@@ -704,3 +704,4 @@ src/sc4/NetworkWorldCache.cpp
 src/rz/RZTime.cpp
 src/sc4/NetworkToolSolve.cpp
 src/sc4/TileRules.cpp
+src/sc4/NetworkPreview.cpp

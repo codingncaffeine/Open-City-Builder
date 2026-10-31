@@ -752,6 +752,19 @@ void RunInputScript(const std::string& all) {
                 Frame();
             }
             gMgr->GZWinMsgPost_Mouse(kGZMsgMouseUpL, c, d, 0);
+        } else if (name.rfind("press@", 0) == 0 || name.rfind("hold@", 0) == 0 || name.rfind("release@", 0) == 0) {
+            // press@XxY (move there, left button down), hold@XxY (move with the button held), release@XxY (button up):
+            // a drag that can be photographed half way.
+            int px = 0, py = 0;
+            std::sscanf(name.c_str() + name.find('@') + 1, "%dx%d", &px, &py);
+            if (name[0] == 'p') {
+                gMgr->GZWinMsgPost_Mouse(kGZMsgMouseMove, px, py, 0);
+                gMgr->GZWinMsgPost_Mouse(kGZMsgMouseDownL, px, py, 0);
+            } else if (name[0] == 'h') {
+                gMgr->GZWinMsgPost_Mouse(kGZMsgMouseMove, px, py, 0x10);
+            } else {
+                gMgr->GZWinMsgPost_Mouse(kGZMsgMouseUpL, px, py, 0);
+            }
         } else if (name.rfind("click@", 0) == 0) {   // click@XxY: one left click at a window point
             int cx = 0, cy = 0;
             std::sscanf(name.c_str() + 6, "%dx%d", &cx, &cy);

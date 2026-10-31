@@ -10,6 +10,8 @@
 #include "sc4/BudgetSimulator.h"
 #include "sc4/NetworkTool.h"
 #include "sc4/NetworkToolUI.h"
+#include "sc4/NetworkPreview.h"
+#include "app/NativeModelMaker.h"
 #include "sc4/NetworkWorldCache.h"
 #include "sc4/NetworkOccupant.h"
 #include "sc4/TileRules.h"
@@ -122,18 +124,19 @@ private:
     sc4::cSC4NetworkPlacementParams params_{};
 };
 
-// cSC4NetworkPreview is not ported yet: the layer exists (the tool's Init needs one) and draws nothing.
-class Preview final : public sc4::INetworkPreview {
+// cSC4NetworkPreview's terrain and textures.
+class PreviewHost final : public sc4::INetworkPreviewHost {
 public:
-    std::uint32_t AddRef() override { return 2; }
-    std::uint32_t Release() override { return 1; }
-    void Init() override {}
-    void Shutdown() override {}
-    void Clear() override {}
-    void Erase(const sc4::SC4PointU&) override {}
-    void AddUntexturedSelection(const sc4::SC4PointU&, std::uint32_t, const float*, float, bool) override {}
-    void AdjustCellHeights(const sc4::SC4PointU&, const float*, bool) override {}
+    float VertexAltitude(int x, int z) override { sc4::cSTETerrain* t = Terrain(); return t ? t->GetAltitudeAtVertex(x, z) : 0.0f; }
+    float WaterDepth(int x, int z) override { sc4::cSTETerrain* t = Terrain(); return t ? t->GetWaterDepthAtVertex(x, z) : 0.0f; }
+    bool WaterShown() override { sc4::cSTETerrain* t = Terrain(); return t && t->GetWaterSurfaceDisplayState(); }
+    bool TriangulationFlipped(int x, int z) override {
+        sc4::cSTETerrain* t = Terrain();
+        return t && t->IsTriangulationFlipped(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z));
+    }
+    int Texture(const cGZPersistResourceKey& key) override { return static_cast<int>(FshTextureId(key.group, key.instance)); }
 };
+PreviewHost g_previewHost;
 
 class ToolHost final : public sc4::INetworkToolHost {
 public:
@@ -146,13 +149,19 @@ public:
     int CityHeight() override { sc4::cSTETerrain* t = Terrain(); return t ? static_cast<int>(t->CellCountZ()) : 0; }
     cIGZUnknown* AcquireOccupantManager() override { return nullptr; }
     cIGZUnknown* AcquireCityViewModel() override { return nullptr; }
-    void AddRenderLayer(sc4::INetworkPreview*, std::uint32_t, std::int32_t) override {}
-    void RemoveRenderLayer(sc4::INetworkPreview*) override {}
+    // SL::spRenderer vslot 0x100 / 0x108 (layer 5, priority 1000).
+    void AddRenderLayer(sc4::INetworkPreview* layer, std::uint32_t list, std::int32_t priority) override {
+        if (auto* view = dynamic_cast<sc4::cSC4NetworkPreview*>(layer); view && CityRenderer())
+            CityRenderer()->AddViewObject(view, static_cast<int>(list), static_cast<std::uint32_t>(priority));
+    }
+    void RemoveRenderLayer(sc4::INetworkPreview* layer) override {
+        if (auto* view = dynamic_cast<sc4::cSC4NetworkPreview*>(layer); view && CityRenderer()) CityRenderer()->RemoveViewObject(view);
+    }
     std::uint32_t RendererAltitudeScale() override { return 0; }
     void RegisterMessage(cIGZMessageTarget2* target, std::uint32_t type) override { if (SL::spMS2) SL::spMS2->AddNotification(target, type); }
     void UnregisterMessage(cIGZMessageTarget2* target, std::uint32_t type) override { if (SL::spMS2) SL::spMS2->RemoveNotification(target, type); }
     cIGZUnknown* CreateNetworkOrFilter(std::uint32_t) override { return nullptr; }
-    sc4::INetworkPreview* CreatePreview() override { return &preview_; }
+    sc4::INetworkPreview* CreatePreview() override { return new sc4::cSC4NetworkPreview(); }
     sc4::INetworkWorldCache* CreateWorldCache() override { return new sc4::cSC4NetworkWorldCache(); }
     sc4::INetworkConstraintSatisfier* CreateConstraintSatisfier() override { return nullptr; }
     const sc4::INetworkTypeInfo* NetworkTypeInfo(std::uint32_t type) override {
@@ -218,10 +227,13 @@ public:
         }
         return true;
     }
+    std::uint32_t PieceTexture(std::uint32_t piece, int&) override {
+        int zoom = 0, rotation = 0;
+        if (SC4ViewUtilities* v = ViewUtilities()) v->GetZoomAndRotation(zoom, rotation);
+        return piece + ((piece & 0xf) == 0 ? static_cast<std::uint32_t>(zoom) : 0u);   // as cSC4NetworkOccupantModel::GetTexture
+    }
     int CurrentViewLevel() override { return g_view ? static_cast<int>(g_view->GetCurrentViewLevel()) : 1; }
 
-private:
-    Preview preview_;
 };
 
 class UIHost final : public sc4::INetworkToolUIHost {
@@ -305,6 +317,7 @@ void InstallNetworkTool(sc4::cSC4View3DWin& view, cISC4City* city) {
     }
     sc4::SetNetworkToolUIHost(&g_uiHost);
     sc4::SetNetworkInputToolHost(&g_inputHost);
+    sc4::SetNetworkPreviewHost(&g_previewHost);
 }
 
 sc4::cSC4ViewInputControl* CreateNetworkTool(int type) {

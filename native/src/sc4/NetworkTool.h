@@ -460,6 +460,8 @@ public:
     // SL::spRM vslot 0xc with {0x6534284a, the type's exemplar group, piece} (iid 0xa52160f5): a pre-built model piece.
     virtual bool HasPrebuiltModelExemplar(std::uint32_t /*type*/, std::uint32_t /*piece*/) { return false; }
     virtual int CurrentViewLevel() { return 1; }                      // SL::spView3D vslot 0x58
+    // SL::NetworkManager() vslot 0x34: the texture instance of a piece at the current zoom (the rotation may change).
+    virtual std::uint32_t PieceTexture(std::uint32_t piece, int& /*rotation*/) { return piece; }
     // cSC4NetworkRoutines::ComputeDemolitionRegionForPlacementCells + spDemolition vslot 0x18 (DemolishRegion with
     // cSC4DemolishByNetworksOccupantFilter): price (commit false) or demolish (true) what stands on the cells; false when
     // the region may not be cleared.

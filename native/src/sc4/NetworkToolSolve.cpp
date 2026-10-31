@@ -17,6 +17,7 @@
 
 #include "sc4/NetworkOccupant.h"
 #include "sc4/NetworkWorldCache.h"
+#include "sc4/NetworkPreview.h"
 #include "sc4/TileRules.h"
 
 namespace sc4 {
@@ -806,9 +807,33 @@ float cSC4NetworkTool::GetNetworkVertexHeight(std::int32_t vertex) {
     return host ? host->TerrainVertexHeight(vertex) : 0.0f;
 }
 
-// i386 vslot 0xf0. NOT PORTED YET: the textured preview of the piece (cSC4NetworkPreview::AddTexturedSelection with the
-// piece's texture from the network manager); nothing is drawn while dragging.
-void cSC4NetworkTool::AddCellPreview(cSC4NetworkCellInfo&, const tSolvedCell&) {}
+// i386 vslot 0xf0 (0x0012...): the solved piece's texture on the cell, tinted (blue for a +0x52 cell, else orange),
+// raised by the type's elevation (kAltitudeForNetworkType: the elevated highway, light rail and monorail float 15.5).
+// NOT PORTED: the cells of two network types (SolveMultiTypeSeparation); they get no preview.
+void cSC4NetworkTool::AddCellPreview(cSC4NetworkCellInfo& cell, const tSolvedCell& solved) {
+    static constexpr float kAltitudeForNetworkType[13] = {0, 0, 15.5f, 0, 0, 0, 0, 0, 15.5f, 15.5f, 0, 0, 0};
+    if (cell.status == 0 || !preview_) return;
+    auto* preview = dynamic_cast<cSC4NetworkPreview*>(preview_);
+    if (!preview) return;
+    INetworkToolHost* host = GetNetworkToolHost();
+    const bool flip = (solved.rotationFlip >> 7) != 0;
+    int rotation = solved.rotationFlip & 0x7f;
+    // The network manager's piece texture (vslot 0x34) for the piece at the renderer's zoom.
+    const std::uint32_t instance = host ? host->PieceTexture(solved.pieceType, rotation) : solved.pieceType;
+    const cGZPersistResourceKey key{0x7ab50e44, 0x1abe787d, instance};
+    const std::uint32_t color = (cell.unknown5a == 0 ? 0x664c01u : 0u) - 0xffff01u;
+    const SC4PointU at{cell.x, cell.z};
+    preview->Erase(at);
+    const std::uint32_t flags = cell.networkFlags;
+    if ((flags & 0x304) == 0 || (flags & 0xfffffcfbu) == 0) {
+        const std::uint32_t lowest = (0u - flags) & flags;
+        for (int type = 0; type < 13; ++type) {
+            if (lowest != kFlagForNetworkType[type]) continue;
+            preview->AddTexturedSelection(at, color, cell.vertexHeights, key, rotation, flip, kAltitudeForNetworkType[type], cell.buildable);
+            return;
+        }
+    }
+}
 
 // i386 0x001262b4 (vslot 0xe0): a new occupant of the class `clsid` (0 = cSC4NetworkOccupant) over the cell's four corners.
 void cSC4NetworkTool::CreateNetworkOccupant(cSC4NetworkCellInfo* cell, cSC4NetworkOccupant** out, float (*corners)[3], std::uint32_t clsid) {
