@@ -13,6 +13,7 @@
 //  * GetMajorBridge* read the last element of the bridge vector through the vector's end pointer (0x100187f42).
 #include "sc4/NetworkTool.h"
 #include "sc4/NetworkToolUI.h"
+#include "sc4/SCPropertyHelp.h"
 
 #include "sc4/TileNeighborhood.h"
 
@@ -1006,5 +1007,70 @@ void cSC4NetworkTool::PlaceAllSegments(bool place, bool allowDiagonals, bool con
     unknown9a_ = savedFlag;
 }
 
+
+// i386 0x00152598. The i386 record holds the block at +0x50; the i386 offsets are in the comments. Angles are read in
+// degrees and kept in radians (FLOAT_00a70840 = pi / 180).
+void LoadNetworkPlacementParams(const cISCPropertyHolder* exemplar, cSC4NetworkPlacementParams& p) {
+    using H = cSCPropertyHelp;
+    constexpr float kRadiansPerDegree = 0.017453292f;
+    float f = 0.0f;
+    const auto angle = [&](std::uint32_t id, std::uint32_t& word) {
+        float value = 0.0f;
+        std::memcpy(&value, &word, sizeof value);
+        H::GetPropertyValue(exemplar, id, value);
+        value *= kRadiansPerDegree;
+        std::memcpy(&word, &value, sizeof value);
+    };
+    angle(0x879d12e7, p.unknown00[0]);                                   // +0x00
+    angle(0x279d1707, p.unknown00[1]);                                   // +0x04
+    angle(0x07b36c71, p.unknown00[2]);                                   // +0x08
+    std::memcpy(&f, &p.unknown00[3], 4); H::GetPropertyValue(exemplar, 0xc7b36ca4, f); std::memcpy(&p.unknown00[3], &f, 4);   // +0x0c
+    H::GetPropertyValue(exemplar, 0xc7b36ca5, p.float10[0]);             // +0x10
+    H::GetPropertyValue(exemplar, 0xc804dd86, p.float10[1]);             // +0x14 the drag cells' height window
+    H::GetPropertyValue(exemplar, 0xc804dd87, p.maxSlope);               // +0x18
+    p.maxSlope *= kRadiansPerDegree;
+    angle(0xc804dd88, p.unknown1c);                                      // +0x1c
+    std::memcpy(&f, &p.unknown20, 4); H::GetPropertyValue(exemplar, 0xc804dd89, f); std::memcpy(&p.unknown20, &f, 4);   // +0x20
+    bool flag = p.unknown24 != 0;
+    H::GetPropertyValue(exemplar, 0xc804dd90, flag);                     // +0x24 the multi-anchor drag
+    p.unknown24 = flag ? 1 : 0;
+    p.straightOrDiagonalOnly = 0;                                        // +0x25
+    if (!H::GetPropertyValue(exemplar, 0xc804dd9b, p.unknown40[7])) p.unknown40[7] = 1000;   // +0x50 the anchor delay (ms)
+    H::GetPropertyValue(exemplar, 0xc804dd92, p.list28);                 // +0x28 the anchor steps per zoom
+    H::GetPropertyValue(exemplar, 0xc804dd93, p.float40[0]);             // +0x34 the new cells' height window
+    H::GetPropertyValue(exemplar, 0xc804dd94, p.float40[1]);             // +0x38
+    H::GetPropertyValue(exemplar, 0xc804dd95, p.float40[2]);             // +0x3c
+    H::GetPropertyValue(exemplar, 0xc804dd96, p.float40[3]);             // +0x40
+    flag = (p.unknown40[4] & 0xff) != 0;
+    H::GetPropertyValue(exemplar, 0xc804dd97, flag);                     // +0x44 (a byte)
+    p.unknown40[4] = (p.unknown40[4] & ~0xffu) | (flag ? 1u : 0u);
+    H::GetPropertyValue(exemplar, 0xc804dd98, p.unknown40[5]);           // +0x48
+    H::GetPropertyValue(exemplar, 0xc804dd99, p.unknown40[6]);           // +0x4c
+    p.list60.clear();
+    H::GetPropertyValue(exemplar, 0xe974eaa4, p.list60);                 // +0x54
+    p.list78.clear();
+    if (!H::GetPropertyValue(exemplar, 0xe974eaa5, p.list78)) p.list78.assign(p.list60.size(), 0);   // +0x60
+    p.list90.clear();
+    if (!H::GetPropertyValue(exemplar, 0xe974eaa6, p.list90)) p.list90.assign(p.list60.size(), 10.0f);   // +0x6c
+    p.listD0.clear();
+    H::GetPropertyValue(exemplar, 0xe974eaa7, p.listD0);                 // +0xa0
+    p.floatA8[0] = 1.5f;
+    H::GetPropertyValue(exemplar, 0x4a270db0, p.floatA8[0]);             // +0x78
+    p.floatA8[1] = 32.0f;
+    H::GetPropertyValue(exemplar, 0x4a270e94, p.floatA8[1]);             // +0x7c
+    p.unknownA8[2] = 0;
+    H::GetPropertyValue(exemplar, 0x4a271248, p.unknownA8[2]);           // +0x80
+    p.unknownA8[3] = 0;
+    H::GetPropertyValue(exemplar, 0x4a27124f, p.unknownA8[3]);           // +0x84
+    std::uint32_t crew = 1;
+    H::GetPropertyValue(exemplar, 0x4a275748, crew);                     // +0x88
+    p.unknownA8[4] = crew;
+    if (!H::GetPropertyValue(exemplar, 0x4a2d49b9, p.unknownA8[5])) p.unknownA8[5] = 1;     // +0x8c the cost of a cell
+    if (!H::GetPropertyValue(exemplar, 0x8a2d49ea, p.unknownA8[6])) p.unknownA8[6] = 10;    // +0x90
+    if (!H::GetPropertyValue(exemplar, 0x8a2d49f0, p.unknownA8[7])) p.unknownA8[7] = 20;    // +0x94
+    if (!H::GetPropertyValue(exemplar, 0x6a2d49f4, p.floatA8[8])) p.floatA8[8] = 0.1f;      // +0x98 the cost of terrain change
+    // Quirk kept (i386): a missing demolition cost (+0x9c) resets the cell cost instead.
+    if (!H::GetPropertyValue(exemplar, 0xea86e3b5, p.unknownA8[9])) p.unknownA8[5] = 1;
+}
 
 }  // namespace sc4

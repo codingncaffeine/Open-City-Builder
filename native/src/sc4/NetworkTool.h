@@ -388,7 +388,7 @@ public:
     virtual std::uint32_t DefaultExemplarId() const = 0;             // +0x0c (GetOccupantExemplar default)
     virtual int PenWidthX() const = 0;                               // +0x1c (DAT_100b231ac)
     virtual int PenWidthZ() const = 0;                               // +0x20 (DAT_100b231b0)
-    virtual std::uint32_t CostPerCell() const { return 0; }          // i386 sNetworkTypeInfo +0xdc
+    virtual std::uint32_t CostPerCell() const { return PlacementParams().unknownA8[5]; }   // i386 sNetworkTypeInfo +0xdc = params +0x8c
     virtual const std::vector<cSC4NetworkBridgeTypeInfo>& BridgeTypes() const = 0;  // +0x40
     virtual const cSC4NetworkPlacementParams& PlacementParams() const = 0;          // +0x80
     // The unordered_map<uint32, cSC4NetworkSupportStructInfo> at +0x58: the value pointer, or null.
@@ -460,6 +460,10 @@ public:
     // SL::spRM vslot 0xc with {0x6534284a, the type's exemplar group, piece} (iid 0xa52160f5): a pre-built model piece.
     virtual bool HasPrebuiltModelExemplar(std::uint32_t /*type*/, std::uint32_t /*piece*/) { return false; }
     virtual int CurrentViewLevel() { return 1; }                      // SL::spView3D vslot 0x58
+    // cSC4NetworkRoutines::ComputeDemolitionRegionForPlacementCells + spDemolition vslot 0x18 (DemolishRegion with
+    // cSC4DemolishByNetworksOccupantFilter): price (commit false) or demolish (true) what stands on the cells; false when
+    // the region may not be cleared.
+    virtual bool DemolishForNetwork(bool /*commit*/, const std::vector<SC4PointU>& /*cells*/, std::int64_t& cost) { cost = 0; return true; }
 };
 
 void SetNetworkToolHost(INetworkToolHost* host);
@@ -539,6 +543,12 @@ public:
     virtual void PropagateSolvedCellsForSmoothing() = 0;                                   // [77] 0x268
     virtual void ReloadNetworkSpecificInfo(std::uint32_t exemplarId) = 0;                  // [81] 0x288
 };
+
+class cISCPropertyHolder;
+// cSC4NetworkTypeInfo::LoadPlacementParams (i386 0x00152598): the placement block of one network type from its placement
+// exemplar's properties (the caller fetches {0x6534284a, 0x084344e0, exemplar id}); missing properties keep their defaults.
+void LoadNetworkPlacementParams(const cISCPropertyHolder* exemplar, cSC4NetworkPlacementParams& params);
+constexpr std::uint32_t kNetworkPlacementExemplarGroup = 0x084344e0;
 
 class cSC4NetworkTool : public cISC4NetworkTool, public cIGZMessageTarget2 {
 public:
@@ -758,6 +768,7 @@ private:
     std::uint32_t placementFlagMask_ = 0;                   // +0x62c
     cIGZUnknown* networkOrFilter_ = nullptr;                // +0x630 (counted; cISC4NetworkORFilter)
 
+    std::vector<SC4PointU> demolitionCells_;              // i386 +0x238 (the demolition region, as cells)
     std::vector<cSC4NetworkOccupant*> previewOccupants_;  // i386 +0x25c (the preview occupants of this drag)
 
     // 0x100186d3e's shared flag (sbInited @ 0x100b2... in the binary).

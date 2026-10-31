@@ -13,6 +13,9 @@
 #include "sc4/NetworkWorldCache.h"
 #include "sc4/NetworkOccupant.h"
 #include "sc4/TileRules.h"
+#include "sc4/Exemplar.h"
+#include "sc4/FloraOccupant.h"
+#include "gz/cGZPersistResourceManager.h"
 #include "app/NativeUi.h"
 #include "gz/cGZPersistResourceKey.h"
 #include <string>
@@ -91,7 +94,16 @@ constexpr int kTypeKinds[13] = {1, 2, 0, 1, 1, 0, 0, 1, 2, 2, 1, 1, 0};
 
 class TypeInfo final : public sc4::INetworkTypeInfo {
 public:
-    explicit TypeInfo(std::uint32_t type) : type_(type) {}
+    explicit TypeInfo(std::uint32_t type) : type_(type) {
+        // LoadPlacementParams(kNetworkPlacementExemplarIDs[type]) (the power line has none).
+        const std::uint32_t id = sc4::kNetworkPlacementExemplarIDs[type];
+        void* raw = nullptr;
+        if (id && SL::spRM && SL::spRM->GetResource(cGZPersistResourceKey{0x6534284a, sc4::kNetworkPlacementExemplarGroup, id}, 0xa52160f5, &raw, 0, nullptr) && raw) {
+            auto* exemplar = static_cast<sc4::cISCResExemplar*>(raw);
+            sc4::LoadNetworkPlacementParams(exemplar->AsISCPropertyHolder(), params_);
+            exemplar->Release();
+        }
+    }
     std::uint32_t ViewInputControlId() const override { return kTypeRecords[type_].vic; }
     std::uint32_t ToolViewId() const override { return kTypeRecords[type_].toolView; }
     std::uint32_t CursorId() const override { return kTypeRecords[type_].cursor; }
@@ -188,6 +200,23 @@ public:
     bool HasPrebuiltModelExemplar(std::uint32_t type, std::uint32_t piece) override {
         std::vector<std::uint8_t> bytes;
         return type < 13 && LoadResourceBytes(0x6534284a, kTypeRecords[type].exemplar, piece, bytes);
+    }
+    // The demolition a road makes. INTERIM: cSC4Demolition has no native host yet, so only the flora on the cells goes
+    // (free, as the original's flora demolition); lots and buildings under a drag are not handled.
+    bool DemolishForNetwork(bool commit, const std::vector<sc4::SC4PointU>& cells, std::int64_t& cost) override {
+        cost = 0;
+        if (!commit) return true;
+        sc4::cISC4OccupantManager* occupants = Occupants();
+        if (!occupants) return true;
+        for (const sc4::SC4PointU& cell : cells) {
+            for (int guard = 0; guard < 16; ++guard) {
+                sc4::cISC4Occupant* occupant = nullptr;
+                if (!occupants->GetFirstOccupantByStandardCityCell(occupant, static_cast<int>(cell.x), static_cast<int>(cell.z), sc4::kOccupantTypeFlora) || !occupant) break;
+                occupants->RemoveOccupant(occupant, true, 0);
+                occupant->Release();
+            }
+        }
+        return true;
     }
     int CurrentViewLevel() override { return g_view ? static_cast<int>(g_view->GetCurrentViewLevel()) : 1; }
 

@@ -730,14 +730,42 @@ bool cSC4NetworkTool::CheckForGoodTerrain(int& steps) {
     return true;
 }
 
-// i386 vslot 0xf4. NOT PORTED YET: the demolition region of the drag (cSC4NetworkRoutines::
-// ComputeDemolitionRegionForPlacementCells, its cost at +0x254 and the highlighted occupants). Nothing is demolished.
+// i386 vslot 0xf4 (0x0012...): the regular cells of the valid steps that hold no buildable network piece form the
+// demolition region (cSC4NetworkRoutines::ComputeDemolitionRegionForPlacementCells); its cost goes to +0x254. A region
+// the network may not clear (a zone of type 10..15) costs one step.
+// NOT PORTED: cSC4NetworkRoutines::UpdateHighlights (the highlight of what will go: highlight 5 on, 0 off).
 int cSC4NetworkTool::UpdateOccupantHighlights(int validSteps) {
-    if (validSteps == 0) ClearOccupantHighlights();
-    return validSteps;
+    if (validSteps_ == 0) {
+        ClearOccupantHighlights();
+        return 0;
+    }
+    std::vector<SC4PointU> cells;
+    for (int s = 0; s < validSteps_; ++s) {
+        const tDraggedStep& step = steps_[static_cast<std::size_t>(s)];
+        if (step.direction == 3) continue;
+        for (std::uint32_t c = step.firstCell; c <= step.lastCell; ++c) {
+            const cSC4NetworkCellInfo* cell = GetCellInfo(cells_[c].x, cells_[c].z);
+            if (!cell || !cell->buildable) cells.push_back(cells_[c]);
+        }
+    }
+    demolitionCells_ = cells;
+    std::int64_t cost = 0;
+    INetworkToolHost* host = GetNetworkToolHost();
+    const bool ok = !host || host->DemolishForNetwork(false, demolitionCells_, cost);
+    baseCost_ = static_cast<std::int32_t>(cost);
+    return validSteps - (ok ? 0 : 1);
 }
 
-void cSC4NetworkTool::DestroyHilightedOccupants() {}                       // i386 vslot 0xf8: nothing highlighted yet
+// i386 vslot 0xf8: the demolition region goes (spDemolition vslot 0x18 with cSC4DemolishByNetworksOccupantFilter), then
+// the highlights.
+void cSC4NetworkTool::DestroyHilightedOccupants() {
+    if (!demolitionCells_.empty()) {
+        std::int64_t cost = 0;
+        if (INetworkToolHost* host = GetNetworkToolHost()) host->DemolishForNetwork(true, demolitionCells_, cost);
+        demolitionCells_.clear();
+    }
+    ClearOccupantHighlights();
+}
 void cSC4NetworkTool::UpdateTerrainHeights(std::vector<std::uint32_t>&) {}  // i386 vslot 0xec: NOT PORTED YET
 
 // i386 vslot 0xe8. NOT PORTED YET: the support check of the solved heights; every solve is accepted.
@@ -977,7 +1005,8 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, bool allowDiagonals, bool connect
             // UpdatePositionChangedPreviewsForPreviousSegments: not ported (anchored multi-segment previews).
         } else {
             StartPlacing();                                                          // vslot 0x120
-            // DestroyHilightedOccupants / UpdateTerrainHeights / Mark*ExistingOccupantsAsNewlySolved: not ported yet.
+            DestroyHilightedOccupants();                                             // vslot 0xf8
+            // UpdateTerrainHeights / Mark*ExistingOccupantsAsNewlySolved: not ported yet.
         }
         if (previewUpdateEnabled_) InsertOccupantsForSolvedCells(solvedCellList_, &placed, false);
     }
