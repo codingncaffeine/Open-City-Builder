@@ -64,10 +64,10 @@ cSC4NetworkTool::cSC4NetworkTool(std::uint32_t networkType) : networkType_(netwo
     unknown150_.clear();
     intersections_.clear();
     bridges_.clear();
-    unknown1a8_.clear();
+    tunnels_.clear();
     reservedCells_.clear();
     rendererAltitudeScale_ = 0;
-    unknown1e0_.clear();
+    pendingNeighborConnections_.clear();
     neighborConnections_.clear();
     anchors_.clear();
     constraintA_ = nullptr;
@@ -647,10 +647,10 @@ bool cSC4NetworkTool::OccupantExists(int x, int z, std::uint32_t typeMask, std::
 bool cSC4NetworkTool::IsTerrainOK(std::uint32_t x, std::uint32_t z) {
     INetworkToolHost* host = GetNetworkToolHost();
     if (host == nullptr) return false;
-    if (!host->TerrainAllowsNetwork(x, z)) return true;  // SL::spTerrain +0x110
-    const std::uint32_t key = x + (z << 16);
-    const cSC4NetworkCellInfo* cell = host->GetCellInfo(key);
-    return cell != nullptr && cell->buildable;  // +0x5e
+    // i386: SL::spTerrain vslot 0x88 = CellHasWater; a water cell is fine only where a piece that may stand in water is.
+    if (!host->TerrainAllowsNetwork(x, z)) return true;
+    const cSC4NetworkCellInfo* cell = GetCellInfo(x, z);
+    return cell != nullptr && cell->buildable;  // +0x5e (i386 +0x56)
 }
 
 // 0x10071e47a
@@ -1006,14 +1006,5 @@ void cSC4NetworkTool::PlaceAllSegments(bool place, bool allowDiagonals, bool con
     unknown9a_ = savedFlag;
 }
 
-// i386 0x004cd0..: the solve (and the placement) of the current line. NOT PORTED YET: the next step of the road work.
-bool cSC4NetworkTool::PlaceNetwork(bool place, bool, bool, std::uint32_t) {
-    static int logged = 0;
-    if (logged < 4) {
-        ++logged;
-        std::fprintf(stderr, "network tool: PlaceNetwork(%s) not ported; %d steps, %zu cells\n", place ? "place" : "preview", totalSteps_, cells_.size());
-    }
-    return false;
-}
 
 }  // namespace sc4

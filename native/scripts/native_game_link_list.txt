@@ -702,3 +702,5 @@ src/sc4/NetworkToolUI.cpp
 src/sc4/ViewInputControlNetworkTool.cpp
 src/sc4/NetworkWorldCache.cpp
 src/rz/RZTime.cpp
+src/sc4/NetworkToolSolve.cpp
+src/sc4/TileRules.cpp

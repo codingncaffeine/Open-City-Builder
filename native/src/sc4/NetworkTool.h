@@ -48,6 +48,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <list>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -61,6 +62,8 @@
 namespace sc4 {
 
 class cISC4NetworkToolUI;
+class cSC4NetworkOccupant;
+class cSC4TileEvaluator;
 
 // SC4Point<unsigned int>: two u32 at +0x0 (x) and +0x4 (z). The engine's template also has AddClamped etc.,
 // none of which the recovered tool functions call.
@@ -217,9 +220,11 @@ struct tBridge {
 struct tReservedCell {
     std::uint32_t x = 0;        // +0x00
     std::uint32_t z = 0;        // +0x04
-    std::uint32_t unknown08 = 0;// +0x08
+    std::uint32_t compact = 0;  // +0x08 the edges to draw (cSC4TileNeighborhoodCompact, DoAdditionalDraws)
     std::uint32_t network = 0;  // +0x0c (network type passed to CheckForReservedTiles(x, z, type))
-    std::uint32_t unknown10 = 0;// +0x10
+    std::uint8_t oneWayBits = 0;   // +0x10 merged into the cell's one-way byte under
+    std::uint8_t oneWayMask = 0;   // +0x11 this mask
+    std::uint8_t unknown12[2] = {};
 };
 
 // cISC4NetworkTool::NeighborConnectionInfo, copied out of the first element of the vector at +0x1f8
@@ -404,7 +409,8 @@ public:
     virtual float TerrainCellSize() = 0;
     // SL::spTerrain i386 vslot 0x34: the terrain height at a vertex id (the cell info's vertex ids, +0xb0).
     virtual float TerrainVertexHeight(std::int32_t /*vertex*/) { return 0.0f; }
-    // SL::spTerrain slot +0x110: may a network cell be built here (IsTerrainOK 0x10071e4ca).
+    // SL::spTerrain slot +0x110 (i386 vslot 0x88 = cSTETerrain::CellHasWater): IsTerrainOK reads it as "the cell has
+    // water" (true = water). The name is the first port's.
     virtual bool TerrainAllowsNetwork(std::uint32_t x, std::uint32_t z) = 0;
     // SL::spCity slots +0x2e8 / +0x2f0: city size in cells (Init -> +0x4ac / +0x4b0).
     virtual int CityWidth() = 0;
@@ -438,6 +444,15 @@ public:
                                            std::uint32_t propertyId) = 0;
     // SC4LoadString(group, instance, out): the localized failure reason.
     virtual bool LoadString(std::uint32_t group, std::uint32_t instance, cIGZString& out) = 0;
+    // The network occupant of a cell (occupant manager vslot 0x84 with the tool's network filter, QI 0xa821ef94), one
+    // reference, or null.
+    virtual cSC4NetworkOccupant* NetworkOccupantAt(std::uint32_t /*x*/, std::uint32_t /*z*/, std::uint32_t /*typeMask*/) { return nullptr; }
+    // SL::spSurfaceWater vslot 0x28: the water surface height at a terrain vertex (or below every height when dry).
+    virtual float WaterSurfaceAtVertex(std::int32_t /*x*/, std::int32_t /*z*/) { return -3.4e38f; }
+    // sNetworkTypeInfo[type] +0: 1 = simple edge subtypes, 2 = complex ones, 0 = none.
+    virtual int NetworkTypeKind(std::uint32_t /*type*/) { return 0; }
+    // CheckForReservedTiles(x, z, type) (i386 vslot 0x118): a lot, a reserved building or an immovable piece holds the cell.
+    virtual bool CellReserved(std::uint32_t /*x*/, std::uint32_t /*z*/, std::uint32_t /*type*/) { return false; }
 };
 
 void SetNetworkToolHost(INetworkToolHost* host);
@@ -602,7 +617,42 @@ public:
     void GetNetworkHeightForTerrainHeight(float /*terrainHeight*/) {}     // 0x1001906f0 (empty)
     void DebugDumpEdgeTypes(const cIGZString& /*dump*/) {}                // 0x10041530c (empty)
     bool IsTerrainOK(std::uint32_t x, std::uint32_t z);                   // 0x10071e4ca
-    bool IdentifyStartingConditions(int& failureReason);                  // 0x10071e47a
+    virtual bool IdentifyStartingConditions(int& steps);                  // 0x10071e47a (i386 vslot 0x110)
+    // --- the placement virtuals (i386 vslots 0xdc..0x124; the derived tools override them) ---
+    virtual bool DoNetworkSpecificPlacement(bool allowDiagonals, bool connectNeighbor) { (void)allowDiagonals; (void)connectNeighbor; return false; }
+    virtual void InsertOccupantsForSolvedCells(std::vector<tSolvedCell>& cells, std::list<cSC4NetworkOccupant*>* out, bool preview);
+    virtual bool CanTilesBeSupportedOnTerrain(std::uint32_t networkType);
+    virtual void UpdateTerrainHeights(std::vector<std::uint32_t>& vertices);
+    virtual int UpdateOccupantHighlights(int validSteps);
+    virtual void DestroyHilightedOccupants();
+    virtual void CheckForReservedTiles(int& steps, std::uint32_t networkType, bool skipDrag);
+    virtual bool CheckForGoodTerrain(int& steps);
+    virtual void CreateCellInfosForCurrentPlacementTiles(std::uint32_t networkType);
+    // --- the solve (src/sc4/NetworkToolSolve.cpp) ---
+    cSC4NetworkCellInfo* GetCellInfo(std::uint32_t key);
+    cSC4NetworkCellInfo* GetCellInfo(std::uint32_t x, std::uint32_t z) { return GetCellInfo(x + (z << 16)); }
+    cSC4NetworkOccupant* GetNetworkOccupant(std::uint32_t x, std::uint32_t z);
+    cSC4NetworkCellInfo* ComputeAndStoreCellInfo(std::uint32_t key);
+    cSC4NetworkCellInfo* CreatePlaceholderCellInfo(std::uint32_t x, std::uint32_t z, std::uint32_t networkType);
+    void AssignEdgeMajorTypes(std::uint32_t networkType);
+    void DoAdditionalDraws();
+    bool AssignSimpleEdgeSubtypes(cSC4NetworkCellInfo& cell, std::uint32_t type, std::unordered_set<std::uint32_t>& set, bool assign);
+    bool AssignComplexEdgeSubtypes(cSC4NetworkCellInfo& cell, std::uint32_t type, std::unordered_set<std::uint32_t>& set, bool assign);
+    void MarkExtendingDiagonalEdges(const cSC4NetworkCellInfo& cell, bool* extending, std::uint32_t type);
+    void AssignEdgeSubtypes(std::unordered_set<std::uint32_t>& set, std::unordered_set<std::uint32_t>& removed, bool reset);
+    void BuildSetOfCellsToBeSolved();
+    void ExpandToSolveSetBasedOnConnectivity(std::vector<std::uint32_t>& frontier, int rings);
+    void MarkNeighborConnections();
+    void BuildPaddedNetworkSet(const std::unordered_set<std::uint32_t>& set, std::unordered_set<std::uint32_t>& out, std::uint32_t pad);
+    int SolveNetwork(std::uint32_t networkType, bool retry);
+    void SolveUsingEvaluator(std::unordered_set<std::uint32_t>& padded, std::unordered_set<std::uint32_t>& toSolve,
+                             const cSC4TileEvaluator& evaluator, std::uint32_t networkType);
+    void ApplyNetworkRules(std::unordered_set<std::uint32_t>& padded, std::unordered_set<std::uint32_t>& toSolve,
+                           std::unordered_set<std::uint32_t>& unsolved, const cSC4TileEvaluator& evaluator, std::uint32_t networkType);
+    bool AdjustTileSubsets(std::vector<tSolvedCell>& cells, bool retry);
+    bool VerifyTileSubsets(std::vector<tSolvedCell>& cells);
+    bool SmoothenNetwork(int pass);
+    const std::vector<tSolvedCell>& SolvedCells() const { return solvedCellList_; }
     void SetTerrainHilight(int param);                                    // 0x10018cd24
     // i386 0x004cc96a: the drag's cells (+0xb8) and steps (+0xa0); zMajor / xMajor = the splitter's two flags.
     void ComputeDraggedCells(const SC4PointU& start, const SC4PointU& end, int zMajor, int xMajor, std::uint32_t networkType);
@@ -653,10 +703,10 @@ private:
     std::unordered_set<std::uint32_t> unknown150_;          // +0x150
     std::vector<tIntersection> intersections_;               // +0x178
     std::vector<tBridge> bridges_;                          // +0x190
-    std::vector<std::uint32_t> unknown1a8_;                 // +0x1a8
+    std::vector<std::uint32_t> tunnels_;                    // +0x1a8 (i386 +0xe4 std::vector<tTunnel>; no tunnels are made yet)
     std::vector<tReservedCell> reservedCells_;              // +0x1c0
     std::uint32_t rendererAltitudeScale_ = 0;               // +0x1d8
-    std::vector<std::uint32_t> unknown1e0_;                 // +0x1e0
+    std::vector<tNeighborConnection> pendingNeighborConnections_;   // +0x1e0 (i386 +0x100, MarkNeighborConnections)
     std::vector<tNeighborConnection> neighborConnections_;  // +0x1f8
     std::vector<SC4PointU> anchors_;                        // +0x210
     INetworkConstraintSatisfier* constraintA_ = nullptr;    // +0x228 (cSC4VertexHtConstraintSatisfier)
@@ -693,6 +743,8 @@ private:
     std::uint32_t networkType_ = 0;                         // +0x628
     std::uint32_t placementFlagMask_ = 0;                   // +0x62c
     cIGZUnknown* networkOrFilter_ = nullptr;                // +0x630 (counted; cISC4NetworkORFilter)
+
+    std::vector<cSC4NetworkOccupant*> previewOccupants_;  // i386 +0x25c (the preview occupants of this drag)
 
     // 0x100186d3e's shared flag (sbInited @ 0x100b2... in the binary).
     static bool sbInited_;

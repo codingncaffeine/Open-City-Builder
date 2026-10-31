@@ -103,7 +103,9 @@ struct FakePreview : INetworkPreview {
 
 struct FakeWorldCache : INetworkWorldCache {
     void Clear() override { ++clears; }
-    cSC4NetworkCellInfo* GetCell(std::uint32_t) override { return nullptr; }
+    // IsTerrainOK reads the tool's own cache (i386 0x...): it answers the host's test cell.
+    cSC4NetworkCellInfo* GetCell(std::uint32_t) override { return source ? *source : nullptr; }
+    cSC4NetworkCellInfo** source = nullptr;
     void GetAllCells(std::vector<cSC4NetworkCellInfo>& out) override { out.clear(); }
     cSC4NetworkCellInfo* CreateCell(std::uint32_t) override { return nullptr; }
     int clears = 0;
@@ -210,6 +212,7 @@ struct FakeHost : INetworkToolHost {
     }
     INetworkWorldCache* CreateWorldCache() override {
         if (worldCache == nullptr) worldCache = new FakeWorldCache();
+        worldCache->source = &cell;
         return worldCache;
     }
     INetworkConstraintSatisfier* CreateConstraintSatisfier() override { return &satisfier; }

@@ -11,6 +11,11 @@
 #include "sc4/NetworkTool.h"
 #include "sc4/NetworkToolUI.h"
 #include "sc4/NetworkWorldCache.h"
+#include "sc4/NetworkOccupant.h"
+#include "sc4/TileRules.h"
+#include "app/NativeUi.h"
+#include "gz/cGZPersistResourceKey.h"
+#include <string>
 #include "sc4/Render3D.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/View3DWin.h"
@@ -18,6 +23,7 @@
 #include "sc4/ViewUtilities.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
+#include "sc4/OccupantManager.h"
 
 namespace native {
 namespace {
@@ -33,6 +39,14 @@ sc4::cSTETerrain* Terrain() {
     auto* terrain = static_cast<sc4::cSTETerrain*>(static_cast<cIGZSerializable*>(raw));
     static_cast<cIGZSerializable*>(raw)->Release();
     return terrain;
+}
+sc4::cISC4OccupantManager* Occupants() {
+    cIGZUnknown* object = g_city ? g_city->GetComponent(sc4::CityComponent::OccupantManager) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(sc4::kGZIID_cISC4OccupantManager, &raw) || !raw) return nullptr;
+    auto* manager = static_cast<sc4::cISC4OccupantManager*>(raw);
+    manager->Release();
+    return manager;
 }
 sc4::cSC4BudgetSimulator* Budget() {
     cIGZUnknown* object = g_city ? g_city->GetComponent(sc4::CityComponent::BudgetSimulator) : nullptr;
@@ -71,6 +85,9 @@ constexpr TypeRecord kTypeRecords[13] = {
     {0x4be08afb, 0x6be08658, 0x00, 0x4be091b2, 0x00000000, 1, 1},   // 11 dirt road
     {0x6be0843b, 0xebe084d1, 0x00, 0x6be091b4, 0x00000000, 2, 2},   // 12 ground highway
 };
+
+// sNetworkTypeInfo +0: 1 = simple edge subtypes, 2 = complex (ReloadNetworkTypeInfo).
+constexpr int kTypeKinds[13] = {1, 2, 0, 1, 1, 0, 0, 1, 2, 2, 1, 1, 0};
 
 class TypeInfo final : public sc4::INetworkTypeInfo {
 public:
@@ -112,7 +129,7 @@ public:
     cIGZUnknown* AcquireTerrain() override { return nullptr; }   // the solver reaches the terrain through this host
     float TerrainCellSize() override { return 16.0f; }
     float TerrainVertexHeight(std::int32_t vertex) override { sc4::cSTETerrain* t = Terrain(); return t ? t->GetAltitude(vertex) : 0.0f; }
-    bool TerrainAllowsNetwork(std::uint32_t, std::uint32_t) override { return true; }
+    bool TerrainAllowsNetwork(std::uint32_t x, std::uint32_t z) override { sc4::cSTETerrain* t = Terrain(); return t && t->CellHasWater(x, z); }
     int CityWidth() override { sc4::cSTETerrain* t = Terrain(); return t ? static_cast<int>(t->CellCountX()) : 0; }
     int CityHeight() override { sc4::cSTETerrain* t = Terrain(); return t ? static_cast<int>(t->CellCountZ()) : 0; }
     cIGZUnknown* AcquireOccupantManager() override { return nullptr; }
@@ -138,6 +155,22 @@ public:
     sc4::cSC4NetworkCellInfo* GetCellInfo(std::uint32_t) override { return nullptr; }
     cIGZUnknown* GetTuningProperty(std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t) override { return nullptr; }
     bool LoadString(std::uint32_t, std::uint32_t, cIGZString&) override { return false; }
+    sc4::cSC4NetworkOccupant* NetworkOccupantAt(std::uint32_t x, std::uint32_t z, std::uint32_t) override {
+        sc4::cISC4OccupantManager* occupants = Occupants();
+        sc4::cISC4Occupant* occupant = nullptr;
+        if (!occupants || !occupants->GetFirstOccupantByStandardCityCell(occupant, static_cast<int>(x), static_cast<int>(z), 0xc772bf98u) || !occupant) return nullptr;
+        void* raw = nullptr;
+        sc4::cSC4NetworkOccupant* network = nullptr;
+        if (occupant->QueryInterface(0xa821ef94u, &raw) && raw) network = dynamic_cast<sc4::cSC4NetworkOccupant*>(static_cast<cIGZUnknown*>(raw));
+        occupant->Release();
+        return network;   // the QueryInterface reference
+    }
+    float WaterSurfaceAtVertex(std::int32_t x, std::int32_t z) override {
+        sc4::cSTETerrain* t = Terrain();
+        if (!t || !t->IsWaterVertex(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z))) return -3.4e38f;
+        return t->GetWaterLevel(static_cast<std::int32_t>(z * (static_cast<std::int32_t>(t->CellCountX()) + 1) + x));
+    }
+    int NetworkTypeKind(std::uint32_t type) override { return type < 13 ? kTypeKinds[type] : 0; }
 
 private:
     Preview preview_;
@@ -210,6 +243,18 @@ void InstallNetworkTool(sc4::cSC4View3DWin& view, cISC4City* city) {
     g_view = &view;
     g_city = dynamic_cast<sc4::cSC4City*>(city);
     sc4::SetNetworkToolHost(&g_toolHost);
+    // The tile rules (RUL files) the solver matches drags against, once.
+    static bool rulesLoaded = false;
+    if (!rulesLoaded) {
+        rulesLoaded = true;
+        sc4::SetTileRuleResourceLoader([](const cGZPersistResourceKey& key, std::string& out) {
+            std::vector<std::uint8_t> bytes;
+            if (!LoadResourceBytes(key.type, key.group, key.instance, bytes)) return false;
+            out.assign(bytes.begin(), bytes.end());
+            return true;
+        });
+        std::printf("network tool: %d tile rule files loaded\n", sc4::LoadNetworkTileEvaluators());
+    }
     sc4::SetNetworkToolUIHost(&g_uiHost);
     sc4::SetNetworkInputToolHost(&g_inputHost);
 }
