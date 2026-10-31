@@ -934,6 +934,40 @@ int main() {
         }
     }
 
+    // ---- DrawNetworkLine / ComputeDraggedCells (i386 0x004cdd0a / 0x004cc96a), pen 1 x 1 ----------------------
+    {
+        Fixture f(0);
+        f.host.typeInfo.penX = 1;
+        f.host.typeInfo.penZ = 1;
+        f.Init();
+        using A = NetworkToolTestAccess;
+        // A straight x drag: one step per x, one cell per step.
+        SC4PointU start{2, 5}, end{7, 5};
+        CHECK(f.tool->DrawNetworkLine(start, end, true, 0));
+        CHECK(end.x == 7 && end.z == 5);
+        CHECK(A::TotalSteps(*f.tool) == 6 && f.tool->GetStraightStepCount() == 6);
+        CHECK(A::Cells(*f.tool).size() == 6);
+        for (std::uint32_t i = 0; i < 6; ++i) {
+            CHECK(A::Cells(*f.tool)[i] == (SC4PointU{2 + i, 5}));
+            CHECK(A::Steps(*f.tool)[i].firstCell == i && A::Steps(*f.tool)[i].lastCell == i);
+        }
+        // A 45-degree drag: the walk moves z first on a tie, so every step after the first spans two cells (a staircase).
+        start = {0, 0};
+        end = {3, 3};
+        CHECK(f.tool->DrawNetworkLine(start, end, true, 0));
+        CHECK(A::TotalSteps(*f.tool) == 4);
+        const std::vector<SC4PointU> stair = {{0, 0}, {0, 1}, {1, 1}, {1, 2}, {2, 2}, {2, 3}, {3, 3}};
+        CHECK(A::Cells(*f.tool) == stair);
+        const std::uint32_t firsts[4] = {0, 1, 3, 5}, lasts[4] = {0, 2, 4, 6};
+        for (int i = 0; i < 4; ++i) CHECK(A::Steps(*f.tool)[i].firstCell == firsts[i] && A::Steps(*f.tool)[i].lastCell == lasts[i]);
+        // Backwards along z: the steps run from the start towards smaller z.
+        start = {4, 9};
+        end = {4, 6};
+        CHECK(f.tool->DrawNetworkLine(start, end, true, 0));
+        const std::vector<SC4PointU> down = {{4, 9}, {4, 8}, {4, 7}, {4, 6}};
+        CHECK(A::Cells(*f.tool) == down);
+    }
+
     // ---- Unregister the host and finish ---------------------------------------------------------------------
     SetNetworkToolHost(nullptr);
     if (failures == 0) {

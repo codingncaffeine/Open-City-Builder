@@ -60,6 +60,8 @@
 
 namespace sc4 {
 
+class cISC4NetworkToolUI;
+
 // SC4Point<unsigned int>: two u32 at +0x0 (x) and +0x4 (z). The engine's template also has AddClamped etc.,
 // none of which the recovered tool functions call.
 template <typename T>
@@ -174,7 +176,12 @@ struct cSC4NetworkPlacementParams {
     std::vector<std::uint32_t> list60;      // +0x60
     std::vector<std::uint32_t> list78;      // +0x78
     std::vector<float> list90;              // +0x90
-    std::uint32_t unknownA8[8];             // +0xa8
+    // +0xa8 (i386 +0x78, ten words: the i386 copy constructor 0x00670036 copies 0x78..0x9c). [6] / [7] are per-cell
+    // costs the solution adds for the tunnel / bridge cells, [8] the cost of one unit of terrain change (GetCostOfSolution).
+    union {
+        std::uint32_t unknownA8[10];
+        float floatA8[10];
+    };
     std::vector<std::uint32_t> listD0;      // +0xd0
 };
 
@@ -376,6 +383,7 @@ public:
     virtual std::uint32_t DefaultExemplarId() const = 0;             // +0x0c (GetOccupantExemplar default)
     virtual int PenWidthX() const = 0;                               // +0x1c (DAT_100b231ac)
     virtual int PenWidthZ() const = 0;                               // +0x20 (DAT_100b231b0)
+    virtual std::uint32_t CostPerCell() const { return 0; }          // i386 sNetworkTypeInfo +0xdc
     virtual const std::vector<cSC4NetworkBridgeTypeInfo>& BridgeTypes() const = 0;  // +0x40
     virtual const cSC4NetworkPlacementParams& PlacementParams() const = 0;          // +0x80
     // The unordered_map<uint32, cSC4NetworkSupportStructInfo> at +0x58: the value pointer, or null.
@@ -394,6 +402,8 @@ public:
     virtual cIGZUnknown* AcquireTerrain() = 0;
     // SL::spTerrain slot +0x30: one cell's edge length in metres (Init -> +0x4a4).
     virtual float TerrainCellSize() = 0;
+    // SL::spTerrain i386 vslot 0x34: the terrain height at a vertex id (the cell info's vertex ids, +0xb0).
+    virtual float TerrainVertexHeight(std::int32_t /*vertex*/) { return 0.0f; }
     // SL::spTerrain slot +0x110: may a network cell be built here (IsTerrainOK 0x10071e4ca).
     virtual bool TerrainAllowsNetwork(std::uint32_t x, std::uint32_t z) = 0;
     // SL::spCity slots +0x2e8 / +0x2f0: city size in cells (Init -> +0x4ac / +0x4b0).
@@ -447,7 +457,7 @@ public:
     virtual bool Init() = 0;                                                               // [3] 0x018
     virtual bool Shutdown() = 0;                                                           // [4] 0x020
     virtual void Reset() = 0;                                                              // [5] 0x028
-    // [6] 0x030 GetUITool(cISC4NetworkToolUI**) — not recovered (cSC4NetworkToolUI).
+    virtual bool GetUITool(cISC4NetworkToolUI** out) = 0;                                  // [6] 0x030
     // [7] 0x038 PlaceNetworkOccupants .. [8] 0x040 PlaceNetworkOccupantById — not recovered.
     virtual bool OccupantExists(int x, int z, std::uint32_t typeMask, std::uint32_t& occupantId) = 0;  // [9] 0x048
     virtual void UpdateOnZoneChange(SC4RectU rect, std::uint32_t network) = 0;              // [10] 0x050
@@ -456,8 +466,13 @@ public:
     virtual void ClearFailureReason() = 0;                                                 // [13] 0x068
     virtual bool GetFailureState() = 0;                                                    // [14] 0x070
     virtual void GetFailureReasonString(cIGZString& out) = 0;                              // [15] 0x078
-    // [16] 0x080 ClearCellPreviews, [17] 0x088 ClearOccupantHighlights, [18] 0x090 DrawNetworkLine,
-    // [19] 0x098 PlaceAllSegments, [20] 0x0a0 GetCostOfSolution — not recovered.
+    virtual void ClearCellPreviews() = 0;                                                  // [16] 0x080
+    virtual void ClearOccupantHighlights() = 0;                                            // [17] 0x088
+    // [18] 0x090: the drag from `start` to `end` as cells and steps; `end` moves to the end of the allowed part.
+    virtual bool DrawNetworkLine(SC4PointU& start, SC4PointU& end, bool allowDiagonals, std::uint32_t networkType) = 0;
+    // [19] 0x098: solve every anchor segment (and place it when `place`).
+    virtual void PlaceAllSegments(bool place, bool allowDiagonals, bool connectNeighbor, std::uint32_t networkType) = 0;
+    virtual int GetCostOfSolution() = 0;                                                   // [20] 0x0a0
     virtual void EnablePreviewUpdate(bool enabled) = 0;                                    // [21] 0x0a8
     virtual void SetAnchorPoints(const std::vector<SC4PointU>& anchors) = 0;               // [22] 0x0b0
     virtual void GetDraggedCells(std::vector<SC4PointU>& out) = 0;                         // [23] 0x0b8
@@ -486,7 +501,8 @@ public:
     virtual bool StopPickAtWater() = 0;                                                    // [46] 0x170
     virtual std::uint32_t GetToolViewId() = 0;                                             // [47] 0x178
     virtual void GetPlacementParams(cSC4NetworkPlacementParams& out) = 0;                  // [48] 0x180
-    // [49] 0x188 QueryUserForPotentialIntersections, [50] 0x190 DestroyOccupantsAndResolve — not recovered.
+    virtual void QueryUserForPotentialIntersections() = 0;                                 // [49] 0x188
+    // [50] 0x190 DestroyOccupantsAndResolve — not recovered.
     // [51] / [52] 0x198 / 0x1a0 the complete / deleting destructor.
     virtual void GetFailureReasonString(std::uint32_t reason, cRZString& out) = 0;         // [54] 0x1b0
     // [55] 0x1b8 DoNetworkSpecificPlacement .. [62] 0x1f0 DestroyHilightedOccupants — not recovered.
@@ -514,6 +530,13 @@ public:
     std::uint32_t AddRef() override;                                      // 0x100186c62
     std::uint32_t Release() override;                                     // 0x100186c7e
     bool Init() override;                                                 // 0x100187752
+    bool GetUITool(cISC4NetworkToolUI** out) override;                    // i386 0x00122c58
+    void ClearCellPreviews() override;                                    // i386 0x0012563e
+    void ClearOccupantHighlights() override;                              // i386 0x0012519a
+    bool DrawNetworkLine(SC4PointU& start, SC4PointU& end, bool allowDiagonals, std::uint32_t networkType) override;  // i386 0x004cdd0a
+    void PlaceAllSegments(bool place, bool allowDiagonals, bool connectNeighbor, std::uint32_t networkType) override;  // i386 0x004cf1ce
+    int GetCostOfSolution() override;                                     // i386 0x00124dbe
+    void QueryUserForPotentialIntersections() override;                   // i386 0x0012b18c
     bool Shutdown() override;                                             // 0x100187ce8
     void Reset() override;                                                // 0x10018fdaa
     bool OccupantExists(int x, int z, std::uint32_t typeMask, std::uint32_t& occupantId) override;  // 0x10018fe2e
@@ -581,6 +604,10 @@ public:
     bool IsTerrainOK(std::uint32_t x, std::uint32_t z);                   // 0x10071e4ca
     bool IdentifyStartingConditions(int& failureReason);                  // 0x10071e47a
     void SetTerrainHilight(int param);                                    // 0x10018cd24
+    // i386 0x004cc96a: the drag's cells (+0xb8) and steps (+0xa0); zMajor / xMajor = the splitter's two flags.
+    void ComputeDraggedCells(const SC4PointU& start, const SC4PointU& end, int zMajor, int xMajor, std::uint32_t networkType);
+    // i386: solve the current line and insert its occupants (or previews). Not ported yet.
+    bool PlaceNetwork(bool place, bool allowDiagonals, bool connectNeighbor, std::uint32_t networkType);
     // 0x10071aa64: split the drag from `start` to `end` into straight and diagonal parts and move `end` to the
     // end of the allowed part. See the .cpp for the meaning of every out-parameter.
     void BreakIntoStraightAndDiagSegments(const SC4PointU& start, SC4PointU& end, int& totalSteps,
@@ -644,7 +671,10 @@ private:
     // +0x460 cRZCellMap*, +0x468 / +0x488 std::set<cRZAutoRefCount<cISC4Occupant>> (the highlighted and the
     // preview occupants). No function in this slice touches them, so they stay opaque until the occupant
     // insertion path (CreateNetworkOccupant / InsertOccupantsForSolvedCells) is recovered.
-    std::uint8_t unknown460_[0x40] = {};                    // +0x460 .. +0x49f
+    std::uint8_t unknown460_[0x20] = {};                    // +0x460 .. +0x47f
+    std::int32_t baseCost_ = 0;                             // i386 +0x254: added to every GetCostOfSolution
+    std::int32_t unknown484_ = 0;                           // i386 +0x258
+    std::uint8_t unknown488_[0x18] = {};
     bool previewUpdateEnabled_ = true;                      // +0x4a0
     float cellSize_ = 0.0f;                                 // +0x4a4
     float slopeRise_ = 0.0f;                                // +0x4a8

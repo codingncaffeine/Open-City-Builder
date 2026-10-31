@@ -12,10 +12,12 @@
 //  * GetLastValidPoint indexes the step array with validSteps-1 without a bounds check (0x100190668).
 //  * GetMajorBridge* read the last element of the bridge vector through the vector's end pointer (0x100187f42).
 #include "sc4/NetworkTool.h"
+#include "sc4/NetworkToolUI.h"
 
 #include "sc4/TileNeighborhood.h"
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 namespace sc4 {
@@ -228,7 +230,7 @@ bool cSC4NetworkTool::Init() {
             placement_.list60 = src.list60;
             placement_.list78 = src.list78;
             placement_.list90 = src.list90;
-            for (int i = 0; i < 8; ++i) placement_.unknownA8[i] = src.unknownA8[i];
+            for (int i = 0; i < 10; ++i) placement_.unknownA8[i] = src.unknownA8[i];
             placement_.listD0 = src.listD0;
         }
 
@@ -809,6 +811,209 @@ void cSC4NetworkTool::BreakIntoStraightAndDiagSegments(const SC4PointU& start, S
     if (diff != 1) return;
     if (totalSteps < 2) return;
     straightSteps = 0;
+}
+
+// ============================================================================================================
+// the drag: line, cells, segments (recovered from the Mac i386 build; i386 offsets in the comments)
+// ============================================================================================================
+
+// i386 0x00122c58: a new UI for this tool, one reference, already bound to the tool and its network type.
+bool cSC4NetworkTool::GetUITool(cISC4NetworkToolUI** out) {
+    auto* ui = new cSC4NetworkToolUI();
+    ui->AddRef();
+    ui->Init(this, networkType_);
+    *out = ui;
+    return true;
+}
+
+// i386 0x0012563e: the preview layer and the preview occupants (+0x25c) go. The preview occupant set is not modelled
+// yet (unknown460_), so only the layer is cleared.
+void cSC4NetworkTool::ClearCellPreviews() {
+    if (preview_) preview_->Clear();
+}
+
+// i386 0x0012519a: every highlighted occupant (+0x23c) gets highlight 0 and the set and the cell map (+0x238) go.
+// Not modelled yet (unknown460_): nothing is ever highlighted.
+void cSC4NetworkTool::ClearOccupantHighlights() {}
+
+// i386 0x0012b18c. Not ported yet: the multi-type intersection query (it only asks when the solve found some).
+void cSC4NetworkTool::QueryUserForPotentialIntersections() {}
+
+// i386 0x00124dbe. The per-cell part: each newly solved cell (status) that is not +0x5a costs the most expensive of
+// its network types' per-cell costs (type info +0xdc), and every corner the solve moved costs |terrain - solved| times
+// the terrain-change factor (params, i386 +0x368). The bridge, tunnel and intersection terms read vectors the
+// unported solver steps fill; they stay empty, so they add nothing yet. The rounding is (float)x + 1.5 * 2^23.
+int cSC4NetworkTool::GetCostOfSolution() {
+    INetworkToolHost* host = GetNetworkToolHost();
+    std::int32_t cost = 0;
+    float heightChange = 0.0f;
+    for (const tSolvedCell& solved : solvedCellList_) {
+        cSC4NetworkCellInfo* cell = worldCache_ ? worldCache_->GetCell(solved.cellKey) : nullptr;
+        if (!cell) continue;
+        if (cell->status != 0 && cell->unknown5a == 0) {
+            std::uint32_t most = 0;
+            for (std::uint32_t type = 0; type < 13; ++type) {
+                const INetworkTypeInfo* info = host ? host->NetworkTypeInfo(type) : nullptr;
+                if ((kFlagForNetworkType[type] & cell->networkFlags) != 0 && info && most < info->CostPerCell()) most = info->CostPerCell();
+            }
+            cost += static_cast<std::int32_t>(most);
+        }
+        for (int i = 0; i < 4; ++i) {
+            const float terrain = host ? host->TerrainVertexHeight(cell->vertexBaseHeights[i]) : 0.0f;
+            const float solvedHeight = cell->vertexHeights[i];
+            heightChange += terrain <= solvedHeight ? solvedHeight - terrain : terrain - solvedHeight;
+        }
+    }
+    float rounded = heightChange * placement_.floatA8[8] + 12582912.0f;
+    std::int32_t bits;
+    std::memcpy(&bits, &rounded, sizeof bits);
+    return bits - 0x4b400000 + cost + baseCost_;
+}
+
+// i386 0x004cdd0a.
+bool cSC4NetworkTool::DrawNetworkLine(SC4PointU& start, SC4PointU& end, bool allowDiagonals, std::uint32_t networkType) {
+    INetworkToolHost* host = GetNetworkToolHost();
+    const INetworkTypeInfo* info = host ? host->NetworkTypeInfo(networkType) : nullptr;
+    const int penX = info ? info->PenWidthX() : 1;
+    const int penZ = info ? info->PenWidthZ() : 1;
+    steps_.clear();
+    totalSteps_ = 0;
+    cells_.clear();
+    int zMajor = 0, xMajor = 0;
+    BreakIntoStraightAndDiagSegments(start, end, totalSteps_, straightSteps_, directionA_, directionB_, zMajor, xMajor,
+                                     allowDiagonals, penX, penZ);
+    stepIsHorizontal_ = xMajor != 0;
+    if (placement_.straightOrDiagonalOnly && totalSteps_ != straightSteps_) return false;
+    ComputeDraggedCells(start, end, zMajor, xMajor, networkType);
+    if (penX > 1 || penZ > 1) {
+        // A wide pen must stay inside the city.
+        for (int s = 0; s < totalSteps_; ++s) {
+            const tDraggedStep& step = steps_[static_cast<std::size_t>(s)];
+            for (std::uint32_t c = step.firstCell; c <= step.lastCell; ++c) {
+                const SC4PointU& cell = cells_[c];
+                if (static_cast<std::uint32_t>(cityWidth_) <= cell.x || static_cast<std::uint32_t>(cityHeight_) <= cell.z) {
+                    totalSteps_ = 0;
+                    steps_.clear();
+                    cells_.clear();
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+// i386 0x004cc96a. A Bresenham walk from start to end that groups the cells into steps along the long axis: on a
+// z-major drag every z move starts a step and x moves widen it (the step spans an x range), and the other way round.
+// On a tie the walk moves z first, then x, alternating. The pen widths widen the steps' ranges; then every step's
+// cells are listed (+0x60) and the steps record their half-open cell ranges (+0x54).
+// Not ported yet: the wide-pen pass after that (pen x > 1, the highways: it checks the ends against existing network
+// occupants through cSC4PlacedNetworkOccupantFilter and extends or shifts the end steps, 0x004ccd48..0x004cdc4e).
+void cSC4NetworkTool::ComputeDraggedCells(const SC4PointU& start, const SC4PointU& end, int zMajor, int xMajor,
+                                          std::uint32_t networkType) {
+    struct StepBound { int min, max; };
+    INetworkToolHost* host = GetNetworkToolHost();
+    const INetworkTypeInfo* info = host ? host->NetworkTypeInfo(networkType) : nullptr;
+    const std::uint32_t penX = info ? static_cast<std::uint32_t>(info->PenWidthX()) : 1;
+    const std::uint32_t penZ = info ? static_cast<std::uint32_t>(info->PenWidthZ()) : 1;
+    const bool penDirIsX = zMajor != 0;   // tStepBound::sbPenDirIsX
+    std::vector<StepBound> bounds(static_cast<std::size_t>(totalSteps_) + 1, StepBound{0, 0});
+    bounds[0] = StepBound{100000, -100000};
+    int x = static_cast<int>(start.x), z = static_cast<int>(start.z);
+    std::size_t k = 0;
+    bool zFirst = true;
+    for (;;) {
+        StepBound& b = bounds[k];
+        const int coord = penDirIsX ? x : z;
+        if (coord < b.min) b.min = coord;
+        if (b.max < coord) b.max = coord;
+        if ((static_cast<std::uint32_t>(x) == end.x && static_cast<std::uint32_t>(z) == end.z) || k == static_cast<std::size_t>(totalSteps_)) break;
+        const int dx = static_cast<int>(end.x) - x, dz = static_cast<int>(end.z) - z;
+        const std::uint32_t adx = static_cast<std::uint32_t>(dx < 0 ? -dx : dx), adz = static_cast<std::uint32_t>(dz < 0 ? -dz : dz);
+        if (adz < adx || (adz <= adx && !zFirst)) {
+            x += dx < 1 ? -1 : 1;
+            if (!zMajor) bounds[++k] = StepBound{100000, -100000};
+            zFirst = true;
+        } else {
+            z += dz < 1 ? -1 : 1;
+            if (!xMajor) bounds[++k] = StepBound{100000, -100000};
+            zFirst = false;
+        }
+    }
+    // The pen widths: a wide pen grows the range away from the drag's side (direction B).
+    const auto penDelta = [&](std::uint32_t pen) {
+        const bool negative = directionB_ == 1 || (zMajor ? directionB_ == 7 : directionB_ == 3);
+        return negative ? 1 - static_cast<int>(pen) : static_cast<int>(pen) - 1;
+    };
+    const auto grow = [](StepBound& b, int delta) { if (delta < 0) b.min += delta; else b.max += delta; };
+    if (penX > 1) {
+        const int delta = penDelta(penX);
+        for (int s = 0; s < straightSteps_; ++s) grow(bounds[static_cast<std::size_t>(s)], delta);
+    }
+    if (penZ > 1) {
+        const int delta = penDelta(penZ);
+        if (straightSteps_ < totalSteps_) {
+            int s = straightSteps_;
+            StepBound& first = bounds[static_cast<std::size_t>(s)];
+            if (s < 1) {
+                if (first.min == first.max) grow(first, delta);
+            } else {
+                grow(first, delta);
+            }
+            while (++s < totalSteps_ - 1) grow(bounds[static_cast<std::size_t>(s)], delta);
+            StepBound& last = bounds[static_cast<std::size_t>(totalSteps_ - 1)];
+            if (last.min == last.max) grow(last, delta);
+        }
+    }
+    steps_.assign(static_cast<std::size_t>(totalSteps_), tDraggedStep{});
+    const bool backwards = zMajor ? end.z <= start.z : end.x <= start.x;
+    const int sign = backwards ? -1 : 1;
+    std::uint32_t next = 0;
+    int along = 0;
+    for (int s = 0; s < totalSteps_; ++s) {
+        const StepBound& b = bounds[static_cast<std::size_t>(s)];
+        const int count = b.max - b.min + 1;
+        tDraggedStep& step = steps_[static_cast<std::size_t>(s)];
+        step.firstCell = next;
+        next += static_cast<std::uint32_t>(count);
+        step.lastCell = next - 1;
+        step.direction = 0;
+        for (int i = 0; i < count; ++i) {
+            if (!zMajor) cells_.push_back(SC4PointU{static_cast<std::uint32_t>(along + static_cast<int>(start.x)), static_cast<std::uint32_t>(i + b.min)});
+            else cells_.push_back(SC4PointU{static_cast<std::uint32_t>(i + b.min), static_cast<std::uint32_t>(along + static_cast<int>(start.z))});
+        }
+        along += sign;
+    }
+    if (penX > 1) {
+        static bool warned = false;
+        if (!warned) { warned = true; std::fprintf(stderr, "network tool: the wide-pen pass of ComputeDraggedCells is not ported (highways)\n"); }
+    }
+}
+
+// i386 0x004cf1ce: every anchor segment is drawn, its previews cleared and solved (and placed when `place`).
+// Not ported yet: the construction crew a real placement of a crewed type (mask 0x1f4f) builds the segments with
+// (cSC4NetworkConstructionCrew, new(0x58)); the occupants are placed directly.
+void cSC4NetworkTool::PlaceAllSegments(bool place, bool allowDiagonals, bool connectNeighbor, std::uint32_t networkType) {
+    const bool savedFlag = unknown9a_;
+    unknown9a_ = false;
+    ReloadCheck();
+    for (std::size_t i = 0; i + 1 < anchors_.size(); ++i) {
+        SC4PointU from = anchors_[i], to = anchors_[i + 1];
+        DrawNetworkLine(from, to, allowDiagonals, networkType);
+        ClearCellPreviews();
+        PlaceNetwork(place, allowDiagonals, connectNeighbor, networkType);
+    }
+    unknown9a_ = savedFlag;
+}
+
+// i386 0x004cd0..: the solve (and the placement) of the current line. NOT PORTED YET: the next step of the road work.
+bool cSC4NetworkTool::PlaceNetwork(bool place, bool, bool, std::uint32_t) {
+    static int logged = 0;
+    if (logged < 4) {
+        ++logged;
+        std::fprintf(stderr, "network tool: PlaceNetwork(%s) not ported; %d steps, %zu cells\n", place ? "place" : "preview", totalSteps_, cells_.size());
+    }
+    return false;
 }
 
 }  // namespace sc4

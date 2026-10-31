@@ -26,6 +26,7 @@
 #include <cstdio>
 #include "app/NativeCityUi.h"
 #include "app/NativeBudgetUi.h"
+#include "app/NativeNetworkTool.h"
 #include "app/NativeZoneTool.h"
 #include "app/NativeCatalogUi.h"
 #include "gz/Buffer.h"
@@ -231,7 +232,7 @@ struct StubView3DWin final : IView3DWinHost {
     }
     void GoToNextDisaster() override { SC4_UNWIRED("IView3DWinHost::GoToNextDisaster (cSC4DisasterLayer not recovered)"); }
     cSC4ViewInputControl* CreateDispatchTool(int) override { SC4_UNWIRED("IView3DWinHost::CreateDispatchTool (cSC4ViewInputControlDispatch not recovered)"); return nullptr; }
-    cSC4ViewInputControl* CreateNetworkTool(int) override { SC4_UNWIRED("IView3DWinHost::CreateNetworkTool (cSC4ViewInputControlNetworkTool not recovered)"); return nullptr; }
+    cSC4ViewInputControl* CreateNetworkTool(int type) override { return native::CreateNetworkTool(type); }
     void ShowMyStreetSim() override { SC4_UNWIRED("IView3DWinHost::ShowMyStreetSim"); }
     // The native city save writes an incomplete file the game cannot load back (SAVE-1): until it is whole the city is save-disabled,
     // so every save request takes the game's own "saving is disabled" path instead of replacing the city file.

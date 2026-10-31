@@ -1,3 +1,4 @@
+#include "app/NativeNetworkTool.h"
 #include "app/NativeAutomata.h"
 #include "app/NativeCitySystems.h"
 #include "app/NativeRuntimeWire.h"
@@ -307,6 +308,7 @@ bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* cityInterface, g
     view.EnablePainting(true);
     native::BindSimGridCity(cityInterface);   // the zone developer's Init (in InstallZoneTool) sizes a grid through SimGridCity()
     native::InstallZoneTool(view, cityInterface, *render);
+    native::InstallNetworkTool(view, cityInterface);
     native::InstallCatalogUi(view.GetWindowManager());
     native::SetBudgetViewWindow(view.AsIGZWin());
     view.AddGUI();   // DoPostCityInit's city UI (the view's engine DoMessage that sends it there is not ported)

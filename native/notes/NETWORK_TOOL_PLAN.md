@@ -51,3 +51,18 @@ previews and highlights, the construction crew's animation.
 - Next: install the rule loader natively (SL::spRM bytes) and call LoadNetworkTileEvaluators at start-up; cSC4NetworkTileNeighborhood
   (reads the tool's cell infos); then phase B. The rest of cSC4NetworkTypeInfo (bridges, supports, placement params, tile
   conflict / pattern verifier rules) stays host-provided until needed.
+- (2026-10-31, from the Mac i386 build with symbols) The drag works end to end up to the solver: cSC4ViewInputControlNetworkTool
+  (src/sc4/ViewInputControlNetworkTool.cpp, all 16 functions) and cSC4NetworkToolUI (src/sc4/NetworkToolUI.cpp, all but the bridge
+  chooser rows) drive the tool; the tool's GetUITool, DrawNetworkLine, ComputeDraggedCells (land pens; the wide-pen pass for
+  highways is not ported), PlaceAllSegments and GetCostOfSolution (cell terms) are in; native hosts in src/app/NativeNetworkTool.cpp
+  (the 13 type records ReloadNetworkTypeInfo writes; LoadPlacementParams / LoadSupports / LoadBridgeTypes not yet). Headless: the road
+  button + a drag reach PlaceNetwork, which is the next function (it is a logged stub).
+- i386 vs 64-bit layouts: the i386 tool object is the 64-bit one with 4-byte pointers/vectors (map in the i386 constructor
+  0x00127510: +0x54 steps, +0x60 cells, +0x70 total, +0x74 straight, +0x78 valid, +0x98 solved cells, +0xcc intersections, +0xd8
+  bridges, +0xe4 tunnels, +0xf0 additional draws, +0x118 anchors, +0x218 preview, +0x234 failure, +0x254 base cost, +0x2d0 placement
+  params, +0x398 type info, +0x39c type). The i386 cell info is the 64-bit one minus 8 bytes after +0x0c (occupant at +0x0c).
+  The i386 placement params hold 10 words at +0x78 (the port had 8).
+- NEXT, in call order: PlaceNetwork (i386 1,604 B) -> CreateCellInfosForCurrentPlacementTiles / ComputeAndStoreCellInfo -> SolveNetwork
+  chain (AssignEdgeMajorTypes, BuildSetOfCellsToBeSolved, ApplyNetworkRules ...) -> InsertOccupantsForSolvedCells; cSC4NetworkPreview;
+  LoadPlacementParams. Bridges / tunnels / highway intersections / the construction crew stay stubs.
+

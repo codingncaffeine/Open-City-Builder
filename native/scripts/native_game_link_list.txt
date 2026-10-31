@@ -697,3 +697,8 @@ src/app/NativeCityViewQueries.cpp
 src/sc4/GamePreferencesWinProc.cpp
 src/sc4/AudioPreferencesWinProc.cpp
 src/sc4/VideoPreferencesWinProc.cpp
+src/app/NativeNetworkTool.cpp
+src/sc4/NetworkToolUI.cpp
+src/sc4/ViewInputControlNetworkTool.cpp
+src/sc4/NetworkWorldCache.cpp
+src/rz/RZTime.cpp
