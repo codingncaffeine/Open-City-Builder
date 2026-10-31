@@ -329,6 +329,22 @@ sc4::cSTETerrain* Terrain() {
     return terrain;
 }
 
+// cISC4LightingManager for network pieces: the terrain's shade under a corner (TerrainShade below), a fixed sun for
+// the add-on parts.
+std::uint8_t TerrainShade(int x, int z);
+class NetworkLighting final : public sc4::INetworkOccupantLighting {
+public:
+    void TerrainLighting(const float p[3], std::uint8_t& r, std::uint8_t& g, std::uint8_t& b) override {
+        r = g = b = TerrainShade(static_cast<int>(p[0] / 16.0f + 0.5f), static_cast<int>(p[2] / 16.0f + 0.5f));
+    }
+    void SurfaceLighting(const float*, const float n[3], std::uint8_t& r, std::uint8_t& g, std::uint8_t& b) override {
+        float dot = n[0] * -0.45f + n[1] * 0.78f + n[2] * 0.43f;
+        if (dot < 0.35f) dot = 0.35f;
+        if (dot > 1.0f) dot = 1.0f;
+        r = g = b = static_cast<std::uint8_t>(dot * 255.0f);
+    }
+};
+
 // GetTexture's binding factory: the network textures live in the S3D texture group.
 class NetworkModelHost final : public sc4::INetworkModelHost {
 public:
@@ -503,6 +519,9 @@ bool AttachModelMaker(sc4::cSC43DRender& render, sc4::cSC4City& city) {
     sc4::SetNetworkModelFactory([](sc4::cISC4Occupant* occupant) -> s3d::cIS3DModelInstance* {
         auto* network = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);
         if (!network) return nullptr;
+        // The lighting manager lights a network piece when it enters the city (cSC4NetworkOccupant::UpdateLighting).
+        static NetworkLighting lighting;
+        network->UpdateLighting(lighting);
         auto* model = new sc4::cSC4NetworkOccupantModel(*network);
         model->AddRef();
         return model;

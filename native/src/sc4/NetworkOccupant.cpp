@@ -631,4 +631,35 @@ bool cSC4NetworkOccupant::Read(cIGZIStream& stream) {
     return !stream.GetError();
 }
 
+// i386 0x001344b2: every corner takes the terrain lighting at its position; every add-on part takes the lighting of its
+// triangle's normal (all three corners alike). Then network flag 0x8000.
+void cSC4NetworkOccupant::UpdateLighting(INetworkOccupantLighting& lighting) {
+    for (SC4TileCorner& corner : corners_) {
+        const float position[3] = {corner.x, corner.y, corner.z};
+        lighting.TerrainLighting(position, corner.color[0], corner.color[1], corner.color[2]);
+    }
+    for (SC4AddOnPart& part : parts_) {
+        float triangle[9];
+        for (int i = 0; i < 3; ++i) {
+            triangle[i * 3] = part.corner[i].x;
+            triangle[i * 3 + 1] = part.corner[i].y;
+            triangle[i * 3 + 2] = part.corner[i].z;
+        }
+        // SC4GeometryUtilities::GetNormalToTriangle + cS3DVector3::Normalize
+        const float ax = triangle[3] - triangle[0], ay = triangle[4] - triangle[1], az = triangle[5] - triangle[2];
+        const float bx = triangle[6] - triangle[0], by = triangle[7] - triangle[1], bz = triangle[8] - triangle[2];
+        float normal[3] = {ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx};
+        const float length = std::sqrt(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
+        if (length > 0.0f) for (float& n : normal) n /= length;
+        std::uint8_t r = 0, g = 0, b = 0;
+        lighting.SurfaceLighting(triangle, normal, r, g, b);
+        for (SC4TileCorner& corner : part.corner) {
+            corner.color[0] = r;
+            corner.color[1] = g;
+            corner.color[2] = b;
+        }
+    }
+    SetNetworkFlag(0x8000);
+}
+
 }  // namespace sc4

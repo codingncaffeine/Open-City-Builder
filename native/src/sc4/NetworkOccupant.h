@@ -92,6 +92,14 @@ public:
 INetworkOccupantHost* NetworkOccupantHost();
 void SetNetworkOccupantHost(INetworkOccupantHost* host);
 
+// cISC4LightingManager as cSC4NetworkOccupant::UpdateLighting calls it (i386 vslots 0x30 and 0x60).
+class INetworkOccupantLighting {
+public:
+    virtual ~INetworkOccupantLighting() = default;
+    virtual void TerrainLighting(const float position[3], std::uint8_t& r, std::uint8_t& g, std::uint8_t& b) = 0;      // 0x30
+    virtual void SurfaceLighting(const float* triangle, const float normal[3], std::uint8_t& r, std::uint8_t& g, std::uint8_t& b) = 0;   // 0x60
+};
+
 class cSC4NetworkOccupant : public cSC4Occupant {   // not final: cSC4UndergroundOccupant derives from it
 public:
     cSC4NetworkOccupant();
@@ -168,6 +176,7 @@ public:
     void GetOccupiedCell(std::uint32_t& x, std::uint32_t& z) const;
     virtual void SetTranslucency(bool on, std::uint8_t alpha);
     void MarkLightingUpdateNeeded() { SetNetworkFlag(kNetworkFlagLightingDirty); }
+    void UpdateLighting(INetworkOccupantLighting& lighting);   // i386 0x001344b2 (vslot 0x188)
     bool IsLit() const { return HasNetworkFlag(kNetworkFlagLit); }
     bool CanBeLit() const { return false; }
     void SetLit(bool lit);

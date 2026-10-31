@@ -453,6 +453,13 @@ public:
     virtual int NetworkTypeKind(std::uint32_t /*type*/) { return 0; }
     // CheckForReservedTiles(x, z, type) (i386 vslot 0x118): a lot, a reserved building or an immovable piece holds the cell.
     virtual bool CellReserved(std::uint32_t /*x*/, std::uint32_t /*z*/, std::uint32_t /*type*/) { return false; }
+    // Occupant manager vslot 0x50 (InsertOccupant(occupant, data)): the manager's handle, kept in one byte by the caller.
+    virtual int InsertNetworkOccupant(cSC4NetworkOccupant* /*occupant*/, std::uint32_t /*data*/) { return 0; }
+    // ClearNetworkOccsFromCell: remove the network occupants of the cell (and demolish a flora occupant on it).
+    virtual void ClearCellForNetwork(std::uint32_t /*x*/, std::uint32_t /*z*/, std::uint32_t /*typeMask*/, std::uint32_t /*networkType*/) {}
+    // SL::spRM vslot 0xc with {0x6534284a, the type's exemplar group, piece} (iid 0xa52160f5): a pre-built model piece.
+    virtual bool HasPrebuiltModelExemplar(std::uint32_t /*type*/, std::uint32_t /*piece*/) { return false; }
+    virtual int CurrentViewLevel() { return 1; }                      // SL::spView3D vslot 0x58
 };
 
 void SetNetworkToolHost(INetworkToolHost* host);
@@ -652,6 +659,13 @@ public:
     bool AdjustTileSubsets(std::vector<tSolvedCell>& cells, bool retry);
     bool VerifyTileSubsets(std::vector<tSolvedCell>& cells);
     bool SmoothenNetwork(int pass);
+    virtual void CreateNetworkOccupant(cSC4NetworkCellInfo* cell, cSC4NetworkOccupant** out, float (*corners)[3], std::uint32_t clsid);
+    virtual void AddCellPreview(cSC4NetworkCellInfo& cell, const tSolvedCell& solved);
+    virtual void InsertNetworkOccupant(cSC4NetworkCellInfo& cell, const tSolvedCell& solved, std::list<cSC4NetworkOccupant*>* out);
+    virtual float GetNetworkVertexHeight(std::int32_t vertex);
+    virtual void SetQuadTrianglesToDraw(cSC4NetworkOccupant* occupant, std::uint32_t compact);
+    void ClearNetworkOccsFromCell(std::uint32_t x, std::uint32_t z);
+    static void MarkOccupantsUsable(std::list<cSC4NetworkOccupant*>& occupants, bool release);
     const std::vector<tSolvedCell>& SolvedCells() const { return solvedCellList_; }
     void SetTerrainHilight(int param);                                    // 0x10018cd24
     // i386 0x004cc96a: the drag's cells (+0xb8) and steps (+0xa0); zMajor / xMajor = the splitter's two flags.

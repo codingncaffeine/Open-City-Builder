@@ -1,6 +1,8 @@
 #include "sc4/ViewInputControlNetworkTool.h"
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 #include "sc4/NetworkTool.h"
 #include "sc4/NetworkToolUI.h"
@@ -11,6 +13,7 @@ namespace {
 INetworkInputToolHost* g_host = nullptr;
 constexpr std::uint32_t kKeyEscape = 0x1b;
 constexpr std::uint32_t kButtonLeftDown = 0x10;   // the modifiers' left-button bit
+bool Trace() { static const bool on = std::getenv("SC4_NETDEBUG") != nullptr; return on; }
 }  // namespace
 
 INetworkInputToolHost* NetworkInputToolHost() { return g_host; }
@@ -124,9 +127,13 @@ bool cSC4ViewInputControlNetworkTool::OnMouseDownL(int x, int y, std::uint32_t m
 }
 
 bool cSC4ViewInputControlNetworkTool::OnMouseUpL(int x, int y, std::uint32_t modifiers) {
+    if (Trace()) std::fprintf(stderr, "network input: mouse up at %d,%d (down %d)\n", x, y, mouseDown_ ? 1 : 0);
     if (!mouseDown_) return false;
-    ReleaseCapture();
+    // The original releases the capture first (0x002ae4d2). The native window manager sends a synthetic mouse move
+    // from inside ReleaseCapture, without the button bit, which OnMouseMove would take for "released outside the
+    // window" and cancel the drag; so the flag drops first.
     mouseDown_ = false;
+    ReleaseCapture();
     if (outline_ && !outline_->IsStarted()) outline_->Start(0);
     const bool handled = ui_->OnMouseUpL(x, y, modifiers);
     SetCursor(ui_->CursorId());
@@ -200,6 +207,7 @@ bool cSC4ViewInputControlNetworkTool::OnMouseMove(int x, int y, std::uint32_t mo
     if (picked && mouseDown_) {
         const std::uint32_t base = ui_->DirectionalCursorBase();
         if ((modifiers & kButtonLeftDown) == 0) {
+            if (Trace()) std::fprintf(stderr, "network input: move without the button (modifiers %x): cancel\n", modifiers);
             // The button went up outside the window.
             if (ui_ && ui_->IsActive()) ui_->CancelInput();
             handled = true;

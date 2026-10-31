@@ -747,15 +747,158 @@ bool cSC4NetworkTool::CanTilesBeSupportedOnTerrain(std::uint32_t) { return true;
 // cSC4VertexHtConstraintSatisfier); the cells keep their terrain heights.
 bool cSC4NetworkTool::SmoothenNetwork(int) { return true; }
 
-// i386 vslot 0xe4. NOT PORTED YET: the occupant insertion (InsertNetworkOccupant / CreateNetworkOccupant). Logs the
-// solved pieces so the solver can be checked.
-void cSC4NetworkTool::InsertOccupantsForSolvedCells(std::vector<tSolvedCell>& cells, std::list<cSC4NetworkOccupant*>*, bool) {
-    static int logged = 0;
-    if (logged >= 6) return;
-    ++logged;
-    std::fprintf(stderr, "network tool: %zu solved pieces:", cells.size());
-    for (const tSolvedCell& c : cells) std::fprintf(stderr, " (%u,%u)=%08x/%u", c.cellKey & 0xffff, c.cellKey >> 16, c.pieceType, c.rotationFlip);
-    std::fprintf(stderr, "\n");
+// i386 0x00124878 (vslot 0xe4). The preview half (not placing) asks AddCellPreview for every solved cell, the placement
+// half inserts a network occupant per cell, or updates the occupant already there.
+// NOT PORTED YET: the intersection previews (+0xcc, multi-type crossings), the connection-piece update of an existing
+// occupant (network flag 0x200000) and the one-way update (0x400000): those cells get a new occupant instead.
+void cSC4NetworkTool::InsertOccupantsForSolvedCells(std::vector<tSolvedCell>& cells, std::list<cSC4NetworkOccupant*>* out, bool preview) {
+    if (!unknown98_ || preview) {
+        for (const tSolvedCell& solved : cells) {
+            cSC4NetworkCellInfo* cell = GetCellInfo(solved.cellKey);
+            if (!cell) continue;
+            for (int i = 0; i < 4; ++i) cell->vertexHeights[i] = GetNetworkVertexHeight((cell->buildable ? 100000 : 0) + cell->vertexBaseHeights[i]);   // vslot 300
+            if (!preview) cell->hasOccupant = true;
+            AddCellPreview(*cell, solved);                                              // vslot 0xf0
+        }
+        return;
+    }
+    for (const tSolvedCell& solved : cells) {
+        cSC4NetworkCellInfo* cell = GetCellInfo(solved.cellKey);
+        if (!cell) continue;
+        cell->hasOccupant = true;
+        InsertNetworkOccupant(*cell, solved, out);                                       // vslot 0x128
+    }
+}
+
+// i386 vslot 300 (0x12c): the solved height of a vertex, or the terrain's.
+float cSC4NetworkTool::GetNetworkVertexHeight(std::int32_t vertex) {
+    float height = 0.0f;
+    if (constraintA_ && constraintA_->GetHeight(vertex, height)) return height;
+    INetworkToolHost* host = GetNetworkToolHost();
+    return host ? host->TerrainVertexHeight(vertex) : 0.0f;
+}
+
+// i386 vslot 0xf0. NOT PORTED YET: the textured preview of the piece (cSC4NetworkPreview::AddTexturedSelection with the
+// piece's texture from the network manager); nothing is drawn while dragging.
+void cSC4NetworkTool::AddCellPreview(cSC4NetworkCellInfo&, const tSolvedCell&) {}
+
+// i386 0x001262b4 (vslot 0xe0): a new occupant of the class `clsid` (0 = cSC4NetworkOccupant) over the cell's four corners.
+void cSC4NetworkTool::CreateNetworkOccupant(cSC4NetworkCellInfo* cell, cSC4NetworkOccupant** out, float (*corners)[3], std::uint32_t clsid) {
+    INetworkToolHost* host = GetNetworkToolHost();
+    const float size = host ? host->TerrainCellSize() : 16.0f;                       // SL::spTerrain vslot 0x18
+    const float x0 = static_cast<float>(cell->x) * size, z0 = static_cast<float>(cell->z) * size;
+    const float c[4][3] = {{x0, cell->vertexHeights[0], z0},
+                           {x0, cell->vertexHeights[1], size + z0},
+                           {size + x0, cell->vertexHeights[2], size + z0},
+                           {size + x0, cell->vertexHeights[3], z0}};
+    std::memcpy(corners, c, sizeof c);
+    cSC4NetworkOccupant* occupant = nullptr;
+    if (clsid == 0) {
+        occupant = new cSC4NetworkOccupant();
+    } else {
+        // cSC4NetworkBridgeOccupant (0x49cc1bcd), cSC4NetworkTunnelOccupant (0x8a4bd52b), cSC4NetworkOccupantWithPreBuiltModel
+        // (0x49c1a034): not created by the land path yet.
+        std::fprintf(stderr, "network tool: occupant class %08x not ported, using a plain network occupant\n", clsid);
+        occupant = new cSC4NetworkOccupant();
+    }
+    *out = occupant;
+    occupant->AddRef();
+    if (!unknown98_) {
+        occupant->SetNetworkFlag(cell->networkFlags & 0xc0000);
+    } else {
+        cell->occupant = occupant;
+        occupant->SetNetworkFlag(cell->networkFlags);
+    }
+    occupant->Init(c);                                                                  // vslot 0xc
+    if (!unknown98_) occupant->SetNetworkFlag(0x80000000u);
+    else occupant->ClearNetworkFlag(0x80000000u);
+    if (clsid == 0x8a4bd52b) {
+        occupant->SetNetworkFlag(0x10000000);
+        occupant->ClearNetworkFlag(0x4000);
+    } else {
+        occupant->SetNetworkFlag(0x4000);
+    }
+    if (unknown98_) {
+        for (std::uint32_t type = 0; type < 13; ++type)
+            if (kFlagForNetworkType[type] & cell->networkFlags) occupant->SetEdgeTypesFlag(static_cast<std::uint8_t>(type), cell->tileNeighborhoods[type]);
+        occupant->SetOneWayDirections(cell->unknown58);
+    }
+    occupant->SetCostOfDemolition(static_cast<std::int64_t>(placement_.unknownA8[9]));   // i386 +0x36c = params +0x9c
+}
+
+// i386 0x00123f2a (vslot 0x148): which of the quad's triangles a piece draws. Without supports (network flag 0x40000000)
+// both; a supported piece of one of the listed edge patterns draws one triangle (0x2000000 / 0x4000000 = the triangles,
+// 0x1000000 = the shared edge).
+void cSC4NetworkTool::SetQuadTrianglesToDraw(cSC4NetworkOccupant* occupant, std::uint32_t compact) {
+    const auto set = [&](std::uint32_t f) { occupant->SetNetworkFlag(f); };
+    const auto clear = [&](std::uint32_t f) { occupant->ClearNetworkFlag(f); };
+    if (occupant->HasNetworkFlag(0x40000000u)) {
+        switch (compact) {
+        case 0x9: case 0x301: case 0x309: case 0xb00: case 0xb01:
+            set(0x1000000); set(0x2000000); clear(0x4000000); return;
+        case 0xb: case 0x1000003: case 0x100000b: case 0x9000003: case 0x9000000:
+            set(0x2000000); clear(0x4000000); return;
+        case 0x90000: case 0x3010000: case 0x3090000: case 0xb000000: case 0xb010000:
+            set(0x1000000); set(0x4000000); clear(0x2000000); return;
+        case 0x900: case 0x30100: case 0x30900: case 0xb0000: case 0xb0100:
+            set(0x4000000); clear(0x2000000); return;
+        default:
+            break;
+        }
+    }
+    set(0x2000000);
+    set(0x4000000);
+}
+
+// i386 0x00125444: the network occupants of the cell the new piece replaces leave the occupant manager (and a flora
+// occupant standing exactly on the cell is demolished).
+void cSC4NetworkTool::ClearNetworkOccsFromCell(std::uint32_t x, std::uint32_t z) {
+    if (INetworkToolHost* host = GetNetworkToolHost()) host->ClearCellForNetwork(x, z, placementFlagMask_, networkType_);
+}
+
+// i386 0x0012b6d8 (vslot 0x128). The plain-piece path: a new occupant with the solved piece and rotation, its triangles,
+// the old occupants of the cell removed, the new one inserted (its handle at +0x54), translucent until it is usable.
+// NOT PORTED YET: the pre-built model pieces (an exemplar {0x6534284a, type exemplar, piece} exists: support models,
+// shear transform), the support structures of raised pieces (AddSupportStructures) and SetExemplarForOccupant.
+void cSC4NetworkTool::InsertNetworkOccupant(cSC4NetworkCellInfo& cell, const tSolvedCell& solved, std::list<cSC4NetworkOccupant*>* out) {
+    INetworkToolHost* host = GetNetworkToolHost();
+    if (host) {
+        for (std::uint32_t type = 0; type < 13; ++type) {
+            if ((kFlagForNetworkType[type] & cell.networkFlags) && host->HasPrebuiltModelExemplar(type, solved.pieceType)) {
+                static int warned = 0;
+                if (warned++ < 4) std::fprintf(stderr, "network tool: piece %08x has a pre-built model (not ported), drawn as a quad\n", solved.pieceType);
+                break;
+            }
+        }
+    }
+    float corners[4][3];
+    cSC4NetworkOccupant* occupant = nullptr;
+    CreateNetworkOccupant(&cell, &occupant, corners, 0);
+    occupant->SetQuadDraw(solved.pieceType, solved.rotationFlip);                      // vslot 0x78
+    SetQuadTrianglesToDraw(occupant, cell.tileNeighborhoods[networkType_]);
+    occupant->ClearNetworkFlag(0x400000);
+    ClearNetworkOccsFromCell(cell.x, cell.z);
+    if (host) cell.occupantId = static_cast<std::uint8_t>(host->InsertNetworkOccupant(occupant, static_cast<std::uint32_t>(unknown458_)));
+    if (occupant->GetNetworkFlag() & 0x10000000u) occupant->ClearNetworkFlag(0x4000);
+    else occupant->SetNetworkFlag(0x4000);
+    if (out) {
+        occupant->AddRef();
+        out->push_back(occupant);
+    }
+    occupant->Release();
+}
+
+// cSC4NetworkConstructionCrew::MarkOccupantsUsable (i386 0x00164690) / MarkOccupantUsable (0x0016429e): opaque in the
+// normal view (view level 1), visible, usable; `release` drops the list's references.
+void cSC4NetworkTool::MarkOccupantsUsable(std::list<cSC4NetworkOccupant*>& occupants, bool release) {
+    INetworkToolHost* host = GetNetworkToolHost();
+    for (cSC4NetworkOccupant* occupant : occupants) {
+        if (!occupant) continue;
+        if (host && host->CurrentViewLevel() == 1) occupant->ClearNetworkFlag(0x4000);
+        occupant->SetVisibility(true, true);                                            // cISC4Occupant vslot 0x48
+        occupant->SetNetworkFlag(0x10000000);
+        if (release) occupant->Release();
+    }
 }
 
 // ============================================================================================================
@@ -841,6 +984,10 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, bool allowDiagonals, bool connect
     if (!place) {
         // The preview occupants (+0x25c) are kept so ClearCellPreviews can take them out again.
         for (cSC4NetworkOccupant* occupant : placed) previewOccupants_.push_back(occupant);
+        // SetTerrainHilight (previewUpdateEnabled_): not ported.
+    } else {
+        // The construction crew (cSC4NetworkConstructionCrew::AddNetworkSegment) is not ported: the pieces are usable at once.
+        MarkOccupantsUsable(placed, true);
     }
     return true;
 }

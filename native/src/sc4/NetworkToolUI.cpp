@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 #include "rz/RZTime.h"
 #include "rz/cRZKeyboard.h"
@@ -18,6 +20,8 @@ const std::uint32_t kNetworkDragSound[13] = {0x495a6c6e, 0x495a6c6e, 0x495a6c6e,
 
 namespace {
 INetworkToolUIHost* g_host = nullptr;
+// SC4_NETDEBUG=1 traces the drag's decisions on stderr (a port aid; the original has no such output).
+bool Trace() { static const bool on = std::getenv("SC4_NETDEBUG") != nullptr; return on; }
 constexpr std::uint32_t kKeyShift = 0x10;
 constexpr std::uint32_t kErrorSound = 0xaa62c9d5;        // OnMouseUpL on a failed drag
 constexpr float kPickAltitudeWindow = 50.0f;             // cSC4Helicopter::...::kDeltaAltitude 0x00a7079c
@@ -101,6 +105,7 @@ void cSC4NetworkToolUI::CloseBridgeChooser() {
 }
 
 void cSC4NetworkToolUI::AbortPlacement() {
+    if (Trace()) std::fprintf(stderr, "network ui: abort (placing %d)\n", placing_ ? 1 : 0);
     if (!placing_) return;
     placing_ = false;
     mouseDown_ = false;
@@ -126,6 +131,7 @@ void cSC4NetworkToolUI::DoPlacement() {
     const bool paid = g_host && g_host->SpendFunds(static_cast<std::uint32_t>(tool_->GetCostOfSolution()));
     view_->ClearCostIndicator(paid);
     placing_ = false;
+    if (Trace()) std::fprintf(stderr, "network ui: place, cost %d, paid %d\n", tool_->GetCostOfSolution(), paid ? 1 : 0);
     if (paid) {
         // A dry run with neighbour connections on tells whether the drag reaches the city edge.
         tool_->Reset();
@@ -314,7 +320,9 @@ bool cSC4NetworkToolUI::OnMouseDownL(int x, int y, std::uint32_t modifiers) {
     allowDiagonals_ = !cRZKeyboard::IsKeyDownNowStatic(kKeyShift);
     multiAnchor_ = false;   // see the header: the shipped game never drags with anchors
     SC4PointU cell;
-    if (ScreenToCell(x, y, cell, &startAltitude_, false, 0.0f, 0.0f, 0.0f)) {
+    const bool picked = ScreenToCell(x, y, cell, &startAltitude_, false, 0.0f, 0.0f, 0.0f);
+    if (Trace()) std::fprintf(stderr, "network ui: mouse down at %d,%d picked %d cell %u,%u this %p\n", x, y, picked ? 1 : 0, cell.x, cell.z, static_cast<void*>(this));
+    if (picked) {
         placing_ = true;
         mouseDown_ = true;
         preferredBridge_ = -1;
@@ -339,8 +347,10 @@ bool cSC4NetworkToolUI::OnMouseDownL(int x, int y, std::uint32_t modifiers) {
 }
 
 bool cSC4NetworkToolUI::OnMouseUpL(int, int, std::uint32_t) {
+    if (Trace()) std::fprintf(stderr, "network ui: up entry view %p down %d placing %d this %p\n", static_cast<void*>(view_), mouseDown_ ? 1 : 0, placing_ ? 1 : 0, static_cast<void*>(this));
     if (!view_ || !mouseDown_) return false;
     mouseDown_ = false;
+    if (Trace()) std::fprintf(stderr, "network ui: mouse up, failure %d, %zu anchors\n", tool_->GetFailureState() ? 1 : 0, anchors_.size());
     if (tool_->GetFailureState()) {
         if (g_host) g_host->PlaySound(kErrorSound);
         AbortPlacement();

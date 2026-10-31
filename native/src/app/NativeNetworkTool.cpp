@@ -171,6 +171,25 @@ public:
         return t->GetWaterLevel(static_cast<std::int32_t>(z * (static_cast<std::int32_t>(t->CellCountX()) + 1) + x));
     }
     int NetworkTypeKind(std::uint32_t type) override { return type < 13 ? kTypeKinds[type] : 0; }
+    int InsertNetworkOccupant(sc4::cSC4NetworkOccupant* occupant, std::uint32_t data) override {
+        sc4::cISC4OccupantManager* occupants = Occupants();
+        return occupants && occupants->InsertOccupant(static_cast<sc4::cISC4Occupant*>(occupant), data) ? 1 : 0;
+    }
+    // The network occupants of the cell leave the manager. NOT PORTED: the flora on the cell (spDemolition).
+    void ClearCellForNetwork(std::uint32_t x, std::uint32_t z, std::uint32_t, std::uint32_t) override {
+        sc4::cISC4OccupantManager* occupants = Occupants();
+        for (int guard = 0; occupants && guard < 8; ++guard) {
+            sc4::cISC4Occupant* occupant = nullptr;
+            if (!occupants->GetFirstOccupantByStandardCityCell(occupant, static_cast<int>(x), static_cast<int>(z), 0xc772bf98u) || !occupant) break;
+            occupants->RemoveOccupant(occupant, true, 0);
+            occupant->Release();
+        }
+    }
+    bool HasPrebuiltModelExemplar(std::uint32_t type, std::uint32_t piece) override {
+        std::vector<std::uint8_t> bytes;
+        return type < 13 && LoadResourceBytes(0x6534284a, kTypeRecords[type].exemplar, piece, bytes);
+    }
+    int CurrentViewLevel() override { return g_view ? static_cast<int>(g_view->GetCurrentViewLevel()) : 1; }
 
 private:
     Preview preview_;
