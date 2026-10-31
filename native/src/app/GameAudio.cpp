@@ -2,6 +2,7 @@
 // station's music and the UI sounds. The output is the platform backend CreatePlatformAudioBackend() makes
 // (GameAudioAV.mm on macOS, linux/GameAudioSDL.cpp on Linux).
 #include <algorithm>
+#include <random>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -206,13 +207,29 @@ void GameAudio::SetStation(const std::string& directory) {
         if (extension == ".mp3") playlist_.push_back(directory + "/" + entry.path().filename().string());
     }
     std::sort(playlist_.begin(), playlist_.end());   // the listing order varies; the shuffle below picks the order
-    for (std::size_t i = playlist_.size(); i > 1; --i) std::swap(playlist_[i - 1], playlist_[std::rand() % i]);
+    Shuffle();
+}
+
+// A new random order every launch and every time the list has played through (std::rand was never seeded, so every
+// launch played the same order).
+void GameAudio::Shuffle() {
+    static std::mt19937 random{std::random_device{}()};
+    std::shuffle(playlist_.begin(), playlist_.end(), random);
+    // Never start a new round with the song that just ended.
+    if (playlist_.size() > 1 && playlist_.front() == currentSong_) std::swap(playlist_.front(), playlist_.back());
+    nextSong_ = 0;
+    if (std::getenv("SC4_DEBUG")) {
+        std::fprintf(stderr, "audio: playlist order:");
+        for (const std::string& song : playlist_) std::fprintf(stderr, " %s", std::filesystem::path(song).filename().string().c_str());
+        std::fprintf(stderr, "\n");
+    }
 }
 
 void GameAudio::Tick() {
     if (impl_ && !playlist_.empty() && !muted_ && musicEnabled_ && !radioHeld_ && (!impl_->ambient || !impl_->ambient->IsPlaying())) {
         for (std::size_t tries = 0; tries < playlist_.size(); ++tries) {
-            const std::string& path = playlist_[nextSong_++ % playlist_.size()];
+            if (nextSong_ >= playlist_.size()) Shuffle();
+            const std::string path = playlist_[nextSong_++];
             if (songEnabled_ && !songEnabled_(path)) continue;
             if (PlaySong(path)) break;
         }

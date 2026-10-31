@@ -24,6 +24,7 @@ public:
     // The radio: the mp3s of GameData/Radio/Stations/<station>/Music play one after another in a shuffled order
     // ("Mayor" in a city, "Region" on the region screen); an empty name stops the music.
     void SetStation(const std::string& stationDirectory);
+    void Shuffle();   // a new random playlist order
     void SetMuted(bool muted);
     bool Muted() const { return muted_; }
     std::string CurrentName() const { return current_; }
