@@ -12,6 +12,13 @@ else OBJ=build/linux_obj; OUT=build/sc4_game_linux; OPT="-O1 -g"; LD=""; fi
 mkdir -p $OBJ
 PKG="$(pkg-config --cflags sdl3 epoxy freetype2 libpng libmpg123)"
 CF="-std=c++20 -stdlib=libc++ -include cstdlib -include cmath -include platform/linux_char_traits.h -Dst_atimespec=st_atim -Dst_mtimespec=st_mtim -Dst_ctimespec=st_ctim -D_CS_DARWIN_USER_TEMP_DIR=_CS_PATH $OPT -Wno-overloaded-virtual -w -Isrc -Iscripts/tests/stubs $PKG"
+# The window and taskbar icon (art/logo-256.png) is compiled into the game; a new logo rebuilds the file that includes it.
+mkdir -p build/generated
+if [ ! -f build/generated/app_icon.inc ] || [ ../art/logo-256.png -nt build/generated/app_icon.inc ]; then
+  (cd ../art && xxd -i -n app_icon_png logo-256.png) > build/generated/app_icon.inc
+  rm -f $OBJ/src_app_linux_game_main_linux.cpp.o
+fi
+CF="$CF -Ibuild/generated"
 LIST=scripts/linux_game_link_list.txt
 OBJS=""
 for s in $(grep -v '^#' $LIST); do OBJS="$OBJS $OBJ/$(echo "$s" | tr '/' '_').o"; done

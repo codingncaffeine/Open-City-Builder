@@ -6,6 +6,7 @@ set -e
 cd "$(dirname "$0")/.."
 DATA="$(realpath "${1:-../scratch/testbed/game}")"
 [ -x build/sc4_game_linux ] || bash scripts/build_linux_game.sh
+bash scripts/install_desktop_entry.sh "$DATA" >/dev/null   # the taskbar icon (Wayland matches the app id to the entry)
 CONTENTS="$(mktemp -d)"   # the build looks for <contents>/GameData: point it at the PC folder
 trap 'rm -rf "$CONTENTS"' EXIT
 ln -s "$DATA" "$CONTENTS/GameData"

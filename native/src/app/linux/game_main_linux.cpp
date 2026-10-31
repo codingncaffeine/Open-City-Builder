@@ -330,6 +330,23 @@ cGZBuffer* DecodeBmpBytes(const std::vector<std::uint8_t>& b) {
     return buffer;
 }
 
+// The application's identity on the desktop. SDL makes the identifier the Wayland app_id and the X11 WM_CLASS; the taskbar
+// matches it to scripts/install_desktop_entry.sh's desktop entry of the same name, whose Icon= it shows.
+constexpr const char* kAppId = "io.github.codingncaffeine.OpenCityBuilder";
+#include "app_icon.inc"   // build/generated: art/logo-256.png
+
+// The window's own icon (the title bar, X11 taskbars, and Wayland compositors with xdg-toplevel-icon).
+void SetWindowIconFromLogo(SDL_Window* window) {
+    png_image image{};
+    image.version = PNG_IMAGE_VERSION;
+    if (!png_image_begin_read_from_memory(&image, app_icon_png, app_icon_png_len)) return;
+    image.format = PNG_FORMAT_RGBA;
+    SDL_Surface* surface = SDL_CreateSurface(int(image.width), int(image.height), SDL_PIXELFORMAT_RGBA32);
+    if (!surface) { png_image_free(&image); return; }
+    if (png_image_finish_read(&image, nullptr, surface->pixels, png_int_32(surface->pitch), nullptr)) SDL_SetWindowIcon(window, surface);
+    SDL_DestroySurface(surface);
+}
+
 cGZBuffer* DecodePngBytes(const std::vector<uint8_t>& png) {
     if (png.size() >= 2 && png[0] == 'B' && png[1] == 'M') return DecodeBmpBytes(png);
     png_image image{};
@@ -905,6 +922,7 @@ int main(int argc, char** argv) {
     }
     const bool interactive = shot.empty() && scenario.empty();
 
+    SDL_SetAppMetadata("Open City Builder", nullptr, kAppId);
     if (!SDL_Init(SDL_INIT_VIDEO)) { std::fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
@@ -947,6 +965,7 @@ int main(int argc, char** argv) {
     if (fullscreen) flags |= SDL_WINDOW_FULLSCREEN;
     gWindow = SDL_CreateWindow("Open City Builder", int(windowW / contentScale), int(windowH / contentScale), flags);
     if (!gWindow) { std::fprintf(stderr, "SDL window: %s\n", SDL_GetError()); return 1; }
+    SetWindowIconFromLogo(gWindow);
     SDL_GLContext context = SDL_GL_CreateContext(gWindow);
     if (!context) { std::fprintf(stderr, "OpenGL 3.3 context: %s\n", SDL_GetError()); return 1; }
     SDL_GL_SetSwapInterval(1);
