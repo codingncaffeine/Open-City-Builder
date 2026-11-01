@@ -1184,6 +1184,7 @@ void cSC4WinRegionScreen::ShowPanel(int panel) {   // @ 0x100237a58
 
 bool cSC4WinRegionScreen::GZOnCommand(std::uint32_t command, std::uint64_t param) {   // @ 0x10023b92a (PARTIAL)
     IRegionScreenHost* host = RegionScreenHost();
+    if (getenv("SC4_DEBUG")) fprintf(stderr, "region screen: command %#x param %#llx\n", command, static_cast<unsigned long long>(param));
     if (command == 0x287259f7) {   // a check box changed
         if (param != kRegionScreenGridCheckBoxId) return true;
         void* raw = nullptr;

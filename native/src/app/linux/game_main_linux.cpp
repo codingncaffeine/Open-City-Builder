@@ -650,7 +650,16 @@ std::uint32_t Flags() {
 }
 void PostMouse(std::uint32_t type, float x, float y, std::uint32_t extra = 0) {
     const Placement p = FramePlacement();   // window points -> the game's logical screen
-    gMgr->GZWinMsgPost_Mouse(type, int((x - p.x) * float(gW) / p.w), int((y - p.y) * float(gH) / p.h), extra | Flags());
+    const int gx = int((x - p.x) * float(gW) / p.w), gy = int((y - p.y) * float(gH) / p.h);
+    static const bool trace = std::getenv("SC4_DEBUG") != nullptr;
+    if (trace && type != kGZMsgMouseMove) {
+        int ww = 0, wh = 0, pw = 0, ph = 0;
+        SDL_GetWindowSize(gWindow, &ww, &wh);
+        SDL_GetWindowSizeInPixels(gWindow, &pw, &ph);
+        std::fprintf(stderr, "mouse %#x at window %.0f,%.0f -> game %d,%d (window %dx%d points, %dx%d pixels, frame %.0f,%.0f %.0fx%.0f, game %dx%d)\n",
+                     type, x, y, gx, gy, ww, wh, pw, ph, p.x, p.y, p.w, p.h, gW, gH);
+    }
+    gMgr->GZWinMsgPost_Mouse(type, gx, gy, extra | Flags());
 }
 
 // The Windows virtual-key code the game's windows test (VK_ESCAPE 0x1b, VK_RETURN 0x0d, letters and digits as upper-case ASCII).
