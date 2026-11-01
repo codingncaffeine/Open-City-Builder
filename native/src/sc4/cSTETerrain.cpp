@@ -2620,6 +2620,9 @@ void cSTETerrain::ComputeSpansForRectangle(const TerrainPoint* quad, int* spanMi
         if (k != 3) maxOfFirstThree = maxRow;
     }
     if (maxOfFirstThree < 0) minRow = 0;
+    // A brush hanging over the city's near edge has rows below zero even when the first three corners are on the map:
+    // left unclamped they indexed before the span tables and below vertex 0 (the user's crash raising terrain at the edge).
+    if (minRow < 0) minRow = 0;
     if (static_cast<std::uint32_t>(maxRow) > cellsZ_) maxRow = static_cast<std::int32_t>(cellsZ_);
     firstRow = minRow;
     lastRow = maxRow;
@@ -3257,6 +3260,7 @@ void cSTETerrain::ApplyBrushAtLocation(void* textureInfo, std::int32_t cellX, st
             if (static_cast<std::uint32_t>(texelX) < texHeight && static_cast<std::uint32_t>(texelY) < texWidth) {
                 context.textureValue = pixels[texelX * static_cast<std::int32_t>(texWidth) + texelY];
                 const std::int32_t index = GetVertIndex(column, row);   // vertsX * row + column
+                if (static_cast<std::uint32_t>(index) >= totalVerts_) { tx += deltaTx; ty += deltaTy; continue; }   // port guard: never outside the grid
                 if ((this->*fn)(index, context)) {
                     if (column < rect.left) rect.left = column;
                     if (column > rect.right) rect.right = column;
