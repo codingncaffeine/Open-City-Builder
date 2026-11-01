@@ -3,11 +3,7 @@
 #include "rz/cRZString.h"
 
 namespace {
-std::string ReadString(cIGZIStream& s) {
-    cRZString text;
-    s.GetGZStr(text);
-    return std::string(text.ToChar(), text.Strlen());
-}
+std::string ReadString(cIGZIStream& s) { return ReadEffectString(s); }
 std::uint32_t ReadU32(cIGZIStream& s) { std::uint32_t v = 0; s.GetUint32(v); return v; }
 std::uint8_t ReadU8(cIGZIStream& s) { std::uint8_t v = 0; s.GetUint8(v); return v; }
 // A u32 count followed by that many elements.
@@ -21,6 +17,14 @@ void WriteVector3s(cIGZOStream& s, const std::vector<cS3DVector3>& v) {
     for (const cS3DVector3& e : v) s << e;
 }
 }  // namespace
+
+std::string ReadEffectString(cIGZIStream& s) {
+    std::uint32_t length = 0;
+    if (!s.GetUint32(length) || length == 0 || length > (1u << 20)) return {};
+    std::string text(length, '\0');
+    s.GetVoid(text.data(), length);
+    return text;
+}
 
 void S3DTransformLegacySave(cIGZOStream& s, const cS3DTransform& v) {
     for (int row = 0; row < 3; ++row)

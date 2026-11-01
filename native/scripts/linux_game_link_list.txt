@@ -390,6 +390,9 @@ src/sc4/LandfillZone.cpp
 src/sc4/PortDeveloper.cpp
 src/sc4/EffectMaps.cpp
 src/sc4/EffectsCollection.cpp
+src/sc4/EffectsResource.cpp
+src/sc4/EffectDescriptions.cpp
+src/sc4/EffectComponents.cpp
 src/sc4/ParticlesEffect.cpp
 src/sc4/Vehicle.cpp
 src/sc4/VisualEffect.cpp
@@ -511,7 +514,6 @@ src/sc4/AmbienceStateFilters.cpp
 src/sc4/BudgetDialogs.cpp
 src/sc4/CitySituationAdvice.cpp
 src/sc4/ViewInputControlEffect.cpp
-src/sc4/EffectComponents.cpp
 src/sc4/GraphsViewWinProc.cpp
 src/sc4/Helicopter.cpp
 src/sc4/LightingManager.cpp

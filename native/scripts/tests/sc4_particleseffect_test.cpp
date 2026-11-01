@@ -834,8 +834,7 @@ void TestTractorForce() {
     records[1].to = cS3DVector3{2.0f, 0.0f, 0.0f};
     records[1].time = 1.0f;
     records[1].end = 1.0f;
-    description.tractorBegin = records.data();
-    description.tractorEnd = records.data() + records.size();
+    description.tractors = records;
     sc4::cSC4ParticlesEffect effect;
     effect.SetDescription(&description);
     effect.Init();

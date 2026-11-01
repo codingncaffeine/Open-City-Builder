@@ -1568,21 +1568,22 @@ bool cSC4ParticlesEffect::UpdateParticlePhysicsExtra(cSC4EffectsParticle* partic
         }
         elapsed -= step;
     } while (0.0f < elapsed);
-    if ((description_->flags & 0x100000000ull) != 0) TestBuildingCollision(particle);   // byte +8 bit 0
+    if ((description_->flags8 & 1) != 0) TestBuildingCollision(particle);   // byte +8 bit 0
     return particle->alive != 0;
 }
 
 // 0x1005f7de6
 void cSC4ParticlesEffect::ApplyTractorForce(cSC4EffectsParticle* particle, float elapsed) {
     const float age = particle->age;
-    const cSC4TractorRecord* record = description_->tractorEnd;
-    if (!record || !description_->tractorBegin) return;
+    if (description_->tractors.empty()) return;
+    const cSC4TractorRecord* const begin = description_->tractors.data();
+    const cSC4TractorRecord* record = begin + description_->tractors.size();
     float time = 0.0f;
     do {
         time = *reinterpret_cast<const float*>(reinterpret_cast<const char*>(record) - 8);
         --record;
         if (!(time > age)) break;
-        if (record == description_->tractorBegin) break;   // the original trusts the times; do not walk before the array
+        if (record == begin) break;   // the original trusts the times; do not walk before the array
     } while (true);
     float end = record->end;
     if (end != 0.0f || std::isnan(end)) {

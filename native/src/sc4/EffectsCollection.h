@@ -203,7 +203,8 @@ public:
         components_.clear();
     }
 
-private:
+protected:
+    // cSC4EffectsResource (sc4/EffectsResource.h) is the other class built on this one: its Read fills these tables.
     // The same member at +0x208 used by every lookup (see the quirks): assign the name and lowercase it.
     const std::string& LowercasedName(const char* name);
     // The component table index of a type, or -1 for a type outside 3..15 (the original indexes unchecked).
@@ -242,7 +243,7 @@ static_assert(sizeof(cSC4LightDescription) == 0x38, "light descriptions are 0x38
 static_assert(sizeof(cSC4CameraParams) == 0x28, "camera parameters are 0x28 bytes");
 static_assert(sizeof(cSC4MessageTriggerDescription) == 0x20, "message triggers are 0x20 bytes");
 static_assert(sizeof(cSC4DynamicParticleDescription) == 0x58, "dynamic particle payload is 0x58 bytes");
-static_assert(sizeof(cSC4ParticlesDescription) == 0x278, "particle description layout is 0x278 bytes");
+static_assert(sizeof(cSC4ParticlesDescription) == 0x2c0, "particle description layout is 0x2c0 bytes");
 static_assert(sizeof(cSC4EffectsCollection) == 0x220, "the collection is 0x220 bytes");
 
 }  // namespace sc4

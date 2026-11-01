@@ -1,6 +1,7 @@
 #include "sc4/EffectComponents.h"
 
 #include "rz/cRZString.h"
+#include "sc4/EffectDescriptions.h"
 
 #include <cmath>
 #include <cstring>
@@ -19,11 +20,7 @@ cISC4VisualEffectComponent* Make(EffectComponentType type, cISC4ComponentDescrip
     auto it = Factories().find(type);
     return it == Factories().end() || !it->second ? nullptr : it->second(description);
 }
-std::string ReadString(cIGZIStream& stream) {
-    cRZString text;
-    stream.GetGZStr(text);
-    return text.ToChar();
-}
+std::string ReadString(cIGZIStream& stream) { return ReadEffectString(stream); }
 }  // namespace
 
 IEffectsHost* EffectsHost() { return g_host; }

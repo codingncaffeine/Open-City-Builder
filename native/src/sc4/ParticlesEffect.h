@@ -125,12 +125,14 @@ struct cSC4ParticlesDescription {
     //   0x01000000 walk direction comes from the description         0x02000000 city-side walk direction
     //   0x08000000 attractor (extra physics)                         0x10000000 tractor force (extra physics)
     //   0x20000000 horizontal texture flip                           0x40000000 vertical texture flip
-    //   0x80000000 launch the timed effects                           0x100000000 test the buildings each step
+    //   0x80000000 launch the timed effects
+    // The three words are std::bitset<32>, <8> and <11> (u32 each in the stream, one 8-byte word each here).
     std::uint64_t flags = 0;
-    std::uint32_t reserved08 = 0;              // +0x08
-    std::uint32_t reserved0c = 0;              // +0x0c
+    std::uint64_t flags8 = 0;                  // +0x08 bit 0: test the buildings each step
     std::uint8_t flag10 = 0;                   // +0x10 bit 0: keep the global size scale
-    std::uint8_t reserved11[7] = {};
+    std::uint8_t reserved11 = 0;
+    std::uint16_t flag10High = 0;              // +0x12 the other bits of the 11-bit word
+    std::uint32_t reserved14 = 0;
     float lifetimeMin = 0;                     // +0x18
     float lifetimeMax = 0;                     // +0x1c
     float spawnPhase = 0;                      // +0x20 wave phase rate / spawn time scale
@@ -152,15 +154,15 @@ struct cSC4ParticlesDescription {
     std::uint32_t reserved94 = 0;              // +0x94
     std::vector<float> rateCurve;              // +0x98
     std::vector<cS3DVector3> colorCurve;       // +0xb0
-    std::uint8_t reservedC8[0x18] = {};        // +0xc8 (a vector the particle code never reads)
+    std::vector<float> curveC8;                // +0xc8 (a curve the particle code never reads)
     std::vector<float> sizeCurve;              // +0xe0
     std::vector<float> alphaCurve;             // +0xf8
     std::vector<float> spinCurve;              // +0x110
-    std::uint32_t textureId = 0;               // +0x128
+    std::uint32_t textureId = 0;               // +0x128 (the model id of a model-based particle system)
     std::uint8_t drawMode = 0;                 // +0x12c SetDrawMode argument
     std::uint8_t billboardMode = 0;            // +0x12d 1 = build the basis from the effect transform
     std::uint16_t reserved12e = 0;             // +0x12e
-    std::uint32_t reserved130 = 0;             // +0x130
+    float value130 = 0;                        // +0x130
     float maxWidth = 0;                        // +0x134 clamp of the billboard half width
     float origin[3] = {0, 0, 0};               // +0x138 / +0x13c / +0x140
     float globalOffsetScale = 0;               // +0x144 multiplies the global wind offset
@@ -168,29 +170,38 @@ struct cSC4ParticlesDescription {
     float terrainCentre[3] = {0, 0, 0};        // +0x14c / +0x150 / +0x154
     float damping = 0;                         // +0x158
     float spinAroundY = 0;                     // +0x15c rotates particles around the effect's Y axis
-    std::vector<float> waveRows;               // +0x160 7 floats per row: phase, 3 coefficients, 3 amplitudes
-    std::uint8_t reserved178[0x30] = {};       // +0x178
+    std::vector<float> waveRows;               // +0x160 the cWiggle records, 7 floats each: rate, two vectors
+    float value178 = 0;                        // +0x178
+    float range17c[2] = {0, 0};                // +0x17c
+    float vector184[3] = {0, 0, 0};            // +0x184
+    std::vector<float> curve190;               // +0x190
     float terrainDrag = 0;                     // +0x1a8
     float terrainBounce[7] = {0, 0, 0, 0, 0, 0, 0};   // +0x1ac..+0x1c4
     float heightMin = 0;                       // +0x1c8 height-based emission band (terrain height - water level)
     float heightMax = 0;                       // +0x1cc
     std::string name;                          // +0x1d0
-    std::uint8_t reserved1e8[8] = {};          // +0x1e8
+    std::uint16_t value1e8 = 0;                // +0x1e8
+    std::uint16_t value1ea = 0;                // +0x1ea
+    float value1ec = 0;                        // +0x1ec
     float walkIntervalMin = 0, walkIntervalMax = 0;   // +0x1f0 / +0x1f4
     float walkSpeedMin = 0, walkSpeedMax = 0;         // +0x1f8 / +0x1fc
     float walkAngle = 0;                       // +0x200
     float walkAngle2 = 0;                      // +0x204
     float walkBias[3] = {0, 0, 0};             // +0x208 / +0x20c / +0x210
-    std::uint8_t reserved214[0xc] = {};        // +0x214
+    float values214[3] = {0, 0, 0};            // +0x214
     std::vector<float> attractorCurve;         // +0x220
     float attractorTime = 0;                   // +0x238
     std::int32_t attractorMode = 0;            // +0x23c
-    std::uint8_t reserved240[8] = {};          // +0x240
-    const cSC4TractorRecord* tractorEnd = nullptr;   // +0x248 one past the last tractor record
-    const cSC4TractorRecord* tractorBegin = nullptr;   // +0x250 (the original never reads it; used to bound the walk)
+    std::vector<cSC4TractorRecord> tractors;   // +0x240 (the original reads the end pointer at +0x248)
     float tractorRadius = 0;                   // +0x258
     std::uint32_t reserved25c = 0;             // +0x25c
     std::vector<cSC4TimedEffectRecord> timedEffects;   // +0x260
+    float values278[2] = {0, 0};               // +0x278
+    std::vector<std::uint32_t> modelIds;       // +0x280 model particles pick one of these at random (else textureId)
+    float values298[2] = {0, 0};               // +0x298
+    std::vector<float> curve2a0;               // +0x2a0
+    float value2b8 = 0;                        // +0x2b8
+    std::uint32_t refCount = 0;                // +0x2bc (the original's cRZAutoRefCount counter)
 };
 
 // A colour as the fast vertex path stores it: four floats (R, G, B, A). cS3DColorARGB32 is not recovered separately;
@@ -545,7 +556,7 @@ private:
     static constexpr std::uint64_t kFlagsLakeSea = 0x60000;
 };
 
-static_assert(sizeof(cSC4ParticlesDescription) == 0x278, "description layout must match the original record");
+static_assert(sizeof(cSC4ParticlesDescription) == 0x2c0, "description layout must match the original record");
 static_assert(sizeof(cSC4TimedEffectRecord) == 0x20, "timed effect records are 0x20 bytes");
 static_assert(sizeof(cSC4TractorRecord) == 0x20, "tractor records are 0x20 bytes");
 static_assert(sizeof(cSC4EffectsParticle) == 0x44, "particles are 0x44 bytes (sEffectsParticleAllocator)");

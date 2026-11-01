@@ -100,6 +100,10 @@ struct cSC4DynamicParticleDescription {
     std::vector<float> curve;                // +0x50
 };
 
+// A string of the packed effects library: a u32 byte count, then the bytes (the PC library is written this way; the
+// stream's own GetGZStr reads the 7-bit length the Mac build writes, which misreads every record after the first name).
+std::string ReadEffectString(cIGZIStream& s);
+
 // The legacy (pre-version-5) transform: 3x3 rotation row by row, translation, scale, then the change counter as a u32.
 // @ 0x1000cfa93; the load side is LoadLegacyS3DTransform (0x1000cf954).
 void S3DTransformLegacySave(cIGZOStream& s, const cS3DTransform& v);
