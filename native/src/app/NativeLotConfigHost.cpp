@@ -144,8 +144,21 @@ public:
     bool FloraFootprint(std::uint32_t, SC4Footprint&) override { return false; }
     bool FloraInFamily(std::uint32_t, std::unordered_set<std::uint32_t>&) override { return false; }
     std::uint32_t NewGuid() override { return NewId(); }
-    void WriteSerializable(cIGZOStream&, std::uint32_t) override {}
-    bool ReadSerializable(cIGZIStream& stream, std::uint32_t clsid) override { void* out = nullptr; return SC4ReadGZSerializable(stream, clsid, &out, false); }
+    // the manager's record names the city's building development simulator, flora simulator and prop manager (by the
+    // interfaces the city keeps them as); the references are written as the city's components so their ids match
+    void WriteSerializable(cIGZOStream& stream, std::uint32_t iid) override {
+        cSC4City* city = HostCity();
+        const sc4::CityComponent component = iid == 0x07813eae ? sc4::CityComponent::BuildingDevelopmentSimulator
+                                           : iid == 0x06c66177 ? sc4::CityComponent::FloraSimulator
+                                                               : sc4::CityComponent::PropManager;
+        SC4WriteGZSerializable(stream, city ? city->GetComponent(component) : nullptr);
+    }
+    bool ReadSerializable(cIGZIStream& stream, std::uint32_t clsid) override {
+        void* out = nullptr;
+        const bool ok = SC4ReadGZSerializable(stream, clsid, &out, false);
+        if (out) static_cast<cIGZUnknown*>(out)->Release();
+        return ok;
+    }
 } g_manager;
 
 class ConfigurationHost final : public ILotConfigurationHost {

@@ -475,12 +475,12 @@ bool cSC4ZoneDeveloper::Write(cIGZOStream& stream) const {
     const std::uint32_t columns = rows != 0 ? static_cast<std::uint32_t>(lotMap_[0].size()) : 0u;
     stream.SetUint32(rows);
     stream.SetUint32(columns);
+    // one reference per cell, a null one for an empty cell (SC4WriteGZSerializable), as Read reads them
     for (const auto& column : lotMap_)
-        for (cSC4Lot* lot : column)
-            if (lot) {
-                if (g_host) g_host->WriteLot(stream, lot);   // SC4WriteGZSerializable
-                else stream.SetUint32(0);
-            }
+        for (cSC4Lot* lot : column) {
+            if (g_host) g_host->WriteLot(stream, lot);
+            else if (lot) stream.SetUint32(0);
+        }
     return !stream.GetError();
 }
 
@@ -523,6 +523,7 @@ bool cSC4ZoneDeveloper::Read(cIGZIStream& stream) {
             } else {
                 lots_.push_front(lot);
                 ++lotCount_;
+                if (adapter && g_host) g_host->LotRead(lot, adapter);
             }
         }
     }

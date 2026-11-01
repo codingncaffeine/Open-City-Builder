@@ -379,6 +379,8 @@ public:
     virtual void GameDelay(int milliseconds, bool yield) = 0;             // SC4GameDelay @ 0x100038fac
     virtual void WriteLot(cIGZOStream& stream, cSC4Lot* lot) = 0;         // SC4WriteGZSerializable
     virtual cSC4Lot* ReadLot(cIGZIStream& stream) = 0;                    // SC4ReadGZSerializable(0xe818fced), referenced
+    // a city file's lot and the serializable it came in (the port's lots are plain C++; saves reuse that identity)
+    virtual void LotRead(cSC4Lot* /*lot*/, cIGZUnknown* /*serializable*/) {}
 };
 IZoneDeveloperHost* ZoneDeveloperHost();
 void SetZoneDeveloperHost(IZoneDeveloperHost* host);

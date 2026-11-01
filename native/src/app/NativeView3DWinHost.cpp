@@ -240,12 +240,7 @@ struct StubView3DWin final : IView3DWinHost {
     cSC4ViewInputControl* CreateDispatchTool(int) override { SC4_UNWIRED("IView3DWinHost::CreateDispatchTool (cSC4ViewInputControlDispatch not recovered)"); return nullptr; }
     cSC4ViewInputControl* CreateNetworkTool(int type) override { return native::CreateNetworkTool(type); }
     void ShowMyStreetSim() override { SC4_UNWIRED("IView3DWinHost::ShowMyStreetSim"); }
-    // The native city save writes an incomplete file the game cannot load back (SAVE-1): until it is whole the city is save-disabled,
-    // so every save request takes the game's own "saving is disabled" path instead of replacing the city file.
-    void PostCityInit() override {
-        if (std::getenv("SC4_ENABLESAVE")) return;   // dev switch: let the save run (SAVE-1 work), sandboxed tests only
-        if (cSC4City* city = LoadedCity(); city && !city->IsSaveDisabled()) city->DisableSave();
-    }
+    void PostCityInit() override {}
     ISimulatorPauseSink* Simulator() override { static SimulatorView view; return CityExists() ? &view : nullptr; }
     cSC4ViewInputControl* CreateSignTool() override { return new cSC4ViewInputControlSignTool(); }
     cSC4ViewInputControl* CreatePlaceLotTool(std::uint32_t lot) override { return new cSC4ViewInputControlPlaceLot(0, lot, 0, false); }

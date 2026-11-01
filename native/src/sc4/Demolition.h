@@ -1,4 +1,5 @@
-// cSC4Demolition — the demolition service (33 functions with thunks, 0x1000eaf70..0x1000ee64a, class id 0x26dde2ea,
+// cSC4Demolition — the demolition service (33 functions with thunks, 0x1000eaf70..0x1000ee64a, class id 0x0990c38a (the type of its
+// city-file record; the city keeps it as interface 0x26dde2ea),
 // message target 0x452294aa, serializable 0xe4fda3d4). Layout: +0x1c initialized, +0x20/+0x24 city cells x/z,
 // +0x28 default occupant filter, +0x30 city, +0x38 building development simulator, +0x40 occupant manager,
 // +0x48 terrain, +0x50 current region.
@@ -21,7 +22,7 @@
 
 namespace sc4 {
 
-constexpr std::uint32_t kGZCLSID_cSC4Demolition = 0x26dde2ea;
+constexpr std::uint32_t kGZCLSID_cSC4Demolition = 0x0990c38a;
 constexpr std::uint32_t kMessageTuningReloaded = 0xc53d10aa, kMessageCityInit = 0x26d31ec1, kMessageDemolishRequest = 0xa9ded179;
 constexpr std::uint32_t kMessageOccupantDemolished = 0xaa7a014d;
 

@@ -30,6 +30,7 @@
 #include "sc4/SCPropertyHelp.h"
 #include "sc4/cSC4ResponseCurve.h"
 #include "sc4/cSC4SimGrid.h"
+#include "sc4/RetainedReference.h"
 
 class cIGZIStream;
 class cIGZOStream;
@@ -274,6 +275,9 @@ private:
     std::list<WaterProducer> producers_;        // +0x110
     WaterProducer* currentProducer_ = nullptr;  // +0x1a8
     std::list<IPlumbingPipe*> pipes_;           // +0x200
+    // the references a city file carries that the port does not resolve yet (kept as read, written back on save)
+    cRetainedReference fileAuxGrid_, fileSupplyGrid_, fileWaterGrid_, fileCurrentOccupant_;
+    cRetainedReferences fileProducerOccupants_, filePipes_;
     int distressedPipes_ = 0, burstPipes_ = 0, pollutedSources_ = 0;
     int averagePollution_ = 0;                  // +0xe8 average pollution over the producers (UpdateWaterProduction)
     bool initialized_ = false;                  // +0x18 service wiring done (Init phase one)

@@ -667,6 +667,26 @@ void cSC4BuildingDevelopmentSimulator::DoMonthlySimulation() {
 bool cSC4BuildingDevelopmentSimulator::Write(cIGZOStream& stream) const {
     if (stream.GetError()) return false;
     stream.SetUint16(4);
+    void* dbStream = nullptr;
+    if (fromCityFile_ && stream.QueryInterface(kGZIID_cISC4DBSegmentOStream, &dbStream) && dbStream) {
+        // the city-file layout ReadCityRecord reads: the file's own tables around the port's growth marks and flags
+        static_cast<cIGZUnknown*>(dbStream)->Release();
+        fileHead_.Replay(stream);
+        stream.SetUint32(static_cast<std::uint32_t>(growthMarks_.size()));
+        for (const auto& mark : growthMarks_) {
+            stream.SetUint32(mark.first);
+            stream.SetUint32(static_cast<std::uint32_t>(mark.second.size()));
+            for (const auto& cell : mark.second) {
+                stream.SetSint32(cell.first);
+                stream.SetSint32(cell.second);
+            }
+        }
+        fileTail_.Replay(stream);
+        stream.SetUint8(cheatPlumbing_);
+        stream.SetUint8(cheatPower_);
+        stream.SetUint8(cheatCaps_);
+        return !stream.GetError();
+    }
     stream.SetUint32(static_cast<std::uint32_t>(growthMarks_.size()));
     for (const auto& mark : growthMarks_) {
         stream.SetUint32(mark.first);
@@ -702,19 +722,23 @@ bool cSC4BuildingDevelopmentSimulator::ReadCityRecord(cIGZIStream& stream) {
         SC4ReadGZSerializable(stream, iid, &raw, false);
         if (raw) static_cast<cIGZUnknown*>(raw)->Release();
     };
-    std::uint32_t u32 = 0, count = 0;
+    (void)skipReference;
+    std::uint32_t count = 0;
     std::uint8_t u8 = 0;
-    skipReference(0xc9bd939a);
-    skipReference(0x797a4e8);
-    stream.GetUint32(count);                                   // the developers by key
+    cRecordTape& head = fileHead_;   // what the port does not model is kept as read (RecordTape.h) and saved back
+    head.Clear();
+    fileTail_.Clear();
+    head.Ref(stream);
+    head.Ref(stream);
+    count = head.U32(stream);                                  // the developers by key
     if (count > kMaxCount) return false;
-    for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) { stream.GetUint32(u32); skipReference(0xe7cdd662); }
-    stream.GetUint32(count);                                   // occupants
+    for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) { head.U32(stream); head.Ref(stream); }
+    count = head.U32(stream);                                  // occupants
     if (count > kMaxCount) return false;
-    for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) skipReference(0x26bb767e);
-    stream.GetUint32(count);                                   // developer type -> byte
+    for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) head.Ref(stream);
+    count = head.U32(stream);                                  // developer type -> byte
     if (count > kMaxCount) return false;
-    for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) { stream.GetUint32(u32); stream.GetUint8(u8); }
+    for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) { head.U32(stream); head.U8(stream); }
     growthMarks_.clear();
     stream.GetUint32(count);                                   // growth marks: key -> set of cells
     if (count > kMaxCount) return false;
@@ -731,13 +755,13 @@ bool cSC4BuildingDevelopmentSimulator::ReadCityRecord(cIGZIStream& stream) {
             cells.insert({x, z});
         }
     }
-    stream.GetUint32(count);                                   // growth profiles: developer, two ints, a byte -> count
+    count = fileTail_.U32(stream);                             // growth profiles: developer, two ints, a byte -> count
     if (count > kMaxCount) return false;
     for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) {
-        std::int32_t s32 = 0;
-        skipReference(0xe7cdd662);
-        stream.GetSint32(s32); stream.GetSint32(s32); stream.GetUint8(u8); stream.GetUint32(u32);
+        fileTail_.Ref(stream);
+        fileTail_.S32(stream); fileTail_.S32(stream); fileTail_.U8(stream); fileTail_.U32(stream);
     }
+    fromCityFile_ = true;
     stream.GetUint8(u8); cheatPlumbing_ = u8 != 0;
     stream.GetUint8(u8); cheatPower_ = u8 != 0;
     stream.GetUint8(u8); cheatCaps_ = u8 != 0;

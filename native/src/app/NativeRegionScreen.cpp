@@ -391,7 +391,10 @@ public:
         if (!adapter || !g_services.loadCity) return 0;
         const std::string path = adapter->SavePath();
         if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "launch city path \"%s\"\n", path.c_str());
-        return !path.empty() && g_services.loadCity(path) ? 1 : 0;
+        int x = 0, z = 0;
+        adapter->GetPosition(x, z);
+        cISC4Region* region = ActiveRegion();
+        return !path.empty() && g_services.loadCity(path, region ? region->GetCity(x, z) : nullptr) ? 1 : 0;
     }
     void QuitToRegionSelect(bool) override {}
 

@@ -189,6 +189,7 @@ private:
     std::uint32_t refCount_ = 0;   // +0x110 (COM identity)
     FireTunables tunables_;
     cSC4ProtectionSimulator protection_;
+    cRetainedReference fileDispatch_;   // +0x120 the dispatch helper a city file named (kept as read)
     cSC4ResponseCurve stationEfficiency_, strikeChance_;
     bool onStrike_ = false;
     int strikeStart_ = 0;

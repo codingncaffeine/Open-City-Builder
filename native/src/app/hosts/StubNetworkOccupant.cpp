@@ -11,8 +11,13 @@ struct StubNetworkOccupant final : INetworkOccupantHost {
     void PostMessage(std::uint32_t message, cISC4Occupant* occupant, std::uint32_t value) override {}
     void RegisterWithNetworkManager(cISC4Occupant* occupant) override {}
     bool IntersectionPieceId(std::uint32_t pieceId) override { return {}; }
-    void ReadPersistRef(cIGZIStream& stream, std::uint32_t clsid, cIGZUnknown*& out) override { std::uint32_t key[3] = {}; stream.GetUint32(key[0]); stream.GetUint32(key[1]); stream.GetUint32(key[2]); out = nullptr; /* SC4ReadGZPersistRef: a resource key, resolved through the resource manager (not wired) */ }
-    void WritePersistRef(cIGZOStream& stream, cIGZUnknown* object) override { SC4WriteGZSerializable(stream, object); }
+    // SC4ReadGZPersistRef / SC4WriteGZPersistRef: a resource key (type, group, instance), resolved through the resource manager
+    void ReadPersistRef(cIGZIStream& stream, std::uint32_t clsid, cIGZUnknown*& out) override {
+        void* raw = nullptr;
+        SC4ReadGZPersistRef(stream, clsid, &raw);
+        out = static_cast<cIGZUnknown*>(raw);
+    }
+    void WritePersistRef(cIGZOStream& stream, cIGZUnknown* object) override { SC4WriteGZPersistRef(stream, object); }
 };
 }  // namespace
 

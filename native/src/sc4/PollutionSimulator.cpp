@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "rz/cRZString.h"
 #include "sc4/DBSegment.h"
 #include "sc4/ProtectionSimulator.h"
 
@@ -57,6 +58,11 @@ std::uint32_t cSC4PollutionSimulator::Release() {
 // belong to the unrecovered daily-diffusion state, so they are not serialised here — the field order of
 // the scalars below matches the binary.
 bool cSC4PollutionSimulator::Write(cIGZOStream& stream) const {
+    void* dbStream = nullptr;
+    if (stream.QueryInterface(kGZIID_cISC4DBSegmentOStream, &dbStream) && dbStream) {
+        static_cast<cIGZUnknown*>(dbStream)->Release();
+        return WriteCityRecord(stream);
+    }
     stream.SetUint16(4);
     for (auto& grid : valueGrids_) SC4WriteGZSerializable(stream, static_cast<cISC4SimGridBase*>(grid.get()));
     for (auto& grid : sourceGrids_) SC4WriteGZSerializable(stream, static_cast<cISC4SimGridBase*>(grid.get()));
@@ -122,16 +128,14 @@ bool cSC4PollutionSimulator::ReadCityRecord(cIGZIStream& stream) {
     std::int64_t s64 = 0;
     double f64 = 0.0;
     std::uint8_t u8 = 0;
-    stream.GetUint32(u32);                                    // +0xb8
-    stream.GetUint32(u32);                                    // +0xbc
-    for (int list = 0; list < 4; ++list) {                    // +0xc0 / +0xd8 / +0xf0 / +0x108: lists of occupants
+    fromCityFile_ = true;
+    stream.GetUint32(fileB8_);                                // +0xb8
+    stream.GetUint32(fileBC_);                                // +0xbc
+    for (auto& kept : fileLists_) {                           // +0xc0 / +0xd8 / +0xf0 / +0x108: lists of occupants (kept as read)
+        kept.clear();
         stream.GetUint32(u32);
         if (u32 < 10000000u)
-            for (std::uint32_t i = 0; i < u32 && !stream.GetError(); ++i) {
-                void* raw = nullptr;
-                SC4ReadGZSerializable(stream, 0x26bb767e, &raw, false);
-                if (raw) static_cast<cIGZUnknown*>(raw)->Release();
-            }
+            for (std::uint32_t i = 0; i < u32 && !stream.GetError(); ++i) { kept.emplace_back(); kept.back().Read(stream); }
     }
     stream.GetUint32(recyclingCenterCountSnapshot);           // +0x208
     stream.GetSint32(averageAir_);                            // +0x20c
@@ -143,6 +147,10 @@ bool cSC4PollutionSimulator::ReadCityRecord(cIGZIStream& stream) {
     stream.GetUint32(periodValue224[0]);                      // +0x224
     stream.GetUint32(periodValue224[1]);                      // +0x228
     stream.GetUint32(cellCount);                              // +0x22c
+    if (version < 3) {                                        // versions 1-2 (the PC saves) carried a string here, dropped on read
+        cRZString dropped;
+        stream.GetGZStr(dropped);
+    }
     std::uint16_t avgGarbage = 0;
     stream.GetUint16(avgGarbage); averageGarbage_ = static_cast<std::int16_t>(avgGarbage);   // +0x234
     stream.GetUint32(monthlyIncineratorCapacity_);            // +0x238
@@ -150,8 +158,8 @@ bool cSC4PollutionSimulator::ReadCityRecord(cIGZIStream& stream) {
     stream.GetFloat32(recyclingEffect_);                      // +0x240
     stream.GetUint8(u8); garbageUncollected_ = u8 != 0;       // +0x244
     stream.GetUint32(totalGarbageUncollected_);               // +0x248
-    stream.GetSint64(s64);                                    // +0x2d0
-    stream.GetSint64(s64);                                    // +0x2d8
+    stream.GetSint64(file2d0_);                               // +0x2d0
+    stream.GetSint64(file2d8_);                               // +0x2d8
     if (version > 3) { stream.GetUint32(u32); abductedPrev_ = static_cast<std::int32_t>(u32); }   // +0x2c8
     stream.GetSint64(producedPrev_);                          // +0x288
     stream.GetSint64(importedPrev_);                          // +0x290
@@ -160,8 +168,8 @@ bool cSC4PollutionSimulator::ReadCityRecord(cIGZIStream& stream) {
     stream.GetSint64(incineratedPrev_);                       // +0x2a8
     stream.GetSint64(convertedPrev_);                         // +0x2b0
     stream.GetSint64(landfilledPrev_);                        // +0x2b8
-    stream.GetSint64(s64);                                    // +0x250
-    stream.GetSint64(s64);                                    // +0x258
+    stream.GetSint64(file250_);                               // +0x250
+    stream.GetSint64(file258_);                               // +0x258
     stream.GetSint64(recycledThisMonth_);                     // +0x260
     stream.GetFloat64(recyclingShare268_);                    // +0x268
     stream.GetSint64(wasteToEnergyThisMonth_);                // +0x270
@@ -172,20 +180,80 @@ bool cSC4PollutionSimulator::ReadCityRecord(cIGZIStream& stream) {
     stream.GetSint32(allowance); recyclingAllowance_ = allowance;   // +0x2c0
     std::int32_t landfills = 0;
     stream.GetUint32(u32); landfills = static_cast<std::int32_t>(u32); activeLandfillCount_ = landfills;   // +0x2cc
-    stream.GetUint32(u32);                                    // +0x2e4
-    RandomIterator walk;
-    stream >> walk;                                           // +0x2e8
+    stream.GetUint32(file2e4_);                               // +0x2e4
+    stream >> fileWalk_;                                      // +0x2e8
     stream.GetUint8(u8); dirtyRadiation = u8 != 0;            // +0x328..
     stream.GetUint8(u8); dirtyAir = u8 != 0;
     stream.GetUint8(u8); dirtyWater = u8 != 0;
     stream.GetUint8(u8); dirtyGarbage = u8 != 0;
+    if (version < 3) stream.GetUint32(u32);                   // versions 1-2: one more word, dropped on read
     stream.GetFloat32(efficiency_);                           // +0x348
     std::int32_t supply = 0, capacity = 0;
     stream.GetSint32(supply); garbageSupply_ = supply;        // +0x34c
     stream.GetSint32(capacity); garbageCapacity_ = capacity;  // +0x350
-    void* raw = nullptr;                                      // +0x1c0: the water grid
-    SC4ReadGZSerializable(stream, 0x223e2b67, &raw, false);
-    if (raw) static_cast<cIGZUnknown*>(raw)->Release();
+    fileWaterGrid_ = cRetainedReference();
+    fileWaterGrid_.Read(stream);                              // +0x1c0: the water grid
+    (void)s64;
+    return !stream.GetError();
+}
+
+// The city-file record, as ReadCityRecord reads it (version 4); what the port does not model is written as the file had it.
+bool cSC4PollutionSimulator::WriteCityRecord(cIGZOStream& stream) const {
+    stream.SetUint16(4);
+    for (auto& grid : valueGrids_) SC4WriteGZSerializable(stream, static_cast<cISC4SimGridBase*>(grid.get()));
+    for (auto& grid : sourceGrids_) SC4WriteGZSerializable(stream, static_cast<cISC4SimGridBase*>(grid.get()));
+    stream.SetUint32(fileB8_);                                // +0xb8
+    stream.SetUint32(fileBC_);                                // +0xbc
+    for (const auto& kept : fileLists_) {                     // +0xc0 / +0xd8 / +0xf0 / +0x108
+        stream.SetUint32(std::uint32_t(kept.size()));
+        for (const cRetainedReference& occupant : kept) occupant.Write(stream);
+    }
+    stream.SetUint32(recyclingCenterCountSnapshot);           // +0x208
+    stream.SetSint32(averageAir_);                            // +0x20c
+    stream.SetSint32(averageWater_);                          // +0x210
+    stream.SetUint32(airSum);                                 // +0x214
+    stream.SetUint32(waterSum);                               // +0x218
+    stream.SetUint32(periodValue21c[0]);                      // +0x21c
+    stream.SetUint32(periodValue21c[1]);                      // +0x220
+    stream.SetUint32(periodValue224[0]);                      // +0x224
+    stream.SetUint32(periodValue224[1]);                      // +0x228
+    stream.SetUint32(cellCount);                              // +0x22c
+    stream.SetUint16(static_cast<std::uint16_t>(averageGarbage_));   // +0x234
+    stream.SetUint32(monthlyIncineratorCapacity_);            // +0x238
+    stream.SetUint32(monthlyWasteToEnergyCapacity_);          // +0x23c
+    stream.SetFloat32(recyclingEffect_);                      // +0x240
+    stream.SetUint8(garbageUncollected_ ? 1 : 0);             // +0x244
+    stream.SetUint32(totalGarbageUncollected_);               // +0x248
+    stream.SetSint64(file2d0_);                               // +0x2d0
+    stream.SetSint64(file2d8_);                               // +0x2d8
+    stream.SetUint32(static_cast<std::uint32_t>(abductedPrev_));   // +0x2c8
+    stream.SetSint64(producedPrev_);                          // +0x288
+    stream.SetSint64(importedPrev_);                          // +0x290
+    stream.SetSint64(exportedPrev_);                          // +0x298
+    stream.SetFloat64(recycledPrev_);                         // +0x2a0
+    stream.SetSint64(incineratedPrev_);                       // +0x2a8
+    stream.SetSint64(convertedPrev_);                         // +0x2b0
+    stream.SetSint64(landfilledPrev_);                        // +0x2b8
+    stream.SetSint64(file250_);                               // +0x250
+    stream.SetSint64(file258_);                               // +0x258
+    stream.SetSint64(recycledThisMonth_);                     // +0x260
+    stream.SetFloat64(recyclingShare268_);                    // +0x268
+    stream.SetSint64(wasteToEnergyThisMonth_);                // +0x270
+    stream.SetSint64(incineratedThisMonth_);                  // +0x278
+    stream.SetSint64(landfilledThisMonth_);                   // +0x280
+    stream.SetUint32(abductedThisMonth_);                     // +0x2c4
+    stream.SetSint32(static_cast<std::int32_t>(recyclingAllowance_));   // +0x2c0
+    stream.SetUint32(static_cast<std::uint32_t>(activeLandfillCount_)); // +0x2cc
+    stream.SetUint32(file2e4_);                               // +0x2e4
+    stream << fileWalk_;                                      // +0x2e8
+    stream.SetUint8(dirtyRadiation ? 1 : 0);                  // +0x328..
+    stream.SetUint8(dirtyAir ? 1 : 0);
+    stream.SetUint8(dirtyWater ? 1 : 0);
+    stream.SetUint8(dirtyGarbage ? 1 : 0);
+    stream.SetFloat32(efficiency_);                           // +0x348
+    stream.SetSint32(static_cast<std::int32_t>(garbageSupply_));     // +0x34c
+    stream.SetSint32(static_cast<std::int32_t>(garbageCapacity_));   // +0x350
+    fileWaterGrid_.Write(stream);                             // +0x1c0
     return !stream.GetError();
 }
 

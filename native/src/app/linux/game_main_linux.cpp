@@ -639,7 +639,7 @@ bool Boot() {
             if (!gAppWindow || !gAppWindow->CreateCityScreen()) return;
             if (sc4::cSC4View3DWin* view = gAppWindow->View3D()) native::AttachCityRenderStack(*view, native::BootApplication() ? native::BootApplication()->GetCity() : nullptr, gDriver.get(), static_cast<gz::cIGZDrawContext*>(gGraphics->Primary()->GetDrawContext()), gW, gH);
         }, [] { if (gAppWindow) gAppWindow->CreateRegionScreen(); }});
-        screen.loadCity = [app](const std::string& path) { return native::LoadCityFile(*app, path); };
+        screen.loadCity = [app](const std::string& path, cRZAutoRefCount<cISC4RegionalCity>* holder) { return native::LoadCityFile(*app, path, holder); };
         native::InstallRegionScreenHost(screen);
         native::InstallRegionExtras(gDriver.get(), []() -> std::uint8_t* { return native::BootApplication() ? native::BootApplication()->GetPreferences() : nullptr; });
         if (std::uint8_t* preferences = app->GetPreferences()) {   // the game's defaults: clouds over the region map, scrolling at the screen edges

@@ -1,4 +1,6 @@
 #include "sc4/cSC424HourClock.h"
+#include "gz/StreamOps.h"
+#include "rz/cRZTimer.h"
 
 #include <cctype>
 #include <cstdlib>
@@ -231,6 +233,10 @@ bool cSC424HourClock::Read(cIGZIStream& s) {
     s.GetFloat32(magnification_);
     s.GetFloat32(magMax_);
     s.GetUint32(timeSeconds_);
+    if (version < 2) {   // version 1 (the PC saves) also streamed a timer, dropped on read
+        cRZTimer timer(static_cast<cRZTimer::Units>(4));
+        s >> timer;
+    }
     s.GetUint32(nightStart_);
     s.GetUint32(nightEnd_);
     return !s.GetError();

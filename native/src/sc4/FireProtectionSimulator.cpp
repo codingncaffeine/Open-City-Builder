@@ -71,8 +71,8 @@ bool cSC4FireProtectionSimulator::ReadStation(cIGZIStream& stream, IProtectionSt
 bool cSC4FireProtectionSimulator::Write(cIGZOStream& stream) const {
     stream.SetUint16(3);
     if (!protection_.Write(stream)) return false;
-    // +0x120 the dispatch helper (cRZAutoRefCount<...>, iid 0xc9c00435) is not recovered: written as null.
-    SC4WriteGZSerializable(stream, nullptr);
+    // +0x120 the dispatch helper (cRZAutoRefCount<...>, iid 0xc9c00435) is not recovered: the one a file named, else null.
+    fileDispatch_.Write(stream);
     return !stream.GetError();
 }
 
@@ -81,11 +81,8 @@ bool cSC4FireProtectionSimulator::Read(cIGZIStream& stream) {
     stream.GetUint16(version);
     if (version > 3) return false;
     if (!protection_.Read(stream)) return false;
-    if (version >= 3) {
-        void* raw = nullptr;
-        SC4ReadGZSerializable(stream, kGZIID_cISC4ProtectionDispatchSimulator, &raw, false);   // +0x120 (null)
-        if (raw) static_cast<cIGZUnknown*>(raw)->Release();
-    }
+    fileDispatch_ = cRetainedReference();
+    if (version >= 3) fileDispatch_.Read(stream);                         // +0x120
     return !stream.GetError();
 }
 

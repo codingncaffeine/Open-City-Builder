@@ -19,6 +19,7 @@
 #include "gz/cIGZMessage2.h"
 #include "gz/cIGZSerializable.h"
 #include "rz/cRZRandom.h"
+#include "sc4/RecordTape.h"
 #include "sc4/SCPropertyHelp.h"
 #include "sc4/cSC4ResponseCurve.h"
 
@@ -208,6 +209,7 @@ private:
     std::list<IResidentialOccupant*> extraSchools_, extraHospitals_, healthAffecting1_, healthAffecting2_;
     int population_ = 0;
     bool fundingChanged_ = true;
+    cRecordTape cityRecord_;   // the city-file record as read (saved back in that layout)
     bool autoBudgetSchools_ = false, autoBudgetHospitals_ = false;
 };
 

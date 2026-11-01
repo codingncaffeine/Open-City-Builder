@@ -54,6 +54,14 @@ std::uint32_t cSC4FloraSimulator::Release() {
 //   version is written. PARTIAL: the field list above is the confirmed binary layout, not a guessed body.
 bool cSC4FloraSimulator::Write(cIGZOStream& stream) const {
     stream.SetUint16(2);
+    void* dbStream = nullptr;
+    if (fromCityFile_ && stream.QueryInterface(kGZIID_cISC4DBSegmentOStream, &dbStream) && dbStream) {
+        static_cast<cIGZUnknown*>(dbStream)->Release();
+        fileHead_.Replay(stream);
+        stream << fileWalk_;
+        fileRandom_.Write(stream);
+        fileTail_.Replay(stream);
+    }
     return !stream.GetError();
 }
 
@@ -67,29 +75,21 @@ bool cSC4FloraSimulator::Read(cIGZIStream& stream) {
     if (!stream.QueryInterface(kGZIID_cISC4DBSegmentIStream, &dbStream) || !dbStream) return !stream.GetError();   // the port's own reduced record
     static_cast<cIGZUnknown*>(dbStream)->Release();
     // The record of a city file: four flags, the growth parameters, the walk iterator, the seed generator and the occupants of the
-    // flora in progress. The port's flora simulator keeps none of this state yet, so it is consumed.
-    std::uint8_t u8 = 0;
-    std::uint32_t u32 = 0;
-    std::int32_t s32 = 0;
-    float f32 = 0.0f;
-    for (int i = 0; i < 4; ++i) stream.GetUint8(u8);
-    stream.GetFloat32(f32); stream.GetFloat32(f32);
-    stream.GetSint32(s32); stream.GetSint32(s32);
-    for (int i = 0; i < 4; ++i) stream.GetUint32(u32);
-    stream.GetUint8(u8);
-    RandomIterator walk;
-    stream >> walk;                                                    // +0x78
-    cRZRandom random(1);
-    random.Read(stream);                                               // +0xb8
-    stream.GetUint32(u32);                                             // +0xd8: a list of occupant references
-    if (u32 < 10000000u) {
-        for (std::uint32_t i = 0; i < u32 && !stream.GetError(); ++i) {
-            void* raw = nullptr;
-            SC4ReadGZSerializable(stream, 0x26bb767e, &raw, false);
-            if (raw) static_cast<cIGZUnknown*>(raw)->Release();
-        }
-    }
-    stream.GetFloat32(f32); stream.GetFloat32(f32);
+    // flora in progress. The port's flora simulator keeps none of this state yet: it is kept as read and saved back (RecordTape.h).
+    fileHead_.Clear();
+    fileTail_.Clear();
+    for (int i = 0; i < 4; ++i) fileHead_.U8(stream);
+    fileHead_.F32(stream); fileHead_.F32(stream);
+    fileHead_.S32(stream); fileHead_.S32(stream);
+    for (int i = 0; i < 4; ++i) fileHead_.U32(stream);
+    fileHead_.U8(stream);
+    stream >> fileWalk_;                                               // +0x78
+    fileRandom_.Read(stream);                                          // +0xb8
+    const std::uint32_t count = fileTail_.U32(stream);                 // +0xd8: a list of occupant references
+    if (count < 10000000u)
+        for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) fileTail_.Ref(stream);
+    fileTail_.F32(stream); fileTail_.F32(stream);
+    fromCityFile_ = true;
     return !stream.GetError();
 }
 

@@ -21,6 +21,7 @@
 #include "gz/cGZPersistResourceKey.h"
 #include "gz/cIGZMessage2.h"
 #include "rz/cRZString.h"
+#include "sc4/RecordTape.h"
 #include "sc4/BuildingOccupant.h"
 #include "sc4/SCProperty.h"
 
@@ -385,6 +386,9 @@ private:
     std::vector<float> stageMultipliers_ = std::vector<float>(8, 1.0f);        // +0x1b0
     std::map<std::int32_t, std::int32_t> lastBuildDay_;                         // +0x180
     std::map<std::uint32_t, std::set<std::pair<int, int>>> growthMarks_;       // mGrowthMarks
+    // the city-file record's tables the port does not model (kept as read, saved back around the growth marks)
+    bool fromCityFile_ = false;
+    cRecordTape fileHead_, fileTail_;
     bool cheatPlumbing_ = false, cheatPower_ = false, cheatCaps_ = false;       // +0x1c9..0x1cb
     bool cheatDebug_ = false, cheatCoffee_ = false;                             // +0x1cc, +0x1cd
     bool plannedGrowth_ = false;                                                // +0x1c8 (never set: Grow, not PlanGrowth)

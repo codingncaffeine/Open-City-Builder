@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "app/NativeLotSerial.h"
 #include "app/NativeZoneOverlay.h"
 #include "platform/Unwired.h"
 #include "rz/cRZRandom.h"
@@ -181,8 +182,9 @@ struct ZoneDeveloperHost final : IZoneDeveloperHost {
         return range ? random.RandomUint32Uniform(range) : 0;
     }
     void GameDelay(int, bool) override {}
-    void WriteLot(cIGZOStream&, cSC4Lot*) override { SC4_UNWIRED("IZoneDeveloperHost::WriteLot (city save, SAVE-1)"); }
+    void WriteLot(cIGZOStream& stream, cSC4Lot* lot) override { SC4WriteGZSerializable(stream, LotSerializable(lot)); }
     cSC4Lot* ReadLot(cIGZIStream&) override { return nullptr; }   // the load path reads lots through the serializable factory
+    void LotRead(cSC4Lot* lot, cIGZUnknown* serializable) override { RememberLotSerializable(lot, serializable); }
 } g_host;
 
 // The lot developer's base-texture services.

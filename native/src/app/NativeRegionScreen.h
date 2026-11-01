@@ -6,6 +6,9 @@
 #include <functional>
 #include <string>
 
+#include "rz/cRZAutoRefCount.h"
+#include "sc4/ISC4RegionalCity.h"
+
 #include "app/NativeGraphics.h"
 #include "sc4/WinRegionScreen.h"
 #include "sc4/WinRegionView.h"
@@ -19,7 +22,7 @@ struct RegionScreenServices {
     Graphics* graphics = nullptr;
     cIGZWin* (*createWindowFromScript)(const cGZPersistResourceKey&, cIGZWin*, std::uint32_t) = nullptr;
     std::function<cGZBuffer*(std::uint32_t group, std::uint32_t instance)> loadBitmap;
-    std::function<bool(const std::string& path)> loadCity;   // loads a city file and enters it
+    std::function<bool(const std::string& path, cRZAutoRefCount<cISC4RegionalCity>* holder)> loadCity;   // loads a city file and enters it
 
 };
 

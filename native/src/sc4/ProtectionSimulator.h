@@ -24,6 +24,7 @@
 #include "gz/cIGZUnknown.h"
 #include "sc4/RandomIterator.h"
 #include "sc4/cSC4SimGrid.h"
+#include "sc4/RetainedReference.h"
 
 class cIGZIStream;
 class cIGZOStream;
@@ -156,6 +157,11 @@ private:
     SimGridPtr<std::uint8_t> adjusted_;
     SimGridPtr<std::int16_t> unadjusted_;
     std::list<IProtectionStation*> stations_;
+    // a city file's grid and station references (the coverage model and the stations are not resolved yet): kept as read
+    cRetainedReference fileUnadjusted_, fileAdjusted_, fileThird_;
+    cRetainedReferences fileStations_;
+    bool fromCityFile_ = false;
+    bool WriteCityRecord(cIGZOStream& stream) const;
     int zonedCount_ = 0, protectionSum_ = 0, protectedCount_ = 0;
     float averageProtection_ = 0.0f, coverageShare_ = 0.0f;
 };

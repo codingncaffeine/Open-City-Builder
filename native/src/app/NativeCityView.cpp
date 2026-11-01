@@ -86,6 +86,7 @@ public:
 
     bool Init() override { return render_->Init(); }
     void Shutdown() override {
+        native::DetachModelMaker();
         render_->Shutdown();
         native::ShutdownCityLighting();
     }
@@ -204,6 +205,25 @@ public:
 
 }  // namespace
 
+// SC4_DEBUG: how many occupants of each type the city holds (printed on load and when a save starts).
+void PrintOccupantCensus(cISC4City* cityInterface, const char* label) {
+    auto* city = dynamic_cast<sc4::cSC4City*>(cityInterface);
+    cIGZUnknown* om = city ? city->GetComponent(sc4::CityComponent::OccupantManager) : nullptr;
+    void* iface = nullptr;
+    if (!om || !om->QueryInterface(sc4::kGZIID_cISC4OccupantManager, &iface)) return;
+    auto* manager = static_cast<sc4::cISC4OccupantManager*>(iface);
+    static std::map<std::uint32_t, int> census;
+    census.clear();
+    const float lo[3] = {-1e6f, -1e6f, -1e6f}, hi[3] = {1e6f, 1e6f, 1e6f};
+    auto* all = new sc4::cSC4OccupantFilter();
+    all->AddRef();
+    manager->IterateOccupantsByBBox([](sc4::cISC4Occupant* o, void*) { ++census[o->GetType()]; return true; }, nullptr, lo, hi,
+                                    static_cast<sc4::cISC4OccupantFilter*>(all));
+    all->Release();
+    manager->Release();
+    for (auto& [type, n] : census) std::printf("%s: type %08x x%d\n", label, type, n);
+}
+
 sc4::cSC43DRender* g_cityRender = nullptr;
 sc4::cSC43DRender* CityRenderer() { return g_cityRender; }
 
@@ -227,17 +247,7 @@ bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* cityInterface, g
         if (om && om->QueryInterface(sc4::kGZIID_cISC4OccupantManager, &iface)) {
             auto* manager = static_cast<sc4::cISC4OccupantManager*>(iface);
             manager->Init();
-            if (std::getenv("SC4_DEBUG")) {   // census of the loaded occupants by type
-                static std::map<std::uint32_t, int> census;
-                census.clear();
-                const float lo[3] = {-1e6f, -1e6f, -1e6f}, hi[3] = {1e6f, 1e6f, 1e6f};
-                auto* all = new sc4::cSC4OccupantFilter();
-                all->AddRef();
-                manager->IterateOccupantsByBBox([](sc4::cISC4Occupant* o, void*) { static int shown = 0; if (o->GetType() == 0xc7cc75f1 && shown++ < 6) { float p[3] = {}; o->GetPosition(p); std::printf("vehicle at %.1f %.1f %.1f\n", p[0], p[1], p[2]); } ++census[o->GetType()]; return true; }, nullptr, lo, hi,
-                                                static_cast<sc4::cISC4OccupantFilter*>(all));
-                all->Release();
-                for (auto& [type, n] : census) std::printf("occupants: type %08x x%d\n", type, n);
-            }
+            if (std::getenv("SC4_DEBUG")) native::PrintOccupantCensus(city, "occupants");   // the loaded occupants by type
             manager->Release();
         }
     }

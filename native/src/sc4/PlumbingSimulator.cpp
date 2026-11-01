@@ -599,7 +599,7 @@ namespace {
 
 // cSC4PlumbingSimulator::WriteWaterProducer (0x10009d00c): x/z, the lot rect, capacity, production and the
 // occupant reference. percent (+0x24) and polluted (+0x28) are deliberately not serialized.
-void WriteWaterProducer(cIGZOStream& stream, IPlumbingHost* host, const WaterProducer& producer) {
+void WriteWaterProducer(cIGZOStream& stream, IPlumbingHost* host, const WaterProducer& producer, const cRetainedReference* kept) {
     stream.SetSint32(producer.x);
     stream.SetSint32(producer.z);
     stream.SetSint32(producer.rect.left);
@@ -608,7 +608,8 @@ void WriteWaterProducer(cIGZOStream& stream, IPlumbingHost* host, const WaterPro
     stream.SetSint32(producer.rect.bottom);
     stream.SetUint32(std::uint32_t(producer.capacity));
     stream.SetUint32(std::uint32_t(producer.production));
-    host->WriteOccupant(stream, producer.occupant);
+    if (kept) kept->Write(stream);   // the occupant a city file named (not resolved by the port yet)
+    else host->WriteOccupant(stream, producer.occupant);
 }
 
 // cSC4PlumbingSimulator::ReadWaterProducer (0x10009d488).
@@ -625,7 +626,7 @@ void SkipReference(cIGZIStream& stream, std::uint32_t iid) {
     if (raw) static_cast<cIGZUnknown*>(raw)->Release();
 }
 
-bool ReadWaterProducer(cIGZIStream& stream, IPlumbingHost* host, WaterProducer& producer) {
+bool ReadWaterProducer(cIGZIStream& stream, IPlumbingHost* host, WaterProducer& producer, cRetainedReference& kept) {
     stream.GetSint32(producer.x);
     stream.GetSint32(producer.z);
     stream.GetSint32(producer.rect.left);
@@ -637,7 +638,7 @@ bool ReadWaterProducer(cIGZIStream& stream, IPlumbingHost* host, WaterProducer& 
     stream.GetUint32(production);
     producer.capacity = int(capacity);
     producer.production = int(production);
-    if (IsCityFileStream(stream)) SkipReference(stream, 0x26bb767e);
+    if (IsCityFileStream(stream)) kept.Read(stream);
     else host->ReadOccupant(stream, &producer.occupant);
     return !stream.GetError();
 }
@@ -646,8 +647,8 @@ bool ReadWaterProducer(cIGZIStream& stream, IPlumbingHost* host, WaterProducer& 
 
 bool cSC4PlumbingSimulator::Write(cIGZOStream& stream) const {
     stream.SetUint16(4);
-    host_->WriteGrid(stream, auxGrid_);                                     // +0x58
-    host_->WriteGrid(stream, supplyGrid_);                                  // +0x60
+    if (auxGrid_) host_->WriteGrid(stream, auxGrid_); else fileAuxGrid_.Write(stream);              // +0x58
+    if (supplyGrid_) host_->WriteGrid(stream, supplyGrid_); else fileSupplyGrid_.Write(stream);     // +0x60
     stream.SetUint32(std::uint32_t(cellsX_));                               // +0xd0
     stream.SetUint32(std::uint32_t(cellsZ_));                               // +0xd4
     for (std::uint8_t flag : cellFlags_) stream.SetUint8(flag);             // +0xc8
@@ -656,16 +657,23 @@ bool cSC4PlumbingSimulator::Write(cIGZOStream& stream) const {
     stream.SetSint64(value1b8_);                                            // +0x1b8
     stream.SetUint32(std::uint32_t(producers_.size()));                     // +0x120
     stream.SetUint32(std::uint32_t(pollutedSources_));                      // +0x23c
-    for (const WaterProducer& producer : producers_) WriteWaterProducer(stream, host_, producer);
-    WriteWaterProducer(stream, host_, currentProducer_ ? *currentProducer_ : WaterProducer{});
+    std::size_t index = 0;
+    for (const WaterProducer& producer : producers_) {
+        const cRetainedReference* kept = !producer.occupant && index < fileProducerOccupants_.size() ? &fileProducerOccupants_[index] : nullptr;
+        WriteWaterProducer(stream, host_, producer, kept);
+        ++index;
+    }
+    WriteWaterProducer(stream, host_, currentProducer_ ? *currentProducer_ : WaterProducer{}, currentProducer_ ? nullptr : &fileCurrentOccupant_);
     // +0x1b0 ScanningIterator: the live walk of DoIdle's flood fill is not modelled yet (PLUMBING-1), so a fresh one is written.
     stream << ScanningIterator{};
     stream.SetSint64(demand_);                                              // +0x198
-    stream.SetUint32(std::uint32_t(pipes_.size()));                         // +0x218
+    const bool keptPipes = pipes_.empty();
+    stream.SetUint32(std::uint32_t(keptPipes ? filePipes_.size() : pipes_.size()));   // +0x218
     stream.SetUint32(std::uint32_t(distressedPipes_));                      // +0x21c
     stream.SetUint32(std::uint32_t(burstPipes_));                           // +0x220
-    for (IPlumbingPipe* pipe : pipes_) host_->WritePipe(stream, pipe);      // +0x200
-    host_->WriteWaterGrid(stream);                                          // +0xf0 int16 water grid
+    if (keptPipes) for (const cRetainedReference& pipe : filePipes_) pipe.Write(stream);
+    else for (IPlumbingPipe* pipe : pipes_) host_->WritePipe(stream, pipe);  // +0x200
+    fileWaterGrid_.Write(stream);   // +0xf0 int16 water grid (host-owned; the port keeps the one the file named, else a null reference)
     stream.SetSint64(capacity_);                                            // +0x178
     stream.SetSint64(consumed_);                                            // +0x180
     stream.SetSint64(imported_);                                            // +0x188
@@ -679,10 +687,15 @@ bool cSC4PlumbingSimulator::Read(cIGZIStream& stream) {
     if (version != 4) return false;
     const bool cityFile = IsCityFileStream(stream);
     cSC4SimGrid<std::uint8_t>* grid = nullptr;
-    if (cityFile) SkipReference(stream, 0xc9bd939a); else host_->ReadGrid(stream, &grid);
+    fileAuxGrid_ = cRetainedReference();
+    fileSupplyGrid_ = cRetainedReference();
+    fileWaterGrid_ = cRetainedReference();
+    fileProducerOccupants_.clear();
+    filePipes_.clear();
+    if (cityFile) fileAuxGrid_.Read(stream); else host_->ReadGrid(stream, &grid);
     auxGrid_ = grid;                                                        // +0x58
     grid = nullptr;
-    if (cityFile) SkipReference(stream, 0xc9bd939a); else host_->ReadGrid(stream, &grid);
+    if (cityFile) fileSupplyGrid_.Read(stream); else host_->ReadGrid(stream, &grid);
     supplyGrid_ = grid;                                                     // +0x60
     std::uint32_t cellsX = 0, cellsZ = 0;
     stream.GetUint32(cellsX); cellsX_ = int(cellsX);                        // +0xd0
@@ -701,11 +714,13 @@ bool cSC4PlumbingSimulator::Read(cIGZIStream& stream) {
     producers_.clear();
     for (std::uint32_t i = 0; i < producerCount; ++i) {
         WaterProducer producer;
-        ReadWaterProducer(stream, host_, producer);
+        fileProducerOccupants_.emplace_back();
+        ReadWaterProducer(stream, host_, producer, fileProducerOccupants_.back());
         producers_.push_back(producer);
     }
     WaterProducer current;
-    ReadWaterProducer(stream, host_, current);                              // +0x1a8 (released if unused)
+    fileCurrentOccupant_ = cRetainedReference();
+    ReadWaterProducer(stream, host_, current, fileCurrentOccupant_);        // +0x1a8 (released if unused)
     currentProducer_ = nullptr;
     if (current.occupant) current.occupant->Release();                      // drop the temporary reference
     ScanningIterator scan;                                                  // +0x1b0 (not kept, see PLUMBING-1)
@@ -719,11 +734,11 @@ bool cSC4PlumbingSimulator::Read(cIGZIStream& stream) {
     pipes_.clear();
     for (std::uint32_t i = 0; i < pipeCount; ++i) {
         IPlumbingPipe* pipe = nullptr;
-        if (cityFile) { SkipReference(stream, 0x49c05b9f); continue; }
+        if (cityFile) { filePipes_.emplace_back(); filePipes_.back().Read(stream); continue; }
         host_->ReadPipe(stream, &pipe);
         if (pipe) pipes_.push_back(pipe);
     }
-    if (cityFile) SkipReference(stream, 0x223e2b67); else host_->ReadWaterGrid(stream);   // +0xf0 int16 water grid
+    if (cityFile) fileWaterGrid_.Read(stream); else host_->ReadWaterGrid(stream);   // +0xf0 int16 water grid
     gridsInitialized_ = true;
     countdown_ = 0;                                                         // +0x128 cleared on load
     stream.GetSint64(capacity_);                                            // +0x178

@@ -28,6 +28,7 @@
 #include "rz/cRZRandom.h"
 #include "sc4/CommonIIDs.h"
 #include "sc4/MiscTypes.h"
+#include "sc4/RecordTape.h"
 #include "sc4/SCPropertyHelp.h"
 #include "sc4/cSC4ResponseCurve.h"
 
@@ -426,6 +427,7 @@ public:
     static const std::array<std::uint8_t, 9> kTravelModeToTransitNetwork;
 
 private:
+    cRecordTape cityRecord_;   // the city-file record as read (the port models none of it yet)
     NetworkInfo* FindNetworkInfo(int networkType, int x, int z) const;
     std::vector<NetworkInfo>* Cell(int x, int z) const;
 

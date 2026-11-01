@@ -505,7 +505,19 @@ void InstallModelResources(gd::cIGZGDriver* driver) {
     SL::spRM->RegisterObjectFactory(kGZCLSID_cS3DResModelFactory, s3d::kResourceTypeModel, &factory);
 }
 
+namespace {
+sc4::cSC4ModelMaker* g_maker = nullptr;
+}  // namespace
+
+void DetachModelMaker() {
+    if (!g_maker) return;
+    g_maker->Shutdown();
+    g_maker->Release();
+    g_maker = nullptr;
+}
+
 bool AttachModelMaker(sc4::cSC43DRender& render, sc4::cSC4City& city) {
+    DetachModelMaker();
     g_render = &render;
     g_city = &city;
     if (sc4::cSTETerrain* terrain = Terrain()) AttachShadowOverlay(render, *terrain);
@@ -540,6 +552,7 @@ bool AttachModelMaker(sc4::cSC43DRender& render, sc4::cSC4City& city) {
     sc4::SetModelMakerHost(&makerHost);
     auto* maker = new sc4::cSC4ModelMaker();
     maker->AddRef();
+    g_maker = maker;
     const bool ok = maker->Init();
     maker->DoPostCityInit();
     std::printf("city view: model maker %s: %d models loaded, %d failed, %d instances, %d inserted\n", ok ? "up" : "FAILED", g_modelsLoaded, g_modelsFailed, g_instances, g_inserted);

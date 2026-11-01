@@ -10,6 +10,7 @@
 #include <set>
 #include <string>
 #include "gz/SimHostRegistry.h"
+#include "sc4/RetainedReference.h"
 #include "sc4/DBSegment.h"
 #include "sc4/CommercialSimulator.h"
 #include "sc4/CrimeSimulator.h"
@@ -87,10 +88,29 @@ public:
     PowerPlantBudgetEntry GetPlantBudgetEntry(IPowerOccupant* plant) override { Seam("IPowerHost::GetPlantBudgetEntry"); return {}; }
     float DepartmentFundingFraction() override { Seam("IPowerHost::DepartmentFundingFraction"); return 0; }
     int CityDay() override { Seam("IPowerHost::CityDay"); return {}; }
-    bool ReadPowerGrid(cIGZIStream& stream) override { DropNested(stream); return true; }
-    bool ReadSupplyGrid(cIGZIStream& stream) override { DropNested(stream); return true; }
-    bool ReadPlant(cIGZIStream& stream, IPowerOccupant** out) override { *out = nullptr; DropNested(stream); return true; }
-    bool ReadPole(cIGZIStream& stream, IPowerPole** out) override { *out = nullptr; DropNested(stream); return true; }
+    // The city file's grid, plant and pole references are not resolved by the port's power simulator: they are kept as read
+    // and written back in the same order (Write calls these in Read's order, with null plants and poles).
+    bool ReadPowerGrid(cIGZIStream& stream) override {
+        powerGrid_ = cRetainedReference();
+        plants_.clear();
+        poles_.clear();
+        return powerGrid_.Read(stream);
+    }
+    bool ReadSupplyGrid(cIGZIStream& stream) override { supplyGrid_ = cRetainedReference(); return supplyGrid_.Read(stream); }
+    bool ReadPlant(cIGZIStream& stream, IPowerOccupant** out) override { *out = nullptr; plants_.emplace_back(); return plants_.back().Read(stream); }
+    bool ReadPole(cIGZIStream& stream, IPowerPole** out) override { *out = nullptr; poles_.emplace_back(); return poles_.back().Read(stream); }
+    void WritePowerGrid(cIGZOStream& stream) override { plantAt_ = poleAt_ = 0; powerGrid_.Write(stream); }
+    void WriteSupplyGrid(cIGZOStream& stream) override { supplyGrid_.Write(stream); }
+    void WritePlant(cIGZOStream& stream, IPowerOccupant*) override {
+        if (plantAt_ < plants_.size()) plants_[plantAt_++].Write(stream); else SC4WriteGZSerializable(stream, nullptr);
+    }
+    void WritePole(cIGZOStream& stream, IPowerPole*) override {
+        if (poleAt_ < poles_.size()) poles_[poleAt_++].Write(stream); else SC4WriteGZSerializable(stream, nullptr);
+    }
+private:
+    cRetainedReference powerGrid_, supplyGrid_;
+    std::vector<cRetainedReference> plants_, poles_;
+    std::size_t plantAt_ = 0, poleAt_ = 0;
 };
 Probe1 g_IPowerHost;
 }
@@ -115,6 +135,7 @@ public:
     bool ProducerLotDisabled(IPlumbingOccupant* occupant) override { Seam("IPlumbingHost::ProducerLotDisabled"); return false; }
     std::vector<IPlumbingNeighborConnection*> NeighborConnections(void* regionalCity) override { Seam("IPlumbingHost::NeighborConnections"); return {}; }
     bool ReadGrid(cIGZIStream& stream, cSC4SimGrid<std::uint8_t>** out) override { *out = SimGridCast<std::uint8_t>(ReadNested(stream, 1)); return true; }
+    void WriteGrid(cIGZOStream& stream, cSC4SimGrid<std::uint8_t>* grid) override { SC4WriteGZSerializable(stream, static_cast<cISC4SimGridBase*>(grid)); }
     bool ReadWaterGrid(cIGZIStream& stream) override { DropNested(stream); return true; }
     bool ReadOccupant(cIGZIStream& stream, IPlumbingOccupant** out) override { *out = nullptr; DropNested(stream); return true; }
     bool ReadPipe(cIGZIStream& stream, IPlumbingPipe** out) override { *out = nullptr; DropNested(stream); return true; }

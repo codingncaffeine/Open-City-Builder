@@ -8,6 +8,7 @@
 #include "sc4/App.h"
 #include "sc4/DBSegment.h"
 #include "sc4/SaveGame.h"
+#include "sc4/cSC4City.h"
 #include "sc4/ServiceLocator.h"
 
 namespace native {
@@ -41,14 +42,18 @@ bool ReadRegionalCityFile(const cIGZString& path, cISC4RegionalCity*& out) {
 }
 
 // ---- cSC4RegionalCity -----------------------------------------------------------------------------------------------------
-// Everything that needs a live city (the simulators) answers neutrally: a region city is only a record here.
+// The live city (name, mayor, difficulty, serial, established, save path) is the app's open city: on the save-started message
+// the application's regional city refreshes itself from it (UpdateCityCache) before cSC4App::Write stores it. What needs
+// the simulators (rating, taxes, connections, populations, jobs) still answers neutrally and keeps the record's values.
+sc4::cSC4City* LiveCity(const cISC4City* city) { return dynamic_cast<sc4::cSC4City*>(const_cast<cISC4City*>(city)); }
+
 class CityHost final : public IRegionalCityHost {
 public:
     std::uint32_t DefaultDifficultyLevel() override { return 0; }
     void AddNotification(cIGZMessageTarget2* target, std::uint32_t type) override { if (SL::spMS2) SL::spMS2->AddNotification(target, type); }
     void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t type) override { if (SL::spMS2) SL::spMS2->RemoveNotification(target, type); }
-    cISC4RegionalCity* CurrentRegionalCity() override { return nullptr; }
-    cISC4City* CurrentCity() override { return nullptr; }
+    cISC4RegionalCity* CurrentRegionalCity() override { return g_app ? g_app->GetRegionalCity() : nullptr; }
+    cISC4City* CurrentCity() override { return g_app ? g_app->GetCity() : nullptr; }
     cISC4RegionalCity* RegionCityAt(int, int) override { return nullptr; }
     void ConvertConnectionCellToNeighborCell(int, int, int&, int&, cISC4RegionalCity*&, int&, int&) override {}
     void ConvertNeighborCellToConnectionCell(cISC4RegionalCity*, int, int, int&, int&) override {}
@@ -69,16 +74,17 @@ public:
         return segment && sc4::SC4ReadStringRecord(segment, group, instance, out);
     }
     bool LoadString(std::uint32_t, std::uint32_t, cIGZString&) override { return false; }
-    void CityName(const cISC4City*, cIGZString& out) override { out.AssignFromCString(""); }
-    void CityMayorName(const cISC4City*, cIGZString& out) override { out.AssignFromCString(""); }
-    void SetCityName(cISC4City*, const cIGZString&) override {}
-    void SetCityMayorName(cISC4City*, const cIGZString&) override {}
-    std::uint32_t CityDifficulty(const cISC4City*) override { return 0; }
-    void SetCityDifficulty(cISC4City*, std::uint32_t) override {}
+    void CityName(const cISC4City* city, cIGZString& out) override { if (auto* live = LiveCity(city)) live->GetCityName(out); else out.AssignFromCString(""); }
+    void CityMayorName(const cISC4City* city, cIGZString& out) override { if (auto* live = LiveCity(city)) live->GetMayorName(out); else out.AssignFromCString(""); }
+    void SetCityName(cISC4City* city, const cIGZString& name) override { if (auto* live = LiveCity(city)) live->SetCityName(name); }
+    void SetCityMayorName(cISC4City* city, const cIGZString& name) override { if (auto* live = LiveCity(city)) live->SetMayorName(name); }
+    std::uint32_t CityDifficulty(const cISC4City* city) override { auto* live = LiveCity(city); return live ? std::uint32_t(live->GetDifficultyLevel()) : 0; }
+    void SetCityDifficulty(cISC4City* city, std::uint32_t level) override { if (auto* live = LiveCity(city)) live->SetDifficultyLevel(sc4::cSC4City::DifficultyLevel(level)); }
     void SetCitySize(cISC4City*, float, float) override {}
-    std::uint32_t CitySerialNumber(const cISC4City*) override { return 0; }
-    bool CityEstablished(const cISC4City*) override { return false; }
-    int CityMayorRating(const cISC4City*) override { return 0; }
+    std::uint32_t CitySerialNumber(const cISC4City* city) override { auto* live = LiveCity(city); return live ? live->GetCitySerialNumber() : 0; }
+    bool CityEstablished(const cISC4City* city) override { auto* live = LiveCity(city); return live && live->GetEstablished(); }
+    // (no live mayor rating yet: the record's value is kept)
+    int CityMayorRating(const cISC4City*) override { cISC4RegionalCity* current = CurrentRegionalCity(); return current ? Concrete(current)->GetMayorRating() : 0; }
     void CityTaxRates(const cISC4City*, float (&rates)[12]) override { for (float& r : rates) r = 7.0f; }
     void CityConnections(const cISC4City*, NeighborConnectionList&) override {}
     void CityUpdateCommodityStats(cISC4City*) override {}

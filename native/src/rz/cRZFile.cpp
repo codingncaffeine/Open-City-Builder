@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 
 namespace {
 
@@ -400,9 +401,20 @@ bool cRZFile::Remove() {
     return rc == 0;
 }
 
+// rename(2), and across filesystems (EXDEV) a copy then a remove: the original's MoveFile moves files between volumes,
+// and the temporary directory (/tmp, often a tmpfs) is rarely on the filesystem the saves live on.
+static bool MovePath(const char* from, const char* to) {
+    if (::rename(from, to) == 0) return true;
+    if (errno != EXDEV) return false;
+    std::error_code error;
+    std::filesystem::copy_file(from, to, std::filesystem::copy_options::overwrite_existing, error);
+    if (error) { std::filesystem::remove(to, error); errno = EXDEV; return false; }
+    return ::unlink(from) == 0 || errno == ENOENT;
+}
+
 bool cRZFile::Rename(const cIGZString& newPath) {
     if (IsOpen()) Close();
-    if (::rename(NativePath(path_), NativePath(newPath)) == 0) {
+    if (MovePath(NativePath(path_), NativePath(newPath))) {
         path_.AssignFromChars(newPath.Data(), newPath.Strlen());
         return true;
     }
@@ -570,7 +582,7 @@ bool cRZFile::IsFileWritable(const cIGZString& path) {
 bool cRZFile::Remove(const cIGZString& path) { return ::remove(NativePath(path)) == 0; }
 
 bool cRZFile::Rename(const cIGZString& from, const cIGZString& to) {
-    return ::rename(NativePath(from), NativePath(to)) == 0;
+    return MovePath(NativePath(from), NativePath(to));
 }
 
 std::uint32_t cRZFile::GetLength(const cIGZString& path) {
@@ -586,8 +598,13 @@ bool cRZFile::GetTempDirectory(cIGZString& out) {
     const char* dir = std::getenv("TMPDIR");
     char buf[1024];
     if (!dir || !*dir) {
+#ifdef __APPLE__
         std::size_t n = ::confstr(_CS_DARWIN_USER_TEMP_DIR, buf, sizeof buf);
         dir = (n > 0 && n <= sizeof buf) ? buf : "/tmp";
+#else
+        (void)buf;
+        dir = "/tmp";   // no per-user temporary directory key off macOS (the build maps it to _CS_PATH = "/bin:/usr/bin")
+#endif
     }
     out.AssignFromCString(dir);
     out.AppendChars("/", 1);  // the original always appends, even when a separator is present

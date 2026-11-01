@@ -8,6 +8,8 @@
 //    (0xea57da59) of that dialog goes on.
 //  * Quit and the "go to region" request flush the graphics system twice before the city is closed.
 //  * PartialCloseCity pauses the game (all but graphics) and never resumes it itself.
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -134,6 +136,7 @@ bool cSC4App::DoMessage(cIGZMessage2* message) {
 bool cSC4App::Write(cIGZOStream& stream, cIGZPersistDBSegment* segment) const {
     stream.SetUint16(2);
     if (!sc4::SC4WriteGZSerializable(stream, city_)) return false;
+    if (std::getenv("SC4_DEBUG")) std::printf("save: regional city %p\n", regionalCity_ ? static_cast<void*>(regionalCity_->get()) : nullptr);
     if (regionalCity_ && regionalCity_->get()) return cityHooks_.writeRegionalCity && cityHooks_.writeRegionalCity(segment, regionalCity_->get());
     return true;
 }
@@ -581,6 +584,8 @@ bool cSC4App::SaveCity(const cRZString& path, bool alternate) {
             SL::spMS2->MessageSend(message.get());
         };
 
+        const bool debug = std::getenv("SC4_DEBUG") != nullptr;
+        if (debug) std::printf("save: %s -> temp %s\n", savePath.ToChar(), tempPath.ToChar());
         if (segment->Init() && segment->SetPath(*tempCopy) && segment->Open(false, true)) {
             sendProgress(kSaveStartedMessage);
             sendProgress(kSaveDataWrittenMessage);
@@ -603,10 +608,13 @@ bool cSC4App::SaveCity(const cRZString& path, bool alternate) {
                     }
                 }
             }
+            if (debug) std::printf("save: app record %s\n", success ? "written" : "FAILED");
             if (success) success = rawSegment->SaveClassObjects();
+            if (debug) std::printf("save: class objects %s\n", success ? "written" : "FAILED");
             segment->Close();
             segment->Shutdown();
         } else {
+            if (debug) std::printf("save: temp segment could not be opened\n");
             segment->Shutdown();
         }
         segment->Release();
@@ -634,6 +642,7 @@ bool cSC4App::SaveCity(const cRZString& path, bool alternate) {
         if (pathDiffers && cRZFile::FileExists(path)) cRZFile::Remove(path);
     }
     if (tempPath.Strlen() != 0) cRZFile::Remove(tempPath);
+    if (std::getenv("SC4_DEBUG")) std::printf("save: %s %s\n", savePath.ToChar(), success ? "done" : "FAILED");
 
     city_->SetCitySaveFilePath(success ? savePath : previousSavePath);
     cRZString reopenPath;

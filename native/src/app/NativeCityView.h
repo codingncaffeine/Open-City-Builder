@@ -17,6 +17,8 @@ int CityViewZoom();
 // The vehicle or pedestrian automata layer is active (NativeCityQueries.cpp).
 bool CityAutomataLayersActive();
 // Builds the stack for the city that is loaded and attaches it to the view; true when the renderer came up.
+// SC4_DEBUG: prints how many occupants of each type the city holds, one line per type ("<label>: type T xN").
+void PrintOccupantCensus(cISC4City* city, const char* label);
 bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* city, gd::cIGZGDriver* driver, gz::cIGZDrawContext* screen, int viewportWidth, int viewportHeight);
 
 }  // namespace native

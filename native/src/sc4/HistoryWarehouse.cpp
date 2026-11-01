@@ -1,3 +1,6 @@
+#include <cstdio>
+#include <cstdlib>
+#include <iterator>
 #include "sc4/HistoryWarehouse.h"
 
 #include <chrono>
@@ -248,7 +251,9 @@ bool cSC4HistoryWarehouse::Store(std::uint32_t series, int value) {
     IHistoryEnvironment* env = HistoryEnvironment();
     const std::uint32_t today = env ? env->SimDayNumber() : 0;
     const std::uint32_t last = s.nodes.empty() ? 0 : s.nodes.back().julianDay;
-    if (last < today) {
+    // An empty series always takes a first point (on day 0, before the environment has a date, `last < today` is false and
+    // back() of the empty list would write into the list itself).
+    if (s.nodes.empty() || last < today) {
         if (s.maxLength != 0 && s.maxLength <= s.nodes.size()) s.nodes.pop_front();
         s.nodes.push_back(HistoryNode{value, today});
     } else {

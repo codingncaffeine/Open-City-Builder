@@ -137,6 +137,7 @@ class cSC4AdvisorBase : public cSC4Advisor {
 public:
     cSC4AdvisorBase();                                   // @ 0x100444c9c
     ~cSC4AdvisorBase() override;                         // @ 0x100444cfa
+    std::uint32_t GetGZCLSID() const override { return kGZCLSID_cSC4AdvisorBase; }   // @ 0x100444c90
 
     bool Init(int advisorType) override;                 // @ 0x100444d3c
     bool Shutdown() override;                            // @ 0x100444dee

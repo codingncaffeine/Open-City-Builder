@@ -1,3 +1,4 @@
+#include "sc4/CommonIIDs.h"
 #include "sc4/cSC4City.h"
 
 #include <cstdio>
@@ -477,11 +478,19 @@ bool cSC4City::Read(cIGZIStream& stream) {
     auto readComponent = [&](CityComponent id) {
         const CityComponentInfo& info = GetCityComponentInfo(id);
         void* raw = nullptr;
-        if (SC4ReadGZSerializable(stream, info.iid, &raw, false) && raw) {
-            auto* object = static_cast<cIGZUnknown*>(raw);
+        if (!SC4ReadGZSerializable(stream, kGZIID_cIGZUnknown, &raw, false) || !raw) return;
+        auto* unknown = static_cast<cIGZUnknown*>(raw);
+        void* typed = nullptr;
+        if (unknown->QueryInterface(info.iid, &typed) && typed) {
+            auto* object = static_cast<cIGZUnknown*>(typed);
             components_[static_cast<std::size_t>(id)] = object;
             object->Release();
+        } else if (void* plain = nullptr; unknown->QueryInterface(kGZIID_PlainObject, &plain) && plain) {
+            // a class the port keeps as plain C++ comes wrapped in an adapter that answers no interface of its own: the
+            // city keeps the adapter, as it does for one it creates (CreateCityComponents), and the file's object is used
+            components_[static_cast<std::size_t>(id)] = unknown;
         }
+        unknown->Release();
     };
     for (std::size_t i = 0; i < kStreamCoreCount; ++i) readComponent(kStreamOrder[i]);
     // version-gated tail: Unknown250 (>8), CitySituationManager (>10), NetworkManager (>11)

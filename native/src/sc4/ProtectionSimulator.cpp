@@ -261,7 +261,33 @@ IProtectionStation* cSC4ProtectionSimulator::DispatchFromNearestStation(float x,
 
 // ---- streams ------------------------------------------------------------------------------------------------------
 
+// The record of a city file (the layout ReadCityRecord reads): the grid and station references a loaded file named are
+// written back as they were read; the walk iterator follows the first grid.
+bool cSC4ProtectionSimulator::WriteCityRecord(cIGZOStream& stream) const {
+    stream.SetUint16(3);
+    if (fromCityFile_ || !unadjusted_.get()) fileUnadjusted_.Write(stream); else SC4WriteGZSerializable(stream, static_cast<cISC4SimGridBase*>(unadjusted_.get()));   // +0xa0
+    stream << walk_;                                                      // +0x40
+    if (fromCityFile_ || !adjusted_.get()) fileAdjusted_.Write(stream); else SC4WriteGZSerializable(stream, static_cast<cISC4SimGridBase*>(adjusted_.get()));       // +0xa8
+    fileThird_.Write(stream);                                             // +0xb0
+    stream.SetUint32(std::uint32_t(fileStations_.size()));                // +0xb8 (the port's stations are not COM objects yet)
+    for (const cRetainedReference& station : fileStations_) station.Write(stream);
+    stream.SetSint32(zonedCount_);                                        // +0xd0
+    stream.SetSint32(protectionSum_);                                     // +0xd4
+    stream.SetSint32(protectedCount_);                                    // +0xd8
+    stream.SetFloat32(averageProtection_);                                // +0xdc
+    stream.SetFloat32(coverageShare_);                                    // +0xe0
+    stream.SetUint8(flagE8_ ? 1 : 0);                                     // +0xe8
+    stream.SetUint32(valueEC_);                                           // +0xec
+    stream.SetUint32(dispatchBitsInUse);                                  // +0xf0
+    return !stream.GetError();
+}
+
 bool cSC4ProtectionSimulator::Write(cIGZOStream& stream) const {
+    void* dbStream = nullptr;
+    if (stream.QueryInterface(kGZIID_cISC4DBSegmentOStream, &dbStream) && dbStream) {
+        static_cast<cIGZUnknown*>(dbStream)->Release();
+        return WriteCityRecord(stream);
+    }
     stream.SetUint16(3);
     host_->WriteGridInt16(stream, unadjusted_.get());                     // +0xa0
     // +0x40 RandomIterator walk state is not streamed here: the operator lives in SimStreamOps.cpp, which is
@@ -293,14 +319,17 @@ bool cSC4ProtectionSimulator::ReadCityRecord(cIGZIStream& stream) {
         SC4ReadGZSerializable(stream, iid, &raw, false);
         if (raw) static_cast<cIGZUnknown*>(raw)->Release();
     };
-    skipReference(0x223e2b67);                                            // +0xa0
+    (void)skipReference;
+    fromCityFile_ = true;
+    fileUnadjusted_.Read(stream);                                         // +0xa0
     stream >> walk_;                                                      // +0x40
-    skipReference(0xc9bd939a);                                            // +0xa8
-    skipReference(0xc9bd939a);                                            // +0xb0
+    fileAdjusted_.Read(stream);                                           // +0xa8
+    fileThird_.Read(stream);                                              // +0xb0
     std::uint32_t stationCount = 0;
     stream.GetUint32(stationCount);                                       // +0xb8: the occupants of the stations
+    fileStations_.clear();
     if (stationCount < 10000000u)
-        for (std::uint32_t i = 0; i < stationCount && !stream.GetError(); ++i) skipReference(0x26bb767e);
+        for (std::uint32_t i = 0; i < stationCount && !stream.GetError(); ++i) { fileStations_.emplace_back(); fileStations_.back().Read(stream); }
     stream.GetSint32(zonedCount_);                                        // +0xd0
     stream.GetSint32(protectionSum_);                                     // +0xd4
     stream.GetSint32(protectedCount_);                                    // +0xd8

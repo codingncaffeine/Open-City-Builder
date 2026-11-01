@@ -1264,6 +1264,29 @@ bool cSC4DemandSimulator::DoMessage(cIGZMessage2* message) {
 // persistence
 // ---------------------------------------------------------------------------------------------------------
 
+namespace {
+// The serializable view of one demand in a city file (class 0x8990c12d): cSC4Demand is plain C++ in the port and owned
+// by the simulator's map, so the view only borrows it; the serializer's references keep the view alive through the save.
+class DemandSerializable final : public cIGZSerializable {
+public:
+    explicit DemandSerializable(const cSC4Demand* demand) : demand_(const_cast<cSC4Demand*>(demand)) {}
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid == kGZIID_cIGZUnknown || iid == kGZIID_cIGZSerializable) { *out = static_cast<cIGZSerializable*>(this); AddRef(); return true; }
+        if (iid == kGZIID_PlainObject) { *out = demand_; return true; }
+        *out = nullptr;
+        return false;
+    }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override { if (--refs_ == 0) { delete this; return 0; } return refs_; }
+    bool Write(cIGZOStream& stream) const override { return demand_->Write(stream); }
+    bool Read(cIGZIStream& stream) override { return demand_->Read(stream); }
+    std::uint32_t GetGZCLSID() const override { return demand_->GetGZCLSID(); }
+private:
+    cSC4Demand* demand_;
+    std::uint32_t refs_ = 0;
+};
+}  // namespace
+
 bool cSC4DemandSimulator::Write(cIGZOStream& stream) const {
     if (stream.GetError()) return false;
     stream.SetUint16(2);
@@ -1272,9 +1295,18 @@ bool cSC4DemandSimulator::Write(cIGZOStream& stream) const {
     stream.SetFloat32(value130_);
     stream.SetFloat32(value134_);
     stream.SetUint32(static_cast<std::uint32_t>(demands_.size()));
+    void* dbStream = nullptr;
+    const bool references = stream.QueryInterface(kGZIID_cISC4DBSegmentOStream, &dbStream) && dbStream;
+    if (dbStream) static_cast<cIGZUnknown*>(dbStream)->Release();
     for (const auto& entry : demands_) {
         stream.SetUint32(entry.first);
-        if (!entry.second || !entry.second->Write(stream)) return false;
+        if (!entry.second) return false;
+        if (references) {   // a city file: each demand is its own object, referenced here (as Read reads it)
+            cRZAutoRefCount<cIGZSerializable> view(new DemandSerializable(entry.second));
+            if (!SC4WriteGZSerializable(stream, view.get())) return false;
+        } else if (!entry.second->Write(stream)) {
+            return false;
+        }
     }
     stream.SetUint32(static_cast<std::uint32_t>(previousCensus_.size()));
     for (const auto& entry : previousCensus_) {

@@ -77,11 +77,15 @@ bool cSC4PoliceSimulator::ReadStation(cIGZIStream& stream, IProtectionStation** 
 bool cSC4PoliceSimulator::Write(cIGZOStream& stream) const {
     stream.SetUint16(8);
     if (!protection_.Write(stream)) return false;
-    SC4WriteGZSerializable(stream, nullptr);                              // +0x128 police power grid (unrecovered)
-    stream.SetUint32(std::uint32_t(fundedJails_.size()));                 // +0x168
-    for (IPoliceOccupant* jail : fundedJails_) host_->WriteOccupant(stream, jail);
-    stream.SetUint32(std::uint32_t(jails_.size()));                       // +0x130
-    for (IPoliceOccupant* jail : jails_) host_->WriteOccupant(stream, jail);
+    filePowerGrid_.Write(stream);                                         // +0x128 police power grid (unrecovered)
+    // a loaded city's jails are the references its file named (fundedJails_/jails_ stay empty then)
+    const bool keptFunded = fundedJails_.empty(), keptJails = jails_.empty();
+    stream.SetUint32(std::uint32_t(keptFunded ? fileFundedJails_.size() : fundedJails_.size()));   // +0x168
+    if (keptFunded) for (const cRetainedReference& jail : fileFundedJails_) jail.Write(stream);
+    else for (IPoliceOccupant* jail : fundedJails_) host_->WriteOccupant(stream, jail);
+    stream.SetUint32(std::uint32_t(keptJails ? fileJails_.size() : jails_.size()));                 // +0x130
+    if (keptJails) for (const cRetainedReference& jail : fileJails_) jail.Write(stream);
+    else for (IPoliceOccupant* jail : jails_) host_->WriteOccupant(stream, jail);
     stream.SetSint32(jailCapacity_);                                      // +0x148
     stream.SetSint32(jailPopulation_);                                    // +0x14c
     stream.SetSint32(criminals_);                                         // +0x150
@@ -90,7 +94,7 @@ bool cSC4PoliceSimulator::Write(cIGZOStream& stream) const {
     stream.SetSint32(unjailedAdded_);                                     // +0x164
     stream.SetSint32(crimesPrev_);                                        // +0x158
     stream.SetSint32(crimesThisMonth_);                                   // +0x160
-    SC4WriteGZSerializable(stream, nullptr);                              // +0x118 dispatch helper (unrecovered)
+    fileDispatch_.Write(stream);                                          // +0x118 dispatch helper (unrecovered)
     return !stream.GetError();
 }
 
@@ -99,9 +103,8 @@ bool cSC4PoliceSimulator::Read(cIGZIStream& stream) {
     stream.GetUint16(version);
     if (version > 8) return false;
     if (!protection_.Read(stream)) return false;
-    void* raw = nullptr;
-    SC4ReadGZSerializable(stream, kInt16GridIid, &raw, false);            // +0x128 police power grid (null)
-    if (raw) static_cast<cIGZUnknown*>(raw)->Release();
+    filePowerGrid_ = cRetainedReference();
+    filePowerGrid_.Read(stream);                                          // +0x128 police power grid
     // In a city file the jails are object references the host does not resolve yet: they are consumed so the record stays in step.
     void* dbStream = nullptr;
     const bool references = stream.QueryInterface(kGZIID_cISC4DBSegmentIStream, &dbStream) && dbStream;
@@ -109,9 +112,9 @@ bool cSC4PoliceSimulator::Read(cIGZIStream& stream) {
     const auto readJail = [&](std::list<IPoliceOccupant*>& into) {
         IPoliceOccupant* jail = nullptr;
         if (references) {
-            void* object = nullptr;
-            SC4ReadGZSerializable(stream, 0x26bb767e, &object, false);
-            if (object) static_cast<cIGZUnknown*>(object)->Release();
+            cRetainedReferences& kept = &into == &fundedJails_ ? fileFundedJails_ : fileJails_;
+            kept.emplace_back();
+            kept.back().Read(stream);
         } else if (host_->ReadOccupant(stream, &jail) && jail) {
             into.push_back(jail);
         }
@@ -119,6 +122,8 @@ bool cSC4PoliceSimulator::Read(cIGZIStream& stream) {
     std::uint32_t count = 0;
     stream.GetUint32(count);                                              // +0x168 funded jails
     fundedJails_.clear();
+    fileFundedJails_.clear();
+    fileJails_.clear();
     for (std::uint32_t i = 0; i < count && count < 10000000u; ++i) readJail(fundedJails_);
     stream.GetUint32(count);                                              // +0x130 jails
     jails_.clear();
@@ -131,11 +136,8 @@ bool cSC4PoliceSimulator::Read(cIGZIStream& stream) {
     stream.GetSint32(unjailedAdded_);                                     // +0x164
     stream.GetSint32(crimesPrev_);                                        // +0x158
     stream.GetSint32(crimesThisMonth_);                                   // +0x160
-    if (version >= 8) {
-        raw = nullptr;
-        SC4ReadGZSerializable(stream, kGZIID_cISC4ProtectionDispatchSimulator, &raw, false);   // +0x118 (null)
-        if (raw) static_cast<cIGZUnknown*>(raw)->Release();
-    }
+    fileDispatch_ = cRetainedReference();
+    if (version >= 8) fileDispatch_.Read(stream);                         // +0x118 dispatch helper
     return !stream.GetError();
 }
 

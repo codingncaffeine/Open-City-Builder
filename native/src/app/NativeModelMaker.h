@@ -14,5 +14,9 @@ void InstallModelResources(gd::cIGZGDriver* driver);
 unsigned int FshTextureId(unsigned int group, unsigned int instance);
 // Builds and initialises the model maker for the loaded city; its models go into `render`.
 bool AttachModelMaker(sc4::cSC43DRender& render, sc4::cSC4City& city);
+// Shuts the model maker of the city being left down (before its renderer goes): the original keeps one model maker for the
+// application, the port makes one per city, and a stale one stays subscribed to the view messages with the old city's
+// occupants (their models point into the old renderer).
+void DetachModelMaker();
 
 }  // namespace native

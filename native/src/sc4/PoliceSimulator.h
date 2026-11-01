@@ -246,6 +246,9 @@ private:
     cSC4ProtectionSimulator protection_;
     cSC4ResponseCurve stationEfficiency_, jailEfficiency_, strikeChance_, jailbreakChance_;
     std::list<IPoliceOccupant*> jails_, fundedJails_, jailbreakBuildings_;
+    // a city file's references (power grid +0x128, the jails, dispatch helper +0x118): not resolved yet, kept as read
+    cRetainedReference filePowerGrid_, fileDispatch_;
+    cRetainedReferences fileFundedJails_, fileJails_;
     int jailCapacity_ = 0, jailPopulation_ = 0, criminals_ = 0;
     int arrestsPrev_ = 0, crimesPrev_ = 0, arrestsThisMonth_ = 0, crimesThisMonth_ = 0, unjailedAdded_ = 0;
     bool onStrike_ = false;

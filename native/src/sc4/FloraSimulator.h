@@ -15,6 +15,8 @@
 #include "gz/cIGZOStream.h"
 #include "sc4/Exemplar.h"
 #include "rz/cRZRandom.h"
+#include "sc4/RandomIterator.h"
+#include "sc4/RecordTape.h"
 #include "sc4/FloraOccupant.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/SCProperty.h"
@@ -120,6 +122,11 @@ public:
     static std::uint32_t AdvanceClusterType(std::uint32_t a, std::uint32_t b);
 
 private:
+    // the city-file record (not modelled yet): kept as read and saved back
+    bool fromCityFile_ = false;
+    cRecordTape fileHead_, fileTail_;
+    RandomIterator fileWalk_;
+    cRZRandom fileRandom_{1};
     std::uint32_t refCount_ = 0;                                    // +0x1c
     cRZRandom random_{0};                                           // +0x84
     bool keepFloraOnTerrainChange_ = false;                         // +0x2f (a debug console option): move, never remove

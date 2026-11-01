@@ -6,6 +6,9 @@
 #include <functional>
 #include <string>
 
+#include "rz/cRZAutoRefCount.h"
+#include "sc4/ISC4RegionalCity.h"
+
 class cSC4App;
 class cIGZUnknown;
 class cIGZMessageTarget2;
@@ -25,7 +28,8 @@ void SetCityScreenCallbacks(CityScreenCallbacks callbacks);
 // Installs the city hooks once and loads the city file through cSC4App::LoadCity; true when the city came up.
 // The exemplar and cohort factories of the resource manager (idempotent; boot and the first city load call it).
 void RegisterExemplarFactories();
-bool LoadCityFile(cSC4App& app, const std::string& path);
+// holder = the region's slot of the city (its regional record is read into it on load and written from it on save)
+bool LoadCityFile(cSC4App& app, const std::string& path, cRZAutoRefCount<cISC4RegionalCity>* holder = nullptr);
 // One framework tick for the services the simulator host registered (NativeSimulatorHost.cpp): cSC4Simulator::OnTick.
 void TickSimulatorServices(std::uint32_t tickNumber);
 // SL::spSimulator vslot 0x98 / 0xa8 (AddAgent / RemoveAgent) on the city's cSC4Simulator: what every simulator's Init / Shutdown

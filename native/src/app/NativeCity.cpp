@@ -5,11 +5,15 @@
 #include "app/NativeCitySystems.h"
 #include "app/NativeRuntimeWire.h"
 #include "app/NativeCity.h"
+#include "app/NativeCityView.h"
 #include "app/NativeFlora.h"
+#include "app/NativeLotSerial.h"
+#include "app/NativeUi.h"
 #include "app/NativeBuildingDevelopment.h"
 #include "app/NativeGrowthDevelopers.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <set>
 
 #include "gz/GZCOM.h"
@@ -22,6 +26,8 @@
 #include "sc4/SaveGame.h"
 #include "sc4/cSC4City.h"
 #include "sc4/Simulator.h"
+#include "rz/cRZFile.h"
+#include "rz/cRZMessage2Standard.h"
 
 cIGZSerializable* CreateCityProbeSerializable(std::uint32_t classId);   // city_probe_creators.cpp
 cIGZSerializable* CreateCityProbeSerializable2(std::uint32_t classId);
@@ -48,6 +54,10 @@ struct CityHost final : sc4::ICityHost {
     // A component the city file did not carry: the class's GZCOM creator, asked for the interface the city keeps it as
     // (cSC4City::CreateCityComponents -> GZCOM()->CreateInstance(classId, iid)).
     cIGZUnknown* CreateComponent(std::uint32_t classId, std::uint32_t iid) override;
+    // the region view thumbnails are copied from the city's previous file (cSC4City::WriteRegionViewThumbnail)
+    cIGZPersistDBSegment* OpenSaveGame(const cIGZString& path) override { return sc4::SC4OpenSaveGame(path, false, true); }
+    void CloseSaveGame(cIGZPersistDBSegment* segment) override { sc4::SC4CloseSaveGame(segment); }
+    bool FileExists(const cIGZString& path) override { return cRZFile::FileExists(path); }
     void PostMessage(cIGZMessage2* message) override { if (SL::spMS2) SL::spMS2->MessagePost(message, false); }   // SL::spMS2 slot 0x20
     void SendMessage(cIGZMessage2* message) override { if (SL::spMS2) SL::spMS2->MessageSend(message); }          // slot 0x18
     // slot 0x18 / 0x20 of each component (NativeCityComponents.cpp)
@@ -160,7 +170,36 @@ void RegisterExemplarFactories() {
     SL::spRM->RegisterObjectFactory(0x053429c8, sc4::kResourceTypeCohort, &cohortFactory);
 }
 
-bool LoadCityFile(cSC4App& app, const std::string& path) {
+namespace {
+// cSC4City::Init subscribes the city to the save-started message 0x26c63343 (with its name/size/established commands); its
+// DoMessage then writes the region view thumbnails into the new file (segment = void1, the final path = void3, data4 = the
+// alternate flag). The port's city is no message target, so this one stands in for that case.
+constexpr std::uint32_t kMessageSaveStarted = 0x26c63343;
+class CitySaveTarget final : public cIGZMessageTarget2 {
+public:
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid != sc4::kGZIID_cIGZMessageTarget2 && iid != 1) return false;
+        *out = static_cast<cIGZMessageTarget2*>(this);
+        return true;
+    }
+    std::uint32_t AddRef() override { return 1; }
+    std::uint32_t Release() override { return 1; }
+    bool DoMessage(cIGZMessage2* message) override {
+        if (!message || message->GetType() != kMessageSaveStarted) return true;
+        auto* standard = static_cast<cIGZMessage2Standard*>(message);
+        auto* segment = static_cast<cIGZPersistDBSegment*>(standard->GetVoid1());
+        auto* path = static_cast<cIGZString*>(standard->GetVoid3());
+        if (std::getenv("SC4_DEBUG")) {
+            std::printf("save: thumbnails for %s (city %p)\n", path ? path->ToChar() : "?", static_cast<void*>(HostCity()));
+            PrintOccupantCensus(HostCity(), "save: occupants");
+        }
+        if (sc4::cSC4City* city = HostCity(); city && segment && path) city->WriteRegionViewThumbnail(*segment, *path, standard->GetData4() != 0);
+        return true;
+    }
+} g_citySave;
+}  // namespace
+
+bool LoadCityFile(cSC4App& app, const std::string& path, cRZAutoRefCount<cISC4RegionalCity>* holder) {
     static CityHost cityHost;
     static Factory factory;
     static bool installed = false;
@@ -177,6 +216,9 @@ bool LoadCityFile(cSC4App& app, const std::string& path) {
             return segment->AsIGZPersistDBSegment();
         };
         hooks.readLoadSaveVersion = [](cIGZPersistDBSegment* segment) { return sc4::SC4ReadAppLoadSaveVersion(segment); };
+        hooks.writeLoadSaveVersion = [](cIGZPersistDBSegment* segment) { return sc4::SC4WriteAppLoadSaveVersion(segment); };
+        hooks.writeRegionalCity = [](cIGZPersistDBSegment* segment, cISC4RegionalCity* city) { return sc4::SC4WriteRegionalCity(segment, city); };
+        hooks.readRegionalCity = [](cIGZPersistDBSegment* segment, cRZAutoRefCount<cISC4RegionalCity>& out) { return sc4::SC4ReadRegionalCity(segment, out); };
         // SC4CreateSavePathForCity (0x1001e98a4 -> 0x1001e9aa9): "City - <name>.sc4", sanitised, resolved in the current region's
         // directory (natively the directory the open city was read from), " (n)" appended while another city's file holds the name.
         hooks.createSavePathForCity = [](const cRZString& cityName, std::uint32_t, cRZString& out) {
@@ -187,6 +229,17 @@ bool LoadCityFile(cSC4App& app, const std::string& path) {
             const std::size_t slash = currentPath.rfind('/');
             if (slash == std::string::npos) { out = current; return; }   // no directory known: the file it came from
             const std::string directory = currentPath.substr(0, slash + 1);
+            // The city's own file already carries its name ("City - <name>.sc4" or "City - <name> (n).sc4"): it is kept.
+            // Only a renamed city moves to a new file.
+            cRZString ownName;
+            sc4::SC4SanitizeFileName(cRZString((std::string("City - ") + cityName.ToChar()).c_str()), ownName);
+            const std::string stem = ownName.ToChar(), file = currentPath.substr(slash + 1);
+            if (file.size() > stem.size() + 4 && file.compare(0, stem.size(), stem) == 0 && file.compare(file.size() - 4, 4, ".sc4") == 0) {
+                const std::string rest = file.substr(stem.size(), file.size() - 4 - stem.size());
+                const bool numbered = rest.size() > 3 && rest.compare(0, 2, " (") == 0 && rest.back() == ')' &&
+                                      rest.find_first_not_of("0123456789", 2) == rest.size() - 1;
+                if (rest.empty() || numbered) { out = current; return; }
+            }
             for (unsigned copy = 1;; ++copy) {
                 std::string name = std::string("City - ") + cityName.ToChar();
                 if (copy > 1) name += " (" + std::to_string(copy) + ")";
@@ -198,12 +251,18 @@ bool LoadCityFile(cSC4App& app, const std::string& path) {
             }
         };
         hooks.notify = [](const std::string& title, const std::string& text) { std::printf("notify: %s - %s\n", title.c_str(), text.c_str()); };
-        hooks.loadText = [](std::uint32_t, std::uint32_t) { return std::string(); };
+        hooks.loadText = [](std::uint32_t group, std::uint32_t instance) {
+            cRZString text;
+            return LoadLocalizedString(group, instance, text) ? std::string(text.ToChar()) : std::string();
+        };
         hooks.busy = [](bool) {};
         hooks.flushGraphics = [] {};
         hooks.destroyCurrentScreen = [] { if (g_screens.destroyCurrentScreen) g_screens.destroyCurrentScreen(); };
         hooks.createCityScreen = [] { if (g_screens.createCityScreen) g_screens.createCityScreen(); };
         hooks.createRegionScreen = [] { if (g_screens.createRegionScreen) g_screens.createRegionScreen(); };
+        static bool subscribed = false;
+        if (std::getenv("SC4_DEBUG")) std::printf("save: message server %p\n", static_cast<void*>(SL::spMS2));
+        if (!subscribed && SL::spMS2) subscribed = SL::spMS2->AddNotification(&g_citySave, kMessageSaveStarted);
         RegisterExemplarFactories();
         InstallStubHosts();
         InstallCityProbeBindings();
@@ -213,10 +272,27 @@ bool LoadCityFile(cSC4App& app, const std::string& path) {
         InstallDemandSimulatorHost();
         InstallLotConfigurationHosts();
     }
-    const bool loaded = app.LoadCity(cRZString(path.c_str()), nullptr);
+    ForgetLotSerializables();
+    const bool loaded = app.LoadCity(cRZString(path.c_str()), holder);
     // The city-started message 0x26d31ec1 is not posted natively: the weather simulator's catch-up (DoPostCityInit) runs here,
     // after cSC4City::Init has initialised the components (the city view attached during the load, before them).
     if (loaded) WeatherPostCityInit();
+    // SC4_ROUNDTRIP=1 (dev switch, sandboxed tests only): the first city opened is saved over its own file at once and the
+    // saved file is opened again, so one headless run shows whether every class reads back what it wrote.
+    static bool roundTripDone = false;
+    if (loaded && !roundTripDone && std::getenv("SC4_ROUNDTRIP")) {
+        roundTripDone = true;
+        const bool saved = app.SaveCity(false);
+        cRZString savedPath;
+        if (sc4::cSC4City* city = HostCity()) city->GetCitySaveFilePath(savedPath);
+        std::printf("roundtrip: save %s -> %s\n", saved ? "ok" : "FAILED", savedPath.ToChar());
+        std::fflush(stdout);
+        if (saved) {
+            const bool reloaded = LoadCityFile(app, savedPath.ToChar(), holder);
+            std::printf("roundtrip: reload %s\n", reloaded ? "ok" : "FAILED");
+            return reloaded;
+        }
+    }
     std::printf("city: %s %s (%zu classes missing)\n", path.c_str(), loaded ? "loaded" : "FAILED", factory.missing.size());
     return loaded;
 }

@@ -547,12 +547,15 @@ bool cSC4OrdinanceSimulator::Read(cIGZIStream& stream) {
         void* ordinance = nullptr;
         if (serializable->QueryInterface(kGZIID_cISC4Ordinance, &ordinance) && ordinance) {
             auto* o = static_cast<cISC4Ordinance*>(ordinance);          // reference kept by the map
-            auto existing = ordinances_.find(o->GetID());
+            // keyed by the class id (serializable vslot 0x14), as the original: an ordinance whose record loads after this
+            // one is not read yet, so its own id is still 0 here
+            const std::uint32_t key = serializable->GetGZCLSID();
+            auto existing = ordinances_.find(key);
             if (existing != ordinances_.end()) {
                 existing->second->Release();
                 existing->second = o;
             } else {
-                ordinances_[o->GetID()] = o;
+                ordinances_[key] = o;
             }
         }
         serializable->Release();

@@ -20,6 +20,8 @@
 #include "gz/cIGZSerializable.h"
 #include "gz/cIGZIStream.h"
 #include "gz/cIGZOStream.h"
+#include "sc4/RetainedReference.h"
+#include "sc4/RandomIterator.h"
 #include "sc4/SCPropertyHelp.h"
 #include "sc4/cSC4ResponseCurve.h"
 #include "sc4/cSC4SimGrid.h"
@@ -139,6 +141,7 @@ public:
     std::uint32_t Release() override;
     bool Write(cIGZOStream& stream) const override;
     bool ReadCityRecord(cIGZIStream& stream);   // @ 0x100096588
+    bool WriteCityRecord(cIGZOStream& stream) const;   // the city-file layout ReadCityRecord reads
     bool Read(cIGZIStream& stream) override;
     std::uint32_t GetGZCLSID() const override { return kGZCLSID_cSC4PollutionSimulator; }
 
@@ -288,6 +291,13 @@ private:
     std::uint32_t refCount_ = 0;                                        // +0x24
     PollutionTunables tunables_;
     SimGridPtr<std::int16_t> valueGrids_[4];          // +0x78
+    // what a city file carries that the port does not model (written back as read)
+    bool fromCityFile_ = false;
+    std::uint32_t fileB8_ = 0, fileBC_ = 0, file2e4_ = 0;
+    std::int64_t file2d0_ = 0, file2d8_ = 0, file250_ = 0, file258_ = 0;
+    RandomIterator fileWalk_;
+    cRetainedReference fileWaterGrid_;
+    cRetainedReferences fileLists_[4];
     SimGridPtr<std::int16_t> sourceGrids_[4];         // +0x98
     cSC4ResponseCurve propRequestCurve_, garbageTransportCapacity_, ageCurve_, efficiencyCurve_, fundingEfficiencyCurve_;
     std::list<IPollutionOccupant*> waterTreatment_, incinerators_, wasteToEnergy_, recyclingCenters_;

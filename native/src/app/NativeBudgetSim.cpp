@@ -185,9 +185,24 @@ struct BudgetEnvironment final : sc4::IBudgetSimEnvironment {
     std::string BuildingName(std::uint32_t) override { return {}; }
 };
 
+// The history warehouse's calendar and agent registration (the original asks the simulator directly): without it every
+// point it stores lands on day 0.
+class HistoryEnvironment final : public sc4::IHistoryEnvironment {
+public:
+    std::uint32_t SimDayNumber() override { sc4::cSC4Simulator* sim = Simulator(); return sim ? sim->GetSimDateNumber() : 0; }
+    void SimYearMonth(int& year, int& month) override {
+        year = month = 0;
+        if (sc4::cSC4Simulator* sim = Simulator()) sim->GetSimDate(&year, &month, nullptr, nullptr, nullptr);
+    }
+    void AddAgent(cIGZMessageTarget2* target, int period, const char* name, std::uint32_t flags) override { AddCitySimulatorAgent(target, period, name, flags); }
+    void RemoveAgent(cIGZMessageTarget2* target) override { RemoveCitySimulatorAgent(target); }
+};
+
 }  // namespace
 
 void InstallBudgetSimHosts() {
+    static HistoryEnvironment history;
+    sc4::SetHistoryEnvironment(&history);
     static BudgetServices services;
     static BudgetEnvironment environment;
     cSC4BudgetSimulator::SetServices(&services);
