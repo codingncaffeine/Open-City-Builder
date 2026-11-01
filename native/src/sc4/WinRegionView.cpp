@@ -1,5 +1,8 @@
 #include "sc4/WinRegionView.h"
 
+#include <cstdio>
+#include <cstdlib>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -609,7 +612,7 @@ void cSC4WinRegionView::UpdateSignpost(cSC4RegionViewCity& city) {   // @ 0x1007
     }
     IRegionCityView* regional = host ? host->FindRegionalCity(regionIndex_, city.x, city.z) : nullptr;
     if (!((regional && (tutorialGhost || regional->GetEstablished())) || forcedSignposts_)) return;
-    cGZPersistResourceKey key{kRegionViewSignpostKeyType, 0, kRegionViewSignpostKeyInstance};
+    cGZPersistResourceKey key{0, kRegionViewSignpostKeyGroup, kRegionViewSignpostKeyInstance};
     std::uint32_t windowId = kRegionViewSignpostWindowId;
     if (!tutorialGhost) {
         key.instance = signpostType_;
@@ -625,6 +628,9 @@ void cSC4WinRegionView::UpdateSignpost(cSC4RegionViewCity& city) {   // @ 0x1007
         }
     }
     cIGZWin* window = host ? host->CreateWindowFromScript(key, this, windowId) : nullptr;
+    if (std::getenv("SC4_DEBUG"))
+        std::fprintf(stderr, "region view: signpost for %d,%d key %08x/%08x/%08x id %08x -> %p (regional %p, forced %d)\n", city.x, city.z,
+                     key.type, key.group, key.instance, windowId, static_cast<void*>(window), static_cast<void*>(regional), forcedSignposts_ ? 1 : 0);
     if (city.signpost != window) {
         if (window) window->AddRef();
         cIGZWin* previous = city.signpost;

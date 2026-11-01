@@ -71,7 +71,9 @@ constexpr std::uint32_t kRegionViewIconEffectType[2] = {0, 1};     // (&DAT_100a
 constexpr std::uint32_t kRegionViewAuraBarId = 0x4a553000;         // the signpost's value bar
 constexpr std::uint32_t kRegionViewBarImageGroup = 0x46a006b0;     // cSLBuffer(0, 0x46a006b0, 0x14416327, 9, 0)
 constexpr std::uint32_t kRegionViewBarImageInstance = 0x14416327;
-constexpr std::uint32_t kRegionViewSignpostKeyType = 0x96a006b0;
+// The signpost scripts are UI scripts: type 0, group 0x96a006b0 (the first port had the group in the type field, so no
+// signpost window was ever built).
+constexpr std::uint32_t kRegionViewSignpostKeyGroup = 0x96a006b0;
 constexpr std::uint32_t kRegionViewSignpostKeyInstance = 0xca539343;
 constexpr std::uint32_t kRegionViewSignpostWindowId = 0x0a551c53;
 constexpr std::uint32_t kRegionViewSignpostTuningType = 0x6534284a;
