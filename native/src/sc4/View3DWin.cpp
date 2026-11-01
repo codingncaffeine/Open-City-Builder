@@ -2,6 +2,7 @@
 #include "sc4/View3DWin.h"
 
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <utility>
@@ -2714,7 +2715,8 @@ void cSC4View3DWin::DoPanelCommandGUI(std::uint32_t command) {
         case 0x6a935ca4u:                                               // the "new city" button (panel 1)
             toggle = buttonState(0xc988bc79u);
             panel = 1;
-            if (!toggle && host_ && !host_->CanInvokeZoningTool() && !host_->ShowEstablishCityDialog()) {
+            // Turning mayor mode on in a city not yet established asks for its names first (0x10078c4a0).
+            if (toggle && host_ && !host_->CanInvokeZoningTool() && !host_->ShowEstablishCityDialog()) {
                 // The dialog was refused: the button's toggle is put back and nothing opens (0x10078c4b6).
                 if (gz::cIGZWinBtn* button = panelButton(0xc988bc79u)) {
                     button->SetBtnFlag(gz::kBtnOn, false);
@@ -2879,7 +2881,7 @@ void cSC4View3DWin::HandleButtonActivated(cIGZWin* sender, cGZMessage& message) 
             }
         }
     }
-    (void)done;
+    if (getenv("SC4_DEBUG")) fprintf(stderr, "city view: button %#x%s\n", button, done ? "" : " (no handler)");
     if (host_) host_->AfterButtonActivated();                           // SL::spCity vslot 0x290 (tutorial) -> vslot 0x40 / 0x70
     Release();
 }

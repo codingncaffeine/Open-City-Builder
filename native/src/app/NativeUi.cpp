@@ -34,6 +34,7 @@
 #include "gz/WinFont.h"
 #include "gz/WinGrid.h"
 #include "gz/WinLineInput.h"
+#include "gz/WinTextEdit.h"
 #include "gz/WinListBox.h"
 #include "gz/WinScrollbar.h"
 #include "gz/WinSlider.h"
@@ -312,6 +313,8 @@ bool InitUiScripts(WinMgr* mgr) {
     gz::RegisterDirectorMaker("cGZWinLineInput", +[]() -> cIGZUnknown* {
         return static_cast<cIGZUnknown*>(static_cast<cIGZWin*>(new gz::cGZWinLineInput(g_mgr, true)));
     });
+    // The edit box (clsid 0x231a1c58): the establish-city dialog's city and mayor names.
+    gz::RegisterDirectorMaker("cGZWinTextEdit", +[]() -> cIGZUnknown* { return MakeWin<gz::cGZWinTextEdit>(); });
     gz::RegisterDirectorMaker("cGZWinGrid", +[]() -> cIGZUnknown* {   // the director's default flags (Mac i386 CreateGZWinGrid 0x0073c2ee)
         return static_cast<cIGZUnknown*>(static_cast<cIGZWin*>(new gz::cGZWinGrid(g_mgr, 0x19bff)));
     });

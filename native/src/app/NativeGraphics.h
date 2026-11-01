@@ -66,6 +66,7 @@ public:
 
     cIGZBufferDrawTarget* QueryDrawTarget() override { return asBuffer_; }
     cIGZBuffer* AsBuffer() { return asBuffer_; }
+    cIGZBuffer* AsGZBuffer() override { return asBuffer_; }
     cGZBuffer* Pixels() { return buffer_; }
     bool OnScreen() const { return onScreen_; }
     // every live buffer (debug dumps of private buffers)

@@ -154,7 +154,10 @@ struct StubView3DWin final : IView3DWinHost {
     cIGZWin* CreateWinAnimationRecorder() override { return {}; }
     void RecorderSetAnimationOutputDirectory(cIGZWin* recorder, const cIGZString& directory, bool create) override {}
     ICityMouseRouter* CityMouseRouter() override { return {}; }
-    bool CanInvokeZoningTool() override { return true; }   // an established city: the start panel stays closed
+    bool CanInvokeZoningTool() override {   // SL::spCity vslot 0xb0: GetEstablished
+        sc4::cSC4City* city = native::HostCity();
+        return city && city->GetEstablished();
+    }
     ITerrainEditor* TerrainEditor() override { return {}; }
     bool GraphicsSystemAllowsSelfScroll() override { return {}; }
     void RunChangeTerrainDialog(int& type) override {}
@@ -290,7 +293,10 @@ struct StubView3DWin final : IView3DWinHost {
     cSC4ViewInputControl* CreateQueryTool(int type, std::uint32_t tipPeriod) override {
         return new cSC4ViewInputControlQuery(static_cast<cSC4ViewInputControlQuery::EQueryType>(type), tipPeriod);
     }
-    bool ShowEstablishCityDialog() override { return {}; }
+    bool ShowEstablishCityDialog() override {
+        sc4::cSC4View3DWin* view = CityView3DWin();
+        return view && native::RunEstablishCityDialog(static_cast<cIGZWin*>(static_cast<cGZWin*>(view)));
+    }
     bool DisasterAlertActive() override { return {}; }
     bool SituationAlertActive() override { return {}; }
     bool SimulatorBusy() override { return {}; }
@@ -330,7 +336,7 @@ struct StubView3DWin final : IView3DWinHost {
     // SC4MakeMoneyString: the simoleon sign and the grouped amount ("§1,290,385", "-§500")
     void MakeMoneyString(std::int64_t value, cIGZString& out) override {
         const std::string grouped = GroupDigits(value < 0 ? -value : value);
-        out.AssignFromCString(((value < 0 ? "-\xa7" : "\xa7") + grouped).c_str());
+        out.AssignFromCString(((value < 0 ? "-\xc2\xa7" : "\xc2\xa7") + grouped).c_str());   // UTF-8, as the fonts decode
     }
     bool SimulationDate(int& day, int& month, int& year, int& startYear) override {
         auto* simulator = CityComponentAs<cSC4Simulator>(CityComponent::Simulator, kGZCLSID_cSC4Simulator);

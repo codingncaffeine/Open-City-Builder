@@ -39,6 +39,8 @@ void RunGameOptionsDialog(std::function<std::uint8_t*()> preferences);
 void RunAudioOptionsDialog(std::function<std::uint8_t*()> preferences);
 // The modal "Graphic Options" dialog (cSC4VideoPreferencesWinProc) over the same blob.
 void RunGraphicOptionsDialog(std::function<std::uint8_t*()> preferences);
+// cSC4View3DWin::DoEstablishCityDialog: the city and mayor names and the difficulty, then the city is established. True on OK.
+bool RunEstablishCityDialog(cIGZWin* view);
 // The game's logical height for the next start (<documents>/display.conf; 0 = none chosen).
 int LoadDisplayHeight();
 // The window's size and the game's logical height (the main sets them); the resolution choices offered for them.

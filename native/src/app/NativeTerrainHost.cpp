@@ -16,6 +16,7 @@
 #include "sc4/ISC4City.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/cSC4City.h"
+#include "app/NativeCity.h"
 #include "sc4/Exemplar.h"
 #include "sc4/cSTETerrain.h"
 #include "sc4/SurfaceWater.h"
@@ -241,7 +242,7 @@ struct NativeTerrainHost final : ITerrainHost {
     void FloraBrushList(std::vector<std::uint32_t>& ids) override {}
     bool FloraOccupantIsBrushable(std::uint32_t id) override { return {}; }
     void AddFloraAt(float x, float y, float z) override {}
-    bool CityEstablished() override { return true; }
+    bool CityEstablished() override { sc4::cSC4City* city = native::HostCity(); return city && city->GetEstablished(); }
     void AddFloraAura(float x, float z) override {}
     bool AddOverlayDecal(cIGZUnknown* overlay, const cGZPersistResourceKey& key, const TerrainPoint& position, float strength, float randomAmount) override { return {}; }
     void ListBrushResources(std::vector<cGZPersistResourceKey>& out) override { ListResources(out, 0x6534284a, 0x6a01fc2a); }

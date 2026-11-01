@@ -337,12 +337,12 @@ bool cGZWinLineInput::UpdateViewLocation() {
 void cGZWinLineInput::draw_text(int x, int y, std::uint32_t offset, std::uint32_t count, int colorIndex) {
     const std::uint32_t color = fontColors_[colorIndex];
     if (color == kWinUnsetColor) {
-        font_->DrawTextLine(drawBuffer_, x, y, text_.Data() + offset, count, kFontDefaultColor, kFontDefaultColor,
+        font_->DrawTextLine(FontTarget(drawBuffer_), x, y, text_.Data() + offset, count, kFontDefaultColor, kFontDefaultColor,
                             nullptr, nullptr);
         return;
     }
     const std::string part(text_.Data() + offset, count);
-    font_->DrawTextLine(drawBuffer_, x, y, part.c_str(), static_cast<std::uint32_t>(part.size()), color,
+    font_->DrawTextLine(FontTarget(drawBuffer_), x, y, part.c_str(), static_cast<std::uint32_t>(part.size()), color,
                         kFontDefaultColor, nullptr, nullptr);
 }
 

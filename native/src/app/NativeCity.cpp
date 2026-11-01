@@ -20,6 +20,7 @@
 #include "sc4/ISC4City.h"
 #include "sc4/SaveGame.h"
 #include "sc4/cSC4City.h"
+#include "sc4/Simulator.h"
 
 cIGZSerializable* CreateCityProbeSerializable(std::uint32_t classId);   // city_probe_creators.cpp
 cIGZSerializable* CreateCityProbeSerializable2(std::uint32_t classId);
@@ -53,6 +54,16 @@ struct CityHost final : sc4::ICityHost {
     void ShutdownComponent(sc4::CityComponent component, cIGZUnknown* object) override { RunCityComponentLifecycle(component, object, false); }
     // cSC4City::Init has created and initialised the components: the locator's OnCityCreate / OnCityInit.
     void OnCityInitialized() override { BindCityServices(g_hostCity); ReportCityWiring(); }
+    // SetEstablished: the simulator's SetCityEstablished (vslot 0x108) switches the agents of an established city on.
+    void OnEstablishedChanged(bool established) override {
+        sc4::cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::Simulator) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(0xe4fda3d4, &raw) || !raw) return;
+        auto* serializable = static_cast<cIGZSerializable*>(raw);
+        if (serializable->GetGZCLSID() == sc4::kGZCLSID_cSC4Simulator) static_cast<sc4::cSC4Simulator*>(serializable)->SetCityEstablished(established);
+        serializable->Release();
+    }
 };
 
 // Every serialized object of a city file is created from its class id, as the game's serializer does through GZCOM

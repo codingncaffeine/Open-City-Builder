@@ -47,6 +47,8 @@
 #include "gz/GZFont.h"
 #include "gz/GZFramework.h"
 #include "gz/WinFont.h"
+#include "gz/WinTextEdit.h"
+#include "gz/WinStyle.h"
 #include "render/gd/GLGDriver.h"
 #include "app/NativeAutomata.h"
 #include "app/NativeLighting.h"
@@ -299,6 +301,15 @@ struct FontSource final : gz::IWinFontSource {
     }
 } gFontSource;
 
+// RZ::WCM()'s font styles as the edit controls ask for them (cGZWinTextEdit, cGZWinLineInput): the same fonts as the font
+// source, as cIGZFont. Without it the edit boxes had no font and crashed painting.
+struct StyleManager final : gz::IWinStyleManager {
+    cIGZUnknown* GetFontStyle(std::uint32_t style) override {
+        gz::IWinFont* font = gFontSource.Font(style);
+        return font ? font->AsFont() : nullptr;
+    }
+} gStyleManager;
+
 // ---- images: PNG through libpng, uncompressed BMP by hand -> a CPU buffer with straight alpha (B, G, R, A in memory) ------
 cGZBuffer* NewBuffer(std::uint32_t w, std::uint32_t h) {
     auto* buffer = new cGZBuffer();
@@ -437,6 +448,23 @@ sc4::cWinSC4App* gAppWindow = nullptr;
 
 // What the splash screen reaches outside itself (SPLASH-1): the game's script window builder, the message server, the driver
 // clear, and the application window's screen swap.
+// The edit boxes' system services: the clipboard and the key state from SDL. The control lowercases A-Z unless shift or caps
+// lock reads as down (the original saw upper-case virtual-key characters), so a missing host typed every name in lower case.
+struct TextEditHost final : gz::IWinTextEditHost {
+    bool ClipboardGetText(cIGZString& out) override {
+        if (!SDL_HasClipboardText()) return false;
+        char* text = SDL_GetClipboardText();
+        if (!text) return false;
+        out.AssignFromCString(text);
+        SDL_free(text);
+        return true;
+    }
+    void ClipboardSetText(const cIGZString& text) override { SDL_SetClipboardText(text.ToChar()); }
+    std::uint32_t ModifierState() override { return std::uint32_t(SDL_GetModState()); }   // SDL_KMOD_LCTRL | RCTRL = 0xc0
+    bool CapsLockOn() override { return (SDL_GetModState() & SDL_KMOD_CAPS) != 0; }
+    bool ShiftDown() override { return (SDL_GetModState() & SDL_KMOD_SHIFT) != 0; }
+} gTextEditHost;
+
 struct SplashHost final : sc4::ISplashScreenHost {
     struct Unknown final : cIGZUnknown {
         bool QueryInterface(std::uint32_t, void**) override { return false; }
@@ -554,6 +582,7 @@ bool Boot() {
     gMgr->GetMainWindow()->SetArea(0, 0, gW, gH);
     if (!InitFont()) std::printf("font: FAILED to initialise\n");
     gz::SetWinFontSource(&gFontSource);
+    gz::SetWinStyleManager(&gStyleManager);
     native::InstallButtonSounds();   // the window buttons' host: caption fonts (and sounds, once there is audio output)
 
     const bool ok = native::RunBoot(true, true, gDriver.get(), [&](cGZFramework& framework, cSC4App& app) {
@@ -1002,6 +1031,7 @@ int main(int argc, char** argv) {
     std::printf("game data: %s\n", platform::GameDataDir().c_str());
     if (interactive) SDL_StartTextInput(gWindow);
 
+    gz::SetWinTextEditHost(&gTextEditHost);
     gDriver = gd::cGLGDriver::Create(std::uint32_t(gW), std::uint32_t(gH), std::uint32_t(windowW), std::uint32_t(windowH));
     if (!gDriver) { std::printf("no usable OpenGL driver\n"); return 1; }
     Boot();
@@ -1024,13 +1054,28 @@ int main(int argc, char** argv) {
         gMgr->Plot();
         gGraphics->Services().Tick();
         Present();
-        // debug: SC4_MODALINPUT="FRAME:X:Y,..." clicks inside the dialog at those frames of it; SC4_MODALFRAMES its length (30)
+        // debug: SC4_MODALINPUT="FRAME:X:Y,..." clicks inside the dialog at those frames of it (FRAME:type:TEXT, FRAME:key:VK type); SC4_MODALFRAMES its length (30)
         if (!interactive) {
             if (const char* input = std::getenv("SC4_MODALINPUT")) {
                 std::stringstream list(input);
                 std::string item;
                 while (std::getline(list, item, ',')) {
                     int at = -1, x = 0, y = 0;
+                    char text[128] = {};
+                    // "FRAME:type:TEXT" types the characters, "FRAME:key:VK" presses and releases one virtual key
+                    if (std::sscanf(item.c_str(), "%d:type:%127[^,]", &at, text) == 2) {
+                        if (at != frame + 1) continue;
+                        for (const char* c = text; *c; ++c) gMgr->GZWinMsgPost_Keyboard(kGZMsgCharacter, std::uint32_t(*c), 0);
+                        std::printf("modal input: type \"%s\" at frame %d\n", text, at);
+                        continue;
+                    }
+                    if (std::sscanf(item.c_str(), "%d:key:%d", &at, &x) == 2) {
+                        if (at != frame + 1) continue;
+                        gMgr->GZWinMsgPost_Keyboard(kGZMsgKeyDown, std::uint32_t(x), 0);
+                        gMgr->GZWinMsgPost_Keyboard(kGZMsgKeyUp, std::uint32_t(x), 0);
+                        std::printf("modal input: key %d at frame %d\n", x, at);
+                        continue;
+                    }
                     if (std::sscanf(item.c_str(), "%d:%d:%d", &at, &x, &y) == 3 && at == frame + 1) {
                         gMgr->GZWinMsgPost_Mouse(kGZMsgMouseMove, x, y, 0);
                         gMgr->GZWinMsgPost_Mouse(kGZMsgMouseDownL, x, y, 0);

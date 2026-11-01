@@ -24,6 +24,7 @@
 #include "gz/WinInterfaces.h"
 #include "rz/cRZString.h"
 
+class cIGZBuffer;
 class cIGZBufferDrawTarget;
 namespace gz { class IDrawTargetBuffer; }
 
@@ -50,8 +51,15 @@ public:
     virtual bool Blt(IWinBuffer* source, const cRZRect& sourceRect, const cRZRect& destRect) { (void)source; (void)sourceRect; (void)destRect; return true; }   // vslot 0xf8 (no clip)
     virtual bool GetShadeColor(std::uint8_t& r, std::uint8_t& g, std::uint8_t& b, std::uint8_t& a) { (void)r; (void)g; (void)b; (void)a; return false; }   // QueryInterface(0x86d72b57) vslot 0x20
     virtual cIGZBufferDrawTarget* QueryDrawTarget() { return nullptr; }      // QueryInterface(0xab300b2b)
+    // The buffer itself as the font renderers draw into it (cIGZFont::DrawTextLine's target); null when there is none.
+    virtual cIGZBuffer* AsGZBuffer() { return nullptr; }
     virtual gz::IDrawTargetBuffer* AsDrawSource() { return nullptr; }        // the buffer as a draw-context blit source
 };
+// What a control hands cIGZFont::DrawTextLine: the buffer's cIGZBuffer (the original's drawBuffer_ is one), else the window buffer.
+inline void* FontTarget(IWinBuffer* buffer) {
+    cIGZBuffer* gz = buffer ? buffer->AsGZBuffer() : nullptr;
+    return gz ? static_cast<void*>(gz) : static_cast<void*>(buffer);
+}
 
 // Services of the graphics system the windows need.
 class IWinGraphics {

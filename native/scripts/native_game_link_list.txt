@@ -428,7 +428,9 @@ src/app/hosts/StubDisaster.cpp
 src/app/hosts/StubEffectTool.cpp
 src/app/hosts/StubEffects.cpp
 src/app/hosts/StubEffectsManager.cpp
-src/app/hosts/StubEstablishCity.cpp
+src/app/NativeEstablishCity.cpp
+src/app/NativeBudgetSim.cpp
+src/sc4/UIFilters.cpp
 src/app/hosts/StubFeature.cpp
 src/app/hosts/StubFlora.cpp
 src/app/hosts/StubFloraSimulator.cpp

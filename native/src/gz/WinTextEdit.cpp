@@ -1927,23 +1927,23 @@ bool cGZWinTextEdit::GZPaint() {   // 0x100261fe6
                 if (!unfocused) selectionPath = partStart <= lineEnd && partEnd != partStart && lineStart < partEnd;
                 else selectionPath = !(lineEnd < partStart || partEnd <= lineStart || partEnd == partStart || !(flags_ & kTEKeepHighlight));
                 if (!selectionPath) {
-                    font_->DrawTextLine(drawBuffer_, x, y, data + lineStart, static_cast<std::uint32_t>(length), textColor, backColor, &clip, nullptr);
+                    font_->DrawTextLine(FontTarget(drawBuffer_), x, y, data + lineStart, static_cast<std::uint32_t>(length), textColor, backColor, &clip, nullptr);
                 } else {
                     const int lineWidth = font_->GetStringWidth(data + lineStart, static_cast<std::uint32_t>(length));
                     if (lineStart < partStart || partEnd < lineStart + static_cast<std::uint32_t>(length)) {
-                        font_->DrawTextLine(drawBuffer_, x, y, data + lineStart, static_cast<std::uint32_t>(length), textColor, backColor, &clip, nullptr);
+                        font_->DrawTextLine(FontTarget(drawBuffer_), x, y, data + lineStart, static_cast<std::uint32_t>(length), textColor, backColor, &clip, nullptr);
                         int before = 0;
                         if (partStart != lineStart) before = font_->GetStringWidth(data + lineStart, partStart - lineStart);
                         const int selWidth = font_->GetStringWidth(data + partStart, partEnd - partStart);
                         cRZRect fill{x + before, y, x + before + selWidth, y + lineHeight_};
                         context->SetColor(colors_[7]);
                         context->Fill(fill);
-                        font_->DrawTextLine(drawBuffer_, fill.left, y, data + partStart, partEnd - partStart, selectedText, selectedBack, &clip, nullptr);
+                        font_->DrawTextLine(FontTarget(drawBuffer_), fill.left, y, data + partStart, partEnd - partStart, selectedText, selectedBack, &clip, nullptr);
                     } else {
                         cRZRect fill{x, y, x + lineWidth, y + lineHeight_};
                         context->SetColor(colors_[7]);
                         context->Fill(fill);
-                        font_->DrawTextLine(drawBuffer_, x, y, data + lineStart, static_cast<std::uint32_t>(length), selectedText, selectedBack, &clip, nullptr);
+                        font_->DrawTextLine(FontTarget(drawBuffer_), x, y, data + lineStart, static_cast<std::uint32_t>(length), selectedText, selectedBack, &clip, nullptr);
                     }
                 }
             }

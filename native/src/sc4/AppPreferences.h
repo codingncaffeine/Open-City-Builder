@@ -38,6 +38,10 @@ constexpr std::size_t kAppResetBlock = 0x4ac;      // 0x40 bytes zeroed by SaveP
 constexpr std::size_t kAppResetByte = 0x4ef;       // u8: set to 1 by SavePreferences
 constexpr std::size_t kVideoAutoConfigure = 0xf0c; // u8
 constexpr std::size_t kVideoHardwareDriver = 0xf13;// u8: cleared when the hardware driver fails to initialise
+// fields the "establish city" dialog reads and writes (cSC4View3DWin::DoEstablishCityDialog)
+constexpr std::size_t kLastCityName = 0x06c;      // 0x200 bytes: the last city name entered
+constexpr std::size_t kMayorName = 0x26c;         // 0x200 bytes: the mayor name, offered again for the next city
+constexpr std::size_t kDifficultyLevel = 0x46c;   // u32: the last difficulty chosen (0 easy .. 2 hard)
 constexpr std::size_t kVideoWidth = 0xf1c;         // u32 (default 1024)
 constexpr std::size_t kVideoHeight = 0xf20;        // u32 (default 768)
 constexpr std::size_t kVideoColorDepth = 0xf24;    // u32
