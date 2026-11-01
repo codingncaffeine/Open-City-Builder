@@ -572,8 +572,7 @@ bool cSC4ResidentialSimulator::ReadCityRecord(cIGZIStream& stream) {
         t.F32(stream, &d.value94);
         t.U32(stream, &d.messageId);
     };
-    static_assert(sizeof(population_) == sizeof(std::int32_t));
-    t.S32(stream, reinterpret_cast<std::int32_t*>(&population_));   // +0x60
+    t.S32(stream);                                            // i386 +0x34
     for (int i = 0; i < 3; ++i) t.Ref(stream);
     t.S32(stream);
     for (int i = 0; i < 3; ++i) t.Ref(stream);
@@ -591,7 +590,8 @@ bool cSC4ResidentialSimulator::ReadCityRecord(cIGZIStream& stream) {
     t.F32(stream);
     t.U32(stream);
     t.Bool(stream, &fundingChanged_);                         // +0x12c
-    t.S32(stream);
+    static_assert(sizeof(population_) == sizeof(std::int32_t));
+    t.S32(stream, reinterpret_cast<std::int32_t*>(&population_));   // i386 +0xa4, read just before the department data
     department(health_);                                      // +0x160
     department(education_);                                   // +0x200
     for (int i = 0; i < 3; ++i) occupantList();               // +0x2d0 / +0x2e8 / +0x300

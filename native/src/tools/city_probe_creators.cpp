@@ -13,6 +13,7 @@
 // constructed here: there is no serialization to run, so they stay on the probe's uncreatable list.
 #include <cstdint>
 
+#include "gz/SimHostRegistry.h"
 #include "rz/cRZRandom.h"
 #include "sc4/AutomataControllerManager.h"
 #include "sc4/AutomataGenerator.h"
@@ -189,7 +190,9 @@ cIGZSerializable* CreateCityProbeSerializable(std::uint32_t classId) {
             return object;
         }
         case 0xe990c18e: {  // cSC4LandValueSimulator(ILandValueHost*)
-            auto* object = new cSC4LandValueSimulator(CityProbeLandValueHost());
+            // the application's installed host (the game's NativeSimHosts.cpp) when there is one, else the probe binding
+            ILandValueHost* host = gzcom::GetSimHosts().landValue;
+            auto* object = new cSC4LandValueSimulator(host ? host : CityProbeLandValueHost());
             object->AddRef();
             return object;
         }

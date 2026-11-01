@@ -270,6 +270,10 @@ std::int16_t GrowthDeveloperDesirabilityAt(void* developer, unsigned x, unsigned
     sc4::cSC4SimGrid<std::int16_t>* map = developer ? static_cast<sc4::cSC4GrowthDeveloper*>(developer)->GetDesirabilityMap() : nullptr;
     return map ? map->GetCellValue(static_cast<std::int32_t>(x), static_cast<std::int32_t>(z)) : 0;
 }
+sc4::cSC4SimGrid<std::int16_t>* GrowthDeveloperDesirabilityMap(std::uint32_t type) {
+    sc4::cSC4GrowthDeveloper* d = GrowthDeveloperOfType(type);
+    return d ? d->GetDesirabilityMap() : nullptr;
+}
 std::vector<void*> AllGrowthDevelopers() {
     std::vector<void*> out;
     for (sc4::cSC4GrowthDeveloper* d : g_developers) out.push_back(d);

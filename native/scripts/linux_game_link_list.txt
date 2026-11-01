@@ -596,6 +596,7 @@ src/app/NativeGrowthDevelopers.cpp
 src/app/NativeGrowthMaps.cpp
 src/app/NativeTractDevelopment.cpp
 src/app/NativeDemandHost.cpp
+src/app/NativeSimHosts.cpp
 src/app/NativeLotConfigHost.cpp
 src/app/NativeCatalogUi.cpp
 src/sc4/WinCalloutBox.cpp

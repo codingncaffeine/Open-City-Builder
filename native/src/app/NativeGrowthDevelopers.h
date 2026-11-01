@@ -28,6 +28,7 @@ void InstallTractDeveloperHost();
 std::uint32_t GrowthDeveloperKind(void* developer);
 sc4::cSC4Demand* GrowthDeveloperDemandChannel(void* developer);
 std::int16_t GrowthDeveloperDesirabilityAt(void* developer, unsigned x, unsigned z);
+sc4::cSC4SimGrid<std::int16_t>* GrowthDeveloperDesirabilityMap(std::uint32_t developerType);   // the land value simulator
 std::vector<void*> AllGrowthDevelopers();
 void InstallDemandSimulatorHost();   // NativeDemandHost.cpp
 void InstallLotConfigurationHosts();   // NativeLotConfigHost.cpp: the lot configuration manager and the lot configurations   // the demand simulator's IDemandSimulatorHost (DEMAND-1)   // the tract developer's ITractDeveloperHost (growth layer 3)

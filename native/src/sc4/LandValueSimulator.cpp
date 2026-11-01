@@ -421,8 +421,8 @@ void cSC4LandValueSimulator::DoIdle(std::uint32_t budgetMilliseconds) {
             stage_ = 8;
         } else {
             DesirabilityContext context{developerCursor_->second, developerCurve_.get()};
-            ProcessTwoGridsWithCallback<std::uint8_t, std::int16_t>(*scratch_, *host_->DesirabilityMap(developerCursor_->first),
-                                                                    AddDesirability, &context);
+            if (cSC4SimGrid<std::int16_t>* map = host_->DesirabilityMap(developerCursor_->first))   // the port's host: null until the developer exists
+                ProcessTwoGridsWithCallback<std::uint8_t, std::int16_t>(*scratch_, *map, AddDesirability, &context);
             ++developerCursor_;
         }
         break;

@@ -18,7 +18,7 @@ using namespace sc4;
 // Components whose class and Init are recovered but whose host in the native game is still the city probe's neutral binding
 // (src/tools/city_probe_bindings.cpp): their Init dereferences services the probe does not answer, so they stay uninitialised until a
 // native host replaces the probe. Each entry is a to-do (SIM-HOST-*).
-constexpr const char* kProbeHosted = ",LandValueSimulator,TrafficNetwork,";
+constexpr const char* kProbeHosted = ",TrafficNetwork,";
 // Components the native city view initialises itself, after its render stack is up (NativeCityView.cpp: the terrain needs the view's
 // services for its first surface pass, the occupant manager needs the automata host installed first). Initialised here they come up
 // half-wired and their init guard then stops the second call (the terrain drew black). Ordering divergence until those services exist

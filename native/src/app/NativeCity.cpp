@@ -2,6 +2,7 @@
 #include <filesystem>
 // Loading a city file in the native application (see NativeCity.h). The factory and city host are the ones the city probe
 // (src/tools/city_probe.cpp) proved against the retail files.
+#include "app/NativeSimHosts.h"
 #include "app/NativeCitySystems.h"
 #include "app/NativeRuntimeWire.h"
 #include "app/NativeCity.h"
@@ -266,6 +267,7 @@ bool LoadCityFile(cSC4App& app, const std::string& path, cRZAutoRefCount<cISC4Re
         RegisterExemplarFactories();
         InstallStubHosts();
         InstallCityProbeBindings();
+        InstallNativeSimHosts();            // land value (more simulators move off the probe bindings here)
         InstallBuildingDevelopmentHost();   // the real hosts replace the generated stubs before the components Init
         InstallGrowthDeveloperHost();
         InstallTractDeveloperHost();
