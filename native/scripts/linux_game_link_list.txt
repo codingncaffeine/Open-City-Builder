@@ -595,6 +595,8 @@ src/app/NativeBuildingDevelopment.cpp
 src/app/NativeGrowthDevelopers.cpp
 src/app/NativeGrowthMaps.cpp
 src/app/NativeTractDevelopment.cpp
+src/app/NativeLotConstruction.cpp
+src/app/NativeProps.cpp
 src/app/NativeDemandHost.cpp
 src/app/NativeSimHosts.cpp
 src/app/NativeLotConfigHost.cpp

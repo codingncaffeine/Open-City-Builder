@@ -14,6 +14,7 @@
 
 #include "app/NativeBuildingDevelopment.h"
 #include "app/NativeGrowthDevelopers.h"
+#include "app/NativeLotConstruction.h"
 #include "app/NativeLotSerial.h"
 #include "app/NativeZoneOverlay.h"
 #include "platform/Unwired.h"
@@ -300,8 +301,13 @@ struct LotHost final : ILotHost {
     void OnDeveloperLotAbandoned(std::uint16_t wealthIndex) override {}
     std::uint8_t LandValueAt(int x, int z) override { return {}; }
     std::uint32_t RandomPercent() override { static cRZRandom random(0x107u); return random.RandomUint32Uniform(100); }
-    cISC4LotConfigurationRef* LotConfigurationById(std::uint32_t id) override { return {}; }
-    void PostLotMessage(std::uint32_t message, const cSC4Lot& snapshot, std::uint32_t oldValue, std::uint32_t newValue, std::uint32_t buildingType, std::int32_t wealth) override {}
+    cISC4LotConfigurationRef* LotConfigurationById(std::uint32_t id) override { return NativeLotConfigurationRef(id); }
+    // PARTIAL: the message (0xe8bda2e7 and the condition change) is not posted to SL::spMS2; the lot developer, which turns a built
+    // lot's base texture, takes the state change directly.
+    void PostLotMessage(std::uint32_t message, const cSC4Lot& snapshot, std::uint32_t oldValue, std::uint32_t newValue, std::uint32_t, std::int32_t) override {
+        if (message != sc4::kMessageLotStateChanged) return;
+        if (cSC4LotDeveloper* developer = LotDeveloper()) developer->DoLotStateChanged(snapshot, oldValue, newValue);
+    }
     void SetLotHighlight(int x, int z, bool on, float altitude) override {}
     std::int32_t TrafficJobs(const cSC4Lot& lot, int kind) override { return {}; }
     void SetTrafficJobs(const cSC4Lot& lot, int kind, std::int32_t jobs) override {}
@@ -359,6 +365,11 @@ std::uint32_t NativeNetworkTypesAt(int x, int z) {
             if (network->IsOfType(type)) types |= 1u << type;
     occupant->Release();
     return types;
+}
+
+sc4::cSC4Lot* NativeLotAtCell(int x, int z, bool exactCell) {
+    cSC4ZoneDeveloper* developer = Developer();
+    return developer ? developer->GetLot(x, z, exactCell) : nullptr;
 }
 
 float NativeAreaSlope(const std::int32_t rect[4], bool includeWater) {

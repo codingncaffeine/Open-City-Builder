@@ -6,6 +6,8 @@
 #include "app/NativeCitySystems.h"
 #include "app/NativeRuntimeWire.h"
 #include "app/NativeCity.h"
+#include "app/NativeLotConstruction.h"
+#include "app/NativeProps.h"
 #include "app/NativeCityView.h"
 #include "app/NativeFlora.h"
 #include "app/NativeLotSerial.h"
@@ -268,6 +270,8 @@ bool LoadCityFile(cSC4App& app, const std::string& path, cRZAutoRefCount<cISC4Re
         InstallStubHosts();
         InstallCityProbeBindings();
         InstallNativeSimHosts();            // land value (more simulators move off the probe bindings here)
+        InstallLotConstructionHosts();      // the lot developer's terrain host and construction services
+        InstallPropHosts();                 // the prop catalogue and the props' occupant manager
         InstallBuildingDevelopmentHost();   // the real hosts replace the generated stubs before the components Init
         InstallGrowthDeveloperHost();
         InstallTractDeveloperHost();

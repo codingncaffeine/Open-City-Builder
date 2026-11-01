@@ -3,7 +3,7 @@
 // growth developers exist), the simulator becomes a real simulator agent and SL::spMS2 listener through a message-target adapter,
 // its construction resources are a real cSC4Demand, and its growth developers are real cSC4GrowthDeveloper objects.
 //
-// Still neutral (each logs SC4_UNWIRED or is named here): the building / foundation occupants and their placement (layer 4), the
+// Still neutral (each logs SC4_UNWIRED or is named here): the foundation occupants (layer 4), the
 // maintenance cost and localized names, the lot configurations behind the zone capacity map.
 #include "app/NativeBuildingDevelopment.h"
 
@@ -21,6 +21,10 @@
 #include "gz/cIGZPersistResourceKeyList.h"
 #include "platform/Unwired.h"
 #include "sc4/BuildingDevelopmentSimulator.h"
+#include "sc4/BuildingOccupant.h"
+#include "sc4/OccupantManager.h"
+#include "sc4/SCPropertyHelp.h"
+#include "sc4/cSTETerrain.h"
 #include "sc4/DemandSimulator.h"
 #include "sc4/Exemplar.h"
 #include "sc4/ServiceLocator.h"
@@ -128,25 +132,103 @@ public:
     }
 } g_tract;
 
-// IBuildingPlacementServices: the growth developers are real; the occupant placement is layer 4.
+sc4::cISC4OccupantManager* Occupants() {
+    cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::OccupantManager) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(sc4::kGZIID_cISC4OccupantManager, &raw) || !raw) return nullptr;
+    auto* manager = static_cast<sc4::cISC4OccupantManager*>(raw);
+    manager->Release();   // the city keeps the manager
+    return manager;
+}
+sc4::cSTETerrain* Terrain() {
+    cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::Terrain) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(0xab953253, &raw) || !raw) return nullptr;
+    auto* serializable = static_cast<cIGZSerializable*>(raw);
+    serializable->Release();
+    return static_cast<sc4::cSTETerrain*>(serializable);
+}
+
+// A building occupant while AddNewBuildingOccupant places it: the slots it calls on the new cSC4BuildingOccupant. The wrapper
+// holds the creation reference; ReleaseBuilding drops it (the occupant manager keeps its own once inserted).
+class PlacedBuilding final : public IPlacedBuilding {
+public:
+    PlacedBuilding() : occupant(new sc4::cSC4BuildingOccupant()) { occupant->AddRef(); }   // operator new + vslot 0x4
+    cISCPropertyHolder* PropertyHolder() override { return occupant->AsPropertyHolder(); }
+    void SetBuildingType(std::uint32_t type) override { occupant->SetBuildingType(type); }                      // 0x14
+    void SetBounds(const float minimum[3], const float maximum[3]) override { occupant->SetBoundingBox(minimum, maximum); }   // 0x20
+    void SetRotation(int rotation) override { occupant->SetOrientation(rotation); }                              // 0x3c
+    void FinishPlacement() override { occupant->Init(); }                                                         // 0x64
+    void SetPosition(const float position[3]) override { occupant->SetPosition(position); }                      // 0x70
+    void GetBounds(float minimum[3], float maximum[3]) override { occupant->GetBoundingBox(minimum, maximum); }   // 0x74
+    sc4::cSC4BuildingOccupant* occupant;
+    bool inserted = false;
+};
+
+// IBuildingPlacementServices: the growth developers, and the building occupants AddNewBuildingOccupant places.
 class PlacementServices final : public IBuildingPlacementServices {
 public:
-    IPlacedBuilding* CreateBuilding() override { SC4_UNWIRED("IBuildingPlacementServices::CreateBuilding (layer 4)"); return nullptr; }
-    void ReleaseBuilding(IPlacedBuilding*) override {}
+    IPlacedBuilding* CreateBuilding() override { return new PlacedBuilding(); }
+    void ReleaseBuilding(IPlacedBuilding* building) override {   // vslot 0x8; the wrapper goes with the last use (NativeAddNewBuildingOccupant)
+        auto* placed = static_cast<PlacedBuilding*>(building);
+        sc4::cSC4BuildingOccupant* occupant = placed->occupant;
+        if (!placed->inserted) delete placed;
+        occupant->Release();
+    }
     IPlacedFoundation* CreateFoundation() override { SC4_UNWIRED("IBuildingPlacementServices::CreateFoundation (layer 4)"); return nullptr; }
     void ReleaseFoundation(IPlacedFoundation*) override {}
     float FoundationSurfaceHeight(const int*, int) override { return 0.0f; }
-    void LoadBuildingProperties(IPlacedBuilding&, std::uint32_t) override {}
+    // @ i386 0x000fc808: the building's exemplar becomes the occupant's default exemplar (the 0xac2b5f7 view, vslot 0xc), and its
+    // size (0x27812810) the bounding box from the origin.
+    void LoadBuildingProperties(IPlacedBuilding& building, std::uint32_t type) override {
+        auto& placed = static_cast<PlacedBuilding&>(building);
+        if (type == 0) type = placed.occupant->GetBuildingType();
+        cGZPersistResourceKey key;
+        void* raw = nullptr;
+        if (!NativeBuildingKeyFromType(type, key) || !SL::spRM || !SL::spRM->GetResource(key, 0xa52160f5, &raw, 0, nullptr) || !raw) return;
+        auto* exemplar = static_cast<cISCResExemplar*>(raw);
+        placed.occupant->SetDefaultExemplar(exemplar);
+        std::vector<float> size;
+        if (cSCPropertyHelp::GetPropertyValue(exemplar->AsISCPropertyHolder(), 0x27812810, size) && size.size() >= 3) {
+            const float origin[3] = {0.0f, 0.0f, 0.0f};
+            placed.occupant->SetBoundingBox(origin, size.data());
+        }
+        exemplar->Release();
+    }
     IGrowthDeveloperRef* CreateGrowthDeveloper() override { return new GrowthDeveloperRef(); }
-    float SurfaceHeightForFootprint(const float*) override { return 0.0f; }
+    // PARTIAL: terrain vslot 0x44(rect, 0, 1); the highest terrain point of the footprint's corners and centre stands in.
+    float SurfaceHeightForFootprint(const float rect[4]) override {
+        sc4::cSTETerrain* terrain = Terrain();
+        if (!terrain) return 0.0f;
+        float best = terrain->GetAltitude((rect[0] + rect[2]) * 0.5f, (rect[1] + rect[3]) * 0.5f);
+        for (int corner = 0; corner < 4; ++corner) {
+            const float h = terrain->GetAltitude(rect[(corner & 1) ? 2 : 0], rect[(corner & 2) ? 3 : 1]);
+            if (best < h) best = h;
+        }
+        return best;
+    }
     void CellToPosition(int x, int z, float& px, float& pz) override { px = (static_cast<float>(x) + 0.5f) * 16.0f; pz = (static_cast<float>(z) + 0.5f) * 16.0f; }
     void PositionToCell(float x, float z, int& cx, int& cz) override {
         if (cSC4City* city = HostCity()) city->PositionToCell(x, z, cx, cz);
         else { cx = static_cast<int>(x / 16.0f); cz = static_cast<int>(z / 16.0f); }
     }
-    float TerrainHeight(float, float) override { return 0.0f; }
-    bool OccupantAtCell(int, int, std::uint32_t) override { return false; }
-    bool AddOccupant(IPlacedOccupant*, bool) override { SC4_UNWIRED("IBuildingPlacementServices::AddOccupant (layer 4)"); return false; }
+    float TerrainHeight(float x, float z) override { sc4::cSTETerrain* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
+    bool OccupantAtCell(int cx, int cz, std::uint32_t type) override {   // occupant manager vslot 0x80 GetFirstOccupantByStandardCityCell
+        sc4::cISC4OccupantManager* occupants = Occupants();
+        sc4::cISC4Occupant* occupant = nullptr;
+        if (!occupants || !occupants->GetFirstOccupantByStandardCityCell(occupant, cx, cz, type) || !occupant) return false;
+        occupant->Release();
+        return true;
+    }
+    // BDS vslot 0x18 (i386 0x000f6ed8): occupant manager vslot 0x50 InsertOccupant(building, 0).
+    bool AddOccupant(IPlacedOccupant* occupant, bool) override {
+        auto* placed = static_cast<PlacedBuilding*>(occupant);
+        sc4::cISC4OccupantManager* occupants = Occupants();
+        placed->inserted = occupants && occupants->InsertOccupant(placed->occupant->AsOccupant(), 0);
+        return placed->inserted;
+    }
     bool RemoveOccupant(IPlacedOccupant*, bool, bool) override { return false; }
 } g_placement;
 
@@ -236,6 +318,17 @@ cSC4BuildingDevelopmentSimulator* CityBuildingDevelopment() {
     return static_cast<cSC4BuildingDevelopmentSimulator*>(raw);
 }
 }  // namespace
+
+// BDS vslot 0x1c AddNewBuildingOccupant(type, position, rotation): the inserted building (borrowed: the occupant manager holds it).
+sc4::cISC4BuildingOccupant* NativeAddNewBuildingOccupant(std::uint32_t type, float position[3], int rotation) {
+    cSC4BuildingDevelopmentSimulator* simulator = CityBuildingDevelopment();
+    IPlacedBuilding* building = simulator ? simulator->AddNewBuildingOccupant(type, position, rotation) : nullptr;
+    if (!building) return nullptr;
+    auto* placed = static_cast<PlacedBuilding*>(building);
+    sc4::cSC4BuildingOccupant* occupant = placed->occupant;
+    delete placed;
+    return occupant;
+}
 
 const sc4::BuildingProfile* NativeBuildingProfile(std::uint32_t buildingType) {
     cSC4BuildingDevelopmentSimulator* simulator = CityBuildingDevelopment();

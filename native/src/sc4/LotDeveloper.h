@@ -11,6 +11,7 @@
 // +0x140 maximum levelling amount, +0x148 development-cost response curve.
 #pragma once
 #include <deque>
+#include <vector>
 #include <cstdint>
 
 #include "gz/cIGZIStream.h"
@@ -114,6 +115,42 @@ public:
     virtual cISC4LotBaseTextureOccupant* CreateBaseTextureOccupant() = 0;
 };
 
+class cSC4LotConfiguration;
+struct cSC4LotConfigurationObject;
+class cISC4LotConfigurationRef;
+class cISC4BuildingOccupant;
+class cISC4Occupant;
+// What StartConstruction and the building placement reach outside the class: the building development simulator (+0x18), the
+// city (+0x1c), the occupant manager (+0x28) with the blocking-lot filter (+0x58) and the demolition utility (+0x20), the terrain
+// (+0x3c), and the lot configuration manager behind the lot's configuration reference.
+class ILotConstructionServices {
+public:
+    virtual ~ILotConstructionServices() = default;
+    // The lot keeps its configuration as the manager's COM reference (lot vslot 0x28 / 0x24).
+    virtual cISC4LotConfigurationRef* ConfigurationRef(cSC4LotConfiguration* configuration) = 0;
+    virtual cSC4LotConfiguration* Configuration(cISC4LotConfigurationRef* reference) = 0;
+    virtual std::int32_t BuildingPurpose(std::uint32_t buildingType) = 0;                    // +0x18 vslot 0x9c -> profile +0
+    virtual std::uint32_t BuildingWealth(std::uint32_t buildingType) = 0;                    // +0x18 vslot 0x9c -> profile +4
+    // +0x18 vslot 0x1c AddNewBuildingOccupant(type, position, rotation): the inserted building (borrowed) or null.
+    virtual cISC4BuildingOccupant* AddNewBuildingOccupant(std::uint32_t type, float position[3], int rotation) = 0;
+    virtual void CellCornerToPosition(int cellX, int cellZ, float& x, float& z) = 0;          // +0x1c vslot 0x180
+    virtual float TerrainAltitude(float x, float z) = 0;                                      // +0x3c vslot 0x30
+    // +0x28 vslot 0x94 GetOccupantsByBBox(min, max, +0x58 blocking filter), each demolished by +0x20 vslot 0x20(1, occupant, 0, 1, 0, 0, 0).
+    virtual void DemolishBlockingOccupants(const float minimum[3], const float maximum[3]) = 0;
+    // GZCOM cSC4ConstructionOccupant (0xa97f909e / 0x496e7636), its SetLot(lot) and +0x28 vslot 0x50 InsertOccupant(it, 0).
+    virtual void StartConstructionOccupant(cSC4Lot* lot) = 0;
+    virtual cSC4Lot* LotAt(int x, int z) = 0;                                                 // +0x24 vslot 0x14 GetLot(x, z, true)
+    virtual std::uint32_t RandomBelow(std::uint32_t range) = 0;                               // cRZRandom::RandomUint32Uniform
+    virtual bool LotTextureExists(std::uint32_t instance) = 0;                                // spRM vslot 0x38 {FSH 0x7ab50e44, 0x0986135e}
+    // spLotConfigurationManager vslot 0x6c: the prop types an object may become (its families resolved).
+    virtual void ObjectPropTypes(const cSC4LotConfigurationObject& object, std::vector<std::uint32_t>& out) = 0;
+    // +0x30 spPropManager vslot 0x64 AddLotProp(type, position, rotation): the inserted prop (borrowed) or null.
+    virtual cISC4Occupant* AddLotProp(std::uint32_t type, const float position[3], std::int32_t rotation) = 0;
+    virtual bool FloraTypeValid(std::uint32_t type) = 0;                                      // +0x38 spFloraSim vslot 0x2c
+    virtual void FloraTypesInFamily(std::vector<std::uint32_t>& out, std::uint32_t family) = 0;  // vslot 0x38 (hash-set order)
+    virtual cISC4Occupant* AddFlora(std::uint32_t type, float position[3]) = 0;              // vslot 0x48 (type, position, false)
+};
+
 // The lot developer's own interface (class id 0xa990bfe0, iid 0x4818e5d2). Only the COM identity is
 // recovered; the concrete methods are called directly, so the interface carries no extra slots.
 class cISC4LotDeveloper : public cIGZUnknown {
@@ -174,8 +211,28 @@ public:
     void RemoveLotBaseTexture(cSC4Lot* lot);                                                      // @ 0x10014652e
     bool GetForceEmptyLotBaseTextures() const { return forceEmptyLotBaseTextures_; }             // @ 0x100148ec2
 
+    // ---- construction (i386 0x000f48d0 and the placement it uses)
+    static void SetConstructionServices(ILotConstructionServices* services);
+    bool StartConstruction(cSC4Lot* lot, cSC4LotConfiguration* configuration, std::uint32_t buildingType, bool construct);   // vslot 0x18
+    void ClearLotBlockingObjects(cSC4Lot* lot);                                                                       // i386 0x000f044a
+    // The lot-state-changed message (0xe8bda2e7) for the lot whose snapshot it carries: a lot reaching state 3 or 4 gets its
+    // configuration's base textures, one finishing construction (2 -> 3) its props, flora and network nodes (DoMessage branch).
+    void DoLotStateChanged(const cSC4Lot& snapshot, std::uint32_t oldState, std::uint32_t newState);
+    void SetNormalLotBaseTexture(cSC4Lot* lot, cSC4LotConfiguration* configuration);                                 // vslot 0xb0
+    void AddLotProps(cSC4Lot* lot, cSC4LotConfiguration* configuration);                                             // i386 0x000ef4c0
+    cISC4Occupant* SelectAndCreateLotProp(cSC4Lot* lot, std::uint32_t objectIndex);                                 // i386 0x000ef38a
+    void AddLotFlora(cSC4Lot* lot, cSC4LotConfiguration* configuration);                                             // i386 0x000f2ffe
+    std::uint32_t PickFloraTypeForLot(const std::vector<std::uint32_t>& types);                                      // i386 0x000f2efa
+    std::uint32_t PickLotBaseTextureForLot(cSC4Lot* lot, const std::vector<std::uint32_t>& textures);               // i386 0x000ef182
+    void GetPositionForBuilding(cSC4Lot* lot, float position[3], std::int32_t& rotation);                            // vslot 0xa0
+    void GetPositionForLotConfigurationObject(cSC4Lot* lot, cSC4LotConfiguration* configuration,
+                                              const cSC4LotConfigurationObject* object, float position[3],
+                                              std::int32_t& rotation);                                                // vslot 0x9c
+
 
 private:
+    bool AddLotFoundation(cSC4Lot* lot, cSC4LotConfiguration* configuration);                    // vslot 0xdc (PARTIAL)
+    void AddBuildingFoundation(cISC4BuildingOccupant* building, cSC4LotConfiguration* configuration);   // vslot 0xec (PARTIAL)
     IBaseLotDeveloperHost* host_;
     ILotGateServices* gates_ = nullptr;
     std::uint32_t refCount_ = 0;               // COM refcount (shared by the three sub-objects)

@@ -1,8 +1,7 @@
 // The tract developer on the native application (notes/GROWTH_PLAN.md layer 3). Replaces the generated neutral ITractDeveloperHost:
 // the city, zone manager, lots (through the zone developer, the port's lot map), lot configurations, building catalogue,
 // construction resources and network occupants are the city's, so cSC4TractDeveloper::Grow searches real lots and real lot
-// configurations and picks real buildings. Its last step, the lot developer's StartConstruction (layer 4, not recovered), is
-// reported, not performed.
+// configurations and picks real buildings. Its last step is the city's lot developer's StartConstruction (layer 4).
 //
 // Neutral here (each named, PARTIAL): the tunables (the class's defaults stand); the abandon / reoccupy calls; the services the
 // port does not run natively answer "provided" so that the growth-stage caps do not hold growth back: power (2), water, fire
@@ -17,6 +16,7 @@
 #include "app/NativeBuildingDevelopment.h"
 #include "app/NativeCity.h"
 #include "app/NativeGrowthDevelopers.h"
+#include "app/NativeLotConstruction.h"
 #include "platform/Unwired.h"
 #include "app/NativeZoneDeveloperHost.h"
 #include "gz/cGZPersistResourceManager.h"
@@ -25,6 +25,7 @@
 #include "sc4/GrowthDeveloper.h"
 #include "sc4/Exemplar.h"
 #include "sc4/LotConfigurationManager.h"
+#include "sc4/LotDeveloper.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/Simulator.h"
 #include "sc4/ZoneDeveloper.h"
@@ -53,6 +54,7 @@ template <class T> T* Plain(sc4::CityComponent c) {
 }
 cSC4ZoneDeveloper* ZoneDeveloper() { return Com<cSC4ZoneDeveloper>(sc4::CityComponent::ZoneDeveloper, cSC4ZoneDeveloper::kZoneDeveloperClassId); }
 cSC4TractDeveloper* TractDeveloper() { return Com<cSC4TractDeveloper>(sc4::CityComponent::TractDeveloper, kTractDeveloperClassId); }
+cSC4LotDeveloper* LotDeveloper() { return Com<cSC4LotDeveloper>(sc4::CityComponent::LotDeveloper, kGZCLSID_cSC4LotDeveloper); }
 cSC4LotConfigurationManager* LotConfigurations() { return Plain<cSC4LotConfigurationManager>(sc4::CityComponent::LotConfigurationManager); }
 
 // ---- the growth developer as the tract developer sees it (IGrowthDeveloperApi)
@@ -161,7 +163,10 @@ struct LotDeveloperApi final : ITractLotDeveloperApi {
             std::fprintf(stderr, "tract developer: StartConstruction lot (%d,%d) configuration %08x building %08x%s\n", x, z,
                          configuration ? configuration->GetID() : 0, buildingType, flag ? " (keep)" : "");
         }
-        SC4_UNWIRED("ITractLotDeveloperApi::StartConstruction (cSC4LotDeveloper construction, growth layer 4)");
+        cSC4LotDeveloper* developer = LotDeveloper();
+        ReadLotDeveloperTunables(developer);
+        const bool started = developer && developer->StartConstruction(lot, configuration, buildingType, flag);   // vslot 0x18
+        if (std::getenv("SC4_SIMDEBUG")) std::fprintf(stderr, "tract developer: construction %s\n", started ? "started" : "FAILED");
     }
     void AbandonBuilding(cSC4Lot*, int) override { SC4_UNWIRED("ITractLotDeveloperApi::AbandonBuilding (layer 4)"); }
     void ReoccupyBuilding(cSC4Lot*, std::uint32_t) override { SC4_UNWIRED("ITractLotDeveloperApi::ReoccupyBuilding (layer 4)"); }

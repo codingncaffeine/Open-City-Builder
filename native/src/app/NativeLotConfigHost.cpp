@@ -12,9 +12,11 @@
 #include <random>
 #include <vector>
 
+#include "app/NativeBoot.h"
 #include "app/NativeBuildingDevelopment.h"
 #include "app/NativeCity.h"
 #include "gz/cGZPersistResourceManager.h"
+#include "sc4/App.h"
 #include "gz/cIGZPersistResourceKeyList.h"
 #include "sc4/BuildingOccupant.h"
 #include "sc4/CommonIIDs.h"
@@ -78,7 +80,11 @@ std::uint32_t NewId() {
 
 class ManagerHost final : public ILotConfigurationManagerHost {
 public:
-    std::uint8_t PreferencesDetail() override { return 0; }
+    std::uint8_t PreferencesDetail() override {   // SL::spPreferences + 0xf16: the Graphic Options' city detail (1..3)
+        cSC4App* app = BootApplication();
+        const std::uint8_t* preferences = app ? app->GetPreferences() : nullptr;
+        return preferences ? preferences[0xf16] : 0;
+    }
     void ForEachLotConfigurationKey(const std::function<void(const cGZPersistResourceKey&)>& fn) override {
         if (!SL::spRM) return;
         // The manager initialises before the building development simulator; its building checks need the catalogue loaded.

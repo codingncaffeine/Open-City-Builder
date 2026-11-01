@@ -4,7 +4,7 @@
 
 #include <vector>
 
-namespace sc4 { struct BuildingProfile; class cSC4Demand; struct DemandBuildingProfile; }
+namespace sc4 { struct BuildingProfile; class cSC4Demand; struct DemandBuildingProfile; class cISC4BuildingOccupant; }
 struct cGZPersistResourceKey;
 
 namespace native {
@@ -14,6 +14,7 @@ void InstallBuildingDevelopmentHost();
 
 // The building development simulator's catalogue for the growth developers' host (NativeGrowthDevelopers.cpp cannot include
 // BuildingDevelopmentSimulator.h: the headers clash). Null / 0 / false without a city or a building development simulator.
+sc4::cISC4BuildingOccupant* NativeAddNewBuildingOccupant(std::uint32_t type, float position[3], int rotation);   // vslot 0x1c
 const sc4::BuildingProfile* NativeBuildingProfile(std::uint32_t buildingType);            // vslot 0x138
 float NativeMaxCapacity(int zoneType, std::uint32_t purpose, std::uint32_t wealth);      // vslot 0x168
 sc4::cSC4Demand* NativeDemandChannel(std::uint32_t type, std::uint32_t keyOffset);       // SL::spDemandSim vslot 0x30
