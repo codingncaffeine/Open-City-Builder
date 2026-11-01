@@ -108,7 +108,7 @@ bool PropertyTokenReplacementFunction(const cIGZString& token, cIGZString& out, 
 sc4::cSC4CatalogItem* CreateCatalogItemFromExemplar(sc4::cISCResExemplar* exemplar, cIGZWin* window,
                                                     std::uint32_t itemType,
                                                     sc4::cSCStringDetokenizer* detokenizer);     // @ 0x100309e70
-// Quirk kept: itemType (param_3) is never read by the original.
+// itemType (param_3) is the exemplar group the items come from (the Mac i386 build at 0x244284 filters on type 0x6534284a and it).
 void CreateCatalogItemList(std::multimap<int, sc4::cISC4CatalogItem*>& items, sc4::cISC4WinCatalogView* view,
                            std::uint32_t itemType, std::uint32_t id, std::uint32_t typeFilter,
                            std::uint32_t propertyFilter);                                       // @ 0x10030a37b

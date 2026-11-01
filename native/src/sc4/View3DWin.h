@@ -154,7 +154,7 @@ constexpr std::uint32_t kMsgViewInputControlChanged = 0x09c8b8ea;    // SendView
 constexpr std::uint32_t kMsgViewScrollBegin = 0xcad61e00;            // DoScrollBegin
 constexpr std::uint32_t kMsgViewScrollEnd = 0xead61e16;              // DoScrollEnd
 constexpr std::uint32_t kMsgViewGlobalEffectTrigger = 0xaa375fe8;    // Assert/RetractGlobalEffectTrigger
-constexpr std::uint32_t kMsgViewTerrainDisplayChanged = 0x470bd214;  // RunGlobalTerrainTool cases 5 / 6 (data1 0 / 1)
+constexpr std::uint32_t kMsgTerrainErosion = 0x470bd214;  // RunGlobalTerrainTool cases 5 / 6: data1 0 = water erosion, 1 = wind (cSTETerrain::DoErosion)
 constexpr std::uint32_t kMsgViewCommand = 0x00000003;                // the command message (cGZMsgCommand)
 constexpr std::uint32_t kCmdViewCatalogItem = 0x49d993d4;            // DoMessage case 3's parameter id
 constexpr std::uint32_t kMsgViewCheatCode = 0x230e27ac;              // DoMessage: run a cheat

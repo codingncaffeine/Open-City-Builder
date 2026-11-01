@@ -431,7 +431,10 @@ src/app/hosts/StubEffectsManager.cpp
 src/app/NativeEstablishCity.cpp
 src/app/NativeBudgetSim.cpp
 src/app/NativeTerrainTool.cpp
+src/app/NativeFlora.cpp
+src/app/NativeWeather.cpp
 src/sc4/ViewInputControlTerrainScrubber.cpp
+src/sc4/ViewInputControlFlora.cpp
 src/sc4/UIFilters.cpp
 src/app/hosts/StubFeature.cpp
 src/app/hosts/StubFlora.cpp

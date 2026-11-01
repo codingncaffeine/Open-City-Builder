@@ -34,6 +34,7 @@ void InstallBudgetSimHosts();
 void InstallTerrainTools();
 void InstallFloraStub();
 void InstallFloraSimulatorStub();
+void InstallNativeFlora();
 void InstallGraphsViewStub();
 void InstallGrowthDeveloperStub();
 void InstallHelicopterStub();
@@ -92,6 +93,7 @@ void InstallPlaceLotStub();
 void InstallQueryStub();
 void InstallSignToolStub();
 void InstallWeatherStub();
+void InstallNativeWeather();
 void InstallWinAdviceListStub();
 void InstallWinAnimationRecorderStub();
 void InstallWinBMPViewStub();
@@ -138,6 +140,7 @@ void InstallStubHosts() {
     InstallTerrainTools();
     InstallFloraStub();
     InstallFloraSimulatorStub();
+    InstallNativeFlora();                 // the real flora hosts replace the two stubs above
     InstallGraphsViewStub();
     InstallGrowthDeveloperStub();
     InstallHelicopterStub();
@@ -196,6 +199,7 @@ void InstallStubHosts() {
     InstallQueryStub();
     InstallSignToolStub();
     InstallWeatherStub();
+    InstallNativeWeather();               // the real weather host replaces the stub above
     InstallWinAdviceListStub();
     InstallWinAnimationRecorderStub();
     InstallWinBMPViewStub();

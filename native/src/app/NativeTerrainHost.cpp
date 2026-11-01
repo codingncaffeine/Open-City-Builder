@@ -17,6 +17,9 @@
 #include "sc4/ServiceLocator.h"
 #include "sc4/cSC4City.h"
 #include "app/NativeCity.h"
+#include "app/NativeFlora.h"
+#include "sc4/AuraSimulator.h"
+#include "sc4/FloraSimulator.h"
 #include "sc4/Exemplar.h"
 #include "sc4/cSTETerrain.h"
 #include "sc4/SurfaceWater.h"
@@ -47,6 +50,24 @@ public:
 private:
     cRZIniFile ini_;
 };
+
+// The terrain's cIGZMessageTarget2 (the port's cSTETerrain has no message-target base): erosion (0x470bd214), zoom,
+// the terrain commands and the reconcile retry reach cSTETerrain::DoMessage through it.
+class TerrainMessageTarget final : public cIGZMessageTarget2 {
+public:
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid != 0x452294aa && iid != 1) return false;
+        *out = static_cast<cIGZMessageTarget2*>(this);
+        return true;
+    }
+    std::uint32_t AddRef() override { return 1; }
+    std::uint32_t Release() override { return 1; }
+    bool DoMessage(cIGZMessage2* message) override {
+        if (message && std::getenv("SC4_TVDEBUG")) std::fprintf(stderr, "terrain: message %08x\n", message->GetType());
+        return terrain ? terrain->DoMessage(message) : true;
+    }
+    cSTETerrain* terrain = nullptr;
+} g_terrainTarget;
 
 class KeyFilter final : public cIGZPersistResourceKeyFilter {
 public:
@@ -179,8 +200,21 @@ struct NativeTerrainHost final : ITerrainHost {
     void AddToAutomataManager(cSTETerrain* terrain) override {}
     void RemoveFromAutomataManager(cSTETerrain* terrain) override {}
     cIGZCommandServer* CommandServer() override { return {}; }
-    bool AddTerrainNotification(cSTETerrain* terrain, std::uint32_t type) override { return {}; }
-    bool RemoveTerrainNotification(cSTETerrain* terrain, std::uint32_t type) override { return {}; }
+    // The terrain's message-server subscriptions (Init / Shutdown), through the target adapter. 0x26d31ec1 (city up ->
+    // DoPostCityInit) stays out: the native city view does DoPostCityInit's hook-up itself (NativeTerrainView), and a
+    // second view Init would follow.
+    bool AddTerrainNotification(cSTETerrain* terrain, std::uint32_t type) override {
+        if (type == 0x26d31ec1 || !SL::spMS2) return false;
+        g_terrainTarget.terrain = terrain;
+        if (std::getenv("SC4_TVDEBUG")) std::fprintf(stderr, "terrain: subscribes to %08x\n", type);
+        return SL::spMS2->AddNotification(&g_terrainTarget, type);
+    }
+    bool RemoveTerrainNotification(cSTETerrain* terrain, std::uint32_t type) override {
+        if (type == 0x26d31ec1 || !SL::spMS2) return false;
+        const bool removed = SL::spMS2->RemoveNotification(&g_terrainTarget, type);
+        if (g_terrainTarget.terrain == terrain) g_terrainTarget.terrain = nullptr;
+        return removed;
+    }
     void UpdateLandSimulator(cIGZUnknown* landSimulator) override {}
     void ResetLandSimulator(cIGZUnknown* landSimulator) override {}
     bool WorldManagerBusy() override { return {}; }
@@ -282,12 +316,36 @@ struct NativeTerrainHost final : ITerrainHost {
     void SurfaceWaterCreateSpring(std::int32_t vertexIndex) override { if (cSTESurfaceWater* water = WaterOf(Component(CityComponent::SurfaceWater))) water->CreateSpring(vertexIndex); }
     void SurfaceWaterEndBrushScrub(std::uint32_t brushType, std::uint32_t arg) override { if (cSTESurfaceWater* water = WaterOf(Component(CityComponent::SurfaceWater))) water->EndBrushScrub(brushType, arg); }
     void PostBrushSound(std::uint32_t type, std::uint32_t data1, std::uint32_t data2) override {}
-    std::uint32_t FloraBrushCount() override { return {}; }
-    void FloraBrushList(std::vector<std::uint32_t>& ids) override {}
-    bool FloraOccupantIsBrushable(std::uint32_t id) override { return {}; }
-    void AddFloraAt(float x, float y, float z) override {}
+    std::uint32_t FloraBrushCount() override {
+        cSC4FloraSimulator* flora = native::CityFloraSimulator();
+        std::uint32_t count = 0;
+        if (flora) flora->GetAllFloraTypes(nullptr, count);
+        return count;
+    }
+    void FloraBrushList(std::vector<std::uint32_t>& ids) override {
+        cSC4FloraSimulator* flora = native::CityFloraSimulator();
+        std::uint32_t count = static_cast<std::uint32_t>(ids.size());
+        if (flora && count != 0) flora->GetAllFloraTypes(ids.data(), count);
+    }
+    bool FloraOccupantIsBrushable(std::uint32_t id) override {
+        cSC4FloraSimulator* flora = native::CityFloraSimulator();
+        const cSC4StaticFloraData* data = flora ? flora->GetStaticFloraData(id) : nullptr;
+        return data && (data->flags & 3) == 2;
+    }
+    void AddFloraAt(float x, float y, float z) override {   // flora simulator vslot 0x48: AddNewFloraOccupant(0, xyz, false)
+        cSC4FloraSimulator* flora = native::CityFloraSimulator();
+        float xyz[3] = {x, y, z};
+        if (flora) flora->AddNewFloraOccupant(0, xyz, false);
+    }
     bool CityEstablished() override { sc4::cSC4City* city = native::HostCity(); return city && city->GetEstablished(); }
-    void AddFloraAura(float x, float z) override {}
+    void AddFloraAura(float x, float z) override {          // SL::spAuraSim vslot 0x38: AddTransientEffect(x, z, 1)
+        cIGZUnknown* object = Component(CityComponent::AuraSimulator);
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(kGZIID_cISC4AuraSimulator, &raw) || !raw) return;
+        auto* aura = static_cast<cISC4AuraSimulator*>(raw);
+        aura->AddTransientEffect(x, z, static_cast<TransientAuraEffect>(1));
+        aura->Release();
+    }
     bool AddOverlayDecal(cIGZUnknown* overlay, const cGZPersistResourceKey& key, const TerrainPoint& position, float strength, float randomAmount) override { return {}; }
     void ListBrushResources(std::vector<cGZPersistResourceKey>& out) override { ListResources(out, 0x6534284a, 0x6a01fc2a); }
     ITerrainEffect* CreateTerrainEffect(std::uint32_t id0, std::uint32_t id1) override { return {}; }
@@ -299,7 +357,7 @@ struct NativeTerrainHost final : ITerrainHost {
     std::mt19937 rng_{12345};
     cISC4RegionalCity* RegionalCity() override { return {}; }
     bool CityLoadInProgress() override { return {}; }
-    cIGZMessageTarget2* TerrainMessageTarget() override { return {}; }
+    cIGZMessageTarget2* TerrainMessageTarget() override { return &g_terrainTarget; }
     cISC4Region* Region() override { return {}; }
     void RegionalCityPosition(const cISC4RegionalCity& city, std::int32_t& x, std::int32_t& z) override {}
     void RegionalCitySize(const cISC4RegionalCity& city, std::int32_t& width, std::int32_t& height) override {}

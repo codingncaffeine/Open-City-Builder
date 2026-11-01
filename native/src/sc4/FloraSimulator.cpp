@@ -3,9 +3,13 @@
 #include "sc4/SimStreamOps.h"
 #include "sc4/DBSegment.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
+#include "sc4/NetworkOccupant.h"
 #include "sc4/SCPropertyHelp.h"
 
 namespace sc4 {
@@ -301,6 +305,240 @@ int cSC4FloraSimulator::GetFloraTypesByFamily(std::unordered_set<std::uint32_t>&
     if (it == g_floraFamilyMap.end()) return 0;
     for (std::uint32_t type : it->second) out.insert(type);
     return static_cast<int>(it->second.size());
+}
+
+// ==================================================================================================== planting
+
+namespace {
+// cSC4FloraBlockingOccupantFilter::IsOccupantIncluded (0x62388a in the Mac i386 build): flora, buildings (0x278128a0),
+// lots (0x6a11bd2b), props (0xa823821e) and the network pieces with any 0x1f4f flag keep a new tree away.
+class FloraBlockingFilter final : public cSC4OccupantFilter {
+public:
+    bool IsOccupantIncluded(cISC4Occupant* occupant) override {
+        switch (occupant->GetType()) {
+            case kOccupantTypeFlora: case 0x278128a0: case 0x6a11bd2b: case 0xa823821e: return true;
+            case 0xc772bf98: {
+                auto* network = dynamic_cast<cSC4NetworkOccupant*>(occupant);
+                return network && (network->GetNetworkFlag() & 0x1f4f) != 0;
+            }
+            default: return false;
+        }
+    }
+};
+
+void ReleaseAll(OccupantList& list) {
+    for (cISC4Occupant* occupant : list) occupant->Release();
+    list.clear();
+}
+}  // namespace
+
+// The cluster chain of a type: its cluster-type property (+4), 0 for an unknown type.
+std::uint32_t cSC4FloraSimulator::NextClusterType(std::uint32_t type) {
+    auto it = g_staticFloraDataMap.find(type);
+    return it == g_staticFloraDataMap.end() ? 0 : it->second->familyKey;
+}
+
+// The type two trees of a and b merge into: the one after whichever of the two comes later in the other's chain, or 0
+// when neither chain reaches the other.
+std::uint32_t cSC4FloraSimulator::AdvanceClusterType(std::uint32_t a, std::uint32_t b) {
+    for (std::uint32_t t = a; t != 0; t = NextClusterType(t))
+        if (t == b) return NextClusterType(b);
+    for (std::uint32_t t = b; t != 0; t = NextClusterType(t))
+        if (t == a) return NextClusterType(a);
+    return 0;
+}
+
+// 0x1000c1a24 (Mac i386 0x8c68e). Not on a lot: dry land only (unless aquatic) and no steeper than the type's slope
+// limit (+0x2c); then the type's box (half width +0x40, height +0x44, 16 m below the ground) must lie inside the city
+// and touch no blocking occupant other than `ignore`.
+bool cSC4FloraSimulator::LocationIsOKForNewFlora(std::uint32_t type, float x, float z, cISC4Occupant* ignore) const {
+    const cSC4StaticFloraData* data = GetStaticFloraData(type);
+    if (!data || !g_host) return false;
+    bool onLot = false;
+    const float ground = g_host->GroundHeight(x, z, onLot);
+    if (!onLot) {
+        if (ground < g_host->SeaLevel() && !data->aquatic) return false;
+        if (g_host->TerrainNormalY(x, z) <= 1.0f - data->traits[7]) return false;
+    }
+    const float half = data->traits[12];
+    const float min[3] = {x - half, ground - 16.0f, z - half};
+    const float max[3] = {x + half, ground + data->traits[13], z + half};
+    float sizeX = 0.0f, sizeZ = 0.0f;
+    g_host->CitySizeMeters(sizeX, sizeZ);
+    if (min[0] < 0.0f || min[2] < 0.0f || sizeX < max[0] || sizeZ < max[2]) return false;
+    cISC4OccupantManager* occupants = g_host->OccupantManager();
+    if (!occupants) return true;
+    FloraBlockingFilter filter;
+    OccupantList found;
+    occupants->GetOccupantsByBBox(found, min, max, &filter, 0xffffffffu);
+    bool ok = true;
+    for (cISC4Occupant* occupant : found) {
+        if (!ok || occupant == ignore) continue;
+        float otherMin[3], otherMax[3];
+        occupant->GetBoundingBox(otherMin, otherMax);
+        const bool apart = max[0] < otherMin[0] || otherMax[0] < min[0] || max[1] < otherMin[1] || otherMax[1] < min[1] ||
+                           max[2] < otherMin[2] || otherMax[2] < min[2];
+        if (!apart) ok = false;
+    }
+    ReleaseAll(found);
+    return ok;
+}
+
+bool cSC4FloraSimulator::AddNewFloraOccupant(cISC4Occupant* occupant) {
+    cISC4OccupantManager* occupants = g_host ? g_host->OccupantManager() : nullptr;
+    return occupants && occupants->InsertOccupant(occupant, 0);
+}
+
+// 0x1000c1f6c (Mac i386 0x8d51a). Clustering: the flora of the type's cluster box (+0x48 across, +0x4c up) whose chain
+// meets the new type is merged one tree at a time (each merge removes that tree, moves the new one to the centre of the
+// merged boxes and advances the type) for as long as a pass merges something; the result must still pass
+// LocationIsOKForNewFlora. The new occupant faces one of five orientations (0..4, as the original draws them), is born
+// today and sits on the ground (the sea surface for land flora in the water).
+cISC4Occupant* cSC4FloraSimulator::AddNewFloraOccupant(std::uint32_t type, float* xyz, bool skipClusters) {
+    if (!g_host) return nullptr;
+    if (!IsFloraTypeValid(type)) {
+        if (type != 0) return nullptr;
+        float score = 0.0f;
+        type = GetBestFloraTypeForLocation(xyz[0], xyz[2], score);
+        if (type == 0) {
+            if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "flora: no species suits %.0f,%.0f\n", xyz[0], xyz[2]);
+            return nullptr;
+        }
+    }
+    if (!skipClusters) {
+        cISC4OccupantManager* occupants = g_host->OccupantManager();
+        for (;;) {
+            const cSC4StaticFloraData* data = GetStaticFloraData(type);
+            if (!data) break;
+            const float height = g_host->TerrainHeight(xyz[0], xyz[2]);
+            const float min[3] = {xyz[0] - data->value48, height - data->value4c, xyz[2] - data->value48};
+            const float max[3] = {xyz[0] + data->value48, height + data->value4c, xyz[2] + data->value48};
+            OccupantList found;
+            if (occupants) occupants->GetOccupantsByBBox(found, min, max, kOccupantTypeFlora, 0xffffffffu);
+            xyz[0] += xyz[0];                                    // the sums of the box centres, doubled
+            xyz[1] += xyz[1];
+            xyz[2] += xyz[2];
+            int merged = 1;
+            for (cISC4Occupant* occupant : found) {
+                void* raw = nullptr;
+                if (!occupant->QueryInterface(kGZIID_cISC4FloraOccupant, &raw) || !raw) continue;
+                auto* flora = static_cast<cISC4FloraOccupant*>(raw);
+                const std::uint32_t next = AdvanceClusterType(flora->GetFloraType(), type);
+                if (next != 0) {
+                    float otherMin[3], otherMax[3];
+                    occupant->GetBoundingBox(otherMin, otherMax);
+                    const float scale = 0.5f / static_cast<float>(merged + 1);
+                    const float sumX = otherMin[0] + otherMax[0] + xyz[0];
+                    const float sumZ = otherMin[2] + otherMax[2] + xyz[2];
+                    if (LocationIsOKForNewFlora(next, scale * sumX, scale * sumZ, occupant)) {
+                        occupants->RemoveOccupant(occupant, true, 0);
+                        xyz[0] = sumX;
+                        xyz[2] = sumZ;
+                        type = next;
+                        ++merged;
+                    }
+                }
+                flora->Release();
+            }
+            ReleaseAll(found);
+            const float scale = 0.5f / static_cast<float>(merged);
+            xyz[0] *= scale;
+            xyz[1] = -1.0f;                                      // re-read from the ground below
+            xyz[2] *= scale;
+            if (merged < 2) break;
+        }
+        if (!LocationIsOKForNewFlora(type, xyz[0], xyz[2], nullptr)) {
+            if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "flora: plant type %#x at %.0f,%.0f blocked\n", type, xyz[0], xyz[2]);
+            return nullptr;
+        }
+    }
+
+    auto* occupant = new cSC4FloraOccupant();
+    occupant->AddRef();
+    occupant->SetFloraType(type);
+    occupant->SetOrientation(static_cast<std::uint32_t>(random_.RandomSint32RangeUniform(0, 4)));
+    if (xyz[1] <= 0.0f) {
+        const float sea = g_host->SeaLevel();
+        const cSC4StaticFloraData* data = GetStaticFloraData(type);
+        bool onLot = false;
+        xyz[1] = g_host->GroundHeight(xyz[0], xyz[2], onLot);
+        if (data && !data->aquatic && xyz[1] < sea) xyz[1] = sea;
+    }
+    cISC4Occupant* result = nullptr;
+    if (0.0f <= xyz[1]) {
+        if (cSC4StaticFloraData* data = GetStaticFloraData(type)) occupant->SetStaticFloraData(data);
+        occupant->cSC4FloraOccupant::SetPosition(xyz);
+        occupant->SetBirthDate(g_host->SimDate());
+        occupant->SetLastSeedingDate(occupant->GetBirthDate());
+        occupant->cSC4Occupant::Init();
+        if (AddNewFloraOccupant(occupant->AsOccupant())) result = occupant->AsOccupant();
+    }
+    occupant->Release();
+    if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "flora: plant type %#x at %.0f,%.0f,%.0f -> %s\n", type, xyz[0], xyz[1], xyz[2], result ? "added" : "refused");
+    return result;
+}
+
+// DoMessage's 0x278e6003 branch: the rectangle grown by one cell towards the origin and clamped to the city's cells.
+void cSC4FloraSimulator::DoTerrainChangedMessage(std::uint32_t data1, std::uint32_t data2) {
+    if (!g_host) return;
+    float sizeX = 0.0f, sizeZ = 0.0f;
+    g_host->CitySizeMeters(sizeX, sizeZ);
+    const auto cellsX = static_cast<std::int32_t>(sizeX / 16.0f), cellsZ = static_cast<std::int32_t>(sizeZ / 16.0f);
+    std::int32_t rect[4];
+    rect[0] = std::max(static_cast<std::int32_t>(data1 >> 16) - 1, 0);
+    rect[1] = std::max(static_cast<std::int32_t>(data2 >> 16) - 1, 0);
+    rect[2] = std::min(static_cast<std::int32_t>(data1 & 0xffff), cellsX - 1);
+    rect[3] = std::min(static_cast<std::int32_t>(data2 & 0xffff), cellsZ - 1);
+    DoTerrainAltitudeChange(rect);
+}
+
+// 0x1000c19c0 (Mac i386 0x8c9e2). Every flora occupant of the cells whose ground moved (by 0.001 m or more) is removed, unless
+// the debug option keeps them, in which case (and for the ones whose ground did not move) the occupant follows the ground.
+void cSC4FloraSimulator::DoTerrainAltitudeChange(const std::int32_t rect[4]) {
+    cISC4OccupantManager* occupants = g_host ? g_host->OccupantManager() : nullptr;
+    if (!occupants) return;
+    OccupantList found;
+    if (!occupants->GetOccupantsByStandardCityCells(found, rect, rect + 2, kOccupantTypeFlora, 0xffffffffu)) return;
+    int removed = 0;
+    for (cISC4Occupant* occupant : found) {
+        void* raw = nullptr;
+        if (occupant->QueryInterface(kGZIID_cISC4FloraOccupant, &raw) && raw) {
+            auto* flora = static_cast<cISC4FloraOccupant*>(raw);
+            float position[3];
+            flora->AsOccupant()->GetPosition(position);
+            bool onLot = false;
+            const float ground = g_host->GroundHeight(position[0], position[2], onLot);
+            if (!keepFloraOnTerrainChange_ && 0.001f <= std::fabs(ground - position[1])) {
+                occupants->RemoveOccupant(flora->AsOccupant(), true, 0);
+                ++removed;
+            } else {
+                AdjustFloraPositionFromTerrainChange(occupant, flora);
+            }
+            flora->Release();
+        }
+    }
+    if (std::getenv("SC4_DEBUG") && !found.empty())
+        std::fprintf(stderr, "flora: terrain changed in cells %d,%d..%d,%d: %zu flora, %d removed\n", rect[0], rect[1], rect[2], rect[3], found.size(), removed);
+    ReleaseAll(found);
+}
+
+// 0x1000c18f4 (Mac i386 0x8c916): land flora sits on the ground or the sea surface, whichever is higher; aquatic flora on the
+// sea surface. A move of 0.001 m or more updates the position and tells the occupant manager.
+void cSC4FloraSimulator::AdjustFloraPositionFromTerrainChange(cISC4Occupant* occupant, cISC4FloraOccupant* flora) {
+    if (!g_host) return;
+    const float sea = g_host->SeaLevel();
+    const cSC4StaticFloraData* data = GetStaticFloraData(flora->GetFloraType());
+    float position[3];
+    occupant->GetPosition(position);
+    bool onLot = false;
+    const float ground = g_host->GroundHeight(position[0], position[2], onLot);
+    float target = sea;
+    if (data && !data->aquatic && sea <= ground) target = ground;
+    if (0.001f <= std::fabs(target - position[1])) {
+        position[1] = target;
+        occupant->SetPosition(position);
+        if (cISC4OccupantManager* occupants = g_host->OccupantManager()) occupants->MoveOccupant(occupant, true);
+    }
 }
 
 }  // namespace sc4

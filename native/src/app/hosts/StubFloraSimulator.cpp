@@ -13,6 +13,11 @@ struct StubFloraSimulator final : IFloraSimulatorHost {
     float SeaLevel() override { return {}; }
     float TerrainHeight(float x, float z) override { return {}; }
     int TerrainClass(float x, float z) override { return {}; }
+    cISC4OccupantManager* OccupantManager() override { return {}; }
+    float GroundHeight(float x, float z, bool& onLot) override { onLot = false; return {}; }
+    float TerrainNormalY(float x, float z) override { return 1.0f; }
+    void CitySizeMeters(float& x, float& z) override { x = z = 0.0f; }
+    std::uint32_t SimDate() override { return {}; }
 };
 }  // namespace
 

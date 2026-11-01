@@ -81,6 +81,13 @@ struct TerrainRect {                // SC4Rect<int>: inclusive vertex bounds
 
 struct TerrainVector3 { float x = 0, y = 0, z = 0; };
 
+// kEmptyRect (set by a static initialiser in the original: {INT_MAX, INT_MAX, INT_MIN, INT_MIN}), so a union with it is the other rect.
+inline constexpr TerrainRect kEmptyTerrainRect{0x7fffffff, 0x7fffffff, -0x7fffffff - 1, -0x7fffffff - 1};
+inline bool IsEmptyTerrainRect(const TerrainRect& r) {
+    return r.left == kEmptyTerrainRect.left && r.top == kEmptyTerrainRect.top && r.right == kEmptyTerrainRect.right &&
+           r.bottom == kEmptyTerrainRect.bottom;
+}
+
 struct TerrainPoint { float x = 0, z = 0; };   // SC4Point<float> (x at +0, z at +4)
 struct TerrainPointI { std::int32_t x = 0, z = 0; };   // SC4Point<int>
 
@@ -296,7 +303,7 @@ struct TerrainBrushParameters {
     float strengthScale = 1.0f;               // +0x18
     float radiusScale = 1.0f;                 // +0x1c
     std::uint32_t redisplayFlags = 0;         // +0x20
-    TerrainRect rect = {0, 0, -1, -1};        // +0x24 (in/out: the cells the brush touched)
+    TerrainRect rect = kEmptyTerrainRect;     // +0x24 (in/out: the cells the brush touched)
     float levelAltitude = 0.0f;               // +0x34
 };
 static_assert(sizeof(TerrainBrushParameters) == 0x38);
@@ -1055,7 +1062,7 @@ private:
     bool loadOk_ = false;
     std::int32_t neighborOffsets_[8] = {};        // +0xa4..+0xc0
     TerrainRect gridRect_;                        // +0x58: the whole grid as a vertex rect
-    TerrainRect emptyRect_ = {0, 0, -1, -1};      // +0xcc (kEmptyRect + the following dword pair)
+    TerrainRect emptyRect_ = kEmptyTerrainRect;   // +0xcc (kEmptyRect)
     std::vector<Vertex> vertices_;                // +0x88
     std::vector<float> waterDepth_;               // cSTESurfaceWater vertex +0x0 (elided class)
     std::vector<float> sediment_;                 // cSTESurfaceWater vertex +0x1c

@@ -30,6 +30,7 @@
 #include "app/NativeZoneTool.h"
 #include "app/NativeCatalogUi.h"
 #include "app/NativeTerrainTool.h"
+#include "app/NativeFlora.h"
 #include "gz/Buffer.h"
 #include "gz/WinBtn.h"
 #include "sc4/SC4UI.h"
@@ -121,7 +122,7 @@ private:
 
 struct StubView3DWin final : IView3DWinHost {
     View3DNotifications notifications_;
-    cIGZMessageServer2* MessageServer2() override { return {}; }
+    cIGZMessageServer2* MessageServer2() override { return SL::spMS2; }   // SL::spMS2: erosion, view filter / level and tool changes
     // the preferences blob (0x1734 bytes): all defaults off (no edge scrolling)
     std::uint8_t* Preferences() override { static std::uint8_t blob[0x1734] = {}; return blob; }
     bool CityExists() override { return LoadedCity() != nullptr; }
@@ -250,7 +251,7 @@ struct StubView3DWin final : IView3DWinHost {
     cSC4ViewInputControl* CreateLabelTool() override { SC4_UNWIRED("IView3DWinHost::CreateLabelTool (cSC4ViewInputControlLabelTool not recovered)"); return nullptr; }
     cSC4ViewInputControl* CreateSignLabelDemolishTool() override { SC4_UNWIRED("IView3DWinHost::CreateSignLabelDemolishTool (not recovered)"); return nullptr; }
     cSC4ViewInputControl* CreateObliterateCityTool() override { SC4_UNWIRED("IView3DWinHost::CreateObliterateCityTool (cSC4ObliterateCity not recovered)"); return nullptr; }
-    cSC4ViewInputControl* CreateFloraTool(std::uint32_t) override { SC4_UNWIRED("IView3DWinHost::CreateFloraTool (cSC4ViewInputControlFlora not recovered)"); return nullptr; }
+    cSC4ViewInputControl* CreateFloraTool(std::uint32_t type) override { return native::CreateFloraTool(type); }
     cSC4ViewInputControl* CreateNetworkIntxTool(std::uint32_t) override { SC4_UNWIRED("IView3DWinHost::CreateNetworkIntxTool (not recovered)"); return nullptr; }
     bool CursorOverView(cIGZWin* view, int& x, int& y) override {
         WinMgr* manager = ActiveWinMgr();

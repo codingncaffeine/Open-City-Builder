@@ -1271,7 +1271,7 @@ bool cSTETerrain::Init() {
         minHeight_ = 0.0f;                                   // +0x90 / +0x94
         maxHeight_ = 0.0f;
     }
-    emptyRect_ = {0, 0, -1, -1};                             // +0xcc
+    emptyRect_ = kEmptyTerrainRect;                          // +0xcc
     InitBrushParameters();
     if (host->Messages()) {
         for (std::uint32_t type : kTerrainMessageTypes) host->AddTerrainNotification(this, type);
@@ -1526,8 +1526,7 @@ void cSTETerrain::DoAnimationTick(std::uint32_t elapsedMs) {
     TickVolcanicAshRegions(elapsedMs);                            // 0x1007379be
     const std::uint32_t next = elapsedMs + waterProximityTick_;   // +0xc8
     waterProximityTick_ = next;
-    const bool emptyRect = emptyRect_.left == 0 && emptyRect_.top == 0 && emptyRect_.right == -1 &&
-                           emptyRect_.bottom == -1;
+    const bool emptyRect = IsEmptyTerrainRect(emptyRect_);
     if (9999999 < next && !emptyRect) ComputeWaterProximityValues(gridRect_);   // the 10 s sweep
 }
 
@@ -1985,7 +1984,7 @@ void cSTETerrain::ComputeWaterProximityValues(const TerrainRect& r) {
     const std::int64_t width = static_cast<std::int64_t>(emptyRect_.right) - emptyRect_.left;
     const std::int64_t height = static_cast<std::int64_t>(emptyRect_.bottom) - emptyRect_.top;
     if (width * height <= 99) return;
-    emptyRect_ = {0, 0, -1, -1};                            // +0xcc reset to kEmptyRect
+    emptyRect_ = kEmptyTerrainRect;                         // +0xcc reset to kEmptyRect
     waterProximityTick_ = 0;                                // +0xc8
     waterVertexCount_ = 0;                                  // +0x108
     const std::uint8_t dry = static_cast<std::uint8_t>(Statics().maxBeachWidth + 2);
@@ -3068,7 +3067,7 @@ bool cSTETerrain::ApplyBrush(std::uint32_t brushType, TerrainBrushParameters& pa
     // 0x100731c50: reset the dirty rect, look the brush up in sBrushDescriptionMap (a lower_bound walk in the
     // original) and apply every component. A non-empty rect is redisplaayed with the caller's flags; the
     // original's return value is false only when the brush is unknown.
-    parameters.rect = {0, 0, -1, -1};
+    parameters.rect = kEmptyTerrainRect;
     const auto& map = BrushDescriptions();
     const auto it = map.find(brushType);
     if (it == map.end()) return false;
@@ -3336,13 +3335,12 @@ bool cSTETerrain::BrushFnRaiseLower(std::int32_t index, const TerrainBrushContex
 
 bool cSTETerrain::BrushFnFlora(std::int32_t index, const TerrainBrushContext& context) {
     // 0x100732a0e: 31% of the cells whose texture value is above 9 get a flora instance at a random point in
-    // the cell, but only on land (altitude <= 0 is the original's "can plant" test) and inside the grid.
+    // the cell, but only on dry land (the surface water's depth at the vertex <= 0) and inside the grid.
     ITerrainHost* host = TerrainHost();
     if (!host) return false;
     if (context.textureValue <= 9) return false;
     if (host->RandomUint32UniformBelow(100) < 0x1f) {
-        const float altitude = vertices_[static_cast<std::size_t>(index)].altitude;
-        if (altitude <= 0.0f) {
+        if (GetWaterDepthAtVertex(index) <= 0.0f) {
             const std::uint32_t row = static_cast<std::uint32_t>(index) / vertsX_;
             const std::uint32_t column = static_cast<std::uint32_t>(index) % vertsX_;
             if (column < cellsX_ && row < cellsZ_) {

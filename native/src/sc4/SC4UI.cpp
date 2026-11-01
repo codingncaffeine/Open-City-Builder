@@ -8,6 +8,7 @@
 
 #include "gz/Buffer.h"
 #include "gz/RZServices.h"
+#include "gz/cGZPersistResourceKeyList.h"
 #include "gz/WinGen.h"
 #include "gz/WinText.h"
 #include "rz/RZStringUtils.h"
@@ -226,14 +227,16 @@ sc4::cSC4CatalogItem* CreateCatalogItemFromExemplar(sc4::cISCResExemplar* exempl
 void CreateCatalogItemList(std::multimap<int, sc4::cISC4CatalogItem*>& items, sc4::cISC4WinCatalogView* view,
                            std::uint32_t itemType, std::uint32_t id, std::uint32_t typeFilter,
                            std::uint32_t propertyFilter) {
-    (void)itemType;
     auto* detokenizer = new sc4::cSCStringDetokenizer();
     detokenizer->AddRef();
 
     cIGZPersistResourceManager* manager = SL::RM();   // SL::spRM
     if (manager) {
+        // The exemplars (0x6534284a) of the catalog's group (cGZPersistResourceKeyFilterByTypeAndGroup on the stack).
+        cGZPersistResourceKeyFilterByTypeAndGroup filter(0x6534284a, itemType);
+        filter.AddRef();
         cIGZPersistResourceKeyList* keys = nullptr;
-        if (manager->GetAvailableResourceList(&keys, nullptr) && keys) {
+        if (manager->GetAvailableResourceList(&keys, &filter) && keys) {
             const std::uint32_t count = keys->Size();
             for (std::uint32_t i = 0; i < count; ++i) {
                 const cGZPersistResourceKey* key = keys->GetKey(i);

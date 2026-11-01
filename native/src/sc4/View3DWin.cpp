@@ -2948,7 +2948,7 @@ void cSC4View3DWin::RunGlobalTerrainTool(int tool) {                        // 0
             if (cIGZMessageServer2* server = host_ ? host_->MessageServer2() : nullptr) {
                 auto* message = new cRZMessage2Standard();
                 message->AddRef();
-                message->SetType(kMsgViewTerrainDisplayChanged);
+                message->SetType(kMsgTerrainErosion);
                 message->SetData1(tool == 6 ? 1 : 0);
                 server->MessagePost(message, false);
                 message->Release();

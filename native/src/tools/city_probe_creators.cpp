@@ -178,7 +178,8 @@ cIGZSerializable* CreateCityProbeSerializable(std::uint32_t classId) {
             return object;
         }
         case 0x2990c1bc: {  // cSC4WeatherSimulator(IWeatherHost*)
-            auto* object = new cSC4WeatherSimulator(CityProbeWeatherHost());
+            // the application's installed host (the game's NativeWeather.cpp) when there is one, else the probe binding
+            auto* object = new cSC4WeatherSimulator(WeatherHost() ? WeatherHost() : CityProbeWeatherHost());
             object->AddRef();
             return object;
         }

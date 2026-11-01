@@ -14,7 +14,9 @@
 #include "gz/cIGZIStream.h"
 #include "gz/cIGZOStream.h"
 #include "sc4/Exemplar.h"
+#include "rz/cRZRandom.h"
 #include "sc4/FloraOccupant.h"
+#include "sc4/OccupantManager.h"
 #include "sc4/SCProperty.h"
 
 namespace sc4 {
@@ -55,6 +57,14 @@ public:
     virtual float SeaLevel() = 0;                                      // terrain vslot 0xe8
     virtual float TerrainHeight(float x, float z) = 0;                 // terrain vslot 0x60
     virtual int TerrainClass(float x, float z) = 0;                    // sim-grid vslot 0x98
+    // AddNewFloraOccupant / LocationIsOKForNewFlora: the simulator's occupant manager (+0x14), its lot manager (+0x24
+    // vslot 0x48: the ground height and whether the point is on a lot), the terrain's face normal (+0x20 vslot 0x68),
+    // the city's size in metres (SL::spCity vslots 0x164 / 0x168) and the simulator's day number (+0x1c vslot 0x20).
+    virtual cISC4OccupantManager* OccupantManager() = 0;
+    virtual float GroundHeight(float x, float z, bool& onLot) = 0;
+    virtual float TerrainNormalY(float x, float z) = 0;
+    virtual void CitySizeMeters(float& x, float& z) = 0;
+    virtual std::uint32_t SimDate() = 0;
 };
 IFloraSimulatorHost* FloraSimulatorHost();
 void SetFloraSimulatorHost(IFloraSimulatorHost* host);
@@ -95,9 +105,25 @@ public:
     int GetFloraTypesByFamily(std::unordered_set<std::uint32_t>& out, std::uint32_t family) const;
     void SetElevationScale(float scale) { elevationScale_ = scale; }
 
+    // Planting (the terrain's flora brush, cSTETerrain::BrushFnFlora): a new occupant of `type` (0 = the best type for the
+    // spot) at xyz; unless `skipClusters`, the trees around it that cluster with it are merged into the next cluster type
+    // first. Returns the occupant (one reference held by the occupant manager) or null.
+    cISC4Occupant* AddNewFloraOccupant(std::uint32_t type, float* xyz, bool skipClusters);   // vslot 0x48 (0x1000c1f6c)
+    bool AddNewFloraOccupant(cISC4Occupant* occupant);                                         // vslot 0x44
+    bool LocationIsOKForNewFlora(std::uint32_t type, float x, float z, cISC4Occupant* ignore) const;   // vslot 0x3c
+    // The terrain-changed message 0x278e6003 (data1 = x0 << 16 | x1, data2 = z0 << 16 | z1, cells): DoMessage's decoding,
+    // then DoTerrainAltitudeChange (0x8c9e2 in the Mac i386 build) over the flora of the cells.
+    void DoTerrainChangedMessage(std::uint32_t data1, std::uint32_t data2);
+    void DoTerrainAltitudeChange(const std::int32_t rect[4]);
+    void AdjustFloraPositionFromTerrainChange(cISC4Occupant* occupant, cISC4FloraOccupant* flora);
+    static std::uint32_t NextClusterType(std::uint32_t type);
+    static std::uint32_t AdvanceClusterType(std::uint32_t a, std::uint32_t b);
+
 private:
     std::uint32_t refCount_ = 0;                                    // +0x1c
-    float elevationScale_ = 1.0f;                                   // +0xd0 (tunable)
+    cRZRandom random_{0};                                           // +0x84
+    bool keepFloraOnTerrainChange_ = false;                         // +0x2f (a debug console option): move, never remove
+    float elevationScale_ = 1.0f;                                   // +0xd0 (i386 +0x98: 16 / tunable 0xc9dbdd02)
 };
 
 }  // namespace sc4
