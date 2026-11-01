@@ -341,12 +341,15 @@ void DetachEffects() {
 }
 
 sc4::ITerrainEffect* CreateTerrainEffect(std::uint32_t group, std::uint32_t type) {
-    if (!BindManager()) return nullptr;
+    if (!BindManager()) {
+        if (std::getenv("SC4_FXDEBUG")) std::fprintf(stderr, "effects: terrain effect %08x/%08x: no manager (city %p)\n", group, type, static_cast<void*>(g_city));
+        return nullptr;
+    }
     sc4::cSC4VisualEffect* effect = nullptr;
     const bool ok = g_manager->CreateVisualEffect(group, type, &effect) && effect;
     if (g_debug) {
         static int shown = 0;
-        if (shown++ < 8) std::fprintf(stderr, "effects: terrain effect %08x/%08x -> %s (slot %d)\n", group, type, ok ? "made" : "none", ok ? effect->Slot() : -1);
+        if (shown++ < 8 || std::getenv("SC4_FXDEBUG")) std::fprintf(stderr, "effects: terrain effect %08x/%08x -> %s (slot %d)\n", group, type, ok ? "made" : "none", ok ? effect->Slot() : -1);
     }
     if (!ok) return nullptr;
     if (effect->Slot() < 0) {   // a binding without a usable description: nothing would draw
