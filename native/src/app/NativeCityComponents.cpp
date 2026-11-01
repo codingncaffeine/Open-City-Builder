@@ -22,16 +22,17 @@ constexpr const char* kProbeHosted = ",TrafficNetwork,";
 // Components the native city view initialises itself, after its render stack is up (NativeCityView.cpp: the terrain needs the view's
 // services for its first surface pass, the occupant manager needs the automata host installed first). Initialised here they come up
 // half-wired and their init guard then stops the second call (the terrain drew black). Ordering divergence until those services exist
-// before cSC4City::Init.
+// before cSC4City::Init. Their Shutdown stays in the city's pass (kShutdownOrder): skipping it left every occupant alive after the city
+// closed, still answering day ticks (a construction site went on completing the old city's lots inside the next city).
 constexpr const char* kInitByCityView = ",Terrain,OccupantManager,";
 
 // Dev switch: SC4_COMPINIT_SKIP=Name,Name leaves more components uninitialised (bisecting a component whose Init breaks);
 // SC4_COMPINIT_PROBES=1 initialises the probe-hosted ones anyway.
-bool Skipped(const char* name) {
+bool Skipped(const char* name, bool init) {
     const std::string key = std::string(",") + name + ",";
     static const bool probes = std::getenv("SC4_COMPINIT_PROBES") != nullptr;
     if (!probes && std::string(kProbeHosted).find(key) != std::string::npos) return true;
-    if (std::string(kInitByCityView).find(key) != std::string::npos) return true;
+    if (init && std::string(kInitByCityView).find(key) != std::string::npos) return true;
     static const char* list = std::getenv("SC4_COMPINIT_SKIP");
     if (!list) return false;
     return (std::string(",") + list + ",").find(key) != std::string::npos;
@@ -55,7 +56,7 @@ void RunCityComponentLifecycle(CityComponent component, cIGZUnknown* object, boo
     const char* name = GetCityComponentInfo(component).name;
     static const bool trace = std::getenv("SC4_SIMDEBUG") != nullptr;
     if (!object) return;
-    if (Skipped(name)) {
+    if (Skipped(name, init)) {
         if (trace) std::fprintf(stderr, "city: %s %s skipped (probe host)\n", init ? "init" : "shutdown", name);
         if (init) SC4_UNWIRED("cSC4City::Init component left uninitialised (its host is still a city-probe binding)");
         return;

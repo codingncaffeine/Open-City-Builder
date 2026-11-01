@@ -216,11 +216,12 @@ bool cSC4ZoneDeveloper::Init() {
         lotMap_.resize(static_cast<std::size_t>(cellsX_));
         for (auto& column : lotMap_) column.assign(static_cast<std::size_t>(cellsZ_), nullptr);
     } else if (cellsX_ > 0) {
-        // Re-init: the original walks the existing map and calls cISC4Lot::Init (vslot 0x28) on every
-        // non-null cell.
+        // Re-init: the original walks the existing map with GetLot(x, z, true) (vslot 0x40, i386 0x000e100c) and calls
+        // cISC4Lot::Init on each lot it returns. The exact-cell query answers only a lot's anchor cell, so every lot is initialised
+        // once (a second Init drops the configuration the first restored from the save).
         for (int x = 0; x < cellsX_; ++x)
             for (int z = 0; z < cellsZ_; ++z) {
-                cSC4Lot* lot = LotAt(lotMap_, x, z);
+                cSC4Lot* lot = GetLot(x, z, true);
                 if (lot) lot->Init();
             }
     }
