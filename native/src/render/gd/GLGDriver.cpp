@@ -45,7 +45,7 @@ void main() {
     gl_Position = c.projection * eye;
     gl_Position.xy = gl_Position.xy * uViewport.xy + uViewport.zw * gl_Position.w;
     vColor = aColor * c.colorMul;
-    vUv0 = c.stride >= 24u ? aUv0 : vec2(0.0);
+    vUv0 = c.stride >= 24u || c.stride == 20u ? aUv0 : vec2(0.0);
     vUv1 = c.stride >= 32u ? aUv1 : vUv0;
     if ((c.texMode & 4u) != 0u) vUv0 = (c.texMat0 * vec4(eye.xyz, 1.0)).xy;
     else if ((c.texMode & 1u) != 0u) vUv0 = (c.texMat0 * vec4(vUv0, 0.0, 1.0)).xy;
@@ -764,7 +764,7 @@ void cGLGDriver::InterleavedArrays(eGDVertexFormat format, int stride, const voi
 void cGLGDriver::DrawArrays(eGDPrimType mode, int first, int count) {
     Impl& s = *impl_;
     if (count < 1 || mode > 7 || !s.base) return;
-    if ((s.format != vf::V3F_C4UB && s.format != vf::V3F_C4UB_T2F && s.format != vf::V3F_C4UB_2T2F)) {
+    if ((s.format != vf::V3F_C4UB && s.format != vf::V3F_T2F && s.format != vf::V3F_C4UB_T2F && s.format != vf::V3F_C4UB_2T2F)) {
         { char note[64]; std::snprintf(note, sizeof note, "DrawArrays(vertex format %#x)", unsigned(s.format)); Unsupported(note); }
         return;
     }
@@ -799,7 +799,7 @@ void cGLGDriver::DrawArrays(eGDPrimType mode, int first, int count) {
 void cGLGDriver::DrawElements(eGDPrimType mode, int count, eGDType indexType, const void* indices) {
     Impl& s = *impl_;
     if (count < 1 || mode > 7 || !s.base) return;
-    if ((s.format != vf::V3F_C4UB && s.format != vf::V3F_C4UB_T2F && s.format != vf::V3F_C4UB_2T2F)) {
+    if ((s.format != vf::V3F_C4UB && s.format != vf::V3F_T2F && s.format != vf::V3F_C4UB_T2F && s.format != vf::V3F_C4UB_2T2F)) {
         { char note[64]; std::snprintf(note, sizeof note, "DrawElements(vertex format %#x)", unsigned(s.format)); Unsupported(note); }
         return;
     }
@@ -868,15 +868,25 @@ void cGLGDriver::Encode(unsigned primitive, int vertexCount, const std::uint16_t
     glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof dc, &dc);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, s.ubo);
 
-    // V3F, C4UB, then one or two T2F sets (the Metal shader reads the same bytes by stride)
+    // V3F, C4UB, then one or two T2F sets (the Metal shader reads the same bytes by stride). V3F_T2F has no colour: the
+    // vertices are white, as Direct3D lights a vertex without a diffuse component, and its T2F follows the position.
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, s.stride, reinterpret_cast<const void*>(0));
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, s.stride, reinterpret_cast<const void*>(12));
-    if (s.stride >= 24) { glEnableVertexAttribArray(2); glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, s.stride, reinterpret_cast<const void*>(16)); }
-    else { glDisableVertexAttribArray(2); glVertexAttrib2f(2, 0, 0); }
-    if (s.stride >= 32) { glEnableVertexAttribArray(3); glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, s.stride, reinterpret_cast<const void*>(24)); }
-    else { glDisableVertexAttribArray(3); glVertexAttrib2f(3, 0, 0); }
+    if (s.format == vf::V3F_T2F) {
+        glDisableVertexAttribArray(1);
+        glVertexAttrib4f(1, 1, 1, 1, 1);
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, s.stride, reinterpret_cast<const void*>(12));
+        glDisableVertexAttribArray(3);
+        glVertexAttrib2f(3, 0, 0);
+    } else {
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, s.stride, reinterpret_cast<const void*>(12));
+        if (s.stride >= 24) { glEnableVertexAttribArray(2); glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, s.stride, reinterpret_cast<const void*>(16)); }
+        else { glDisableVertexAttribArray(2); glVertexAttrib2f(2, 0, 0); }
+        if (s.stride >= 32) { glEnableVertexAttribArray(3); glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, s.stride, reinterpret_cast<const void*>(24)); }
+        else { glDisableVertexAttribArray(3); glVertexAttrib2f(3, 0, 0); }
+    }
 
     for (int st = 0; st < 2; ++st) {
         glActiveTexture(GL_TEXTURE0 + st);

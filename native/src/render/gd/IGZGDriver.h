@@ -24,7 +24,7 @@ namespace state { enum : eGDDriverState { AlphaTest = 0, DepthTest = 1, Stencil 
 
 using eGDMatrixTarget = std::uint32_t;   // 0 modelview, 1 projection (the UI context loads target 1)
 using eGDVertexFormat = std::uint32_t;   // 1,2,3,10,11,0x20..0x26 predefined; negative (sign bit) = packed
-namespace vf { enum : eGDVertexFormat { V3F_C4UB = 1, V3F_C4UB_T2F = 10, V3F_C4UB_2T2F = 11 }; }
+namespace vf { enum : eGDVertexFormat { V3F_C4UB = 1, V3F_T2F = 2, V3F_C4UB_T2F = 10, V3F_C4UB_2T2F = 11 }; }
 
 using eGDStencilOp = std::uint32_t;
 using eGDShade = std::uint32_t;
