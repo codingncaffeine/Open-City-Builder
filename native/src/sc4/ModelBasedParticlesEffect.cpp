@@ -320,12 +320,9 @@ void cSC4ModelBasedParticlesEffect::ProcessModelParticle(cSC4MBParticle* particl
         float rotation[3][3];
         for (int r = 0; r < 3; ++r)
             for (int c = 0; c < 3; ++c) rotation[r][c] = frame.m[3 * r + c];
+        // The original multiplies the local rotation (still the identity here) by the frame: the product is the frame.
         for (int r = 0; r < 3; ++r)
-            for (int c = 0; c < 3; ++c) {   // local.rotation (identity so far) * frame
-                float sum = 0.0f;
-                for (int k = 0; k < 3; ++k) sum += local.rotation[r][k] * rotation[k][c];
-                local.rotation[r][c] = sum;
-            }
+            for (int c = 0; c < 3; ++c) local.rotation[r][c] = rotation[r][c];
         local.flags |= nS3D::kTransformRotation;
         if (0.0f < description_->values214[0]) {   // turn smoothing: ease the heading toward the walk direction
             const float target = TurnsFromRotation(rotation);
@@ -490,8 +487,10 @@ void cSC4ModelBasedParticlesEffect::DrawParticle(cSC4MBParticle* particle, SC4Dr
         if (draw) model_->Draw(draw, false);
         static int traced = 0;
         if (std::getenv("SC4_FXDEBUG") && traced++ % 40 == 0)
-            std::fprintf(stderr, "fx: draw %p at %.1f %.1f %.1f scale %.3f frame %.1f/%d alpha %.2f draw %p\n", static_cast<void*>(this), transform.translation[0],
-                         transform.translation[1], transform.translation[2], transform.scale, particle->frame, frames, alpha, static_cast<void*>(draw));
+            std::fprintf(stderr, "fx: draw %p at %.1f %.1f %.1f scale %.3f frame %.1f/%d vel %.2f %.2f %.2f rot z-axis %.2f %.2f %.2f y-axis %.2f %.2f %.2f\n", static_cast<void*>(this),
+                         transform.translation[0], transform.translation[1], transform.translation[2], transform.scale, particle->frame, frames, particle->velocity.x,
+                         particle->velocity.y, particle->velocity.z, transform.rotation[0][2], transform.rotation[1][2], transform.rotation[2][2], transform.rotation[0][1],
+                         transform.rotation[1][1], transform.rotation[2][1]);
     }
     if (particle->slave && particle->slave->IsStarted()) {
         if (Flag11(4)) {
