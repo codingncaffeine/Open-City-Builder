@@ -33,6 +33,8 @@
 #include "gz/WinCtrlFactory.h"
 #include "gz/WinFont.h"
 #include "gz/WinGrid.h"
+#include "gz/WinLineInput.h"
+#include "gz/WinListBox.h"
 #include "gz/WinScrollbar.h"
 #include "gz/WinSlider.h"
 #include "gz/WinText.h"
@@ -303,6 +305,13 @@ bool InitUiScripts(WinMgr* mgr) {
     // The slider (clsid 0x21325208) and the grid (0xdaa6b9bf): without makers the scripts built bare windows in their place
     // (the audio options' volume sliders drew as filled boxes and its playlist took no rows).
     gz::RegisterDirectorMaker("cGZWinSlider", +[]() -> cIGZUnknown* { return MakeWin<gz::cGZWinSlider>(); });
+    // The list box (clsid 0x598) and the line input (0x21335c5a): the region dialogs' region list and name field.
+    gz::RegisterDirectorMaker("cGZWinListBox", +[]() -> cIGZUnknown* {
+        return static_cast<cIGZUnknown*>(static_cast<cIGZWin*>(new gz::cGZWinListBox(g_mgr, false)));
+    });
+    gz::RegisterDirectorMaker("cGZWinLineInput", +[]() -> cIGZUnknown* {
+        return static_cast<cIGZUnknown*>(static_cast<cIGZWin*>(new gz::cGZWinLineInput(g_mgr, true)));
+    });
     gz::RegisterDirectorMaker("cGZWinGrid", +[]() -> cIGZUnknown* {   // the director's default flags (Mac i386 CreateGZWinGrid 0x0073c2ee)
         return static_cast<cIGZUnknown*>(static_cast<cIGZWin*>(new gz::cGZWinGrid(g_mgr, 0x19bff)));
     });

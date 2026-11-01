@@ -48,6 +48,7 @@ class cSC4DialogWinProcBase : public gz::cIGZWinProc {
 public:
     cSC4DialogWinProcBase(std::uint32_t resourceInstance, std::uint32_t windowId, std::uint32_t defaultFocusId = 0)
         : resourceInstance_(resourceInstance), windowId_(windowId), defaultFocusId_(defaultFocusId) {}
+    virtual ~cSC4DialogWinProcBase() = default;   // Release deletes the derived dialogs through this class
     bool QueryInterface(std::uint32_t iid, void** out) override;
     std::uint32_t AddRef() override { return ++refCount_; }
     std::uint32_t Release() override;
@@ -61,6 +62,7 @@ public:
     virtual void GZOnOK();
 
     cIGZWin* Window() const { return window_; }
+    void EndDialog(std::uint32_t result);                            // @ 0x1003d6b7e: the result Display returns
     gz::cIGZWinBtn* GetBtnControl(std::uint32_t id);                     // @ 0x1003d6e3e
     void TranslateTokensInCaption(std::uint32_t id);                 // @ 0x1003d6cc6 (caption text with %tokens% resolved)
 

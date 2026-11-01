@@ -1,4 +1,5 @@
 #include "sc4/WinRegionScreen.h"
+#include "sc4/RegionDialogs.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1211,6 +1212,28 @@ bool cSC4WinRegionScreen::GZOnCommand(std::uint32_t command, std::uint64_t param
     }
     case 0x4a560001:
         RestoreSignposts();
+        return true;
+    case 0x2a5b0001:   // load region: the chosen region becomes the active one and the region screen is rebuilt for it
+    case 0x2a5b0002: { // delete region: the active one goes, then the same rebuild
+        if (!host) return true;
+        if (param == 0x2a5b0001) {
+            RegionDialogNation nation;
+            nation.active = host->CurrentRegionIndex();
+            for (int i = 0; i < host->RegionCount(); ++i) nation.names.push_back(host->RegionNameAt(i) ? host->RegionNameAt(i) : "");
+            const int index = SC4DisplayLoadRegionDialog(this, nation);
+            if (getenv("SC4_DEBUG")) fprintf(stderr, "region screen: load region dialog -> %d\n", index);
+            if (index < 0) return true;
+            host->SelectRegion(index);                  // cISC4Nation vslot 0x24 (SetActiveRegion)
+        } else {
+            if (!SC4DisplayDeleteRegionDialog(this)) return true;
+            host->DeleteRegion(currentRegionIndex_);    // cISC4Nation vslot 0x30
+        }
+        SetUserPreferencesToCurrentRegion();
+        host->ReloadRegion();                           // cISC4App vslot 0x30 (0): back to a fresh region view
+        return true;
+    }
+    case 0x2a5b0000:   // new region: cSC4NewRegionDialog is not ported yet
+        if (getenv("SC4_DEBUG")) fprintf(stderr, "region screen: the new-region dialog is not ported yet\n");
         return true;
     case 0x0a5510a9:   // the options menu's game options button
         if (host) host->RunGameOptionsDialog();

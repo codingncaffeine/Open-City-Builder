@@ -1,3 +1,4 @@
+#include "app/NativeJobs.h"
 #include "app/NativeRegionScreen.h"
 #include "app/NativeAnimationTicks.h"
 
@@ -349,7 +350,24 @@ public:
         return name ? name->ToChar() : nullptr;
     }
     const char* RegionName() override { return RegionNameAt(CurrentRegionIndex()); }
-    bool ReloadRegion() override { return false; }
+    // cISC4App::RequestGoToRegionView(false): the region screen is destroyed and rebuilt for the active region. The
+    // region screen's own button calls this, so the rebuild waits for the end of the frame.
+    bool ReloadRegion() override {
+        static int pending = -1;
+        if (pending >= 0) return true;
+        pending = RegisterFrameSwap([] {
+            UnregisterFrameSwap(pending);
+            pending = -1;
+            // RequestGoToRegionView(false) with no city open: destroy the current screen, make a region screen. The app's own
+            // screen hooks are only installed with a city, so the nation host's (the app window's) do it here.
+            if (::INationHost* nation = ::NationHost()) {
+                nation->DestroyCurrentScreen();
+                nation->CreateRegionScreen();
+            }
+        });
+        return true;
+    }
+    void DeleteRegion(int index) override { if (Nation() && index >= 0) Nation()->DeleteRegion(std::uint32_t(index)); }
     bool RegionCellBounds(int& left, int& top, int& right, int& bottom) override {
         cISC4Region* region = ActiveRegion();
         if (!region) return false;

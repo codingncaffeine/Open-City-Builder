@@ -113,12 +113,15 @@ bool cSC4DialogWinProcBase::DoWinProcMessage(cIGZWin* window, cGZMessage& messag
 }
 
 bool cSC4DialogWinProcBase::GZOnButtonActivate(std::uint32_t id) {
-    if (id == 0xca5b9966) GZOnOK();
-    else if (id == 0x8a5b9959) GZOnCancel();
+    // 0x8a5b9959 is the OK button and 0xca5b9966 Cancel (Mac i386 0x002eb4a8: vslot 0x30 / 0x2c; the dialog scripts
+    // caption them "OK" / "Load Region" and "Cancel").
+    if (id == 0x8a5b9959) GZOnOK();
+    else if (id == 0xca5b9966) GZOnCancel();
     else return false;
     return true;
 }
 
+void cSC4DialogWinProcBase::EndDialog(std::uint32_t result) { window_->GetWindowManager()->EndDialog(kEndDialogCode, window_, result); }
 void cSC4DialogWinProcBase::GZOnCancel() { window_->GetWindowManager()->EndDialog(kEndDialogCode, window_, 0); }
 void cSC4DialogWinProcBase::GZOnOK() { window_->GetWindowManager()->EndDialog(kEndDialogCode, window_, 1); }
 

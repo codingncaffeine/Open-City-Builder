@@ -28,15 +28,15 @@ int main() {
     cGZMessage done; done.type = gz::kWinProcShutdown;
     CHECK(dialog->DoWinProcMessage(nullptr, init) && dialog->attached == 1);
     CHECK(dialog->DoWinProcMessage(nullptr, done) && dialog->detached == 1 && dialog->Window() == nullptr);
-    cGZMessage command; command.type = kGZMsgCommand; command.param1 = 0x287259f6; command.param2 = 0xca5b9966;
+    cGZMessage command; command.type = kGZMsgCommand; command.param1 = 0x287259f6; command.param2 = 0x8a5b9959;   // OK (Mac i386 0x002eb4a8)
     CHECK(!dialog->DoWinProcMessage(nullptr, command) && dialog->ok == 1);
-    command.param2 = 0x8a5b9959;
+    command.param2 = 0xca5b9966;                              // Cancel
     dialog->DoWinProcMessage(nullptr, command);
     CHECK(dialog->cancel == 1);
     command.param2 = 0x1;
     CHECK(!dialog->GZOnButtonActivate(1));
     command.param1 = 0x999;                                  // another sender: ignored
-    command.param2 = 0xca5b9966;
+    command.param2 = 0x8a5b9959;
     dialog->DoWinProcMessage(nullptr, command);
     CHECK(dialog->ok == 1);
     dialog->Release();                                       // count 1 -> deleted

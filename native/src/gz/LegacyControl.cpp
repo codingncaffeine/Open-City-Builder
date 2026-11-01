@@ -1799,7 +1799,7 @@ void cGZLegacyControl::InterpretPropertiesGZWinSpinner(cIGZWin* window, tScriptP
         (void)window; (void)parameters; (void)init;                                              \
     }
 
-GZLEGACYCTRL_PARTIAL_INTERPRETER(GZWinListBox)
+
 GZLEGACYCTRL_PARTIAL_INTERPRETER(GZWinCombo)
 GZLEGACYCTRL_PARTIAL_INTERPRETER(GZWinLineInput)
 GZLEGACYCTRL_PARTIAL_INTERPRETER(GZWinOptGrp)

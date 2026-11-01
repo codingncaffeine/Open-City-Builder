@@ -706,3 +706,9 @@ src/rz/RZTime.cpp
 src/sc4/NetworkToolSolve.cpp
 src/sc4/TileRules.cpp
 src/sc4/NetworkPreview.cpp
+src/gz/LegacyControlListBox.cpp
+src/sc4/RegionDialogs.cpp
+src/gz/WinListBox.cpp
+src/gz/WinLineInput.cpp
+src/gz/WinScrollbar2.cpp
+src/gz/WinSpinner.cpp
