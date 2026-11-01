@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cfloat>
+#include <map>
 
 #include "rz/cRZDate.h"
 #include "rz/cRZMessage2Standard.h"
@@ -247,6 +248,11 @@ bool cSC4HistoryWarehouse::DoMessage(cIGZMessage2* message) {
 }
 
 bool cSC4HistoryWarehouse::Store(std::uint32_t series, int value) {
+    if (std::getenv("SC4_HISTORYDEBUG")) {
+        static std::map<std::uint32_t, int> seen;
+        const int n = ++seen[series];
+        if (n <= 2 || n % 100 == 0) std::fprintf(stderr, "history: store %08x = %d (#%d)\n", series, value, n);
+    }
     Series& s = GetKeyVector(series);
     IHistoryEnvironment* env = HistoryEnvironment();
     const std::uint32_t today = env ? env->SimDayNumber() : 0;
