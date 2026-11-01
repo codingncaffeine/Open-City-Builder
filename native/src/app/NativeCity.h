@@ -18,7 +18,7 @@ void InstallStubHosts();
 
 // The window changes LoadCity asks for once the file is read (the application window's DestroyCurrentScreen / CreateCityScreen).
 struct CityScreenCallbacks {
-    std::function<void()> destroyCurrentScreen, createCityScreen;
+    std::function<void()> destroyCurrentScreen, createCityScreen, createRegionScreen;   // the last: leaving a city
 };
 void SetCityScreenCallbacks(CityScreenCallbacks callbacks);
 

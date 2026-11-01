@@ -19,6 +19,8 @@ IS4LightingManager* CreateNativeLightingManager();
 void InitCityLighting(sc4::cSTETerrain* terrain, sc4::cSC43DRender* render, sc4::cSC4Simulator* simulator);
 // Advances the time of day from the simulation clock; call once per frame.
 void TickLighting();
+// The city's renderer shut down: the manager and the city pointers go, the next city builds its own.
+void ShutdownCityLighting();
 // The city's 24-hour clock (a plain cSC424HourClock; null: fall back to the simulator's counters). Its visual time is the sun's.
 void SetLightingClock(sc4::cSC424HourClock* clock);
 sc4::cSC4LightingManager* LightingManager();

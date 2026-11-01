@@ -31,6 +31,7 @@ void InstallEffectsStub();
 void InstallEffectsManagerStub();
 void InstallEstablishCityHost();
 void InstallBudgetSimHosts();
+void InstallTerrainTools();
 void InstallFloraStub();
 void InstallFloraSimulatorStub();
 void InstallGraphsViewStub();
@@ -134,6 +135,7 @@ void InstallStubHosts() {
     InstallEffectsManagerStub();
     InstallEstablishCityHost();
     InstallBudgetSimHosts();
+    InstallTerrainTools();
     InstallFloraStub();
     InstallFloraSimulatorStub();
     InstallGraphsViewStub();

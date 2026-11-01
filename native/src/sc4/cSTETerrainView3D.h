@@ -394,6 +394,8 @@ public:
     TerrainRect WaterColorRect() const { return waterRect_; }
     bool WaterColorDone() const { return waterColorDone_; }
     float NightFactor() const { return nightFactor_; }
+    float DisplayAltitudeHigh() const { return heightHi_; }   // +0x94
+    float DisplayAltitudeLow() const { return heightLo_; }    // +0x98
     int VisibleEdgeA() const { return visibleEdge_[0]; }
     int VisibleEdgeB() const { return visibleEdge_[1]; }
     ITerrainSelection* Selection() const { return selection_.get(); }

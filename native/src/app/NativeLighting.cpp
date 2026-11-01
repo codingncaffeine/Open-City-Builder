@@ -218,6 +218,18 @@ void InitCityLighting(sc4::cSTETerrain* terrain, sc4::cSC43DRender* render, sc4:
     if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "lighting: manager ready, time %.1f night=%d\n", g_manager->GetTimeOfDay(), g_manager->IsNight());
 }
 
+void ShutdownCityLighting() {
+    g_terrain = nullptr;
+    g_render = nullptr;
+    g_simulator = nullptr;
+    g_inited = false;
+    if (g_manager && SL::spLightingManager == static_cast<cIGZUnknown*>(static_cast<sc4::cISC4LightingManager*>(g_manager))) SL::spLightingManager = nullptr;
+    if (g_manager) {
+        g_manager->Release();
+        g_manager = nullptr;
+    }
+}
+
 void TickLighting() {
     if (!g_inited || !g_manager || !g_terrain) return;
     static std::time_t lastCheck = 0;

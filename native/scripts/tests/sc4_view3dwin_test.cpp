@@ -412,10 +412,10 @@ struct FakeTerrainEditor final : ITerrainEditor {
     float TerrainHeightAt(float, float) override { ++heightsAt; return height + 1.0f; }
     void SetTerrainType(int value) override { type = value; ++typeSets; }
     int TerrainType() override { return type; }
-    void SetToolMode158(std::uint32_t mode) override { mode158 = static_cast<int>(mode); }
-    void SetToolMode160(std::uint32_t mode) override { mode160 = static_cast<int>(mode); }
-    void CancelActiveTool() override { ++cancels; }
-    void SetActiveToolFlag(bool on) override { activeFlag = on; ++activeFlags; }
+    void CreateFlatAreas(bool smoothen) override { mode158 = smoothen ? 1 : 0; }
+    void CreateShoreCliffs(bool redisplay) override { mode160 = redisplay ? 1 : 0; }
+    float DefaultRaiseLowerAmount() override { ++cancels; return 10.0f; }
+    void ChangeTerrainLevel(bool raise, float) override { activeFlag = raise; ++activeFlags; }
     bool TerrainTypeForBrush(int value, std::uint32_t& out) override {
         ++brushCalls;
         brush = value;

@@ -511,7 +511,7 @@ bool Boot() {
         native::SetCityScreenCallbacks({[] { if (gAppWindow) gAppWindow->DestroyCurrentScreen(); }, [] {
             if (!gAppWindow || !gAppWindow->CreateCityScreen()) return;
             if (sc4::cSC4View3DWin* view = gAppWindow->View3D()) native::AttachCityRenderStack(*view, native::BootApplication() ? native::BootApplication()->GetCity() : nullptr, gDriver.get(), static_cast<gz::cIGZDrawContext*>(gGraphics->Primary()->GetDrawContext()), kW, kH);
-        }});
+        }, [] { if (gAppWindow) gAppWindow->CreateRegionScreen(); }});
         screen.loadCity = [app](const std::string& path) { return native::LoadCityFile(*app, path); };
         native::InstallRegionScreenHost(screen);
         native::InstallRegionExtras(gDriver.get(), []() -> std::uint8_t* { return native::BootApplication() ? native::BootApplication()->GetPreferences() : nullptr; });

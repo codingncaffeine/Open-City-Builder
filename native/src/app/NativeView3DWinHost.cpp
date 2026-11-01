@@ -29,6 +29,7 @@
 #include "app/NativeNetworkTool.h"
 #include "app/NativeZoneTool.h"
 #include "app/NativeCatalogUi.h"
+#include "app/NativeTerrainTool.h"
 #include "gz/Buffer.h"
 #include "gz/WinBtn.h"
 #include "sc4/SC4UI.h"
@@ -158,7 +159,7 @@ struct StubView3DWin final : IView3DWinHost {
         sc4::cSC4City* city = native::HostCity();
         return city && city->GetEstablished();
     }
-    ITerrainEditor* TerrainEditor() override { return {}; }
+    ITerrainEditor* TerrainEditor() override { return native::CityTerrainEditor(); }
     bool GraphicsSystemAllowsSelfScroll() override { return {}; }
     void RunChangeTerrainDialog(int& type) override {}
     std::uint32_t GetWindowChildrenSet(cIGZWin* window, std::set<cIGZWin*>& children) override { return nSC4UI::GetWindowChildrenSet(window, children); }
@@ -303,7 +304,7 @@ struct StubView3DWin final : IView3DWinHost {
     cIGZBuffer* CreateImageBuffer() override { return {}; }
     IAdvisorWindow* AdvisorWindow() override { return {}; }
     cSC4ViewInputControl* CreateZoningTool(std::uint32_t type) override { return native::CreateZoneTool(static_cast<int>(type)); }
-    cSC4ViewInputControl* CreateTerrainScrubberTool(std::uint32_t type, bool flag) override { return {}; }
+    cSC4ViewInputControl* CreateTerrainScrubberTool(std::uint32_t type, bool flag) override { return native::CreateTerrainScrubberTool(type, flag); }
     cSC4ViewInputControl* CreateLevelTerrainTool() override { return {}; }
     cSC4ViewInputControl* CreateCityScrollTool() override { return new cSC4ViewInputControlCityScroll(); }
     void CityScrollSetMouseScroll(cSC4ViewInputControl* tool, int x, int y) override {

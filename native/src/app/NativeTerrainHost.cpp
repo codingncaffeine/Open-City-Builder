@@ -24,6 +24,9 @@
 #include "sc4/AdvisorSystem.h"
 #include "gz/GZCOM.h"
 #include "platform/Unwired.h"
+#include "rz/cRZRandom.h"
+#include "s3d/FSH.h"
+#include <map>
 
 namespace native {
 bool NeighborsHasConnection(cIGZUnknown* component, std::uint32_t type, int x, int z);      // NativeSurfaceWaterNeighbors.cpp
@@ -129,6 +132,9 @@ struct NativeMySimAgentHost final : IMySimAgentHost {
         else { x = 0; z = 0; }
     }
 };
+// A brush shape as the terrain samples it (cS3DTextureBufferInfo: the size and the byte plane at +0x20).
+struct BrushTexture { std::uint32_t width = 0, height = 0; std::vector<std::uint8_t> pixels; };
+
 struct NativeTerrainHost final : ITerrainHost {
     cIGZMessageServer2* Messages() override { return SL::spMS2; }
     cIGZMessage2Standard* NewMessage() override { auto* message = new cRZMessage2Standard(); message->AddRef(); return message; }
@@ -225,11 +231,49 @@ struct NativeTerrainHost final : ITerrainHost {
     void SetUpTexturesForCurrentTerrainTypeAndZoom(std::int32_t zoom) override {}
     std::uint32_t TerrainTextureSubTextureCount(std::int32_t zoom, std::uint32_t textureId) override { return {}; }
     std::int32_t MoistureIndexAtX(float worldX) override { return {}; }
-    std::uint32_t RandomUint32UniformBelow(std::uint32_t bound) override { return {}; }
-    void* LoadBrushComponentResource(std::uint32_t instance) override { return {}; }
-    void* BrushComponentTextureInfo(void* resource) override { return {}; }
-    bool BrushTextureInfoSize(void* textureInfo, std::uint32_t& width, std::uint32_t& height) override { return {}; }
-    const std::uint8_t* BrushTexturePixels(void* textureInfo) override { return {}; }
+    std::uint32_t RandomUint32UniformBelow(std::uint32_t bound) override { static cRZRandom random(0x7e11u); return bound ? random.RandomUint32Uniform(bound) : 0; }
+    // The brush shapes: FSH {0x7ab50e44, 0x891b0e1a, instance}, one byte per texel: an 8-bit frame (0x7b paletted, 0x64 grey)
+    // is sampled as its raw bytes like the original's texture buffer; any other format is decoded and its red channel kept. Loaded once per instance and kept: the brush descriptions hold them for good.
+    void* LoadBrushComponentResource(std::uint32_t instance) override {
+        static std::map<std::uint32_t, BrushTexture> cache;
+        auto it = cache.find(instance);
+        if (it != cache.end()) return it->second.pixels.empty() ? nullptr : &it->second;
+        BrushTexture& texture = cache[instance];
+        std::vector<std::uint8_t> bytes;
+        s3d::FshFile file;
+        s3d::FshFrameInfo frame;
+        if (!LoadResourceBytes(0x7ab50e44, 0x891b0e1a, instance, bytes) || !file.Open(bytes.data(), bytes.size()) || !file.GetFrame(0, frame)) {
+            std::fprintf(stderr, "terrain: brush texture %08x not found\n", instance);
+            return nullptr;
+        }
+        texture.width = static_cast<std::uint32_t>(frame.width);
+        texture.height = static_cast<std::uint32_t>(frame.height);
+        if ((frame.code == 0x64 || frame.code == 0x7b) && frame.pixels) {   // the 8-bit frames: the bytes themselves
+            texture.pixels.assign(frame.pixels, frame.pixels + std::size_t(texture.width) * texture.height);
+        } else {
+            std::vector<std::uint8_t> rgba;
+            int w = 0, h = 0;
+            if (!file.DecodeRgba8(0, rgba, w, h)) {
+                std::fprintf(stderr, "terrain: brush texture %08x has an unreadable format %#x\n", instance, frame.code);
+                return nullptr;
+            }
+            texture.pixels.resize(std::size_t(w) * h);
+            for (std::size_t i = 0; i < texture.pixels.size(); ++i) texture.pixels[i] = rgba[i * 4];
+        }
+        return &texture;
+    }
+    void* BrushComponentTextureInfo(void* resource) override { return resource; }
+    bool BrushTextureInfoSize(void* textureInfo, std::uint32_t& width, std::uint32_t& height) override {
+        auto* texture = static_cast<BrushTexture*>(textureInfo);
+        if (!texture) return false;
+        width = texture->width;
+        height = texture->height;
+        return true;
+    }
+    const std::uint8_t* BrushTexturePixels(void* textureInfo) override {
+        auto* texture = static_cast<BrushTexture*>(textureInfo);
+        return texture && !texture->pixels.empty() ? texture->pixels.data() : nullptr;
+    }
     bool SurfaceWaterRain(std::int32_t vertexIndex, TerrainBrushContext& context, TerrainRect& rect, float amount) override {
         cSTESurfaceWater* water = WaterOf(Component(CityComponent::SurfaceWater));
         return water && water->Rain(vertexIndex, context, rect, amount);

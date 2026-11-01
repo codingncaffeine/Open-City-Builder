@@ -1,5 +1,7 @@
 #include "sc4/cSC4City.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <bit>
 #include <cmath>
 #include <cstring>
@@ -469,6 +471,7 @@ bool cSC4City::Read(cIGZIStream& stream) {
     stream.GetFloat32(invCellWidthZ_);
     stream.GetSint32(cellCountX_);
     stream.GetSint32(cellCountZ_);
+    if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "city: read version %u established %d difficulty %u save-disable count %u cells %d x %d\n", version, int(established_), difficulty_, saveDisableCount_, cellCountX_, cellCountZ_);
     if (!established_) host_->LoadDefaultCityName(cityName_);
 
     auto readComponent = [&](CityComponent id) {

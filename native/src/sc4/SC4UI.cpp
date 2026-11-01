@@ -173,8 +173,7 @@ bool PropertyTokenReplacementFunction(const cIGZString& token, cIGZString& out, 
 // ---- catalog items --------------------------------------------------------------------------------------
 
 // @ 0x100309e70. The record is built from the exemplar's name / description / icon / id properties; the cost
-// [sic] is always stored as 0 and a missing id (0xffffffff) becomes 0. The exemplar key read into a discarded
-// local at the end is kept (the original really does read it and throw it away).
+// [sic] is always stored as 0 and a missing id (0xffffffff) becomes the exemplar's instance (i386 0x00243eb2).
 sc4::cSC4CatalogItem* CreateCatalogItemFromExemplar(sc4::cISCResExemplar* exemplar, cIGZWin* window,
                                                     std::uint32_t itemType,
                                                     sc4::cSCStringDetokenizer* detokenizer) {
@@ -201,13 +200,14 @@ sc4::cSC4CatalogItem* CreateCatalogItemFromExemplar(sc4::cISCResExemplar* exempl
     // The icon bitmap is {0x856ddbac, 0x6a386d26, icon instance} in the default colour type.
     cSLBuffer icon(cGZPersistResourceKey{0x856ddbac, 0x6a386d26, iconInstance}, 1, false);
 
-    cGZPersistResourceKey discardedKey{};
-    exemplar->GetKey(discardedKey);   // kept: the answer is never used
+    // An exemplar without the id property is identified by its resource instance (the terrain brushes, 0x6a01fc2a).
+    cGZPersistResourceKey key{};
+    exemplar->GetKey(key);
 
     auto* item = new sc4::cSC4CatalogItem();
     item->AddRef();   // original vslot 0x8 (the catalog takes over the reference)
     item->SetItemType(itemType);
-    item->SetItemID(itemId == 0xffffffffu ? 0u : itemId);
+    item->SetItemID(itemId == 0xffffffffu ? key.instance : itemId);
     item->SetName(name);
     item->SetDescription(description);
     if (cIGZBuffer* bitmap = icon.GetBuffer()) {

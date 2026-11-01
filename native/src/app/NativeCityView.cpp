@@ -85,7 +85,10 @@ public:
     }
 
     bool Init() override { return render_->Init(); }
-    void Shutdown() override { render_->Shutdown(); }
+    void Shutdown() override {
+        render_->Shutdown();
+        native::ShutdownCityLighting();
+    }
     void* GetDrawContext() override { return render_->GetDrawContext(); }
     void* GetCamera() override { return render_->GetCamera(); }
     void ForceFullRedraw() override { render_->ForceFullRedraw(); }

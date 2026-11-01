@@ -15,8 +15,15 @@ namespace sc4 {
 template <class T>
 class PlainSerializableAdapter final : public cIGZSerializable {
 public:
-    explicit PlainSerializableAdapter(T* object) : object_(object) {}
-    ~PlainSerializableAdapter() { delete object_; }
+    // A reference-counted plain class is owned through its count: the adapter holds one reference, so a component that
+    // AddRefs and Releases it (the tract developer and the lot configuration manager) cannot delete it under the city.
+    explicit PlainSerializableAdapter(T* object) : object_(object) {
+        if constexpr (requires { object->AddRef(); }) object_->AddRef();
+    }
+    ~PlainSerializableAdapter() {
+        if constexpr (requires { object_->Release(); }) object_->Release();
+        else delete object_;
+    }
 
     bool QueryInterface(std::uint32_t iid, void** out) override {
         if (iid == kGZIID_cIGZUnknown || iid == kGZIID_cIGZSerializable) {

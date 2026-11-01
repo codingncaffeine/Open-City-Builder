@@ -18,13 +18,42 @@
 #include "sc4/ServiceLocator.h"
 #include "sc4/Render3D.h"
 #include "sc4/ViewUtilities.h"
+#include "rz/cRZMessage2Standard.h"
 #include "sc4/cSTETerrain.h"
 #include "sc4/cSTETerrainView3D.h"
 
 namespace native {
+extern sc4::cSTETerrainView3D* g_terrainView;
 namespace {
 
 constexpr std::uint32_t kFshType = 0x7ab50e44, kFshGroup = 0x891b0e1a;
+
+// The view's message-server registrations (cSTETerrainView3D::Init: grid toggle, terrain and water changed, camera
+// changes, night factor). Without them the view never re-read the heights a brush changed.
+class ViewMessageTarget final : public cIGZMessageTarget2 {
+public:
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid != 0x452294aa && iid != 1) return false;   // cIGZMessageTarget2
+        *out = static_cast<cIGZMessageTarget2*>(this);
+        return true;
+    }
+    std::uint32_t AddRef() override { return 1; }
+    std::uint32_t Release() override { return 1; }
+    bool DoMessage(cIGZMessage2* message) override {
+        if (!g_terrainView || !message) return true;
+        sc4::TerrainViewMessage m;
+        m.type = message->GetType();
+        void* standard = nullptr;
+        if (message->QueryInterface(kGZIID_cIGZMessage2Standard, &standard) && standard) {
+            auto* s = static_cast<cIGZMessage2Standard*>(standard);
+            m.data1 = static_cast<std::uint32_t>(s->GetData1());
+            m.data2 = static_cast<std::uint32_t>(s->GetData2());
+            s->Release();
+        }
+        if (std::getenv("SC4_TVDEBUG")) std::fprintf(stderr, "terrain view: message %08x %08x %08x\n", m.type, m.data1, m.data2);
+        return g_terrainView->DoMessage(m);
+    }
+} g_viewMessages;
 
 gd::cIGZGDriver* g_driver = nullptr;
 
@@ -93,6 +122,8 @@ public:
     }
     void SetTerrain(sc4::cSTETerrain* terrain) { terrain_ = terrain; }
     void ApplyTerrainLighting(const sc4::TerrainRect& rect) override { if (terrain_) terrain_->DoLighting(rect); }
+    void RegisterMessage(std::uint32_t type) override { if (SL::spMS2) SL::spMS2->AddNotification(&g_viewMessages, type); }
+    void UnregisterMessage(std::uint32_t type) override { if (SL::spMS2) SL::spMS2->RemoveNotification(&g_viewMessages, type); }
     bool HasLighting() const override { return true; }
     void GetNormalLight(const float normal[3], float rgba[4]) const override {
         if (sc4::cSC4LightingManager* lighting = native::LightingManager()) {
@@ -251,6 +282,25 @@ private:
     std::uint32_t refs_ = 1;
 };
 
+// The view as the terrain holds it (cISTETerrainView at +0x110): RedisplayTerrain re-lights through it, and with it
+// set the terrain posts the "terrain changed" messages the view re-reads its heights from.
+class TerrainViewLink final : public sc4::ITerrainView {
+public:
+    explicit TerrainViewLink(sc4::cSTETerrainView3D& view) : view_(view) {}
+    cIGZSerializable* Serializable() override { return &view_; }
+    bool Init(sc4::cSTETerrain* terrain) override { return view_.Init(terrain); }
+    void Shutdown() override { view_.Shutdown(); }
+    void MarkTextureSpanInfoDirty(std::int32_t firstRow, std::int32_t lastRow) override { sc4::cSTETerrainView3D::MarkTextureSpanInfoDirty(firstRow, lastRow); }
+    void SetLightingUpdateRect(const sc4::TerrainRect* r) override { view_.SetLightingUpdateRect(r); }
+    void ChangeTerrainType(std::int32_t terrainType) override { sc4::cSTETerrainView3D::ChangeTerrainType(terrainType); }
+    void SetUpTexturesForCurrentTerrainTypeAndZoom(std::int32_t zoom) override { sc4::cSTETerrainView3D::SetUpTexturesForCurrentTerrainTypeAndZoom(zoom); }
+    float MaxDisplayAltitude() const override { return view_.DisplayAltitudeHigh(); }
+    float MinDisplayAltitude() const override { return view_.DisplayAltitudeLow(); }
+    cIGZUnknown* OverlayManager(std::uint32_t) override { return nullptr; }
+private:
+    sc4::cSTETerrainView3D& view_;
+};
+
 }  // namespace
 
 sc4::cSTETerrainView3D* g_terrainView = nullptr;
@@ -290,6 +340,12 @@ bool AttachTerrainView(sc4::cSC43DRender& render, sc4::cSTETerrain& terrain, gd:
     std::printf("city view: terrain view %s\n", ok ? "up" : "FAILED");
     if (!ok) return false;
     g_terrainView = view;
+    // DoPostCityInit's hook-up: the terrain gets its view and redisplays from here on (brushes, levelling, reconcile).
+    static TerrainViewLink* link = nullptr;
+    delete link;
+    link = new TerrainViewLink(*view);
+    terrain.SetView(link);
+    terrain.SetDisplayEnabled(true);
     // AddViewObject's list ids: 2 = drawn before the static view (view pass 0: the terrain), 0 = after it (view pass 2: the water)
     render.AddViewObject(new PassObject(render, *view, 0), 2, 100);
     render.AddViewObject(new PassObject(render, *view, 1), 0, 100);

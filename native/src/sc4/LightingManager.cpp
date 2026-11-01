@@ -206,8 +206,9 @@ private:
 // renderer deletes the view (cSC43DRender::Shutdown).
 class LightingManagerView final : public IS4LightingManager {
 public:
-    explicit LightingManagerView(sc4::cSC4LightingManager* manager) : manager_(manager) {}
-    ~LightingManagerView() override { delete manager_; }
+    // The view holds a reference: the manager is shared with the host that created it.
+    explicit LightingManagerView(sc4::cSC4LightingManager* manager) : manager_(manager) { manager_->AddRef(); }
+    ~LightingManagerView() override { manager_->Release(); }
     void GetGlobalLight(cS3DVector3& out) override { manager_->GetGlobalLight(&out); }
     bool GetModelLight(s3d::cIS3DModelInstance* instance, cS3DVector3& out) override {
         return manager_->GetModelLight(instance, &out);

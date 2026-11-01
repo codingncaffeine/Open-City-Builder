@@ -202,7 +202,7 @@ bool LoadCityFile(cSC4App& app, const std::string& path) {
         hooks.flushGraphics = [] {};
         hooks.destroyCurrentScreen = [] { if (g_screens.destroyCurrentScreen) g_screens.destroyCurrentScreen(); };
         hooks.createCityScreen = [] { if (g_screens.createCityScreen) g_screens.createCityScreen(); };
-        hooks.createRegionScreen = [] {};
+        hooks.createRegionScreen = [] { if (g_screens.createRegionScreen) g_screens.createRegionScreen(); };
         RegisterExemplarFactories();
         InstallStubHosts();
         InstallCityProbeBindings();

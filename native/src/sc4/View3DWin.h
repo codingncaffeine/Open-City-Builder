@@ -461,11 +461,11 @@ public:
     virtual float TerrainHeightAt(float x, float z) = 0;                    // vslot 0xf8
     virtual void SetTerrainType(int type) = 0;                              // vslot 0x148
     virtual int TerrainType() = 0;                                          // vslot 0x150
-    virtual void SetToolMode158(std::uint32_t mode) = 0;                    // vslot 0x158 (RunGlobalTerrainTool case 1)
-    virtual void SetToolMode160(std::uint32_t mode) = 0;                    // vslot 0x160 (case 2)
-    virtual void CancelActiveTool() = 0;                                    // vslot 0x178 (cases 3 / 4)
-    virtual void SetActiveToolFlag(bool on) = 0;                            // vslot 0x180 (cases 3 / 4)
-    virtual bool TerrainTypeForBrush(int brush, std::uint32_t& out) = 0;    // vslot 0x1d0 (ApplyDefaultTerrainBrush)
+    virtual void CreateFlatAreas(bool smoothen) = 0;                        // vslot 0x158 (RunGlobalTerrainTool case 1)
+    virtual void CreateShoreCliffs(bool redisplay) = 0;                     // vslot 0x160 (case 2)
+    virtual float DefaultRaiseLowerAmount() = 0;                            // vslot 0x178 GetDefaultTerrainRaiseLowerAmount (cases 3 / 4)
+    virtual void ChangeTerrainLevel(bool raise, float amount) = 0;          // vslot 0x180 (cases 3 / 4)
+    virtual bool TerrainTypeForBrush(int brush, std::uint32_t& out) = 0;    // vslot 0x1d0 GetBrushExemplarID (ApplyDefaultTerrainBrush)
 };
 
 // ---------------------------------------------------------------------------------------------------------------

@@ -1507,6 +1507,7 @@ void cSC4View3DWin::InvokeCatalogItemCommand(std::uint32_t itemType, std::uint32
         tool->Release();
     };
     const bool cityAllowsTools = host_ && host_->CanInvokeZoningTool();   // SL::spCity vslot 0xb0
+    if (getenv("SC4_DEBUG")) fprintf(stderr, "city view: catalog item %#x type %#x\n", id, itemType);
     switch (itemType) {
         case 0x8a313c52u:                                               // a terrain brush without the scrubber's flag
             if (closeMenu) CloseTertiaryMenu();
@@ -2931,16 +2932,16 @@ void cSC4View3DWin::RunGlobalTerrainTool(int tool) {                        // 0
             ChangeTerrainType();
             break;
         case 1:
-            if (terrain) terrain->SetToolMode158(1);
+            if (terrain) terrain->CreateFlatAreas(true);
             break;
         case 2:
-            if (terrain) terrain->SetToolMode160(1);
+            if (terrain) terrain->CreateShoreCliffs(true);
             break;
         case 3:
-            if (terrain) { terrain->CancelActiveTool(); terrain->SetActiveToolFlag(true); }
+            if (terrain) terrain->ChangeTerrainLevel(true, terrain->DefaultRaiseLowerAmount());
             break;
         case 4:
-            if (terrain) { terrain->CancelActiveTool(); terrain->SetActiveToolFlag(false); }
+            if (terrain) terrain->ChangeTerrainLevel(false, terrain->DefaultRaiseLowerAmount());
             break;
         case 5:
         case 6:

@@ -1734,12 +1734,19 @@ bool cSC4AutomataManager::ReadInternal(cIGZIStream& stream, std::uint16_t versio
     std::uint32_t count = 0;
     stream.GetUint32(count);
     automata_.clear();
+    std::uint32_t droppedOnLoad = 0;
     for (std::uint32_t i = 0; i < count; ++i) {
         void* raw = nullptr;
         SC4ReadGZSerializable(stream, kGZIID_cISC4Automaton, &raw, false);
         if (!raw) continue;
-        automata_.push_front(static_cast<IAutomataAutomaton*>(raw));
+        // PORT GAP: the object answers 0xa9b40f05 as the recovered cSC4Automaton, which does not implement this manager's
+        // IAutomataAutomaton (the two halves were ported apart). Kept in the list, every call through it hit the wrong
+        // vtable (leaving a city crashed in DestroyAutomata). The saved automata are dropped until an adapter exists:
+        // they are the cars and pedestrians on screen, and the simulation spawns new ones.
+        static_cast<cIGZUnknown*>(raw)->Release();
+        ++droppedOnLoad;
     }
+    if (droppedOnLoad != 0) std::fprintf(stderr, "automata: %u saved automata dropped (no IAutomataAutomaton adapter yet)\n", droppedOnLoad);
     if (version < 5) {
         recountBuildings_ = true;
     } else {
