@@ -406,6 +406,7 @@ private:
 
     IDemandSimulatorHost* host_ = nullptr;
     bool readFromStream_ = false;        // +0x18
+    std::vector<std::pair<cSC4Demand*, cIGZSerializable*>> pendingDemandObjects_;   // read references, copied in Init
     bool initialized_ = false;           // +0x19
     std::uint32_t refCount_ = 0;         // +0x1c
     int state_ = 3;                      // +0x20

@@ -25,6 +25,7 @@
 #include "sc4/cSC4City.h"
 #include <cstdio>
 #include <cstdlib>
+#include "app/NativeCityPanel.h"
 #include "app/NativeCityUi.h"
 #include "app/NativeBudgetUi.h"
 #include "app/NativeNetworkTool.h"
@@ -241,6 +242,7 @@ struct StubView3DWin final : IView3DWinHost {
     cSC4ViewInputControl* CreateNetworkTool(int type) override { return native::CreateNetworkTool(type); }
     void ShowMyStreetSim() override { SC4_UNWIRED("IView3DWinHost::ShowMyStreetSim"); }
     void PostCityInit() override {}
+    void MayorRatingChanged() override { if (sc4::cSC4View3DWin* view = CityView3DWin()) native::UpdateMayorRatingBar(*view); }
     ISimulatorPauseSink* Simulator() override { static SimulatorView view; return CityExists() ? &view : nullptr; }
     cSC4ViewInputControl* CreateSignTool() override { return new cSC4ViewInputControlSignTool(); }
     cSC4ViewInputControl* CreatePlaceLotTool(std::uint32_t lot) override { return new cSC4ViewInputControlPlaceLot(0, lot, 0, false); }

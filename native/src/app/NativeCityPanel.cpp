@@ -9,12 +9,17 @@
 #include "app/NativeCityPanel.h"
 
 #include <cstdio>
+#include <algorithm>
 #include <cstdlib>
+#include <cstring>
 
 #include "app/NativeCity.h"
 #include "app/NativeUi.h"
 #include "gz/DrawContext.h"
 #include "gz/Win.h"
+#include "gz/Buffer.h"
+#include "gz/WinBMP.h"
+#include "sc4/AuraSimulator.h"
 #include "sc4/DemandSimulator.h"
 #include "sc4/Exemplar.h"
 #include "sc4/HistoryWarehouse.h"
@@ -105,7 +110,92 @@ constexpr cGZPersistResourceKey kTrendExemplar{0x6534284a, 0x690f693f, 0};
 constexpr std::uint32_t kTrendSeriesProperty = 0x6a6564f4, kTrendCurveProperty = 0x6a6564f6;
 constexpr std::uint32_t kTrendDefaultSeries = 0x0a5cbf37;
 
+// The mayor rating bar (UpdateMayorRatingBar, i386 0x00524554): image 0x14015549 holds one row per rating step; the bar
+// shows the row for the current rating (-100..100) across its whole height. Beside it up to three 7-pixel arrows show
+// the change since the last update: falling = 0xca5a415e (anchored right), rising = 0x6a5a4156.
+constexpr std::uint32_t kMayorRatingImage = 0x14015549, kMayorRatingBar = 0x8a517556;
+constexpr std::uint32_t kFallingArrows = 0xca5a415e, kRisingArrows = 0x6a5a4156;
+int g_ratingRow = 0;                  // the view's +0x380: the row shown last
+int g_fallingX = 0, g_fallingY = 0;   // +0x38c / +0x390: where the falling arrows sit at full width
+
+int MayorRating() {
+    sc4::cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(CityComponent::AuraSimulator) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(sc4::kGZIID_cISC4AuraSimulator, &raw) || !raw) return 0;
+    auto* aura = static_cast<sc4::cISC4AuraSimulator*>(raw);
+    const int rating = static_cast<std::int8_t>(aura->GetMayorRating());   // the original reads a signed char
+    aura->Release();
+    return rating;
+}
+
+int RatingRow(int rating, int height) {
+    const long long scaled = static_cast<long long>(height) * std::clamp(rating + 100, 0, 200) / 200;
+    return static_cast<int>(std::clamp<long long>(scaled, 0, height - 1));
+}
+
+template <class T> T* Child(cIGZWin* root, std::uint32_t id, std::uint32_t iid) {
+    void* raw = nullptr;
+    return root->GetChildAsRecursive(id, iid, &raw) && raw ? static_cast<T*>(raw) : nullptr;
+}
+
+void ShowArrows(cIGZWin* root, std::uint32_t id, int count, bool anchorRight) {
+    auto* bmp = Child<gz::cIGZWinBMP>(root, id, gz::kGZIID_cIGZWinBMP);
+    if (!bmp) return;
+    cIGZWin* win = bmp->AsIGZWin();
+    if (count <= 0) {
+        win->SetW(1);
+        if (anchorRight) win->GZWinMoveTo(g_fallingX, g_fallingY);
+        win->HideWindow();
+    } else {
+        win->SetW(count * 7);
+        if (anchorRight) win->GZWinMoveTo((3 - count) * 7 + g_fallingX, g_fallingY);
+        win->ShowWindow();
+    }
+    bmp->Release();
+}
+
 }  // namespace
+
+void UpdateMayorRatingBar(sc4::cSC4View3DWin& view) {
+    cIGZWin* root = view.AsIGZWin();
+    cGZBuffer* source = root ? LoadBitmapResource(kUiImageGroup, kMayorRatingImage) : nullptr;
+    if (!source) return;
+    const int width = static_cast<int>(source->Width()), height = static_cast<int>(source->Height());
+    const int rating = MayorRating();
+    const int row = RatingRow(rating, height);
+    auto* bar = new cGZBuffer();
+    bar->AddRef();
+    if (height > 0 && bar->Init(width, height, source->GetColorType()) && source->Lock(cIGZBuffer::kLockRead) &&
+        bar->Lock(cIGZBuffer::kLockWrite)) {
+        const auto* from = static_cast<const std::uint8_t*>(source->GetColorSurfaceBits()) + static_cast<std::size_t>(row) * source->GetColorSurfaceStride();
+        auto* to = static_cast<std::uint8_t*>(bar->GetColorSurfaceBits());
+        const std::size_t bytes = static_cast<std::size_t>(width) * source->GetBytesPerPixel();
+        for (int y = 0; y < height; ++y) std::memcpy(to + static_cast<std::size_t>(y) * bar->GetColorSurfaceStride(), from, bytes);
+        bar->Unlock(cIGZBuffer::kLockWrite);
+        source->Unlock(cIGZBuffer::kLockRead);
+        if (auto* bmp = Child<gz::cIGZWinBMP>(root, kMayorRatingBar, gz::kGZIID_cIGZWinBMP)) {
+            bmp->SetBMP(bar);
+            bmp->AsIGZWin()->InvalidateSelfAndParents();
+            bmp->Release();
+        }
+    }
+    bar->Release();
+    source->Release();
+    const int change = row - g_ratingRow;
+    if (change < 0) {
+        ShowArrows(root, kFallingArrows, std::min(-change, 3), true);
+        ShowArrows(root, kRisingArrows, 0, false);
+    } else if (change > 0) {
+        ShowArrows(root, kRisingArrows, std::min(change, 3), false);
+        ShowArrows(root, kFallingArrows, 0, true);
+    } else {
+        ShowArrows(root, kFallingArrows, 0, true);
+        ShowArrows(root, kRisingArrows, 0, false);
+    }
+    g_ratingRow = row;
+    if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "city panel: mayor rating %d -> row %d of %d (change %d)\n", rating, row, height, change);
+}
 
 void InstallCityPanelHosts() {
     sc4::SetWinRCIHost(&g_rci);
@@ -156,6 +246,17 @@ void ConfigureCityPanels(sc4::cSC4View3DWin& view) {
     }
     if (fill) fill->Release();
     if (marker) marker->Release();
+    // DoPostCityInit: the rating row the arrows count from, and where the falling arrows sit; then the first update.
+    if (cGZBuffer* image = LoadBitmapResource(kUiImageGroup, kMayorRatingImage)) {
+        g_ratingRow = RatingRow(MayorRating(), static_cast<int>(image->Height()));
+        image->Release();
+    }
+    if (auto* arrows = Child<gz::cIGZWinBMP>(root, kFallingArrows, gz::kGZIID_cIGZWinBMP)) {
+        g_fallingX = arrows->AsIGZWin()->GetL();
+        g_fallingY = arrows->AsIGZWin()->GetT();
+        arrows->Release();
+    }
+    UpdateMayorRatingBar(view);
     if (debug) std::fprintf(stderr, "city panel: %d RCI bars, %d opinion polls configured\n", rci, trends);
 }
 

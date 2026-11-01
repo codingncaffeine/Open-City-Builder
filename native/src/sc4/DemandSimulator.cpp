@@ -199,6 +199,12 @@ void cSC4DemandSimulator::InitDynamicDataFromExemplar(const cGZPersistResourceKe
 
 bool cSC4DemandSimulator::Init() {
     if (initialized_) return true;
+    for (auto& [demand, object] : pendingDemandObjects_) {   // the loaded demands, now that every record is read
+        void* plain = nullptr;
+        if (object->QueryInterface(kGZIID_PlainObject, &plain) && plain) demand->CopyStateFrom(*static_cast<cSC4Demand*>(plain));
+        object->Release();
+    }
+    pendingDemandObjects_.clear();
     StaticInit(this);
     IDemandSimulatorHost* h = host();
     if (!h) return true;
@@ -258,6 +264,8 @@ bool cSC4DemandSimulator::Init() {
 }
 
 bool cSC4DemandSimulator::Shutdown() {
+    for (auto& entry : pendingDemandObjects_) entry.second->Release();   // read but never initialised
+    pendingDemandObjects_.clear();
     if (!initialized_) return true;
     initialized_ = false;
     IDemandSimulatorHost* h = host();
@@ -376,6 +384,14 @@ void cSC4DemandSimulator::CreateDemandFromExemplar(std::uint32_t exemplarId, cIS
         std::int32_t value = 0;
         if (cSCPropertyHelp::GetPropertyValue(holder, kDemandPropSupply, value)) demand->SetSupplyValue(static_cast<float>(value));
         if (cSCPropertyHelp::GetPropertyValue(holder, kDemandPropDemand, value)) demand->SetDemandValue(static_cast<float>(value));
+    }
+    if (std::getenv("SC4_DEMANDDEBUG") && (id == 0x21010 || id == 0x1010)) {
+        std::uint32_t u = 0;
+        float f = 0;
+        std::fprintf(stderr, "demand: create %05x new %d read %d: demand prop int32 %d uint32 %d float %d -> demand %g\n", id, wasNew ? 1 : 0, readFromStream_ ? 1 : 0,
+                     cSCPropertyHelp::GetPropertyValue(holder, kDemandPropDemand, *reinterpret_cast<std::int32_t*>(&u)) ? 1 : 0,
+                     cSCPropertyHelp::GetPropertyValue(holder, kDemandPropDemand, u) ? 1 : 0, cSCPropertyHelp::GetPropertyValue(holder, kDemandPropDemand, f) ? 1 : 0,
+                     demand->QueryDemandValue());
     }
     {
         std::int32_t value = 0;
@@ -1380,11 +1396,10 @@ bool cSC4DemandSimulator::Read(cIGZIStream& stream) {
                 delete demand;
                 return false;
             }
+            // The referenced object's own record may come later in the file (the original keeps the object itself, so it
+            // sees the values whenever they arrive); the state is copied once the city is loaded, in Init.
             auto* object = static_cast<cIGZSerializable*>(raw);
-            void* plain = nullptr;
-            if (object && object->QueryInterface(kGZIID_PlainObject, &plain) && plain)
-                demand->CopyStateFrom(*static_cast<cSC4Demand*>(plain));
-            if (object) object->Release();
+            if (object) pendingDemandObjects_.emplace_back(demand, object);   // keeps the reference SC4ReadGZSerializable gave
         } else if (!demand->Read(stream)) {
             delete demand;
             return false;

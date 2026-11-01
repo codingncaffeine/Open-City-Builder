@@ -1,6 +1,8 @@
 #include "sc4/cSC4Demand.h"
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace sc4 {
@@ -145,6 +147,8 @@ bool cSC4Demand::Read(cIGZIStream& s) {
     } else {
         s.GetFloat32(demandCap_);
     }
+    if (id_ == 0x21010 && std::getenv("SC4_DEMANDDEBUG"))
+        std::fprintf(stderr, "demand: object %p read %05x v%u demand %g active %g error %d\n", static_cast<void*>(this), id_, version, demand_, active_, s.GetError() ? 1 : 0);
     return !s.GetError();
 }
 

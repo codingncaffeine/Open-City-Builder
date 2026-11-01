@@ -1,11 +1,11 @@
-#include <cstdio>
 #include "sc4/Simulator.h"
-#include <string>
-#include <map>
 
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
+#include <map>
 #include <sstream>
+#include <string>
 
 #include "gz/GZCOMDirector.h"
 #include "gz/StreamOps.h"
