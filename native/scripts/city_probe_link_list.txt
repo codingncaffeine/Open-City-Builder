@@ -143,6 +143,8 @@ src/rz/cRZCallbackTimer.cpp
 src/sc4audio/SoundManager.cpp
 src/sc4/Region.cpp
 src/gz/LegacyControl.cpp
+src/gz/LegacyControlGrid.cpp
+src/gz/LegacyControlListBox.cpp
 src/sc4/PylonOccupant.cpp
 src/sc4/cSTETerrainView3DDraw.cpp
 src/sc4/CameraControl.cpp
