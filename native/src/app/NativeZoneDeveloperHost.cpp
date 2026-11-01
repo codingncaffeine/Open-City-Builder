@@ -19,6 +19,7 @@
 #include "app/NativeZoneOverlay.h"
 #include "platform/Unwired.h"
 #include "rz/cRZRandom.h"
+#include "sc4/BuildingOccupant.h"
 #include "sc4/LotBaseTextureOccupant.h"
 #include "sc4/LotDeveloper.h"
 #include "sc4/NetworkOccupant.h"
@@ -348,7 +349,23 @@ struct LotHost final : ILotHost {
     }
     bool IsFerryTerminal(const cSC4Lot& lot) override { return {}; }
     bool FerryTerminalRoadAccess(const cSC4Lot& lot) override { return {}; }
-    cIGZUnknown* FindBuildingOccupant(const cSC4Lot& lot) override { return {}; }
+    // cSC4Lot::GetBuilding (vslot 0x180): the building occupant standing on one of the lot's cells (borrowed; the occupant
+    // manager keeps it), as its cISC4BuildingOccupant view.
+    cIGZUnknown* FindBuildingOccupant(const cSC4Lot& lot) override {
+        cISC4OccupantManager* occupants = Occupants();
+        if (!occupants) return nullptr;
+        std::int32_t rect[4];
+        lot.GetBoundingRect(rect);
+        for (int x = rect[0]; x <= rect[2]; ++x)
+            for (int z = rect[1]; z <= rect[3]; ++z) {
+                cISC4Occupant* occupant = nullptr;
+                if (!occupants->GetFirstOccupantByStandardCityCell(occupant, x, z, kOccupantTypeBuilding) || !occupant) continue;
+                auto* building = dynamic_cast<cSC4BuildingOccupant*>(occupant);
+                occupant->Release();
+                if (building) return static_cast<cISC4BuildingOccupant*>(building);
+            }
+        return nullptr;
+    }
     void WriteSerializable(cIGZOStream& stream, cIGZUnknown* object) override { SC4WriteGZSerializable(stream, object); }
     cIGZUnknown* ReadSerializable(cIGZIStream& stream, std::uint32_t clsid) override { void* out = nullptr; SC4ReadGZSerializable(stream, clsid, &out, false); return static_cast<cIGZUnknown*>(out); }
 } g_lotHost;

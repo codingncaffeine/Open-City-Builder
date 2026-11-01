@@ -318,6 +318,8 @@ public:
     virtual void LightColourForDirection(const float direction[3], std::uint8_t rgb[3]) = 0;
     // The renderer's model list.
     virtual IConstructionRenderer* Renderer() = 0;
+    // Read: the lot object a city file holds (the port's serializable lot adapter) as the lot interface, one reference.
+    virtual IConstructionLot* AdoptLot(cIGZUnknown* object) = 0;
 };
 IConstructionOccupantHost* ConstructionOccupantHost();
 void SetConstructionOccupantHost(IConstructionOccupantHost* host);

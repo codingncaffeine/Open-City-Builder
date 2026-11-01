@@ -542,6 +542,10 @@ struct FakeHost final : IConstructionOccupantHost {
         rgb[2] = light[2];
     }
     IConstructionRenderer* Renderer() override { return &renderer; }
+    IConstructionLot* AdoptLot(cIGZUnknown* object) override {
+        void* raw = nullptr;
+        return object && object->QueryInterface(kGZIID_cISC4Lot, &raw) ? static_cast<IConstructionLot*>(static_cast<cIGZUnknown*>(raw)) : nullptr;
+    }
 };
 
 FakeHost* g_host = nullptr;

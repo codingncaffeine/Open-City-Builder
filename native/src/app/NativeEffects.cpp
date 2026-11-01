@@ -27,6 +27,7 @@
 #include "sc4/EffectsManager.h"
 #include "sc4/EffectsResource.h"
 #include "sc4/ModelBasedParticlesEffect.h"
+#include "sc4/PropOccupantVisualEffect.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
@@ -309,6 +310,7 @@ bool BindManager() {
     SetParticlesCity(&g_cityCells);
     sc4::SetModelParticlesHost(&g_models);
     g_manager->SetHost(&g_host);
+    sc4::SetPropVisualEffectHost(g_manager);  // visual-effect props create their effects through the manager (vslots 0x30 / 0x38)
     g_manager->Init();                        // loads the packed library, registers the messages and the tick
     g_manager->SetEffectsActive(true);       // the 0xab96b05f "effects active" message of the city start-up
     // The view's zoom messages set the level of detail; the one the view sent before the manager existed is replayed.
@@ -338,6 +340,7 @@ void DetachEffects() {
     g_city = nullptr;
     g_render = nullptr;
     sc4::SetModelParticlesHost(nullptr);
+    sc4::SetPropVisualEffectHost(nullptr);
 }
 
 sc4::ITerrainEffect* CreateTerrainEffect(std::uint32_t group, std::uint32_t type) {

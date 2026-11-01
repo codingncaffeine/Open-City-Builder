@@ -2,8 +2,8 @@
 // which the prop catalogue was empty (no prop type was valid) and a new prop had no occupant manager to go into: the prop
 // exemplars come from the resource manager, props go into the city's occupant manager and read the city's clock and date.
 //
-// PARTIAL (named): the registered prop classes, terrain-decal and visual-effect props (a plain cSC4PropOccupant stands in, as the
-// manager does when a class is not registered), the prop-data-updated message, the city cell conversions the street props use
+// PARTIAL (named): the registered prop classes and terrain-decal props (a plain cSC4PropOccupant stands in, as the manager does
+// when a class is not registered), the prop-data-updated message, the city cell conversions the street props use
 // (the city's own) and text decals.
 #include <map>
 
@@ -17,6 +17,7 @@
 #include "sc4/OccupantManager.h"
 #include "sc4/PropManager.h"
 #include "sc4/PropOccupant.h"
+#include "sc4/PropOccupantVisualEffect.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/Simulator.h"
 #include "sc4/cSC424HourClock.h"
@@ -77,7 +78,11 @@ public:
     }
     cSC4PropOccupant* CreateRegisteredProp(std::uint32_t) override { return nullptr; }   // PARTIAL: no registered prop classes
     cSC4PropOccupant* CreateTerrainDecalProp() override { return nullptr; }               // PARTIAL
-    cSC4PropOccupant* CreateVisualEffectProp() override { return nullptr; }               // PARTIAL
+    cSC4PropOccupant* CreateVisualEffectProp() override {                                  // prop class 0x2977aa49 (one reference)
+        auto* prop = new cSC4PropOccupantVisualEffect();
+        prop->AddRef();
+        return prop->AsPropOccupant();
+    }
     void PostPropExemplarDataUpdated() override {}                                        // PARTIAL: message 0x896fdc70
     void PositionToCityCell(float x, float z, int& cx, int& cz) override {
         if (cSC4City* city = HostCity()) city->PositionToCell(x, z, cx, cz);

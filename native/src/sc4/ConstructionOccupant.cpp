@@ -394,9 +394,14 @@ bool cSC4ConstructionOccupant::Read(cIGZIStream& stream) {
     needsRebuild_ = true;
     if (!cSC4Occupant::Read(stream)) return !stream.GetError();
     ReleaseRef(lot_);
+    // The original asks the read object for cISC4Lot; the port's lot is a plain class behind a serializable adapter, so the
+    // host turns whatever came in into the lot interface (one reference).
     cIGZUnknown* lotRaw = nullptr;
-    ReadSerializable(stream, kGZIID_cISC4Lot, &lotRaw);
-    if (lotRaw) lot_ = static_cast<IConstructionLot*>(static_cast<cIGZUnknown*>(lotRaw));
+    ReadSerializable(stream, kGZIID_cIGZUnknown, &lotRaw);
+    if (lotRaw) {
+        lot_ = g_host ? g_host->AdoptLot(lotRaw) : nullptr;
+        lotRaw->Release();
+    }
     ReleaseRef(building_);
     cIGZUnknown* buildingRaw = nullptr;
     ReadSerializable(stream, kGZIID_cISC4BuildingOccupant, &buildingRaw);

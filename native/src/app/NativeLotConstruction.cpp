@@ -4,8 +4,7 @@
 // the city's cell corners, the terrain, and the flora a new building clears.
 //
 // PARTIAL (each named here and where it is called): the terrain leveller (LevelVertices changes nothing, so a steep lot keeps its
-// slope), levelled-vertex flags, and the construction occupant (the lot is completed at once instead of going through the
-// scaffold stages).
+// slope) and levelled-vertex flags. The construction occupant is NativeConstruction.cpp.
 #include <cfloat>
 #include <cstdio>
 #include <cstdlib>
@@ -16,6 +15,7 @@
 
 #include "app/NativeBuildingDevelopment.h"
 #include "app/NativeCity.h"
+#include "app/NativeConstruction.h"
 #include "app/NativeFlora.h"
 #include "app/NativeLotConstruction.h"
 #include "app/NativeZoneDeveloperHost.h"
@@ -196,11 +196,7 @@ public:
             occupant->Release();
         }
     }
-    // PARTIAL: the construction occupant (cSC4ConstructionOccupant: scaffold, crane, crew) has no native host yet, so the lot is
-    // completed at once, as StartConstruction does without one (state 3).
-    void StartConstructionOccupant(cSC4Lot* lot) override {
-        if (lot) lot->SetState(3, 0, 0);
-    }
+    void StartConstructionOccupant(cSC4Lot* lot) override { StartNativeConstructionOccupant(lot); }
 } g_services;
 
 }  // namespace
@@ -232,6 +228,7 @@ void ReadLotDeveloperTunables(cSC4LotDeveloper* developer) {   // cSC4LotDevelop
 void InstallLotConstructionHosts() {
     gzcom::GetSimHosts().lotDeveloper = &g_host;
     cSC4LotDeveloper::SetConstructionServices(&g_services);
+    InstallConstructionOccupantHost();
 }
 
 }  // namespace native
