@@ -266,7 +266,7 @@ void cSC4ParticlesEffect::Start(int transition) {
     position_.x = description_->origin[0];
     position_.y = description_->origin[1];
     position_.z = description_->origin[2];
-    if ((description_->flags & 0x8000) == 0) {
+    if ((description_->flags & 0x800000) == 0) {   // bit 23 (i386 Start 0x0041674e tests 0x17)
         walkDirection_ = cS3DVector3{};
     } else {
         // Three draws, in this order: x, (y discarded), z.
@@ -579,7 +579,7 @@ bool cSC4ParticlesEffect::Update(float elapsed, IParticlesDrawContext* context) 
         if (selfLit) context->ResetShade();
     }
     const bool stopped = CheckForStop();
-    if (!stopped && (description_->flags & 0x8000) != 0) UpdateRandomWalk(deltaTime_);
+    if (!stopped && (description_->flags & 0x800000) != 0) UpdateRandomWalk(deltaTime_);   // bit 23 (i386 Update 0x00416414)
     return true;
 }
 

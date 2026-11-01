@@ -121,7 +121,7 @@ struct cSC4ParticlesDescription {
     //   0x00000100 needs an effect-maps terrain query                0x00000200 collide with terrain
     //   0x00000400 collide with the terrain / die outside it         0x00000800 extra physics (see kExtraPhysicsFlags)
     //   0x00001000 align the transform (skip the view basis)         0x00002000 city-side emission volume
-    //   0x00004000 height-based emission ("higher" side)             0x00008000 random walk
+    //   0x00004000 height-based emission ("higher" side)             0x00800000 random walk (bit 23)
     //   0x00010000 height-based emission from the terrain height     0x00020000 land only
     //   0x00040000 water only                                        0x00080000..0x00200000 rate scale powers
     //   0x01000000 walk direction comes from the description         0x02000000 city-side walk direction
