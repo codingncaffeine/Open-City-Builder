@@ -364,6 +364,13 @@ struct FakeOccupantManager : IZoneDeveloperOccupantManagerApi {
         }
     }
     void RemoveOccupant(cISC4Occupant* occupant, bool, std::uint32_t) override { removed.push_back(occupant); }
+    IZoneDeveloperNetworkOccupant* NetworkView(cISC4Occupant* occupant) override {
+        void* network = nullptr;
+        if (!occupant->QueryInterface(0xa821ef94, &network) || !network) return nullptr;
+        auto* view = static_cast<IZoneDeveloperNetworkOccupant*>(network);
+        view->Release();
+        return view;
+    }
 };
 
 // cISC4Lot's host, as far as the zone developer needs it: the zone grid lookup that gives a lot its

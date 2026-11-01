@@ -204,12 +204,7 @@ struct TractHost final : ITractDeveloperHost {
     ITractZoneManagerApi* ZoneManager() override { return &g_zoneManager; }
     IGrowthDeveloperApi* GrowthDeveloper(std::uint32_t type) override { return ViewOf(GrowthDeveloperOfType(type)); }
     bool LotConfigurationsByFilter(std::vector<cSC4LotConfiguration*>& out, cISC4LotConfigurationFilter* filter) override {
-        cSC4LotConfigurationManager* manager = LotConfigurations();
-        if (!manager) return false;
-        cSC4LotConfigurationManager::ConfigurationSet set;
-        manager->GetLotConfigurationsByFilter(set, filter);
-        out.assign(set.begin(), set.end());
-        return !out.empty();
+        return NativeLotConfigurationsByFilter(out, filter);
     }
     void RegisterLotConfigurationFilter(cISC4LotConfigurationFilter* filter) override { if (auto* m = LotConfigurations()) m->RegisterLotConfigurationFilter(filter); }
     void UnregisterLotConfigurationFilter(cISC4LotConfigurationFilter* filter) override { if (auto* m = LotConfigurations()) m->UnregisterLotConfigurationFilter(filter); }
@@ -271,8 +266,27 @@ int NativeTractGrow(void* developer, int tractX, int tractZ, std::uint8_t style)
             for (std::size_t outcome = 0; outcome < histograms[row].size(); ++outcome)
                 if (histograms[row][outcome]) std::fprintf(stderr, " %zu:%zu=%u", row, outcome, histograms[row][outcome]);
         std::fprintf(stderr, "\n");
+        static int shown = 0;
+        if (shown++ < 2) {
+            std::fprintf(stderr, "tract developer: stage %u configurations", style);
+            for (cSC4LotConfiguration* configuration : tract->SuitableConfigurations()) {
+                std::uint32_t sx = 0, sz = 0;
+                configuration->GetSize(sx, sz);
+                std::fprintf(stderr, " %08x:%ux%u/s%u", configuration->GetID(), sx, sz, configuration->GetGrowthStage());
+            }
+            std::fprintf(stderr, "\n");
+        }
     }
     return result;
+}
+
+bool NativeLotConfigurationsByFilter(std::vector<sc4::cSC4LotConfiguration*>& out, sc4::cISC4LotConfigurationFilter* filter) {
+    sc4::cSC4LotConfigurationManager* manager = LotConfigurations();
+    if (!manager) return false;
+    sc4::cSC4LotConfigurationManager::ConfigurationSet set;
+    manager->GetLotConfigurationsByFilter(set, filter);
+    out.assign(set.begin(), set.end());
+    return !out.empty();
 }
 
 void InstallTractDeveloperHost() { sc4::SetTractDeveloperHost(&g_host); }

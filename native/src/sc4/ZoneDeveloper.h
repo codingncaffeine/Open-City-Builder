@@ -301,6 +301,9 @@ public:
     virtual void ListOccupants(std::vector<cISC4Occupant*>& out, int x, int z, std::uint32_t typeId,
                                int maxCount) = 0;
     virtual void RemoveOccupant(cISC4Occupant* occupant, bool shutdown, std::uint32_t data) = 0;   // vslot 0xa8
+    // occupant QueryInterface(cISC4NetworkOccupant 0xa821ef94): the port's network occupant keeps no COM view, so the host
+    // answers with a view of it (borrowed, valid while the occupant lives), or null when the occupant is not a network.
+    virtual IZoneDeveloperNetworkOccupant* NetworkView(cISC4Occupant* occupant) = 0;
 };
 
 // cSC4SafeListIterator<cISC4Lot*>: only the one call CreateLot makes on the iterator the traffic

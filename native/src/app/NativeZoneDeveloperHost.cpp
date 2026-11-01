@@ -12,6 +12,8 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "app/NativeBuildingDevelopment.h"
+#include "app/NativeGrowthDevelopers.h"
 #include "app/NativeLotSerial.h"
 #include "app/NativeZoneOverlay.h"
 #include "platform/Unwired.h"
@@ -19,8 +21,13 @@
 #include "sc4/LotBaseTextureOccupant.h"
 #include "sc4/LotDeveloper.h"
 #include "sc4/NetworkOccupant.h"
+#include <map>
+#include <memory>
+#include <unordered_set>
 #include <vector>
 #include "sc4/DBSegment.h"
+#include "sc4/GrowthDeveloper.h"
+#include "sc4/LotConfigurationManager.h"
 #include "sc4/Simulator.h"
 #include "sc4/Lot.h"
 #include "sc4/OccupantManager.h"
@@ -109,6 +116,25 @@ struct OccupantApi final : IZoneDeveloperOccupantManagerApi {
     void RemoveOccupant(cISC4Occupant* occupant, bool shutdown, std::uint32_t data) override {   // vslot 0xa8
         if (cISC4OccupantManager* m = Occupants()) m->RemoveOccupant(occupant, shutdown, data);
     }
+    IZoneDeveloperNetworkOccupant* NetworkView(cISC4Occupant* occupant) override {
+        auto* network = dynamic_cast<cSC4NetworkOccupant*>(occupant);
+        if (!network) return nullptr;
+        view_.network = network;   // used before the next lookup only, like the original's released QI pointer
+        return &view_;
+    }
+    struct View final : IZoneDeveloperNetworkOccupant {
+        cSC4NetworkOccupant* network = nullptr;
+        bool QueryInterface(std::uint32_t, void**) override { return false; }
+        std::uint32_t AddRef() override { return 1; }
+        std::uint32_t Release() override { return 1; }
+        bool HasNetworkFlag(std::uint32_t flags) const override { return network->HasNetworkFlag(flags); }
+        bool HasAnyNetworkFlag(std::uint32_t flags) const override { return network->HasAnyNetworkFlag(flags); }
+        std::uint32_t GetNetworkFlag() override { return network->GetNetworkFlag(); }
+        bool IsImmovable() const override { return network->IsImmovable(); }
+        bool IsOfType(std::uint32_t type) const override { return network->IsOfType(type); }
+        std::uint32_t GetEdgeTypesFlag(std::uint32_t type) override { return network->GetEdgeTypesFlag(static_cast<std::uint8_t>(type)); }
+        bool ConnectsToNeighbor(int edge, std::uint32_t type) const override { return network->ConnectsToNeighbor(edge, static_cast<std::uint8_t>(type)); }
+    } view_;
 } g_occupantApi;
 
 // SL::spLotDeveloper as the zone developer calls it.
@@ -135,14 +161,58 @@ struct LotDeveloperApi final : IZoneDeveloperLotDeveloperApi {
     }
 } g_lotDeveloperApi;
 
-// SL::spBuildingDevelopmentSim: not wired natively (GROWTH-1). Present so Init completes; it proposes no growth developer, so
-// DetermineLotSize takes its 2x2 default. Its vslot 0x120 is the lot developer.
+// SL::spBuildingDevelopmentSim as DetermineLotSize reads it: the growth developers (their purpose, wealth, growth list,
+// desirability map and demand) and the building catalogue. Its vslot 0x120 is the lot developer.
+struct GridView final : IZoneDeveloperGridApi {
+    cSC4SimGrid<std::int16_t>* grid = nullptr;
+    int TractSize() const override { return grid ? grid->GetTractSize() : 0; }
+    std::int16_t TractValue(int x, int z) const override { return grid ? grid->GetTractValue(x, z) : 0; }
+};
+struct DemandView final : IZoneDeveloperDemandApi {
+    sc4::IGrowthDemandApi* demand = nullptr;
+    float ActiveDemandValue() const override { return demand ? demand->GetActiveValue() : 0.0f; }
+};
+class GrowthView final : public IZoneDeveloperGrowthApi {
+public:
+    explicit GrowthView(sc4::cSC4GrowthDeveloper* d) : d_(d) {}
+    int Purpose() const override { return d_->GetPurpose(); }
+    int Wealth() const override { return d_->GetWealth(); }
+    bool GrowthAndDeclineListsAreValid() const override { return d_->GrowthAndDeclineListsAreValid(); }
+    const std::vector<ZoneDeveloperGrowthItem>& GrowthList() const override {
+        list_.clear();
+        for (const sc4::GrowthItem& item : d_->GetGrowthList()) list_.push_back({item.x, item.z, item.style});
+        return list_;
+    }
+    IZoneDeveloperGridApi* DesirabilityMap() const override { grid_.grid = d_->GetDesirabilityMap(); return grid_.grid ? &grid_ : nullptr; }
+    IZoneDeveloperDemandApi* SourceDemand() const override { demand_.demand = d_->GetSourceDemand(); return demand_.demand ? &demand_ : nullptr; }
+    std::int32_t EstimateDesirability(int x, int z) const override { return d_->EstimateDesirability(x, z); }
+private:
+    sc4::cSC4GrowthDeveloper* d_;
+    mutable std::vector<ZoneDeveloperGrowthItem> list_;
+    mutable GridView grid_;
+    mutable DemandView demand_;
+};
 struct BuildingDevelopmentApi final : IZoneDeveloperBuildingDevelopmentApi {
-    IZoneDeveloperGrowthApi* GetGrowthDeveloper(std::uint32_t) override { return nullptr; }
-    void GetAllBuildingTypes(std::vector<std::uint32_t>&) override {}
+    IZoneDeveloperGrowthApi* GetGrowthDeveloper(std::uint32_t type) override {
+        sc4::cSC4GrowthDeveloper* developer = GrowthDeveloperOfType(type);
+        if (!developer) return nullptr;
+        auto it = views_.find(developer);
+        if (it == views_.end()) it = views_.emplace(developer, std::make_unique<GrowthView>(developer)).first;
+        return it->second.get();
+    }
+    void GetAllBuildingTypes(std::vector<std::uint32_t>& out) override { NativeAllBuildingTypes(out); }
     IZoneDeveloperLotDeveloperApi* GetLotDeveloper() override { return &g_lotDeveloperApi; }
-    void GetBuildingTypesByFamily(std::unordered_set<std::uint32_t>&, std::uint32_t) override {}
-    const BuildingProfile& GetBuildingProfile(std::uint32_t) override { static BuildingProfile none{}; return none; }
+    void GetBuildingTypesByFamily(std::unordered_set<std::uint32_t>& out, std::uint32_t family) override {
+        std::vector<std::uint32_t> types;
+        NativeBuildingsInFamily(family, types);
+        out.insert(types.begin(), types.end());
+    }
+    const BuildingProfile& GetBuildingProfile(std::uint32_t type) override {
+        static const BuildingProfile none{};
+        const BuildingProfile* profile = NativeBuildingProfile(type);
+        return profile ? *profile : none;
+    }
+    std::map<sc4::cSC4GrowthDeveloper*, std::unique_ptr<GrowthView>> views_;
 } g_buildingDevelopmentApi;
 
 struct PlainService final : IZoneDeveloperService {} g_renderer, g_trafficSim;   // only AddRef / Release reach these
@@ -169,7 +239,14 @@ struct ZoneDeveloperHost final : IZoneDeveloperHost {
     IZoneDeveloperZoneManagerApi* ZoneManager() override { return &g_zoneApi; }
     IZoneDeveloperNetworkApi* NetworkSubnet(int) override { return nullptr; }       // cSC4NetworkTool per type: TOOL-1
     IZoneDeveloperSafeListApi* SafeListIterator() override { return nullptr; }     // the developer keeps its own lot list
-    void LotConfigurationsByFilter(std::vector<cSC4LotConfiguration*>&, IZoneDeveloperLotFilter*) override {}
+    void LotConfigurationsByFilter(std::vector<cSC4LotConfiguration*>& out, IZoneDeveloperLotFilter* filter) override {   // manager vslot 0x48
+        struct Bridge final : sc4::cISC4LotConfigurationFilter {
+            IZoneDeveloperLotFilter* filter = nullptr;
+            bool Matches(cSC4LotConfiguration* configuration) override { return filter->IsLotConfigurationIncluded(configuration); }
+        } bridge;
+        bridge.filter = filter;
+        if (filter) NativeLotConfigurationsByFilter(out, &bridge);
+    }
     void AllLotConfigurations(std::vector<cSC4LotConfiguration*>&) override {}
     void LotConfigurationForBuildingType(cSC4LotConfiguration*& out, std::uint32_t) override { out = nullptr; }
     bool LotConfigurationCompatibleWithZone(cISC4LotConfigurationRef*, int) override { return false; }
@@ -248,11 +325,20 @@ struct LotHost final : ILotHost {
         std::int32_t rect[4];
         lot.GetBoundingRect(rect);
         SC4Rect<int> edge;
-        if (!developer->GetNeighborCellsAtEdgeOfLot(SC4Rect<int>{rect[0], rect[1], rect[2], rect[3]}, 1 << rotation, edge)) return false;
-        for (int x = edge.x0; x <= edge.x1; ++x)
-            for (int z = edge.z0; z <= edge.z1; ++z)
-                if (NativeNetworkTypesAt(x, z) & 0x449) return true;
-        return false;
+        const bool hasEdge = developer->GetNeighborCellsAtEdgeOfLot(SC4Rect<int>{rect[0], rect[1], rect[2], rect[3]}, 1 << rotation, edge);
+        bool found = false;
+        std::uint32_t seen = 0;
+        if (hasEdge)
+            for (int x = edge.x0; x <= edge.x1 && !found; ++x)
+                for (int z = edge.z0; z <= edge.z1 && !found; ++z) {
+                    const std::uint32_t types = NativeNetworkTypesAt(x, z);
+                    seen |= types;
+                    found = (types & 0x449) != 0;
+                }
+        if (std::getenv("SC4_SIMDEBUG"))
+            std::fprintf(stderr, "lot road access: rect (%d,%d)-(%d,%d) rotation %d edge %d (%d,%d)-(%d,%d) types %x -> %d\n", rect[0], rect[1],
+                         rect[2], rect[3], rotation, hasEdge, edge.x0, edge.z0, edge.x1, edge.z1, seen, found);
+        return found;
     }
     bool IsFerryTerminal(const cSC4Lot& lot) override { return {}; }
     bool FerryTerminalRoadAccess(const cSC4Lot& lot) override { return {}; }

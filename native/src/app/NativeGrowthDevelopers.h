@@ -7,7 +7,7 @@
 #include <array>
 #include <vector>
 
-namespace sc4 { class cISCPropertyHolder; template <class T> class cSC4SimGrid; class cSC4GrowthDeveloper; class cSC4Demand; }
+namespace sc4 { class cISCPropertyHolder; class cSC4LotConfiguration; class cISC4LotConfigurationFilter; template <class T> class cSC4SimGrid; class cSC4GrowthDeveloper; class cSC4Demand; }
 
 namespace native {
 
@@ -21,6 +21,7 @@ void GrowthDeveloperGrowthList(void* developer, std::vector<std::array<std::int3
 float GrowthDeveloperActiveDemand(void* developer);                  // vslot 0x90 -> demand vslot 0x60
 sc4::cSC4GrowthDeveloper* GrowthDeveloperOfType(std::uint32_t type); // the developer of one developer type (or null)
 // cSC4TractDeveloper::Grow for one developer's tract (NativeTractDevelopment.cpp); > 0 when something was built
+bool NativeLotConfigurationsByFilter(std::vector<sc4::cSC4LotConfiguration*>& out, sc4::cISC4LotConfigurationFilter* filter);   // manager vslot 0x48
 int NativeTractGrow(void* developer, int tractX, int tractZ, std::uint8_t style);
 void InstallTractDeveloperHost();
 // The demand simulator's view (NativeDemandHost.cpp): the zone kind (+0x28, 1..3), the source demand channel, the desirability at a

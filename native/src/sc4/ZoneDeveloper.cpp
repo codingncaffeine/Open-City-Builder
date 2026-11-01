@@ -12,6 +12,8 @@
 #include <climits>
 #include <cmath>
 #include <cstring>
+#include <cstdio>
+#include <cstdlib>
 #include <iterator>
 #include <list>
 #include <unordered_set>
@@ -887,12 +889,10 @@ IZoneDeveloperNetworkOccupant* cSC4ZoneDeveloper::GetNetwork(int x, int z, std::
     IZoneDeveloperNetworkOccupant* result = nullptr;
     for (cISC4Occupant* occupant : occupants) {
         if (!occupant) continue;
-        void* network = nullptr;
-        if (!occupant->QueryInterface(kGZIID_cISC4NetworkOccupant, &network) || !network) continue;
-        auto* view = static_cast<IZoneDeveloperNetworkOccupant*>(network);
-        const bool hit = view->HasAnyNetworkFlag(flags);
-        view->Release();   // the original releases the QI reference even for the chosen occupant
-        if (hit) {
+        // QueryInterface(cISC4NetworkOccupant); the original releases the QI reference even for the chosen occupant
+        IZoneDeveloperNetworkOccupant* view = occupantManager_->NetworkView(occupant);
+        if (!view) continue;
+        if (view->HasAnyNetworkFlag(flags)) {
             result = view;
             break;
         }
@@ -1076,6 +1076,7 @@ bool cSC4ZoneDeveloper::CreateLotIfPossible(int x, int z, int sizeX, int sizeZ, 
 // the footprint and notifies the safe list / building development simulator.
 bool cSC4ZoneDeveloper::CreateLot(int x, int z, int sizeX, int sizeZ, int facing, cSC4Lot*& out) {
     auto* lot = new cSC4Lot(x, z, sizeX, sizeZ, facing);
+    if (std::getenv("SC4_SIMDEBUG")) std::fprintf(stderr, "zone developer: CreateLot (%d,%d) %dx%d facing %d\n", x, z, sizeX, sizeZ, facing);
     out = lot;
     lot->AddRef();      // the caller's reference
     lot->Init();
@@ -1832,7 +1833,7 @@ void cSC4ZoneDeveloper::ExamineBoundaries() {
     const int cellsX = city_->CellCountX();
     const int cellsZ = city_->CellCountZ();
     for (int i = 0; i < 4; ++i) boundaryCost_[i] = 0;
-    const int boundaryValue = extendAsStreets_ ? 0xfe : 1;   // 0x100a14f10 holds 1,1,1,1
+    const int boundaryValue = extendAsStreets_ ? 0 : 1;   // i386 0x000dd1xx: extendAsStreets ^ 1
     for (int i = 0; i < 4; ++i) boundary_[i] = static_cast<BoundaryCondition>(boundaryValue);
     const int x0 = region->bounds.x0, z0 = region->bounds.z0;
     const int x1 = region->bounds.x1, z1 = region->bounds.z1;
@@ -1894,6 +1895,9 @@ void cSC4ZoneDeveloper::ExamineBoundaries() {
         lotOrientation_ = alt;
         lotOrientationAlt_ = orientation;
     }
+    if (std::getenv("SC4_SIMDEBUG"))
+        std::fprintf(stderr, "zone developer: boundaries (%d,%d)-(%d,%d) costs %d %d %d %d -> orientation %d alt %d\n", x0, z0, x1, z1, boundaryCost_[0],
+                     boundaryCost_[1], boundaryCost_[2], boundaryCost_[3], lotOrientation_, lotOrientationAlt_);
 }
 
 // @ 0x10012c320. Lays the parallel streets of an industrial zone: every `spacing` columns/rows, in the
