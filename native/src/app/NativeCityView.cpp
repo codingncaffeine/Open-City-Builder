@@ -5,6 +5,7 @@
 #include "app/NativeBudgetUi.h"
 #include "app/NativeLighting.h"
 #include "app/NativeEffects.h"
+#include "app/NativeCityPanel.h"
 #include "sc4/CommonIIDs.h"
 #include "sc4/cSC424HourClock.h"
 #include "sc4/Simulator.h"
@@ -328,6 +329,7 @@ bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* cityInterface, g
     native::InstallCatalogUi(view.GetWindowManager());
     native::SetBudgetViewWindow(view.AsIGZWin());
     view.AddGUI();   // DoPostCityInit's city UI (the view's engine DoMessage that sends it there is not ported)
+    native::ConfigureCityPanels(view);   // ... and its gauges: RCI bars and opinion polls
     // ... and the toolbar readouts the date / funds / population / name messages refresh in the game
     view.UpdateCityName();
     view.UpdateBudget();

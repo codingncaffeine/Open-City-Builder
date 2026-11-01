@@ -1,5 +1,8 @@
 #include "sc4/DemandSimulator.h"
 
+#include <cstdio>
+#include <cstdlib>
+
 #include "sc4/DBSegment.h"
 
 #include <algorithm>
@@ -239,6 +242,18 @@ bool cSC4DemandSimulator::Init() {
 
     initialized_ = true;
     DoDemandIndexLinks();
+    if (std::getenv("SC4_DEMANDDEBUG")) std::fprintf(stderr, "demand: init %zu exemplar keys, %zu demands\n", keys.size(), demands_.size());
+    if (std::getenv("SC4_DEMANDDEBUG")) {
+        int unset = 0;
+        for (const auto& [id, d] : demands_) if (d && d->QueryActiveDemandMax() > 1e30f) ++unset;
+        std::fprintf(stderr, "demand: %d demands without an active maximum\n", unset);
+        for (std::uint32_t id : {0x21010u, 0x21020u, 0x21030u, 0x23110u, 0x24200u, 0x1010u, 0x11010u}) {
+            auto it = demands_.find(id);
+            if (it == demands_.end() || !it->second) { std::fprintf(stderr, "demand: %05x missing\n", id); continue; }
+            std::fprintf(stderr, "demand: %05x min %g max %g active %g supply %g demand %g\n", id, it->second->QueryActiveDemandMin(), it->second->QueryActiveDemandMax(),
+                         it->second->QueryActiveDemandValue(), it->second->QuerySupplyValue(), it->second->QueryDemandValue());
+        }
+    }
     return true;
 }
 
@@ -359,13 +374,13 @@ void cSC4DemandSimulator::CreateDemandFromExemplar(std::uint32_t exemplarId, cIS
 
     if (wasNew || !readFromStream_) {
         std::int32_t value = 0;
-        if (cSCPropertyHelp::GetPropertyValue(holder, kDemandPropMax, value)) demand->SetActiveDemandMax(static_cast<float>(value));
-        if (cSCPropertyHelp::GetPropertyValue(holder, kDemandPropMin, value)) demand->SetActiveDemandMin(static_cast<float>(value));
+        if (cSCPropertyHelp::GetPropertyValue(holder, kDemandPropSupply, value)) demand->SetSupplyValue(static_cast<float>(value));
+        if (cSCPropertyHelp::GetPropertyValue(holder, kDemandPropDemand, value)) demand->SetDemandValue(static_cast<float>(value));
     }
     {
         std::int32_t value = 0;
-        if (cSCPropertyHelp::GetPropertyValue(holder, kDemandPropSupply, value)) demand->SetSupplyValue(static_cast<float>(value));
-        if (cSCPropertyHelp::GetPropertyValue(holder, kDemandPropDemand, value)) demand->SetDemandValue(static_cast<float>(value));
+        if (cSCPropertyHelp::GetPropertyValue(holder, kDemandPropMin, value)) demand->SetActiveDemandMin(static_cast<float>(value));
+        if (cSCPropertyHelp::GetPropertyValue(holder, kDemandPropMax, value)) demand->SetActiveDemandMax(static_cast<float>(value));
     }
 
     auto addPairLinks = [&](std::uint32_t property, std::uint32_t type, std::uint32_t base) {
@@ -809,6 +824,16 @@ void cSC4DemandSimulator::DoMonthlySimulation() {
     EvaluateConnectionUtilization();
     ExportDemand();
     if (state_ == 3) state_ = 0;
+    if (std::getenv("SC4_DEMANDDEBUG")) {
+        int shown = 0, nonzero = 0;
+        for (const auto& [id, d] : demands_) {
+            if (!d || (d->QuerySupplyValue() == 0.0f && d->QueryDemandValue() == 0.0f && d->QueryActiveDemandValue() == 0.0f)) continue;
+            ++nonzero;
+            if (shown++ < 25) std::fprintf(stderr, "demand: month %05x supply %g demand %g active %g [%g..%g] econ %g\n", id, d->QuerySupplyValue(),
+                                           d->QueryDemandValue(), d->QueryActiveDemandValue(), d->QueryActiveDemandMin(), d->QueryActiveDemandMax(), d->QueryEconomyModifier());
+        }
+        std::fprintf(stderr, "demand: month: %d of %zu demands non-zero, state %d\n", nonzero, demands_.size(), state_);
+    }
 }
 
 void cSC4DemandSimulator::SimulatorBegin() {
@@ -1198,6 +1223,11 @@ void cSC4DemandSimulator::GetLocalPopulationSummary(std::map<std::uint32_t, int>
 bool cSC4DemandSimulator::DoMessage(cIGZMessage2* message) {
     if (!message) return true;
     const std::uint32_t type = message->GetType();
+    if (std::getenv("SC4_DEMANDDEBUG")) {
+        static std::map<std::uint32_t, int> seen;
+        const int n = ++seen[type];
+        if (n <= 3 || n % 50 == 0) std::fprintf(stderr, "demand: message %08x #%d\n", type, n);
+    }
     auto* payload = static_cast<cIGZMessage2Standard*>(message);
     switch (type) {
     case kDemandMessageInterval0:

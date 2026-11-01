@@ -393,6 +393,9 @@ src/sc4/EffectsCollection.cpp
 src/sc4/EffectsResource.cpp
 src/sc4/ModelBasedParticlesEffect.cpp
 src/app/NativeEffects.cpp
+src/app/NativeCityPanel.cpp
+src/sc4/WinRCI.cpp
+src/sc4/WinTrendBar.cpp
 src/sc4/EffectDescriptions.cpp
 src/sc4/EffectComponents.cpp
 src/sc4/ParticlesEffect.cpp

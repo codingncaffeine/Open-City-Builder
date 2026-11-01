@@ -84,10 +84,13 @@ constexpr int kDemandIdleMsTick = 5;
 // demand exemplar properties
 constexpr std::uint32_t kDemandPropInterfaceId = 0x11;             // default 0x0797a4e8
 constexpr std::uint32_t kDemandPropId = 0x21;                       // overrides the exemplar instance id
-constexpr std::uint32_t kDemandPropMax = 0x47bb3f20;
-constexpr std::uint32_t kDemandPropMin = 0x47bb3f21;
-constexpr std::uint32_t kDemandPropSupply = 0x47bb3f10;
-constexpr std::uint32_t kDemandPropDemand = 0x47bb3f11;
+// i386 CreateDemandFromExemplar 0x47bb3f20 -> SetSupplyValue (vslot 0x48), 0x47bb3f21 -> SetDemandValue (0x4c), both only
+// for a new demand; 0x47bb3f10 -> SetActiveDemandMin (0x54), 0x47bb3f11 -> SetActiveDemandMax (0x50), always. (The port had
+// the two pairs crossed: every demand kept the unset caps and the RCI bars ran off the scale.)
+constexpr std::uint32_t kDemandPropSupply = 0x47bb3f20;
+constexpr std::uint32_t kDemandPropDemand = 0x47bb3f21;
+constexpr std::uint32_t kDemandPropMin = 0x47bb3f10;
+constexpr std::uint32_t kDemandPropMax = 0x47bb3f11;
 constexpr std::uint32_t kDemandPropLinkLo = 0x47bb3f31;             // pairs (target, percent*100)
 constexpr std::uint32_t kDemandPropLinkSupply = 0x47bb3f30;
 constexpr std::uint32_t kDemandPropLinkHi = 0x47bb3f32;

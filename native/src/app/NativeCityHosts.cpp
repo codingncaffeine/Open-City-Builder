@@ -29,6 +29,7 @@ void InstallDemandSimulatorStub();
 void InstallDisasterStub();
 void InstallEffectsStub();
 void InstallEffectsManagerStub();
+void InstallCityPanelHosts();
 void InstallEstablishCityHost();
 void InstallBudgetSimHosts();
 void InstallTerrainTools();
@@ -135,6 +136,7 @@ void InstallStubHosts() {
     InstallDisasterStub();
     InstallEffectsStub();
     InstallEffectsManagerStub();
+    InstallCityPanelHosts();              // the RCI and opinion-poll gauges' services (NativeCityPanel.cpp)
     InstallEstablishCityHost();
     InstallBudgetSimHosts();
     InstallTerrainTools();

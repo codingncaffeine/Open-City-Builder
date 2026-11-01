@@ -1,5 +1,7 @@
 #include <cstdio>
 #include "sc4/Simulator.h"
+#include <string>
+#include <map>
 
 #include <chrono>
 #include <cstdlib>
@@ -238,6 +240,12 @@ bool cSC4Simulator::SendAgentMessage(const AgentInfo& agent, std::uint32_t type,
     message->SetData3(data3);
     const bool result = agent.agent->DoMessage(message);
     message->Release();
+    static const bool trace = std::getenv("SC4_AGENTDEBUG") != nullptr;
+    if (trace && type != 0x6695681a) {
+        static std::map<std::pair<std::string, std::uint32_t>, int> seen;
+        const int n = ++seen[{agent.name, type}];
+        if (n <= 2 || n % 30 == 0) std::fprintf(stderr, "agent: %s <- %08x #%d (done %d, day %u)\n", agent.name.c_str(), type, n, result ? 1 : 0, data1);
+    }
     return result;
 }
 

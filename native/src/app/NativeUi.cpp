@@ -41,7 +41,10 @@
 #include "gz/WinText.h"
 #include "rz/COMDirectors.h"
 #include "sc4/SLString.h"
+#include "sc4/WinAuraAlert.h"
 #include "sc4/WinMapView.h"
+#include "sc4/WinRCI.h"
+#include "sc4/WinTrendBar.h"
 #include "sc4/WinSmallViews.h"
 #include "rz/cRZString.h"
 
@@ -303,6 +306,11 @@ bool InitUiScripts(WinMgr* mgr) {
     gz::RegisterDirectorMaker("cSC4WinText", +[]() -> cIGZUnknown* { return MakeWin<gz::cGZWinText>(); });
     gz::RegisterDirectorMaker("cGZWinFlatRect", +[]() -> cIGZUnknown* { return MakeWin<gz::cGZWinFlatRect>(); });
     gz::RegisterDirectorMaker("cSC4WinMapView", +[]() -> cIGZUnknown* { return MakeWin<sc4::cSC4WinMapView>(); });   // clsid 0x28c5a41f
+    // The city toolbar's gauges (clsids 0xc7a0e17e RCI bar, 0xaa5c2f86 trend bar, mayor rating bar): without makers the script
+    // built bare windows in their place, so the RCI meter and the opinion polls never showed anything.
+    gz::RegisterDirectorMaker("cSC4WinRCI", +[]() -> cIGZUnknown* { return MakeWin<sc4::cSC4WinRCI>(); });
+    gz::RegisterDirectorMaker("cSC4WinTrendBar", +[]() -> cIGZUnknown* { return MakeWin<sc4::cSC4WinTrendBar>(); });
+    gz::RegisterDirectorMaker("cSC4WinAuraBar", +[]() -> cIGZUnknown* { return MakeWin<sc4::cSC4WinAuraBar>(); });
     // The slider (clsid 0x21325208) and the grid (0xdaa6b9bf): without makers the scripts built bare windows in their place
     // (the audio options' volume sliders drew as filled boxes and its playlist took no rows).
     gz::RegisterDirectorMaker("cGZWinSlider", +[]() -> cIGZUnknown* { return MakeWin<gz::cGZWinSlider>(); });

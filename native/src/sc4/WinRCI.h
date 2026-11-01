@@ -25,13 +25,13 @@
 
 #include "gz/Win.h"
 #include "gz/cIGZMessage2.h"
+#include "sc4/CommonIIDs.h"
 
 namespace sc4 {
 
 class cISC4DemandSimulator;
 
 constexpr std::uint32_t kGZIID_cISC4WinRCI = 0x89e1574c;
-constexpr std::uint32_t kGZIID_cIGZMessageTarget2 = 0x452294aa;
 constexpr std::uint32_t kWinRCIDemandChangedMessage = 0x426840a0;
 constexpr int kWinRCIMaxChannels = 16;
 constexpr std::uint32_t kWinRCIDemandKeyOffset = 0x20000;   // GetDemand(id, 0x20000)
