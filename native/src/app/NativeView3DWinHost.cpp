@@ -24,6 +24,7 @@
 #include "sc4/Simulator.h"
 #include "sc4/cSC4City.h"
 #include <cstdio>
+#include <cstdlib>
 #include "app/NativeCityUi.h"
 #include "app/NativeBudgetUi.h"
 #include "app/NativeNetworkTool.h"
@@ -242,6 +243,7 @@ struct StubView3DWin final : IView3DWinHost {
     // The native city save writes an incomplete file the game cannot load back (SAVE-1): until it is whole the city is save-disabled,
     // so every save request takes the game's own "saving is disabled" path instead of replacing the city file.
     void PostCityInit() override {
+        if (std::getenv("SC4_ENABLESAVE")) return;   // dev switch: let the save run (SAVE-1 work), sandboxed tests only
         if (cSC4City* city = LoadedCity(); city && !city->IsSaveDisabled()) city->DisableSave();
     }
     ISimulatorPauseSink* Simulator() override { static SimulatorView view; return CityExists() ? &view : nullptr; }
