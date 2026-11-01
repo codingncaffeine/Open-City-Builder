@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "gz/cIGZSerializable.h"
+#include "gz/cIGZMessage2.h"
 #include "gz/cIGZIStream.h"
 #include "gz/cIGZOStream.h"
 #include "sc4/RetainedReference.h"
@@ -116,9 +117,42 @@ public:
     virtual void SetBudgetLineItem(cISCPropertyHolder* holder, std::int32_t id, std::int64_t cost) = 0;               // spBudgetSim vslot 0x1a8
 };
 
+// A garbage deal with a neighbour (cISC4NeighborDeal): its monthly amount and how much of it was used so far.
+class IPollutionDeal {
+public:
+    virtual ~IPollutionDeal() = default;
+    virtual int Amount() = 0;                                          // vslot 0x28
+    virtual int Used() = 0;                                            // vslot 0x50
+    virtual void SetUsed(int used) = 0;                                // vslot 0x54
+};
+// An occupant a 0x99ef1142 / 0x99ef1143 message names, as DoOccupantChanged reads it: its property holder, the city cells its
+// bounding box covers (spCity vslot 0x17c of both corners) and its position.
+struct PollutionOccupantFootprint {
+    IPollutionOccupant* occupant = nullptr;                            // stable for the occupant's life (the lists keep it)
+    cISCPropertyHolder* holder = nullptr;
+    int cellX0 = 0, cellZ0 = 0, cellX1 = -1, cellZ1 = -1;
+    float position[3] = {};
+};
+
 class IPollutionHost {
 public:
     virtual ~IPollutionHost() = default;
+    // Init's services: the simulator's agents (SL::spSimulator vslot 0x4c), notifications (SL::spMS2), the tuning exemplar,
+    // the history series length (history warehouse vslot 0x68).
+    virtual void AddAgent(cIGZMessageTarget2* target, int interval, const char* name, std::uint32_t flags) = 0;
+    virtual void RemoveAgent(cIGZMessageTarget2* target) = 0;
+    virtual void AddNotification(cIGZMessageTarget2* target, std::uint32_t message) = 0;
+    virtual void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t message) = 0;
+    virtual const cISCPropertyHolder* SimulatorExemplar() = 0;         // {0x6534284a, 0xe7e2c2db, 0xc911e35b}
+    virtual void CreateHistory(std::uint32_t historyId, std::uint32_t length) = 0;
+    // The daily pass: ordinance factors (ordinance simulator vslot 0x64), the zone of a cell (zone manager vslot 0x30), the traffic
+    // simulator's air contribution at a cell (its grid vslot 0x1c), the neighbour garbage deals (neighbours simulator vslot 0x74).
+    virtual float OrdinanceFactor(std::uint32_t property, std::uint32_t index) = 0;
+    virtual int ZoneTypeAt(int cellX, int cellZ) = 0;
+    virtual std::uint8_t TrafficAirAt(int cellX, int cellZ) = 0;
+    virtual void GarbageDeals(std::uint32_t kind, std::vector<IPollutionDeal*>& out) = 0;   // 0x4773ffe5 import, 0x4773ffe4 export
+    virtual void SetSanitationLineItemCost(int item, std::int64_t cost) = 0;               // the sanitation department's line item
+    virtual bool OccupantFootprint(void* occupant, PollutionOccupantFootprint& out) = 0;    // false: not a city occupant
     virtual bool PowerAvailable() = 0;                                 // power simulator vslot 0xf8
     virtual bool OccupantPowered(IPollutionOccupant* occupant) = 0;    // this+0x60 vslot 0xf8
     virtual float SanitationFunding() = 0;                             // budget department +0x50 -> float
@@ -129,7 +163,7 @@ public:
     virtual float RecyclingCapacitySlots() = 0;                        // this+0x50 vslot 0x80
 };
 
-class cSC4PollutionSimulator final : public cIGZSerializable {
+class cSC4PollutionSimulator final : public cIGZSerializable, public cIGZMessageTarget2 {
 public:
     explicit cSC4PollutionSimulator(IPollutionHost* host);
     ~cSC4PollutionSimulator() = default;
@@ -144,6 +178,16 @@ public:
     bool WriteCityRecord(cIGZOStream& stream) const;   // the city-file layout ReadCityRecord reads
     bool Read(cIGZIStream& stream) override;
     std::uint32_t GetGZCLSID() const override { return kGZCLSID_cSC4PollutionSimulator; }
+
+    // the simulation (Init @ 0x0006f836, Shutdown, DoMessage @ 0x0006e7d4, the agents' daily / monthly passes)
+    bool Init();
+    bool Shutdown();
+    bool DoMessage(cIGZMessage2* message) override;
+    void SimulationBegin();
+    void DoDailySimulation();
+    void DoMonthlySimulation();
+    void DoOccupantChanged(void* occupant, bool added);
+    static constexpr std::uint32_t kUpdatePeriod = 30;                  // mUpdatePeriod (StaticInit): days for a whole-city sweep
 
     // tunables + curves (ReadSimulatorTunableValues)
     void ReadSimulatorTunableValues(const cISCPropertyHolder* exemplar);
@@ -293,9 +337,12 @@ private:
     SimGridPtr<std::int16_t> valueGrids_[4];          // +0x78
     // what a city file carries that the port does not model (written back as read)
     bool fromCityFile_ = false;
-    std::uint32_t fileB8_ = 0, fileBC_ = 0, file2e4_ = 0;
-    std::int64_t file2d0_ = 0, file2d8_ = 0, file250_ = 0, file258_ = 0;
-    RandomIterator fileWalk_;
+    bool loaded_ = false;                             // this[0x11]: Read filled the state, Init keeps it
+    bool running_ = false;                            // this[0x10]: agents and notifications registered
+    bool effectsShown_ = false;                       // +0x32c (this[0x21c]): the pollution view layer is on
+    std::uint32_t cellX_ = 0, cellZ_ = 0, cellsPerDay_ = 0;
+    std::int64_t file2d0_ = 0, sanitationCost_ = 0, producedThisMonth_ = 0, importedThisMonth_ = 0;
+    RandomIterator walk_;
     cRetainedReference fileWaterGrid_;
     cRetainedReferences fileLists_[4];
     SimGridPtr<std::int16_t> sourceGrids_[4];         // +0x98

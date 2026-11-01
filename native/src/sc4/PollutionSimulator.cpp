@@ -25,6 +25,22 @@ constexpr std::uint32_t kHistoryRadiation = 0xea110137;
 constexpr std::uint32_t kHistoryTotal = 0xea110138;
 
 inline std::int32_t RoundToEven(float v) { return static_cast<std::int32_t>(std::nearbyint(v)); }
+// A float to an unsigned int the way the original converts it (0 below zero, saturating at 2^32).
+inline std::uint32_t ToUint(float v) { return v <= 0.0f ? 0u : v >= 4294967296.0f ? 0xffffffffu : static_cast<std::uint32_t>(v); }
+
+constexpr std::uint32_t kMessageDaily = 0x66956814;
+constexpr std::uint32_t kMessageMonthly = 0x66956816;
+constexpr std::uint32_t kMessageSimulationBegin = 0x66956810;
+constexpr std::uint32_t kMessageOccupantInserted = 0x99ef1142;
+constexpr std::uint32_t kMessageOccupantRemoved = 0x99ef1143;
+constexpr std::uint32_t kMessageCityStarted = 0x26d31ec1;
+constexpr std::uint32_t kMessageTunablesChanged = 0xca1b151c;
+constexpr std::uint32_t kMessageViewLayer = 0xc6cdbf1a;
+constexpr std::uint32_t kNotifications[] = {kMessageOccupantInserted, kMessageOccupantRemoved, kMessageCityStarted,
+                                            kMessageTunablesChanged, kMessageViewLayer};
+constexpr std::uint32_t kGarbageImportDeals = 0x4773ffe5, kGarbageExportDeals = 0x4773ffe4;
+constexpr float kDealShare = 0.1f;                // cSTESurfaceWater::UpdateFloodWaters()::kMaxSedimentToDeposit, shared constant
+constexpr float kMaxCellGarbage = 32767.0f;       // 0x00a70720
 }  // namespace
 
 cSC4PollutionSimulator::cSC4PollutionSimulator(IPollutionHost* host) : host_(host) {}
@@ -34,8 +50,9 @@ cSC4PollutionSimulator::cSC4PollutionSimulator(IPollutionHost* host) : host_(hos
 // to `this`; the serializable id is what the city-load serializer (SC4ReadGZSerializable) asks for.
 bool cSC4PollutionSimulator::QueryInterface(std::uint32_t iid, void** out) {
     if (iid == 0xe4fda3d4) *out = static_cast<cIGZSerializable*>(this);
+    else if (iid == 0x452294aa) *out = static_cast<cIGZMessageTarget2*>(this);
     else if (iid == 1 || iid == 0x877181ec || iid == kGZCLSID_cSC4PollutionSimulator)
-        *out = static_cast<cIGZUnknown*>(this);
+        *out = static_cast<cIGZSerializable*>(this);
     else return false;
     AddRef();
     return true;
@@ -44,6 +61,7 @@ bool cSC4PollutionSimulator::QueryInterface(std::uint32_t iid, void** out) {
 // 0x100094d48: below 2 destroys the object (the original runs FinalRelease, which Shutdowns and deletes).
 std::uint32_t cSC4PollutionSimulator::Release() {
     if (refCount_ < 2) {
+        Shutdown();
         delete this;
         return 0;
     }
@@ -129,8 +147,9 @@ bool cSC4PollutionSimulator::ReadCityRecord(cIGZIStream& stream) {
     double f64 = 0.0;
     std::uint8_t u8 = 0;
     fromCityFile_ = true;
-    stream.GetUint32(fileB8_);                                // +0xb8
-    stream.GetUint32(fileBC_);                                // +0xbc
+    loaded_ = true;
+    stream.GetUint32(cellX_);                                // +0xb8
+    stream.GetUint32(cellZ_);                                // +0xbc
     for (auto& kept : fileLists_) {                           // +0xc0 / +0xd8 / +0xf0 / +0x108: lists of occupants (kept as read)
         kept.clear();
         stream.GetUint32(u32);
@@ -159,7 +178,7 @@ bool cSC4PollutionSimulator::ReadCityRecord(cIGZIStream& stream) {
     stream.GetUint8(u8); garbageUncollected_ = u8 != 0;       // +0x244
     stream.GetUint32(totalGarbageUncollected_);               // +0x248
     stream.GetSint64(file2d0_);                               // +0x2d0
-    stream.GetSint64(file2d8_);                               // +0x2d8
+    stream.GetSint64(sanitationCost_);                               // +0x2d8
     if (version > 3) { stream.GetUint32(u32); abductedPrev_ = static_cast<std::int32_t>(u32); }   // +0x2c8
     stream.GetSint64(producedPrev_);                          // +0x288
     stream.GetSint64(importedPrev_);                          // +0x290
@@ -168,8 +187,8 @@ bool cSC4PollutionSimulator::ReadCityRecord(cIGZIStream& stream) {
     stream.GetSint64(incineratedPrev_);                       // +0x2a8
     stream.GetSint64(convertedPrev_);                         // +0x2b0
     stream.GetSint64(landfilledPrev_);                        // +0x2b8
-    stream.GetSint64(file250_);                               // +0x250
-    stream.GetSint64(file258_);                               // +0x258
+    stream.GetSint64(producedThisMonth_);                               // +0x250
+    stream.GetSint64(importedThisMonth_);                               // +0x258
     stream.GetSint64(recycledThisMonth_);                     // +0x260
     stream.GetFloat64(recyclingShare268_);                    // +0x268
     stream.GetSint64(wasteToEnergyThisMonth_);                // +0x270
@@ -180,8 +199,8 @@ bool cSC4PollutionSimulator::ReadCityRecord(cIGZIStream& stream) {
     stream.GetSint32(allowance); recyclingAllowance_ = allowance;   // +0x2c0
     std::int32_t landfills = 0;
     stream.GetUint32(u32); landfills = static_cast<std::int32_t>(u32); activeLandfillCount_ = landfills;   // +0x2cc
-    stream.GetUint32(file2e4_);                               // +0x2e4
-    stream >> fileWalk_;                                      // +0x2e8
+    stream.GetUint32(cellsPerDay_);                               // +0x2e4
+    stream >> walk_;                                      // +0x2e8
     stream.GetUint8(u8); dirtyRadiation = u8 != 0;            // +0x328..
     stream.GetUint8(u8); dirtyAir = u8 != 0;
     stream.GetUint8(u8); dirtyWater = u8 != 0;
@@ -202,8 +221,8 @@ bool cSC4PollutionSimulator::WriteCityRecord(cIGZOStream& stream) const {
     stream.SetUint16(4);
     for (auto& grid : valueGrids_) SC4WriteGZSerializable(stream, static_cast<cISC4SimGridBase*>(grid.get()));
     for (auto& grid : sourceGrids_) SC4WriteGZSerializable(stream, static_cast<cISC4SimGridBase*>(grid.get()));
-    stream.SetUint32(fileB8_);                                // +0xb8
-    stream.SetUint32(fileBC_);                                // +0xbc
+    stream.SetUint32(cellX_);                                // +0xb8
+    stream.SetUint32(cellZ_);                                // +0xbc
     for (const auto& kept : fileLists_) {                     // +0xc0 / +0xd8 / +0xf0 / +0x108
         stream.SetUint32(std::uint32_t(kept.size()));
         for (const cRetainedReference& occupant : kept) occupant.Write(stream);
@@ -225,7 +244,7 @@ bool cSC4PollutionSimulator::WriteCityRecord(cIGZOStream& stream) const {
     stream.SetUint8(garbageUncollected_ ? 1 : 0);             // +0x244
     stream.SetUint32(totalGarbageUncollected_);               // +0x248
     stream.SetSint64(file2d0_);                               // +0x2d0
-    stream.SetSint64(file2d8_);                               // +0x2d8
+    stream.SetSint64(sanitationCost_);                               // +0x2d8
     stream.SetUint32(static_cast<std::uint32_t>(abductedPrev_));   // +0x2c8
     stream.SetSint64(producedPrev_);                          // +0x288
     stream.SetSint64(importedPrev_);                          // +0x290
@@ -234,8 +253,8 @@ bool cSC4PollutionSimulator::WriteCityRecord(cIGZOStream& stream) const {
     stream.SetSint64(incineratedPrev_);                       // +0x2a8
     stream.SetSint64(convertedPrev_);                         // +0x2b0
     stream.SetSint64(landfilledPrev_);                        // +0x2b8
-    stream.SetSint64(file250_);                               // +0x250
-    stream.SetSint64(file258_);                               // +0x258
+    stream.SetSint64(producedThisMonth_);                               // +0x250
+    stream.SetSint64(importedThisMonth_);                               // +0x258
     stream.SetSint64(recycledThisMonth_);                     // +0x260
     stream.SetFloat64(recyclingShare268_);                    // +0x268
     stream.SetSint64(wasteToEnergyThisMonth_);                // +0x270
@@ -244,8 +263,8 @@ bool cSC4PollutionSimulator::WriteCityRecord(cIGZOStream& stream) const {
     stream.SetUint32(abductedThisMonth_);                     // +0x2c4
     stream.SetSint32(static_cast<std::int32_t>(recyclingAllowance_));   // +0x2c0
     stream.SetUint32(static_cast<std::uint32_t>(activeLandfillCount_)); // +0x2cc
-    stream.SetUint32(file2e4_);                               // +0x2e4
-    stream << fileWalk_;                                      // +0x2e8
+    stream.SetUint32(cellsPerDay_);                               // +0x2e4
+    stream << walk_;                                      // +0x2e8
     stream.SetUint8(dirtyRadiation ? 1 : 0);                  // +0x328..
     stream.SetUint8(dirtyAir ? 1 : 0);
     stream.SetUint8(dirtyWater ? 1 : 0);
@@ -924,4 +943,429 @@ void cSC4PollutionSimulator::AddRadiationToCity(const float position[3], float a
     }
 }
 
+// ---------------------------------------------------------------------------- simulation
+
+// @ 0x0006f836. StaticInit's curves are members here and the update period a constant. A loaded city (Read set this[0x11]) keeps its
+// grids, sweep position and counters; a new one starts them. Every time: the tunables, the daily and monthly agents, the notifications
+// and the total-pollution history length. PARTIAL: the per-8x8-block visual-effect slots (UpdatePollutionVisualEffect), the prop
+// developer's requester registration and the sanitation department's line items 10 / 20 / 30 are not set up (no native counterparts).
+bool cSC4PollutionSimulator::Init() {
+    if (!loaded_) {
+        loaded_ = true;
+        CreateGrids();
+        averageAir_ = averageWater_ = 0;
+        averageGarbage_ = 0;
+        airSum = waterSum = 0;
+        periodValue21c[0] = periodValue21c[1] = 0;
+        periodValue224[0] = periodValue224[1] = 0;
+        cellCount = radiationCount = 0;
+        totalGarbageUncollected_ = 0;
+        monthlyIncineratorCapacity_ = monthlyWasteToEnergyCapacity_ = 0;
+        recyclingEffect_ = 0.0f;
+        abductedThisMonth_ = 0;
+        abductedPrev_ = 0;
+        recyclingAllowance_ = 0;
+        garbageSupply_ = garbageCapacity_ = 0;
+        producedPrev_ = importedPrev_ = exportedPrev_ = 0;
+        recycledPrev_ = 0;
+        incineratedPrev_ = convertedPrev_ = landfilledPrev_ = 0;
+        activeLandfillCount_ = 0;
+        recyclingCenterCountSnapshot = static_cast<std::uint32_t>(recyclingCenters_.size());
+        const int countX = valueGrids_[0]->GetTractCountX(), countZ = valueGrids_[0]->GetTractCountZ();
+        cellsPerDay_ = static_cast<std::uint32_t>((countX * countZ) / static_cast<int>(kUpdatePeriod >> 1));
+        walk_.SetModular(false);
+        walk_.SetRect(0, 0, countX - 1 < 0 ? 0 : countX - 1, countZ - 1);
+        walk_.Reset(true);
+        int a = 0, b = 0;
+        walk_.Next(a, b);
+        cellX_ = static_cast<std::uint32_t>(a * 2);
+        cellZ_ = static_cast<std::uint32_t>(b * 2);
+        dirtyRadiation = dirtyAir = dirtyWater = dirtyGarbage = false;
+    }
+    if (!running_) {
+        running_ = true;
+        ReadSimulatorTunableValues(host_->SimulatorExemplar());
+        static const char* const kName = "cSC4PollutionSimulator";
+        host_->AddAgent(this, 6, kName, 2);
+        host_->AddAgent(this, 4, kName, 2);
+        for (std::uint32_t message : kNotifications) host_->AddNotification(this, message);
+        host_->CreateHistory(kHistoryTotal, 2);
+    }
+    return true;
+}
+
+bool cSC4PollutionSimulator::Shutdown() {
+    if (running_) {
+        running_ = false;
+        host_->RemoveAgent(this);
+        for (std::uint32_t message : kNotifications) host_->RemoveNotification(this, message);
+    }
+    return true;
+}
+
+// @ 0x0006e7d4
+bool cSC4PollutionSimulator::DoMessage(cIGZMessage2* message) {
+    auto* standard = static_cast<cIGZMessage2Standard*>(message);
+    switch (message->GetType()) {
+    case kMessageMonthly: DoMonthlySimulation(); return true;
+    case kMessageSimulationBegin: SimulationBegin(); return true;
+    case kMessageDaily: DoDailySimulation(); return true;
+    case kMessageTunablesChanged: ReadSimulatorTunableValues(host_->SimulatorExemplar()); return true;
+    case kMessageOccupantInserted:
+    case kMessageOccupantRemoved:
+        DoOccupantChanged(standard->GetVoid1(), message->GetType() == kMessageOccupantInserted);
+        return true;
+    case kMessageViewLayer: {
+        const auto* layer = static_cast<const std::int32_t*>(standard->GetVoid2());
+        const bool shown = layer && *layer == 1;
+        if (shown == effectsShown_) return true;
+        effectsShown_ = shown;
+        break;
+    }
+    case kMessageCityStarted: break;
+    default: return true;
+    }
+    if (visualEffectUpdate_) visualEffectUpdate_();   // UpdatePollutionVisualEffect
+    return true;
+}
+
+// @ 0x0006abf2: the sanitation efficiency from the department's funding (as EndOfCycle refreshes it).
+void cSC4PollutionSimulator::SimulationBegin() {
+    efficiency_ = fundingEfficiencyCurve_.GetOutputValue(host_->SanitationFunding() * 100.0f) * 0.01f;
+}
+
+// @ 0x0006c4f4. One day of the sweep: the plants' free capacity, the neighbour garbage deals, then `cellsPerDay_` 2x2-cell blocks in
+// the walk's random order. Each block turns its building sources (scaled by the ordinances and the zones' factors) and the traffic into
+// air, water and garbage: garbage is disposed of (export, plants, landfill, abduction) or left on the cells, water is treated by the
+// plants' capacity, and the published air / water values move towards the targets by at most the tunable deltas. A finished walk ends
+// the cycle (EndOfCycle: averages + history).
+void cSC4PollutionSimulator::DoDailySimulation() {
+    std::uint32_t waterCapacity = 0, waterPlants = 0;
+    for (IPollutionOccupant* o : waterTreatment_) {
+        std::uint32_t unused = 0;
+        if (GetUnusedCapacity(kPollutionOccWaterTreatment, kPollutionOccWaterTreatmentUsed, o, unused)) waterCapacity += unused;
+        ++waterPlants;
+    }
+    monthlyIncineratorCapacity_ = 0;
+    std::uint32_t incineratorCapacity = 0, incinerators = 0;
+    for (IPollutionOccupant* o : incinerators_) {
+        std::uint32_t capacity = 0, unused = 0;
+        if (GetCurrentCapacity(kPollutionOccIncinerator, o, capacity)) monthlyIncineratorCapacity_ += capacity;
+        if (GetUnusedCapacity(kPollutionOccIncinerator, kPollutionOccIncineratorUsed, o, unused)) incineratorCapacity += unused;
+        ++incinerators;
+    }
+    std::uint32_t incineratorLeft = incineratorCapacity;
+    monthlyWasteToEnergyCapacity_ = 0;
+    std::uint32_t wteCapacity = 0, wtePlants = 0;
+    for (IPollutionOccupant* o : wasteToEnergy_) {
+        std::uint32_t capacity = 0, unused = 0;
+        if (GetCurrentCapacity(kPollutionOccWasteToEnergy, o, capacity)) monthlyWasteToEnergyCapacity_ += capacity;
+        if (GetUnusedCapacity(kPollutionOccWasteToEnergy, kPollutionOccWasteToEnergyUsed, o, unused)) wteCapacity += unused;
+        ++wtePlants;
+    }
+    std::uint32_t wteLeft = wteCapacity;
+
+    // garbage the neighbours send (a tenth of each deal a day), then what they can take
+    std::vector<IPollutionDeal*> deals;
+    host_->GarbageDeals(kGarbageImportDeals, deals);
+    int imported = 0;
+    for (IPollutionDeal* deal : deals) {
+        if (!(0.0f < static_cast<float>(deal->Amount() - deal->Used()))) continue;
+        const int share = RoundToEven(static_cast<float>(deal->Amount()) * kDealShare);
+        imported += share;
+        deal->SetUsed(share + deal->Used());
+        importedThisMonth_ += share;
+    }
+    deals.clear();
+    host_->GarbageDeals(kGarbageExportDeals, deals);
+    for (IPollutionDeal* deal : deals) {
+        const int room = deal->Amount() - deal->Used();
+        if (room <= 0) continue;
+        int share = RoundToEven(static_cast<float>(deal->Amount()) * kDealShare);
+        if (room < share) share = room;
+        deal->SetUsed(share + deal->Used());
+        recyclingAllowance_ += share;
+    }
+    const float importedEaten = eatGarbage(static_cast<float>(imported), incineratorLeft, wteLeft);
+    AddToGarbageSupply(static_cast<int>(static_cast<float>(imported) - importedEaten));
+
+    const float trafficFactor = host_->OrdinanceFactor(0x8a67e378, 0);
+    const float airFactor = host_->OrdinanceFactor(0x08f79b8e, 0);
+    const float waterFactor = host_->OrdinanceFactor(0xe8f79c8b, 0);
+    const float garbageFactor = host_->OrdinanceFactor(0xe8f79c90, 0);
+    float zoneFactors[16][3];
+    for (std::uint32_t zone = 0; zone < 16; ++zone) {
+        zoneFactors[zone][0] = host_->OrdinanceFactor(0x8a67e373, zone);
+        zoneFactors[zone][1] = host_->OrdinanceFactor(0x8a67e374, zone);
+        zoneFactors[zone][2] = host_->OrdinanceFactor(0x8a67e376, zone);
+    }
+    constexpr int kLandfillZone = 0xe;
+    std::uint32_t waterLeft = waterCapacity;
+    for (std::uint32_t step = 0; step < cellsPerDay_; ++step) {
+        const int cx = static_cast<int>(cellX_), cz = static_cast<int>(cellZ_);
+        const std::int16_t sourceAir = std::max<std::int16_t>(0, valueGrids_[0]->GetCellValue(cx, cz));
+        const std::int16_t sourceWater = std::max<std::int16_t>(0, valueGrids_[1]->GetCellValue(cx, cz));
+        const std::int16_t sourceGarbage = std::max<std::int16_t>(0, valueGrids_[2]->GetCellValue(cx, cz));
+        const std::int16_t sourceRadiation = std::max<std::int16_t>(0, valueGrids_[3]->GetCellValue(cx, cz));
+        std::int16_t air = static_cast<std::int16_t>(static_cast<int>(static_cast<float>(sourceAir) * airFactor));
+        std::int16_t water = static_cast<std::int16_t>(static_cast<int>(static_cast<float>(sourceWater) * waterFactor));
+        std::int16_t garbage = static_cast<std::int16_t>(static_cast<int>(static_cast<float>(sourceGarbage) * garbageFactor));
+        int counted = 0;
+        bool developed = false;
+        float sumAir = 0.0f, sumWater = 0.0f, sumGarbage = 0.0f;
+        for (int i = 0; i < 4; ++i) {
+            const int zone = host_->ZoneTypeAt((i & 1) + cx, (i >> 1) + cz);
+            if (zone == kLandfillZone) continue;
+            const int z = zone & 0xf;
+            sumAir += zoneFactors[z][0];
+            sumWater += zoneFactors[z][1];
+            sumGarbage += zoneFactors[z][2];
+            ++counted;
+            if (zone != 0) developed = true;
+        }
+        if (developed) ++cellCount;
+        if (0 < counted) {
+            const float n = static_cast<float>(counted);
+            air = static_cast<std::int16_t>(static_cast<int>((sumAir / n) * static_cast<float>(air)));
+            water = static_cast<std::int16_t>(static_cast<int>((sumWater / n) * static_cast<float>(water)));
+            garbage = static_cast<std::int16_t>(static_cast<int>((sumGarbage / n) * static_cast<float>(garbage)));
+        }
+        std::uint32_t waterTarget = static_cast<std::uint32_t>(static_cast<int>(water));
+        int airTarget = air;
+        for (int i = 0; i < 4; ++i) {
+            const int x = (i & 1) + cx, z = (i >> 1) + cz;
+            const int zone = host_->ZoneTypeAt(x, z);
+            int existing = 0;
+            GetGarbageValue(static_cast<unsigned>(x), static_cast<unsigned>(z), existing);
+            const std::uint8_t traffic = host_->TrafficAirAt(x, z);
+            const int airNext = static_cast<int>(static_cast<float>(airTarget) +
+                                                 static_cast<float>(traffic) * tunables_.trafficAirFactor * trafficFactor);
+            if (zone != kLandfillZone) {
+                float produced = static_cast<float>(garbage) / static_cast<float>(counted);
+                const int producedRounded = RoundToEven(produced);
+                producedThisMonth_ += producedRounded;
+                if (0.0f < recyclingEffect_ && 0.0f < produced) {
+                    const float recycled = std::min(produced * recyclingEffect_, produced);
+                    recyclingShare268_ += recycled;
+                    produced -= recycled;
+                }
+                const float onCell = static_cast<float>(existing);
+                SetGarbageValue(static_cast<unsigned>(x), static_cast<unsigned>(z), 0);
+                if (static_cast<std::uint32_t>(existing) <= totalGarbageUncollected_) totalGarbageUncollected_ -= static_cast<std::uint32_t>(existing);
+                float left = (produced + onCell) - eatGarbage(produced + onCell, incineratorLeft, wteLeft);
+                if (0.0f < left) {
+                    if (left <= kMaxCellGarbage) {
+                        const int valve = garbageCapacity_ - garbageSupply_;
+                        if (-1 < valve || kMaxCellGarbage <= left) {
+                            SetGarbageValue(static_cast<unsigned>(x), static_cast<unsigned>(z), static_cast<int>(left));
+                            totalGarbageUncollected_ = ToUint(left + static_cast<float>(totalGarbageUncollected_));
+                        } else {
+                            // the landfills are over capacity: the cell takes some of their garbage back
+                            int pull = -valve;
+                            float pulled;
+                            if (pull <= producedRounded) pulled = static_cast<float>(pull);
+                            else if (garbage != 0) { pull = producedRounded; pulled = static_cast<float>(pull); }
+                            else { pull = 1; pulled = 1.0f; }
+                            if (kMaxCellGarbage < pulled + left) pull = static_cast<int>(kMaxCellGarbage - left);
+                            AddToGarbageSupply(-pull);
+                            SetGarbageValue(static_cast<unsigned>(x), static_cast<unsigned>(z), static_cast<int>(static_cast<float>(pull) + left));
+                            totalGarbageUncollected_ = ToUint(static_cast<float>(pull) + left + static_cast<float>(totalGarbageUncollected_));
+                        }
+                    } else {
+                        left -= kMaxCellGarbage;
+                        SetGarbageValue(static_cast<unsigned>(x), static_cast<unsigned>(z), 0x7fff);
+                        totalGarbageUncollected_ += 0x7fff;
+                        if (0.0f < left) AddToGarbageSupply(static_cast<int>(left));
+                    }
+                }
+            }
+            airTarget = airNext;
+        }
+        periodValue21c[0] += waterTarget;
+        if (waterLeft != 0 && 0 < static_cast<int>(waterTarget)) {
+            // the treatment plants clean what they can, in proportion to last cycle's treated share
+            std::uint32_t limit = waterLeft, treated;
+            const auto lastTotal = static_cast<int>(periodValue224[0]), lastTreated = static_cast<int>(periodValue224[1]);
+            if (lastTotal < 1 || lastTreated < 1 || periodValue224[1] < waterLeft) {
+                treated = static_cast<int>(limit) <= static_cast<int>(waterTarget) ? limit : waterTarget;
+            } else {
+                limit = static_cast<std::uint32_t>(RoundToEven((static_cast<float>(lastTreated) / static_cast<float>(lastTotal)) * static_cast<float>(static_cast<int>(waterTarget))));
+                if (limit != 0) treated = static_cast<int>(limit) <= static_cast<int>(waterTarget) ? limit : waterTarget;
+                else treated = 1;
+            }
+            if (waterLeft < treated) treated = waterLeft;
+            periodValue21c[1] += treated;
+            waterTarget -= treated;
+            waterLeft -= treated;
+        }
+        waterSum += waterTarget;
+        airSum += static_cast<std::uint32_t>(airTarget);
+        radiationCount += static_cast<std::uint32_t>(sourceRadiation);
+        const int airClamped = airTarget < 0 ? 0 : std::min(airTarget, 0x7fff);
+        const int waterClamped = static_cast<int>(waterTarget) < 0 ? 0 : std::min(static_cast<int>(waterTarget), 0x7fff);
+        int current = 0;
+        GetAirValue(cellX_, cellZ_, current);
+        if (current < airClamped) SetAirValue(cellX_, cellZ_, current + static_cast<int>(std::min<std::uint32_t>(airClamped - current, tunables_.maxAirDelta)));
+        else if (airClamped < current) SetAirValue(cellX_, cellZ_, current - static_cast<int>(std::min<std::uint32_t>(current - airClamped, tunables_.maxAirDelta)));
+        GetWaterValue(cellX_, cellZ_, current);
+        if (current < waterClamped) {
+            SetWaterValue(cellX_, cellZ_, current + static_cast<int>(std::min<std::uint32_t>(waterClamped - current, tunables_.maxWaterDelta)));
+        } else if (waterClamped < current) {
+            int next = current - static_cast<int>(std::min<std::uint32_t>(current - waterClamped, tunables_.maxWaterDelta));
+            if (next == 0) {
+                // a cell only dries out once no neighbour holds water (the original bounds the +1 neighbours by the tract counts)
+                int n = 0;
+                bool dry = true;
+                if (cx != 0) { GetWaterValue(cellX_ - 1, cellZ_, n); dry = n < 2; }
+                if (cz != 0 && dry) { GetWaterValue(cellX_, cellZ_ - 1, n); dry = n < 2; }
+                if (cellX_ < static_cast<std::uint32_t>(valueGrids_[0]->GetTractCountX()) - 1u && dry) { GetWaterValue(cellX_ + 1, cellZ_, n); dry = n < 2; }
+                if (cellZ_ < static_cast<std::uint32_t>(valueGrids_[0]->GetTractCountZ()) - 1u && dry) { GetWaterValue(cellX_, cellZ_ + 1, n); dry = n < 2; }
+                next = dry ? 0 : 1;
+            }
+            SetWaterValue(cellX_, cellZ_, next);
+        }
+        if (walk_.IsDone()) {
+            walk_.Reset(true);
+            EndOfCycle();
+        }
+        int a = 0, b = 0;
+        walk_.Next(a, b);
+        cellX_ = static_cast<std::uint32_t>(a * 2);
+        cellZ_ = static_cast<std::uint32_t>(b * 2);
+    }
+    if (garbageCapacity_ - garbageSupply_ < 0) {
+        const int over = -(garbageCapacity_ - garbageSupply_);
+        int eaten = static_cast<int>(eatGarbage(static_cast<float>(over), incineratorLeft, wteLeft));
+        const std::uint32_t left = static_cast<std::uint32_t>(over - eaten);
+        if (tunables_.maxGarbageOnValve < left) eaten += static_cast<int>(left - tunables_.maxGarbageOnValve);
+        AddToGarbageSupply(-eaten);
+    }
+    std::uint32_t used = waterCapacity - waterLeft;
+    if (used != 0) SetOccupantListUsedCapacity(waterTreatment_, kPollutionOccWaterTreatment, kPollutionOccWaterTreatmentUsed, waterCapacity, used, waterPlants);
+    used = incineratorCapacity - incineratorLeft;
+    if (used != 0) SetOccupantListUsedCapacity(incinerators_, kPollutionOccIncinerator, kPollutionOccIncineratorUsed, incineratorCapacity, used, incinerators);
+    used = wteCapacity - wteLeft;
+    if (used != 0) SetOccupantListUsedCapacity(wasteToEnergy_, kPollutionOccWasteToEnergy, kPollutionOccWasteToEnergyUsed, wteCapacity, used, wtePlants);
+    CalcMaintenanceCosts(waterTreatment_);
+    CalcMaintenanceCosts(incinerators_);
+    CalcMaintenanceCosts(recyclingCenters_);
+}
+
+// @ 0x0006e32e. Closes the month: the neighbour deals restart, the sanitation line item is charged for the garbage that left the city,
+// the month's garbage counters become last month's and go to the history, the plants age and their used capacity resets.
+void cSC4PollutionSimulator::DoMonthlySimulation() {
+    std::vector<IPollutionDeal*> deals;
+    host_->GarbageDeals(kGarbageImportDeals, deals);
+    for (IPollutionDeal* deal : deals) deal->SetUsed(0);
+    deals.clear();
+    host_->GarbageDeals(kGarbageExportDeals, deals);
+    std::int64_t exported = 0;
+    for (IPollutionDeal* deal : deals) {
+        deal->SetUsed(0);
+        exported += deal->Amount();
+    }
+    sanitationCost_ = static_cast<std::int64_t>(static_cast<float>(exported + incineratedThisMonth_ + wasteToEnergyThisMonth_ + landfilledThisMonth_) *
+                                                tunables_.value2e0);
+    host_->SetSanitationLineItemCost(20, sanitationCost_);
+    abductedPrev_ = static_cast<std::int32_t>(abductedThisMonth_);
+    producedPrev_ = producedThisMonth_;
+    importedPrev_ = importedThisMonth_;
+    exportedPrev_ = recycledThisMonth_;           // +0x260 (i386 +0x160): the garbage eatGarbage sent to the neighbours
+    recycledPrev_ = recyclingShare268_;
+    incineratedPrev_ = incineratedThisMonth_;
+    convertedPrev_ = wasteToEnergyThisMonth_;
+    landfilledPrev_ = landfilledThisMonth_;
+    host_->AddHistory(0xea110158, static_cast<std::int32_t>(producedThisMonth_));
+    host_->AddHistory(0x8ab2f258, static_cast<std::int32_t>(importedThisMonth_));
+    host_->AddHistory(0x6ab2f260, static_cast<std::int32_t>(recycledThisMonth_));
+    host_->AddHistory(0xea11016f, static_cast<std::int32_t>(recyclingShare268_));
+    host_->AddHistory(0xea110197, static_cast<std::int32_t>(incineratedThisMonth_));
+    host_->AddHistory(0xea1101a1, static_cast<std::int32_t>(wasteToEnergyThisMonth_));
+    host_->AddHistory(0xea1101aa, static_cast<std::int32_t>(landfilledThisMonth_));
+    producedThisMonth_ = importedThisMonth_ = recycledThisMonth_ = 0;
+    recyclingShare268_ = 0;
+    incineratedThisMonth_ = wasteToEnergyThisMonth_ = landfilledThisMonth_ = 0;
+    abductedThisMonth_ = 0;
+    recyclingAllowance_ = 0;
+    AgeOccupantList(waterTreatment_, kPollutionOccWaterTreatmentUsed, kPollutionOccWaterTreatment);
+    AgeOccupantList(incinerators_, kPollutionOccIncineratorUsed, kPollutionOccIncinerator);
+    AgeOccupantList(recyclingCenters_, 0, 0);
+    ResetOccupantListCapacityUsedProperty(waterTreatment_, kPollutionOccWaterTreatmentUsed, 0x08fcdb69);
+    ResetOccupantListCapacityUsedProperty(incinerators_, kPollutionOccIncineratorUsed, 0xa8fcdba8);
+    ComputeWasteToEnergyListCurrentCapacity();
+    ResetOccupantListCapacityUsedProperty(wasteToEnergy_, kPollutionOccWasteToEnergyUsed, 0x28fcdbb0);
+    if (visualEffectUpdate_) visualEffectUpdate_();   // UpdatePollutionVisualEffect
+    // PARTIAL: spNeighborsSim vslot 0x7c (the neighbour deals' monthly settlement) is the neighbours simulator's own pass.
+}
+
+// @ 0x0006ad02. A building's pollution enters (or leaves) the source grids: its garbage on every cell it covers, then each type's
+// radius effect (centre value falling to the outer value at the radius) around its tract. The plants join or leave their lists and
+// start with no used capacity. PARTIAL: the maintenance line item (spBudgetSim vslots 0xcc / 0xdc / 0xe0) is not booked.
+void cSC4PollutionSimulator::DoOccupantChanged(void* occupant, bool added) {
+    PollutionOccupantFootprint footprint;
+    if (!occupant || !host_->OccupantFootprint(occupant, footprint) || !footprint.holder) return;
+    cISCPropertyHolder* holder = footprint.holder;
+    bool exempt = false;
+    if (cSCPropertyHelp::GetPropertyValue(holder, 0x029244db, exempt) && exempt) return;
+    std::vector<std::int32_t> centre;
+    if (holder->HasProperty(0x27812851) && cSCPropertyHelp::GetPropertyValue(holder, 0x27812851, centre) && centre.size() >= 4) {
+        std::vector<std::int32_t> outer(4, 0);
+        std::vector<float> radius(4, 0.0f);
+        if (holder->HasProperty(0xaa5832f3)) cSCPropertyHelp::GetPropertyValue(holder, 0xaa5832f3, outer);
+        if (holder->HasProperty(0x68ee9764)) cSCPropertyHelp::GetPropertyValue(holder, 0x68ee9764, radius);
+        outer.resize(4, 0);
+        radius.resize(4, 0.0f);
+        const std::int16_t garbage = static_cast<std::int16_t>(added ? centre[2] : -centre[2]);
+        cSC4SimGrid<std::int16_t>& garbageGrid = *valueGrids_[2];
+        const int shift = garbageGrid.GetTractShift();
+        for (int x = footprint.cellX0; x <= footprint.cellX1; ++x)
+            for (int z = footprint.cellZ0; z <= footprint.cellZ1; ++z)
+                garbageGrid.SetTractValue(x >> shift, z >> shift, static_cast<std::int16_t>(garbageGrid.GetCellValue(x, z) + garbage));
+        dirtyGarbage = true;
+        for (int type = 0; type < 4; ++type) {
+            if (!(0.0f < radius[type])) continue;
+            cSC4SimGrid<std::int16_t>& grid = *valueGrids_[type];
+            int tx = 0, tz = 0;
+            grid.PositionToTract(footprint.position[0], footprint.position[2], tx, tz);
+            const float peak = static_cast<float>(added ? centre[type] : -centre[type]);
+            const float edge = static_cast<float>(added ? outer[type] : -outer[type]);
+            AddRadiusEffect(grid.GetGridData(), grid.GetTractCountX(), grid.GetTractCountZ(), tx, tz, radius[type], peak, edge);
+        }
+    }
+    IPollutionOccupant* plant = footprint.occupant;
+    if (!plant) return;
+    const auto startEmpty = [&](std::uint32_t usedProperty, std::uint32_t savedProperty) {
+        cSCPropertyHelp::SetPropertyValue(holder, usedProperty, std::uint32_t{0});
+        cSCPropertyHelp::SetPropertyValue(holder, savedProperty, std::uint32_t{0});
+    };
+    if (holder->HasProperty(kPollutionOccWaterTreatment)) {
+        AddOrRemoveOccupant(waterTreatment_, plant, added);
+        if (added) startEmpty(kPollutionOccWaterTreatmentUsed, 0x08fcdb69);
+    }
+    if (holder->HasProperty(kPollutionOccIncinerator)) {
+        AddOrRemoveOccupant(incinerators_, plant, added);
+        if (added) startEmpty(kPollutionOccIncineratorUsed, 0xa8fcdba8);
+    }
+    if (holder->HasProperty(kPollutionOccWasteToEnergy)) {
+        std::uint32_t capacity = 0;
+        cSCPropertyHelp::GetPropertyValue(holder, kPollutionOccWasteToEnergy, capacity);
+        AddOrRemoveOccupant(wasteToEnergy_, plant, added);
+        if (added) {
+            startEmpty(kPollutionOccWasteToEnergyUsed, 0x28fcdbb0);
+            std::uint32_t produced = 0;
+            if (cSCPropertyHelp::GetPropertyValue(holder, kPollutionOccWasteToEnergyProduced, produced))
+                cSCPropertyHelp::SetPropertyValue(holder, kPollutionOccWasteToEnergyRate, produced);
+            monthlyWasteToEnergyCapacity_ += capacity;
+        } else {
+            monthlyWasteToEnergyCapacity_ -= capacity;
+        }
+        if (static_cast<std::int32_t>(monthlyWasteToEnergyCapacity_) < 0) monthlyWasteToEnergyCapacity_ = 0;
+    }
+    if (holder->HasProperty(kPollutionOccRecyclingMax)) {
+        AddOrRemoveOccupant(recyclingCenters_, plant, added);
+        recyclingCenterCountSnapshot = static_cast<std::uint32_t>(recyclingCenters_.size());
+    }
+}
+
 }  // namespace sc4
+

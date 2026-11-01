@@ -30,13 +30,73 @@ bool cSC4FireProtectionSimulator::QueryInterface(std::uint32_t iid, void** out) 
 
 std::uint32_t cSC4FireProtectionSimulator::Release() {
     if (refCount_ < 2) {
+        Shutdown();
         delete this;
         return 0;
     }
     return --refCount_;
 }
 
-bool cSC4FireProtectionSimulator::DoMessage(cIGZMessage2*) { return true; }   // routing unrecovered
+namespace {
+// cSC4ProtectionSimulator::ProtectionInit's notifications: occupants inserted / removed / changed, funding changed, the dispatch
+// messages and the tunables reload.
+constexpr std::uint32_t kProtectionNotifications[] = {0x99ef1142, 0x99ef1143, 0xc8dac052, 0x08dac3e7, 0xe94671eb,
+                                                      0x894671f6, 0xe94671ec, 0xe94671ed, 0xc53d10aa};
+constexpr std::uint32_t kFireTuningInstance = 0x68f5524a;
+}  // namespace
+
+// @ 0x00237e72. ProtectionInit: the coverage grids (fire's instance ids), the sweep, the daily and monthly agents, the notifications.
+// PARTIAL: the dispatch manager registration, the fire department's budget line, the flammability simulator reference and the fire
+// plane dispatch source are not set up (the dispatch layer is not native yet).
+bool cSC4FireProtectionSimulator::Init() {
+    if (running_) return true;
+    running_ = true;
+    ReadSimulatorTunableValues(host_->SimulatorExemplar());
+    protection_.CreateGrids(0, 0);
+    if (auto* grid = protection_.AdjustedGrid()) grid->SetInstanceID(0x49d5b8f9);
+    if (auto* grid = protection_.UnadjustedGrid()) grid->SetInstanceID(0x89d5b91a);
+    static const char* const kName = "cSC4ProtectionSimulator";
+    host_->AddAgent(this, 4, kName, 2);
+    host_->AddAgent(this, 6, kName, 2);
+    for (std::uint32_t message : kProtectionNotifications) host_->AddNotification(this, message);
+    return true;
+}
+
+bool cSC4FireProtectionSimulator::Shutdown() {
+    if (!running_) return true;
+    running_ = false;
+    host_->RemoveAgent(this);
+    for (std::uint32_t message : kProtectionNotifications) host_->RemoveNotification(this, message);
+    return true;
+}
+
+// @ 0x00237e0a over cSC4ProtectionSimulator::DoMessage @ 0x0007cace. PARTIAL: the dispatch messages (0xe94671eb..ed, 0x894671f6)
+// are not routed: no dispatches exist natively.
+bool cSC4FireProtectionSimulator::DoMessage(cIGZMessage2* message) {
+    auto* standard = static_cast<cIGZMessage2Standard*>(message);
+    const std::uint32_t type = message->GetType();
+    const auto station = [&]() -> IFireOccupant* {
+        IFireOccupant* occupant = host_->FireOccupant(standard->GetVoid1());
+        cISCPropertyHolder* holder = occupant ? occupant->PropertyHolder() : nullptr;
+        return holder && !holder->HasProperty(0x029244db) ? occupant : nullptr;
+    };
+    switch (type) {
+    case 0x99ef1142: if (IFireOccupant* o = station()) DoOccupantInserted(o); break;
+    case 0x99ef1143: if (IFireOccupant* o = station()) DoOccupantRemoved(o); break;
+    case 0xc8dac052: if (IFireOccupant* o = station()) DoOccupantChanged(o); break;
+    case 0x66956814: DoDailySimulation(); break;
+    case 0x66956816: DoMonthlySimulation(); break;
+    case 0x08dac3e7:   // DoFundingChanged: the department's funding moved
+        if (!protection_.Stations().empty()) protection_.UpdateUnadjustedProtectionGrid();
+        break;
+    case 0xc53d10aa:
+        if (static_cast<std::uint32_t>(standard->GetData1()) == 0xe7e2c2db && static_cast<std::uint32_t>(standard->GetData3()) == kFireTuningInstance)
+            ReadSimulatorTunableValues(host_->SimulatorExemplar());
+        break;
+    default: break;
+    }
+    return true;
+}
 
 // ---- streams ---------------------------------------------------------------------------------------------
 

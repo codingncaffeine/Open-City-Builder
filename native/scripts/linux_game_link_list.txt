@@ -687,6 +687,9 @@ src/app/citycomp/cSC4CommercialSimulator.cpp
 src/app/citycomp/cSC4FlammabilitySimulator.cpp
 src/app/citycomp/cSC4IndustrialSimulator.cpp
 src/app/citycomp/cSC4LandValueSimulator.cpp
+src/app/citycomp/cSC4PollutionSimulator.cpp
+src/app/citycomp/cSC4FireProtectionSimulator.cpp
+src/app/citycomp/cSC4PoliceSimulator.cpp
 src/app/citycomp/cSC4WeatherSimulator.cpp
 src/app/citycomp/cSC4MySimAgentSimulator.cpp
 src/app/citycomp/cSC4CivicBuildingSimulator.cpp

@@ -63,7 +63,7 @@ bool cSC4ProtectionSimulator::IsProtectionGridCellZoned(int tx, int tz) const {
     const int size = tractSize_;
     for (int x = size * tx; x < size * (tx + 1); ++x)
         for (int z = size * tz; z < size * (tz + 1); ++z)
-            if (zoneColumns[static_cast<std::size_t>(x)][static_cast<std::size_t>(z)] != 0) return true;
+            if (zoneColumns.empty() ? host_->IsZonedAt(x, z) : zoneColumns[static_cast<std::size_t>(x)][static_cast<std::size_t>(z)] != 0) return true;
     return false;
 }
 

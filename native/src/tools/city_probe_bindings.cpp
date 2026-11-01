@@ -366,6 +366,18 @@ public:
     void PostMessage(std::uint32_t message, std::uint32_t arg) override { Seam("IPollutionHost::PostMessage");}
     void AddHistory(std::uint32_t historyId, std::int64_t value) override { Seam("IPollutionHost::AddHistory");}
     float RecyclingCapacitySlots() override { Seam("IPollutionHost::RecyclingCapacitySlots"); return 0; }
+    void AddAgent(cIGZMessageTarget2*, int, const char*, std::uint32_t) override { Seam("IPollutionHost::AddAgent"); }
+    void RemoveAgent(cIGZMessageTarget2*) override { Seam("IPollutionHost::RemoveAgent"); }
+    void AddNotification(cIGZMessageTarget2*, std::uint32_t) override { Seam("IPollutionHost::AddNotification"); }
+    void RemoveNotification(cIGZMessageTarget2*, std::uint32_t) override { Seam("IPollutionHost::RemoveNotification"); }
+    const cISCPropertyHolder* SimulatorExemplar() override { Seam("IPollutionHost::SimulatorExemplar"); return nullptr; }
+    void CreateHistory(std::uint32_t, std::uint32_t) override { Seam("IPollutionHost::CreateHistory"); }
+    float OrdinanceFactor(std::uint32_t, std::uint32_t) override { Seam("IPollutionHost::OrdinanceFactor"); return 1.0f; }
+    int ZoneTypeAt(int, int) override { Seam("IPollutionHost::ZoneTypeAt"); return 0; }
+    std::uint8_t TrafficAirAt(int, int) override { Seam("IPollutionHost::TrafficAirAt"); return 0; }
+    void GarbageDeals(std::uint32_t, std::vector<IPollutionDeal*>& out) override { Seam("IPollutionHost::GarbageDeals"); out.clear(); }
+    void SetSanitationLineItemCost(int, std::int64_t) override { Seam("IPollutionHost::SetSanitationLineItemCost"); }
+    bool OccupantFootprint(void*, PollutionOccupantFootprint&) override { Seam("IPollutionHost::OccupantFootprint"); return false; }
 };
 Probe11 g_IPollutionHost;
 }

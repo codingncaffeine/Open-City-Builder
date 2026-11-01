@@ -36,13 +36,71 @@ bool cSC4PoliceSimulator::QueryInterface(std::uint32_t iid, void** out) {
 
 std::uint32_t cSC4PoliceSimulator::Release() {
     if (refCount_ < 2) {
+        Shutdown();
         delete this;
         return 0;
     }
     return --refCount_;
 }
 
-bool cSC4PoliceSimulator::DoMessage(cIGZMessage2*) { return true; }   // routing unrecovered
+namespace {
+// cSC4ProtectionSimulator::ProtectionInit's notifications, plus the police simulator's own 0x0a159d95.
+constexpr std::uint32_t kPoliceNotifications[] = {0x99ef1142, 0x99ef1143, 0xc8dac052, 0x08dac3e7, 0xe94671eb,
+                                                  0x894671f6, 0xe94671ec, 0xe94671ed, 0xc53d10aa, 0x0a159d95};
+constexpr std::uint32_t kPoliceTuningInstance = 0x28dfcf89;
+}  // namespace
+
+// ProtectionInit: the coverage grids (police's instance ids), the sweep, the daily and monthly agents, the notifications.
+// PARTIAL: the dispatch manager registration, the police department's budget lines, the crime simulator reference and the
+// helicopter dispatch source are not set up (the dispatch layer is not native yet).
+bool cSC4PoliceSimulator::Init() {
+    if (running_) return true;
+    running_ = true;
+    ReadSimulatorTunableValues(host_->SimulatorExemplar());
+    protection_.CreateGrids(0, 0);
+    if (auto* grid = protection_.AdjustedGrid()) grid->SetInstanceID(0x49d5bbb9);
+    if (auto* grid = protection_.UnadjustedGrid()) grid->SetInstanceID(0x49d5bbce);
+    static const char* const kName = "cSC4ProtectionSimulator";
+    host_->AddAgent(this, 4, kName, 2);
+    host_->AddAgent(this, 6, kName, 2);
+    for (std::uint32_t message : kPoliceNotifications) host_->AddNotification(this, message);
+    return true;
+}
+
+bool cSC4PoliceSimulator::Shutdown() {
+    if (!running_) return true;
+    running_ = false;
+    host_->RemoveAgent(this);
+    for (std::uint32_t message : kPoliceNotifications) host_->RemoveNotification(this, message);
+    return true;
+}
+
+// cSC4ProtectionSimulator::DoMessage @ 0x0007cace, then the police simulator's own messages. PARTIAL: the dispatch messages and
+// 0x0a159d95 (jails) are not routed: no dispatches or jails natively.
+bool cSC4PoliceSimulator::DoMessage(cIGZMessage2* message) {
+    auto* standard = static_cast<cIGZMessage2Standard*>(message);
+    const auto station = [&]() -> IPoliceOccupant* {
+        IPoliceOccupant* occupant = host_->PoliceOccupant(standard->GetVoid1());
+        cISCPropertyHolder* holder = occupant ? occupant->PropertyHolder() : nullptr;
+        return holder && !holder->HasProperty(0x029244db) ? occupant : nullptr;
+    };
+    switch (message->GetType()) {
+    case 0x99ef1142: if (IPoliceOccupant* o = station()) DoOccupantInserted(o); break;
+    case 0x99ef1143: if (IPoliceOccupant* o = station()) DoOccupantRemoved(o); break;
+    case 0xc8dac052: if (IPoliceOccupant* o = station()) DoOccupantChanged(o); break;
+    case 0x66956814: DoDailySimulation(); break;
+    case 0x66956816: DoMonthlySimulation(); break;
+    case 0x08dac3e7:
+        if (!protection_.Stations().empty()) protection_.UpdateUnadjustedProtectionGrid();
+        break;
+    case 0xc53d10aa:
+        if (static_cast<std::uint32_t>(standard->GetData1()) == 0xe7e2c2db && static_cast<std::uint32_t>(standard->GetData3()) == kPoliceTuningInstance)
+            ReadSimulatorTunableValues(host_->SimulatorExemplar());
+        break;
+    default: break;
+    }
+    return true;
+}
 
 // ---- streams ---------------------------------------------------------------------------------------------
 

@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <memory>
 #include <set>
 #include <vector>
 
@@ -19,6 +20,14 @@
 #include "sc4/Exemplar.h"
 #include "sc4/HistoryWarehouse.h"
 #include "sc4/LandValueSimulator.h"
+#include "sc4/Budget.h"
+#include "sc4/BudgetSimulator.h"
+#include "sc4/Occupant.h"
+#include "sc4/Ordinance.h"
+#include "sc4/PollutionSimulator.h"
+#include "sc4/FireProtectionSimulator.h"
+#include "sc4/PoliceSimulator.h"
+#include "sc4/Simulator.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSC4ZoneManager.h"
@@ -174,11 +183,215 @@ private:
 
 LandValueHost g_landValue;
 
+// A city occupant as the pollution simulator's plant lists keep it.
+class PollutionOccupant final : public IPollutionOccupant {
+public:
+    explicit PollutionOccupant(cISC4Occupant* occupant) : occupant_(occupant) {}
+    cISCPropertyHolder* PropertyHolder() override { return occupant_->AsPropertyHolder(); }
+    void Position(float xyz[3]) override { occupant_->GetPosition(xyz); }
+private:
+    cISC4Occupant* occupant_;
+};
+
+class PollutionHost final : public IPollutionHost {
+public:
+    // PARTIAL: the power simulator is not wired natively; every plant counts as powered.
+    bool PowerAvailable() override { return true; }
+    bool OccupantPowered(IPollutionOccupant*) override { return true; }
+    // The sanitation department (0x6a42a8f5): its funding share; full funding while the department does not exist.
+    float SanitationFunding() override {
+        auto* budget = Component<cSC4BudgetSimulator>(CityComponent::BudgetSimulator, kGZCLSID_cSC4BudgetSimulator);
+        cSC4DepartmentBudget* department = budget ? budget->GetDepartmentBudget(0x6a42a8f5) : nullptr;
+        return department ? department->GetFundingPercentage() : 1.0f;
+    }
+    // PARTIAL: no landfill developer natively (no landfill zones yet): no free landfill space, no transport load.
+    void LandfillRange(int& low, int& high) override { low = high = 0; }
+    int LandfillTransportLoad() override { return 0; }
+    void PostMessage(std::uint32_t message, std::uint32_t arg) override {
+        if (!SL::spMS2) return;
+        auto* m = new cRZMessage2Standard();
+        m->AddRef();
+        m->SetType(message);
+        m->SetData1(arg);
+        SL::spMS2->MessagePost(m, false);
+        m->Release();
+    }
+    void AddHistory(std::uint32_t historyId, std::int64_t value) override { AddHistoryValue(historyId, value); }
+    float RecyclingCapacitySlots() override { return 0.0f; }
+    void AddAgent(cIGZMessageTarget2* target, int interval, const char* name, std::uint32_t flags) override { AddCitySimulatorAgent(target, interval, name, flags); }
+    void RemoveAgent(cIGZMessageTarget2* target) override { RemoveCitySimulatorAgent(target); }
+    void AddNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->AddNotification(target, message); }
+    void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->RemoveNotification(target, message); }
+    const cISCPropertyHolder* SimulatorExemplar() override { return native::SimulatorExemplar(0xc911e35b); }
+    void CreateHistory(std::uint32_t historyId, std::uint32_t length) override {
+        if (cSC4HistoryWarehouse* history = History()) history->SetHistoryDataQueueLength(historyId, length);
+    }
+    float OrdinanceFactor(std::uint32_t property, std::uint32_t index) override {
+        auto* ordinances = Component<cSC4OrdinanceSimulator>(CityComponent::OrdinanceSimulator, kGZCLSID_cSC4OrdinanceSimulator);
+        return ordinances ? ordinances->GetCumulativeFactor(property, index) : 1.0f;
+    }
+    int ZoneTypeAt(int x, int z) override { cSC4ZoneManager* m = Zones(); return m ? m->GetZoneType(x, z) : 0; }
+    // PARTIAL: the traffic simulator is not running natively, so traffic adds no air pollution yet.
+    std::uint8_t TrafficAirAt(int, int) override { return 0; }
+    // PARTIAL: no neighbour deals natively (the region's connections are not modelled).
+    void GarbageDeals(std::uint32_t, std::vector<IPollutionDeal*>& out) override { out.clear(); }
+    // PARTIAL: the sanitation department's line items are not created natively.
+    void SetSanitationLineItemCost(int, std::int64_t) override {}
+    bool OccupantFootprint(void* raw, PollutionOccupantFootprint& out) override {
+        auto* occupant = static_cast<cISC4Occupant*>(raw);
+        cSC4City* city = HostCity();
+        if (!occupant || !city) return false;
+        out.holder = occupant->AsPropertyHolder();
+        float lo[3] = {}, hi[3] = {};
+        occupant->GetBoundingBox(lo, hi);
+        city->PositionToCell(lo[0], lo[2], out.cellX0, out.cellZ0);
+        city->PositionToCell(hi[0], hi[2], out.cellX1, out.cellZ1);
+        occupant->GetPosition(out.position);
+        auto& adapter = occupants_[occupant];
+        if (!adapter) adapter = std::make_unique<PollutionOccupant>(occupant);
+        out.occupant = adapter.get();
+        return true;
+    }
+
+private:
+    std::map<cISC4Occupant*, std::unique_ptr<PollutionOccupant>> occupants_;
+};
+
+PollutionHost g_pollution;
+
+cSC4Simulator* Simulator() { return Component<cSC4Simulator>(CityComponent::Simulator, kGZCLSID_cSC4Simulator); }
+
+// A city occupant as the fire simulator's station list keeps it.
+class FireOccupant final : public IFireOccupant {
+public:
+    explicit FireOccupant(cISC4Occupant* occupant) : occupant_(occupant) {}
+    std::uint32_t OccupantType() override { return occupant_->GetType(); }
+    void Position(float xyz[3]) override { occupant_->GetPosition(xyz); }
+    cISCPropertyHolder* PropertyHolder() override { return occupant_->AsPropertyHolder(); }
+    bool UsesDepartmentBudget() override {
+        void* raw = nullptr;
+        if (!occupant_->QueryInterface(0xe9793a65, &raw) || !raw) return false;
+        static_cast<cIGZUnknown*>(raw)->Release();
+        return true;
+    }
+private:
+    cISC4Occupant* occupant_;
+};
+
+class FireHost final : public IFireHost {
+public:
+    int CurrentDay() override { cSC4Simulator* s = Simulator(); return s ? static_cast<int>(s->GetSimDateNumber()) : 0; }
+    void PostMessage(std::uint32_t message, IFireOccupant*) override { PostCityMessage(message); }
+    void AddHistory(std::uint32_t historyId, std::int64_t value) override { AddHistoryValue(historyId, value); }
+    // PARTIAL: the stations' budget line items are not native yet: no per-station funding records.
+    bool FundingFraction(IFireOccupant*, std::uint32_t, float&) override { return false; }
+    bool FundingInfo(IFireOccupant*, std::uint32_t, int&, float&) override { return false; }
+    bool SetFundingFraction(IFireOccupant*, std::uint32_t, const SC4Percentage&) override { return false; }
+    float DepartmentBudgetFraction() override {
+        auto* budget = Component<cSC4BudgetSimulator>(CityComponent::BudgetSimulator, kGZCLSID_cSC4BudgetSimulator);
+        cSC4DepartmentBudget* department = budget ? budget->GetDepartmentBudget(0x28f55a9f) : nullptr;
+        return department ? department->GetFundingPercentage() : 1.0f;
+    }
+    void* DepartmentBudget() override { return nullptr; }
+    void SetStrikerGroup(IFireOccupant*, bool) override {}
+    void RegisterFundedStation(IFireOccupant*, std::uint32_t, bool) override {}
+    float PoliceCoverageShare() override {
+        auto* police = Component<cSC4PoliceSimulator>(CityComponent::PoliceSimulator, kGZCLSID_cSC4PoliceSimulator);
+        return police ? police->GetPercentCoverage() : 0.0f;
+    }
+    // PARTIAL: no dispatch layer natively (no fire trucks yet).
+    int AvailableDispatchCount(std::uint32_t) override { return 0; }
+    std::vector<std::uint32_t> ActiveDispatches(std::uint32_t) override { return {}; }
+    bool GetDispatch(std::uint32_t, ProtectionDispatchInfo&) override { return false; }
+    bool LotAllowsDispatch(IProtectionStation*) override { return true; }
+    bool IsAboveWater(float x, float z) override { cSTETerrain* t = Terrain(); return !t || t->GetAltitude(x, z) > t->GetSeaLevel(); }
+    bool IsZonedAt(int x, int z) override { cSC4ZoneManager* m = Zones(); return m && m->GetZoneType(x, z) != 0; }
+    void TakeStationDispatch(IProtectionStation*) override {}
+    void AddAgent(cIGZMessageTarget2* target, int interval, const char* name, std::uint32_t flags) override { AddCitySimulatorAgent(target, interval, name, flags); }
+    void RemoveAgent(cIGZMessageTarget2* target) override { RemoveCitySimulatorAgent(target); }
+    void AddNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->AddNotification(target, message); }
+    void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->RemoveNotification(target, message); }
+    const cISCPropertyHolder* SimulatorExemplar() override { return native::SimulatorExemplar(0x68f5524a); }
+    IFireOccupant* FireOccupant(void* raw) override {
+        auto* occupant = static_cast<cISC4Occupant*>(raw);
+        if (!occupant) return nullptr;
+        auto& adapter = occupants_[occupant];
+        if (!adapter) adapter = std::make_unique<native::FireOccupant>(occupant);
+        return adapter.get();
+    }
+private:
+    std::map<cISC4Occupant*, std::unique_ptr<native::FireOccupant>> occupants_;
+};
+
+FireHost g_fire;
+
+// A city occupant as the police simulator's station list keeps it.
+class PoliceOccupant final : public IPoliceOccupant {
+public:
+    explicit PoliceOccupant(cISC4Occupant* occupant) : occupant_(occupant) {}
+    std::uint32_t OccupantType() override { return occupant_->GetType(); }
+    void Position(float xyz[3]) override { occupant_->GetPosition(xyz); }
+    cISCPropertyHolder* PropertyHolder() override { return occupant_->AsPropertyHolder(); }
+    bool UsesDepartmentBudget() override {
+        void* raw = nullptr;
+        if (!occupant_->QueryInterface(0xe9793a65, &raw) || !raw) return false;
+        static_cast<cIGZUnknown*>(raw)->Release();
+        return true;
+    }
+private:
+    cISC4Occupant* occupant_;
+};
+
+class PoliceHost final : public IPoliceHost {
+public:
+    int CurrentDay() override { cSC4Simulator* s = Simulator(); return s ? static_cast<int>(s->GetSimDateNumber()) : 0; }
+    void PostMessage(std::uint32_t message, IPoliceOccupant*) override { PostCityMessage(message); }
+    void AddHistory(std::uint32_t historyId, std::int64_t value) override { AddHistoryValue(historyId, value); }
+    // PARTIAL: the stations' budget line items are not native yet: no per-station funding records.
+    bool FundingFraction(IPoliceOccupant*, std::uint32_t, float&) override { return false; }
+    bool FundingInfo(IPoliceOccupant*, std::uint32_t, int&, float&) override { return false; }
+    float DepartmentBudgetFraction() override {
+        auto* budget = Component<cSC4BudgetSimulator>(CityComponent::BudgetSimulator, kGZCLSID_cSC4BudgetSimulator);
+        cSC4DepartmentBudget* department = budget ? budget->GetDepartmentBudget(0xa2963983) : nullptr;
+        return department ? department->GetFundingPercentage() : 1.0f;
+    }
+    void SetStrikerGroup(IPoliceOccupant*, bool) override {}
+    void SetJailbreakGroup(IPoliceOccupant*, bool) override {}
+    void RegisterFundedStation(IPoliceOccupant*, std::uint32_t, bool) override {}
+    // PARTIAL: no dispatch layer natively (no police cars yet).
+    int AvailableDispatchCount(std::uint32_t) override { return 0; }
+    std::vector<std::uint32_t> ActiveDispatches(std::uint32_t) override { return {}; }
+    bool GetDispatch(std::uint32_t, ProtectionDispatchInfo&) override { return false; }
+    bool LotAllowsDispatch(IProtectionStation*) override { return true; }
+    bool IsAboveWater(float x, float z) override { cSTETerrain* t = Terrain(); return !t || t->GetAltitude(x, z) > t->GetSeaLevel(); }
+    bool IsZonedAt(int x, int z) override { cSC4ZoneManager* m = Zones(); return m && m->GetZoneType(x, z) != 0; }
+    void TakeStationDispatch(IProtectionStation*) override {}
+    void AddAgent(cIGZMessageTarget2* target, int interval, const char* name, std::uint32_t flags) override { AddCitySimulatorAgent(target, interval, name, flags); }
+    void RemoveAgent(cIGZMessageTarget2* target) override { RemoveCitySimulatorAgent(target); }
+    void AddNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->AddNotification(target, message); }
+    void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->RemoveNotification(target, message); }
+    const cISCPropertyHolder* SimulatorExemplar() override { return native::SimulatorExemplar(0x28dfcf89); }
+    IPoliceOccupant* PoliceOccupant(void* raw) override {
+        auto* occupant = static_cast<cISC4Occupant*>(raw);
+        if (!occupant) return nullptr;
+        auto& adapter = occupants_[occupant];
+        if (!adapter) adapter = std::make_unique<native::PoliceOccupant>(occupant);
+        return adapter.get();
+    }
+private:
+    std::map<cISC4Occupant*, std::unique_ptr<native::PoliceOccupant>> occupants_;
+};
+
+PoliceHost g_police;
+
 }  // namespace
 
 void InstallNativeSimHosts() {
     gzcom::SimHosts& hosts = gzcom::GetSimHosts();
     hosts.landValue = &g_landValue;
+    hosts.pollution = &g_pollution;
+    hosts.fire = &g_fire;
+    hosts.police = &g_police;
 }
 
 }  // namespace native

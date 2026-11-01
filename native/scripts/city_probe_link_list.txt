@@ -376,3 +376,7 @@ src/app/hosts/IfaceIVehicleHost.cpp
 src/tools/watercraft_neutral.cpp
 src/tools/automata_base_handle.cpp
 src/app/hosts/StubNetworkLotManager.cpp
+src/sc4/EffectsResource.cpp
+src/sc4/ModelBasedParticlesEffect.cpp
+src/sc4/EffectDescriptions.cpp
+src/sc4/EffectComponents.cpp

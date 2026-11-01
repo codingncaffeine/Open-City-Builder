@@ -84,6 +84,14 @@ public:
     virtual bool IsZonedAt(int x, int z) = 0;
     virtual void TakeStationDispatch(IProtectionStation* station) = 0;
     // ---- stream seams: jail/station occupants are reached through the host ----
+    // Init's services (SL::spSimulator agents, SL::spMS2 notifications, the tuning exemplar) and the station view of the
+    // occupant a message names (null when it is not one).
+    virtual void AddAgent(cIGZMessageTarget2*, int, const char*, std::uint32_t) {}
+    virtual void RemoveAgent(cIGZMessageTarget2*) {}
+    virtual void AddNotification(cIGZMessageTarget2*, std::uint32_t) {}
+    virtual void RemoveNotification(cIGZMessageTarget2*, std::uint32_t) {}
+    virtual const cISCPropertyHolder* SimulatorExemplar() { return nullptr; }   // {0x6534284a, 0xe7e2c2db, 0x28dfcf89}
+    virtual IPoliceOccupant* PoliceOccupant(void*) { return nullptr; }
     virtual void WriteOccupant(cIGZOStream&, IPoliceOccupant*) {}        // SC4WriteGZSerializable(stream, occupant)
     virtual bool ReadOccupant(cIGZIStream&, IPoliceOccupant**) { return false; }
 };
@@ -118,6 +126,8 @@ public:
     bool Write(cIGZOStream& stream) const override;
     bool Read(cIGZIStream& stream) override;
     bool DoMessage(cIGZMessage2* message) override;
+    bool Init();       // @ cSC4PoliceSimulator::Init (with cSC4ProtectionSimulator::ProtectionInit @ 0x0007d4a0)
+    bool Shutdown();
 
     // tunables from the simulator exemplar {type 0x6534284a, group 0xe7e2c2db, instance 0x28dfcf89}; null = defaults
     void ReadSimulatorTunableValues(const cISCPropertyHolder* exemplar);
@@ -252,6 +262,7 @@ private:
     int jailCapacity_ = 0, jailPopulation_ = 0, criminals_ = 0;
     int arrestsPrev_ = 0, crimesPrev_ = 0, arrestsThisMonth_ = 0, crimesThisMonth_ = 0, unjailedAdded_ = 0;
     bool onStrike_ = false;
+    bool running_ = false;
     int strikeStart_ = 0;
     std::uint64_t value128_ = 0, value0b0_ = 0;   // +0x128, +0xb0
 };
