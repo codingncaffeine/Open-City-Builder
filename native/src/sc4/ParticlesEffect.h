@@ -56,6 +56,8 @@
 #include "sc4/PackedRenderState.h"
 #include "sc4/ParticleSimulatorBase.h"
 
+class SC4DrawContext;
+
 // ---------------------------------------------------------------------------------------------
 // Data records
 // ---------------------------------------------------------------------------------------------
@@ -357,6 +359,8 @@ public:
     virtual int Rotation() const = 0;                                       // +0x18
     // SC4ViewUtilities: the vec3 at +0x68 and the one at +0x74 (whose z component is the float at +0x7c).
     virtual void GetBillboardBasis(cS3DVector3& basisA, cS3DVector3& basisB) const = 0;
+    // The renderer's draw context behind this one (model-based particles draw model instances through it).
+    virtual SC4DrawContext* DrawContext() { return nullptr; }
 };
 
 // The hosts. The game installs the adapters; the test installs its fakes.
@@ -481,7 +485,7 @@ public:
         return reinterpret_cast<cSCParticle*>(particle);
     }
 
-private:
+protected:   // cSC4ModelBasedParticlesEffect (sc4/ModelBasedParticlesEffect.h) derives from this class, as in the original
     // The shared geometry / colour computation of the two ProcessParticle overloads; the only difference between them is
     // how the colour is written (4 bytes vs 4 floats).
     void ProcessParticleGeometry(cSC4EffectsParticle* particle, int index, cS3DVector3& outCorner,

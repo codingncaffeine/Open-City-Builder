@@ -4,6 +4,7 @@
 #include "app/NativeRuntimeWire.h"
 #include "app/NativeBudgetUi.h"
 #include "app/NativeLighting.h"
+#include "app/NativeEffects.h"
 #include "sc4/CommonIIDs.h"
 #include "sc4/cSC424HourClock.h"
 #include "sc4/Simulator.h"
@@ -86,6 +87,7 @@ public:
 
     bool Init() override { return render_->Init(); }
     void Shutdown() override {
+        native::DetachEffects();
         native::DetachModelMaker();
         render_->Shutdown();
         native::ShutdownCityLighting();
@@ -308,6 +310,7 @@ bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* cityInterface, g
         sc4::SetDBSegmentMessageServer(SL::spMS2);
         native::SetAutomataRenderer(render, city);
         native::PostCityInitToAutomataManagers(city);
+        native::AttachEffects(*render, *city);
     }
 
 

@@ -391,6 +391,8 @@ src/sc4/PortDeveloper.cpp
 src/sc4/EffectMaps.cpp
 src/sc4/EffectsCollection.cpp
 src/sc4/EffectsResource.cpp
+src/sc4/ModelBasedParticlesEffect.cpp
+src/app/NativeEffects.cpp
 src/sc4/EffectDescriptions.cpp
 src/sc4/EffectComponents.cpp
 src/sc4/ParticlesEffect.cpp

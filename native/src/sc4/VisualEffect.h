@@ -93,6 +93,8 @@ public:
     void SetSlot(std::int32_t slot) { slot_ = slot; }
     std::int32_t Slot() const { return slot_; }
     const std::vector<cComponentRec>& Components() const { return components_; }
+    // cSC4EffectsManager::UpdateVisualEffect merges the description's components into this list (+0x130).
+    std::vector<cComponentRec>& MutableComponents() { return components_; }
     const cS3DTransform& WorldTransform() const { return world_; }
     const cS3DTransform& CombinedSource() const { return combined_; }
 

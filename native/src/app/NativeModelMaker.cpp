@@ -139,6 +139,20 @@ public:
         return true;
     }
     void ComputeBounds(cS3DBoundingBox& out) override { out = bounds_; }
+    int FrameCount() const override { return static_cast<int>(frameMeshes_.size()); }
+    int FrameRate() const override { return frameRate_; }
+    // Loads frame `frame` into an instance of this model (the instance's mesh / material records are frame 0's layout).
+    bool SelectFrame(s3d::cIS3DModelInstance* instance, int frame) override {
+        auto* concrete = dynamic_cast<s3d::cS3DModelInstance*>(instance);
+        if (!concrete || frame < 0 || frame >= static_cast<int>(frameMeshes_.size())) return false;
+        const std::vector<SC4Mesh>& meshes = frameMeshes_[static_cast<std::size_t>(frame)];
+        if (concrete->Meshes().size() != meshes.size()) return false;
+        for (std::size_t i = 0; i < meshes.size(); ++i) {
+            std::memcpy(concrete->Meshes()[i].data(), &meshes[i], sizeof(SC4Mesh));
+            std::memcpy(concrete->Materials()[i].data(), &frameMaterials_[static_cast<std::size_t>(frame)][i], sizeof(s3d::cS3DMaterial));
+        }
+        return true;
+    }
     bool GetShadowMeshes(std::vector<s3d::ShadowMeshData>& out) override {
         out.clear();
         for (std::size_t i = 0; i < meshes_.size(); ++i) {
@@ -179,23 +193,35 @@ public:
         }
         const std::uint32_t group = GetGroup();
         bool haveBounds = false;
-        for (const s3d::AnimMesh& mesh : model.meshes) {
-            if (mesh.frames.empty()) continue;
-            const s3d::FrameRef& frame = mesh.frames[0];
-            if (frame.vertexGroup >= vertexGroups_.size() || frame.primitiveGroup >= drawLists_.size()) continue;
-            SC4Mesh out;
-            out.vertices = &vertexGroups_[frame.vertexGroup];
-            out.indexGroup = frame.indexGroup < indexPointers_.size() ? &indexPointers_[frame.indexGroup] : nullptr;
-            out.draws = &drawLists_[frame.primitiveGroup];
-            meshes_.push_back(out);
-            materials_.push_back(frame.materialGroup < model.materials.size() ? BuildMaterial(model.materials[frame.materialGroup], group) : s3d::cS3DMaterial{});
-            const s3d::VertexGroup& vg = model.vertexGroups[frame.vertexGroup];
-            for (int k = 0; k < 3; ++k) {
-                bounds_.min[k] = haveBounds ? std::min(bounds_.min[k], vg.min[k]) : vg.min[k];
-                bounds_.max[k] = haveBounds ? std::max(bounds_.max[k], vg.max[k]) : vg.max[k];
+        // Every frame of the ANIM chunk: frame f of a mesh is its f-th frame reference (meshes with fewer frames keep their
+        // last one). Frame 0 is what static models draw and what the bounds cover.
+        std::size_t frames = 1;
+        for (const s3d::AnimMesh& mesh : model.meshes) frames = std::max(frames, mesh.frames.size());
+        frameMeshes_.resize(frames);
+        frameMaterials_.resize(frames);
+        frameRate_ = model.frameRate;
+        for (std::size_t f = 0; f < frames; ++f) {
+            for (const s3d::AnimMesh& mesh : model.meshes) {
+                if (mesh.frames.empty()) continue;
+                const s3d::FrameRef& frame = mesh.frames[std::min(f, mesh.frames.size() - 1)];
+                if (frame.vertexGroup >= vertexGroups_.size() || frame.primitiveGroup >= drawLists_.size()) continue;
+                SC4Mesh out;
+                out.vertices = &vertexGroups_[frame.vertexGroup];
+                out.indexGroup = frame.indexGroup < indexPointers_.size() ? &indexPointers_[frame.indexGroup] : nullptr;
+                out.draws = &drawLists_[frame.primitiveGroup];
+                frameMeshes_[f].push_back(out);
+                frameMaterials_[f].push_back(frame.materialGroup < model.materials.size() ? BuildMaterial(model.materials[frame.materialGroup], group) : s3d::cS3DMaterial{});
+                if (f != 0) continue;
+                const s3d::VertexGroup& vg = model.vertexGroups[frame.vertexGroup];
+                for (int k = 0; k < 3; ++k) {
+                    bounds_.min[k] = haveBounds ? std::min(bounds_.min[k], vg.min[k]) : vg.min[k];
+                    bounds_.max[k] = haveBounds ? std::max(bounds_.max[k], vg.max[k]) : vg.max[k];
+                }
+                haveBounds = true;
             }
-            haveBounds = true;
         }
+        meshes_ = frameMeshes_[0];
+        materials_ = frameMaterials_[0];
         return !meshes_.empty();
     }
 
@@ -257,6 +283,9 @@ private:
     std::vector<SC4MeshDrawList> drawLists_;
     std::vector<SC4Mesh> meshes_;
     std::vector<s3d::cS3DMaterial> materials_;
+    std::vector<std::vector<SC4Mesh>> frameMeshes_;              // every animation frame (frame 0 = meshes_)
+    std::vector<std::vector<s3d::cS3DMaterial>> frameMaterials_;
+    int frameRate_ = 0;
     cS3DBoundingBox bounds_{{0, 0, 0}, {0, 0, 0}};
 };
 

@@ -52,6 +52,11 @@ public:
     virtual void ComputeBounds(cS3DBoundingBox& out) = 0;   // [7]
     // The shadow code's view of the model: false when the model has no mesh list for level 0.
     virtual bool GetShadowMeshes(std::vector<ShadowMeshData>& out) { out.clear(); return false; }
+    // Frame animation (the ANIM chunk; port seam for cIS3DModelInstanceAnimated's frame loads): the frame count, the
+    // chunk's rate word (milliseconds per frame) and a frame load into an instance this model created.
+    virtual int FrameCount() const { return 1; }
+    virtual int FrameRate() const { return 0; }
+    virtual bool SelectFrame(cIS3DModelInstance* instance, int frame) { (void)instance; (void)frame; return false; }
 };
 
 class cIS3DModelInstance : public cIGZUnknown {

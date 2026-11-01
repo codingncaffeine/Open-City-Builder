@@ -6,9 +6,13 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 
+#include "rz/PortMemoryStreams.h"
 #include "rz/RZStringUtils.h"
+#include "s3d/S3DMath.h"
+#include "sc4/EffectsResource.h"
 #include "gz/CommandParameterSet.h"
 #include "sc4/GameDataRegistry.h"
 
@@ -161,7 +165,8 @@ bool cSC4EffectsManager::Init() {
     effectsResource_ = host_->CreateEffectsResource();           // already Init'ed by the host
     effectsParser_ = host_->CreateEffectsParser();
     host_->SendProgressMessage(2, "");
-    host_->LoadEffectsFiles();                                   // LoadAllEffects
+    host_->LoadEffectsFiles();
+    LoadAllEffects();
     for (std::uint32_t id : kEffectsMessageIds) host_->RegisterMessageHandler(id);
     host_->AddCheatHandler(this);                                // SL::spCCM vslot 0x38(this, 0)
     host_->RegisterCheatCode(kCheatEffectCode, "Effect");
@@ -440,8 +445,8 @@ void cSC4EffectsManager::ActivateNewVisualEffects() {
         newVisualEffectSlots_.clear();
         if (first == activeVisualEffectSlots_.size()) return;
         --guard;
-        for (std::size_t i = first; i < activeVisualEffectSlots_.size(); ++i)
-            UpdateVisualEffect(visualEffects_[static_cast<std::size_t>(activeVisualEffectSlots_[i])].get(), false);
+        for (std::size_t i = first; i < activeVisualEffectSlots_.size(); ++i)   // forced: a new effect builds all its components
+            UpdateVisualEffect(visualEffects_[static_cast<std::size_t>(activeVisualEffectSlots_[i])].get(), true);
     }
 }
 
@@ -488,8 +493,16 @@ void cSC4EffectsManager::DeactivateUnusedVisualEffects() {
                 stillRunning.push_back(index);
         }
         newParticlesEffectSlots_.swap(stillRunning);
-        // The decal / model-based / geometry-sourced / dynamic-particle pools are not modelled: their classes are
-        // unrecovered (see the pending ledger).
+        stillRunning.clear();
+        for (int index : newModelEffectSlots_) {
+            auto* effect = modelEffects_[static_cast<std::size_t>(index)].get();
+            if (effect->RefCount() == 1 && !effect->IsStarted())
+                freeModelEffectSlots_.push_back(index);
+            else
+                stillRunning.push_back(index);
+        }
+        newModelEffectSlots_.swap(stillRunning);
+        // The decal / geometry-sourced / dynamic-particle pools are not modelled (see the pending ledger).
     }
     killing_ = false;
     ActivateNewVisualEffects();
@@ -531,21 +544,88 @@ void cSC4EffectsManager::DoZoomChanged(int zoom) {
     UpdateActiveVisualEffects();
 }
 
-// @ 0x1005e1850 (PARTIAL). The component-merge half (description records -> components, the LOD filter and the
-// per-component transforms) needs CreateComponentFromDescription and the unrecovered effect classes; the port keeps
-// the description retarget (name or (group,type) key) and the parameter re-application.
+// @ i386 0x0040658e. The components the description made earlier are kept while the current LOD level is inside
+// their record's [min, max) range (their LOD scale is refreshed when the level moved) and stopped and dropped
+// otherwise; components added from outside (record index -1) are always kept. Then every record whose range holds the
+// current level but did not hold the previous one (all of them when forced) gets its component, in record order, with
+// the "random group" rule: consecutive records sharing a non-zero group are one weighted pick (chances out of 65536).
 void cSC4EffectsManager::UpdateVisualEffect(cSC4VisualEffect* effect, bool forceUpdate) {
     if (!effect) return;
-    if (forceUpdate_ || effect->Slot() < 0) {
+    std::vector<cSC4VisualEffect::cComponentRec>& components = effect->MutableComponents();
+    if (!components.empty() && effect->Slot() >= 0 && static_cast<std::size_t>(effect->Slot()) < collection_.Effects().size()) {
+        const cSC4EffectDescription& description = collection_.Effects()[static_cast<std::size_t>(effect->Slot())];
+        std::size_t kept = 0;
+        for (std::size_t i = 0; i < components.size(); ++i) {
+            cSC4VisualEffect::cComponentRec& rec = components[i];
+            bool keep = rec.reserved40 == 0xffffffffull;
+            if (!keep && rec.reserved40 < description.records.size()) {
+                const cSC4EffectDescription::cDescriptionRec& record = description.records[static_cast<std::size_t>(rec.reserved40)];
+                if (!forceUpdate_ && record.flagA <= lodLevel_ && lodLevel_ < record.flagB) {
+                    if (lodLevel_ != previousLodLevel_) UpdateLODScale(record, &rec);
+                    keep = true;
+                }
+            }
+            if (!keep) {
+                if (rec.component) {
+                    rec.component->Stop(1);
+                    rec.component->Release();
+                    rec.component = nullptr;
+                }
+                continue;
+            }
+            if (kept != i) components[kept] = rec;
+            ++kept;
+        }
+        components.resize(kept);
+    }
+    if (forceUpdate_) {
         int index = -1;
         if (!effect->Name().empty())
             index = ResolveDescriptionByName(effect->Name());
-        else if (effect->Group() != 0 || effect->Type() != 0)
+        else
             index = ResolveDescriptionByKey(effect->Group(), effect->Type());
         effect->SetSlot(index);
     }
-    (void)forceUpdate;
-    effect->ApplyParams();   // a no-op until the component merge fills the parameter records
+    if (effect->Slot() < 0 || static_cast<std::size_t>(effect->Slot()) >= collection_.Effects().size()) return;
+    const cSC4EffectDescription& description = collection_.Effects()[static_cast<std::size_t>(effect->Slot())];
+    cSC4ModelBasedParticlesEffect* chained = nullptr;
+    std::uint16_t group = 0;
+    std::uint32_t pick = 0, total = 0;
+    for (std::size_t r = 0; r < description.records.size(); ++r) {
+        const cSC4EffectDescription::cDescriptionRec& record = description.records[r];
+        const bool inNow = record.flagA <= lodLevel_ && lodLevel_ < record.flagB;
+        const bool inBefore = record.flagA <= previousLodLevel_ && previousLodLevel_ < record.flagB;
+        if (record.intValue < 0 || !((inNow && !inBefore) || forceUpdate || forceUpdate_)) continue;
+        if (record.shortC == 0) {
+            group = 0;
+        } else {
+            if (group != record.shortC) {
+                pick = random_.RandomUint32Uniform(0x10000);
+                total = 0;
+            }
+            group = record.shortC;
+            total += record.shortD;
+            if (total < pick) continue;
+            pick = 0x10000;
+        }
+        if (!inNow) continue;
+        components.emplace_back();
+        cSC4VisualEffect::cComponentRec* rec = &components.back();
+        rec->reserved40 = r;
+        CreateComponentFromDescription(record, rec, &chained);
+        rec = &components.back();
+        if (!rec->component) {   // a kind the port does not create (decals, dynamic / geometry particles, nested effects)
+            components.pop_back();
+            continue;
+        }
+        UpdateLODScale(record, rec);
+        rec->transform = record.transform;
+        cS3DTransform local = rec->transform;     // the record's transform times the effect's combined source
+        nS3D::MultiplyTransform(local, effect->CombinedSource());
+        rec->component->SetTransforms(local, effect->WorldTransform());
+        if (effect->IsStarted() && !effect->IsStopping()) rec->component->Start(forceUpdate ? 0 : 1);
+    }
+    effect->ApplyParams();
 }
 
 // @ 0x1005e21f8: interpolate the record's two LOD curves at the current level and hand the pair to the component as
@@ -622,12 +702,38 @@ void cSC4EffectsManager::GetStatsString(cRZString& out) {
                 static_cast<double>(globalParams_.rateScale));
 }
 
-// @ 0x1005df48a (PARTIAL). The draw path (terrain maps, the view-frustum culling of the three unrecovered particle
-// families, the draw-pair sort, the per-family render calls, the decal update, the screen flashes and the lighting
-// tint) needs the cSC4DrawContext -> IParticlesDrawContext adapter and the unrecovered family classes; it is not
-// ported. The manager still reports a successful frame.
+// @ i386 0x00407524 (PARTIAL: the effect-map overlay, the depth sort of the drawn systems, the decal and
+// geometry-sourced pools and the debug bounding boxes are not ported). Every running particle system advances by the
+// time the animation ticks gathered since the last frame; the ones whose bounds are in view are drawn, the rest only
+// simulate. Then the screen flash / lighting tint, the recycling of finished effects, and the tick time restarts.
 bool cSC4EffectsManager::Update(SC4DrawContext* context) {
-    (void)context;
+    const float elapsed = elapsedSeconds_;
+    IParticlesDrawContext* draw = host_ ? host_->ParticlesDrawContext(context) : nullptr;
+    particlesDrawn_ = 0;
+    std::uint32_t systems = 0;
+    auto run = [&](cSC4ParticlesEffect* effect) {
+        if (!effect || !effect->IsStarted()) return;
+        const bool visible = draw && host_->IsBoundingBoxInView(effect->BoundingBox());
+        const int before = effect->LiveParticleCount();
+        effect->Update(elapsed, visible ? draw : nullptr);
+        static int traced = 0;
+        if (std::getenv("SC4_FXDEBUG") && dynamic_cast<cSC4ModelBasedParticlesEffect*>(effect) && traced++ < 60)
+            std::fprintf(stderr, "fx: update %p dt %.3f live %d -> %d started %d delayed %d box %.0f,%.0f,%.0f\n", static_cast<void*>(effect), elapsed, before,
+                         effect->LiveParticleCount(), effect->IsStarted() ? 1 : 0, effect->IsInDelayedStop() ? 1 : 0,
+                         effect->BoundingBox().min[0], effect->BoundingBox().min[1], effect->BoundingBox().min[2]);
+        if (visible) {
+            ++systems;
+            particlesDrawn_ += static_cast<std::uint32_t>(effect->LiveParticleCount());
+        }
+    };
+    for (int index : newParticlesEffectSlots_) run(particlesEffects_[static_cast<std::size_t>(index)].get());
+    for (int index : newModelEffectSlots_) run(modelEffects_[static_cast<std::size_t>(index)].get());
+    particleSystemCount_ = systems;
+    if (0.0f < flashInverseDuration_) DrawScreenFlashes(context, elapsed);
+    if (0.0f < tintInverseDuration_) UpdateLightingTint(elapsed);
+    DeactivateUnusedVisualEffects();
+    elapsedSeconds_ = 0.0f;
+    tickCount_ = 0;
     return true;
 }
 
@@ -801,15 +907,120 @@ cSC4ParticlesEffect* cSC4EffectsManager::NewParticlesEffect() {
     return particlesEffects_[static_cast<std::size_t>(index)].get();
 }
 
-// @ 0x1005e23c6 (PARTIAL): creating the component of a description record needs the unrecovered particle / decal
-// classes (model-based, geometry-sourced, dynamic and decal effects) and the component description tables; only the
-// signature is kept so the class stays complete.
+namespace {
+// A particle system as a component of a visual effect (the original's particle classes are cISC4ComponentEffects
+// themselves; the port's particle classes keep the particle-only interface, so the component is this adapter). It holds
+// one reference on the system; the manager's pool holds the other.
+class ParticlesComponent final : public cISC4VisualEffectComponent {
+public:
+    explicit ParticlesComponent(cSC4ParticlesEffect* effect) : effect_(effect) { effect_->AddRef(); }
+    ~ParticlesComponent() override { effect_->Release(); }
+    void Start(int transition) override { effect_->Start(transition); }
+    void Stop(int transition) override { effect_->Stop(transition); }
+    bool IsStarted() const override { return effect_->IsStarted(); }
+    void SetTransforms(const cS3DTransform& effect, const cS3DTransform& source) override { effect_->SetTransforms(effect, source); }
+    void ApplyEffect(float elapsed) override { effect_->ApplyEffect(elapsed); }
+    bool SetFloatParams(int type, const float* values, int count) override { return effect_->SetFloatParams(type, values, count); }
+    bool SetVoidParams(int type, void** values, int count) override { return effect_->SetVoidParams(type, values, count); }
+
+private:
+    cSC4ParticlesEffect* effect_;
+};
+
+bool ModelBased(const cSC4ParticlesDescription& description) { return (description.flag10 & 1) != 0; }
+}  // namespace
+
+// @ i386 0x00406246. Kind 0 = particle systems (count of them, each delayed by the record's spacing; model-based ones
+// can chain), 3..15 = the component description tables (Instantiate). Decals (1), nested visual effects (2), dynamic
+// particles (16) and geometry-sourced particle systems are not ported: the component stays empty and the caller drops
+// it. Bit 0 of the record's type marks the component "not needed to finish".
 void cSC4EffectsManager::CreateComponentFromDescription(const cSC4EffectDescription::cDescriptionRec& record,
                                                         cSC4VisualEffect::cComponentRec* component,
-                                                        cSC4ParticlesEffect** chained) {
-    (void)record;
-    (void)component;
-    (void)chained;
+                                                        cSC4ModelBasedParticlesEffect** chained) {
+    const std::uint32_t kind = record.kind;
+    if (kind == 0) {
+        if (record.intValue < 0 || static_cast<std::size_t>(record.intValue) >= collection_.Particles().size()) return;
+        auto* description = const_cast<cSC4ParticlesDescription*>(&collection_.Particles()[static_cast<std::size_t>(record.intValue)]);
+        if (std::getenv("SC4_FXDEBUG"))
+            std::fprintf(stderr, "fx: record %s kind 0 idx %d count %u flag10 %02x flags %08llx model %08x ids %zu geom %.2f terrain %p\n", record.name.c_str(), record.intValue,
+                         record.shortA, description->flag10, static_cast<unsigned long long>(description->flags), description->textureId, description->modelIds.size(),
+                         description->values278[0], static_cast<void*>(ParticlesTerrain()));
+        for (int i = 0; i < static_cast<int>(record.shortA); ++i) {
+            cSC4ParticlesEffect* effect = nullptr;
+            cSC4ModelBasedParticlesEffect* modelBased = nullptr;
+            if (!ModelBased(*description)) {
+                effect = NewParticlesEffect();
+            } else if (description->values278[0] != 0.0f) {
+                continue;   // geometry-sourced particles (NewGeometrySourcedParticlesEffect) are not ported
+            } else {
+                effect = modelBased = NewModelBasedParticlesEffect();
+            }
+            if (!effect) return;
+            if (modelBased) modelBased->SetDescription(description);
+            else effect->SetDescription(description);
+            if (i > 0) {
+                const float delay = static_cast<float>(static_cast<std::uint32_t>(record.shortB) * static_cast<std::uint32_t>(i));
+                effect->SetFloatParams(0x101, &delay, 1);
+            }
+            if (!modelBased || (record.type & 2) == 0) {
+                *chained = nullptr;
+            } else {
+                if (*chained) {
+                    (*chained)->SetChainSystem(modelBased);
+                    modelBased->SuppressEmission();
+                }
+                *chained = modelBased;
+            }
+            auto* wrapped = new ParticlesComponent(effect);
+            wrapped->AddRef();
+            if (component->component) component->component->Release();
+            component->component = wrapped;
+        }
+    } else if (kind >= 3 && kind - 3 < 13) {
+        if (record.intValue < 0) return;
+        const auto& table = collection_.ComponentDescs()[kind - 3].descriptions;
+        if (static_cast<std::size_t>(record.intValue) >= table.size()) return;
+        cISC4ComponentDescription* description = table[static_cast<std::size_t>(record.intValue)].get();
+        cISC4VisualEffectComponent* made = description ? description->Instantiate() : nullptr;
+        if (!made) return;
+        made->AddRef();
+        component->component = made;
+        component->flags |= 2;
+    }
+    if (record.type & 1) component->flags |= 4;
+    else component->flags &= ~std::uint64_t{4};
+}
+
+// @ i386 0x00405ed8: a recycled system from the free list, or a new one Init'ed with the global parameters.
+cSC4ModelBasedParticlesEffect* cSC4EffectsManager::NewModelBasedParticlesEffect() {
+    if (!freeModelEffectSlots_.empty()) {
+        const int index = freeModelEffectSlots_.back();
+        freeModelEffectSlots_.pop_back();
+        newModelEffectSlots_.push_back(index);
+        return modelEffects_[static_cast<std::size_t>(index)].get();
+    }
+    if (!ParticlesTerrain()) return nullptr;   // Init sizes the system from the terrain
+    auto* effect = new cSC4ModelBasedParticlesEffect();
+    effect->Init();
+    effect->SetGlobalParams(&globalParams_);
+    newModelEffectSlots_.push_back(static_cast<int>(modelEffects_.size()));
+    modelEffects_.emplace_back(effect);
+    return effect;
+}
+
+// @ i386 0x00409e36 (the packed half; the plug-in "main.fx" text files need the SCRes parser host and are not loaded).
+void cSC4EffectsManager::LoadAllEffects() {
+    if (!host_) return;
+    std::vector<std::vector<std::uint8_t>> libraries;
+    host_->PackedEffectsResources(libraries);
+    if (libraries.empty()) return;
+    BeginCollection();
+    for (const std::vector<std::uint8_t>& bytes : libraries) {
+        PortMemoryIStream in(bytes.data(), bytes.size());
+        cSC4EffectsResource library;
+        if (library.Read(in)) library.AddToCollection(&collection_);
+    }
+    EndCollection();
 }
 
 // @ 0x1005e31cc: allocate the terrain snowline effect on first use, reset the current altitude (which forces the first
@@ -877,9 +1088,16 @@ void cSC4EffectsManager::DoEffectsTick() {
 // view manager / IParticlesDrawContext seam and are not ported).
 void cSC4EffectsManager::DoAnimationTick(std::uint32_t elapsedMs) {
     std::uint32_t scaled = elapsedMs;
-    if (host_) scaled = static_cast<std::uint32_t>(static_cast<float>(elapsedMs) * host_->SimulatorSpeed());
+    if (host_) scaled = static_cast<std::uint32_t>(std::max(0.0f, static_cast<float>(elapsedMs) * host_->SimulatorSpeed()));
     tickCount_ += scaled;
     elapsedSeconds_ = static_cast<float>(static_cast<double>(tickCount_) * 1e-06);
+    // @ i386 0x0040448c: every running effect applies this tick (the cursor-ray parameter of effects with flag 5 is
+    // not ported).
+    const float step = static_cast<float>(static_cast<double>(scaled) * 1e-06);
+    for (int index : activeVisualEffectSlots_) {
+        cSC4VisualEffect* effect = visualEffects_[static_cast<std::size_t>(index)].get();
+        if (effect->IsStarted()) effect->ApplyEffect(step);
+    }
 }
 
 // @ 0x1005dd7b8 (PARTIAL). The dispatch of the recovered message types is ported: the zoom/rotation notifications,
@@ -910,6 +1128,10 @@ bool cSC4EffectsManager::DoMessage(cIGZMessage2* message) {
                 if (effect->IsStarted()) effect->SetVectorParams(0xe, reinterpret_cast<cS3DVector3*>(ray), 2);
             }
         }
+        return true;
+    }
+    if (type == 0x86ad10ee) {   // the animation tick manager's tick: data 2 = the elapsed microseconds
+        DoAnimationTick(static_cast<std::uint32_t>(static_cast<cIGZMessage2Standard*>(message)->GetData2()));
         return true;
     }
     switch (type) {

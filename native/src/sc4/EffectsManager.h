@@ -126,6 +126,7 @@
 #include "sc4/EffectDescriptions.h"
 #include "sc4/EffectMaps.h"
 #include "sc4/EffectsCollection.h"
+#include "sc4/ModelBasedParticlesEffect.h"
 #include "sc4/PackedRenderState.h"
 #include "sc4/ParticlesEffect.h"
 #include "sc4/PropOccupantVisualEffect.h"
@@ -133,12 +134,12 @@
 
 class cIGZUnknown;
 class cIGZCommandParameterSet;
+class SC4DrawContext;   // sc4/DrawContext.h (global, like the renderer's)
 
 namespace sc4 {
 
 class cSC4EffectsManager;
 class cISC4GameDataRegistry;   // sc4/GameDataRegistry.h (the game-data registry lives in this namespace)
-class SC4DrawContext;
 
 constexpr std::uint32_t kGZIID_cISC4EffectsManager = 0x452294aa;    // +0x10 sub-object (0x1005dd616)
 constexpr std::uint32_t kGZIID_cISC4EffectsManagerAlt = 0xc97cf5cd; // the manager object itself
@@ -197,6 +198,13 @@ public:
     // SL::spMS2 vslot 0x20 (MessagePost): a cRZMessage2Standard of this type, posted with `false`. Both the effects
     // tick callback (0x1005dc8c9) and ParseEffectsFiles (0x1005e32ca) build that message inline in the original.
     virtual void PostMessage(std::uint32_t type) = 0;
+    // LoadAllEffects' resource-manager half: the bytes of every packed effects library (type 0xea5118b0), the base
+    // game's instance 1 of group 0xea5118b1 first, then the others the resource manager lists.
+    virtual void PackedEffectsResources(std::vector<std::vector<std::uint8_t>>& out) { out.clear(); }
+    // Update's draw half: the particle view of the renderer's draw context (null = simulate without drawing) and the
+    // view-frustum test of a particle system's bounds (SC4ViewUtilities::IsBoundingBoxInViewFrustum).
+    virtual IParticlesDrawContext* ParticlesDrawContext(SC4DrawContext* context) { (void)context; return nullptr; }
+    virtual bool IsBoundingBoxInView(const cS3DBoundingBox& box) { (void)box; return true; }
 
     // ---- effect files (0x1005e324a ParseEffectsFiles) ----------------------------------------------------------
     // The file parser at +0xeb0 is the nSCRes::cFileParser GZCOM object (clsid 0x5cf9459a, iid 0x1cf94583). Its two
@@ -329,6 +337,10 @@ public:
     // The four other factories (model-based 0x1005e279c, geometry-sourced 0x1005e2908, dynamic 0x1005e2c12 and
     // decal 0x1005e2d80) are SKIPPED: their classes are not recovered, so they are not declared here.
     cSC4ParticlesEffect* NewParticlesEffect();                              // @ 0x1005e2a74
+    cSC4ModelBasedParticlesEffect* NewModelBasedParticlesEffect();          // @ i386 0x00405ed8
+    // LoadAllEffects (i386 0x00409e36): BeginCollection, every packed effects library into the collection,
+    // EndCollection. The plug-in "main.fx" text path is not ported.
+    void LoadAllEffects();
 
     // ---- effect files and the game-data registry command --------------------------------------------------------
     // The files the parser at +0xeb0 was given (LoadAllEffects adds "main.fx" / "Effects/config.fx"): a successful
@@ -353,7 +365,7 @@ public:
     void CreateFlashMaterials();                                            // @ 0x1005dc2a2
     void CreateComponentFromDescription(const cSC4EffectDescription::cDescriptionRec& record,
                                         cSC4VisualEffect::cComponentRec* component,
-                                        cSC4ParticlesEffect** chained);     // @ 0x1005e23c6 (PARTIAL)
+                                        cSC4ModelBasedParticlesEffect** chained);   // @ i386 0x00406246 (PARTIAL)
 
     // ---- the description library (the +0xd0 sub-object) --------------------------------------------------------
     cSC4EffectsCollection& Collection() { return collection_; }
@@ -416,7 +428,18 @@ public:
     void SetHeapCheckEnabled(bool value) { heapCheck_ = value; }
     bool DrawTerrainMaps() const { return drawTerrainMaps_; }
     bool KillGuardCleared() const { return !killing_; }
-    void SetLodLevel(int level) { lodLevel_ = level; }   // UpdateVisualEffect's LOD filtering; public for the test
+    void SetLodLevel(int level) { lodLevel_ = level; }
+    // Debug census of the model-based pool: systems in use, started, live particles, systems with a model.
+    void ModelEffectCensus(int& inUse, int& started, int& particles, int& withModel) const {
+        inUse = static_cast<int>(newModelEffectSlots_.size());
+        started = particles = withModel = 0;
+        for (int index : newModelEffectSlots_) {
+            const auto* effect = modelEffects_[static_cast<std::size_t>(index)].get();
+            started += effect->IsStarted() ? 1 : 0;
+            particles += effect->LiveParticleCount();
+            withModel += effect->ModelInstance() ? 1 : 0;
+        }
+    }   // UpdateVisualEffect's LOD filtering; public for the test
 
 private:
     // The shared lowercase scratch (+0x2d8): the original lowercases in place into one std::string member.
@@ -451,13 +474,16 @@ private:
     std::vector<cRZAutoRefCount<cSC4ParticlesEffect>> particlesEffects_;   // +0xd90
     std::vector<int> newParticlesEffectSlots_;          // +0xda8
     std::vector<int> freeParticlesEffectSlots_;         // +0xdc0
+    std::vector<cRZAutoRefCount<cSC4ModelBasedParticlesEffect>> modelEffects_;   // +0xe20
+    std::vector<int> newModelEffectSlots_;              // +0xe38
+    std::vector<int> freeModelEffectSlots_;             // +0xe50
 
     cIGZUnknown* effectsResource_ = nullptr;            // +0xeb0 the nSCRes::cFileParser (one reference)
     cIGZUnknown* effectsParser_ = nullptr;              // +0xeb8 (one reference)
 
     int zoom_ = -1;                                     // +0xec0
-    int lodLevel_ = 1;                                  // +0xec4
-    int previousLodLevel_ = 1;                          // +0xec8
+    int lodLevel_ = -1;                                 // +0xec4 (-1 until the first zoom message: i386 ctor 0x00407e30)
+    int previousLodLevel_ = -1;                         // +0xec8
     int lodOffset_ = 0;                                 // +0xecc
     std::uint32_t particlesDrawn_ = 0;                  // +0xed0
     std::uint32_t activeVisualEffectCount_ = 0;         // +0xed4

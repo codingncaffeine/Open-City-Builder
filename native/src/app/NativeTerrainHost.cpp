@@ -18,6 +18,7 @@
 #include "sc4/cSC4City.h"
 #include "app/NativeCity.h"
 #include "app/NativeFlora.h"
+#include "app/NativeEffects.h"
 #include "sc4/AuraSimulator.h"
 #include "sc4/FloraSimulator.h"
 #include "sc4/Exemplar.h"
@@ -348,7 +349,7 @@ struct NativeTerrainHost final : ITerrainHost {
     }
     bool AddOverlayDecal(cIGZUnknown* overlay, const cGZPersistResourceKey& key, const TerrainPoint& position, float strength, float randomAmount) override { return {}; }
     void ListBrushResources(std::vector<cGZPersistResourceKey>& out) override { ListResources(out, 0x6534284a, 0x6a01fc2a); }
-    ITerrainEffect* CreateTerrainEffect(std::uint32_t id0, std::uint32_t id1) override { return {}; }
+    ITerrainEffect* CreateTerrainEffect(std::uint32_t id0, std::uint32_t id1) override { return native::CreateTerrainEffect(id0, id1); }
     cRZString NewCityName() override { return {}; }
     ITerrainHeightImage* NewCityHeightImage() override { return {}; }
     cIGZPersistDBSegment* NewCityObliteratedTerrainSegment() override { return {}; }

@@ -365,64 +365,38 @@ void cSC4ParticlesEffect::Stop(int transition) {
 
 // 0x1005f33cc
 void cSC4ParticlesEffect::SetTransforms(const cS3DTransform& effect, const cS3DTransform& source) {
-    // The effect transform: change counter + 1, rotation and flags copied (the counter is the effect's own).
+    // i386 0x00414bf4: both transforms are copied whole (cS3DTransform::operator=: the copy bumps the destination's change
+    // counter). The effect translation is where new particles are born (InitEffectsParticle transforms by the whole
+    // effect transform); the port used to keep only its rotation, so every system emitted at the map's corner.
     const std::uint8_t effectCounter = effectTransform_.changeCounter;
-    effectTransform_.changeCounter = static_cast<std::uint8_t>(effectCounter + 1);
-    for (int row = 0; row < 3; ++row) {
-        for (int column = 0; column < 3; ++column) {
-            effectTransform_.rotation[row][column] = effect.rotation[row][column];
-        }
-    }
-    effectTransform_.flags = effect.flags;
-
-    // The source transform: rotation, translation, scale and flags copied.
     const std::uint8_t sourceCounter = sourceTransform_.changeCounter;
+    effectTransform_ = effect;
+    effectTransform_.changeCounter = static_cast<std::uint8_t>(effectCounter + 1);
+    sourceTransform_ = source;
     sourceTransform_.changeCounter = static_cast<std::uint8_t>(sourceCounter + 1);
-    for (int row = 0; row < 3; ++row) {
-        for (int column = 0; column < 3; ++column) {
-            sourceTransform_.rotation[row][column] = source.rotation[row][column];
-        }
-    }
-    for (int i = 0; i < 3; ++i) sourceTransform_.translation[i] = source.translation[i];
-    sourceTransform_.scale = source.scale;
-    sourceTransform_.flags = source.flags;
-
     if (!suppressEmission_ && (description_->flags & 0x1000) != 0) {
-        // Aligned: the effect's plane is defined by its own rotation, so both translations are dropped and the box is
-        // reset to the emission box.
-        effectTransform_.translation[0] = 0.0f;
-        effectTransform_.translation[1] = 0.0f;
-        effectTransform_.translation[2] = 0.0f;
+        // Aligned: both translations are dropped and the box is reset to the emission box, whose centre becomes the
+        // attractor origin.
+        for (int i = 0; i < 3; ++i) effectTransform_.translation[i] = 0.0f;
         effectTransform_.flags |= 1;
-        effectTransform_.changeCounter = static_cast<std::uint8_t>(effectCounter + 2);
-        sourceTransform_.translation[0] = 0.0f;
-        sourceTransform_.translation[1] = 0.0f;
-        sourceTransform_.translation[2] = 0.0f;
+        ++effectTransform_.changeCounter;
+        for (int i = 0; i < 3; ++i) sourceTransform_.translation[i] = 0.0f;
         sourceTransform_.flags |= 1;
-        sourceTransform_.changeCounter = static_cast<std::uint8_t>(sourceCounter + 2);
+        ++sourceTransform_.changeCounter;
         box_ = emissionBox_;
         attractorOrigin_.x = (emissionBox_.min[0] + emissionBox_.max[0]) * 0.5f;
         attractorOrigin_.y = (emissionBox_.min[1] + emissionBox_.max[1]) * 0.5f;
         attractorOrigin_.z = (emissionBox_.min[2] + emissionBox_.max[2]) * 0.5f;
     }
-
-    // The box follows the transformed source translation (the original accumulates the delta into it).
-    const float tx = sourceTransform_.translation[0];
-    const float ty = sourceTransform_.translation[1];
-    const float tz = sourceTransform_.translation[2];
+    // The attractor origin becomes the effect's position seen through the source transform; the box moves with it.
+    const float oldX = attractorOrigin_.x, oldY = attractorOrigin_.y, oldZ = attractorOrigin_.z;
+    const float* t = effectTransform_.translation;
+    const auto& r = sourceTransform_.rotation;
     const float scale = sourceTransform_.scale;
-    const float oldX = attractorOrigin_.x;
-    const float oldY = attractorOrigin_.y;
-    const float oldZ = attractorOrigin_.z;
-    attractorOrigin_.x = (sourceTransform_.rotation[0][0] * tx + sourceTransform_.rotation[0][1] * ty +
-                          sourceTransform_.rotation[0][2] * tz) * scale + attractorOrigin_.x;
-    attractorOrigin_.y = (sourceTransform_.rotation[1][0] * tx + sourceTransform_.rotation[1][1] * ty +
-                          sourceTransform_.rotation[1][2] * tz) * scale + attractorOrigin_.y;
-    attractorOrigin_.z = (sourceTransform_.rotation[2][0] * tx + sourceTransform_.rotation[2][1] * ty +
-                          sourceTransform_.rotation[2][2] * tz) * scale + attractorOrigin_.z;
-    const float dx = attractorOrigin_.x - oldX;
-    const float dy = attractorOrigin_.y - oldY;
-    const float dz = attractorOrigin_.z - oldZ;
+    attractorOrigin_.x = (r[0][0] * t[0] + r[0][1] * t[1] + r[0][2] * t[2]) * scale + sourceTransform_.translation[0];
+    attractorOrigin_.y = (r[1][0] * t[0] + r[1][1] * t[1] + r[1][2] * t[2]) * scale + sourceTransform_.translation[1];
+    attractorOrigin_.z = (r[2][0] * t[0] + r[2][1] * t[1] + r[2][2] * t[2]) * scale + sourceTransform_.translation[2];
+    const float dx = attractorOrigin_.x - oldX, dy = attractorOrigin_.y - oldY, dz = attractorOrigin_.z - oldZ;
     box_.min[0] += dx;
     box_.min[1] += dy;
     box_.min[2] += dz;
@@ -1671,12 +1645,38 @@ bool cSC4ParticlesEffect::ApplyTerrainForces(cSC4EffectsParticle* particle, cons
             }
         }
     }
+    // The original asks the effects manager for its effect maps first and does nothing without them; only the flag
+    // 0x400 branch reads them, so the port runs the two terrain branches without and skips that one.
     IParticlesEffectMaps* maps = ParticlesEffects() ? ParticlesEffects()->EffectMaps() : nullptr;
-    if (!maps) return true;
     bool alive = true;
     desc = description_;
     if ((desc->flags & 0x400) == 0) {
-        if (desc->terrainDrag != 0.0f || std::isnan(desc->terrainDrag)) {
+        if (desc->terrainDrag == 0.0f) {
+            // i386 0x004176ae (the branch the port had dropped): no drag = follow the ground. Below the surface (or
+            // always, with flag 0x200) the particle is put on it and its velocity into the ground is removed.
+            const float height = terrain_ ? terrain_->TerrainHeight(position.x, position.z) : position.y;
+            if ((desc->flags & 0x200) != 0 || (position.y <= height && height != position.y)) {
+                const float invScale = 1.0f / sourceTransform_.scale;
+                const float lx = (position.x - sourceTransform_.translation[0]) * invScale;
+                const float ly = (height - sourceTransform_.translation[1]) * invScale;
+                const float lz = (position.z - sourceTransform_.translation[2]) * invScale;
+                const auto& r = sourceTransform_.rotation;   // BackTransformPoint / BackTransformDirection: the transpose
+                particle->position.x = r[0][0] * lx + r[1][0] * ly + r[2][0] * lz;
+                particle->position.y = r[0][1] * lx + r[1][1] * ly + r[2][1] * lz;
+                particle->position.z = r[0][2] * lx + r[1][2] * ly + r[2][2] * lz;
+                cS3DVector3 normal{0.0f, 1.0f, 0.0f};
+                if (terrain_) terrain_->TerrainNormal(position.x, position.z, normal);
+                const float nx = r[0][0] * normal.x + r[1][0] * normal.y + r[2][0] * normal.z;
+                const float ny = r[0][1] * normal.x + r[1][1] * normal.y + r[2][1] * normal.z;
+                const float nz = r[0][2] * normal.x + r[1][2] * normal.y + r[2][2] * normal.z;
+                const float into = -(nx * particle->velocity.x + ny * particle->velocity.y + nz * particle->velocity.z);
+                if (0.0f < into) {
+                    particle->velocity.x += nx * into;
+                    particle->velocity.y += ny * into;
+                    particle->velocity.z += nz * into;
+                }
+            }
+        } else {
             const float water = terrain_ ? terrain_->WaterHeight(position.x, position.z) : 0.0f;
             if (position.y <= water && water != position.y) {
                 const float height = terrain_ ? terrain_->TerrainHeight(position.x, position.z) : 0.0f;
@@ -1729,13 +1729,13 @@ bool cSC4ParticlesEffect::ApplyTerrainForces(cSC4EffectsParticle* particle, cons
                 }
             }
         }
-    } else {
+    } else if (maps) {
         // PARTIAL: the vertical bounce plane of description flag 0x400 needs the effect map's height field; the
         // recovered part only keeps the particle alive (see the ledger).
         const float height = maps->Height(position.x, position.z);
         (void)height;
     }
-    maps->Release();
+    if (maps) maps->Release();
     return alive;
 }
 
