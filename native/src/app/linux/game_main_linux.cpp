@@ -29,6 +29,7 @@
 
 #include "platform/GameDataPath.h"
 #include "platform/PointerState.h"
+#include "sc4/RegionDialogs.h"
 #include "app/NativeBoot.h"
 #include "app/NativeCity.h"
 #include "app/NativeAnimationTicks.h"
@@ -464,6 +465,7 @@ struct SplashHost final : sc4::ISplashScreenHost {
 // The game's sound: Sound.dat opened through the recovered persistence layer, the radio station that follows the screen and
 // the window buttons' sounds (the interactive run only, or SC4_AUDIO=1; shots and scenarios stay silent).
 GameAudio* gAudio = nullptr;
+bool gQuit = false;   // ends the main loop (the window's close button, the game's own quit)
 void StartGameAudio() {
     static GameAudio audio;
     std::string error;
@@ -592,6 +594,12 @@ bool Boot() {
         callbacks.destroyCurrentScreen = [] { if (gAppWindow) gAppWindow->DestroyCurrentScreen(); };
         callbacks.createRegionScreen = [] { if (gAppWindow) gAppWindow->CreateRegionScreen(); };
         native::InstallRegionServices(*app, callbacks);
+        // The app's questions (quit, save) are scripted dialogs answered by a button id, and its quit ends the main loop.
+        // The city load installs the rest of these hooks; these two are needed from the region screen on.
+        app->CityHooks().scriptedModal = [](std::uint32_t instance, std::uint32_t window) {
+            return static_cast<int>(sc4::SC4RunScriptedButtonDialog(gMgr->GetMainWindow(), instance, window));
+        };
+        app->CityHooks().quitFramework = [] { gQuit = true; };
         native::RegionScreenServices screen;
         screen.app = app;
         screen.graphics = gGraphics.get();
@@ -698,7 +706,6 @@ bool CityViewKey(SDL_Keycode key, bool down, bool repeat) {
 }
 
 double gWheel = 0;
-bool gQuit = false;
 
 void HandleEvent(const SDL_Event& e) {
     switch (e.type) {
@@ -831,10 +838,23 @@ int RunScenario(const std::string& path) {
         std::istringstream words(line);
         std::string command;
         if (!(words >> command)) continue;
+        if (gQuit) { std::printf("scenario %d: the game quit\n", number); return 0; }
         std::printf("scenario %d: %s\n", number, line.c_str());
         if (command == "frames") {
             int n = 0; words >> n;
             for (int i = 0; i < n; ++i) { Frame(); Nap(); }
+        } else if (command == "sdlclick") {   // sdlclick X Y: a real SDL left click in window points, through the live event path
+            float x = 0, y = 0; words >> x >> y;
+            SDL_Event e{};
+            e.type = SDL_EVENT_MOUSE_MOTION; e.motion.windowID = SDL_GetWindowID(gWindow); e.motion.x = x; e.motion.y = y;
+            SDL_PushEvent(&e); PumpEvents(); Frame(); Nap();
+            for (const SDL_EventType type : {SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_EVENT_MOUSE_BUTTON_UP}) {
+                SDL_Event b{};
+                b.type = type; b.button.windowID = SDL_GetWindowID(gWindow); b.button.button = SDL_BUTTON_LEFT;
+                b.button.down = type == SDL_EVENT_MOUSE_BUTTON_DOWN; b.button.clicks = 1; b.button.x = x; b.button.y = y;
+                SDL_PushEvent(&b); PumpEvents(); Frame(); Nap();
+            }
+            for (int i = 0; i < 5; ++i) { PumpEvents(); Frame(); Nap(); }
         } else if (command == "tap") {   // a single click (toolbar buttons toggle: a double click turns them on and off again)
             int x = 0, y = 0; words >> x >> y;
             gMgr->GZWinMsgPost_Mouse(kGZMsgMouseMove, x, y, 0);
@@ -1061,6 +1081,7 @@ int main(int argc, char** argv) {
         Present();
         if (frames > 0 && ++n >= frames) break;
     }
+    if (gAudio) gAudio->Close();   // its voices are SDL audio streams: they go before SDL_Quit (the static outlives it)
     SDL_GL_DestroyContext(context);
     SDL_DestroyWindow(gWindow);
     SDL_Quit();

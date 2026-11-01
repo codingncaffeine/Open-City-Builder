@@ -317,6 +317,7 @@ public:
     virtual const char* RegionName() = 0;                                   // city list vslot 0x18 -> vslot 0x38
     virtual bool ReloadRegion() = 0;                                        // cISC4App vslot 0x60 (0)
     virtual void DeleteRegion(int index) { (void)index; }                   // cISC4Nation vslot 0x30 (i386)
+    virtual void RequestQuitFromRegion(bool ask) { (void)ask; }             // cISC4App vslot 0x2c (i386)
     virtual bool RegionCellBounds(int& left, int& top, int& right, int& bottom) = 0;   // city list vslot 0xc0
     virtual int CitySnapshotSet() = 0;                                      // city list vslot 0x90
     // region vslot 0xb8 (GetCityLocations): the city places of the active region (x, z, log2 of the edge length).

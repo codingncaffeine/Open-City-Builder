@@ -14,6 +14,7 @@ AudioPlatform::IBackend* CreatePlatformAudioBackend();
 class GameAudio {
 public:
     ~GameAudio();
+    void Close();   // frees every voice and the backend (before SDL_Quit)
     bool Open(const std::string& soundDat, std::string& error);
     // Ambient bed: the next suitable long sound, looped until replaced.
     void NextAmbient();

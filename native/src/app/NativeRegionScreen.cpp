@@ -367,6 +367,7 @@ public:
         });
         return true;
     }
+    void RequestQuitFromRegion(bool ask) override { if (cSC4App* app = BootApplication()) app->RequestQuitFromRegion(ask); }
     void DeleteRegion(int index) override { if (Nation() && index >= 0) Nation()->DeleteRegion(std::uint32_t(index)); }
     bool RegionCellBounds(int& left, int& top, int& right, int& bottom) override {
         cISC4Region* region = ActiveRegion();

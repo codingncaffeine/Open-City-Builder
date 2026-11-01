@@ -62,13 +62,21 @@ struct GameAudio::Impl {
     }
 };
 
-GameAudio::~GameAudio() {
+GameAudio::~GameAudio() { Close(); }
+
+// Stops and frees every voice and the backend; safe to call twice. The main loop calls it before SDL_Quit: the voices
+// are SDL audio streams, and the static GameAudio would otherwise free them after SDL shut its audio down (a crash on
+// every quit).
+void GameAudio::Close() {
     if (impl_) {
         delete impl_->ambient;
         delete impl_->click;
         if (impl_->manager) impl_->manager->Shutdown();
+        for (AudioPlatform::IVoice* voice : impl_->voices) delete voice;
+        impl_->voices.clear();
         if (impl_->segment) impl_->segment->Close();
         delete impl_;
+        impl_ = nullptr;
     }
 }
 

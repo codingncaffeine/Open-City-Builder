@@ -42,6 +42,22 @@ void cSC4LoadRegionDialog::GZOnOK() {
     EndDialog(id);
 }
 
+namespace {
+class cButtonResultDialog final : public cSC4DialogWinProcBase {
+public:
+    cButtonResultDialog(std::uint32_t instance, std::uint32_t windowId) : cSC4DialogWinProcBase(instance, windowId, 0) {}
+    bool GZOnButtonActivate(std::uint32_t id) override { EndDialog(id); return true; }
+};
+}  // namespace
+
+std::uint32_t SC4RunScriptedButtonDialog(cIGZWin* parent, std::uint32_t instance, std::uint32_t windowId) {
+    auto* dialog = new cButtonResultDialog(instance, windowId);
+    dialog->AddRef();
+    const std::uint32_t result = dialog->Display(parent);
+    dialog->Release();
+    return result;
+}
+
 int SC4DisplayLoadRegionDialog(cIGZWin* parent, const RegionDialogNation& nation) {
     auto* dialog = new cSC4LoadRegionDialog(nation);
     dialog->AddRef();

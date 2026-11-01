@@ -35,6 +35,10 @@ public:
     void GZOnAttach() override { TranslateTokensInCaption(0x1000); }                  // @ 0x006fd924
 };
 
+// A scripted message dialog (the app's quit / save questions): shows the window of script `instance` (id `windowId`)
+// modally and answers the id of the button that closed it.
+std::uint32_t SC4RunScriptedButtonDialog(cIGZWin* parent, std::uint32_t instance, std::uint32_t windowId);
+
 // The selected region's index, or -1 (cancelled).
 int SC4DisplayLoadRegionDialog(cIGZWin* parent, const RegionDialogNation& nation);
 // True when the player confirmed.

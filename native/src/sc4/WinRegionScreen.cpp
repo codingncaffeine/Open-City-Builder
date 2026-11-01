@@ -1232,6 +1232,18 @@ bool cSC4WinRegionScreen::GZOnCommand(std::uint32_t command, std::uint64_t param
         host->ReloadRegion();                           // cISC4App vslot 0x30 (0): back to a fresh region view
         return true;
     }
+    case 0x26c10a3e: {   // exit: remember the region and the view, ask the app to quit (it asks the player), unpress the button
+        SetUserPreferencesToCurrentRegion();
+        SetUserPreferencesToCurrentPosition();
+        if (host) host->RequestQuitFromRegion(true);   // cISC4App vslot 0x2c (1)
+        void* raw = nullptr;
+        if (GetChildAs(0x26c10a3e, gz::kGZIID_cIGZWinBtn, &raw) && raw) {
+            auto* button = static_cast<gz::cIGZWinBtn*>(raw);
+            button->SetChecked(false);
+            button->Release();
+        }
+        return true;
+    }
     case 0x2a5b0000:   // new region: cSC4NewRegionDialog is not ported yet
         if (getenv("SC4_DEBUG")) fprintf(stderr, "region screen: the new-region dialog is not ported yet\n");
         return true;
