@@ -1,3 +1,4 @@
+#include "app/NativeDemolishTool.h"
 #include "app/NativeNetworkTool.h"
 #include "app/NativeAutomata.h"
 #include "app/NativeCitySystems.h"
@@ -342,6 +343,7 @@ bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* cityInterface, g
     native::InstallZoneTool(view, cityInterface, *render);
     native::InstallNetworkTool(view, cityInterface);
     native::InstallPlaceLotHost(view);
+    native::InstallDemolishTool(view);
     native::InstallCatalogUi(view.GetWindowManager());
     native::SetBudgetViewWindow(view.AsIGZWin());
     view.AddGUI();   // DoPostCityInit's city UI (the view's engine DoMessage that sends it there is not ported)

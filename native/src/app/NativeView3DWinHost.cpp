@@ -8,6 +8,7 @@
 #include <vector>
 #include "sc4/View3DWin.h"
 #include "rz/cRZMessage2Standard.h"
+#include "app/NativeDemolishTool.h"
 #include "app/NativeCity.h"
 #include "platform/Unwired.h"
 #include "app/NativeLighting.h"
@@ -263,7 +264,7 @@ struct StubView3DWin final : IView3DWinHost {
     ISimulatorPauseSink* Simulator() override { static SimulatorView view; return CityExists() ? &view : nullptr; }
     cSC4ViewInputControl* CreateSignTool() override { return new cSC4ViewInputControlSignTool(); }
     cSC4ViewInputControl* CreatePlaceLotTool(std::uint32_t lot) override { return new cSC4ViewInputControlPlaceLot(0, lot, 0, false); }
-    cSC4ViewInputControl* CreateDemolishTool() override { SC4_UNWIRED("IView3DWinHost::CreateDemolishTool (cSC4ViewInputControlDemolish not recovered)"); return nullptr; }
+    cSC4ViewInputControl* CreateDemolishTool() override { return native::CreateDemolishTool(); }
     cSC4ViewInputControl* CreateLabelTool() override { SC4_UNWIRED("IView3DWinHost::CreateLabelTool (cSC4ViewInputControlLabelTool not recovered)"); return nullptr; }
     cSC4ViewInputControl* CreateSignLabelDemolishTool() override { SC4_UNWIRED("IView3DWinHost::CreateSignLabelDemolishTool (not recovered)"); return nullptr; }
     cSC4ViewInputControl* CreateObliterateCityTool() override { SC4_UNWIRED("IView3DWinHost::CreateObliterateCityTool (cSC4ObliterateCity not recovered)"); return nullptr; }

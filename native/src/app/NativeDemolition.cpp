@@ -267,7 +267,7 @@ public:
         if (!occupants) return out;
         const int a[2] = {cells.x0, cells.z0}, b[2] = {cells.x1, cells.z1};
         OccupantList found;
-        if (occupants->GetOccupantsByStandardCityCells(found, a, b, 0xffffffffu, 0xffffffffu)) {
+        if (occupants->GetOccupantsByStandardCityCells(found, a, b, 0u, 0xffffffffu)) {
             const float x0 = static_cast<float>(cells.x0) * 16.0f, z0 = static_cast<float>(cells.z0) * 16.0f;
             const float x1 = static_cast<float>(cells.x1 + 1) * 16.0f, z1 = static_cast<float>(cells.z1 + 1) * 16.0f;
             for (cISC4Occupant* occupant : found) {
@@ -405,6 +405,17 @@ bool DemolishRegion(bool commit, const DemolitionRegion& region, int privilege, 
     if (!demolition) return false;
     Scope scope;
     const bool ok = demolition->DemolishRegion(commit, region, privilege, flags, dezone, filter, cost, nullptr, g_arena.Of(clicked), viewX, viewY);
+    if (Debug()) {
+        std::map<std::uint32_t, std::pair<int, int>> byType;   // type -> seen, gone from the occupant manager (flag 1 cleared)
+        for (auto& [occupant, adapter] : g_arena.occupants) {
+            auto& tally = byType[occupant->GetType()];
+            ++tally.first;
+            if (!occupant->IsFlagSet(1)) ++tally.second;
+        }
+        std::fprintf(stderr, "demolition: %zu lots;", g_arena.lots.size());
+        for (auto& [type, tally] : byType) std::fprintf(stderr, " %08x %d/%d", type, tally.second, tally.first);
+        std::fprintf(stderr, "\n");
+    }
     if (Debug())
         std::fprintf(stderr, "demolition: region %d,%d..%d,%d commit %d privilege %d flags %x -> %d cost %lld\n", region.bounds.x0, region.bounds.z0,
                      region.bounds.x1, region.bounds.z1, commit, privilege, flags, ok, cost ? static_cast<long long>(*cost) : 0LL);

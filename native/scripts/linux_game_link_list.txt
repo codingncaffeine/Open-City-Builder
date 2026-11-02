@@ -669,6 +669,8 @@ src/app/NativeSurfaceWaterNeighbors.cpp
 src/app/NativeShadowOverlay.cpp
 src/app/NativeDecalOverlay.cpp
 src/app/NativeDemolition.cpp
+src/app/NativeDemolishTool.cpp
+src/sc4/ViewInputControlDemolish.cpp
 src/app/NativeCityComponents.cpp
 src/app/citycomp/cSC4Simulator.cpp
 src/app/citycomp/cSC4HistoryWarehouse.cpp

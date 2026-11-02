@@ -13,6 +13,7 @@
 #include <map>
 #include <unordered_set>
 
+#include "app/NativeDemolition.h"
 #include "app/NativeBuildingDevelopment.h"
 #include "app/NativeCity.h"
 #include "app/NativeGrowthDevelopers.h"
@@ -234,9 +235,12 @@ struct TractHost final : ITractDeveloperHost {
         cSC4Lot* lot = d ? d->GetLot(x, z, false) : nullptr;
         return lot && lot->HasRoadAccess();
     }
-    void DemolishLots(const std::list<cRZAutoRefCount<cSC4Lot>>& lots, std::uint32_t) override {
+    // spDemolition DemolishLots(true, lots, privilege 0, flags, false, null, null, null) (tract-developer.md: 0x800 keeps the zone).
+    void DemolishLots(const std::list<cRZAutoRefCount<cSC4Lot>>& lots, std::uint32_t flags) override {
+        std::vector<cSC4Lot*> list;
         for (const auto& lot : lots)
-            if (lot && lot->GetBuildingType(false) != 0) SC4_UNWIRED("ITractDeveloperHost::DemolishLots (built lot; no demolition simulator natively)");
+            if (lot) list.push_back(lot.get());
+        native::DemolishLots(true, list.data(), static_cast<int>(list.size()), 0, flags, false, nullptr);
     }
     void BuildingExemplarBool(const cGZPersistResourceKey& key, std::uint32_t property, bool& value) override {
         void* raw = nullptr;

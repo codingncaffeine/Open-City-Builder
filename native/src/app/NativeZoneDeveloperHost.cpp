@@ -407,7 +407,26 @@ struct LotHost final : ILotHost {
     bool TrafficHasJobAccess(const cSC4Lot& lot, int kind) override { return {}; }
     void UnitLotShutdown(cIGZUnknown* unit, const cSC4Lot& lot) override {}
     void NeighborLots(const cSC4Lot& lot, int direction, std::vector<cSC4Lot*>& out) override {}
-    void GetLotOccupants(const cSC4Lot& lot, std::vector<cIGZUnknown*>& out) override {}
+    // Lot slot 49 (0x006bff70, lot-records.md §3.1): the occupant manager's occupants of any type over the lot's cells, through an
+    // "inside the lot" filter (here: the position lies in the lot's rectangle). The pointers are borrowed (the manager holds them).
+    void GetLotOccupants(const cSC4Lot& lot, std::vector<cIGZUnknown*>& out) override {
+        cISC4OccupantManager* occupants = Occupants();
+        if (!occupants) return;
+        std::int32_t r[4] = {};
+        lot.GetBoundingRect(r);
+        const int a[2] = {r[0], r[1]}, b[2] = {r[2], r[3]};
+        OccupantList found;
+        if (occupants->GetOccupantsByStandardCityCells(found, a, b, 0u, 0xffffffffu)) {
+            const float x0 = static_cast<float>(r[0]) * 16.0f, z0 = static_cast<float>(r[1]) * 16.0f;
+            const float x1 = static_cast<float>(r[2] + 1) * 16.0f, z1 = static_cast<float>(r[3] + 1) * 16.0f;
+            for (cISC4Occupant* occupant : found) {
+                float p[3] = {};
+                occupant->GetPosition(p);
+                if (x0 <= p[0] && p[0] <= x1 && z0 <= p[2] && p[2] <= z1) out.push_back(occupant);
+            }
+        }
+        occupants->ReleaseOccupantList(found);
+    }
     // cSC4Lot::CalculateRoadAccess's scan (0x100181c62): the cells along one edge of the lot (the zone developer's
     // GetNeighborCellsAtEdgeOfLot, edge mask 1 << rotation) hold a network occupant of a road type (mask 0x449: road, street,
     // avenue, one-way road).
