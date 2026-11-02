@@ -21,6 +21,7 @@
 #include "sc4/ViewUtilities.h"
 #include "sc4/CameraControl.h"
 #include "app/NativeTerrainView.h"
+#include "app/NativeCity.h"
 #include "app/NativeModelMaker.h"
 #include "app/NativeZoneTool.h"
 #include "app/NativeAudio.h"
@@ -31,6 +32,7 @@
 #include "sc4/cSTETerrain.h"
 #include "sc4/ISC4City.h"
 #include "sc4/OccupantManager.h"
+#include "sc4/SCPropertyHelp.h"
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/DBSegment.h"
@@ -217,6 +219,27 @@ void PrintOccupantCensus(cISC4City* cityInterface, const char* label) {
     all->Release();
     manager->Release();
     for (auto& [type, n] : census) std::printf("%s: type %08x x%d\n", label, type, n);
+}
+
+// The buildings within `radius` metres of a ground point, with their models and texture sizes (the scenario `probe` command).
+void ProbeBuildingsAt(float x, float z, float radius) {
+    sc4::cSC4City* city = HostCity();
+    cIGZUnknown* om = city ? city->GetComponent(sc4::CityComponent::OccupantManager) : nullptr;
+    void* iface = nullptr;
+    if (!om || !om->QueryInterface(sc4::kGZIID_cISC4OccupantManager, &iface)) return;
+    auto* manager = static_cast<sc4::cISC4OccupantManager*>(iface);
+    const float lo[3] = {x - radius, -1e5f, z - radius}, hi[3] = {x + radius, 1e5f, z + radius};
+    sc4::OccupantList list;
+    manager->GetOccupantsByBBox(list, lo, hi, 0x278128a0u, 0xffffffffu);
+    for (sc4::cISC4Occupant* o : list) {
+        cRZString name;
+        if (sc4::cISCPropertyHolder* holder = o->AsPropertyHolder()) sc4::cSCPropertyHelp::GetPropertyValue(holder, 0x00000020, name);
+        float p[3];
+        o->GetPosition(p);
+        std::printf("probe: %s at %.0f,%.0f %s\n", name.str().c_str(), p[0], p[2], DescribeOccupantModels(o).c_str());
+    }
+    manager->ReleaseOccupantList(list);
+    manager->Release();
 }
 
 sc4::cSC43DRender* g_cityRender = nullptr;

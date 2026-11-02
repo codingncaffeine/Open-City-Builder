@@ -13,7 +13,11 @@
 #include "gz/cGZPersistResourceManager.h"
 #include "gz/cIGZPersistDBSerialRecord.h"
 #include "render/gd/IGZGDriver.h"
+#include "render/gd/GLGDriver.h"
 #include "s3d/FSH.h"
+#include "sc4/CameraControl.h"
+#include "sc4/QuadGrid.h"
+#include <set>
 #include "s3d/MaterialManager.h"
 #include "s3d/ModelInstance.h"
 #include "s3d/S3DModel.h"
@@ -47,6 +51,7 @@ int g_modelsLoaded = 0, g_modelsFailed = 0, g_instances = 0, g_inserted = 0;
 struct TextureBinding {
     const std::uint32_t* record = &id;
     std::uint32_t id = 0;
+    int width = 0, height = 0;   // SC4_TEXDEBUG
 };
 const TextureBinding* TextureRecord(std::uint32_t group, std::uint32_t instance) {
     static std::map<std::pair<std::uint32_t, std::uint32_t>, std::unique_ptr<TextureBinding>> cache;
@@ -66,7 +71,11 @@ const TextureBinding* TextureRecord(std::uint32_t group, std::uint32_t instance)
     for (std::size_t p = 0; p + 3 < rgba.size(); p += 4) std::swap(rgba[p], rgba[p + 2]);   // RGBA -> BGRA
     const std::uint32_t id = g_driver->CreateTexture(4, static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h), 1, 1);
     g_driver->LoadTextureLevel(id, 0, 0, 0, static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h), 3, 1, static_cast<std::uint32_t>(w), rgba.data());
+    static const char* only = std::getenv("SC4_GDONLYTEX");   // debug: draw only the meshes of this FSH instance
+    if (only && std::strtoul(only, nullptr, 16) == instance) gd::cGLGDriver::SetDebugOnlyTexture(id);
     slot->id = id;
+    slot->width = w;
+    slot->height = h;
     return slot.get();
 }
 
@@ -222,7 +231,52 @@ public:
         }
         meshes_ = frameMeshes_[0];
         materials_ = frameMaterials_[0];
+        static const bool texDebug = std::getenv("SC4_TEXDEBUG") != nullptr;
+        if (texDebug) {   // the model, its extent and every texture it binds with the texture's size
+            std::string line = " vfmt";
+            for (const s3d::VertexGroup& g : model.vertexGroups) {
+                char part[24];
+                std::snprintf(part, sizeof part, " %x/%u", g.format, g.stride);
+                line += part;
+                if (g.stride == 20 && g.count) {   // position + uv: the uv rectangle the group samples
+                    float lo[2] = {1e9f, 1e9f}, hi[2] = {-1e9f, -1e9f};
+                    for (std::size_t v = 0; v < g.count; ++v) {
+                        float uv[2];
+                        std::memcpy(uv, g.data.data() + v * 20 + 12, 8);
+                        for (int k = 0; k < 2; ++k) { lo[k] = std::min(lo[k], uv[k]); hi[k] = std::max(hi[k], uv[k]); }
+                    }
+                    char box[64];
+                    std::snprintf(box, sizeof box, " uv[%.3f,%.3f..%.3f,%.3f]", lo[0], lo[1], hi[0], hi[1]);
+                    line += box;
+                }
+            }
+            for (const s3d::Material& m : model.materials)
+                for (const auto& t : m.textures) {
+                    const TextureBinding* b = TextureRecord(group, t.instance);
+                    char part[48];
+                    std::snprintf(part, sizeof part, " %08x:%dx%d", t.instance, b->width, b->height);
+                    line += part;
+                }
+            std::fprintf(stderr, "s3d model %08x/%08x size %.1f x %.1f x %.1f tex%s\n", group, GetInstance(), bounds_.max[0] - bounds_.min[0],
+                         bounds_.max[1] - bounds_.min[1], bounds_.max[2] - bounds_.min[2], line.c_str());
+        }
         return !meshes_.empty();
+    }
+
+    // SC4_TEXDEBUG / the probe: "group/instance tex instance:WxH ..." of frame 0's materials.
+    std::string Describe() {
+        char head[48];
+        std::snprintf(head, sizeof head, "%08x/%08x", GetGroup(), GetInstance());
+        std::string line = head;
+        for (const s3d::cS3DMaterial& m : materials_)
+            for (int i = 0; i < m.layerCount && i < 2; ++i) {
+                const auto* binding = reinterpret_cast<const TextureBinding*>(m.layers[i].texture);
+                char part[48];
+                std::snprintf(part, sizeof part, " %08x:%dx%d", m.layers[i].textureId, binding ? binding->width : -1,
+                              binding ? binding->height : -1);
+                line += part;
+            }
+        return line;
     }
 
 private:
@@ -469,7 +523,7 @@ public:
     void RefreshViewFilter() override {}
     bool RendererHasModelInstance(s3d::cIS3DModelInstance* instance) override { return g_render && g_render->IsModelInserted(instance); }
     void RendererUpdateModelInstance(s3d::cIS3DModelInstance* instance) override { if (g_render) g_render->MoveModel(instance); }
-    void RendererAddModelInstance(s3d::cIS3DModelInstance* instance, int) override { if (g_render) g_render->InsertModel(instance); }
+    void RendererChangeModelInstance(s3d::cIS3DModelInstance* instance, int code) override { if (g_render) g_render->ChangeModel(instance, code); }
     cIGZUnknown* ViewUtilities() override { return nullptr; }
     int ViewZoom() override { const SC4ViewUtilities* v = Utilities(); return v ? v->Zoom() : 0; }
     int ViewRotation() override { const SC4ViewUtilities* v = Utilities(); return v ? v->Rotation() : 0; }
@@ -592,4 +646,65 @@ bool AttachModelMaker(sc4::cSC43DRender& render, sc4::cSC4City& city) {
 
 namespace native {
 unsigned int FshTextureId(unsigned int group, unsigned int instance) { return TextureRecord(group, instance)->id; }
+
+// Debug (scenario `audit`): the renderer's grid models whose resource was made for another zoom than the camera's, and
+// whether their owner's placeable still holds them (a model left in the renderer after its owner dropped it draws on).
+void AuditRendererModels() {
+    if (!g_render || !g_render->QuadGrid()) return;
+    sc4::cSC4CameraControl* camera = g_render->GetCameraControl();
+    const int zoom = camera ? camera->Zoom() : -1;
+    SC4QuadGrid& grid = *g_render->QuadGrid();
+    std::set<SC4GridElement*> seen;
+    for (int x = 0; x < grid.Dimension(); ++x)
+        for (int z = 0; z < grid.Dimension(); ++z)
+            for (SC4GridElement* e : grid.Quadrant(x, z).elements) seen.insert(e);
+    int total = 0, wrong = 0, orphaned = 0, printed = 0;
+    for (SC4GridElement* e : seen) {
+        auto* element = static_cast<::SC43DGridElement*>(e);
+        if (!element->model) continue;
+        auto* res = dynamic_cast<ResModel*>(element->model->GetResModel());
+        if (!res || res->GetGroup() != 0xbadb57f1) continue;   // building-style models
+        ++total;
+        const int modelZoom = static_cast<int>((res->GetInstance() >> 8) & 0xf);
+        if (modelZoom == zoom) continue;
+        ++wrong;
+        bool held = false;
+        void* raw = nullptr;
+        cIGZUnknown* owner = element->model->GetOwner();
+        if (owner && owner->QueryInterface(0x26bb767e, &raw) && raw) {
+            auto* occupant = static_cast<sc4::cISC4Occupant*>(raw);
+            if (sc4::cISC43DPlaceableObject* placeable = occupant->GetPlaceableObject()) {
+                std::uint32_t count = static_cast<std::uint32_t>(placeable->GetModelCount());
+                std::vector<sc4::cIS3DModelInstance*> held_(count);
+                if (count) placeable->GetModels(held_.data(), count);
+                for (auto* m : held_) held = held || reinterpret_cast<s3d::cIS3DModelInstance*>(m) == element->model;
+            }
+            occupant->Release();
+        }
+        if (!held) ++orphaned;
+        if (printed++ < 10)
+            std::printf("audit: model %08x (zoom %d) flags %04x owner %p held %d\n", res->GetInstance(), modelZoom, element->flags,
+                        static_cast<void*>(owner), int(held));
+    }
+    std::printf("audit: camera zoom %d: %d building models in the renderer, %d made for another zoom, %d not held by their owner\n",
+                zoom, total, wrong, orphaned);
+}
+
+std::string DescribeOccupantModels(sc4::cISC4Occupant* occupant) {
+    sc4::cISC43DPlaceableObject* placeable = occupant ? occupant->GetPlaceableObject() : nullptr;
+    if (!placeable) return "no placeable";
+    std::uint32_t count = static_cast<std::uint32_t>(placeable->GetModelCount());
+    std::vector<sc4::cIS3DModelInstance*> held(count);
+    if (count) placeable->GetModels(held.data(), count);
+    std::vector<s3d::cIS3DModelInstance*> models;
+    for (sc4::cIS3DModelInstance* m : held) models.push_back(reinterpret_cast<s3d::cIS3DModelInstance*>(m));   // as AddModelToRenderer
+    char head[64];
+    std::snprintf(head, sizeof head, "zooms %x models %u:", placeable->GetZoomLevelsCreatedFor(), count);
+    std::string out = head;
+    for (s3d::cIS3DModelInstance* model : models) {
+        auto* res = model ? dynamic_cast<ResModel*>(model->GetResModel()) : nullptr;
+        out += res ? " [" + res->Describe() + "]" : " [?]";
+    }
+    return out;
+}
 }  // namespace native

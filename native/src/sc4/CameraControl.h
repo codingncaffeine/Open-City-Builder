@@ -135,6 +135,11 @@ public:
     bool SetViewTargetVelocity(const cS3DVector3& velocity);         // 0x10076bffc
     void GetViewportSize(int& width, int& height) const { width = viewportW_; height = viewportH_; }   // 0x10076c07a
     void SetViewportSize(int width, int height);                     // 0x10076c090
+    // Window pixels per logical (game-resolution) pixel. The original draws the city texel for pixel; with a UI scale the
+    // viewport is logical while the scene rasterises at full resolution, so the projection works in real pixels: the city
+    // keeps the original's pixel size (more of it shows) and its pre-rendered building textures stay sharp. 1 = the original.
+    static void SetDevicePixelScale(float scale);
+    static float DevicePixelScale();
     void GetDistancesToClipPlanes(float& nearPlane, float& farPlane) const { nearPlane = near_; farPlane = far_; }   // 0x10076c0ba
     void SetCameraPositionTweakAdd(float x, float y);                // 0x10076c0d6
     void SetCitySize(float x, float z);                              // 0x10076c114

@@ -415,12 +415,20 @@ void cSC4CameraControl::SendPreViewChangeMessage(std::uint32_t kind) {
     message->Release();
 }
 
+namespace {
+float g_devicePixelScale = 1.0f;
+}  // namespace
+
+void cSC4CameraControl::SetDevicePixelScale(float scale) { g_devicePixelScale = scale > 0.0f ? scale : 1.0f; }
+float cSC4CameraControl::DevicePixelScale() { return g_devicePixelScale; }
+
 void cSC4CameraControl::UpdateCameraZoomAndRotationParams() {
     const int zoom = zoom_;
     const int pixels = kViewportCellPixelWidth[zoom];
     const float mag = magnification_;
     const float cityWidth = CityWidthFromOrthoView(16.0f, zoom);
-    const float pixelMag = float(pixels) * mag;
+    // logical pixels per cell: a logical pixel spans `scale` window pixels, so a cell keeps the original's window pixel width
+    const float pixelMag = float(pixels) * mag / g_devicePixelScale;
     worldPerPixel_ = cityWidth / pixelMag;
     pixelPerWorld_ = pixelMag / cityWidth;
     const float yaw = yaw_;
@@ -473,8 +481,10 @@ void cSC4CameraControl::UpdateCameraPositionParams() {
         if (float(upper) != v || IsNaN(float(upper)) || IsNaN(v)) upper = lower;
         return upper;
     };
-    const int px = roundDown(screen.x), py = roundDown(screen.y);
-    const cS3DVector2 offset{(screen.x - float(px)) + tweakX_, tweakY_ - (screen.y - float(py))};
+    // snapped to whole window pixels: logical coordinates times the device pixel scale (identical at scale 1)
+    const float s = g_devicePixelScale;
+    const float sx = float(roundDown(screen.x * s)) / s, sy = float(roundDown(screen.y * s)) / s;
+    const cS3DVector2 offset{(screen.x - sx) + tweakX_, tweakY_ - (screen.y - sy)};
     camera_->SetViewportOffset(offset);
     const cS3DTransform& v = camera_->ViewXform();
     viewDir_ = cS3DVector3{-v.rotation[2][0], -v.rotation[2][1], -v.rotation[2][2]};

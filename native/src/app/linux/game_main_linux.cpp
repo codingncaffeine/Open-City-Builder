@@ -35,7 +35,9 @@
 #include "app/NativeCity.h"
 #include "app/NativeAnimationTicks.h"
 #include "platform/PerfLog.h"
+#include "sc4/CameraControl.h"
 #include "app/NativeCityView.h"
+#include "app/NativeModelMaker.h"
 #include "app/NativeFonts.h"
 #include "app/NativeGraphics.h"
 #include "app/NativeRegion.h"
@@ -976,6 +978,19 @@ int RunScenario(const std::string& path) {
             }
             push(SDL_EVENT_MOUSE_BUTTON_UP, x + dx, y + dy); PumpEvents(); Frame(); Nap();
             for (int i = 0; i < 5; ++i) { PumpEvents(); Frame(); Nap(); }
+        } else if (command == "audit") {   // audit: renderer models made for another zoom (stale models drawing over new ones)
+            native::AuditRendererModels();
+        } else if (command == "probe") {   // probe X Y: the buildings around the ground under a logical view point
+            int px = 0, py = 0;
+            words >> px >> py;
+            float hit[3] = {};
+            sc4::cSC4View3DWin* view = gAppWindow ? gAppWindow->View3D() : nullptr;
+            if (view && view->PickTerrain(px, py, hit, true)) {
+                std::printf("probe %d,%d: ground %.0f,%.0f\n", px, py, hit[0], hit[2]);
+                native::ProbeBuildingsAt(hit[0], hit[2], 24.0f);
+            } else {
+                std::printf("probe %d,%d: no ground\n", px, py);
+            }
         } else if (command == "tap") {   // a single click (toolbar buttons toggle: a double click turns them on and off again)
             int x = 0, y = 0; words >> x >> y;
             gMgr->GZWinMsgPost_Mouse(kGZMsgMouseMove, x, y, 0);
@@ -1098,6 +1113,7 @@ int main(int argc, char** argv) {
     gW = std::max(640, int(std::lround(windowW / uiScale)));
     gH = std::max(480, int(std::lround(windowH / uiScale)));
     std::printf("display: window %dx%d pixels, UI scale %.2f -> game resolution %dx%d\n", windowW, windowH, uiScale, gW, gH);
+    sc4::cSC4CameraControl::SetDevicePixelScale(float(windowH) / float(gH));   // the city at window resolution, texel for pixel
     native::SetGameResolution(gW, gH, usable.w, usable.h);
     native::SetDisplayGeometry(windowW, windowH, gH);
     // The shot and scenario runs draw into a hidden window: the frame target is offscreen anyway, the window only holds the context.

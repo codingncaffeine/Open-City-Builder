@@ -3,6 +3,8 @@
 // the two destructors, 0x030 Write, 0x038 Read, 0x040 GetGZCLSID; the second group (+8, 0x100a97248) is the
 // cIGZSerializable view with the three thunks and Write / Read / GetGZCLSID.
 #include "sc4/ModelMaker.h"
+
+#include <map>
 #include "platform/PerfLog.h"
 
 #include <algorithm>
@@ -715,7 +717,7 @@ void cSC4ModelMaker::DoOccupantHilighted(cISC4Occupant* occupant, int from, int 
         attributes.flags = (attributes.flags & ~1u) | (to != 0 ? 1u : 0u);
         attributes.flags = (attributes.flags & 0xffff00ffu) | (static_cast<std::uint32_t>(to & 0xff) << 8);
         instance->SetDrawAttributes(attributes);
-        if (g_host && g_host->RendererHasModelInstance(instance)) g_host->RendererAddModelInstance(instance, 1);
+        if (g_host && g_host->RendererHasModelInstance(instance)) g_host->RendererChangeModelInstance(instance, 1);
     }
 }
 
@@ -854,6 +856,34 @@ void cSC4ModelMaker::DoZoomAndRotationChange(int oldZoom, int oldRotation, int z
         if (!list.empty()) {
             inViewIteration_ = true;
             for (cISC4Occupant* occupant : list) LoadOccupantModelsForZoomAndRotation(occupant, zoom, rotation);
+            static const bool modelDebug = std::getenv("SC4_MODELDEBUG") != nullptr;
+            if (modelDebug) {   // occupants whose models were not made for the new view, counted by type and name
+                std::map<std::string, int> stale;
+                int total = 0;
+                for (cISC4Occupant* occupant : list) {
+                    cISC43DPlaceableObject* placeable = Placeable(occupant);
+                    if (!placeable) continue;
+                    const std::uint32_t zooms = placeable->GetZoomLevelsCreatedFor(), rotations = placeable->GetRotationsCreatedFor();
+                    if ((zooms >> zoom & 1) && (rotations >> rotation & 1)) continue;
+                    cRZString name;
+                    cISCPropertyHolder* holder = occupant->AsPropertyHolder();
+                    if (holder) cSCPropertyHelp::GetPropertyValue(holder, 0x00000020, name);
+                    char key[160];
+                    std::snprintf(key, sizeof key, "type %08x zooms %x models %u %s", occupant->GetType(), zooms, placeable->GetModelCount(),
+                                  name.str().c_str());
+                    ++stale[key];
+                    ++total;
+                }
+                std::map<std::uint32_t, int> modelCounts;   // buildings by how many model instances they hold
+                for (cISC4Occupant* occupant : list) {
+                    if (occupant->GetType() != 0x278128a0) continue;
+                    if (cISC43DPlaceableObject* placeable = Placeable(occupant)) ++modelCounts[placeable->GetModelCount()];
+                }
+                for (const auto& [models, count] : modelCounts) std::fprintf(stderr, "ModelMaker: %d buildings hold %u models\n", count, models);
+                for (const auto& [key, count] : stale) std::fprintf(stderr, "ModelMaker: stale x%d %s\n", count, key.c_str());
+                std::fprintf(stderr, "ModelMaker: zoom %d rotation %d: %d of %zu occupants keep models of another view\n", zoom, rotation,
+                             total, list.size());
+            }
             occupantManager_->ReleaseOccupantList(list);
             inViewIteration_ = false;
             const SC4RectT<int> city{0, 0, citySizeX_ - 1, citySizeZ_ - 1};
@@ -966,7 +996,7 @@ bool cSC4ModelMaker::ChangeModels(cISC4Occupant* occupant, std::uint32_t type, i
     for (std::uint32_t i = 0; i < models.count(); ++i) {
         s3d::cIS3DModelInstance* instance = models.data()[i];
         if (g_host && g_host->RendererHasModelInstance(instance)) {
-            g_host->RendererAddModelInstance(instance, layer);
+            g_host->RendererChangeModelInstance(instance, layer);
         }
     }
     return true;
@@ -1026,6 +1056,19 @@ bool cSC4ModelMaker::OccupantFilterIterationFunction(cISC4Occupant* occupant) {
 
 bool cSC4ModelMaker::AddModels(cISC4Occupant* occupant, int zoom, int rotation, std::uint32_t type, bool visible) {
     if (!occupant) return false;
+    static const char* onlyName = std::getenv("SC4_ONLYBUILDING");   // debug: buildings whose exemplar name lacks this get no models
+    if (onlyName && type == kModelOccupantTypeBuilding) {
+        cRZString name;
+        if (cISCPropertyHolder* holder = occupant->AsPropertyHolder()) cSCPropertyHelp::GetPropertyValue(holder, 0x00000020, name);
+        bool keep = false;   // a list separated by '|'
+        for (std::string rest = onlyName; !keep;) {
+            const std::size_t bar = rest.find('|');
+            keep = name.str().find(rest.substr(0, bar)) != std::string::npos;
+            if (bar == std::string::npos) break;
+            rest = rest.substr(bar + 1);
+        }
+        if (!keep) return false;
+    }
     SC4CellRect cells{};
     occupant->GetBoundingCityCells(cells);
     if (cells.x1 < loadRect_.x0 || loadRect_.x1 < cells.x0 || cells.z1 < loadRect_.z0 ||
@@ -1641,13 +1684,14 @@ void cSC4ModelMaker::DoBuildingCompletionChanged(cISC4BuildingOccupant* building
         ++transform.changeCounter;
         transform.flags |= nS3D::kTransformTranslation;
         instance->SetTransform(transform);
-        std::uint32_t properties = static_cast<std::uint32_t>(instance->GetProperties());
-        if (completion >= 1.0f) {
-            if ((properties & 1u) != 0) instance->SetProperties(static_cast<int>(properties & ~1u));
-        } else {
-            if ((properties & 1u) == 0) instance->SetProperties(static_cast<int>(properties | 1u));
+        // bit 0 of the instance properties marks an unfinished building; a change of it is a draw-property change (5)
+        const std::uint32_t properties = static_cast<std::uint32_t>(instance->GetProperties());
+        const bool unfinished = completion < 1.0f;
+        if (unfinished != ((properties & 1u) != 0)) {
+            instance->SetProperties(static_cast<int>(unfinished ? (properties | 1u) : (properties & ~1u)));
+            if (g_host->RendererHasModelInstance(instance)) g_host->RendererChangeModelInstance(instance, 5);
         }
-        if (g_host->RendererHasModelInstance(instance)) g_host->RendererAddModelInstance(instance, 5);
+        if (g_host->RendererHasModelInstance(instance)) g_host->RendererUpdateModelInstance(instance);   // the new position
     }
     placeable->Release();
 }

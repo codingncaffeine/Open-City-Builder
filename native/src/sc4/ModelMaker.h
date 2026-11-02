@@ -235,7 +235,10 @@ public:
     // The renderer (SL::spRenderer is the view's renderer): vslot 0xd8 Has, 0xf0 update, 0xf8 add(instance, layer).
     virtual bool RendererHasModelInstance(s3d::cIS3DModelInstance* instance) = 0;
     virtual void RendererUpdateModelInstance(s3d::cIS3DModelInstance* instance) = 0;
-    virtual void RendererAddModelInstance(s3d::cIS3DModelInstance* instance, int layer) = 0;
+    // renderer vslot +0x7c (i386): ChangeModel(instance, code) for a model the renderer already holds (1 highlight, 2 / 3 a
+    // layer refresh, 5 draw properties). Not an insert: inserting again built a second grid element that outlived the model's
+    // removal, so a zoom change left the old zoom's model drawing over the new one.
+    virtual void RendererChangeModelInstance(s3d::cIS3DModelInstance* instance, int code) = 0;
     // SL::spViewUtilities (the object is borrowed; the model maker only reads the fields below through the host).
     virtual cIGZUnknown* ViewUtilities() = 0;
     // SL::spViewUtilities: +0x14 zoom, +0x18 rotation, +0x24 rotation angle, +0x15c viewport units per world unit.

@@ -671,6 +671,8 @@ IBackingStore* cGLGDriver::BackingStore() { return &impl_->store; }
 
 std::uint32_t cGLGDriver::DrawCalls() const { return impl_->draws; }
 void cGLGDriver::DetachContext() { impl_->contextGone = true; }
+namespace { std::uint32_t g_onlyTexture = 0; }
+void cGLGDriver::SetDebugOnlyTexture(std::uint32_t id) { g_onlyTexture = id; }
 std::uint32_t cGLGDriver::PipelineCount() const { return static_cast<std::uint32_t>(impl_->programs.size()); }
 
 // ---- state ----
@@ -992,6 +994,7 @@ void cGLGDriver::Encode(unsigned primitive, const std::uint8_t* vertices, int ve
         s.lastInfo = &s.programInfo[s.lastProgram];
         s.lastKey = key;
     }
+    if (g_onlyTexture && (!key.on[0] || s.cfg[0].texture != g_onlyTexture)) return;   // debug: draws of one texture only
     const GLuint program = s.lastProgram;
     s.SyncState(mirror_, program);
     Impl::Shadow& h = s.shadow;

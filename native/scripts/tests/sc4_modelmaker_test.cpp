@@ -13,6 +13,7 @@
 #include "rz/cRZVersion.h"
 #include "sc4/Lot.h"
 #include "sc4/ModelMaker.h"
+#include "sc4/BuildingOccupant.h"
 #include "sc4/Occupant.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/ZoneDeveloper.h"
@@ -344,6 +345,35 @@ struct FakeResourceManager final : cIGZPersistResourceManager {
 };
 
 // The occupant manager: every query returns the scripted occupant list.
+// A building occupant for DoBuildingCompletionChanged (its occupant and completion only).
+struct FakeBuildingOccupant final : sc4::cISC4BuildingOccupant {
+    cISC4Occupant* occupant = nullptr;
+    float completion = 1.0f;
+    sc4::BuildingProfile profile;
+    cRZString name;
+    std::uint32_t refs = 1;
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return ++refs; }
+    std::uint32_t Release() override { return refs > 1 ? --refs : refs; }
+    cISC4Occupant* AsOccupant() override { return occupant; }
+    std::uint32_t GetBuildingType() const override { return 0; }
+    void SetBuildingType(std::uint32_t) override {}
+    std::int32_t GetBuildingAge() const override { return 0; }
+    void SetBuildingAge(std::int32_t) override {}
+    void SetBoundingBox(const float*, const float*) override {}
+    const float& GetCompletionPercent() override { return completion; }
+    void SetCompletionPercent(float value) override { completion = value; }
+    const sc4::BuildingProfile& GetBuildingProfile() const override { return profile; }
+    const cRZString& GetBuildingName() const override { return name; }
+    const cRZString& GetExemplarName() const override { return name; }
+    std::int32_t GetOrientation() const override { return 0; }
+    bool SetOrientation(std::int32_t) override { return true; }
+    bool IsLit() const override { return false; }
+    void SetLit(bool) override {}
+    void SetName(const cRZString&) override {}
+    bool GetName(cRZString&) override { return false; }
+};
+
 struct FakeOccupantManager final : cISC4OccupantManager {
     std::vector<cISC4Occupant*> occupants;
     cISC4OccupantFilter* lastFilter = nullptr;
@@ -603,7 +633,7 @@ struct FakeHost final : sc4::IModelMakerHost {
     std::string configIgnoreMissing;
     std::vector<int> zoomFilterValues;
     int filterRefreshes = 0;
-    int rendererAdds = 0;
+    int rendererChanges = 0;
     int rendererUpdates = 0;
     int shadowDecals = 0;
     int shadowQuality = 5;
@@ -623,7 +653,7 @@ struct FakeHost final : sc4::IModelMakerHost {
     float ShadowMinimumHeight() override { return shadowMinimum; }
     sc4::IShadowOverlay* ShadowOverlay(int) override { return &overlay; }
     std::vector<s3d::cIS3DModelInstance*> rendererModels;
-    std::vector<std::pair<s3d::cIS3DModelInstance*, int>> layerAdds;
+    std::vector<std::pair<s3d::cIS3DModelInstance*, int>> changeCodes;
 
     cIGZUnknown* Renderer() override { return reinterpret_cast<cIGZUnknown*>(resources); }
     cISC4OccupantFilter* CurrentViewFilter() override {
@@ -637,10 +667,10 @@ struct FakeHost final : sc4::IModelMakerHost {
         ++rendererUpdates;
         rendererModels.push_back(instance);
     }
-    void RendererAddModelInstance(s3d::cIS3DModelInstance* instance, int layer) override {
-        ++rendererAdds;
+    void RendererChangeModelInstance(s3d::cIS3DModelInstance* instance, int code) override {
+        ++rendererChanges;
         rendererModels.push_back(instance);
-        layerAdds.emplace_back(instance, layer);
+        changeCodes.emplace_back(instance, code);
     }
     int ViewZoom() override { return viewZoom; }
     int ViewRotation() override { return viewRotation; }
@@ -1146,23 +1176,23 @@ int main() {
             CHECK((model->transform.flags & nS3D::kTransformTranslation) != 0);
             CHECK((model->transform.flags & nS3D::kTransformRotation) != 0);
             // ChangeModels re-adds to the renderer with the layer argument (3 when zero)
-            const int addsBefore = host.rendererAdds;
+            const int changesBefore = host.rendererChanges;
             CHECK(maker->ChangeModels(occupant, 0, 0));
-            CHECK(host.rendererAdds == addsBefore + 1);
-            CHECK(host.layerAdds.back().second == 3);
+            CHECK(host.rendererChanges == changesBefore + 1);
+            CHECK(host.changeCodes.back().second == 3);
             CHECK(maker->ChangeModels(occupant, 0, 2));
-            CHECK(host.layerAdds.back().second == 2);
+            CHECK(host.changeCodes.back().second == 2);
             // the highlight path sets bit 0 and the highlight byte, then re-adds to the renderer
-            const int highlightAdds = host.rendererAdds;
+            const int highlightChanges = host.rendererChanges;
             maker->DoOccupantHilighted(occupant, 0, 3);
             CHECK((model->attributes.flags & 1u) == 1u);
             CHECK(((model->attributes.flags >> 8) & 0xff) == 3u);
-            CHECK(host.rendererAdds == highlightAdds + 1);
-            CHECK(host.layerAdds.back().second == 1);
+            CHECK(host.rendererChanges == highlightChanges + 1);
+            CHECK(host.changeCodes.back().second == 1);
             // old == new is a no-op
-            const int noAdds = host.rendererAdds;
+            const int noChanges = host.rendererChanges;
             maker->DoOccupantHilighted(occupant, 2, 2);
-            CHECK(host.rendererAdds == noAdds);
+            CHECK(host.rendererChanges == noChanges);
             // moving the occupant rewrites the translation only for props / flora
             model->transform.translation[0] = -1;
             maker->DoOccupantMoved(occupant, false, sc4::kModelOccupantTypeBuilding);
@@ -1173,6 +1203,27 @@ int main() {
             CHECK(model->transform.translation[0] == 100.0f);
             CHECK((model->transform.flags & nS3D::kTransformTranslation) != 0);
             CHECK(host.rendererUpdates == updatesBefore + 1);
+            // building completion (spec model-maker 9.5): the unfinished bit's flips are draw-property changes (renderer
+            // ChangeModel 5), every call moves the model (MoveModel). Re-inserting instead left a second grid element behind.
+            occupant->type = sc4::kModelOccupantTypeBuilding;
+            FakeBuildingOccupant building;
+            building.occupant = occupant;
+            model->properties &= ~1u;
+            const int completionChanges = host.rendererChanges, completionMoves = host.rendererUpdates;
+            building.completion = 0.5f;
+            maker->DoBuildingCompletionChanged(&building);
+            CHECK((model->properties & 1u) == 1u);
+            CHECK(host.rendererChanges == completionChanges + 1);
+            CHECK(host.changeCodes.back().second == 5);
+            CHECK(host.rendererUpdates == completionMoves + 1);
+            maker->DoBuildingCompletionChanged(&building);   // still unfinished: no change, a move
+            CHECK(host.rendererChanges == completionChanges + 1);
+            CHECK(host.rendererUpdates == completionMoves + 2);
+            building.completion = 1.0f;
+            maker->DoBuildingCompletionChanged(&building);
+            CHECK((model->properties & 1u) == 0u);
+            CHECK(host.rendererChanges == completionChanges + 2);
+            CHECK(host.rendererUpdates == completionMoves + 3);
             // RemoveModels clears the placeable object and calls RemoveAll
             CHECK(maker->RemoveModels(occupant, sc4::kModelOccupantTypeBuilding));
             CHECK(placeable->removeAllCalls == 1);

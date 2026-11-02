@@ -38,6 +38,7 @@ public:
     // The GL context is going away (the window closes, or the process exits with windows still alive): texture and target
     // deletes after this only forget their objects. A late delete through a dead context crashed at exit on NVIDIA.
     void DetachContext();
+    static void SetDebugOnlyTexture(std::uint32_t id);   // debug: skip every draw whose first stage is not this texture
 
     // ---- cIGZGDriver ----
     void Clear(std::uint32_t mask) override;

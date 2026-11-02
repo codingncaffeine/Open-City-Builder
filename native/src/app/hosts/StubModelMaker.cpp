@@ -18,7 +18,7 @@ struct StubModelMaker final : IModelMakerHost {
     void RefreshViewFilter() override {}
     bool RendererHasModelInstance(s3d::cIS3DModelInstance* instance) override { return {}; }
     void RendererUpdateModelInstance(s3d::cIS3DModelInstance* instance) override {}
-    void RendererAddModelInstance(s3d::cIS3DModelInstance* instance, int layer) override {}
+    void RendererChangeModelInstance(s3d::cIS3DModelInstance* instance, int code) override {}
     cIGZUnknown* ViewUtilities() override { return {}; }
     int ViewZoom() override { return {}; }
     int ViewRotation() override { return {}; }
