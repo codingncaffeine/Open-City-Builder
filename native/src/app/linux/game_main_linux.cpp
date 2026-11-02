@@ -30,6 +30,7 @@
 #include "platform/GameDataPath.h"
 #include "platform/PointerState.h"
 #include "sc4/RegionDialogs.h"
+#include "app/NativeBudgetUi.h"
 #include "app/NativeBoot.h"
 #include "app/NativeCity.h"
 #include "app/NativeAnimationTicks.h"
@@ -622,6 +623,7 @@ bool Boot() {
         callbacks.isRegionScreenCurrent = [] { return gAppWindow && gAppWindow->CurrentScreen() && gAppWindow->CurrentScreen()->GetID() == 0xea659793; };
         callbacks.destroyCurrentScreen = [] { if (gAppWindow) gAppWindow->DestroyCurrentScreen(); };
         callbacks.createRegionScreen = [] { if (gAppWindow) gAppWindow->CreateRegionScreen(); };
+        native::InstallLanguageFormatter();
         native::InstallRegionServices(*app, callbacks);
         // The app's questions (quit, save) are scripted dialogs answered by a button id, and its quit ends the main loop.
         // The city load installs the rest of these hooks; these two are needed from the region screen on.
@@ -648,6 +650,13 @@ bool Boot() {
         }
         cISC4Nation* nation = native::CreateNation();
         app->SetNation(nation);
+        if (const char* wanted = std::getenv("SC4_REGION")) {   // development: open this region's folder (the boot picks the first one listed)
+            for (std::uint32_t i = 0; i < nation->GetRegionCount(); ++i) {
+                cISC4Region* region = nation->GetRegion(i);
+                cIGZString* folder = region ? region->GetDirectoryName() : nullptr;
+                if (folder && !std::strcmp(folder->Data(), wanted)) nation->SetActiveRegion(i);
+            }
+        }
         std::printf("nation: regions dir \"%s\"\n", cSC4Nation::msRegionDirectory.ToChar());
         std::printf("nation: %u regions, active %d\n", nation->GetRegionCount(), nation->GetActiveRegionIndex());
     }

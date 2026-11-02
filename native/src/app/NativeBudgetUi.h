@@ -11,6 +11,7 @@ namespace native {
 
 void SetBudgetViewWindow(cIGZWin* view);              // the 3D view window the panel is created in (before AddGUI)
 sc4::IBudgetUIWindow* CreateBudgetUiWindow();         // one reference
+void InstallLanguageFormatter();                      // RZ::LM()'s number / money format, there from boot (the region signposts use it)
 bool BudgetUiOpen(cIGZUnknown* window);
 void BudgetUiRefresh(cIGZUnknown* window);
 

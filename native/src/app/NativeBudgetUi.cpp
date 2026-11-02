@@ -118,10 +118,14 @@ BudgetWindow* g_window = nullptr;
 
 void SetBudgetViewWindow(cIGZWin* view) { g_view = view; }
 
-sc4::IBudgetUIWindow* CreateBudgetUiWindow() {
-    static BudgetHost host;
+void InstallLanguageFormatter() {
     static EnglishFormatter formatter;
     sc4::SetLanguageFormatter(&formatter);
+}
+
+sc4::IBudgetUIWindow* CreateBudgetUiWindow() {
+    static BudgetHost host;
+    InstallLanguageFormatter();
     sc4::SetBudgetUIWinProcHost(&host);
     g_window = new BudgetWindow(new sc4::cSC4BudgetUIWinProc());
     g_window->AddRef();
