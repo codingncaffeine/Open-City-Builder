@@ -571,6 +571,10 @@ src/sc4/AircraftManager.cpp
 src/gz/gzcom_creators/cSC4PipeConnectionOccupant.cpp
 src/sc4/UndergroundConnectionOccupant.cpp
 src/sc4/PipeConnectionOccupant.cpp
+src/sc4/SubwayOccupant.cpp
+src/sc4/SubwayConnectionOccupant.cpp
+src/gz/gzcom_creators/cSC4SubwayOccupant.cpp
+src/gz/gzcom_creators/cSC4SubwayConnectionOccupant.cpp
 src/gz/gzcom_creators/cSC4CitySituationAdvice.cpp
 src/tools/city_probe_creators7.cpp
 src/app/hosts/IfaceITrafficAutomatonHost.cpp

@@ -365,6 +365,10 @@ src/sc4/FireTruck.cpp
 src/sc4/PatrolCar.cpp
 src/sc4/TrailerVehicle.cpp
 src/sc4/PipeConnectionOccupant.cpp
+src/sc4/SubwayOccupant.cpp
+src/sc4/SubwayConnectionOccupant.cpp
+src/gz/gzcom_creators/cSC4SubwayOccupant.cpp
+src/gz/gzcom_creators/cSC4SubwayConnectionOccupant.cpp
 src/sc4/PipeOccupant.cpp
 src/sc4/PowerPoleOccupant.cpp
 src/sc4/UndergroundConnectionOccupant.cpp
