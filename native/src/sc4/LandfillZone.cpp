@@ -1,4 +1,5 @@
 #include "sc4/LandfillZone.h"
+#include "sc4/DBSegment.h"
 
 #include <algorithm>
 #include <cmath>
@@ -350,7 +351,10 @@ bool cSC4LandfillZone::Write(cIGZOStream& stream) const {
     stream.SetSint32(rows_);
     for (const cGarbageHeap& heap : heaps_) heap.Write(stream);
     stream << connected_;
-    host_->WriteProp(stream, zot_);
+    // SC4WriteGZSerializable(zot): without the zone host (a zone loaded before one is installed) the record still holds the
+    // reference, written as null
+    if (host_) host_->WriteProp(stream, zot_);
+    else SC4WriteGZSerializable(stream, nullptr);
     return !stream.GetError();
 }
 
@@ -392,7 +396,13 @@ bool cSC4LandfillZone::Read(cIGZIStream& stream) {
             zot_ = nullptr;
             old->Release();
         }
-        zot_ = host_->ReadProp(stream);
+        if (host_) {
+            zot_ = host_->ReadProp(stream);
+        } else {   // no zone host: the reference is consumed
+            void* raw = nullptr;
+            SC4ReadGZSerializable(stream, 0x26bb767e, &raw, false);
+            if (raw) static_cast<cIGZUnknown*>(raw)->Release();
+        }
     }
     return !stream.GetError();
 }
