@@ -1,6 +1,7 @@
 // cSC4View3DWin — see View3DWin.h for the layout, the vtable groups, the seams and the quirks.
 #include "sc4/View3DWin.h"
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -3039,6 +3040,12 @@ bool cSC4View3DWin::GZPaint() {                                             // 0
             if (scrolling_ && cameraControl_) {
                 const bool scrolled = cameraControl_->ScrollByViewportAngle(scrollAngle_,
                                                                             dt * scrollSpeed_ * kScrollSpeedPerFrame);
+                static const bool trace = std::getenv("SC4_SCROLLDEBUG") != nullptr;
+                if (trace) {
+                    const cS3DVector3& t = cameraControl_->ViewTarget();
+                    std::fprintf(stderr, "scroll: elapsed %u us, step %.4f, target %.3f %.3f %.3f\n", elapsed,
+                                 dt * scrollSpeed_ * kScrollSpeedPerFrame, t.x, t.y, t.z);
+                }
                 if (scrollStopping_) {
                     const float previous = scrollSpeed_;
                     scrollSpeed_ = previous - scrollStopSpeed_;
@@ -3056,7 +3063,12 @@ bool cSC4View3DWin::GZPaint() {                                             // 0
             if (renderer_) {
                 void* drawContext = renderer_->GetDrawContext();
                 if (host_) host_->SetDrawContextFrameMarker(drawContext, frame);
+                static const bool profile = std::getenv("SC4_FRAMEPROF") != nullptr;
+                const auto drawStart = std::chrono::steady_clock::now();
                 renderer_->Draw();
+                if (profile)
+                    std::fprintf(stderr, "frame: scene %.1f\n",
+                                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - drawStart).count());
             }
         }
     }

@@ -57,7 +57,9 @@ bool MarchTerrain(sc4::cSTETerrain* terrain, const cS3DVector3& origin, const cS
         if (x < 0.0f || z < 0.0f || x >= terrain->CellCountX() * 16.0f || z >= terrain->CellCountZ() * 16.0f) return 1.0f;
         return y - terrain->GetAltitude(x, z);
     };
-    // walk down the line from well above the terrain until it goes under, then halve the step
+    // walk down the line from well above the terrain until it goes under, then halve the step. The camera asks from its own
+    // plane, thousands of metres up: the walk goes on until the line is below the lowest possible ground (altitude 0).
+    to = std::max(to, (origin.y + 16.0f) / -d.y);
     float t = from, step = 8.0f;
     if (above(t) <= 0.0f) return false;
     while (above(t + step) > 0.0f) {

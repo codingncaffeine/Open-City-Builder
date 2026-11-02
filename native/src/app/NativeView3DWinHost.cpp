@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include "sc4/View3DWin.h"
+#include "rz/cRZMessage2Standard.h"
 #include "app/NativeCity.h"
 #include "platform/Unwired.h"
 #include "app/NativeLighting.h"
@@ -128,7 +129,16 @@ struct StubView3DWin final : IView3DWinHost {
     // the preferences blob (0x1734 bytes): all defaults off (no edge scrolling)
     std::uint8_t* Preferences() override { static std::uint8_t blob[0x1734] = {}; return blob; }
     bool CityExists() override { return LoadedCity() != nullptr; }
-    void PostGameMessage(std::uint32_t type) override {}
+    // RZ::MS2 post of a bare message: scroll begin / end (the model maker pauses its per-step loading while the view
+    // scrolls) and render properties changed.
+    void PostGameMessage(std::uint32_t type) override {
+        if (!SL::spMS2) return;
+        auto* message = new cRZMessage2Standard();
+        message->AddRef();
+        message->SetType(type);
+        SL::spMS2->MessagePost(message, false);
+        message->Release();
+    }
     INotificationHelper3D* NotificationHelper() override { return &notifications_; }
     void RegisterCommandTable() override {}
     void UnregisterCommandTable() override {}
