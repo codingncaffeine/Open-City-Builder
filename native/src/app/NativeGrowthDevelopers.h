@@ -7,11 +7,15 @@
 #include <array>
 #include <vector>
 
+class cIGZUnknown;
 namespace sc4 { class cISCPropertyHolder; class cSC4LotConfiguration; class cISC4LotConfigurationFilter; template <class T> class cSC4SimGrid; class cSC4GrowthDeveloper; class cSC4Demand; }
 
 namespace native {
 
 void* NewGrowthDeveloper();                                          // new cSC4GrowthDeveloper, one reference
+void* AdoptGrowthDeveloper(cIGZUnknown* object);                     // a loaded cSC4GrowthDeveloper, one more reference; null if not one
+// The current city's developers (the building development simulator's map, NativeBuildingDevelopment.cpp)
+std::vector<void*> CityGrowthDeveloperHandles();
 bool GrowthDeveloperInit(void* developer, sc4::cISCPropertyHolder* exemplar);   // vslot 0x18
 void GrowthDeveloperStartMapUpdate(void* developer);                 // vslot 0xd8
 bool GrowthDeveloperMapUpdateFinished(void* developer);              // vslot 0xe0

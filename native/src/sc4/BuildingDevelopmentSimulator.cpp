@@ -452,6 +452,12 @@ bool cSC4BuildingDevelopmentSimulator::Init() {
     StaticInit();
     if (!placement_ && g_host) placement_ = g_host->PlacementServices();
     if (!tractDeveloper_ && g_host) tractDeveloper_ = g_host->TractDeveloper();    // SL::spTractDeveloper (+0xd0)
+    // A loaded city's developers are the record's (+0xb8 is read with them): CreateDeveloper below re-initialises them from their
+    // exemplars and keeps their maps, instead of making empty ones.
+    for (const auto& [key, object] : loadedDevelopers_)
+        if (placement_ && !developers_.count(key))
+            if (IGrowthDeveloperRef* developer = placement_->AdoptGrowthDeveloper(object)) developers_[key] = developer;
+    loadedDevelopers_.clear();
     // every exemplar of type 0x6534284a whose ExemplarType (0x10) is 4 (a simulator) that names a developer type makes a developer
     if (g_host) g_host->ForEachExemplarKey([this](const cGZPersistResourceKey& key) { InitDynamicDataFromExemplar(key, this); });
     ReadSimulatorTunableValues();
@@ -732,7 +738,11 @@ bool cSC4BuildingDevelopmentSimulator::ReadCityRecord(cIGZIStream& stream) {
     head.Ref(stream);
     count = head.U32(stream);                                  // the developers by key
     if (count > kMaxCount) return false;
-    for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) { head.U32(stream); head.Ref(stream); }
+    loadedDevelopers_.clear();
+    for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) {
+        const std::uint32_t key = head.U32(stream);
+        if (cIGZUnknown* developer = head.Ref(stream)) loadedDevelopers_.emplace_back(key, developer);
+    }
     count = head.U32(stream);                                  // occupants
     if (count > kMaxCount) return false;
     for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) head.Ref(stream);

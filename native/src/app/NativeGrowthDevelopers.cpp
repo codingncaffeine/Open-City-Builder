@@ -12,13 +12,23 @@
 namespace native {
 
 namespace {
-std::vector<sc4::cSC4GrowthDeveloper*> g_developers;   // every developer made (for the debug summary)
+// The current city's developers (a list of every developer ever made answered the first city's developer in the next city).
+std::vector<sc4::cSC4GrowthDeveloper*> Developers() {
+    std::vector<sc4::cSC4GrowthDeveloper*> out;
+    for (void* handle : CityGrowthDeveloperHandles()) out.push_back(static_cast<sc4::cSC4GrowthDeveloper*>(handle));
+    return out;
+}
 }
 
 void* NewGrowthDeveloper() {
     auto* developer = new sc4::cSC4GrowthDeveloper();
     developer->AddRef();
-    g_developers.push_back(developer);
+    return developer;
+}
+
+void* AdoptGrowthDeveloper(cIGZUnknown* object) {
+    auto* developer = dynamic_cast<sc4::cSC4GrowthDeveloper*>(object);
+    if (developer) developer->AddRef();
     return developer;
 }
 
@@ -38,13 +48,13 @@ float GrowthDeveloperActiveDemand(void* developer) {
     return demand ? demand->GetActiveValue() : 0.0f;
 }
 sc4::cSC4GrowthDeveloper* GrowthDeveloperOfType(std::uint32_t type) {
-    for (sc4::cSC4GrowthDeveloper* d : g_developers) if (static_cast<std::uint32_t>(d->GetSubType()) == type) return d;
+    for (sc4::cSC4GrowthDeveloper* d : Developers()) if (static_cast<std::uint32_t>(d->GetSubType()) == type) return d;
     return nullptr;
 }
 
 std::string GrowthDevelopersSummary() {
     std::string out;
-    for (sc4::cSC4GrowthDeveloper* d : g_developers) {
+    for (sc4::cSC4GrowthDeveloper* d : Developers()) {
         char line[96];
         sc4::IGrowthDemandApi* demand = d->GetSourceDemand();
         std::snprintf(line, sizeof line, " %x:%s%zu/%zu d%.0f", d->GetSubType(), d->GrowthAndDeclineListsAreValid() ? "" : "!",
@@ -231,10 +241,19 @@ struct GrowthHost final : IGrowthDeveloperHost {
         return nullptr;
     }
     void WriteGrid(cIGZOStream& stream, cIGZSerializable* grid) override { SC4WriteGZSerializable(stream, grid); }
+    // The read answers the grid interface (0xc9bd939a, the grid's first base); the developer wants its serializable view, a different
+    // sub-object (casting the pointer as it came landed 8 bytes off the grid). The read's reference is handed on.
     cIGZSerializable* ReadGrid(cIGZIStream& stream) override {
         void* out = nullptr;
-        SC4ReadGZSerializable(stream, 0xc9bd939a, &out, false);
-        return static_cast<cIGZSerializable*>(out);
+        if (!SC4ReadGZSerializable(stream, 0xc9bd939a, &out, false) || !out) return nullptr;
+        auto* grid = static_cast<cIGZUnknown*>(out);
+        void* view = nullptr;
+        if (!grid->QueryInterface(0xe4fda3d4, &view) || !view) {
+            grid->Release();
+            return nullptr;
+        }
+        grid->Release();   // the view's reference replaces the read's
+        return static_cast<cIGZSerializable*>(view);
     }
     static std::uint64_t NowMicros() {
         return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
@@ -276,7 +295,7 @@ sc4::cSC4SimGrid<std::int16_t>* GrowthDeveloperDesirabilityMap(std::uint32_t typ
 }
 std::vector<void*> AllGrowthDevelopers() {
     std::vector<void*> out;
-    for (sc4::cSC4GrowthDeveloper* d : g_developers) out.push_back(d);
+    for (sc4::cSC4GrowthDeveloper* d : Developers()) out.push_back(d);
     return out;
 }
 }  // namespace native

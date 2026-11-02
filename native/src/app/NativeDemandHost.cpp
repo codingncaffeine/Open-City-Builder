@@ -97,6 +97,20 @@ namespace {
 
 class DemandHost final : public IDemandSimulatorHost {
 public:
+    bool MessageLot(cIGZUnknown* object, std::uint32_t& buildingType, cISCPropertyHolder*& building) override {
+        buildingType = 0;
+        building = nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(kGZIID_PlainObject, &raw) || !raw) return false;
+        auto* lot = static_cast<cSC4Lot*>(raw);
+        buildingType = lot->GetBuildingType(true);
+        void* view = nullptr;
+        if (cIGZUnknown* occupant = lot->GetBuilding(); occupant && occupant->QueryInterface(kGZIID_cISC4Occupant, &view) && view) {
+            building = static_cast<cISC4Occupant*>(view)->AsPropertyHolder();
+            static_cast<cISC4Occupant*>(view)->Release();
+        }
+        return true;
+    }
     void AddShutdownCallback(bool (*)(void*), void*) override {}   // the app's shutdown callbacks: the native app tears the city down itself
     void AddNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->AddNotification(target, message); }
     void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->RemoveNotification(target, message); }

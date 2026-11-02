@@ -17,6 +17,7 @@
 #include "app/NativeLotSerial.h"
 #include "app/NativeZoneOverlay.h"
 #include "platform/Unwired.h"
+#include "rz/cRZMessage2Standard.h"
 #include "rz/cRZRandom.h"
 #include "sc4/BuildingOccupant.h"
 #include "sc4/LotBaseTextureOccupant.h"
@@ -27,6 +28,7 @@
 #include <memory>
 #include <unordered_set>
 #include <vector>
+#include "sc4/CommonIIDs.h"
 #include "sc4/DBSegment.h"
 #include "sc4/GrowthDeveloper.h"
 #include "sc4/LotConfigurationManager.h"
@@ -324,18 +326,51 @@ struct LotHost final : ILotHost {
     std::uint8_t ZoneTypeAt(int x, int z) override { cSC4ZoneManager* m = Zones(); return m ? static_cast<std::uint8_t>(m->GetZoneType(x, z)) : 0; }
     std::int32_t SimulatorDay() override { cSC4Simulator* sim = Component<cSC4Simulator>(CityComponent::Simulator, kGZCLSID_cSC4Simulator); return sim ? static_cast<std::int32_t>(sim->GetSimDateNumber()) : 0; }
     float TerrainAltitude(float x, float z) override { cSTETerrain* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
-    const LotBuildingProfile* BuildingProfile(std::uint32_t buildingType) override { return {}; }
+    const LotBuildingProfile* BuildingProfile(std::uint32_t buildingType) override { return NativeBuildingProfile(buildingType); }   // BDS vslot 0x138
     float SlopeOf(const cSC4Lot& lot) override { return {}; }
-    std::uint32_t DeveloperType(std::uint32_t purpose, std::int32_t wealth) override { return {}; }
+    std::uint32_t DeveloperType(std::uint32_t purpose, std::int32_t wealth) override { return NativeDeveloperType(purpose, wealth); }   // BDS vslot 0xf0
     void OnDeveloperLotAbandoned(std::uint16_t wealthIndex) override {}
     std::uint8_t LandValueAt(int x, int z) override { return {}; }
     std::uint32_t RandomPercent() override { static cRZRandom random(0x107u); return random.RandomUint32Uniform(100); }
     cISC4LotConfigurationRef* LotConfigurationById(std::uint32_t id) override { return NativeLotConfigurationRef(id); }
-    // PARTIAL: the message (0xe8bda2e7 and the condition change) is not posted to SL::spMS2; the lot developer, which turns a built
-    // lot's base texture, takes the state change directly.
-    void PostLotMessage(std::uint32_t message, const cSC4Lot& snapshot, std::uint32_t oldValue, std::uint32_t newValue, std::uint32_t, std::int32_t) override {
+    // The state change (0xe8bda2e7) goes to the lot developer directly (it turns a built lot's base texture) and to SL::spMS2's subscribers
+    // (the growth developers add the lot's capacity to their maps; data1/2 old/new state, data3 building type, data4 wealth, the lot as
+    // the message object). The lot travels as a copy. PARTIAL: the condition change is not posted.
+    void PostLotMessage(std::uint32_t message, const cSC4Lot& snapshot, std::uint32_t oldValue, std::uint32_t newValue, std::uint32_t buildingType,
+                        std::int32_t wealth) override {
         if (message != sc4::kMessageLotStateChanged) return;
         if (cSC4LotDeveloper* developer = LotDeveloper()) developer->DoLotStateChanged(snapshot, oldValue, newValue);
+        if (!SL::spMS2) return;
+        // Reference counted and on the heap: a message sent while the server is dispatching may be delivered later.
+        struct LotObject final : cIGZUnknown {   // the plain lot behind the message's object slot (a copy it owns)
+            explicit LotObject(const cSC4Lot& lot) : lot_(new cSC4Lot(lot)) { lot_->AddRef(); }
+            ~LotObject() { lot_->Release(); }
+            bool QueryInterface(std::uint32_t iid, void** out) override {
+                if (iid != kGZIID_PlainObject || !out) return false;
+                *out = lot_;   // borrowed, like every plain view
+                return true;
+            }
+            std::uint32_t AddRef() override { return ++refs_; }
+            std::uint32_t Release() override {
+                if (refs_ < 2) { delete this; return 0; }
+                return --refs_;
+            }
+            cSC4Lot* lot_;
+            std::uint32_t refs_ = 0;
+        };
+        auto* object = new LotObject(snapshot);
+        object->AddRef();
+        auto* m = new cRZMessage2Standard();
+        m->AddRef();
+        m->SetType(message);
+        m->SetData1(oldValue);
+        m->SetData2(newValue);
+        m->SetData3(buildingType);
+        m->SetData4(static_cast<std::uint32_t>(wealth));
+        m->SetIGZUnknown(object);
+        SL::spMS2->MessageSend(m);
+        m->Release();
+        object->Release();
     }
     void SetLotHighlight(int x, int z, bool on, float altitude) override {}
     std::int32_t TrafficJobs(const cSC4Lot& lot, int kind) override { return {}; }

@@ -104,6 +104,7 @@ private:
 class GrowthDeveloperRef final : public IGrowthDeveloperRef {
 public:
     GrowthDeveloperRef() : developer_(NewGrowthDeveloper()) {}
+    explicit GrowthDeveloperRef(void* adopted) : developer_(adopted) {}
     void Init(cISCPropertyHolder* properties) override { GrowthDeveloperInit(developer_, properties); }
     void StartMapUpdate() override { GrowthDeveloperStartMapUpdate(developer_); }
     bool IsMapUpdateFinished() const override { return GrowthDeveloperMapUpdateFinished(developer_); }
@@ -198,6 +199,10 @@ public:
         exemplar->Release();
     }
     IGrowthDeveloperRef* CreateGrowthDeveloper() override { return new GrowthDeveloperRef(); }
+    IGrowthDeveloperRef* AdoptGrowthDeveloper(cIGZUnknown* object) override {
+        void* developer = native::AdoptGrowthDeveloper(object);
+        return developer ? new GrowthDeveloperRef(developer) : nullptr;
+    }
     // PARTIAL: terrain vslot 0x44(rect, 0, 1); the highest terrain point of the footprint's corners and centre stands in.
     float SurfaceHeightForFootprint(const float rect[4]) override {
         sc4::cSTETerrain* terrain = Terrain();
@@ -318,6 +323,15 @@ cSC4BuildingDevelopmentSimulator* CityBuildingDevelopment() {
     return static_cast<cSC4BuildingDevelopmentSimulator*>(raw);
 }
 }  // namespace
+
+std::vector<void*> CityGrowthDeveloperHandles() {
+    std::vector<void*> out;
+    cSC4BuildingDevelopmentSimulator* simulator = CityBuildingDevelopment();
+    if (!simulator) return out;
+    for (const auto& [type, developer] : simulator->GetDevelopers())
+        if (auto* ref = dynamic_cast<GrowthDeveloperRef*>(developer)) out.push_back(ref->Handle());   // every developer this host made
+    return out;
+}
 
 // BDS vslot 0x1c AddNewBuildingOccupant(type, position, rotation): the inserted building (borrowed: the occupant manager holds it).
 sc4::cISC4BuildingOccupant* NativeAddNewBuildingOccupant(std::uint32_t type, float position[3], int rotation) {

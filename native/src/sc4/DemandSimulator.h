@@ -248,6 +248,13 @@ public:
     virtual void PostMessage(std::uint32_t type, std::uint32_t data1, std::int32_t data2) = 0;  // cISC4Demand::CalculateActiveDemand
     virtual std::uint32_t CurrentDayNumber() = 0;                                   // simulator +0x30 -> date +0xd0
     virtual std::uint64_t NowCycles() = 0;                                          // mach_absolute_time
+    // The lot of a lot-state message (its cIGZUnknown, QI'd for cISC4Lot 0xe818fced in the original): the lot's building type and its
+    // building's property holder (null without a building). False when the object is not a lot.
+    virtual bool MessageLot(cIGZUnknown*, std::uint32_t& buildingType, cISCPropertyHolder*& building) {
+        buildingType = 0;
+        building = nullptr;
+        return false;
+    }
     virtual float MillisecondsToCycles() = 0;                                       // cSC4LimitTimer::sMillisecsToCyclesCoeff
     // persistence / exemplars
     virtual void ExemplarKeysOfType(std::uint32_t type, std::vector<cGZPersistResourceKey>& out) = 0;  // RM +0x90

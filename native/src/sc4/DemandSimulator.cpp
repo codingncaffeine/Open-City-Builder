@@ -1277,7 +1277,10 @@ bool cSC4DemandSimulator::DoMessage(cIGZMessage2* message) {
     case kDemandMessageLotStateChanged: {
         cIGZUnknown* unknown = payload->GetIGZUnknown();
         if (!unknown) break;
-        auto* lot = static_cast<IDemandLotState*>(unknown);
+        // The object is resolved through the host (the port's lot is a plain class, not the IDemandLotState view the cast assumed).
+        std::uint32_t lotBuildingType = 0;
+        cISCPropertyHolder* holder = nullptr;
+        if (!g_host || !g_host->MessageLot(unknown, lotBuildingType, holder)) break;
         const std::uint64_t oldState = payload->GetData1();
         const std::uint64_t newState = payload->GetData2();
         std::uint32_t buildingType = static_cast<std::uint32_t>(payload->GetData3());
@@ -1286,14 +1289,12 @@ bool cSC4DemandSimulator::DoMessage(cIGZMessage2* message) {
         const bool newOccupied = (newState & 0xfeu) == 2u;
         if (oldOccupied == newOccupied) break;
         if (buildingType == 0) {
-            buildingType = lot->GetBuildingType(true);
+            buildingType = lotBuildingType;
             if (buildingType == 0) break;
         }
         bool ignore = false;
-        IDemandOccupant* building = lot->GetBuilding();
-        if (building) {
-            cISCPropertyHolder* holder = building->AsPropertyHolder();
-            if (holder) cSCPropertyHelp::GetPropertyValue(holder, kDemandPropBuildingIgnoreCapacity, ignore);
+        if (holder) {
+            cSCPropertyHelp::GetPropertyValue(holder, kDemandPropBuildingIgnoreCapacity, ignore);
             if (ignore) break;
         }
         AddAgentEffect(buildingType, newOccupied, SC4Percentage(1.0f));

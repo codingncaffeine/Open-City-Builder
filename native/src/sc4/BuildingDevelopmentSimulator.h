@@ -230,6 +230,8 @@ public:
     virtual float FoundationSurfaceHeight(const int cells[4], int which) = 0;   // this+0xd8 vslot 0x80(cells, which, 1)
     virtual void LoadBuildingProperties(IPlacedBuilding& building, std::uint32_t type) = 0;
     virtual IGrowthDeveloperRef* CreateGrowthDeveloper() = 0;               // new cSC4GrowthDeveloper (reference-initialised)
+    // a developer the city file's record holds (a cSC4GrowthDeveloper the load made); null when the object is not one
+    virtual IGrowthDeveloperRef* AdoptGrowthDeveloper(cIGZUnknown*) { return nullptr; }
     virtual float SurfaceHeightForFootprint(const float rect[4]) = 0;       // this+0xd8 vslot 0x88(rect, 0, 1)
     virtual void CellToPosition(int x, int z, float& px, float& pz) = 0;    // city (this+0x30) vslot 0x308
     virtual void PositionToCell(float x, float z, int& cx, int& cz) = 0;    // city vslot 0x2f8
@@ -379,6 +381,7 @@ private:
     IBuildingPlacementServices* placement_ = nullptr;
     int cityCellsX_ = 0, cityCellsZ_ = 0;                                       // +0x74, +0x78
     std::map<std::uint32_t, IGrowthDeveloperRef*> developers_;                  // +0xb8
+    std::vector<std::pair<std::uint32_t, cIGZUnknown*>> loadedDevelopers_;     // the record's developers by key until Init adopts them (the tape holds them)
     ITractDeveloperRef* tractDeveloper_ = nullptr;                              // +0xd0
     void* buildingMap_ = nullptr;                                               // +0x80
     std::list<DeclineEntry> declinePlan_;                                       // +0x110
