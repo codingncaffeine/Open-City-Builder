@@ -8,6 +8,7 @@
 #include "gz/cIGZMessage2.h"
 #include "rz/cRZString.h"
 #include "sc4/NetworkTool.h"
+#include "sc4/TileRules.h"
 
 static int failures = 0;
 #define CHECK(c)                                                       \
@@ -46,6 +47,11 @@ struct NetworkToolTestAccess {
     static float CellSize(const cSC4NetworkTool& t) { return t.cellSize_; }
     static bool HasBridgeTypes(const cSC4NetworkTool& t) { return t.hasBridgeTypes_; }
     static bool Inited(const cSC4NetworkTool& t) { return t.inited_; }
+    static void SolveMultiType(cSC4NetworkTool& t, const std::unordered_set<std::uint32_t>& cells, std::vector<std::uint32_t>& solved,
+                               std::uint32_t type) {
+        t.SolveMultiTypeIntersections(cells, solved, type);
+    }
+    static std::vector<tSolvedCell>& SolvedCellList(cSC4NetworkTool& t) { return t.solvedCellList_; }
 };
 }  // namespace sc4
 
@@ -969,6 +975,56 @@ int main() {
         CHECK(f.tool->DrawNetworkLine(start, end, true, 0));
         const std::vector<SC4PointU> down = {{4, 9}, {4, 8}, {4, 7}, {4, 6}};
         CHECK(A::Cells(*f.tool) == down);
+    }
+
+    // ---- the multitype rules: a crossing takes its piece, a type running along an allowed overrider gives way ----
+    {
+        using A = NetworkToolTestAccess;
+        Fixture f;
+        f.Init();
+        SetTileRuleResourceLoader([](const cGZPersistResourceKey& key, std::string& out) {
+            if (key.instance != 0x10000001) return false;
+            out = "[RoadStreetIntersectionSolutions]\n; road edges, street edges, piece, rotation, flip\n"
+                  "RNSS=0X00000200,0X02000000,0X00AA0100,0,0\nRWSN=0x00000002,0x00000200,0x00AA0200,0,1\n"
+                  "[AllowedOverrides]\n1 = Road , Street\n";
+            return true;
+        });
+        cSC4NetworkTool::ReloadRules();
+        cSC4NetworkCellInfo cell;
+        f.host.cell = &cell;
+        const std::uint32_t key = 5 | (7u << 16);
+        std::vector<std::uint32_t> solved;
+        // A street ending on the side of a road: the road (priority 3) keeps its edges, the pair has a piece.
+        cell.networkFlags = 0x1 | 0x8;
+        cell.tileNeighborhoods[0] = 0x00000200;
+        cell.tileNeighborhoods[3] = 0x02000000;
+        A::SolveMultiType(*f.tool, {key}, solved, 3);
+        CHECK(solved.size() == 1 && solved[0] == key);
+        const std::vector<tSolvedCell>& pieces = A::SolvedCellList(*f.tool);
+        CHECK(pieces.size() == 1 && pieces[0].pieceType == 0x00aa0100 && pieces[0].rotationFlip == 0 && pieces[0].cellKey == key);
+        CHECK(cell.solvedCellIndex == 0);
+        // The flip column sets 0x80 on the rotation.
+        solved.clear();
+        cell.tileNeighborhoods[0] = 0x00000002;
+        cell.tileNeighborhoods[3] = 0x00000200;
+        A::SolveMultiType(*f.tool, {key}, solved, 3);
+        CHECK(solved.size() == 1 && pieces.size() == 2 && pieces[1].pieceType == 0x00aa0200 && pieces[1].rotationFlip == 0x80);
+        // A street lying along the road: AllowedOverrides hands the cell to the road, no crossing piece.
+        solved.clear();
+        cell.networkFlags = 0x1 | 0x8;
+        cell.tileNeighborhoods[0] = 0x02000200;
+        cell.tileNeighborhoods[3] = 0x02000200;
+        A::SolveMultiType(*f.tool, {key}, solved, 3);
+        CHECK(solved.empty() && cell.networkFlags == 0x1 && cell.tileNeighborhoods[3] == 0);
+        // A pair with no override and no rules (rail 1 + street 8) is left as it was.
+        cell.networkFlags = 0x2 | 0x8;
+        cell.tileNeighborhoods[1] = 0x02000200;
+        cell.tileNeighborhoods[3] = 0x02000200;
+        A::SolveMultiType(*f.tool, {key}, solved, 3);
+        CHECK(solved.empty() && cell.networkFlags == (0x2 | 0x8) && cell.tileNeighborhoods[3] == 0x02000200);
+        f.host.cell = nullptr;
+        SetTileRuleResourceLoader(nullptr);
+        cSC4NetworkTool::ReloadRules();
     }
 
     // ---- Unregister the host and finish ---------------------------------------------------------------------

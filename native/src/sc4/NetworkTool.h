@@ -629,7 +629,7 @@ public:
     static bool StaticInit();                                             // 0x100186d04
     static bool StaticShutdown(void* user);                               // 0x100186d3e
     static void ReloadCheck();                                            // 0x10018774c (empty)
-    static void ReloadRules();                                            // 0x100186d56 — NOT RECOVERED (stub)
+    static void ReloadRules();                                            // 0x100186d56 — partial: the multitype rules
     static int GetNetworkTypeFromFlag(std::uint32_t flag);                // 0x10018f58a
     static int GetFirstNetworkTypeFromFlags(std::uint32_t flags);         // 0x100190386
     // 0x1001c2c10: fill waterBridgeTypes/landBridgeTypes from a bridge-type list (both are cleared first).
@@ -669,6 +669,10 @@ public:
     void MarkNeighborConnections();
     void BuildPaddedNetworkSet(const std::unordered_set<std::uint32_t>& set, std::unordered_set<std::uint32_t>& out, std::uint32_t pad);
     int SolveNetwork(std::uint32_t networkType, bool retry);
+    // i386 0x00147178: the cells two network types share. The lower-priority type gives way (overridden or trimmed
+    // to the edges the other lacks) and a remaining crossing takes its piece from the multitype rules.
+    void SolveMultiTypeIntersections(const std::unordered_set<std::uint32_t>& cells, std::vector<std::uint32_t>& solved,
+                                     std::uint32_t networkType);
     void SolveUsingEvaluator(std::unordered_set<std::uint32_t>& padded, std::unordered_set<std::uint32_t>& toSolve,
                              const cSC4TileEvaluator& evaluator, std::uint32_t networkType);
     void ApplyNetworkRules(std::unordered_set<std::uint32_t>& padded, std::unordered_set<std::uint32_t>& toSolve,
@@ -705,7 +709,11 @@ public:
 
 private:
     // Fields in original order; the comments carry the original offsets.
-    std::vector<std::uint32_t> unknown10_;                  // +0x010
+    // cSC4NetworkTool::tPotentialIntersection: a crossing the multitype rules solved (cell and its network flags).
+    struct tPotentialIntersection {
+        std::uint32_t x = 0, z = 0, networkFlags = 0;
+    };
+    std::vector<tPotentialIntersection> unknown10_;         // +0x010
     std::uint32_t refCount_ = 0;                            // +0x028
     bool inited_ = false;                                   // +0x02c (Init / Shutdown guard)
     std::uint8_t unknown2d_[3] = {0, 0, 0};                 // +0x02d

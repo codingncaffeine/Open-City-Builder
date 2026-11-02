@@ -27,6 +27,7 @@ namespace sc4 {
 // SC4GetResourceAsFile (0x10003a3d2) for the tokenizer: the resource's bytes, or false.
 using TileRuleResourceLoader = std::function<bool(const cGZPersistResourceKey&, std::string&)>;
 void SetTileRuleResourceLoader(TileRuleResourceLoader loader);
+bool LoadTileRuleResourceText(const cGZPersistResourceKey& key, std::string& out);   // through the installed loader
 
 class cSC4FileTokenizer final : public ITileTokenSource {
 public:

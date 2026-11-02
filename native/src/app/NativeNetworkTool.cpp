@@ -180,11 +180,11 @@ public:
         sc4::cISC4OccupantManager* occupants = Occupants();
         sc4::cISC4Occupant* occupant = nullptr;
         if (!occupants || !occupants->GetFirstOccupantByStandardCityCell(occupant, static_cast<int>(x), static_cast<int>(z), 0xc772bf98u) || !occupant) return nullptr;
-        void* raw = nullptr;
-        sc4::cSC4NetworkOccupant* network = nullptr;
-        if (occupant->QueryInterface(0xa821ef94u, &raw) && raw) network = dynamic_cast<sc4::cSC4NetworkOccupant*>(static_cast<cIGZUnknown*>(raw));
-        occupant->Release();
-        return network;   // the QueryInterface reference
+        // The original QIs 0xa821ef94; the port's network occupant does not answer that iid (other seams cast the
+        // result to their own interfaces), so the object is taken directly and keeps the lookup's reference.
+        auto* network = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);
+        if (!network) occupant->Release();
+        return network;
     }
     float WaterSurfaceAtVertex(std::int32_t x, std::int32_t z) override {
         sc4::cSTETerrain* t = Terrain();
@@ -314,6 +314,7 @@ void InstallNetworkTool(sc4::cSC4View3DWin& view, cISC4City* city) {
             return true;
         });
         std::printf("network tool: %d tile rule files loaded\n", sc4::LoadNetworkTileEvaluators());
+        sc4::cSC4NetworkTool::ReloadRules();   // the multitype rules need the loader too
     }
     sc4::SetNetworkToolUIHost(&g_uiHost);
     sc4::SetNetworkInputToolHost(&g_inputHost);

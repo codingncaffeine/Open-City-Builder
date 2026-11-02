@@ -163,13 +163,6 @@ bool cSC4NetworkTool::StaticShutdown(void* user) {
 // 0x10018774c
 void cSC4NetworkTool::ReloadCheck() {}
 
-// 0x100186d56 — NOT RECOVERED. It reads four ini resources (road/network type info, the multitype rules, the
-// tile-conflict overrides and the highway intersection rules) through cRZIniFile and hands them to
-// cSC4NetworkTypeInfo::Load* (0x1001c7308..0x1001c8b00) and SC4NetworkLoadOverrideMatrix (0x1001c6f23), none of
-// which are recovered yet. Keeping it a no-op leaves the network type records empty; every function that reads
-// them is marked recovered-partial in notes/ledger_pending/cSC4NetworkTool.txt.
-void cSC4NetworkTool::ReloadRules() {}
-
 // ============================================================================================================
 // Init / Shutdown / Reset
 // ============================================================================================================

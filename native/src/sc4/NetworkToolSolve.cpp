@@ -13,7 +13,12 @@
 
 #include <cfloat>
 #include <cstdio>
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <cstring>
+#include <map>
+#include <unordered_map>
 
 #include "sc4/NetworkOccupant.h"
 #include "sc4/NetworkWorldCache.h"
@@ -566,14 +571,18 @@ void cSC4NetworkTool::BuildPaddedNetworkSet(const std::unordered_set<std::uint32
 // the solve
 // ============================================================================================================
 
-// i386 0x00147a.. Returns the number of steps that solved (validSteps_ when all did).
+// i386 0x00147a26. Returns the number of steps that solved (validSteps_ when all did).
 int cSC4NetworkTool::SolveNetwork(std::uint32_t networkType, bool retry) {
-    (void)networkType;
     std::unordered_set<std::uint32_t> padded, removed;
     BuildPaddedNetworkSet(solvedCells_, padded, 2);
     AssignEdgeSubtypes(padded, removed, true);
     for (std::uint32_t key : removed) solvedCells_.erase(key);
-    // SolveMultiTypeIntersections (two network types crossing) is not ported: it only acts on multi-type cells.
+    std::vector<std::uint32_t> crossings;
+    SolveMultiTypeIntersections(solvedCells_, crossings, networkType);
+    for (std::uint32_t key : crossings) {
+        solvedCells_.erase(key);
+        padded.erase(key);
+    }
     for (std::uint32_t type = 0; type < 13; ++type) {
         for (cSC4TileEvaluator* evaluator : NetworkTileEvaluators(type)) {
             if (!evaluator) break;
@@ -596,6 +605,222 @@ int cSC4NetworkTool::SolveNetwork(std::uint32_t networkType, bool retry) {
         }
     }
     return result;
+}
+
+// ============================================================================================================
+// the multitype rules
+// ============================================================================================================
+
+namespace {
+
+// AppendNetworkName (i386 0x00152352): the names the multitype rule sections and AllowedOverrides use.
+constexpr const char* kNetworkNames[kNetworkTypeCount] = {"Road", "Rail", "Highway", "Street", "Pipe", "PowerLine", "Avenue",
+                                                       "Subway", "LightRail", "MonoRail", "OneWayRoad", "DirtRoad", "GroundHighway"};
+
+// tMixedTypeIntxSolution: the piece and its rotation (| 0x80 flipped) for one pair of edge configurations.
+struct tMixedTypeIntxSolution {
+    std::uint32_t pieceType = 0;
+    std::uint8_t rotationFlip = 0;
+};
+// cSC4NetworkTool::sAllMixedTypeSolutions: per type pair (lower type first), {lower type's edges, higher type's} ->
+// the solution.
+std::map<std::pair<std::uint32_t, std::uint32_t>, std::unordered_map<std::uint64_t, tMixedTypeIntxSolution>> g_mixedTypeSolutions;
+// The AllowedOverrides matrix (sNetworkTypeInfo +0xfc per type): bit t = this type may override type t.
+std::uint32_t g_overrideMatrix[kNetworkTypeCount] = {};
+
+// nSC4Networks::kNetworkMultitypePriority (i386 0x00845520): the higher value keeps its pieces in a shared cell.
+constexpr int kNetworkMultitypePriority[kNetworkTypeCount] = {3, 5, 6, 2, 1, 0, 4, 1, 7, 7, 3, 0, 5};
+
+// cRZIniFile's view of the text: section -> (key, value) lines in file order, ';' comments and blanks skipped.
+using IniSections = std::map<std::string, std::vector<std::pair<std::string, std::string>>>;
+std::string Lower(std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+std::string Trim(const std::string& s) {
+    const std::size_t a = s.find_first_not_of(" \t\r\n"), b = s.find_last_not_of(" \t\r\n");
+    return a == std::string::npos ? std::string() : s.substr(a, b - a + 1);
+}
+IniSections ParseIni(const std::string& text) {
+    IniSections sections;
+    std::vector<std::pair<std::string, std::string>>* current = nullptr;
+    std::size_t pos = 0;
+    while (pos < text.size()) {
+        std::size_t end = text.find('\n', pos);
+        if (end == std::string::npos) end = text.size();
+        const std::string line = Trim(text.substr(pos, end - pos));
+        pos = end + 1;
+        if (line.empty() || line[0] == ';') continue;
+        if (line[0] == '[') {
+            const std::size_t close = line.find(']');
+            current = &sections[Lower(line.substr(1, close == std::string::npos ? std::string::npos : close - 1))];
+        } else if (current) {
+            const std::size_t eq = line.find('=');
+            if (eq != std::string::npos) current->emplace_back(Trim(line.substr(0, eq)), Trim(line.substr(eq + 1)));
+        }
+    }
+    return sections;
+}
+// NetworkNameToID: the type of a name in kNetworkNames (case-insensitive), or -1.
+int NetworkNameToID(const std::string& name) {
+    for (std::uint32_t t = 0; t < kNetworkTypeCount; ++t)
+        if (Lower(name) == Lower(kNetworkNames[t])) return static_cast<int>(t);
+    return -1;
+}
+
+}  // namespace
+
+// i386 0x00125220 (0x100186d56). PORTED: the multitype rules {0x0a5bcf4b, 0xaa5bcf57, 0x10000001}
+// (ReadAllMultiTypeIntersectionSolutions + SC4NetworkLoadOverrideMatrix). Not yet: the network type info ini
+// (0x8a5971c5/0x8a5993b9, the host holds those records), the tile-conflict overrides (0x10000002) and the highway
+// intersection rules (0x10000000).
+void cSC4NetworkTool::ReloadRules() {
+    std::string text;
+    if (!LoadTileRuleResourceText(cGZPersistResourceKey{kNetworkRulesType, kNetworkRulesGroup, 0x10000001}, text)) return;
+    const IniSections sections = ParseIni(text);
+    // ReadAllMultiTypeIntersectionSolutions (0x0015486c): every pair a < b reads "[<a><b>IntersectionSolutions]",
+    // each value "edgesA,edgesB,piece,rotation,flip" (AddMultiTypeIntersectionSolution 0x001567e2).
+    g_mixedTypeSolutions.clear();
+    for (std::uint32_t a = 0; a < kNetworkTypeCount; ++a) {
+        for (std::uint32_t b = a + 1; b < kNetworkTypeCount; ++b) {
+            auto& solutions = g_mixedTypeSolutions[{a, b}];
+            const auto it = sections.find(Lower(std::string(kNetworkNames[a]) + kNetworkNames[b] + "IntersectionSolutions"));
+            if (it == sections.end()) continue;
+            for (const auto& entry : it->second) {
+                std::uint32_t fields[5];
+                int count = 0;
+                std::size_t start = 0;
+                while (count < 5) {
+                    const std::size_t comma = entry.second.find(',', start);
+                    fields[count++] = static_cast<std::uint32_t>(std::strtoul(entry.second.substr(start, comma - start).c_str(), nullptr, 0));
+                    if (comma == std::string::npos) break;
+                    start = comma + 1;
+                }
+                if (count != 5) continue;
+                tMixedTypeIntxSolution& solution = solutions[static_cast<std::uint64_t>(fields[0]) | static_cast<std::uint64_t>(fields[1]) << 32];
+                solution.pieceType = fields[2];
+                solution.rotationFlip = static_cast<std::uint8_t>(fields[3] | (fields[4] != 0 ? 0x80 : 0));
+            }
+        }
+    }
+    // SC4NetworkLoadOverrideMatrix (0x00151b60): "[AllowedOverrides]" n=TypeA,TypeB marks both directions.
+    std::fill(std::begin(g_overrideMatrix), std::end(g_overrideMatrix), 0u);
+    if (const auto it = sections.find("allowedoverrides"); it != sections.end()) {
+        for (const auto& entry : it->second) {
+            const std::size_t comma = entry.second.find(',');
+            if (comma == std::string::npos) continue;
+            const int a = NetworkNameToID(Trim(entry.second.substr(0, comma)));
+            const int b = NetworkNameToID(Trim(entry.second.substr(comma + 1)));
+            if (a < 0 || b < 0) continue;
+            g_overrideMatrix[a] |= 1u << b;
+            g_overrideMatrix[b] |= 1u << a;
+        }
+    }
+}
+
+void cSC4NetworkTool::SolveMultiTypeIntersections(const std::unordered_set<std::uint32_t>& cells, std::vector<std::uint32_t>& solved,
+                                                  std::uint32_t networkType) {
+    // One bit per edge whose two-bit connection is set (the ((x & 0x3030303) + 0x3030303 & 0x4040404) * 0xc30c3 >> 20 idiom).
+    const auto edgeMask = [](std::uint32_t edges) {
+        return static_cast<std::uint8_t>((((edges & 0x3030303u) + 0x3030303u) & 0x4040404u) * 0xc30c3u >> 20);
+    };
+    // The edges of `inner` that are set all match `outer` (each edge's connection bits, either of the two set).
+    const auto runsAlong = [](std::uint32_t outer, std::uint32_t inner) {
+        return ((outer ^ inner) & (((inner & 0x2020202u) >> 1 | (inner & 0x1010101u)) * 3)) == 0;
+    };
+    const auto raised = [](std::uint32_t flag) { return (flag & 0x304) != 0; };
+    const int drawn = static_cast<int>(networkType);
+    for (std::uint32_t key : cells) {
+        cSC4NetworkCellInfo* cell = GetCellInfo(key);
+        if (!cell) continue;
+        for (;;) {
+            const std::uint32_t flags = cell->networkFlags;
+            std::uint32_t rest = (flags - 1) & flags;
+            const std::uint32_t firstFlag = flags ^ rest;
+            if (rest == 0) break;                                                    // one type: nothing shared
+            const int typeA = GetNetworkTypeFromFlag(firstFlag);
+            const std::uint32_t rest2 = (rest - 1) & rest;
+            const std::uint32_t secondFlag = rest ^ rest2;
+            const int typeB = GetNetworkTypeFromFlag(secondFlag);
+            if (rest2 != 0) {
+                // Three or more types: drop a type whose edges run along a higher-priority one of the same level.
+                const int types[3] = {typeA, typeB, GetNetworkTypeFromFlag(rest2)};
+                const std::uint32_t edges[3] = {cell->tileNeighborhoods[types[0]], cell->tileNeighborhoods[types[1]],
+                                                cell->tileNeighborhoods[types[2]]};
+                bool dropped = false;
+                for (int i = 0; i < 3 && !dropped; ++i) {
+                    const int ti = types[i];
+                    for (int j = 0; j < 3; ++j) {
+                        const int tj = types[j];
+                        const bool lower = kNetworkMultitypePriority[ti] < kNetworkMultitypePriority[tj] ||
+                                           (kNetworkMultitypePriority[ti] == kNetworkMultitypePriority[tj] && drawn != ti && drawn == tj);
+                        if (!lower || !runsAlong(edges[j], edges[i]) || raised(kFlagForNetworkType[ti]) != raised(kFlagForNetworkType[tj])) continue;
+                        cell->networkFlags &= ~kFlagForNetworkType[ti];
+                        cell->tileNeighborhoods[ti] = 0;
+                        cell->RecomputeEdgesFromAllTypes();
+                        if (ti == 10) cell->unknown58 = 0;
+                        dropped = true;
+                        break;
+                    }
+                }
+                if (dropped) continue;                                               // look at the cell again
+                break;
+            }
+            if (cell->buildable) break;                                              // i386 +0x56
+            // The winner keeps its pieces: the higher priority, or on a tie the type being drawn (else the first).
+            int winner = typeB, loser = typeA;
+            std::uint32_t winnerFlag = secondFlag;
+            if (kNetworkMultitypePriority[typeB] <= kNetworkMultitypePriority[typeA] &&
+                !(kNetworkMultitypePriority[typeA] == kNetworkMultitypePriority[typeB] && typeA != drawn && typeB == drawn)) {
+                winner = typeA;
+                loser = typeB;
+                winnerFlag = firstFlag;
+            }
+            const std::uint32_t loserFlag = winnerFlag == firstFlag ? secondFlag : firstFlag;
+            const std::uint32_t winnerEdges = cell->tileNeighborhoods[winner];
+            std::uint32_t loserEdges = cell->tileNeighborhoods[loser];
+            if (runsAlong(winnerEdges, loserEdges)) {
+                // The loser only follows the winner: an allowed override hands the cell to the winner.
+                if (g_overrideMatrix[winner] & (1u << loser)) {
+                    cell->tileNeighborhoods[loser] = 0;
+                    cell->RecomputeEdgesFromAllTypes();
+                    cell->networkFlags = winnerFlag;
+                    if (loser == 10) cell->unknown58 = 0;
+                }
+                break;
+            }
+            if (raised(winnerFlag) == raised(loserFlag)) {
+                // On the same level the loser keeps only the edges the winner does not already connect.
+                for (int edge = 0; edge < 4; ++edge) {
+                    const std::uint32_t bits = 3u << (edge * 8);
+                    if ((winnerEdges & bits) == (loserEdges & bits) && (winnerEdges & bits) != 0) loserEdges &= ~(0xffu << (edge * 8));
+                }
+                cell->tileNeighborhoods[loser] = loserEdges;
+                cell->RecomputeEdgesFromAllTypes();
+                if (loser == 10) cell->unknown58 &= edgeMask(loserEdges);
+            }
+            std::uint32_t streetLike = 0;                                            // road, street, avenue, dirt road
+            for (std::uint32_t t = 0; t < kNetworkTypeCount; ++t)
+                if (kFlagForNetworkType[t] & 0x849) streetLike |= cell->tileNeighborhoods[t];
+            cell->unknown58 &= static_cast<std::uint8_t>(~edgeMask(streetLike));
+            const std::uint32_t low = static_cast<std::uint32_t>(std::min(winner, loser)), high = static_cast<std::uint32_t>(std::max(winner, loser));
+            const auto pair = g_mixedTypeSolutions.find({low, high});
+            if (pair == g_mixedTypeSolutions.end()) break;
+            const std::uint32_t lowEdges = low == static_cast<std::uint32_t>(loser) ? loserEdges : winnerEdges;
+            const std::uint32_t highEdges = low == static_cast<std::uint32_t>(loser) ? winnerEdges : loserEdges;
+            const auto solution = pair->second.find(static_cast<std::uint64_t>(lowEdges) | static_cast<std::uint64_t>(highEdges) << 32);
+            if (solution == pair->second.end()) break;
+            cell->solvedCellIndex = static_cast<std::int32_t>(solvedCellList_.size());
+            tSolvedCell piece;
+            piece.pieceType = solution->second.pieceType;
+            piece.rotationFlip = solution->second.rotationFlip;
+            piece.cellKey = key;
+            solvedCellList_.push_back(piece);
+            solved.push_back(key);
+            unknown10_.push_back({key & 0xffff, key >> 16, flags});
+            break;
+        }
+    }
 }
 
 void cSC4NetworkTool::SolveUsingEvaluator(std::unordered_set<std::uint32_t>& padded, std::unordered_set<std::uint32_t>& toSolve,

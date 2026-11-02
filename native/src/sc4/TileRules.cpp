@@ -46,6 +46,7 @@ std::uint8_t MirrorMetaPos(std::uint8_t meta) {
 }  // namespace
 
 void SetTileRuleResourceLoader(TileRuleResourceLoader loader) { Loader() = std::move(loader); }
+bool LoadTileRuleResourceText(const cGZPersistResourceKey& key, std::string& out) { return Loader() && Loader()(key, out); }
 
 // ---------------------------------------------------------------------------------------------------- cSC4FileTokenizer
 
