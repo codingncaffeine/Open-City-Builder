@@ -46,7 +46,6 @@ namespace native {
 namespace {
 
 // Where the line through `origin` along `direction` meets the terrain (the heights come from the terrain's altitude).
-sc4::cSTETerrain* g_pickTerrain = nullptr;
 bool MarchTerrain(sc4::cSTETerrain* terrain, const cS3DVector3& origin, const cS3DVector3& direction, cS3DVector3& hit, float from = -6000.0f, float to = 6000.0f) {
     if (!terrain) return false;
     const float length = std::sqrt(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z);
@@ -131,17 +130,8 @@ public:
     bool RotateLeft() override { render_->RotateLeft(); return true; }
     bool RotateRight() override { render_->RotateRight(); return true; }
     bool SetZoomAndRotation(int zoom, int rotation) override { render_->SetZoomAndRotation(zoom, rotation); return true; }
-    // The pointer's terrain point: the viewport ray through the pixel, marched down onto the terrain.
-    bool PickTerrain(int x, int y, float* out3, bool always, bool arg5) override {
-        SC4ViewUtilities* utilities = render_->GetViewUtilities();
-        float origin[3] = {}, direction[3] = {};
-        const bool rayOk = utilities && utilities->ViewportPositionToRay(x, y, origin, direction);
-        if (!rayOk) return false;
-        cS3DVector3 hit{};
-        if (!MarchTerrain(g_pickTerrain, cS3DVector3{origin[0], origin[1], origin[2]}, cS3DVector3{direction[0], direction[1], direction[2]}, hit, 0.0f, 30000.0f)) return false;
-        out3[0] = hit.x; out3[1] = hit.y; out3[2] = hit.z;
-        return true;
-    }
+    // The pointer's terrain point: the renderer's pick (the camera's eye ray through the pixel onto the terrain view).
+    bool PickTerrain(int x, int y, float* out3, bool always, bool arg5) override { return render_->PickTerrain(x, y, out3, always, arg5); }
     bool Pick(int x, int y, cISC4OccupantFilter* filter, s3d::cIS3DModelInstance*& model) override { return render_->Pick(x, y, filter, model); }
     cIGZUnknown* ViewUtilities() override { return nullptr; }
     cIGZUnknown* LightingManager() override { return nullptr; }
@@ -237,7 +227,6 @@ bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* cityInterface, g
         void* serializable = nullptr;
         if (terrainObject && terrainObject->QueryInterface(0xab953253, &serializable)) terrain = static_cast<sc4::cSTETerrain*>(static_cast<cIGZSerializable*>(serializable));
         if (terrain) terrain->Init();   // the port's terrain is not a cIGZInitShutdown, so the city's component pass skips it
-        g_pickTerrain = terrain;
         std::printf("city view: terrain component %p -> %p", static_cast<void*>(terrainObject), static_cast<void*>(terrain));
         if (terrain) std::printf(" cells %u x %u", terrain->CellCountX(), terrain->CellCountZ());
         std::printf("\n");
