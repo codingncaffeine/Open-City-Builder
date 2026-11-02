@@ -267,6 +267,20 @@ PollutionHost g_pollution;
 
 cSC4Simulator* Simulator() { return Component<cSC4Simulator>(CityComponent::Simulator, kGZCLSID_cSC4Simulator); }
 
+// GetStationEfficiency's funding (i386 0x00076b12): the budget item of the station's exemplar for the funding purpose, then
+// the occupant's own funding when the department funds it locally, else the department's; a missing department is 100%.
+bool StationFundingFraction(cISCPropertyHolder* holder, std::uint32_t purpose, float& fraction) {
+    auto* budget = Component<cSC4BudgetSimulator>(CityComponent::BudgetSimulator, kGZCLSID_cSC4BudgetSimulator);
+    BudgetItem item;
+    if (!budget || !holder || !budget->GetBudgetItemForPurpose(holder, purpose, item)) return false;
+    cSC4DepartmentBudget* department = budget->GetDepartmentBudget(static_cast<std::uint32_t>(item.departmentId));
+    if (!department)
+        fraction = 1.0f;
+    else
+        fraction = department->IsLocallyFundedObjectInDepartment(holder, purpose) ? item.localFunding : department->GetFundingPercentage();
+    return true;
+}
+
 // A city occupant as the fire simulator's station list keeps it.
 class FireOccupant final : public IFireOccupant {
 public:
@@ -289,8 +303,9 @@ public:
     int CurrentDay() override { cSC4Simulator* s = Simulator(); return s ? static_cast<int>(s->GetSimDateNumber()) : 0; }
     void PostMessage(std::uint32_t message, IFireOccupant*) override { PostCityMessage(message); }
     void AddHistory(std::uint32_t historyId, std::int64_t value) override { AddHistoryValue(historyId, value); }
-    // PARTIAL: the stations' budget line items are not native yet: no per-station funding records.
-    bool FundingFraction(IFireOccupant*, std::uint32_t, float&) override { return false; }
+    bool FundingFraction(IFireOccupant* station, std::uint32_t purpose, float& fraction) override {
+        return station && StationFundingFraction(station->PropertyHolder(), purpose, fraction);
+    }
     bool FundingInfo(IFireOccupant*, std::uint32_t, int&, float&) override { return false; }
     bool SetFundingFraction(IFireOccupant*, std::uint32_t, const SC4Percentage&) override { return false; }
     float DepartmentBudgetFraction() override {
@@ -353,8 +368,9 @@ public:
     int CurrentDay() override { cSC4Simulator* s = Simulator(); return s ? static_cast<int>(s->GetSimDateNumber()) : 0; }
     void PostMessage(std::uint32_t message, IPoliceOccupant*) override { PostCityMessage(message); }
     void AddHistory(std::uint32_t historyId, std::int64_t value) override { AddHistoryValue(historyId, value); }
-    // PARTIAL: the stations' budget line items are not native yet: no per-station funding records.
-    bool FundingFraction(IPoliceOccupant*, std::uint32_t, float&) override { return false; }
+    bool FundingFraction(IPoliceOccupant* station, std::uint32_t purpose, float& fraction) override {
+        return station && StationFundingFraction(station->PropertyHolder(), purpose, fraction);
+    }
     bool FundingInfo(IPoliceOccupant*, std::uint32_t, int&, float&) override { return false; }
     float DepartmentBudgetFraction() override {
         auto* budget = Component<cSC4BudgetSimulator>(CityComponent::BudgetSimulator, kGZCLSID_cSC4BudgetSimulator);
