@@ -110,7 +110,11 @@ struct Host final : IDemolitionHost {
     std::vector<IDemolishable*> PoleConnections(IDemolishable*) override { return conns; }
     void PoleDetach(IDemolishable*) override {}
     bool IsPlainOccupant(IDemolishable*) override { return true; }
-    IDemolitionEffect* CreateEffect(std::uint32_t, std::uint32_t index) override { effects.push_back(index); return &effect; }
+    std::uint32_t missingAbove = 0xffffffffu;   // effect indices above this one are absent from the effect directory
+    IDemolitionEffect* CreateEffect(std::uint32_t, std::uint32_t index) override {
+        effects.push_back(index);
+        return index > missingAbove ? nullptr : &effect;
+    }
     void ReleaseEffect(IDemolitionEffect*) override {}
     void PlayGroupEffect(std::uint32_t, float, float, float) override {}
     void PlaySound(std::uint32_t) override {}
@@ -187,10 +191,21 @@ int main() {
     host.terrainOccupants = {&rock};
     CHECK(d.ModifyTerrainHeight(true, true, 1, 1, 3, 3, 1.0f, nullptr, 0) == 5 && host.levelCells == 5);
 
-    // effects: a 10 m building with effect byte 3 tries indices 0x312, 0x311, 0x310
+    // effects: a 10 m building with effect byte 3 is large (0x312) and plays only that effect, not the smaller ones too
     Occ fx; fx.type = kDemolishTypeBuilding;
     d.DoDemolishOccupantEffect(&fx, 3, nullptr, false, 0, 0);
-    CHECK(host.effects.size() == 3 && host.effects[0] == 0x312 && host.effects[2] == 0x310 && host.effect.played == 3);
+    CHECK(host.effects.size() == 1 && host.effects[0] == 0x312 && host.effect.played == 1);
+    // only when the size's effect is absent the next smaller index is tried, and the first one found is the only one
+    host.effects.clear();
+    host.missingAbove = 0x310;
+    d.DoDemolishOccupantEffect(&fx, 3, nullptr, false, 0, 0);
+    CHECK(host.effects.size() == 3 && host.effects[0] == 0x312 && host.effects[1] == 0x311 && host.effects[2] == 0x310 &&
+          host.effect.played == 2);
+    // none at all down to the nibble 0 key: nothing is played
+    host.effects.clear();
+    host.missingAbove = 0x30f;
+    d.DoDemolishOccupantEffect(&fx, 3, nullptr, false, 0, 0);
+    CHECK(host.effects.size() == 3 && host.effect.played == 2);
     CHECK(d.Shutdown() && host.removedNotes.size() == 3);
     std::printf(failures ? "demolition: %d failures\n" : "demolition: all passed\n", failures);
     return failures != 0;

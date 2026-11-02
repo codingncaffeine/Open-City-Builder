@@ -387,8 +387,8 @@ bool cSC4Demolition::DemolishOccupant(bool commit, IDemolishable* occupant, std:
 // ---- effects ----------------------------------------------------------------------------------------------------------
 
 // Effect index: bits 8+ = caller's effect byte, 0x10 buildings and poles, 0x20 flora / still props, 0x30 animated props,
-// 0x40 plain networks, 0x50 networks with flag 1, low bits 1 / 2 = medium / large. Smaller indices down to the next
-// multiple of 16 are tried too (the loop runs until the low nibble is 0).
+// 0x40 plain networks, 0x50 networks with flag 1, low bits 1 / 2 = medium / large. When the size's effect is absent the
+// smaller indices down to the next multiple of 16 are tried, and the first one found is the only effect played.
 void cSC4Demolition::DoDemolishOccupantEffect(IDemolishable* occupant, std::uint32_t flags, IDemolishableLot* lot, bool primary,
                                               int viewX, int viewY) {
     float box[6] = {1, 1, 1, 0, 0, 0};
@@ -427,19 +427,19 @@ void cSC4Demolition::DoDemolishOccupantEffect(IDemolishable* occupant, std::uint
     } else {
         index |= 2;
     }
-    std::uint32_t low;
-    do {
-        if (IDemolitionEffect* effect = host_->CreateEffect(kEffectSetDemolish, index)) {
-            if (effect->Attach(occupant)) {
-                if (primary) effect->SetViewpoint(viewX, viewY);
-                if (lot && lot->ZoneClass() != 0 && lot->ZoneClass() != 1) effect->SetGrayTint();
-                effect->Play();
-            }
-            host_->ReleaseEffect(effect);
-        }
-        low = index & 0xf;
+    // One effect: the size's own, or (only when that one is absent) the next smaller index (i386 0x000ae090 loop).
+    IDemolitionEffect* effect = nullptr;
+    while (!(effect = host_->CreateEffect(kEffectSetDemolish, index))) {
+        const std::uint32_t low = index & 0xf;
         --index;
-    } while (low != 0);
+        if (low == 0) return;
+    }
+    if (effect->Attach(occupant)) {
+        if (primary) effect->SetViewpoint(viewX, viewY);
+        if (lot && lot->ZoneClass() != 0 && lot->ZoneClass() != 1) effect->SetGrayTint();
+        effect->Play();
+    }
+    host_->ReleaseEffect(effect);
 }
 
 // The group size compared against the thresholds is `groupSize` (DemolishRegion passes 0 here, see the header).
