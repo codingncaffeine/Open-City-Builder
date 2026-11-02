@@ -12,6 +12,7 @@
 //  * GetLastValidPoint indexes the step array with validSteps-1 without a bounds check (0x100190668).
 //  * GetMajorBridge* read the last element of the bridge vector through the vector's end pointer (0x100187f42).
 #include "sc4/NetworkTool.h"
+#include "sc4/NetworkOccupant.h"
 #include "sc4/NetworkToolUI.h"
 #include "sc4/SCPropertyHelp.h"
 
@@ -321,7 +322,8 @@ bool cSC4NetworkTool::Shutdown() {
 // 0x10018fdaa
 void cSC4NetworkTool::Reset() {
     if (worldCache_ != nullptr) worldCache_->Clear();  // cSC4NetworkWorldCache::Clear 0x10079d868
-    // vtable slot +0x88 (ClearOccupantHighlights) and +0x80 (ClearCellPreviews) follow here — unrecovered.
+    ClearOccupantHighlights();                         // vtable slot +0x88
+    ClearCellPreviews();                               // vtable slot +0x80
     anchors_.clear();  // *(this+0x218) = *(this+0x210)
     cells_.clear();    // *(this+0xc0) = *(this+0xb8)
     preferredBridge_ = -1;
@@ -1005,6 +1007,108 @@ void cSC4NetworkTool::PlaceAllSegments(bool place, bool allowDiagonals, bool con
         PlaceNetwork(place, allowDiagonals, connectNeighbor, networkType);
     }
     unknown9a_ = savedFlag;
+}
+
+bool cSC4NetworkTool::PlaceNetworkOccupants(int x0, int z0, int x1, int z1, std::uint32_t flags, cSC4NetworkTool* follow,
+                                            bool place, int networkType) {
+    const std::uint32_t type = networkType >= 0 ? static_cast<std::uint32_t>(networkType) : networkType_;   // +0x39c
+    unknown458_ = 3;                                                     // +0x230
+    failureReason_ = 0;                                                  // +0x234
+    const auto bound = [](int v, int hi) { return static_cast<std::uint32_t>(v < 0 ? 0 : (v > hi ? hi : v)); };
+    const SC4PointU start{bound(x0, cityWidth_ - 1), bound(z0, cityHeight_ - 1)};
+    const SC4PointU end{bound(x1, cityWidth_ - 1), bound(z1, cityHeight_ - 1)};
+    steps_.clear();
+    totalSteps_ = 0;
+    straightSteps_ = 0;
+    if (place && worldCache_) worldCache_->Clear();
+    // One straight run between two cells: the anchors, the drag and the solve.
+    const auto placeRun = [&](SC4PointU from, SC4PointU to) {
+        anchors_.clear();
+        anchors_.push_back(from);
+        anchors_.push_back(to);
+        return DrawNetworkLine(from, to, false, type) && PlaceNetwork(place, false, false, type);
+    };
+    // The network occupant of one of `flags`' types on a cell (the original's cSC4NetworkORFilter lookup).
+    INetworkToolHost* host = GetNetworkToolHost();
+    const auto networkAt = [&](int x, int z) -> cSC4NetworkOccupant* {
+        if (x < 0 || z < 0 || x >= cityWidth_ || z >= cityHeight_ || !host) return nullptr;
+        cSC4NetworkOccupant* occupant = host->NetworkOccupantAt(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z), flags);
+        if (occupant && !occupant->HasAnyNetworkFlag(flags)) {
+            occupant->Release();
+            return nullptr;
+        }
+        return occupant;
+    };
+    bool result = true;
+    if (flags == 0) {
+        result = placeRun(start, end);
+        if (failureReason_ != 0) result = false;
+    } else {
+        int dx = x1 - x0, dz = z1 - z0;
+        if (dx == 0 || dz == 0) {
+            struct Rect { int x0, z0, x1, z1; };
+            std::vector<Rect> followUps;
+            bool alongAxes = true;
+            if (dx == 0 && dz == 0) {
+                // A single cell runs along each axis that already has pieces next to it (west or east, north or south).
+                static constexpr int kNextX[4] = {-1, 0, 1, 0}, kNextZ[4] = {0, -1, 0, 1};   // nSC4Networks::kNextX / kNextZ
+                bool neighbour[4];
+                for (int k = 0; k < 4; ++k) {
+                    cSC4NetworkOccupant* occupant = networkAt(x0 + kNextX[k], z0 + kNextZ[k]);
+                    neighbour[k] = occupant != nullptr;
+                    if (occupant) occupant->Release();
+                }
+                dx = neighbour[0] || neighbour[2] ? 1 : 0;
+                dz = neighbour[1] || neighbour[3] ? 1 : 0;
+                if (dx == 0 && dz == 0) {
+                    alongAxes = false;
+                    result = placeRun(start, end);
+                }
+            }
+            if (alongAxes) {
+                int directions[2][2];
+                int count = 0;
+                if (dx != 0) { directions[count][0] = dx > 0 ? 1 : -1; directions[count][1] = 0; ++count; }
+                if (dz != 0) { directions[count][0] = 0; directions[count][1] = dz > 0 ? 1 : -1; ++count; }
+                result = true;
+                for (int d = 0; d < count; ++d) {
+                    const int stepX = directions[d][0], stepZ = directions[d][1];
+                    SC4PointU runStart = start, runEnd = end;
+                    // The cell before the start and the cell after the end: a piece of this network there extends the
+                    // run onto it; a piece of another network becomes a follow-up connection for `follow`.
+                    const int beforeX = static_cast<int>(start.x) - stepX, beforeZ = static_cast<int>(start.z) - stepZ;
+                    const int afterX = static_cast<int>(end.x) + stepX, afterZ = static_cast<int>(end.z) + stepZ;
+                    const auto cachedHas = [&](int x, int z) {
+                        if (place || !worldCache_ || x < 0 || z < 0) return false;
+                        cSC4NetworkCellInfo* cell = worldCache_->GetCell(static_cast<std::uint32_t>(x) | (static_cast<std::uint32_t>(z) << 16));
+                        return cell && (cell->networkFlags & flags) != 0;
+                    };
+                    const auto cellAt = [](int x, int z) { return SC4PointU{static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z)}; };
+                    if (cSC4NetworkOccupant* occupant = networkAt(beforeX, beforeZ)) {
+                        if (occupant->IsOfType(type)) runStart = cellAt(beforeX, beforeZ);
+                        else followUps.push_back({static_cast<int>(start.x), static_cast<int>(start.z), beforeX, beforeZ});
+                        occupant->Release();
+                    } else if (cachedHas(beforeX, beforeZ)) {
+                        runStart = cellAt(beforeX, beforeZ);
+                    }
+                    if (cSC4NetworkOccupant* occupant = networkAt(afterX, afterZ)) {
+                        if (occupant->IsOfType(type)) runEnd = cellAt(afterX, afterZ);
+                        else followUps.push_back({afterX, afterZ, static_cast<int>(end.x), static_cast<int>(end.z)});
+                        occupant->Release();
+                    } else if (cachedHas(afterX, afterZ)) {
+                        runEnd = cellAt(afterX, afterZ);
+                    }
+                    result = placeRun(runStart, runEnd);
+                }
+            }
+            if (failureReason_ != 0) result = false;
+            if (unknown98_ && follow)                                    // +0x50: the last solve placed for real
+                for (const Rect& r : followUps) follow->PlaceNetworkOccupants(r.x0, r.z0, r.x1, r.z1, 0, nullptr, place, -1);
+        }
+    }
+    anchors_.clear();
+    unknown458_ = 1;
+    return result;
 }
 
 

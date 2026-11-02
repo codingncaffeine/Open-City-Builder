@@ -4,8 +4,7 @@
 // base-texture services (ILotBaseTextureServices) are installed here too, so a new empty lot draws the game's zone texture.
 //
 // The lots get a native ILotHost here as well (zone type, date, altitude). Still neutral (each a to-do): the building development simulator (GROWTH-1: no growth developers, so DetermineLotSize falls
-// back to 2x2 lots and no building is ever proposed), the network tools (ExtendAsStreets / DrawStreet need cSC4NetworkTool,
-// TOOL-1), the lot configuration manager queries, and the terrain view's highlight textures (the drag preview stays the native
+// back to 2x2 lots and no building is ever proposed), the lot configuration manager queries, and the terrain view's highlight textures (the drag preview stays the native
 // overlay's).
 #include "app/NativeZoneDeveloperHost.h"
 
@@ -23,6 +22,7 @@
 #include "sc4/LotBaseTextureOccupant.h"
 #include "sc4/LotDeveloper.h"
 #include "sc4/NetworkOccupant.h"
+#include "sc4/NetworkTool.h"
 #include <map>
 #include <memory>
 #include <unordered_set>
@@ -227,6 +227,31 @@ struct TerrainViewApi final : IZoneDeveloperTerrainViewApi {
     }
 } g_terrainViewApi;
 
+// One of the zone developer's network tools (the original's SL::spNetworkManager vslot 0x28(type, 1)): a
+// cSC4NetworkTool of that type, which draws the auto-streets of a zone drag and its connection fix-ups.
+class ZoneNetworkTool final : public IZoneDeveloperNetworkApi {
+public:
+    explicit ZoneNetworkTool(std::uint32_t type) : tool_(new sc4::cSC4NetworkTool(type)) { tool_->AddRef(); }
+    ~ZoneNetworkTool() override { tool_->Release(); }
+    void AddRef() override { ++refs_; }
+    void Release() override { if (--refs_ == 0) delete this; }
+    void Init() override { tool_->Init(); }
+    void Shutdown() override { tool_->Shutdown(); }
+    bool HasFlag(std::uint32_t) override { return false; }
+    bool GetCellFlags(int x, int z, std::uint32_t flag, std::uint32_t& out) override { return tool_->OccupantExists(x, z, flag, out); }
+    std::uint32_t GetTypeFlags() override { return 0; }
+    std::uint32_t GetConnectionFlags() override { return 0; }
+    bool IsConnected(std::uint32_t, int) override { return false; }
+    void ClearHighlight() override { tool_->Reset(); }
+    bool PlaceNetworkOccupants(int x0, int z0, int x1, int z1, std::uint32_t flags, bool nullToolArgument, bool place, int type) override {
+        return tool_->PlaceNetworkOccupants(x0, z0, x1, z1, flags, nullToolArgument ? nullptr : tool_, place, type);
+    }
+
+private:
+    sc4::cSC4NetworkTool* tool_;
+    int refs_ = 0;
+};
+
 struct ZoneDeveloperHost final : IZoneDeveloperHost {
     cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
     int RendererHighlightScale() override { return 0; }
@@ -239,7 +264,10 @@ struct ZoneDeveloperHost final : IZoneDeveloperHost {
     IZoneDeveloperTerrainViewApi* TerrainView() override { return &g_terrainViewApi; }
     IZoneDeveloperService* TrafficSim() override { return &g_trafficSim; }
     IZoneDeveloperZoneManagerApi* ZoneManager() override { return &g_zoneApi; }
-    IZoneDeveloperNetworkApi* NetworkSubnet(int) override { return nullptr; }       // cSC4NetworkTool per type: TOOL-1
+    IZoneDeveloperNetworkApi* NetworkSubnet(int which) override {                 // 0 road, 1 street, 2 dirt road
+        static constexpr std::uint32_t kTypes[3] = {0, 3, 0xb};
+        return which >= 0 && which < 3 ? new ZoneNetworkTool(kTypes[which]) : nullptr;
+    }
     IZoneDeveloperSafeListApi* SafeListIterator() override { return nullptr; }     // the developer keeps its own lot list
     void LotConfigurationsByFilter(std::vector<cSC4LotConfiguration*>& out, IZoneDeveloperLotFilter* filter) override {   // manager vslot 0x48
         struct Bridge final : sc4::cISC4LotConfigurationFilter {

@@ -569,7 +569,12 @@ public:
     void ClearOccupantHighlights() override;                              // i386 0x0012519a
     bool DrawNetworkLine(SC4PointU& start, SC4PointU& end, bool allowDiagonals, std::uint32_t networkType) override;  // i386 0x004cdd0a
     void PlaceAllSegments(bool place, bool allowDiagonals, bool connectNeighbor, std::uint32_t networkType) override;  // i386 0x004cf1ce
-    int GetCostOfSolution() override;                                     // i386 0x00124dbe
+    // Mac 0x0012a38a (interface slot [7], not in cISC4NetworkTool here): a straight line of this tool's network from
+    // (x0,z0) to (x1,z1), as the zone developer draws its streets. With `flags`, the line's ends grow onto adjacent
+    // pieces of those network types; an end next to a piece of another type is handed to `follow` afterwards.
+    bool PlaceNetworkOccupants(int x0, int z0, int x1, int z1, std::uint32_t flags, cSC4NetworkTool* follow, bool place,
+                               int networkType);
+    int GetCostOfSolution() override;                                    // i386 0x00124dbe
     void QueryUserForPotentialIntersections() override;                   // i386 0x0012b18c
     bool Shutdown() override;                                             // 0x100187ce8
     void Reset() override;                                                // 0x10018fdaa
