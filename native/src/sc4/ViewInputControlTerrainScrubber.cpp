@@ -7,6 +7,7 @@
 
 #include "sc4/Exemplar.h"
 #include "sc4/SCPropertyHelp.h"
+#include "sc4/VisualEffect.h"
 
 namespace sc4 {
 
@@ -34,7 +35,63 @@ cSC4ViewInputControlTerrainScrubber::cSC4ViewInputControlTerrainScrubber(std::ui
     cursorId_ = kTerrainScrubberCursorId;
 }
 
-cSC4ViewInputControlTerrainScrubber::~cSC4ViewInputControlTerrainScrubber() = default;
+cSC4ViewInputControlTerrainScrubber::~cSC4ViewInputControlTerrainScrubber() {
+    for (int i = 0; i < 2; ++i) ReleaseEcho(i, i);
+}
+
+void cSC4ViewInputControlTerrainScrubber::ReleaseEcho(int index, int transition) {
+    if (!echo_[index]) return;
+    if (echo_[index]->IsStarted()) echo_[index]->Stop(transition);
+    echo_[index]->Release();
+    echo_[index] = nullptr;
+}
+
+// The two echo effects of the brush's UI elements: the active pair while the button is down, the inactive pair otherwise
+// (values 0/1 and 4/5, or 2/3 and 6/7 as effect group / type), and the matching cursor.
+void cSC4ViewInputControlTerrainScrubber::SetCursorEchoState(bool active) {   // 0x002b5028
+    const std::uint32_t* v = ui_.values;
+    const std::uint32_t first[2] = {active ? v[0] : v[2], active ? v[1] : v[3]};
+    const std::uint32_t second[2] = {active ? v[4] : v[6], active ? v[5] : v[7]};
+    echoCursor_ = active ? v[8] : v[9];
+    ReleaseEcho(0, 0);
+    ReleaseEcho(1, 1);
+    if (!g_host || !g_host->BrushEffectsEnabled()) return;   // render property 0x11
+    echo_[0] = g_host->CreateEffect(first[0], first[1]);
+    echo_[1] = g_host->CreateEffect(second[0], second[1]);
+}
+
+// The first echo is the brush circle, scaled to the brush radius times the width; the second is scaled by the zoom
+// (3 / 1.7^zoom). Shown echoes start, hidden ones stop; the cursor follows.
+void cSC4ViewInputControlTerrainScrubber::SetCursorEchoPos(const float position[3], bool show) {   // 0x002b496c
+    echoPosition_[0] = position[0];
+    echoPosition_[1] = position[1];
+    echoPosition_[2] = position[2];
+    for (int i = 0; i < 2; ++i) {
+        cSC4VisualEffect* echo = echo_[i];
+        if (!echo) continue;
+        cS3DTransform transform;
+        float scale = 1.0f;
+        if (i == 0) {
+            scale = (terrain_ ? terrain_->BrushRadius(brushType_) : 32.0f) * params_.radiusScale;   // terrain vslot 0xf4
+        } else {
+            scale = static_cast<float>(3.0 / std::pow(1.7, static_cast<double>(g_host ? g_host->ViewZoom() : 0)));
+        }
+        transform.scale = scale;
+        transform.flags = static_cast<std::uint8_t>(1 | (scale != 1.0f ? 2 : 0));
+        transform.translation[0] = position[0];
+        transform.translation[1] = position[1];
+        transform.translation[2] = position[2];
+        transform.changeCounter = static_cast<std::uint8_t>(transform.changeCounter + 2);
+        if (i == 0) echo->SetSourceTransform(transform);   // vslot 0x20 (as the place-lot tool's effects)
+        else echo->SetEffectTransform(transform);          // vslot 0x1c
+        if (show) {
+            if (!echo->IsStarted()) echo->Start(0);
+        } else if (echo->IsStarted()) {
+            echo->Stop(i);
+        }
+    }
+    SetCursor(show ? echoCursor_ : hiddenCursor_);
+}
 
 bool cSC4ViewInputControlTerrainScrubber::QueryInterface(std::uint32_t iid, void** out) {   // 0x002b44c0
     if (iid == kGZIID_cIGZMessageTarget2) {
@@ -79,7 +136,8 @@ bool cSC4ViewInputControlTerrainScrubber::Init() {
     // The original also keeps the terrain view (vslot 0x108) to switch its automatic cell cursor off while scrubbing.
     if (cIGZMessageServer2* server = g_host ? g_host->MessageServer() : nullptr)
         for (std::uint32_t type : kTerrainScrubberMsgViewChanged) server->AddNotification(this, type);
-    // SetCursorEchoState(false): the brush-circle echo effects (SL::spEffectsManager) are not created natively.
+    SetCursorEchoState(false);
+    SetCursor(hiddenCursor_);
     return true;
 }
 
@@ -93,6 +151,9 @@ bool cSC4ViewInputControlTerrainScrubber::Shutdown() {
     }
     if (cIGZMessageServer2* server = g_host ? g_host->MessageServer() : nullptr)
         for (std::uint32_t type : kTerrainScrubberMsgViewChanged) server->RemoveNotification(this, type);
+    // The original stops both echoes but clears +0xe4 twice (the second effect keeps its reference until the tool goes).
+    ReleaseEcho(0, 0);
+    ReleaseEcho(1, 1);
     if (terrain_) {
         terrain_->StopAccumulatingTextureUpdates();                  // vslot 0x13c
         terrain_ = nullptr;
@@ -199,6 +260,7 @@ bool cSC4ViewInputControlTerrainScrubber::OnMouseDownL(int x, int y, std::uint32
     float position[3] = {};
     if (!SetCursorAnchor(x, y) || !GetCursorPositionInWorld(x, y, position)) {
         if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "terrain brush %#x: no terrain under %d,%d\n", brushType_, x, y);
+        SetCursorEchoPos(position, false);
         return true;
     }
     if (!freeBrush_) {   // a brush with a cost does not start with an empty treasury
@@ -218,6 +280,8 @@ bool cSC4ViewInputControlTerrainScrubber::OnMouseDownL(int x, int y, std::uint32
     SetCapture();
     applicationsSinceFlush_ = 0;
     if (kTexUpdateInterval != 0) terrain_->StartAccumulatingTextureUpdates();   // vslot 0x138
+    SetCursorEchoState(true);
+    SetCursorEchoPos(position, true);
     runningCost_ = 0;
     dragTimer_.Restart();
     PushDelayedAction(lastX_, lastZ_, lastX_, lastZ_);
@@ -230,6 +294,7 @@ bool cSC4ViewInputControlTerrainScrubber::OnMouseMove(int x, int y, std::uint32_
     cursorOverView_ = scrubbing_;
     if (movedSinceTick_) return true;   // one application per animation tick from the moves
     float position[3] = {};
+    bool shown = false;
     if (GetCursorPositionInWorld(x, y, position) || scrubbing_) {
         if (scrubbing_) {
             PushDelayedAction(lastX_, lastZ_, position[0], position[2]);
@@ -238,7 +303,9 @@ bool cSC4ViewInputControlTerrainScrubber::OnMouseMove(int x, int y, std::uint32_
             lastZ_ = position[2];
             movedSinceTick_ = true;
         }
+        shown = true;
     }
+    SetCursorEchoPos(position, shown);
     return true;
 }
 
@@ -251,34 +318,47 @@ bool cSC4ViewInputControlTerrainScrubber::OnMouseUpL(int, int, std::uint32_t) {
     if (terrain_) terrain_->EndBrushScrub(brushType_, params_.redisplayFlags);
     cursorOverView_ = scrubbing_ = movedSinceTick_ = false;
     if (terrain_) terrain_->StopAccumulatingTextureUpdates();
+    SetCursorEchoState(false);
+    if (echo_[0]) SetCursorEchoPos(echoPosition_, echo_[0]->IsStarted());
     return true;
 }
 
 bool cSC4ViewInputControlTerrainScrubber::OnMouseExit() {
     cursorOverView_ = false;
+    if (echo_[0]) SetCursorEchoPos(echoPosition_, false);
     return false;
 }
 
-// Shift + 1..9, 0 sets the width (tenths, 0 = full); shift + F1..F10 the strength. Shift and control alone only
-// re-pick the echo's brush, and there is no echo effect natively, so they fall through like the original without one.
+// Shift + 1..9, 0 sets the width (tenths, 0 = full); shift + F1..F10 the strength, and the echo follows. Shift and
+// control alone (keys 0x10 / 0x11) pick the modifier strength and width and resize the echo, without taking the key.
 bool cSC4ViewInputControlTerrainScrubber::OnKeyDown(std::uint32_t key, std::uint32_t modifiers) {
     if (!IsOnTop()) return false;
     if (modifiers & 1) {
         if (0x2f < key && key < 0x3a) {
             baseWidth_ = static_cast<float>(key == 0x30 ? 10 : static_cast<int>(key - 0x30)) / 10.0f;
             params_.radiusScale = baseWidth_;
+            if (echo_[0]) SetCursorEchoPos(echoPosition_, true);
             return true;
         }
         if (0x6f < key && key < 0x7a) {
             baseStrength_ = static_cast<float>(key - 0x6f) / 10.0f;
             params_.strengthScale = baseStrength_;
+            if (echo_[0]) SetCursorEchoPos(echoPosition_, true);
             return true;
         }
     }
+    if (key - 0x10 > 1 || !echo_[0]) return false;
+    ApplyModifierKeys(modifiers);
+    SetCursorEchoPos(echoPosition_, true);
     return false;
 }
 
-bool cSC4ViewInputControlTerrainScrubber::OnKeyUp(std::uint32_t, std::uint32_t) { return false; }
+bool cSC4ViewInputControlTerrainScrubber::OnKeyUp(std::uint32_t key, std::uint32_t modifiers) {   // 0x002b4d58
+    if (key - 0x10 > 1 || !echo_[0]) return false;
+    ApplyModifierKeys(modifiers);
+    SetCursorEchoPos(echoPosition_, true);
+    return false;
+}
 
 bool cSC4ViewInputControlTerrainScrubber::DoMessage(cIGZMessage2* message) {
     const std::uint32_t type = message->GetType();
@@ -289,6 +369,7 @@ bool cSC4ViewInputControlTerrainScrubber::DoMessage(cIGZMessage2* message) {
             movedSinceTick_ = false;
             int x = 0, y = 0;
             if (g_host->CursorPosition(x, y)) OnMouseMove(x, y, 0);
+            if (echo_[0]) SetCursorEchoPos(echoPosition_, echo_[0]->IsStarted());
         }
     } else if (type == kTerrainScrubberMsgTick && scrubbing_) {
         movedSinceTick_ = false;

@@ -17,5 +17,7 @@ int StartNamedEffect(const char* name, float x, float y, float z);
 bool HasNamedEffect(const char* name);
 // A visual effect by name with one reference, not started (the caller places, starts and releases it), or null.
 sc4::cSC4VisualEffect* CreateNamedEffect(const char* name);
+// The effect bound to a (group, type) key (cSC4EffectsManager::CreateVisualEffect(uint, uint)); one reference, null when unbound.
+sc4::cSC4VisualEffect* CreateKeyedEffect(std::uint32_t group, std::uint32_t type);
 
 }  // namespace native

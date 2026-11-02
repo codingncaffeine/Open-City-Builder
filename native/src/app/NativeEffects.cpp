@@ -371,6 +371,14 @@ sc4::cSC4VisualEffect* CreateNamedEffect(const char* name) {
     return effect;
 }
 
+sc4::cSC4VisualEffect* CreateKeyedEffect(std::uint32_t group, std::uint32_t type) {
+    if (!BindManager()) return nullptr;
+    sc4::cSC4VisualEffect* effect = nullptr;
+    const bool ok = g_manager->CreateVisualEffect(group, type, &effect) && effect;
+    if (std::getenv("SC4_FXDEBUG")) std::fprintf(stderr, "effects: keyed effect %08x/%08x -> %s\n", group, type, ok ? "made" : "none");
+    return ok ? effect : nullptr;
+}
+
 int StartNamedEffect(const char* name, float x, float y, float z) {
     if (!BindManager()) return -1;
     sc4::cSC4VisualEffect* effect = nullptr;

@@ -27,6 +27,8 @@
 
 namespace sc4 {
 
+class cSC4VisualEffect;
+
 constexpr std::uint32_t kTerrainScrubberToolId = 0x68e29401;
 constexpr std::uint32_t kTerrainScrubberCursorId = 0x071e5703;
 constexpr std::uint32_t kTerrainScrubberMsgTick = 0x86ad10ee;       // the animation timer, every 0xc0 ms while scrubbing
@@ -50,6 +52,11 @@ public:
     virtual bool ViewportPointOnPlane(int x, int y, float altitude, float out[3]) = 0;
     // The tuning exemplar 0x6534284a/0x88cd66e9/1 (ReadTuningParameters); null when it is missing.
     virtual cISCPropertyHolder* TuningExemplar() = 0;
+    // The cursor echo effects: render property 0x11 (brush effects shown), SL::spEffectsManager vslot 0x1c
+    // CreateVisualEffect(group, type, &out) with one reference for the caller, and SC4ViewUtilities::GetZoomAndRotation.
+    virtual bool BrushEffectsEnabled() { return false; }
+    virtual cSC4VisualEffect* CreateEffect(std::uint32_t, std::uint32_t) { return nullptr; }
+    virtual int ViewZoom() { return 0; }
 };
 ITerrainScrubberHost* TerrainScrubberHost();
 void SetTerrainScrubberHost(ITerrainScrubberHost* host);
@@ -86,6 +93,9 @@ private:
     void ProcessDelayedActions(bool all);                                  // 0x002b4de4
     void RecordBrushApplication();                                         // 0x002b4674
     void ApplyModifierKeys(std::uint32_t modifiers);                       // the strength / width pick shared by the key and mouse handlers
+    void SetCursorEchoState(bool active);                                  // 0x002b5028
+    void SetCursorEchoPos(const float position[3], bool show);             // 0x002b496c
+    void ReleaseEcho(int index, int transition);
 
     std::uint32_t brushType_;                     // +0x2c
     TerrainBrushUIElements ui_{};                 // +0x30
@@ -102,6 +112,10 @@ private:
     cRZTimer sinceApplication_{cRZTimer::kMicroseconds};   // +0xc0
     bool firstApplication_ = true;                // +0xd4
     float baseStrength_ = 1.0f, baseWidth_ = 1.0f;   // +0xdc / +0xe0 (+0xd8 1.0 unused)
+    cSC4VisualEffect* echo_[2] = {};              // +0xe4 the brush circle, +0xe8 the zoom-scaled marker (one reference each)
+    float echoPosition_[3] = {};                  // +0xec
+    std::uint32_t echoCursor_ = 0x71e5705;        // +0xf8 the cursor while the echo shows
+    std::uint32_t hiddenCursor_ = 1;              // +0xfc
     cRZTimer dragTimer_{cRZTimer::kMilliseconds};  // +0x100
     std::uint32_t actionDelay_ = 0;               // +0x114
     float anchorAltitude_ = 0.0f;                 // +0x118

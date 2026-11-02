@@ -6,6 +6,7 @@
 #include "app/NativeCity.h"
 #include "app/NativeCitySystems.h"
 #include "app/NativeCityView.h"
+#include "app/NativeEffects.h"
 #include "app/NativeWinMgr.h"
 #include "app/NativeZoneTool.h"
 #include "gz/cGZPersistResourceManager.h"
@@ -79,6 +80,15 @@ struct ScrubberHost final : sc4::ITerrainScrubberHost {
         if (!SL::spRM || !SL::spRM->GetResource(cGZPersistResourceKey{0x6534284a, 0x88cd66e9, 1}, 0xa52160f5, &resource, 0, nullptr) || !resource)
             return nullptr;
         return static_cast<sc4::cISCResExemplar*>(resource)->AsISCPropertyHolder();
+    }
+    bool BrushEffectsEnabled() override { return true; }   // render property 0x11 kUseCursorEffects (on by default)
+    sc4::cSC4VisualEffect* CreateEffect(std::uint32_t group, std::uint32_t type) override { return CreateKeyedEffect(group, type); }
+    int ViewZoom() override {
+        sc4::cSC43DRender* render = CityRenderer();
+        SC4ViewUtilities* v = render ? render->GetViewUtilities() : nullptr;
+        int zoom = 0, rotation = 0;
+        if (v) v->GetZoomAndRotation(zoom, rotation);
+        return zoom;
     }
 };
 
