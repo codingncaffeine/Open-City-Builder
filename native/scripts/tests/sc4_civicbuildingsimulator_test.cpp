@@ -604,12 +604,12 @@ int main() {
         CHECK(sim->DoMessage(&removed));
     }
     CHECK(sim->Landmarks().size() == 1 && sim->GetLandmarkCount() == 1);
-    // the landmark item only leaves the budget through RemoveBudgetItemFromBudget, which drops the locally funded
-    // object; the civic simulator never registers one, so the line item keeps its 120 (kept from the original).
+    // the landmark item leaves the budget through RemoveBudgetItemFromBudget, which takes its cost back out of the line
+    // the activation added it to (budget.md 7, 12: removal reverses activation)
     CHECK(!civic->IsLocallyFundedObjectInDepartment(holderA, 0));
     {
         cSC4LineItem* line = civic->GetLineItem(0x777);
-        CHECK(line != nullptr && line->GetFullExpenses() == 120);
+        CHECK(line != nullptr && line->GetFullExpenses() == 0);
     }
     CHECK(civic->GetLineItem(0x1234) == nullptr);              // income 45-45 = 0: removed
     CHECK(buildingA->refs == refsA);                           // the list's reference was given back

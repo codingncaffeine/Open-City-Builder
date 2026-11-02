@@ -105,23 +105,28 @@ int main() {
     cSCPropertyHelp::SetPropertyValue(building, kBudgetItemPropDepartments, std::vector<std::uint32_t>{0x11, 0x11});
     cSCPropertyHelp::SetPropertyValue(building, kBudgetItemPropLineItems, std::vector<std::uint32_t>{1, 1});
     cSCPropertyHelp::SetPropertyValue(building, kBudgetItemPropCosts, std::vector<std::int64_t>{300, 50});
+    cSCPropertyHelp::SetPropertyValue(building, kBudgetItemPropReserved, std::vector<std::uint32_t>{0xaaaa, 0xbbbb});   // purpose ids
     std::vector<BudgetItem> items;
     CHECK(sim->GetBudgetItemInfo(building, items) && items.size() == 2);
     CHECK(items[0].cost == 300 && items[1].purpose == 1 && std::fabs(items[1].localFunding - 1.0f) < 1e-6f);
     sim->ChangeBudgetItemCost(building, 1, 75);
     sim->ChangeBudgetItemLocalFunding(building, 1, 0.25f);
     BudgetItem item;
-    CHECK(sim->GetBudgetItemForPurpose(building, 1, item) && item.cost == 75 && std::fabs(item.localFunding - 0.25f) < 1e-6f);
-    CHECK(!sim->GetBudgetItemForPurpose(building, 5, item));
+    // budget.md 7: the first item whose purpose id matches; the item's index is BudgetItem::purpose
+    CHECK(sim->GetBudgetItemForPurpose(building, 0xbbbb, item) && item.purpose == 1 && item.cost == 75 && std::fabs(item.localFunding - 0.25f) < 1e-6f);
+    CHECK(!sim->GetBudgetItemForPurpose(building, 1, item));
     CHECK(sim->GetLineItemFromBudgetItem(item) == line);
+    // Add / RemoveBudgetItemFromBudget(holder, index) move the item's cost into / out of its line's full expenses; nothing registers
     sim->AddBudgetItemToBudget(building, 0);
-    CHECK(police->IsLocallyFundedObjectInDepartment(building, 0) && line->GetFullExpenses() == 500);
+    CHECK(!police->IsLocallyFundedObjectInDepartment(building, 0xaaaa) && line->GetFullExpenses() == 500);
     sim->RemoveBudgetItemFromBudget(building, 0);
-    CHECK(!police->IsLocallyFundedObjectInDepartment(building, 0));
+    CHECK(line->GetFullExpenses() == 200);
+    sim->AddBudgetItemToBudget(building, 7);   // out of range: nothing
+    CHECK(line->GetFullExpenses() == 200);
     auto* copy = new cSCPropertyHolder();
     copy->AddRef();
     cSC4BudgetSimulator::CopyBudgetItemProperties(building, copy);
-    CHECK(sim->GetBudgetItemInfo(copy, items) && items.size() == 2 && items[1].cost == 75 && items[0].cost == 0);   // removal zeroed item 0
+    CHECK(sim->GetBudgetItemInfo(copy, items) && items.size() == 2 && items[1].cost == 75 && items[0].cost == 300);
     copy->Release();
     building->Release();
 

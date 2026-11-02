@@ -23,6 +23,7 @@
 #include "sc4/cSC4City.h"
 
 namespace native {
+void InstallBudgetStub();   // hosts/StubBudget.cpp
 namespace {
 using namespace sc4;
 
@@ -87,6 +88,8 @@ struct BudgetServices final : sc4::IBudgetSimServices {
     void RegisterSimulatorNotifications(void* owner) override {
         auto* sim = static_cast<cSC4BudgetSimulator*>(owner);
         g_target.simulator = sim;
+        // The departments read their objects' budget items through the city's budget simulator (the stub host only covers the load).
+        sc4::SetBudgetHost(sim);
         // The original reads the tunables first thing in Init (ReadSimulatorTunableValues): starting funds, tax rates, loans.
         sc4::cISCPropertyHolder* exemplar = nullptr;
         void* resource = nullptr;
@@ -104,6 +107,7 @@ struct BudgetServices final : sc4::IBudgetSimServices {
     void UnregisterSimulator(void*) override {
         RemoveCitySimulatorAgent(&g_target);
         g_target.simulator = nullptr;
+        InstallBudgetStub();
     }
     void SubscribeMessage(std::uint32_t message) override { if (SL::spMS2) SL::spMS2->AddNotification(&g_target, message); }
     void UnsubscribeMessage(std::uint32_t message) override { if (SL::spMS2) SL::spMS2->RemoveNotification(&g_target, message); }

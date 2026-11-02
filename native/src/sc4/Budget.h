@@ -39,10 +39,10 @@ class cSC4DepartmentBudget;
 struct BudgetItem {
     std::int32_t departmentId = 0;      // +0x00
     std::int32_t lineItemId = 0;        // +0x04
-    std::int32_t reserved8 = 0;         // +0x08
+    std::int32_t reserved8 = 0;         // +0x08 the purpose id (property 0xea54d285) GetBudgetItemForPurpose matches
     std::int32_t reservedC = 0;         // +0x0c
     std::int64_t cost = 0;              // +0x10
-    std::uint32_t purpose = 0;          // +0x18
+    std::uint32_t purpose = 0;          // +0x18 the item's INDEX in the arrays (what ChangeBudgetItem* take)
     float localFunding = 0.0f;          // +0x1c
 };
 

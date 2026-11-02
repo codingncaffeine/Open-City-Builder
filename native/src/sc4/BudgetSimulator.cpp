@@ -536,11 +536,18 @@ bool cSC4BudgetSimulator::GetBudgetItemInfo(cISCPropertyHolder* holder, std::vec
     return true;
 }
 
+// The first item whose purpose id (property 0xea54d285) matches (budget.md 7). The departments key their locally funded objects
+// by that id too, as a city file stores them.
 bool cSC4BudgetSimulator::GetBudgetItemForPurpose(cISCPropertyHolder* holder, std::uint32_t purpose, BudgetItem& item) {
     std::vector<BudgetItem> items;
-    if (!GetBudgetItemInfo(holder, items) || purpose >= items.size()) return false;
-    item = items[purpose];
-    return true;
+    if (!GetBudgetItemInfo(holder, items)) return false;
+    for (const BudgetItem& candidate : items) {
+        if (static_cast<std::uint32_t>(candidate.reserved8) == purpose) {
+            item = candidate;
+            return true;
+        }
+    }
+    return false;
 }
 
 void cSC4BudgetSimulator::ChangeBudgetItemLine(cISCPropertyHolder* holder, int purpose, std::uint32_t lineItemId) {
@@ -569,18 +576,18 @@ void cSC4BudgetSimulator::ChangeBudgetItemLocalFunding(cISCPropertyHolder* holde
     cSCPropertyHelp::SetPropertyValue(holder, kBudgetItemPropLocalFunding, values);
 }
 
-void cSC4BudgetSimulator::AddBudgetItemToBudget(cISCPropertyHolder* holder, int purpose) {
-    BudgetItem item;
-    if (!GetBudgetItemForPurpose(holder, static_cast<std::uint32_t>(purpose), item)) return;
-    if (cSC4DepartmentBudget* department = GetDepartmentBudget(static_cast<std::uint32_t>(item.departmentId)))
-        department->AddLocallyFundedObject(holder, static_cast<std::uint32_t>(purpose));
+// AddBudgetItemToBudget / RemoveBudgetItemFromBudget(holder, index): the item at `index` adds (removes) its cost to its line's full
+// expenses when its department and line exist; nothing is created (budget.md 7).
+void cSC4BudgetSimulator::AddBudgetItemToBudget(cISCPropertyHolder* holder, int index) {
+    std::vector<BudgetItem> items;
+    if (index < 0 || !GetBudgetItemInfo(holder, items) || static_cast<std::size_t>(index) >= items.size()) return;
+    if (cSC4LineItem* line = GetLineItemFromBudgetItem(items[static_cast<std::size_t>(index)])) line->AddToFullExpenses(items[static_cast<std::size_t>(index)].cost);
 }
 
-void cSC4BudgetSimulator::RemoveBudgetItemFromBudget(cISCPropertyHolder* holder, int purpose) {
-    BudgetItem item;
-    if (!GetBudgetItemForPurpose(holder, static_cast<std::uint32_t>(purpose), item)) return;
-    if (cSC4DepartmentBudget* department = GetDepartmentBudget(static_cast<std::uint32_t>(item.departmentId)))
-        department->RemoveLocallyFundedObject(holder, static_cast<std::uint32_t>(purpose));
+void cSC4BudgetSimulator::RemoveBudgetItemFromBudget(cISCPropertyHolder* holder, int index) {
+    std::vector<BudgetItem> items;
+    if (index < 0 || !GetBudgetItemInfo(holder, items) || static_cast<std::size_t>(index) >= items.size()) return;
+    if (cSC4LineItem* line = GetLineItemFromBudgetItem(items[static_cast<std::size_t>(index)])) line->AddToFullExpenses(-items[static_cast<std::size_t>(index)].cost);
 }
 
 cSC4LineItem* cSC4BudgetSimulator::GetLineItemFromBudgetItem(const BudgetItem& item) {

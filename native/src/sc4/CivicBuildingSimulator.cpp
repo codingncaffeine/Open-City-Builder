@@ -30,9 +30,8 @@ cIGZMessage2Standard& StandardMessage(cIGZMessage2* message) {
 }
 
 // 0x100222758: the original's GetBudgetItemForPurpose asks for the whole item list (vslot 0x190) and returns the
-// item whose "reserved" word (property 0xea54d285, BudgetItem::reserved8) equals the purpose id. The port's
-// cSC4BudgetSimulator::GetBudgetItemForPurpose indexes the list by the purpose instead, which the department code
-// relies on; the civic simulator therefore repeats the original's search here.
+// item whose "reserved" word (property 0xea54d285, BudgetItem::reserved8) equals the purpose id, as
+// cSC4BudgetSimulator::GetBudgetItemForPurpose does.
 bool FindBudgetItemByPurpose(cSC4BudgetSimulator* budget, cISCPropertyHolder* holder, std::uint32_t purpose,
                              BudgetItem& item) {
     if (!budget || !holder) return false;
