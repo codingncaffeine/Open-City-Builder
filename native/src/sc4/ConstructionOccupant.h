@@ -320,6 +320,12 @@ public:
     virtual IConstructionRenderer* Renderer() = 0;
     // Read: the lot object a city file holds (the port's serializable lot adapter) as the lot interface, one reference.
     virtual IConstructionLot* AdoptLot(cIGZUnknown* object) = 0;
+    // Read: a prop / a visual-effect prop the city file holds, as the interfaces the occupant uses (one new reference each;
+    // null when the object is not one).
+    virtual IConstructionProp* AdoptProp(cIGZUnknown* object) = 0;
+    virtual IConstructionEffect* AdoptEffect(cIGZUnknown* object) = 0;
+    // Read: a crew member (the cISC4Automaton answer, 0xa9b40f05) as the crew interface, one new reference.
+    virtual IConstructionAutomaton* AdoptAutomaton(cIGZUnknown* object) = 0;
 };
 IConstructionOccupantHost* ConstructionOccupantHost();
 void SetConstructionOccupantHost(IConstructionOccupantHost* host);

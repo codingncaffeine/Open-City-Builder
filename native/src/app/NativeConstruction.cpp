@@ -38,6 +38,12 @@
 #include "app/NativeAnimationTicks.h"
 
 namespace native {
+
+// app/NativeConstructionCrew.cpp (LoadedCrew below)
+sc4::cISC4Occupant* CrewAsOccupant(cIGZUnknown* automaton);
+void CrewSetAutomataFlag(cIGZUnknown* automaton, std::uint32_t flag, bool on);
+void CrewSetOrientation(cIGZUnknown* automaton, const float* direction);
+
 namespace {
 using namespace sc4;
 
@@ -167,6 +173,29 @@ private:
     std::uint32_t refs_ = 1;
 };
 
+// A crew member a city file holds: the automaton itself, reached through the crew interface. The calls are the automaton's
+// own methods, in app/NativeConstructionCrew.cpp (the automaton and construction headers cannot share a translation unit).
+// QueryInterface goes to the automaton, so the crew is written back as the automaton.
+
+class LoadedCrew final : public IConstructionAutomaton {
+public:
+    explicit LoadedCrew(cIGZUnknown* automaton) : automaton_(automaton) { automaton_->AddRef(); }
+    ~LoadedCrew() { automaton_->Release(); }
+    bool QueryInterface(std::uint32_t iid, void** out) override { return automaton_->QueryInterface(iid, out); }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override {
+        if (--refs_ != 0) return refs_;
+        delete this;
+        return 0;
+    }
+    cISC4Occupant* AsOccupant() override { return CrewAsOccupant(automaton_); }
+    void SetAutomataFlag(std::uint32_t flag, bool on) override { CrewSetAutomataFlag(automaton_, flag, on); }
+    void SetOrientation(const float* direction) override { CrewSetOrientation(automaton_, direction); }
+private:
+    cIGZUnknown* automaton_;
+    std::uint32_t refs_ = 1;
+};
+
 class Renderer final : public IConstructionRenderer {
 public:
     bool IsModelInserted(s3d::cIS3DModelInstance* model) override { cSC43DRender* r = CityRenderer(); return r && r->IsModelInserted(model); }
@@ -282,6 +311,19 @@ public:
         void* raw = nullptr;
         if (!object || !object->QueryInterface(kGZIID_PlainObject, &raw) || !raw) return nullptr;
         return new ConstructionLot(static_cast<cSC4Lot*>(raw));
+    }
+    IConstructionProp* AdoptProp(cIGZUnknown* object) override {
+        auto* prop = dynamic_cast<cSC4PropOccupant*>(object);
+        if (!prop) return nullptr;
+        prop->AddRef();
+        return new Prop(prop);
+    }
+    IConstructionAutomaton* AdoptAutomaton(cIGZUnknown* object) override { return object ? new LoadedCrew(object) : nullptr; }
+    IConstructionEffect* AdoptEffect(cIGZUnknown* object) override {
+        auto* effect = dynamic_cast<cSC4PropOccupantVisualEffect*>(object);
+        if (!effect) return nullptr;
+        effect->AddRef();
+        return new Effect(effect);
     }
 private:
     cISCResExemplar* settings_ = nullptr;

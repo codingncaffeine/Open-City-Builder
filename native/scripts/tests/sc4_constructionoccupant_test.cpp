@@ -546,6 +546,22 @@ struct FakeHost final : IConstructionOccupantHost {
         void* raw = nullptr;
         return object && object->QueryInterface(kGZIID_cISC4Lot, &raw) ? static_cast<IConstructionLot*>(static_cast<cIGZUnknown*>(raw)) : nullptr;
     }
+    // the fakes are the interfaces themselves
+    IConstructionProp* AdoptProp(cIGZUnknown* object) override {
+        auto* prop = dynamic_cast<IConstructionProp*>(object);
+        if (prop) prop->AddRef();
+        return prop;
+    }
+    IConstructionEffect* AdoptEffect(cIGZUnknown* object) override {
+        auto* effect = dynamic_cast<IConstructionEffect*>(object);
+        if (effect) effect->AddRef();
+        return effect;
+    }
+    IConstructionAutomaton* AdoptAutomaton(cIGZUnknown* object) override {
+        auto* automaton = dynamic_cast<IConstructionAutomaton*>(object);
+        if (automaton) automaton->AddRef();
+        return automaton;
+    }
 };
 
 FakeHost* g_host = nullptr;

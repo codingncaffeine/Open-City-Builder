@@ -424,24 +424,32 @@ bool cSC4ConstructionOccupant::Read(cIGZIStream& stream) {
     for (std::uint32_t i = 0; i < count; ++i) {
         cIGZUnknown* raw = nullptr;
         ReadSerializable(stream, kGZIID_cISC4PropOccupant, &raw);
-        if (raw) groundProps_.push_back(static_cast<IConstructionProp*>(raw));
+        if (raw) {
+            if (IConstructionProp* prop = g_host ? g_host->AdoptProp(raw) : nullptr) groundProps_.push_back(prop);
+            raw->Release();
+        }
     }
     stream.GetUint32(count);
     for (std::uint32_t i = 0; i < count; ++i) {
         cIGZUnknown* raw = nullptr;
         ReadSerializable(stream, kGZIID_cISC4PropOccupant, &raw);
-        if (raw) roofProps_.push_back(static_cast<IConstructionProp*>(raw));
+        if (raw) {
+            if (IConstructionProp* prop = g_host ? g_host->AdoptProp(raw) : nullptr) roofProps_.push_back(prop);
+            raw->Release();
+        }
     }
     stream.GetUint32(count);
     sparks_.reserve(count);
     for (std::uint32_t i = 0; i < count; ++i) {
         cIGZUnknown* raw = nullptr;
         ReadSerializable(stream, kGZIID_cISC4PropOccupantVisualEffect, &raw);
-        sparks_.push_back(static_cast<IConstructionEffect*>(raw));
+        sparks_.push_back(raw && g_host ? g_host->AdoptEffect(raw) : nullptr);   // null entries are kept, as in the original
+        if (raw) raw->Release();
     }
     cIGZUnknown* dustRaw = nullptr;
     ReadSerializable(stream, kGZIID_cISC4PropOccupantVisualEffect, &dustRaw);
-    dust_ = static_cast<IConstructionEffect*>(dustRaw);
+    dust_ = dustRaw && g_host ? g_host->AdoptEffect(dustRaw) : nullptr;
+    if (dustRaw) dustRaw->Release();
     std::int8_t stage = 0;
     stream.GetSint8(stage);
     stage_ = static_cast<std::uint32_t>(static_cast<std::int32_t>(stage));
@@ -475,7 +483,10 @@ bool cSC4ConstructionOccupant::Read(cIGZIStream& stream) {
         stream >> crew.onRoof;
         cIGZUnknown* raw = nullptr;
         ReadSerializable(stream, kGZIID_cISC4Automaton, &raw);
-        crew.automaton = static_cast<IConstructionAutomaton*>(raw);
+        if (raw) {
+            crew.automaton = g_host ? g_host->AdoptAutomaton(raw) : nullptr;
+            raw->Release();
+        }
         crews_.push_back(crew);
     }
     return !stream.GetError();

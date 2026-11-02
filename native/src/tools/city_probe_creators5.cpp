@@ -1,5 +1,6 @@
 #include <cstdint>
 
+#include "sc4/TrailerVehicle.h"
 #include "sc4/Vehicle.h"
 #include "tools/city_probe_plain.h"
 
@@ -13,6 +14,11 @@ cIGZSerializable* CreateCityProbeSerializable5(std::uint32_t classId) {
     switch (classId) {
         case 0x896e714a: {
             auto* object = new sc4::cSC4Vehicle(sc4::NewStubITrafficAutomatonHost(), sc4::AutomatonHost() ? sc4::AutomatonHost() : sc4::NewStubIAutomatonHost(), sc4::NewStubIVehicleHost());
+            object->AddRef();
+            return object;
+        }
+        case 0x4a5b69ed: {   // cSC4TrailerVehicle: a vehicle pulling trailer cars (its leader refs point at it)
+            auto* object = new sc4::cSC4TrailerVehicle(sc4::NewStubITrafficAutomatonHost(), sc4::AutomatonHost() ? sc4::AutomatonHost() : sc4::NewStubIAutomatonHost(), sc4::NewStubIVehicleHost());
             object->AddRef();
             return object;
         }

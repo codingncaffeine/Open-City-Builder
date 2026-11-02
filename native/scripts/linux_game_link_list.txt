@@ -597,6 +597,7 @@ src/app/NativeGrowthMaps.cpp
 src/app/NativeTractDevelopment.cpp
 src/app/NativeLotConstruction.cpp
 src/app/NativeConstruction.cpp
+src/app/NativeConstructionCrew.cpp
 src/app/NativeProps.cpp
 src/app/NativeDemandHost.cpp
 src/app/NativeSimHosts.cpp
@@ -651,6 +652,7 @@ src/tools/city_probe_creators8.cpp
 src/sc4/EmergencyVehicle.cpp
 src/sc4/FireTruck.cpp
 src/sc4/PatrolCar.cpp
+src/sc4/TrailerVehicle.cpp
 src/sc4/Ambulance.cpp
 src/gz/gzcom_creators/cSTESurfaceWater.cpp
 src/sc4/SurfaceWater.cpp
