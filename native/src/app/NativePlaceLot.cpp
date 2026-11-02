@@ -35,15 +35,17 @@
 #include "sc4/LotDeveloper.h"
 #include "sc4/NetworkOccupant.h"
 #include "sc4/OccupantManager.h"
+#include "sc4/OverlayManager.h"
 #include "sc4/FloraOccupant.h"
 #include "sc4/PoliceSimulator.h"
+#include "sc4/ResidentialSimulator.h"
 #include "sc4/VisualEffect.h"
 #include "sc4/ViewInputControlPlaceLot.h"
 #include "sc4/ZoneDeveloper.h"
 #include "app/NativeAudio.h"
+#include "app/NativeDecalOverlay.h"
 #include "app/NativeEffects.h"
 #include "app/NativeModelMaker.h"
-#include "app/NativeZoneOverlay.h"
 #include "gz/cGZPersistResourceKey.h"
 
 namespace native {
@@ -244,43 +246,24 @@ template <class F> bool WithBuildingExemplar(std::uint32_t type, F&& fn) {
 }
 bool PlaceLotDebug() { static const bool on = std::getenv("SC4_PLOPDEBUG") != nullptr; return on; }
 
-// INTERIM until the effects manager draws decal components: the footprint effects ("building_footprint_ok" / "_notok") are
-// decals, so their cells are painted through the zone overlay instead, green or red, from the tool's own cell coverage.
-void PaintFootprint(const cS3DTransform& transform, bool valid) {
-    ClearDragHighlight();
-    auto* tool = g_view ? dynamic_cast<cSC4ViewInputControlPlaceLot*>(g_view->GetCurrentViewInputControl()) : nullptr;
-    if (!tool) return;
-    float cx = 0, cz = 0;
-    SC4Rect<int> rect{};
-    if (!tool->GetLotCenterAndCellCoverage(tool->Facing(), transform.translation[0], transform.translation[2], cx, cz, rect)) return;
-    const std::uint32_t colour = valid ? 0x9040c040u : 0x90d03030u;
-    for (int x = rect.x0; x <= rect.x1; ++x)
-        for (int z = rect.z0; z <= rect.z1; ++z) SetDragHighlightCell(x, z, colour);
-}
-
 // A visual effect of the effects manager as the tool holds it.
 class Effect final : public IPlaceLotEffect {
 public:
-    Effect(cSC4VisualEffect* effect, int footprint) : effect_(effect), footprint_(footprint) {}
+    explicit Effect(cSC4VisualEffect* effect) : effect_(effect) {}
     bool QueryInterface(std::uint32_t, void**) override { return false; }
     std::uint32_t AddRef() override { return ++refs_; }
     std::uint32_t Release() override {
         if (--refs_ != 0) return refs_;
-        if (footprint_) ClearDragHighlight();
         effect_->Release();
         delete this;
         return 0;
     }
     void Start(int transition) override { effect_->Start(transition); }
-    void Stop(int transition) override {
-        if (footprint_) ClearDragHighlight();
-        effect_->Stop(transition);
-    }
+    void Stop(int transition) override { effect_->Stop(transition); }
     bool IsStarted() override { return effect_->IsStarted(); }
     void SetEffectTransform(const cS3DTransform& transform) override {
         // The tool's transform carries the world position: the effect is placed by its source transform (as StartNamedEffect).
         effect_->SetSourceTransform(transform);
-        if (footprint_) PaintFootprint(transform, footprint_ > 0);
     }
     void SetFinishMessage(std::uint32_t message, std::uint32_t data) override { effect_->SetFinishNotifyMessage(message, data); }
     void SetVectorParams(std::uint32_t type, const float* values, int count) override {
@@ -295,7 +278,6 @@ public:
 
 private:
     cSC4VisualEffect* effect_;
-    int footprint_;   // 1 the valid footprint, -1 the invalid one, 0 any other effect
     std::uint32_t refs_ = 1;
 };
 struct Effects final : IPlaceLotEffects {
@@ -303,8 +285,7 @@ struct Effects final : IPlaceLotEffects {
         cSC4VisualEffect* effect = CreateNamedEffect(name);
         if (PlaceLotDebug()) std::fprintf(stderr, "place lot: effect %s -> %s\n", name, effect ? "made" : "none");
         if (!effect) return nullptr;
-        const std::string n = name;
-        return new Effect(effect, n == "building_footprint_ok" ? 1 : n == "building_footprint_notok" ? -1 : 0);
+        return new Effect(effect);
     }
 } g_effects;
 
@@ -396,6 +377,24 @@ struct LotDeveloperView final : IPlaceLotLotDeveloper {
     }
 } g_lotDeveloperView;
 
+// The place-lot preview as the coverage queries see it: a station / school / hospital that is not in the city yet.
+class PreviewStation final : public IPoliceOccupant, public IFireOccupant, public IResidentialOccupant {
+public:
+    PreviewStation(cISCPropertyHolder* holder, std::uint32_t type) : holder_(holder), type_(type) {}
+    std::uint32_t OccupantType() override { return kOccupantTypeBuilding; }
+    void Position(float xyz[3]) override { xyz[0] = xyz[1] = xyz[2] = 0.0f; }
+    cISCPropertyHolder* PropertyHolder() override { return holder_; }
+    bool UsesDepartmentBudget() override { return false; }
+    bool IsInGroup(std::uint32_t group) override {
+        std::vector<std::uint32_t> groups;
+        return cSCPropertyHelp::GetPropertyValue(holder_, kPropOccupantGroups, groups) && std::find(groups.begin(), groups.end(), group) != groups.end();
+    }
+    std::uint32_t BuildingType() override { return type_; }
+private:
+    cISCPropertyHolder* holder_;
+    std::uint32_t type_;
+};
+
 struct BuildingDevelopment final : IPlaceLotBuildingDevelopment {
     void GetAllBuildingTypes(std::vector<std::uint32_t>& out) override { NativeAllBuildingTypes(out); }
     bool BuildingTypeName(std::uint32_t type, cIGZString& out) override {
@@ -417,8 +416,28 @@ struct BuildingDevelopment final : IPlaceLotBuildingDevelopment {
     bool BuildingIsFireStation(std::uint32_t type) override {
         return WithBuildingExemplar(type, [](cISCPropertyHolder* h) { return h->HasProperty(kFireStationRadius); });
     }
-    // PARTIAL: the police / fire / residential simulators' coverage radius queries; the ring keeps its 32-unit default.
-    bool BuildingCoverageRadius(std::uint32_t, int, float, float&, float&) override { return false; }
+    // spPoliceSim / spFireProtectionSim / spResidentialSim GetOccupantCoverage(preview occupant, fraction, &radius, &ringRadius),
+    // with the building exemplar standing in for the preview occupant's property holder (its budget item is not locally funded yet:
+    // the department's funding applies).
+    bool BuildingCoverageRadius(std::uint32_t type, int category, float fraction, float& radius, float& ringRadius) override {
+        return WithBuildingExemplar(type, [&](cISCPropertyHolder* holder) {
+            PreviewStation station(holder, type);
+            const SC4Percentage share(fraction);
+            bool ok = false;
+            if (category == 0) {
+                auto* police = Component<cSC4PoliceSimulator>(CityComponent::PoliceSimulator, kGZCLSID_cSC4PoliceSimulator);
+                ok = police && police->GetOccupantCoverage(&station, share, radius, ringRadius);
+            } else if (category == 1) {
+                auto* fire = Component<cSC4FireProtectionSimulator>(CityComponent::FireProtectionSimulator, kGZCLSID_cSC4FireProtectionSimulator);
+                ok = fire && fire->GetOccupantCoverage(&station, share, radius, ringRadius);
+            } else {
+                auto* residential = Component<cSC4ResidentialSimulator>(CityComponent::ResidentialSimulator, kGZCLSID_cSC4ResidentialSimulator);
+                ok = residential && residential->GetOccupantCoverage(&station, fraction, radius, ringRadius);
+            }
+            if (PlaceLotDebug()) std::fprintf(stderr, "place lot: coverage of %08x category %d fraction %.2f -> %d radius %.1f ring %.1f\n", type, category, fraction, ok, radius, ringRadius);
+            return ok;
+        });
+    }
 } g_buildingDevelopment;
 
 struct BudgetView final : IPlaceLotBudget {
@@ -568,6 +587,8 @@ public:
     IPlaceLotPropManager* PropManager() override { return &g_propManager; }
     IPlaceLotEffects* Effects() override { return &g_effects; }
     IPlaceLotLocalGrid* CreateLocalGrid() override { return nullptr; }   // cSC4LocalGridHelper is not recovered
+    void* CreateFootprintTexture(int size, int marginX, int marginZ) override { return native::CreateFootprintTexture(size, marginX, marginZ); }
+    void ReleaseFootprintTexture(void* texture) override { static_cast<sc4::IOverlayTexture*>(texture)->Release(); }
     cSC4LotConfiguration* GetLotConfiguration(std::uint32_t id) override {
         cSC4LotConfigurationManager* m = Plain<cSC4LotConfigurationManager>(CityComponent::LotConfigurationManager);
         return m ? m->GetLotConfiguration(id) : nullptr;

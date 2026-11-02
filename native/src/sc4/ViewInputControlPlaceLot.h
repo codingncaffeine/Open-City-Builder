@@ -353,6 +353,11 @@ public:
     virtual IPlaceLotPropManager* PropManager() = 0;                     // SL::spPropManager
     virtual IPlaceLotEffects* Effects() = 0;                             // SL::spEffectsManager
     virtual IPlaceLotLocalGrid* CreateLocalGrid() = 0;                   // the cSC4LocalGridHelper at +0x108 (host-owned)
+    // The footprint texture of GetBuildingPreviewModel: an RZ buffer of size x size 32-bit texels (clear, a white rectangle
+    // inset by the margins, its inside 2 texels in at alpha 0xaa) made a cS3DTextureBinding by the texture-binding factory
+    // (vslot 0x18). One reference for the caller (+0x1b0); ReleaseFootprintTexture is cS3DTextureBinding::Release.
+    virtual void* CreateFootprintTexture(int, int, int) { return nullptr; }
+    virtual void ReleaseFootprintTexture(void*) {}
 
     // SL::spLotConfigurationManager
     virtual cSC4LotConfiguration* GetLotConfiguration(std::uint32_t id) = 0;               // vslot 0x40

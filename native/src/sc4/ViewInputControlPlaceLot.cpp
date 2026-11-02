@@ -278,9 +278,10 @@ void cSC4ViewInputControlPlaceLot::ReleaseLotConfigurationEffects() {
         directionEffect_->Release();
         directionEffect_ = nullptr;
     }
-    // The original releases the grid texture binding here (cS3DTextureBinding::Release); this port never
-    // creates it (GetBuildingPreviewModel is PARTIAL at the texture block).
-    gridTexture_ = nullptr;
+    if (gridTexture_) {   // cS3DTextureBinding::Release
+        if (IPlaceLotHost* host = Host()) host->ReleaseFootprintTexture(gridTexture_);
+        gridTexture_ = nullptr;
+    }
     ClearEffectList(selectionBlue_);
     ClearEffectList(selectionRed_);
     if (previewProp_) {
@@ -1303,15 +1304,19 @@ void cSC4ViewInputControlPlaceLot::GetBuildingPreviewModel() {
         previewProps_.push_back(preview);
     }
 
-    // The grid texture (>256 world units is scaled down into the 0x100-byte grid; otherwise the smallest
-    // power-of-two texture that fits). The texture and its cS3DTextureBinding are not created (PARTIAL).
-    const std::uint32_t gridX = static_cast<std::uint32_t>(cell * static_cast<float>(sizeX));
-    const std::uint32_t gridZ = static_cast<std::uint32_t>(cell * static_cast<float>(sizeZ));
-    std::uint32_t largest = std::max(gridX, gridZ);
+    // The footprint texture (i386 0x1003bc9ac tail): one texel per world unit in the smallest power-of-two square that
+    // holds the lot, or the lot scaled down into 0x100 texels when it is wider than 256 world units; the lot's rectangle
+    // is centred in it and the footprint effect is scaled to the square's world size.
+    std::uint32_t gridX = static_cast<std::uint32_t>(cell * static_cast<float>(sizeX));
+    std::uint32_t gridZ = static_cast<std::uint32_t>(cell * static_cast<float>(sizeZ));
+    const std::uint32_t largest = std::max(gridX, gridZ);
+    std::uint32_t textureSize = 0x100;
     if (largest >= 0x101) {
         gridSize_ = static_cast<float>(largest);
+        gridX = (gridX << 8) / largest;
+        gridZ = (gridZ << 8) / largest;
     } else {
-        std::uint32_t textureSize = 0x10;
+        textureSize = 0x10;
         if (largest >= 0x11) {
             textureSize = 0x20;
             if (largest >= 0x21) {
@@ -1321,6 +1326,12 @@ void cSC4ViewInputControlPlaceLot::GetBuildingPreviewModel() {
         }
         gridSize_ = static_cast<float>(textureSize);
     }
+    if (gridTexture_) {
+        host->ReleaseFootprintTexture(gridTexture_);
+        gridTexture_ = nullptr;
+    }
+    gridTexture_ = host->CreateFootprintTexture(static_cast<int>(textureSize), static_cast<int>((textureSize - gridX) >> 1),
+                                                static_cast<int>((textureSize - gridZ) >> 1));
 
     // Coverage categories, the global effect id and the placement count.
     std::uint32_t buildingType = previewBuildingType_ != 0 ? previewBuildingType_ : buildingType_;
