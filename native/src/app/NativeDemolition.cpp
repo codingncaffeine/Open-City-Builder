@@ -10,6 +10,7 @@
 #include <memory>
 #include <vector>
 
+#include "app/NativeAudio.h"
 #include "app/NativeCity.h"
 #include "app/NativeEffects.h"
 #include "app/NativeZoneDeveloperHost.h"
@@ -359,8 +360,21 @@ public:
     bool IsPlainOccupant(IDemolishable*) override { return false; }
     IDemolitionEffect* CreateEffect(std::uint32_t effectSet, std::uint32_t index) override;
     void ReleaseEffect(IDemolitionEffect* effect) override;
-    void PlayGroupEffect(std::uint32_t, float, float, float) override {}   // PARTIAL: the group dust cloud
-    void PlaySound(std::uint32_t) override {}                              // PARTIAL: the demolition sounds
+    // The group effect (demolish_group_small / medium / large: its rumble) at the region's centre.
+    void PlayGroupEffect(std::uint32_t index, float x, float height, float z) override {
+        cSC4VisualEffect* effect = CreateKeyedEffect(kEffectSetDemolish, index);
+        if (!effect) return;
+        cS3DTransform source;
+        source.flags = 1;
+        source.changeCounter = 1;
+        source.translation[0] = x;
+        source.translation[1] = height;
+        source.translation[2] = z;
+        effect->SetSourceTransform(source);
+        effect->Start(0);
+        effect->Release();
+    }
+    void PlaySound(std::uint32_t soundId) override { PlayGameSound(soundId); }   // the occupant's own demolition sound (0x0a93036f)
     float RenderMinimumSize() override { return 0.0f; }
     float ViewScale() override { return 1.0f; }
 } g_host;

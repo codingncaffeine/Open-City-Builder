@@ -19,6 +19,7 @@
 #include "sc4/PackedRenderState.h"
 #include "sc4/Render3D.h"
 #include "app/NativeAnimationTicks.h"
+#include "app/NativeAudio.h"
 #include "app/NativeCity.h"
 #include "app/NativeModelMaker.h"
 #include "app/NativeUi.h"
@@ -246,6 +247,22 @@ public:
 };
 ManagerHost g_host;
 
+// The effect components' services (sc4/EffectComponents.h): the sound components post their events to the sound system, which
+// here plays the sound through the game's sound manager. PARTIAL: the positional half (the move events, the 3D attenuation),
+// the stop of a looping sound, and the camera effects (no ICameraControl natively).
+class ComponentsHost final : public sc4::IEffectsHost {
+public:
+    sc4::ICameraControl* Camera() override { return nullptr; }
+    bool CameraEffectsEnabled() override { return false; }
+    void AddNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->AddNotification(target, message); }
+    void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->RemoveNotification(target, message); }
+    void PostSoundEvent(std::uint32_t event, std::uint32_t a, std::uint64_t, std::uint64_t, std::uint64_t) override {
+        if (g_debug) std::fprintf(stderr, "effects: sound event %08x %08x\n", event, a);
+        if (event == sc4::kSoundEventPlay) PlayGameSound(a);
+    }
+    bool HasSoundSystem() override { return true; }
+} g_componentsHost;
+
 // ---- the particle systems' terrain (SL::spTerrainMap) ----
 class ParticlesTerrainHost final : public IParticlesTerrain {
 public:
@@ -359,6 +376,7 @@ bool BindManager() {
     SetParticlesTerrain(&g_terrain);
     SetParticlesCity(&g_cityCells);
     SetParticlesTextures(&g_textures);
+    sc4::SetEffectsHost(&g_componentsHost);
     // cSC4VisualEffect::SetModelFromOccupant: the occupant's first model instance and its transform (the demolition effects
     // hand the building's or tree's model to their geometry-sourced particles).
     sc4::GetVisualEffectServices().firstModel = [](sc4::cISC4Occupant* occupant, void*& model, cS3DTransform& transform) {
