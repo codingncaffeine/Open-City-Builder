@@ -370,7 +370,10 @@ class Effect final : public IDemolitionEffect {
 public:
     explicit Effect(cSC4VisualEffect* effect) : effect_(effect) {}
     ~Effect() override { effect_->Release(); }
-    bool Attach(IDemolishable* occupant) override {   // PARTIAL: SetModelFromOccupant; the effect starts at the occupant's position
+    // cSC4VisualEffect::SetModelFromOccupant: the occupant's model becomes the source of the effect's geometry-sourced pieces;
+    // an occupant without a model gets the effect at its position.
+    bool Attach(IDemolishable* occupant) override {
+        if (effect_->SetModelFromOccupant(Raw(occupant))) return true;
         float p[3] = {};
         Raw(occupant)->GetPosition(p);
         cS3DTransform source;

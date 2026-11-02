@@ -393,6 +393,7 @@ src/sc4/EffectMaps.cpp
 src/sc4/EffectsCollection.cpp
 src/sc4/EffectsResource.cpp
 src/sc4/ModelBasedParticlesEffect.cpp
+src/sc4/GeometrySourcedParticlesEffect.cpp
 src/app/NativeEffects.cpp
 src/app/NativeCityPanel.cpp
 src/sc4/WinRCI.cpp

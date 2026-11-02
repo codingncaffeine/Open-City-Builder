@@ -349,6 +349,7 @@ src/sc4/ConstructionOccupant.cpp
 src/sc4/DemandSimulator.cpp
 src/sc4/EffectsManager.cpp
 src/sc4/DecalEffect.cpp
+src/sc4/GeometrySourcedParticlesEffect.cpp
 src/sc4/LandfillDeveloper.cpp
 src/sc4/LandfillOccupant.cpp
 src/sc4/LotBaseTextureOccupant.cpp

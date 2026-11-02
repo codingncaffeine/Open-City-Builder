@@ -507,7 +507,15 @@ void cSC4EffectsManager::DeactivateUnusedVisualEffects() {
                 stillRunning.push_back(index);
         }
         newModelEffectSlots_.swap(stillRunning);
-        // The geometry-sourced and dynamic-particle pools are not modelled (see the pending ledger).
+        stillRunning.clear();
+        for (int index : newGeometrySlots_) {   // i386 0x0040700c: the geometry-sourced pool, as the model one
+            auto* effect = geometryEffects_[static_cast<std::size_t>(index)].get();
+            if (effect->RefCount() == 1 && !effect->IsStarted())
+                freeGeometrySlots_.push_back(index);
+            else
+                stillRunning.push_back(index);
+        }
+        newGeometrySlots_.swap(stillRunning);
         stillRunning.clear();
         for (int index : newDecalSlots_) {   // i386 0x0040700c: a decal only the pool holds and not started is free again
             cSC4DecalEffect* decal = decalEffects_[static_cast<std::size_t>(index)].get();
@@ -742,6 +750,7 @@ bool cSC4EffectsManager::Update(SC4DrawContext* context) {
     };
     for (int index : newParticlesEffectSlots_) run(particlesEffects_[static_cast<std::size_t>(index)].get());
     for (int index : newModelEffectSlots_) run(modelEffects_[static_cast<std::size_t>(index)].get());
+    for (int index : newGeometrySlots_) run(geometryEffects_[static_cast<std::size_t>(index)].get());
     decalCount_ = 0;
     for (int index : newDecalSlots_) {   // i386 0x00407524: every started decal advances (vslot 0x24 Update)
         cSC4DecalEffect* decal = decalEffects_[static_cast<std::size_t>(index)].get();
@@ -972,13 +981,15 @@ void cSC4EffectsManager::CreateComponentFromDescription(const cSC4EffectDescript
             if (!ModelBased(*description)) {
                 effect = NewParticlesEffect();
             } else if (description->values278[0] != 0.0f) {
-                continue;   // geometry-sourced particles (NewGeometrySourcedParticlesEffect) are not ported
+                cSC4GeometrySourcedParticlesEffect* geometry = NewGeometrySourcedParticlesEffect();
+                if (geometry) geometry->SetDescription(description);
+                effect = geometry;
             } else {
                 effect = modelBased = NewModelBasedParticlesEffect();
             }
             if (!effect) return;
             if (modelBased) modelBased->SetDescription(description);
-            else effect->SetDescription(description);
+            else if (description->values278[0] == 0.0f) effect->SetDescription(description);   // the geometry system took its own above
             if (i > 0) {
                 const float delay = static_cast<float>(static_cast<std::uint32_t>(record.shortB) * static_cast<std::uint32_t>(i));
                 effect->SetFloatParams(0x101, &delay, 1);
@@ -1017,6 +1028,23 @@ void cSC4EffectsManager::CreateComponentFromDescription(const cSC4EffectDescript
     }
     if (record.type & 1) component->flags |= 4;
     else component->flags &= ~std::uint64_t{4};
+}
+
+// @ i386 0x00405dc6: a recycled geometry-sourced system from the free list, or a new one Init'ed with the global parameters.
+cSC4GeometrySourcedParticlesEffect* cSC4EffectsManager::NewGeometrySourcedParticlesEffect() {
+    if (!freeGeometrySlots_.empty()) {
+        const int index = freeGeometrySlots_.back();
+        freeGeometrySlots_.pop_back();
+        newGeometrySlots_.push_back(index);
+        return geometryEffects_[static_cast<std::size_t>(index)].get();
+    }
+    if (!ParticlesTerrain()) return nullptr;
+    auto* effect = new cSC4GeometrySourcedParticlesEffect();
+    effect->Init();
+    effect->SetGlobalParams(&globalParams_);
+    newGeometrySlots_.push_back(static_cast<int>(geometryEffects_.size()));
+    geometryEffects_.emplace_back(effect);
+    return effect;
 }
 
 // @ i386 0x00405bb0: a recycled decal from the free list, or a new one Init'ed and added to the pool.

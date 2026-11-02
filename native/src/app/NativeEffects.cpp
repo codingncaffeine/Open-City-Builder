@@ -30,6 +30,8 @@
 #include "sc4/EffectsManager.h"
 #include "sc4/EffectsResource.h"
 #include "sc4/ModelBasedParticlesEffect.h"
+#include "sc4/VisualEffect.h"
+#include "sc4/Occupant.h"
 #include "sc4/PropOccupantVisualEffect.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/cSC4City.h"
@@ -357,6 +359,20 @@ bool BindManager() {
     SetParticlesTerrain(&g_terrain);
     SetParticlesCity(&g_cityCells);
     SetParticlesTextures(&g_textures);
+    // cSC4VisualEffect::SetModelFromOccupant: the occupant's first model instance and its transform (the demolition effects
+    // hand the building's or tree's model to their geometry-sourced particles).
+    sc4::GetVisualEffectServices().firstModel = [](sc4::cISC4Occupant* occupant, void*& model, cS3DTransform& transform) {
+        sc4::cISC43DPlaceableObject* placeable = occupant ? occupant->GetPlaceableObject() : nullptr;
+        if (!placeable || placeable->GetModelCount() < 1) return false;
+        sc4::cIS3DModelInstance* models[16] = {};   // the placeable keeps the s3d instances under its own view type (borrowed)
+        std::uint32_t count = 16;
+        placeable->GetModels(models, count);
+        if (count == 0 || !models[0]) return false;
+        auto* instance = reinterpret_cast<s3d::cIS3DModelInstance*>(models[0]);
+        instance->GetTransform(transform);
+        model = instance;
+        return true;
+    };
     sc4::SetModelParticlesHost(&g_models);
     g_manager->SetHost(&g_host);
     sc4::SetPropVisualEffectHost(g_manager);  // visual-effect props create their effects through the manager (vslots 0x30 / 0x38)

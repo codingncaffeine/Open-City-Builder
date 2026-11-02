@@ -418,7 +418,7 @@ public:
     void SetVertexBufferExtension(IParticlesVertexBuffer* extension);    // @ 0x1005f4cba
     cS3DBoundingBox BoundingBox() const;                                 // @ 0x1005f4d0e
     void PrepareForRendering(IParticlesDrawContext* context);            // @ 0x1005f4d34
-    void GenerateNewParticles();                                         // @ 0x1005f4ea0
+    virtual void GenerateNewParticles();                                 // @ 0x1005f4ea0 (virtual: the geometry-sourced system replaces it)
     void SetPrimitivePoolFormat(cSC4PrimitivePool* pool);                // @ 0x1005f91a4
     cSCParticle* CreateParticle() override;                              // @ 0x1005f9224
     void DestroyParticle(cSCParticle* particle) override;                // @ 0x1005f9d98
