@@ -592,6 +592,7 @@ src/audio/SegmentDataSources.cpp
 src/audio/AudioServices.cpp
 src/audio/platform/AudioPlatform.cpp
 src/sc4/ViewInputControlZone.cpp
+src/app/NativePlaceLot.cpp
 src/app/NativeZoneTool.cpp
 src/app/NativeZoneOverlay.cpp
 src/app/NativeZoneDeveloperHost.cpp

@@ -23,5 +23,8 @@ bool AttachModelMaker(sc4::cSC43DRender& render, sc4::cSC4City& city);
 // application, the port makes one per city, and a stale one stays subscribed to the view messages with the old city's
 // occupants (their models point into the old renderer).
 void DetachModelMaker();
+// The place-lot tool's preview building: an occupant outside the occupant manager whose models the model maker makes (show) or
+// drops (hide) as for a created + shown / hidden + destroyed occupant. False without a model maker.
+bool ShowPreviewOccupant(sc4::cISC4Occupant* occupant, bool show);
 
 }  // namespace native

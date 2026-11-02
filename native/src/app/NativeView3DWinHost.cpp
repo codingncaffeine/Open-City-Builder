@@ -34,6 +34,7 @@
 #include "app/NativeCatalogUi.h"
 #include "app/NativeTerrainTool.h"
 #include "app/NativeFlora.h"
+#include "app/NativePlaceLot.h"
 #include "gz/Buffer.h"
 #include "gz/WinBtn.h"
 #include "sc4/SC4UI.h"
@@ -337,7 +338,14 @@ struct StubView3DWin final : IView3DWinHost {
     bool FilterUiCommandMessage(cGZMessage&) override { return true; }   // no tutorial running: every message is kept
     bool HandleUrl(cIGZString* link) override { return {}; }
     void HandleAdviceLink(cGZMessage& message) override {}
-    void ProcessCheatCode(std::uint32_t id, const char* cmdLine) override {}
+    // Only the reward cheat so far (it sets the view's +0x456 byte, ProcessCheatCode 0x10078526a); the other cheats are not ported.
+    void ProcessCheatCode(std::uint32_t id, const char* cmdLine) override {
+        if (id == 0x4a82253eu) rewardsUnlocked_ = true;   // "You don't deserve it"
+    }
+    void AddBuildingsToItemList(std::uint32_t menuId, const std::set<std::uint32_t>& include, const std::set<std::uint32_t>& exclude,
+                                std::multimap<int, cISC4CatalogItem*>& items) override {
+        native::AddBuildingsToItemList(include, exclude, rewardsUnlocked_, items);
+    }
     void InvokeCatalogItemCommand(std::uint32_t, std::uint32_t, bool) override {}   // unused: the view's InvokeCatalogItemCommand is whole
     void ExecuteAcceleratorCommand(std::uint32_t command) override {}
     void Update24HourClockHover() override {}
@@ -379,6 +387,9 @@ struct StubView3DWin final : IView3DWinHost {
     void ShutdownBudgetUIWinProc(cIGZUnknown* proc) override {}
     void ShutdownGraphsViewWinProc(cIGZUnknown* proc) override {}
     void ShutdownBuildingSelectWinProc(cIGZUnknown* proc) override {}
+
+private:
+    bool rewardsUnlocked_ = false;   // the view's +0x456
 };
 }  // namespace
 

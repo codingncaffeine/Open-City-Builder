@@ -342,6 +342,8 @@ void cSC4ResidentialSimulator::DoBuildingChanged(IResidentialOccupant* building,
         }
         if (!member) continue;
         OccupantList& pending = school ? pendingSchools_ : pendingHospitals_;
+        static const bool trace = std::getenv("SC4_RESDEBUG") != nullptr;
+        if (trace) std::fprintf(stderr, "residential: %s %s\n", school ? "school" : "hospital", added ? "added (pending)" : "removed");
         if (added) {
             cSCPropertyHelp::SetPropertyValue(holder, s.served, kNotGraded);
             cSCPropertyHelp::SetPropertyValue(holder, s.grade, 1.0f);

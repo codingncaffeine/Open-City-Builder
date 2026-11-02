@@ -200,23 +200,20 @@ bool cSC4ViewInputControlPlaceLot::Init() {
     }
 
 configuration_done:
-    if (buildingType_ == 0) {
-        if (lotConfigurationId_ != 0) {
+    {
+        // The plop cost comes from the building's profile: the given building type, or the first building of the lot
+        // configuration's primary building object (Mac i386 0x2d7984: a local, the configuration id is kept).
+        std::uint32_t priced = buildingType_;
+        if (priced == 0 && lotConfigurationId_ != 0) {
             if (cSC4LotConfiguration* configuration = host->GetLotConfiguration(lotConfigurationId_)) {
-                if (cSC4LotConfigurationObject* object =
-                        configuration->GetPrimaryBuildingConfigurationObject()) {
+                if (cSC4LotConfigurationObject* object = configuration->GetPrimaryBuildingConfigurationObject()) {
                     std::vector<std::uint32_t> ids;
                     host->GetObjectIDArray(object, ids);
-                    if (ids.empty()) {
-                        Release();
-                        return false;
-                    }
-                    lotConfigurationId_ = ids.front();
+                    if (!ids.empty()) priced = ids.front();
                 }
             }
         }
-    } else if (host->BuildingDevelopment()) {
-        buildingPrice_ = host->BuildingDevelopment()->BuildingPrice(buildingType_);
+        if (priced != 0 && host->BuildingDevelopment()) buildingPrice_ = host->BuildingDevelopment()->BuildingPrice(priced);
     }
 
     GetBuildingPreviewModel();

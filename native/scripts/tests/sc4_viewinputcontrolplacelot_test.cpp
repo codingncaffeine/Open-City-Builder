@@ -597,6 +597,7 @@ int main() {
     host.groups.insert({0x7001, 0x1401});
     host.props.existing = {0x7100};
     host.building.lotDeveloper.price = 500;
+    host.building.price = 1000;   // the plop cost of the configuration's first building
 
     // --- construction, QueryInterface, the two ctors and the thunks ---------------------------------
     auto* tool = new cSC4ViewInputControlPlaceLot(0, 0, 0, false);
@@ -658,7 +659,9 @@ int main() {
     CHECK(tool->OnMouseMove(10, 10, 0));
     CHECK(tool->FeedbackValid());
     CHECK(tool->PreviewX() == 48.0f && tool->PreviewZ() == 48.0f);
-    CHECK(tool->LotCost() == -100000 + 500 + 100);   // building price + lot price + demolition
+    // Init priced the configuration's first building (Mac i386 0x2d7984): building price + lot price + demolition.
+    CHECK(tool->BuildingPrice() == 1000);
+    CHECK(tool->LotCost() == 1000 + 500 + 100);
     CHECK(host.effects.Count("building_footprint_ok") == 1);
     CHECK(host.effects.Count("Lot_Direction_Arrow") == 1);
     CHECK(tool->FootprintEffect() && tool->FootprintEffect()->IsStarted());
@@ -668,7 +671,7 @@ int main() {
     CHECK(tool->SelectionEffectCount(true) == 1 && tool->SelectionEffectCount(false) == 1);
     CHECK(tool->CoverageActive() == false);
     CHECK(host.mouseMoved == 1);
-    CHECK(host.view.costSet.empty());   // the cost is negative: no indicator
+    CHECK(host.view.costSet.size() == 1 && host.view.costSet[0] == 1600);   // a positive cost is shown
     // The footprint effect name tells the validity; the grid size is the 2x2 bucket (32).
     CHECK(tool->GridSize() == 32.0f);
     CHECK(footprint->hasTransform);
@@ -700,7 +703,9 @@ int main() {
     CHECK(std::strcmp(tool->ErrorMessage().ToChar(), "error_6a71193f") == 0);
     CHECK(host.view.lastCursorTextId == kPlaceLotCursorTextId);
     CHECK(host.view.lastCursorText == "error_6a71193f");
-    CHECK(host.view.costCleared.size() == 2);   // both moves cleared the (negative) cost
+    // Every facing refused, so the automatic facing failed: the move only reads the reason and clears the indicator.
+    CHECK(host.view.costSet.size() == 1);
+    CHECK(host.view.costCleared.size() == 1);
 
     // --- the screen-clear rectangle suppresses validation inside the placed lot ----------------------
     host.lots.canCreateResult = 8;

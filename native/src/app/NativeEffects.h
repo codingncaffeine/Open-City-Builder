@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-namespace sc4 { class cSC43DRender; class cSC4City; class ITerrainEffect; }
+namespace sc4 { class cSC43DRender; class cSC4City; class ITerrainEffect; class cSC4VisualEffect; }
 
 namespace native {
 
@@ -15,5 +15,7 @@ sc4::ITerrainEffect* CreateTerrainEffect(std::uint32_t group, std::uint32_t type
 // -1 = no effects manager (nothing can show it).
 int StartNamedEffect(const char* name, float x, float y, float z);
 bool HasNamedEffect(const char* name);
+// A visual effect by name with one reference, not started (the caller places, starts and releases it), or null.
+sc4::cSC4VisualEffect* CreateNamedEffect(const char* name);
 
 }  // namespace native

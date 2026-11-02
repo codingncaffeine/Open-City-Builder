@@ -707,4 +707,18 @@ std::string DescribeOccupantModels(sc4::cISC4Occupant* occupant) {
     }
     return out;
 }
+
+bool ShowPreviewOccupant(sc4::cISC4Occupant* occupant, bool show) {
+    if (!g_maker || !occupant) return false;
+    const std::uint32_t type = occupant->GetType();
+    if (show) {
+        g_maker->DoOccupantCreated(occupant, true, type);
+        g_maker->DoOccupantShown(occupant, true, type);
+    } else {
+        g_maker->DoOccupantShown(occupant, false, type);
+        g_maker->DoOccupantDestroyed(occupant, true, type);
+    }
+    return true;
+}
+
 }  // namespace native

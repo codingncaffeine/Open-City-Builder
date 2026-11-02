@@ -364,6 +364,13 @@ sc4::ITerrainEffect* CreateTerrainEffect(std::uint32_t group, std::uint32_t type
 
 bool HasNamedEffect(const char* name) { return BindManager() && g_manager->HasVisualEffect(name); }
 
+sc4::cSC4VisualEffect* CreateNamedEffect(const char* name) {
+    if (!name || !BindManager()) return nullptr;
+    sc4::cSC4VisualEffect* effect = nullptr;
+    if (!g_manager->CreateVisualEffect(name, &effect) || !effect) return nullptr;
+    return effect;
+}
+
 int StartNamedEffect(const char* name, float x, float y, float z) {
     if (!BindManager()) return -1;
     sc4::cSC4VisualEffect* effect = nullptr;
