@@ -2,6 +2,7 @@
 #include <filesystem>
 // Loading a city file in the native application (see NativeCity.h). The factory and city host are the ones the city probe
 // (src/tools/city_probe.cpp) proved against the retail files.
+#include "app/NativeMiniMap.h"
 #include "app/NativeSimHosts.h"
 #include "app/NativeCitySystems.h"
 #include "app/NativeRuntimeWire.h"
@@ -277,6 +278,7 @@ bool LoadCityFile(cSC4App& app, const std::string& path, cRZAutoRefCount<cISC4Re
         InstallTractDeveloperHost();
         InstallDemandSimulatorHost();
         InstallLotConfigurationHosts();
+        InstallMiniMapHost();               // the corner minimap's terrain, zones, networks and camera
     }
     ForgetLotSerializables();
     const bool loaded = app.LoadCity(cRZString(path.c_str()), holder);

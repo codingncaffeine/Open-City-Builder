@@ -602,6 +602,7 @@ src/app/NativeTractDevelopment.cpp
 src/app/NativeLotConstruction.cpp
 src/app/NativeConstruction.cpp
 src/app/NativeConstructionCrew.cpp
+src/app/NativeMiniMap.cpp
 src/app/NativeProps.cpp
 src/app/NativeDemandHost.cpp
 src/app/NativeSimHosts.cpp

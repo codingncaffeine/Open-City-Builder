@@ -323,8 +323,11 @@ bool AttachTerrainView(sc4::cSC43DRender& render, sc4::cSTETerrain& terrain, gd:
     sc4::cSTETerrainView3D::SetTerrainSize(terrain.CellCountX(), terrain.CellCountZ());
     auto* view = new sc4::cSTETerrainView3D(&host);
     view->AddRef();
-    {   // the surface textures and colours are derived data (the file stores altitudes and flags only): compute them for the whole grid
+    {   // the normals, cliffs, surface textures and colours are derived data (the file stores altitudes and flags only): compute
+        // them for the whole grid, in DoPostCityInit's order (0x10073847e: CalculateNormalsAndAssignCliffTextures, then
+        // AssignSurfaceTexturesAndColors)
         sc4::TerrainRect all{0, 0, static_cast<std::int32_t>(terrain.CellCountX()), static_cast<std::int32_t>(terrain.CellCountZ())};
+        terrain.CalculateNormalsAndAssignCliffTextures(all);
         terrain.AssignSurfaceTexturesAndColors(all);
         if (std::getenv("SC4_DEBUG")) {
             const auto& verts = terrain.Vertices();

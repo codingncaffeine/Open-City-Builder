@@ -44,6 +44,7 @@
 #include "sc4/WinAuraAlert.h"
 #include "sc4/WinMapView.h"
 #include "sc4/WinRCI.h"
+#include "sc4/WinMiniMap.h"
 #include "sc4/WinTrendBar.h"
 #include "sc4/WinSmallViews.h"
 #include "rz/cRZString.h"
@@ -306,6 +307,7 @@ bool InitUiScripts(WinMgr* mgr) {
     gz::RegisterDirectorMaker("cSC4WinText", +[]() -> cIGZUnknown* { return MakeWin<gz::cGZWinText>(); });
     gz::RegisterDirectorMaker("cGZWinFlatRect", +[]() -> cIGZUnknown* { return MakeWin<gz::cGZWinFlatRect>(); });
     gz::RegisterDirectorMaker("cSC4WinMapView", +[]() -> cIGZUnknown* { return MakeWin<sc4::cSC4WinMapView>(); });   // clsid 0x28c5a41f
+    gz::RegisterDirectorMaker("cSC4WinMiniMap", +[]() -> cIGZUnknown* { return MakeWin<sc4::cSC4WinMiniMap>(); });   // the city view's corner minimap
     // The city toolbar's gauges (clsids 0xc7a0e17e RCI bar, 0xaa5c2f86 trend bar, mayor rating bar): without makers the script
     // built bare windows in their place, so the RCI meter and the opinion polls never showed anything.
     gz::RegisterDirectorMaker("cSC4WinRCI", +[]() -> cIGZUnknown* { return MakeWin<sc4::cSC4WinRCI>(); });
