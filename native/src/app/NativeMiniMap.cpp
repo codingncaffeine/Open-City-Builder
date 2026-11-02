@@ -3,9 +3,7 @@
 // the animation tick and the anti-aliased line the view rectangle is drawn with (DrawLineAntialiased, Mac i386 0x002b4148 /
 // DrawLineAntialiasedNoClip 0x002b2f02, ported here: the minimap is its only caller).
 //
-// PARTIAL: the city situation manager's target marker (no situation manager view natively), and the camera's view rectangle:
-// its corners come from cSC43DRender::PickTerrainAlways (Mac 0x0050679c, over PickTerrain 0x0050498a and the terrain view's
-// pick), which the renderer does not answer yet, so no rectangle is drawn.
+// PARTIAL: the city situation manager's target marker (no situation manager view natively).
 #include <algorithm>
 #include <cstdint>
 #include <vector>

@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <vector>
 
 #include "gz/Buffer.h"
 #include "gz/cIGZIStream.h"
@@ -2931,10 +2932,121 @@ void cSC43DRender::SetShakeOffsets() {
 // ---------------------------------------------------------------------------------------------
 bool cSC43DRender::TakeSnapshot(cIGZBuffer**, bool) { return false; }
 bool cSC43DRender::TakeSnapshot(cIGZString&, bool) { return false; }
-bool cSC43DRender::PickTerrain(const float*, const float*, float*, bool, bool) { return false; }
-bool cSC43DRender::PickTerrain(int, int, float*, bool, bool) { return false; }
-bool cSC43DRender::PickTerrainAlways(const float*, const float*, float*, bool) { return false; }
-bool cSC43DRender::PickTerrainAlways(int, int, float*, bool) { return false; }
+// Where the ray meets the terrain: the terrain view's pick, then again from 4 m higher (a ray that starts just under a slope),
+// and with `groundPlane` the y = 0 plane when the terrain was missed.
+bool cSC43DRender::PickTerrain(const float* origin, const float* direction, float* out, bool groundPlane, bool includeWater) {
+    IRender3DHost* host = Render3DHost();
+    if (!host) return false;
+    bool hit = host->PickTerrainView(origin, direction, out, false);
+    if (!hit) {
+        const float raised[3] = {origin[0], origin[1] + 4.0f, origin[2]};   // FLOAT_00a70718
+        hit = host->PickTerrainView(raised, direction, out, includeWater);
+        if (!hit && groundPlane) {
+            constexpr float kGroundPlane[4] = {0.0f, 1.0f, 0.0f, 0.0f};
+            hit = SC4GeometryUtilities::RayIntersectsPlane(origin, direction, kGroundPlane, out);
+        }
+    }
+    return hit;
+}
+
+// The screen point's eye ray (normalised), picked as above.
+bool cSC43DRender::PickTerrain(int x, int y, float* out, bool groundPlane, bool includeWater) {
+    IRender3DHost* host = Render3DHost();
+    if (!camera_ || !host) return false;
+    cS3DVector3 origin, direction;
+    if (!camera_->GetEyeRay(cS3DVector2{static_cast<float>(x), static_cast<float>(y)}, origin, direction)) return false;
+    const float length = std::sqrt(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z);
+    if (length > 0.0f) { direction.x /= length; direction.y /= length; direction.z /= length; }
+    return PickTerrain(&origin.x, &direction.x, out, groundPlane, includeWater);
+}
+
+// A pick that always lands somewhere in the city: when the ray misses the terrain (outside the city, or over the edge),
+// the part of the ray between its origin and the y = 0 plane is clipped to the city's box (four planes 0.01 inside the
+// edges) and the clipped segment is walked: each piece is picked as a segment, the last as a ray, and a hit that lies past
+// the piece's end counts only for the last one. The answer keeps the hit's height and takes x / z on the ray at that height.
+bool cSC43DRender::PickTerrainAlways(const float* origin, const float* direction, float* out, bool includeWater) {
+    IRender3DHost* host = Render3DHost();
+    int cellsX = 0, cellsZ = 0;
+    if (!host || !host->CityCellCounts(cellsX, cellsZ)) return false;
+    if (PickTerrain(origin, direction, out, false, includeWater)) return true;
+    if (static_cast<double>(direction[1]) > -9.9999997e-06) return false;   // DOUBLE_00a71068: a ray that does not go down
+    struct V4 { float x, y, z, w; };   // cS3DVector4 made from a point: w = 1
+    std::vector<V4> points;
+    points.push_back({origin[0], origin[1], origin[2], 1.0f});
+    const float t = origin[1] / direction[1];
+    points.push_back({origin[0] - t * direction[0], origin[1] - direction[1] * t, origin[2] - t * direction[2], 1.0f});
+    const float planes[4][4] = {{1.0f, 0.0f, 0.0f, -0.01f},
+                                {0.0f, 0.0f, 1.0f, -0.01f},
+                                {-1.0f, 0.0f, 0.0f, static_cast<float>(cellsX << 4) - 0.01f},
+                                {0.0f, 0.0f, -1.0f, static_cast<float>(cellsZ << 4) - 0.01f}};
+    auto side = [](const float* plane, const V4& p) { return p.x * plane[0] + p.y * plane[1] + p.z * plane[2] + p.w * plane[3]; };
+    auto project = [](const float* plane, V4& p) {   // onto the plane along its normal (the w term is multiplied by 0)
+        const float d = plane[0] * p.x + plane[1] * p.y + plane[2] * p.z + p.w * 0.0f + plane[3];
+        p.x -= plane[0] * d; p.y -= plane[1] * d; p.z -= plane[2] * d;
+    };
+    auto crossing = [](const V4& a, const V4& b, float da, float db) {
+        const float f = da / (da - db), g = 1.0f - f;
+        return V4{b.x * f + a.x * g, b.y * f + a.y * g, b.z * f + a.z * g, f * b.w + g * a.w};
+    };
+    for (const float* plane : planes) {
+        // Walk the polyline: a front-to-back segment gets its crossing inserted; a point behind the plane is moved onto it,
+        // and when the segment comes back to the front its crossing is inserted and this plane is done.
+        std::size_t next = 0;
+        for (;;) {
+            std::size_t i = 0;
+            V4 a{}, b{};
+            float da = 0.0f, db = 0.0f;
+            bool walked = false;
+            for (;;) {
+                i = next;
+                if (points.size() - 1 <= i) { walked = true; break; }
+                a = points[i];
+                next = i + 1;
+                b = points[next];
+                da = side(plane, a);
+                db = side(plane, b);
+                if (da < 0.0f) break;
+                if (db < 0.0f) {
+                    points.insert(points.begin() + static_cast<std::ptrdiff_t>(i + 1), crossing(a, b, da, db));
+                    next = i + 2;
+                }
+            }
+            if (walked) break;
+            project(plane, points[i]);
+            if (db <= 0.0f) continue;
+            points.insert(points.begin() + static_cast<std::ptrdiff_t>(i + 1), crossing(a, b, da, db));
+            break;
+        }
+        if (side(plane, points.back()) < 0.0f) project(plane, points.back());
+    }
+    for (std::size_t i = 0;; ++i) {
+        const bool lastPiece = points.size() - 2 <= i;
+        const V4& a = points[i];
+        const V4& b = points[i + 1];
+        const float delta[4] = {b.x - a.x, b.y - a.y, b.z - a.z, b.w - a.w};
+        if (!PickTerrain(&a.x, delta, out, lastPiece, includeWater)) {
+            if (lastPiece) return false;
+            continue;
+        }
+        // a hit past the end of an inner piece belongs to a later piece (sfBarrelMinUpwardPitch = 0)
+        if (!lastPiece && (b.x - a.x) * (out[0] - b.x) + (b.y - a.y) * (out[1] - b.y) + (b.z - a.z) * (out[2] - b.z) > 0.0f) continue;
+        break;
+    }
+    const float s = (out[1] - origin[1]) / direction[1];
+    out[0] = s * direction[0] + origin[0];
+    out[2] = s * direction[2] + origin[2];
+    return true;
+}
+
+bool cSC43DRender::PickTerrainAlways(int x, int y, float* out, bool includeWater) {
+    IRender3DHost* host = Render3DHost();
+    if (!camera_ || !host) return false;
+    cS3DVector3 origin, direction;
+    if (!camera_->GetEyeRay(cS3DVector2{static_cast<float>(x), static_cast<float>(y)}, origin, direction)) return false;
+    const float length = std::sqrt(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z);
+    if (length > 0.0f) { direction.x /= length; direction.y /= length; direction.z /= length; }
+    return PickTerrainAlways(&origin.x, &direction.x, out, includeWater);
+}
 bool cSC43DRender::Pick(int, int, cISC4OccupantFilter*, s3d::cIS3DModelInstance*&) { return false; }
 bool cSC43DRender::Pick(int, int, const float*, const float*, cISC4OccupantFilter*, s3d::cIS3DModelInstance*&) {
     return false;

@@ -203,6 +203,14 @@ public:
     virtual IRender3DSettings* Settings() = 0;
     // SL::spRenderProperties (+0x88 of the renderer): the tunable set Init copies in (0x1007601e2).
     virtual sc4::cSC4RenderProperties* RenderProperties() = 0;
+    // The terrain view's pick (i386 +0x198: QI 0x6771477d vslot 0xc, else the terrain's vslot 0x10): where the ray meets the
+    // terrain (with the water surface when `includeWater`). False without a terrain view.
+    virtual bool PickTerrainView(const float* origin, const float* direction, float* out, bool includeWater) {
+        (void)origin; (void)direction; (void)out; (void)includeWater;
+        return false;
+    }
+    // The city's cell counts (i386 +0x19c vslots 0x1c / 0x20, PickTerrainAlways's clip box). False without a city.
+    virtual bool CityCellCounts(int& x, int& z) { (void)x; (void)z; return false; }
 };
 namespace sc4 {
 IRender3DHost* Render3DHost();
@@ -481,10 +489,10 @@ public:
     void SetBackingStoreEnabled(bool enable) override;              // @ 0x1007699b0
     bool BorrowRenderSystem() override;                             // @ 0x100769ff6
     bool ReturnRenderSystem() override;                             // @ 0x10076a006
-    bool PickTerrain(const float* origin, const float* direction, float* out, bool a, bool b) override;   // [60] PARTIAL
-    bool PickTerrain(int x, int y, float* out, bool a, bool b) override;    // [61] PARTIAL
-    bool PickTerrainAlways(const float* origin, const float* direction, float* out, bool a) override;     // [62] PARTIAL
-    bool PickTerrainAlways(int x, int y, float* out, bool a) override;      // [63] PARTIAL
+    bool PickTerrain(const float* origin, const float* direction, float* out, bool a, bool b) override;   // [60] @ 0x0050498a (i386)
+    bool PickTerrain(int x, int y, float* out, bool a, bool b) override;    // [61] @ 0x00504360 (i386)
+    bool PickTerrainAlways(const float* origin, const float* direction, float* out, bool a) override;     // [62] @ 0x0050679c (i386)
+    bool PickTerrainAlways(int x, int y, float* out, bool a) override;      // [63] @ 0x005042b6 (i386)
     bool Pick(int x, int y, cISC4OccupantFilter* filter, s3d::cIS3DModelInstance*& out) override;        // [64] PARTIAL
     bool Pick(int x, int y, const float* origin, const float* direction, cISC4OccupantFilter* filter,
               s3d::cIS3DModelInstance*& out) override;              // [65] PARTIAL
