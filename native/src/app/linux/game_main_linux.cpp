@@ -508,20 +508,47 @@ void StartGameAudio() {
     std::printf("audio: %zu sounds\n", audio.SoundCount());
 }
 
+// SC4_FRAMEPROF: milliseconds spent in each part of every frame (stderr), to find what holds a frame up.
+struct FrameLaps {
+    bool on = std::getenv("SC4_FRAMEPROF") != nullptr;
+    double last = 0;
+    std::string line;
+    void Start() { if (on) { last = NowMs(); line.clear(); } }
+    void Lap(const char* name) {
+        if (!on) return;
+        const double now = NowMs();
+        char part[64];
+        std::snprintf(part, sizeof part, " %s %.1f", name, now - last);
+        line += part;
+        last = now;
+    }
+    std::uint32_t draws = 0;
+    void End(std::uint32_t total) {
+        if (!on) return;
+        std::fprintf(stderr, "frame:%s draws %u\n", line.c_str(), total - draws);
+        draws = total;
+    }
+} gLaps;
+
 void Frame() {
+    gLaps.Start();
     native::PumpToolTicks(16);
     native::TickLighting();
     native::TickAutomata();
+    gLaps.Lap("tools+light+automata");
     {   // the framework tick of the simulator host's services (cSC4Simulator::OnTick: the date and every simulator agent)
         static std::uint32_t tickNumber = 0;
         native::TickSimulatorServices(++tickNumber);
     }
+    gLaps.Lap("sim");
     // In a city the animation tick manager is ticked here (the region screen ticks it from its GZPaint; the city view's per-frame call is
     // not recovered). Init is idempotent: the region screen shut it down when the city replaced it.
     if (gAppWindow && gAppWindow->View3D() && native::StartAnimationTicks()) native::TickAnimation();
+    gLaps.Lap("anim");
     native::EndFrameJobs();
     if (gAudio) gAudio->Tick();
     PumpTimers();
+    gLaps.Lap("jobs+audio");
     cSC4App* app = native::BootApplication();
     if (app) {
         app->RunMessageServerPump(0, 64, 4);
@@ -529,6 +556,7 @@ void Frame() {
         if (gMessages2) gMessages2->OnTick(16);   // posted and general messages (the splash timer, screen swaps)
         app->OnTick(16);
     }
+    gLaps.Lap("messages");
     const bool regionScreen = gAppWindow && gAppWindow->CurrentScreen() && gAppWindow->CurrentScreen()->GetID() == 0xea659793;
     if (gAudio && gAppWindow && gAppWindow->CurrentScreen()) {   // the radio follows the screen: the region station on the map, the mayor's in a city
         static const std::string stations = platform::GameDataDir() + "Radio/Stations/";
@@ -538,8 +566,12 @@ void Frame() {
     // The city view redraws the 3D scene into the whole screen every frame, so the windows over it repaint every frame too.
     if (gAppWindow && gAppWindow->View3D() && !regionScreen) InvalidateTree(gMgr->GetMainWindow());
     gMgr->Pump();
+    gLaps.Lap("pump");
     gMgr->Plot();
+    gLaps.Lap("plot");
     gGraphics->Services().Tick();
+    gLaps.Lap("gfx");
+    gLaps.End(gDriver ? gDriver->DrawCalls() : 0);
 }
 
 // Where the frame lands in the window (window points): the frame keeps its aspect ratio, bars fill the rest.
@@ -1043,6 +1075,9 @@ int main(int argc, char** argv) {
 
     gz::SetWinTextEditHost(&gTextEditHost);
     gDriver = gd::cGLGDriver::Create(std::uint32_t(gW), std::uint32_t(gH), std::uint32_t(windowW), std::uint32_t(windowH));
+    // However main returns, the driver stops touching GL before the static windows are torn down after it (their buffers
+    // delete textures; through a dead context that crashed at exit on NVIDIA).
+    struct DetachAtReturn { ~DetachAtReturn() { if (gDriver) gDriver->DetachContext(); } } detachAtReturn;
     if (!gDriver) { std::printf("no usable OpenGL driver\n"); return 1; }
     Boot();
     if (interactive || std::getenv("SC4_AUDIO")) StartGameAudio();
@@ -1146,6 +1181,7 @@ int main(int argc, char** argv) {
         if (frames > 0 && ++n >= frames) break;
     }
     if (gAudio) gAudio->Close();   // its voices are SDL audio streams: they go before SDL_Quit (the static outlives it)
+    if (gDriver) gDriver->DetachContext();
     SDL_GL_DestroyContext(context);
     SDL_DestroyWindow(gWindow);
     SDL_Quit();

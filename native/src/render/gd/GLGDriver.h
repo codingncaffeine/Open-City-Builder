@@ -35,6 +35,9 @@ public:
     IBackingStore* BackingStore();
     std::uint32_t DrawCalls() const;
     std::uint32_t PipelineCount() const;
+    // The GL context is going away (the window closes, or the process exits with windows still alive): texture and target
+    // deletes after this only forget their objects. A late delete through a dead context crashed at exit on NVIDIA.
+    void DetachContext();
 
     // ---- cIGZGDriver ----
     void Clear(std::uint32_t mask) override;
@@ -85,7 +88,7 @@ public:
 private:
     cGLGDriver();
     void MarkStage(bool enabled);
-    void Encode(unsigned primitive, int vertexCount, const std::uint16_t* indices, int indexCount);
+    void Encode(unsigned primitive, const std::uint8_t* vertices, int vertexCount, const std::uint16_t* indices, int indexCount);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

@@ -9,6 +9,8 @@
 #include <cstring>
 #include <map>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "render/GDIndexOps.h"
 #include "render/SimGL.h"
@@ -170,6 +172,77 @@ struct Texture {
     std::uint32_t format = 0, levels = 1;
 };
 
+// The debug switches, read once (a getenv per draw cost more than the draw at ~18,000 draws a frame).
+struct DebugSwitches {
+    bool red = std::getenv("SC4_GDRED") != nullptr;
+    std::uint32_t mode = std::getenv("SC4_GDMODE") ? static_cast<std::uint32_t>(std::atoi(std::getenv("SC4_GDMODE"))) : 0u;
+    bool noCull = std::getenv("SC4_GDNOCULL") != nullptr;
+    bool noDepth = std::getenv("SC4_GDNODEPTH") != nullptr;
+};
+const DebugSwitches& Debug() {
+    static const DebugSwitches switches;
+    return switches;
+}
+
+// A stream buffer the draws append to: the game hands every draw its vertices (and the shader its state) from client memory,
+// as Direct3D 7's DrawPrimitive did. With ARB_buffer_storage it is one persistently mapped ring in four quarters, each guarded
+// by a fence placed when the writer leaves it and waited on when it comes round again; without it, glBufferSubData appends
+// and the buffer is orphaned when it wraps (the driver gives it fresh storage, so nothing in flight is overwritten).
+class StreamRing {
+public:
+    void Create(GLenum target, std::size_t size) {
+        target_ = target;
+        size_ = size;
+        glGenBuffers(1, &name_);
+        glBindBuffer(target_, name_);
+        if (epoxy_has_gl_extension("GL_ARB_buffer_storage")) {
+            const GLbitfield flags = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
+            glBufferStorage(target_, GLsizeiptr(size_), nullptr, flags);
+            mapped_ = static_cast<std::uint8_t*>(glMapBufferRange(target_, 0, GLsizeiptr(size_), flags));
+        }
+        if (!mapped_) glBufferData(target_, GLsizeiptr(size_), nullptr, GL_STREAM_DRAW);
+    }
+    GLuint Name() const { return name_; }
+    // Copies `bytes` to an offset that is a multiple of `align` and returns the offset; the buffer must be bound to its target
+    // when the fallback path is in use. Returns SIZE_MAX when the data cannot fit in a quarter of the ring.
+    std::size_t Append(const void* data, std::size_t bytes, std::size_t align) {
+        const std::size_t quarter = size_ / 4;
+        if (bytes > quarter || bytes == 0) return SIZE_MAX;
+        std::size_t at = (pos_ + align - 1) / align * align;
+        if (at + bytes > size_) {
+            if (mapped_) Enter(0, true);
+            else glBufferData(target_, GLsizeiptr(size_), nullptr, GL_STREAM_DRAW);
+            at = 0;
+        } else if (mapped_ && (at + bytes - 1) / quarter != segment_) {
+            Enter((at + bytes - 1) / quarter, false);
+        }
+        if (mapped_) std::memcpy(mapped_ + at, data, bytes);
+        else glBufferSubData(target_, GLintptr(at), GLsizeiptr(bytes), data);
+        pos_ = at + bytes;
+        return at;
+    }
+
+private:
+    // The writer leaves the quarters before `next` (fencing the one it was in) and waits for `next` to be free.
+    void Enter(std::size_t next, bool wrapped) {
+        if (fences_[segment_]) glDeleteSync(fences_[segment_]);
+        fences_[segment_] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        for (std::size_t s = wrapped ? 0 : segment_ + 1; s <= next; ++s) {
+            if (s == segment_ || !fences_[s]) continue;
+            glClientWaitSync(fences_[s], GL_SYNC_FLUSH_COMMANDS_BIT, ~GLuint64(0));
+            glDeleteSync(fences_[s]);
+            fences_[s] = nullptr;
+        }
+        segment_ = next;
+    }
+
+    GLenum target_ = GL_ARRAY_BUFFER;
+    GLuint name_ = 0;
+    std::size_t size_ = 0, pos_ = 0, segment_ = 0;
+    std::uint8_t* mapped_ = nullptr;
+    GLsync fences_[4] = {};
+};
+
 }  // namespace
 
 struct cGLGDriver::Impl {
@@ -179,8 +252,34 @@ struct cGLGDriver::Impl {
     int PX(std::uint32_t x) const { return int(std::lround(double(x) * pixelWidth / width)); }
     int PY(std::uint32_t y) const { return int(std::lround(double(y) * pixelHeight / height)); }
     GLuint frameFbo = 0, frameColor = 0, frameDepth = 0;
-    GLuint vao = 0, vbo = 0, ibo = 0, ubo = 0;
+    GLuint vao = 0;
+    StreamRing vertexRing, indexRing, stateRing;
+    GLint stateAlign = 256;   // GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT
     GLuint whiteTexture = 0;
+
+    // What the draws last set, so a draw only sends the state that changed. Anything else that touches GL state (textures,
+    // targets, clears, the backing store, presentation) calls Dirty() and the next draw sets everything again.
+    struct Shadow {
+        bool valid = false;
+        GLuint program = 0, framebuffer = 0;
+        bool blend = false, depthTest = false, depthWrite = false, cull = false, scissor = false;
+        GLenum blendSrc = 0, blendDst = 0, depthFunc = 0;
+        int scissorRect[4] = {};
+        eGDVertexFormat format = 0;
+        int stride = 0;
+        GLuint texture[2] = {}, sampler[2] = {};
+        std::size_t stateOffset = SIZE_MAX;
+        dx7::MetalRenderState state{};
+    } shadow;
+    void Dirty() { shadow.valid = false; }
+    bool contextGone = false;   // DetachContext: no GL calls from here on
+    struct ProgramInfo { GLint viewportUniform = -1; float viewport[4] = {}; bool viewportSet = false; };
+    std::map<GLuint, ProgramInfo> programInfo;
+    ProgramKey lastKey{};
+    GLuint lastProgram = 0;
+    ProgramInfo* lastInfo = nullptr;
+    std::vector<std::uint16_t> scratchIndices;   // generated / rebased indices, reused draw to draw
+    std::vector<std::uint32_t> scratchWide;
 
     float colorMulRgba[4] = {1, 1, 1, 1};
     dx7::StateRecorder recorder;   // transforms, texture factor, colour multiplier, texture matrices / coordinate sources
@@ -198,8 +297,7 @@ struct cGLGDriver::Impl {
     int error = 0;
 
     std::map<ProgramKey, GLuint> programs;
-    std::map<GLuint, GLint> viewportUniform;   // program -> uViewport
-    std::map<std::uint64_t, GLuint> samplers;
+    std::unordered_map<std::uint64_t, GLuint> samplers;
     std::uint32_t draws = 0;
 
     // ---- textures and stages ----
@@ -207,6 +305,7 @@ struct cGLGDriver::Impl {
         Impl* m;
         explicit Backend(Impl* impl) : m(impl) {}
         bool CreateSurface(std::uint32_t texId, std::uint32_t format, std::uint32_t w, std::uint32_t h, std::uint32_t mips) override {
+            if (m->contextGone) return false;
             GLenum internal = GL_RGBA8;
             if (format == kFmtDXT1) internal = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
             else if (format == kFmtDXT3) internal = GL_COMPRESSED_RGBA_S3TC_DXT3_EXT;
@@ -218,6 +317,7 @@ struct cGLGDriver::Impl {
             Texture t;
             t.format = format;
             t.levels = levels;
+            m->Dirty();
             glGenTextures(1, &t.name);
             glBindTexture(GL_TEXTURE_2D, t.name);
             glTexStorage2D(GL_TEXTURE_2D, GLsizei(levels), internal, GLsizei(w), GLsizei(h));
@@ -229,12 +329,14 @@ struct cGLGDriver::Impl {
         void DestroySurface(std::uint32_t texId) override {
             auto it = m->textures.find(texId);
             if (it == m->textures.end()) return;
-            glDeleteTextures(1, &it->second.name);
+            m->Dirty();
+            if (!m->contextGone) glDeleteTextures(1, &it->second.name);
             m->textures.erase(it);
         }
         bool UploadLevel(std::uint32_t texId, std::uint32_t level, std::uint32_t x, std::uint32_t y, std::uint32_t w, std::uint32_t h, const std::uint8_t* data, bool compressed) override {
             auto it = m->textures.find(texId);
-            if (it == m->textures.end() || level >= it->second.levels) return false;
+            if (m->contextGone || it == m->textures.end() || level >= it->second.levels) return false;
+            m->Dirty();
             glBindTexture(GL_TEXTURE_2D, it->second.name);
             glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
             glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
@@ -268,6 +370,12 @@ struct cGLGDriver::Impl {
             return glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
         }
         void Destroy() override {
+            m->Dirty();
+            if (m->contextGone) {
+                fbo = color = depth = 0;
+                w = h = 0;
+                return;
+            }
             if (fbo) glDeleteFramebuffers(1, &fbo);
             if (color) glDeleteTextures(1, &color);
             if (depth) glDeleteTextures(1, &depth);
@@ -291,6 +399,7 @@ struct cGLGDriver::Impl {
             if (cw <= 0 || ch <= 0) return;
             // top-left rectangles -> GL's bottom-left rows
             const int gsy = srcH - sy - ch, gdy = dstH - dy - ch;
+            m->Dirty();
             glBindFramebuffer(GL_READ_FRAMEBUFFER, toStore ? m->frameFbo : fbo);
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, toStore ? fbo : m->frameFbo);
             glDisable(GL_SCISSOR_TEST);
@@ -301,7 +410,7 @@ struct cGLGDriver::Impl {
         void RestoreToFrame(int sx, int sy, int cw, int ch, int dx, int dy) override { Copy(false, sx, sy, cw, ch, dx, dy); }
     } store{this};
     sGDMode currentMode{};
-    std::map<std::uint32_t, Texture> textures;
+    std::unordered_map<std::uint32_t, Texture> textures;
     nSGLDX7::cTextureStageData records[2];
     StageCfg cfg[2];
     bool anyStageDirty = false, bindMode = false;
@@ -341,6 +450,7 @@ struct cGLGDriver::Impl {
 
     // A colour (RGBA8) + depth (32-bit float) target; leaves its framebuffer bound.
     void MakeTarget(std::uint32_t w, std::uint32_t h, GLuint& fbo, GLuint& color, GLuint& depth) {
+        Dirty();
         glGenTextures(1, &color);
         glBindTexture(GL_TEXTURE_2D, color);
         glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, GLsizei(w), GLsizei(h));
@@ -401,8 +511,9 @@ struct cGLGDriver::Impl {
         glUseProgram(p);
         glUniform1i(glGetUniformLocation(p, "t0"), 0);
         glUniform1i(glGetUniformLocation(p, "t1"), 1);
-        viewportUniform[p] = glGetUniformLocation(p, "uViewport");
+        programInfo[p].viewportUniform = glGetUniformLocation(p, "uViewport");
         programs[k] = p;
+        Dirty();   // glUseProgram above
         return p;
     }
     GLuint Sampler(const StageCfg& c) {
@@ -424,29 +535,72 @@ struct cGLGDriver::Impl {
         return s;
     }
     GLuint DefaultSampler() {
-        StageCfg c;
-        return Sampler(c);
+        static const StageCfg defaults;
+        if (!defaultSampler) defaultSampler = Sampler(defaults);
+        return defaultSampler;
     }
+    GLuint defaultSampler = 0;
 
-    void SetRasterState(const StateMirror& m) {
-        if (m.cull && !std::getenv("SC4_GDNOCULL")) {
-            glEnable(GL_CULL_FACE);
+    // The frame target, program, blend, depth, cull, viewport and scissor a draw needs, sending only what differs from the shadow.
+    void SyncState(const StateMirror& m, GLuint program) {
+        Shadow& h = shadow;
+        if (!h.valid) {
+            // the state nothing else changes: set once per invalidation
+            glBindVertexArray(vao);
+            glBindBuffer(GL_ARRAY_BUFFER, vertexRing.Name());
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexRing.Name());
+            glBindBuffer(GL_UNIFORM_BUFFER, stateRing.Name());
+            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
             glCullFace(GL_BACK);
             glFrontFace(GL_CCW);   // Enable(CullFace) = D3DCULL_CW -> GL FrontFace(CCW) + cull back
-        } else {
-            glDisable(GL_CULL_FACE);
+            // The GL viewport is always the whole frame: the game's viewport is an exact (fractional) transform in the vertex
+            // shader (ViewportTransform), so every draw shares one logical -> pixel mapping. Rounding each viewport's origin
+            // to whole pixels shifted draws with different viewports by up to half a pixel, and at a fractional UI scale
+            // adjacent region-map tiles left one-pixel black columns between them.
+            glViewport(0, 0, GLsizei(pixelWidth), GLsizei(pixelHeight));
+            glActiveTexture(GL_TEXTURE0);
+            h = Shadow{};
+            h.framebuffer = ~0u;
+            h.program = ~0u;
+            h.blendSrc = h.blendDst = h.depthFunc = ~0u;
+            h.texture[0] = h.texture[1] = h.sampler[0] = h.sampler[1] = ~0u;
+            h.format = ~0u;
+            h.stride = -1;
+            const auto set = [](GLenum cap, bool on) { if (on) glEnable(cap); else glDisable(cap); };
+            set(GL_BLEND, h.blend);
+            set(GL_DEPTH_TEST, h.depthTest);
+            glDepthMask(h.depthWrite ? GL_TRUE : GL_FALSE);
+            set(GL_CULL_FACE, h.cull);
+            set(GL_SCISSOR_TEST, h.scissor);
+            h.valid = true;
         }
-        // The GL viewport is always the whole frame: the game's viewport is an exact (fractional) transform in the vertex
-        // shader (ViewportTransform), so every draw shares one logical -> pixel mapping. Rounding each viewport's origin
-        // to whole pixels shifted draws with different viewports by up to half a pixel, and at a fractional UI scale
-        // adjacent region-map tiles left one-pixel black columns between them.
-        glViewport(0, 0, GLsizei(pixelWidth), GLsizei(pixelHeight));
+        if (h.framebuffer != frameFbo) { glBindFramebuffer(GL_FRAMEBUFFER, frameFbo); h.framebuffer = frameFbo; }
+        if (h.program != program) { glUseProgram(program); h.program = program; }
+        if (m.blend != h.blend) { if (m.blend) glEnable(GL_BLEND); else glDisable(GL_BLEND); h.blend = m.blend; }
+        if (m.blend) {
+            const GLenum src = Factor(m.blendSrc), dst = Factor(m.blendDst);
+            if (src != h.blendSrc || dst != h.blendDst) { glBlendFunc(src, dst); h.blendSrc = src; h.blendDst = dst; }
+        }
+        // depth is only written while the depth test is on; GL skips depth writes too with the test off, so keep it on with ALWAYS
+        bool test = m.depthTest, write = m.depthWrite;
+        if (Debug().noDepth) test = write = false;
+        if (!test) write = false;
+        if (test != h.depthTest) { if (test) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST); h.depthTest = test; }
+        if (test) {
+            const GLenum func = Compare(m.depthFunc);
+            if (func != h.depthFunc) { glDepthFunc(func); h.depthFunc = func; }
+        }
+        if (write != h.depthWrite) { glDepthMask(write ? GL_TRUE : GL_FALSE); h.depthWrite = write; }
+        const bool cull = m.cull && !Debug().noCull;
+        if (cull != h.cull) { if (cull) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE); h.cull = cull; }
+        if (scissor != h.scissor) { if (scissor) glEnable(GL_SCISSOR_TEST); else glDisable(GL_SCISSOR_TEST); h.scissor = scissor; }
         if (scissor) {
             const int x0 = PX(vx), y0 = PY(vy), x1 = PX(vx + vw), y1 = PY(vy + vh);
-            glEnable(GL_SCISSOR_TEST);
-            glScissor(x0, y0, x1 - x0, y1 - y0);
-        } else {
-            glDisable(GL_SCISSOR_TEST);
+            const int rect[4] = {x0, y0, x1 - x0, y1 - y0};
+            if (std::memcmp(rect, h.scissorRect, sizeof rect) != 0) {
+                glScissor(rect[0], rect[1], rect[2], rect[3]);
+                std::memcpy(h.scissorRect, rect, sizeof rect);
+            }
         }
     }
     // NDC of the game's viewport (vx, vy bottom-left, vw x vh logical) -> NDC of the whole frame: scale x, y and offset x, y.
@@ -455,18 +609,6 @@ struct cGLGDriver::Impl {
         out[1] = float(vh) / float(height);
         out[2] = float(2.0 * vx + vw) / float(width) - 1.0f;
         out[3] = float(2.0 * vy + vh) / float(height) - 1.0f;
-    }
-    void SetDepthState(bool test, eGDTestFunc func, bool write) {
-        if (std::getenv("SC4_GDNODEPTH")) { test = false; write = false; }
-        // depth is only written while the depth test is on; GL skips depth writes too with the test off, so keep it on with ALWAYS
-        if (test) {
-            glEnable(GL_DEPTH_TEST);
-            glDepthFunc(Compare(func));
-            glDepthMask(write ? GL_TRUE : GL_FALSE);
-        } else {
-            glDisable(GL_DEPTH_TEST);
-            glDepthMask(GL_FALSE);
-        }
     }
 };
 
@@ -501,12 +643,11 @@ std::unique_ptr<cGLGDriver> cGLGDriver::Create(std::uint32_t width, std::uint32_
     }
     glGenVertexArrays(1, &m.vao);
     glBindVertexArray(m.vao);
-    glGenBuffers(1, &m.vbo);
-    glGenBuffers(1, &m.ibo);
-    glGenBuffers(1, &m.ubo);
-    glBindBuffer(GL_UNIFORM_BUFFER, m.ubo);
-    glBufferData(GL_UNIFORM_BUFFER, sizeof(dx7::MetalRenderState), nullptr, GL_STREAM_DRAW);
-    glBindBufferBase(GL_UNIFORM_BUFFER, 0, m.ubo);
+    m.vertexRing.Create(GL_ARRAY_BUFFER, 64u << 20);
+    m.indexRing.Create(GL_ELEMENT_ARRAY_BUFFER, 16u << 20);   // bound to the VAO, which stays bound
+    m.stateRing.Create(GL_UNIFORM_BUFFER, 16u << 20);
+    glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &m.stateAlign);
+    if (m.stateAlign < 1) m.stateAlign = 256;
     glGenTextures(1, &m.whiteTexture);
     glBindTexture(GL_TEXTURE_2D, m.whiteTexture);
     const std::uint32_t white = 0xffffffff;
@@ -529,6 +670,7 @@ std::unique_ptr<cGLGDriver> cGLGDriver::Create(std::uint32_t width, std::uint32_
 IBackingStore* cGLGDriver::BackingStore() { return &impl_->store; }
 
 std::uint32_t cGLGDriver::DrawCalls() const { return impl_->draws; }
+void cGLGDriver::DetachContext() { impl_->contextGone = true; }
 std::uint32_t cGLGDriver::PipelineCount() const { return static_cast<std::uint32_t>(impl_->programs.size()); }
 
 // ---- state ----
@@ -734,8 +876,9 @@ void cGLGDriver::GetViewport(std::uint32_t out[4]) {
 void cGLGDriver::Clear(std::uint32_t mask) {
     Impl& s = *impl_;
     const bool doColor = (mask & kClearColor) != 0, doDepth = (mask & kClearDepth) != 0;
-    if (!doColor && !doDepth) return;
+    if ((!doColor && !doDepth) || s.contextGone) return;
     const std::uint32_t argb = mirror_.clearColor;
+    s.Dirty();
     glBindFramebuffer(GL_FRAMEBUFFER, s.frameFbo);
     if (s.scissor) {
         const int x0 = s.PX(s.vx), y0 = s.PY(s.vy);
@@ -772,10 +915,8 @@ void cGLGDriver::DrawArrays(eGDPrimType mode, int first, int count) {
         Unsupported("DrawArrays(points/lines)");
         return;
     }
-    glBindVertexArray(s.vao);
-    glBindBuffer(GL_ARRAY_BUFFER, s.vbo);
-    glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(count) * s.stride, s.base + std::size_t(first) * s.stride, GL_STREAM_DRAW);
-    std::vector<std::uint16_t> indices;
+    std::vector<std::uint16_t>& indices = s.scratchIndices;
+    indices.clear();
     GLenum type = GL_TRIANGLES;
     switch (mode) {
     case prim::Triangles: break;
@@ -793,7 +934,7 @@ void cGLGDriver::DrawArrays(eGDPrimType mode, int first, int count) {
         nSGLDX7::GenerateIndexedTriListForQuadStrip(count, indices.data());
         break;
     }
-    Encode(type, count, indices.empty() ? nullptr : indices.data(), static_cast<int>(indices.size()));
+    Encode(type, s.base + std::size_t(first) * s.stride, count, indices.empty() ? nullptr : indices.data(), static_cast<int>(indices.size()));
 }
 
 void cGLGDriver::DrawElements(eGDPrimType mode, int count, eGDType indexType, const void* indices) {
@@ -807,7 +948,8 @@ void cGLGDriver::DrawElements(eGDPrimType mode, int count, eGDType indexType, co
         Unsupported("DrawElements(mode/index type)");
         return;
     }
-    std::vector<std::uint32_t> idx(static_cast<std::size_t>(count));
+    std::vector<std::uint32_t>& idx = s.scratchWide;
+    idx.resize(static_cast<std::size_t>(count));
     std::uint32_t lo = 0xffffffff, hi = 0;
     for (int i = 0; i < count; ++i) {
         std::uint32_t v = indexType == 1 ? static_cast<const std::uint8_t*>(indices)[i]
@@ -818,88 +960,108 @@ void cGLGDriver::DrawElements(eGDPrimType mode, int count, eGDType indexType, co
         hi = std::max(hi, v);
     }
     const int vertexCount = static_cast<int>(hi - lo + 1);
-    glBindVertexArray(s.vao);
-    glBindBuffer(GL_ARRAY_BUFFER, s.vbo);
-    glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(vertexCount) * s.stride, s.base + std::size_t(lo) * s.stride, GL_STREAM_DRAW);
-    std::vector<std::uint16_t> rebased(idx.size());
+    std::vector<std::uint16_t>& rebased = s.scratchIndices;
+    rebased.resize(idx.size());
     for (std::size_t i = 0; i < idx.size(); ++i) rebased[i] = static_cast<std::uint16_t>(idx[i] - lo);
-    Encode(GL_TRIANGLES, vertexCount, rebased.data(), count);
+    Encode(GL_TRIANGLES, s.base + std::size_t(lo) * s.stride, vertexCount, rebased.data(), count);
 }
 
-// Issues one draw of the vertices just uploaded to the stream buffer, with the mirrored state.
-void cGLGDriver::Encode(unsigned primitive, int vertexCount, const std::uint16_t* indices, int indexCount) {
+// Issues one draw of `vertexCount` vertices (and indices into them) with the mirrored state: the vertices, indices and shader
+// state are appended to the stream rings, and only the GL state that changed since the last draw is sent.
+void cGLGDriver::Encode(unsigned primitive, const std::uint8_t* vertices, int vertexCount, const std::uint16_t* indices, int indexCount) {
     Impl& s = *impl_;
-    glBindFramebuffer(GL_FRAMEBUFFER, s.frameFbo);
+    if (s.contextGone) return;
     s.ApplyDirtyStages();
     ProgramKey key{};
     key.alphaTest = mirror_.alphaTest;
     key.alphaFunc = static_cast<std::uint8_t>(mirror_.alphaFunc);
+    GLuint stageTexture[2] = {s.whiteTexture, s.whiteTexture};
     for (int st = 0; st < 2; ++st) {
         const StageCfg& c = s.cfg[st];
-        const bool on = c.Active() && s.table.HasTexture(c.texture) && s.textures.count(c.texture);
-        key.on[st] = on;
-        if (on) {
-            const std::uint8_t ops[6] = {std::uint8_t(c.colorOp), std::uint8_t(c.colorArg1), std::uint8_t(c.colorArg2),
-                                         std::uint8_t(c.alphaOp), std::uint8_t(c.alphaArg1), std::uint8_t(c.alphaArg2)};
-            std::memcpy(key.ops[st], ops, 6);
-        }
+        if (!c.Active() || !s.table.HasTexture(c.texture)) continue;
+        auto it = s.textures.find(c.texture);
+        if (it == s.textures.end()) continue;
+        key.on[st] = true;
+        stageTexture[st] = it->second.name;
+        const std::uint8_t ops[6] = {std::uint8_t(c.colorOp), std::uint8_t(c.colorArg1), std::uint8_t(c.colorArg2),
+                                     std::uint8_t(c.alphaOp), std::uint8_t(c.alphaArg1), std::uint8_t(c.alphaArg2)};
+        std::memcpy(key.ops[st], ops, 6);
     }
-    const GLuint program = s.Program(key);
-    glUseProgram(program);
+    if (s.lastProgram == 0 || std::memcmp(&key, &s.lastKey, sizeof key) != 0) {
+        s.lastProgram = s.Program(key);
+        s.lastInfo = &s.programInfo[s.lastProgram];
+        s.lastKey = key;
+    }
+    const GLuint program = s.lastProgram;
+    s.SyncState(mirror_, program);
+    Impl::Shadow& h = s.shadow;
+
     float viewport[4];
     s.ViewportTransform(viewport);
-    glUniform4f(s.viewportUniform[program], viewport[0], viewport[1], viewport[2], viewport[3]);
-    if (mirror_.blend) {
-        glEnable(GL_BLEND);
-        glBlendFunc(Factor(mirror_.blendSrc), Factor(mirror_.blendDst));
-    } else {
-        glDisable(GL_BLEND);
+    Impl::ProgramInfo& info = *s.lastInfo;
+    if (!info.viewportSet || std::memcmp(viewport, info.viewport, sizeof viewport) != 0) {
+        glUniform4f(info.viewportUniform, viewport[0], viewport[1], viewport[2], viewport[3]);
+        std::memcpy(info.viewport, viewport, sizeof viewport);
+        info.viewportSet = true;
     }
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    s.SetDepthState(mirror_.depthTest, mirror_.depthFunc, mirror_.depthWrite);
-    s.SetRasterState(mirror_);
 
     dx7::MetalRenderState dc = s.recorder.Snapshot();
     dc.stride = static_cast<std::uint32_t>(s.stride);
     dc.alphaRef = AlphaRefByte(mirror_.alphaRef);
-    if (std::getenv("SC4_GDRED")) dc.texMode |= 0x100u;
-    if (const char* mode = std::getenv("SC4_GDMODE")) dc.texMode |= static_cast<std::uint32_t>(std::atoi(mode));
-    glBindBuffer(GL_UNIFORM_BUFFER, s.ubo);
-    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof dc, &dc);
-    glBindBufferBase(GL_UNIFORM_BUFFER, 0, s.ubo);
+    if (Debug().red) dc.texMode |= 0x100u;
+    dc.texMode |= Debug().mode;
+    if (h.stateOffset == SIZE_MAX || std::memcmp(&dc, &h.state, sizeof dc) != 0) {
+        const std::size_t at = s.stateRing.Append(&dc, sizeof dc, std::size_t(s.stateAlign));
+        glBindBufferRange(GL_UNIFORM_BUFFER, 0, s.stateRing.Name(), GLintptr(at), sizeof dc);
+        h.stateOffset = at;
+        h.state = dc;
+    }
+
+    const std::size_t vertexAt = s.vertexRing.Append(vertices, std::size_t(vertexCount) * std::size_t(s.stride), std::size_t(s.stride));
+    if (vertexAt == SIZE_MAX) { Unsupported("draw larger than a quarter of the vertex ring"); return; }
+    const GLint firstVertex = GLint(vertexAt / std::size_t(s.stride));
 
     // V3F, C4UB, then one or two T2F sets (the Metal shader reads the same bytes by stride). V3F_T2F has no colour: the
-    // vertices are white, as Direct3D lights a vertex without a diffuse component, and its T2F follows the position.
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, s.stride, reinterpret_cast<const void*>(0));
-    if (s.format == vf::V3F_T2F) {
-        glDisableVertexAttribArray(1);
-        glVertexAttrib4f(1, 1, 1, 1, 1);
-        glEnableVertexAttribArray(2);
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, s.stride, reinterpret_cast<const void*>(12));
-        glDisableVertexAttribArray(3);
-        glVertexAttrib2f(3, 0, 0);
-    } else {
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, s.stride, reinterpret_cast<const void*>(12));
-        if (s.stride >= 24) { glEnableVertexAttribArray(2); glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, s.stride, reinterpret_cast<const void*>(16)); }
-        else { glDisableVertexAttribArray(2); glVertexAttrib2f(2, 0, 0); }
-        if (s.stride >= 32) { glEnableVertexAttribArray(3); glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, s.stride, reinterpret_cast<const void*>(24)); }
-        else { glDisableVertexAttribArray(3); glVertexAttrib2f(3, 0, 0); }
+    // vertices are white, as Direct3D lights a vertex without a diffuse component, and its T2F follows the position. The
+    // pointers are relative to the ring's start; each draw starts at its own first vertex.
+    if (h.format != s.format || h.stride != s.stride) {
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, s.stride, reinterpret_cast<const void*>(0));
+        if (s.format == vf::V3F_T2F) {
+            glDisableVertexAttribArray(1);
+            glVertexAttrib4f(1, 1, 1, 1, 1);
+            glEnableVertexAttribArray(2);
+            glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, s.stride, reinterpret_cast<const void*>(12));
+            glDisableVertexAttribArray(3);
+            glVertexAttrib2f(3, 0, 0);
+        } else {
+            glEnableVertexAttribArray(1);
+            glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, s.stride, reinterpret_cast<const void*>(12));
+            if (s.stride >= 24) { glEnableVertexAttribArray(2); glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, s.stride, reinterpret_cast<const void*>(16)); }
+            else { glDisableVertexAttribArray(2); glVertexAttrib2f(2, 0, 0); }
+            if (s.stride >= 32) { glEnableVertexAttribArray(3); glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, s.stride, reinterpret_cast<const void*>(24)); }
+            else { glDisableVertexAttribArray(3); glVertexAttrib2f(3, 0, 0); }
+        }
+        h.format = s.format;
+        h.stride = s.stride;
     }
 
     for (int st = 0; st < 2; ++st) {
-        glActiveTexture(GL_TEXTURE0 + st);
-        glBindTexture(GL_TEXTURE_2D, key.on[st] ? s.textures[s.cfg[st].texture].name : s.whiteTexture);
-        glBindSampler(GLuint(st), key.on[st] ? s.Sampler(s.cfg[st]) : s.DefaultSampler());
+        const GLuint sampler = key.on[st] ? s.Sampler(s.cfg[st]) : s.DefaultSampler();
+        if (h.texture[st] != stageTexture[st]) {
+            if (st) glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, stageTexture[st]);
+            if (st) glActiveTexture(GL_TEXTURE0);
+            h.texture[st] = stageTexture[st];
+        }
+        if (h.sampler[st] != sampler) { glBindSampler(GLuint(st), sampler); h.sampler[st] = sampler; }
     }
-    glActiveTexture(GL_TEXTURE0);
     if (indices) {
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s.ibo);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, GLsizeiptr(indexCount) * 2, indices, GL_STREAM_DRAW);
-        glDrawElements(primitive, indexCount, GL_UNSIGNED_SHORT, nullptr);
+        const std::size_t indexAt = s.indexRing.Append(indices, std::size_t(indexCount) * 2, 2);
+        if (indexAt == SIZE_MAX) { Unsupported("draw larger than a quarter of the index ring"); return; }
+        glDrawElementsBaseVertex(primitive, indexCount, GL_UNSIGNED_SHORT, reinterpret_cast<const void*>(indexAt), firstVertex);
     } else {
-        glDrawArrays(primitive, 0, vertexCount);
+        glDrawArrays(primitive, firstVertex, vertexCount);
     }
     ++s.draws;
 }
@@ -907,6 +1069,7 @@ void cGLGDriver::Encode(unsigned primitive, int vertexCount, const std::uint16_t
 // ---- presentation ----
 void cGLGDriver::Present(int x, int y, int width, int height) {
     Impl& s = *impl_;
+    s.Dirty();   // the window's frame code clears the default framebuffer around this
     glBindFramebuffer(GL_READ_FRAMEBUFFER, s.frameFbo);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     glDisable(GL_SCISSOR_TEST);
@@ -918,6 +1081,7 @@ void cGLGDriver::Present(int x, int y, int width, int height) {
 
 bool cGLGDriver::ReadBack(std::vector<std::uint8_t>& bgra, std::uint32_t& width, std::uint32_t& height) {
     Impl& s = *impl_;
+    s.Dirty();
     glBindFramebuffer(GL_READ_FRAMEBUFFER, s.frameFbo);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     const std::size_t rowBytes = std::size_t(s.pixelWidth) * 4;
