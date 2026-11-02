@@ -3,7 +3,9 @@
 // Recovered here: the department model (tDepartmentData at +0x160 health / +0x200 education, 0xa0 bytes each),
 // its tunables, the monthly strike machinery (chance, begin, end, per-occupant striking state), the occupant
 // funding percentages and auto budget flags, building lists / counts, system ratings and the small queries.
-// The population change model, daily simulation, coverage grids, ordinance effects and streams are not.
+// The population half follows residential.md (OpenSC4 specs): Init / Shutdown, the 16-state monthly cycle (proximity maps,
+// DoPopulationChange, PostPopulationChange, history), the EQ / HQ / LE queries and the version-7 city record. Not yet: the
+// education/health passes of states 0 and 5-8 (building lists, coverage, grading, ordinance effects).
 //
 // tDepartmentData layout: +0x00 minimum funding (0.6 default), +0x04 strike
 // threshold (1.2), +0x08 (0.2), +0x0c strike length in days (10), +0x10 funding that ends a strike (0.9),
@@ -19,9 +21,11 @@
 #include "gz/cIGZMessage2.h"
 #include "gz/cIGZSerializable.h"
 #include "rz/cRZRandom.h"
-#include "sc4/RecordTape.h"
 #include "sc4/SCPropertyHelp.h"
+#include "sc4/RetainedReference.h"
+#include "sc4/SimStreamOps.h"
 #include "sc4/cSC4ResponseCurve.h"
+#include "sc4/cSC4SimGrid.h"
 
 class cIGZIStream;
 class cIGZOStream;
@@ -33,6 +37,13 @@ constexpr std::uint32_t kGZIID_cISC4ResidentialSimulator = 0x077ac1ee;
 constexpr std::uint32_t kMessageHealthStrike = 0x077accd2, kMessageEducationStrike = 0x077accd0;
 constexpr std::uint32_t kResidentialStrikeStartDate = 0xeaa69f83;   // shared with the police simulator
 constexpr std::uint32_t kOccupantAutoBudget = 0x6c05fc4d;
+
+// A visual effect the population pass places (the "buzzards" over sick tracts): transform, Start(0), Release.
+class IResidentialEffect {
+public:
+    virtual ~IResidentialEffect() = default;
+    virtual void StartAt(float x, float y, float z) = 0;   // places, starts and releases the effect
+};
 
 class IResidentialOccupant {
 public:
@@ -80,6 +91,30 @@ public:
     virtual bool ReadOccupant(cIGZIStream&, IResidentialOccupant**) { return false; }
     virtual void WriteDepartmentGrid(cIGZOStream&) {}                    // int16 grid (+0x80/+0x88 of tDepartmentData)
     virtual bool ReadDepartmentGrid(cIGZIStream&) { return false; }
+
+    // ---- the population half (Init, the monthly cycle, the population pass) ----
+    // Init steps 1-3: the city's services (BDS, occupant manager, developers, demand node 0x1000, message server, budget); false
+    // stops Init as the original does without a demand node or a message server.
+    virtual bool AcquireServices() { return false; }
+    virtual void ReleaseServices() {}
+    virtual void AddAgent(cIGZMessageTarget2*, int /*level*/, const char* /*name*/, std::uint32_t /*flags*/) {}
+    virtual void RemoveAgent(cIGZMessageTarget2*) {}
+    virtual void AddNotification(cIGZMessageTarget2*, std::uint32_t /*message*/) {}
+    virtual void RemoveNotification(cIGZMessageTarget2*, std::uint32_t /*message*/) {}
+    virtual void CreateHistory(std::uint32_t /*id*/, std::uint32_t /*length*/) {}
+    virtual void RecordHistory(std::uint32_t /*id*/, std::int32_t /*value*/) {}    // message 0x89efa536 sent
+    virtual const cISCPropertyHolder* SimulatorExemplar() { return nullptr; }   // {0x6534284a, 0xe7e2c2db, 0x69189c84}
+    // growth developer 0x1010 / 0x1020 / 0x1030 (wealth 1..3) slot 15 GetPopulationMap
+    virtual cSC4SimGrid<std::int16_t>* DeveloperPopulationMap(int /*wealth*/) { return nullptr; }
+    virtual std::uint16_t PollutionValue(int /*type*/, int /*cellX*/, int /*cellZ*/) { return 0; }   // pollution slot 6
+    virtual const cSC4SimGrid<std::uint8_t>* BuildingMap() { return nullptr; }  // BDS slot 41
+    virtual std::uint8_t BuildingMapKey(int wealth) { return std::uint8_t((1 << 2) + wealth + 1); }   // BDS slot 42 (purpose 1)
+    virtual int CurrentMonth() { return 1; }                                    // simulator GetSimDate, month only
+    // effects manager slot 7. false = the create failed (one random draw); true with a null effect = created but nothing can show it.
+    virtual bool CreateEffect(const char* /*name*/, IResidentialEffect** out) { *out = nullptr; return true; }
+    virtual float TerrainAltitude(float /*x*/, float /*z*/) { return 0.0f; }
+    virtual std::uint64_t BeginSlice(std::uint32_t /*milliseconds*/) { return 0; }
+    virtual bool SliceExpired(std::uint64_t) { return false; }
 };
 
 struct DepartmentData {
@@ -161,7 +196,8 @@ public:
         GetRawOccupantFundingPercentages(occupant, staff, budget, education);
     }
     float GetBaseStaffEfficiency(IResidentialOccupant* occupant, bool education);
-    bool ReadCityRecord(cIGZIStream& stream);   // @ 0x100204c4e: the city-file record (grids and occupants as references)
+    bool ReadCityRecord(cIGZIStream& stream);   // the version-7 record (residential.md 9.1)
+    bool WriteCityRecord(cIGZOStream& stream) const;
     bool FundingChanged() const { return fundingChanged_; }
     static bool GetAutoBudget(const IResidentialOccupant* occupant);
     static void SetAutoBudget(IResidentialOccupant* occupant, bool value);
@@ -178,6 +214,43 @@ public:
     int GetHospitalSystemTotals(ResidentialQueryData& totals, const std::vector<std::uint32_t>& groups) { return GetSystemTotals(hospitals_, totals, false, groups); }
     float GetHealthSystemRating();
     float GetSchoolSystemRating();
+
+    // ---- the population half (residential.md: Init 4.1, Shutdown 4.2, the monthly cycle 5, queries 6, tuning 7.1) ----
+    bool Init();
+    bool Shutdown();
+    // One step of the 16-state monthly cycle; false when a time-sliced state ran out of time (the day is delivered again).
+    bool DoDailySimulation(std::uint32_t milliseconds);
+    std::uint32_t State() const { return state_; }
+    cSC4SimGrid<std::uint8_t>* GetProximityMap(std::uint32_t wealth) const { return wealth - 1 < 3 ? proximity_[wealth - 1].get() : nullptr; }
+    cSC4SimGrid<std::uint16_t>* GetPopulationGrid(int wealth) const { return populationGrids_[wealth].get(); }   // 0..2
+    cSC4SimGrid<float>* GetEQGrid(int wealth) const { return eq_[wealth].get(); }
+    cSC4SimGrid<float>* GetHQGrid(int wealth) const { return hq_[wealth].get(); }
+    cSC4SimGrid<std::uint8_t>* GetAgeGrid() const { return ageGrid_.get(); }                                   // slot 41
+    cSC4SimGrid<float>* GetGradeMap(bool school) const { return school ? schoolGrade_.get() : hospitalGrade_.get(); }   // 39 / 40
+    float GetCellEQ(unsigned x, unsigned z) const;    // slots 35 / 36: cell coordinates
+    float GetCellHQ(unsigned x, unsigned z) const;
+    float GetCellEQByWealth(unsigned x, unsigned z, int wealth) const;
+    float GetCellHQByWealth(unsigned x, unsigned z, int wealth) const;
+    float GetGlobalEQ() const;
+    float GetGlobalHQ() const;
+    std::uint8_t GetCellLifeExpectancy(unsigned x, unsigned z);   // slot 29 (the tuning exemplar from the host)
+    std::uint8_t GetGlobalLE();                                   // slot 34
+    // The population tuning (residential.md 7.1).
+    struct PopulationTuning {
+        float eqDecay = 1.0f, hqDecay = 1.0f;
+        std::int16_t newAge[3] = {25, 30, 35};
+        std::uint8_t resetAge = 40;
+        float eqReset = 0.7f, hqReset = 0.7f;
+        float newEQ[3] = {4.0f, 6.0f, 8.0f}, newHQ[3] = {0.0f, 0.0f, 0.0f};
+        float deathsDoorHQ = 0.0f, deathsDoorHeight = 0.0f, deathsDoorDelta = 0.0f, deathsDoorChance = 0.0f;
+        cSC4ResponseCurve air, water, garbage;
+    };
+    void ReadTunablePopulationValues(const cISCPropertyHolder* exemplar);
+    const PopulationTuning& Tuning() const { return tuning_; }
+    void DoPopulationChange(int x, int z);   // one tract of state 4
+    void PostPopulationChange();             // state 12
+    std::uint64_t LifeExpectancySum() const { return leSum_; }
+    int RunningPopulation() const { return runningPopulation_; }
 
     // ---- misc queries ----
     int GetPopulation() const { return population_; }
@@ -208,9 +281,44 @@ private:
     std::vector<std::list<IResidentialOccupant*>> schools_, hospitals_;
     std::list<IResidentialOccupant*> extraSchools_, extraHospitals_, healthAffecting1_, healthAffecting2_;
     int population_ = 0;
-    bool fundingChanged_ = true;
-    cRecordTape cityRecord_;   // the city-file record as read (saved back in that layout)
+    bool fundingChanged_ = true;   // the record's dirty flag
     bool autoBudgetSchools_ = false, autoBudgetHospitals_ = false;
+
+    // ---- population half ----
+    void CreateGrids();
+    void ReleaseGrids();
+    void ResetIterator();
+    bool NextTract(std::int32_t& x, std::int32_t& z);
+    void SeedProximity(int wealth);
+    bool ProximityPass();                         // one distance pass over the work grid; true when a value changed
+    void CopyProximity(int wealth);
+    float TractQuotient(const SimGridPtr<float> (&values)[3], int x, int z) const;
+    float GlobalQuotient(const SimGridPtr<float> (&values)[3]) const;
+    void RecordHistoryData(std::uint32_t id, std::int32_t value) { if (host_) host_->RecordHistory(id, value); }
+
+    bool initialized_ = false, cityStarted_ = false, tuningLoaded_ = false;
+    std::int32_t proximityTractSize_ = 1, populationTractSize_ = 4, eqTractSize_ = 4;
+    SimGridPtr<std::uint8_t> proximity_[3];
+    SimGridPtr<std::uint16_t> populationGrids_[3];
+    SimGridPtr<std::uint8_t> ageGrid_;
+    std::vector<SimGridPtr<std::uint8_t>> schoolCoverage_, hospitalCoverage_;   // 7 / 3 (education-health half)
+    SimGridPtr<float> schoolGrade_, hospitalGrade_;
+    SimGridPtr<float> eq_[3], hq_[3];
+    SimGridPtr<std::uint8_t> work_;               // the temporary proximity grid (states 13 -> 3), not saved
+    float unused98_ = 0.0f, unused9c_ = 0.0f;
+    std::uint32_t state_ = 0;
+    int runningPopulation_ = 0;
+    std::uint64_t leSum_ = 0;
+    ScanningIterator iterator_;
+    std::int32_t ageCount_[20] = {}, ageEqSum_[20] = {};
+    std::int32_t schoolCovered_ = 0, hospitalCovered_ = 0;
+    PopulationTuning tuning_;
+    // What a city file holds that the education/health half does not model yet: the departments' two references each and the
+    // occupant lists (pending school, pending hospital, pending health-affecting; the school and hospital list vectors; the
+    // health-affecting list), kept as read and written back.
+    cRetainedReference departmentRefs_[4];
+    std::vector<cRetainedReferences> fileLists_;
+    std::uint32_t fileSchoolListCount_ = 7, fileHospitalListCount_ = 3;
 };
 
 }  // namespace sc4

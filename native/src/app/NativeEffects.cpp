@@ -362,4 +362,22 @@ sc4::ITerrainEffect* CreateTerrainEffect(std::uint32_t group, std::uint32_t type
     return new TerrainEffect(effect);
 }
 
+bool HasNamedEffect(const char* name) { return BindManager() && g_manager->HasVisualEffect(name); }
+
+int StartNamedEffect(const char* name, float x, float y, float z) {
+    if (!BindManager()) return -1;
+    sc4::cSC4VisualEffect* effect = nullptr;
+    if (!g_manager->CreateVisualEffect(name, &effect) || !effect) return 0;
+    cS3DTransform source;   // identity rotation, translation, scale 1
+    source.flags = 1;
+    source.changeCounter = 1;
+    source.translation[0] = x;
+    source.translation[1] = y;
+    source.translation[2] = z;
+    effect->SetSourceTransform(source);
+    effect->Start(0);
+    effect->Release();
+    return 1;
+}
+
 }  // namespace native

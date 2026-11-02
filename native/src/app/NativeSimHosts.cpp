@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "app/NativeCity.h"
+#include "app/NativeEffects.h"
 #include "app/NativeGrowthDevelopers.h"
 #include "app/NativeSimHosts.h"
 #include "app/NativeZoneDeveloperHost.h"
@@ -27,6 +28,7 @@
 #include "sc4/PollutionSimulator.h"
 #include "sc4/FireProtectionSimulator.h"
 #include "sc4/PoliceSimulator.h"
+#include "sc4/ResidentialSimulator.h"
 #include "sc4/Simulator.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/cSC4City.h"
@@ -384,7 +386,92 @@ private:
 
 PoliceHost g_police;
 
+// The buzzards over a sick tract (residential.md 5.5 step 2).
+class ResidentialEffect final : public IResidentialEffect {
+public:
+    explicit ResidentialEffect(const char* name) : name_(name) {}
+    void StartAt(float x, float y, float z) override { native::StartNamedEffect(name_, x, y, z); }
+private:
+    const char* name_;
+};
+
+class ResidentialHost final : public IResidentialHost {
+public:
+    // ---- the education/health half's seams (PARTIAL: no school / hospital lists natively yet) ----
+    std::uint32_t CurrentDay() override { cSC4Simulator* s = Simulator(); return s ? s->GetSimDateNumber() : 0; }
+    void PostStrikeMessage(std::uint32_t message, IResidentialOccupant*, bool, std::uint32_t) override { PostCityMessage(message); }
+    void SetStrikerGroup(bool, IResidentialOccupant*, bool) override {}
+    bool CityHasOccupantManager() override { cSC4City* c = HostCity(); return c && c->GetComponent(CityComponent::OccupantManager); }
+    bool IsBudgeted(IResidentialOccupant*, std::uint32_t) override { return false; }
+    IBudgetRecord* GetBudgetRecord(IResidentialOccupant*, std::uint32_t) override { return nullptr; }
+    void GetSchoolQueryData(IResidentialOccupant*, ResidentialQueryData& out) override { out = {}; }
+    void GetHospitalQueryData(IResidentialOccupant*, ResidentialQueryData& out) override { out = {}; }
+    void GetOccupantEfficiencyRatings(IResidentialOccupant*, float& staff, bool) override { staff = 1.0f; }
+    std::uint8_t CellWorkforce(unsigned, unsigned) override { return 0; }   // only without grids (the class answers itself)
+    std::uint8_t GlobalWorkforce() override { return 0; }
+    float CellLifeExpectancyBase(unsigned, unsigned) override { return 0.0f; }
+
+    // ---- the population half ----
+    bool AcquireServices() override { return HostCity() != nullptr; }
+    void AddAgent(cIGZMessageTarget2* target, int level, const char* name, std::uint32_t flags) override { AddCitySimulatorAgent(target, level, name, flags); }
+    void RemoveAgent(cIGZMessageTarget2* target) override { RemoveCitySimulatorAgent(target); }
+    void AddNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->AddNotification(target, message); }
+    void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->RemoveNotification(target, message); }
+    void CreateHistory(std::uint32_t id, std::uint32_t length) override {
+        if (cSC4HistoryWarehouse* history = History()) history->SetHistoryDataQueueLength(id, length);
+    }
+    void RecordHistory(std::uint32_t id, std::int32_t value) override { AddHistoryValue(id, value); }
+    const cISCPropertyHolder* SimulatorExemplar() override { return native::SimulatorExemplar(0x69189c84); }
+    cSC4SimGrid<std::int16_t>* DeveloperPopulationMap(int wealth) override {
+        return GrowthDeveloperPopulationMap(0x1000u + 0x10u * static_cast<std::uint32_t>(wealth));
+    }
+    // pollution slot 6: max(0, the source grid's value)
+    std::uint16_t PollutionValue(int type, int x, int z) override {
+        auto* p = Component<cSC4PollutionSimulator>(CityComponent::PollutionSimulator, kGZCLSID_cSC4PollutionSimulator);
+        cSC4SimGrid<std::int16_t>* grid = p ? p->GetPollutionGrid(static_cast<PollutionType>(type)) : nullptr;
+        if (!grid) return 0;
+        const std::int32_t shift = grid->GetTractShift();
+        if (!grid->TractIsInBounds(x >> shift, z >> shift)) return 0;
+        const std::int16_t v = grid->GetCellValue(x, z);
+        return static_cast<std::uint16_t>(v < 0 ? 0 : v);
+    }
+    // PARTIAL: the building development simulator keeps no building map natively, so no proximity tract is seeded (the original's
+    // maps differ from that only along the z = 0 edge, residential.md 5.3).
+    const cSC4SimGrid<std::uint8_t>* BuildingMap() override { return nullptr; }
+    int CurrentMonth() override {
+        cSC4Simulator* s = Simulator();
+        int month = 0;
+        if (s) s->GetSimDate(nullptr, &month, nullptr, nullptr, nullptr);
+        return month;
+    }
+    bool CreateEffect(const char* name, IResidentialEffect** out) override {
+        *out = nullptr;
+        if (!native::HasNamedEffect(name)) return false;
+        static ResidentialEffect buzzards("buzzards");
+        *out = &buzzards;
+        return true;
+    }
+    float TerrainAltitude(float x, float z) override { cSTETerrain* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
+    std::uint64_t BeginSlice(std::uint32_t milliseconds) override { return NowMicroseconds() + std::uint64_t{milliseconds} * 1000u; }
+    bool SliceExpired(std::uint64_t slice) override { return NowMicroseconds() >= slice; }
+};
+
+ResidentialHost g_residential;
+
+cSC4ResidentialSimulator* Residential() {
+    return Component<cSC4ResidentialSimulator>(CityComponent::ResidentialSimulator, kGZCLSID_cSC4ResidentialSimulator);
+}
+
 }  // namespace
+
+cSC4SimGrid<std::uint8_t>* NativeResidentialProximityMap(int wealth) {
+    cSC4ResidentialSimulator* r = Residential();
+    return r ? r->GetProximityMap(static_cast<std::uint32_t>(wealth)) : nullptr;
+}
+cSC4SimGrid<float>* NativeResidentialGradeMap(bool school) {
+    cSC4ResidentialSimulator* r = Residential();
+    return r ? r->GetGradeMap(school) : nullptr;
+}
 
 void InstallNativeSimHosts() {
     gzcom::SimHosts& hosts = gzcom::GetSimHosts();
@@ -392,6 +479,7 @@ void InstallNativeSimHosts() {
     hosts.pollution = &g_pollution;
     hosts.fire = &g_fire;
     hosts.police = &g_police;
+    hosts.residential = &g_residential;
 }
 
 }  // namespace native

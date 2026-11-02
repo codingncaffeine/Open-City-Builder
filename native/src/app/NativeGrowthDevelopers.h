@@ -34,6 +34,11 @@ std::uint32_t GrowthDeveloperKind(void* developer);
 sc4::cSC4Demand* GrowthDeveloperDemandChannel(void* developer);
 std::int16_t GrowthDeveloperDesirabilityAt(void* developer, unsigned x, unsigned z);
 sc4::cSC4SimGrid<std::int16_t>* GrowthDeveloperDesirabilityMap(std::uint32_t developerType);   // the land value simulator
+sc4::cSC4SimGrid<std::int16_t>* GrowthDeveloperPopulationMap(std::uint32_t developerType);     // the residential simulator
+// The residential simulator's maps for the growth developers (NativeSimHosts.cpp): proximity by wealth 1..3 (slot 5), the school /
+// hospital grade maps (slots 39 / 40).
+sc4::cSC4SimGrid<std::uint8_t>* NativeResidentialProximityMap(int wealth);
+sc4::cSC4SimGrid<float>* NativeResidentialGradeMap(bool school);
 std::vector<void*> AllGrowthDevelopers();
 void InstallDemandSimulatorHost();   // NativeDemandHost.cpp
 void InstallLotConfigurationHosts();   // NativeLotConfigHost.cpp: the lot configuration manager and the lot configurations   // the demand simulator's IDemandSimulatorHost (DEMAND-1)   // the tract developer's ITractDeveloperHost (growth layer 3)

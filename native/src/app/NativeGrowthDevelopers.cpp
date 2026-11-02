@@ -156,10 +156,10 @@ struct ZoneManagerApi final : IGrowthZoneManagerApi {
     }
 } g_zoneManager;
 
-struct ResidentialApi final : IGrowthResidentialApi {   // its wealth / EQ maps are not exposed by the port's class
-    cSC4SimGrid<std::uint8_t>* WealthMap(int) override { return nullptr; }
-    cSC4SimGrid<float>* Map138() override { return nullptr; }
-    cSC4SimGrid<float>* Map140() override { return nullptr; }
+struct ResidentialApi final : IGrowthResidentialApi {
+    cSC4SimGrid<std::uint8_t>* WealthMap(int wealth) override { return NativeResidentialProximityMap(wealth); }   // slot 5
+    cSC4SimGrid<float>* Map138() override { return NativeResidentialGradeMap(true); }    // slot 39: the school grade map
+    cSC4SimGrid<float>* Map140() override { return NativeResidentialGradeMap(false); }   // slot 40: the hospital grade map
 } g_residential;
 
 struct CommercialApi final : IGrowthCommercialApi {
@@ -292,6 +292,10 @@ std::int16_t GrowthDeveloperDesirabilityAt(void* developer, unsigned x, unsigned
 sc4::cSC4SimGrid<std::int16_t>* GrowthDeveloperDesirabilityMap(std::uint32_t type) {
     sc4::cSC4GrowthDeveloper* d = GrowthDeveloperOfType(type);
     return d ? d->GetDesirabilityMap() : nullptr;
+}
+sc4::cSC4SimGrid<std::int16_t>* GrowthDeveloperPopulationMap(std::uint32_t type) {
+    sc4::cSC4GrowthDeveloper* d = GrowthDeveloperOfType(type);
+    return d ? d->GetPopulationMap() : nullptr;
 }
 std::vector<void*> AllGrowthDevelopers() {
     std::vector<void*> out;
