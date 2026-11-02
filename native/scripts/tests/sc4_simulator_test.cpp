@@ -5,6 +5,8 @@
 #include "rz/PortMemoryStreams.h"
 #include "rz/cRZString.h"
 #include "rz/cRZMessage2Standard.h"
+#include "sc4/SCProperty.h"
+#include "sc4/SCPropertyHelp.h"
 #include "sc4/Simulator.h"
 
 namespace SL { cIGZMessageServer2* spMS2 = nullptr; }
@@ -28,7 +30,8 @@ struct Host final : ISimulatorHost {
     void UnregisterCommand(std::uint32_t) override { --commands; }
     bool DebugFunctionalityEnabled() override { return false; }
     bool IsDrivingMode() override { return false; }
-    cISCPropertyHolder* TuningExemplar() override { return nullptr; }
+    cISCPropertyHolder* tuning = nullptr;
+    cISCPropertyHolder* TuningExemplar() override { return tuning; }
 };
 
 struct Agent final : cIGZMessageTarget2 {
@@ -107,6 +110,36 @@ int main() {
 
     sim.Shutdown();
     CHECK(host.services == 0 && host.commands == 0);
+
+    // Pace at cheetah with the shipped tuning (exemplar 0x89590e6d = 2000/1000/50 ms per day): the tick loop fills the frame
+    // to 1000/15 ms, so a fast frame gets about 15 days a second; a frame slower than a day gets one day per frame.
+    for (const std::uint32_t renderMs : {5u, 750u}) {
+        cSCPropertyHolder tuning;
+        cSCPropertyHelp::SetPropertyValue(&tuning, 0x89590e6d, std::vector<std::uint32_t>{2000, 1000, 50});
+        host.tuning = &tuning;
+        static double clock = 0;                        // every read of the clock costs 20 µs of loop work
+        clock = 100000;
+        cSC4Simulator paced;
+        paced.SetClockForTest([] { clock += 0.02; return static_cast<std::uint32_t>(clock); });
+        CHECK(paced.Init());
+        cRZMessage2Standard started;
+        started.SetType(0x26d31ec1);
+        paced.DoMessage(&started);
+        paced.SetCityEstablished(true);
+        CHECK(paced.SetSimSpeed(2));
+        const std::uint32_t firstDay = paced.GetSimDateNumber();
+        int frames = 0;
+        for (const double end = clock + 10000; clock < end; ++frames) {
+            clock += renderMs;
+            paced.OnTick(0);
+        }
+        const std::uint32_t days = paced.GetSimDateNumber() - firstDay;
+        std::printf("cheetah, %u ms frames: %u days in 10 s, %d frames\n", renderMs, days, frames);
+        if (renderMs == 5) CHECK(days >= 130 && days <= 210);
+        else CHECK(days + 1 >= static_cast<std::uint32_t>(frames) && days <= static_cast<std::uint32_t>(frames));
+        paced.Shutdown();
+        host.tuning = nullptr;
+    }
     if (!failures) std::printf("sc4_simulator OK\n");
     return failures != 0;
 }
