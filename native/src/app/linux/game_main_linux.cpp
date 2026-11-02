@@ -34,6 +34,7 @@
 #include "app/NativeBoot.h"
 #include "app/NativeCity.h"
 #include "app/NativeAnimationTicks.h"
+#include "platform/PerfLog.h"
 #include "app/NativeCityView.h"
 #include "app/NativeFonts.h"
 #include "app/NativeGraphics.h"
@@ -84,6 +85,7 @@ using linuxapp::PumpTimers;
 // The game's (logical) resolution: the UI lays out in it and every rectangle it draws is in it. The frame target is the
 // window's pixel size; the driver scales the game's rectangles onto it (the UI scale = pixels / logical).
 int gW = 1024, gH = 768;
+std::uint32_t gButtons = 0;   // the SDL mouse button mask (the right button drives scrolling)
 
 SDL_Window* gWindow = nullptr;
 std::unique_ptr<gd::cGLGDriver> gDriver;
@@ -508,12 +510,19 @@ void StartGameAudio() {
     std::printf("audio: %zu sounds\n", audio.SoundCount());
 }
 
-// SC4_FRAMEPROF: milliseconds spent in each part of every frame (stderr), to find what holds a frame up.
+// SC4_FRAMEPROF (stderr) / SC4_PERFLOG=<file>: milliseconds spent in each part of every frame, the time since the previous
+// frame began (it includes presenting and the window events), the draw count and the city view's scroll state.
 struct FrameLaps {
-    bool on = std::getenv("SC4_FRAMEPROF") != nullptr;
-    double last = 0;
+    bool toStderr = std::getenv("SC4_FRAMEPROF") != nullptr;
+    bool on = toStderr || platform::PerfLogOn();
+    double begin = 0, last = 0, previousBegin = 0;
     std::string line;
-    void Start() { if (on) { last = NowMs(); line.clear(); } }
+    void Start() {
+        if (!on) return;
+        previousBegin = begin;
+        begin = last = NowMs();
+        line.clear();
+    }
     void Lap(const char* name) {
         if (!on) return;
         const double now = NowMs();
@@ -523,9 +532,16 @@ struct FrameLaps {
         last = now;
     }
     std::uint32_t draws = 0;
-    void End(std::uint32_t total) {
+    void End(std::uint32_t total, sc4::cSC4View3DWin* view, bool rightButton) {
         if (!on) return;
-        std::fprintf(stderr, "frame:%s draws %u\n", line.c_str(), total - draws);
+        const double interval = previousBegin > 0 ? begin - previousBegin : 0;
+        char state[128] = "";
+        if (view)
+            std::snprintf(state, sizeof state, " scroll %d stop %d hidden %d", int(view->IsScrolling()), int(view->IsScrollStopping()),
+                          int(view->IsSimHiddenPaused()));
+        if (toStderr) std::fprintf(stderr, "frame:%s draws %u\n", line.c_str(), total - draws);
+        platform::PerfNote("frame %6.1f ms%s |%s draws %u%s rbutton %d", interval, interval > 25 ? " SLOW" : "", line.c_str(),
+                           total - draws, state, int(rightButton));
         draws = total;
     }
 } gLaps;
@@ -571,7 +587,7 @@ void Frame() {
     gLaps.Lap("plot");
     gGraphics->Services().Tick();
     gLaps.Lap("gfx");
-    gLaps.End(gDriver ? gDriver->DrawCalls() : 0);
+    gLaps.End(gDriver ? gDriver->DrawCalls() : 0, gAppWindow ? gAppWindow->View3D() : nullptr, (gButtons & SDL_BUTTON_RMASK) != 0);
 }
 
 // Where the frame lands in the window (window points): the frame keeps its aspect ratio, bars fill the rest.
@@ -713,7 +729,6 @@ void WritePng(const std::string& path) {
 }
 
 // ---- input ------------------------------------------------------------------------------------------------------------------
-std::uint32_t gButtons = 0;
 
 std::uint32_t Flags() {
     const SDL_Keymod mod = SDL_GetModState();
@@ -934,6 +949,32 @@ int RunScenario(const std::string& path) {
                 b.button.down = type == SDL_EVENT_MOUSE_BUTTON_DOWN; b.button.clicks = 1; b.button.x = x; b.button.y = y;
                 SDL_PushEvent(&b); PumpEvents(); Frame(); Nap();
             }
+            for (int i = 0; i < 5; ++i) { PumpEvents(); Frame(); Nap(); }
+        } else if (command == "rdrag") {   // rdrag X Y DX DY MS: a real SDL right-button drag (window points), held for MS ms of frames
+            float x = 0, y = 0, dx = 0, dy = 0;
+            int ms = 0;
+            words >> x >> y >> dx >> dy >> ms;
+            const auto push = [&](SDL_EventType type, float px, float py) {
+                SDL_Event e{};
+                e.type = type;
+                if (type == SDL_EVENT_MOUSE_MOTION) {
+                    e.motion.windowID = SDL_GetWindowID(gWindow); e.motion.x = px; e.motion.y = py;
+                    e.motion.state = type == SDL_EVENT_MOUSE_MOTION && (gButtons & SDL_BUTTON_RMASK) ? SDL_BUTTON_RMASK : 0;
+                } else {
+                    e.button.windowID = SDL_GetWindowID(gWindow); e.button.button = SDL_BUTTON_RIGHT;
+                    e.button.down = type == SDL_EVENT_MOUSE_BUTTON_DOWN; e.button.clicks = 1; e.button.x = px; e.button.y = py;
+                }
+                SDL_PushEvent(&e);
+            };
+            push(SDL_EVENT_MOUSE_MOTION, x, y); PumpEvents(); Frame(); Nap();
+            push(SDL_EVENT_MOUSE_BUTTON_DOWN, x, y); PumpEvents(); Frame(); Nap();
+            for (int step = 1; step <= 10; ++step) { push(SDL_EVENT_MOUSE_MOTION, x + dx * step / 10, y + dy * step / 10); PumpEvents(); Frame(); Nap(); }
+            const double end = NowMs() + ms;
+            for (int n = 0; NowMs() < end; ++n) {   // the hand is never quite still: a pixel either way
+                push(SDL_EVENT_MOUSE_MOTION, x + dx + float(n % 3 - 1), y + dy);
+                PumpEvents(); Frame(); Nap();
+            }
+            push(SDL_EVENT_MOUSE_BUTTON_UP, x + dx, y + dy); PumpEvents(); Frame(); Nap();
             for (int i = 0; i < 5; ++i) { PumpEvents(); Frame(); Nap(); }
         } else if (command == "tap") {   // a single click (toolbar buttons toggle: a double click turns them on and off again)
             int x = 0, y = 0; words >> x >> y;

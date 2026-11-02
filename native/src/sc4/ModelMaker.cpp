@@ -3,6 +3,7 @@
 // the two destructors, 0x030 Write, 0x038 Read, 0x040 GetGZCLSID; the second group (+8, 0x100a97248) is the
 // cIGZSerializable view with the three thunks and Write / Read / GetGZCLSID.
 #include "sc4/ModelMaker.h"
+#include "platform/PerfLog.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -896,9 +897,12 @@ void cSC4ModelMaker::DoViewTranslationChange() {
     unloadPending_ = true;
     if (!backgroundLoading_ || cityLoaded_) {
         if (!occupantManager_) return;
+        const double start = platform::PerfLogOn() ? platform::PerfNowMs() : 0.0;
         OccupantList list;
         occupantManager_->GetOccupantsByOccupantManagerCells(list, nullptr, nullptr, modelFilter_, 0xffffffff);
         for (cISC4Occupant* occupant : list) LoadOccupantModelsForZoomAndRotation(occupant, currentZoom_, currentRotation_);
+        if (platform::PerfLogOn())
+            platform::PerfNote("model maker: view moved, %zu occupants checked in %.1f ms", list.size(), platform::PerfNowMs() - start);
         occupantManager_->ReleaseOccupantList(list);
         return;
     }

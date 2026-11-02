@@ -1,4 +1,5 @@
 #include "sc4/Simulator.h"
+#include "platform/PerfLog.h"
 
 #include <chrono>
 #include <cstdio>
@@ -455,6 +456,8 @@ bool cSC4Simulator::OnTick(std::uint32_t) {
     budgetMs_ = budget > 15 ? static_cast<std::uint32_t>(budget) : 15u;
     if (started_ && !inTick_) {
         inTick_ = true;
+        const double perfStart = platform::PerfLogOn() ? platform::PerfNowMs() : 0.0;
+        const std::uint32_t perfDay = date_.DayNumber();
         budgetStart_ = Now();
         do {
             if (hiddenPauseCount_ > 0) break;
@@ -466,6 +469,9 @@ bool cSC4Simulator::OnTick(std::uint32_t) {
             SimulateIdleTime();
         } while (Now() - budgetStart_ < budgetMs_);
         inTick_ = false;
+        if (platform::PerfLogOn() && platform::PerfNowMs() - perfStart > 4.0)
+            platform::PerfNote("simulator: tick %.1f ms (budget %u ms, paused %d, hidden %d, days %u)", platform::PerfNowMs() - perfStart,
+                               budgetMs_, pauseCount_, hiddenPauseCount_, date_.DayNumber() - perfDay);
     }
     tickStart_ = Now();
     return true;
