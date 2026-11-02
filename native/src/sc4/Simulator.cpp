@@ -151,6 +151,8 @@ void cSC4Simulator::ReadSimulatorTunableValues() {
         for (int i = 0; i < 3; ++i) paceTable_[i] = pace[static_cast<std::size_t>(i)];
     dilation_.assign({0.0f, 1.0f, 1.5f, 2.0f, 1.0f});
     cSCPropertyHelp::GetPropertyValue(exemplar, 0x89590e6e, dilation_);
+    if (std::getenv("SC4_SIMDEBUG"))
+        std::fprintf(stderr, "simulator: pace ms per day %u/%u/%u, interval %d\n", paceTable_[0], paceTable_[1], paceTable_[2], paceInterval_);
 }
 
 void cSC4Simulator::DoSetSimSpeed(int speed) {
@@ -342,6 +344,8 @@ void cSC4Simulator::SimulateTimePassage() {
         counters_[4] = date_.DayOfYear();
         const std::uint32_t day = date_.DayNumber();
         PostMessageServerMessage(0x66956814, day, 0, counters_[4]);
+        static const bool dayTrace = std::getenv("SC4_DAYDEBUG") != nullptr;
+        if (dayTrace) std::fprintf(stderr, "simulator: day %u at %u ms (speed %d)\n", day, Now(), speed_);
         if (date_.WeekDay() == 1) {
             pending_[5] = true;
             counters_[5] = (date_.DayOfYear() - 1) / 7 + 1;
@@ -475,6 +479,7 @@ bool cSC4Simulator::AddAgent(cIGZMessageTarget2* agent, int interval, const cIGZ
     info.name.assign(name.Data(), name.Strlen());
     info.flags = flags;
     info.enabled = ((2u - (cityEstablished_ ? 0u : 1u)) & flags) != 0;
+    if (std::getenv("SC4_SIMDEBUG")) std::fprintf(stderr, "simulator: agent %s interval %d flags %u\n", info.name.c_str(), interval, flags);
     AgentSet& set = sets_[interval];
     const bool wasAtEnd = set.cursor == set.agents.end();
     const auto result = set.agents.emplace(agent, info);
