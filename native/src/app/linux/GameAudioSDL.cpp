@@ -1,6 +1,7 @@
 // The Linux audio backend of GameAudio: one SDL3 audio stream per voice on the default playback device. PCM voices (the
 // Sound.dat effects) are queued whole; MP3 voices (the radio stations) are decoded by libmpg123 a block at a time from the
 // stream's own callback, on SDL's audio thread, so a song never decodes on the frame loop's thread.
+#include <cstdlib>
 #include <SDL3/SDL.h>
 #include <mpg123.h>
 
@@ -61,6 +62,7 @@ public:
         stopped_ = false;
         SDL_PutAudioStreamData(stream_, pcm_.data(), int(pcm_.size()));
         SDL_UnlockAudioStream(stream_);
+        if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "audio: voice %zu bytes gain %.2f\n", pcm_.size(), double(SDL_GetAudioStreamGain(stream_)));
     }
     bool IsPlaying() const override { return stream_ && !stopped_ && (SDL_GetAudioStreamQueued(stream_) > 0 || loopsLeft_ != 0); }
 

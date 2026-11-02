@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "gz/cGZAny.h"
+#include "gz/cIGZPersistDBSerialRecord.h"
 #include "rz/RZConvert.h"
 #include "rz/cRZString.h"
 
@@ -15,7 +16,16 @@ constexpr std::uint32_t kIidPersistResource = 0x3b93c5e7, kIidHitResource = 0x45
 constexpr std::uint32_t kRegSelfInstance = 0xff6f9546;
 constexpr std::uint32_t kLegacyMagic = 0x544b4432;  // text header tag of the legacy track format
 
+// The whole record: a database record's stream is asked for its record view (iid 0xc56b8f08) as the original does
+// (size +0x1a0, bytes +0xd8, like cHitList::ReadResource); a port memory stream reports what is left instead.
 bool ReadAll(cIGZIStream& stream, std::vector<std::uint8_t>& out) {
+    cIGZPersistDBSerialRecord* record = nullptr;
+    if (stream.QueryInterface(kGZIID_cIGZPersistDBSerialRecord, reinterpret_cast<void**>(&record)) && record) {
+        out.assign(record->GetSize(), 0);
+        const bool ok = out.empty() || record->GetFieldVoid(out.data(), static_cast<std::uint32_t>(out.size()));
+        record->Release();
+        return ok;
+    }
     auto* sized = dynamic_cast<cIStreamRemaining*>(&stream);
     if (sized == nullptr) return false;
     out.resize(sized->RemainingBytes());

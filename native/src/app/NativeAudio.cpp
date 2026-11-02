@@ -5,6 +5,7 @@
 #include <cstdlib>
 
 #include "audio/AudioServices.h"
+#include "audio/GZSndSys.h"
 #include "audio/interfaces/cIGZSnd.h"
 #include "gz/WinBtn.h"
 #include "gz/WinCtrlFactory.h"
@@ -42,6 +43,8 @@ void ApplyAudioPreferences(const std::uint8_t* preferences) {
     const float music = cSC4AudioPreferencesWinProc::MusicGain(preferences), sound = cSC4AudioPreferencesWinProc::SoundGain(preferences);
     g_audio->SetMusic(music > 0.0f, music);
     g_audio->SetSound(sound > 0.0f, sound);
+    if (auto* system = dynamic_cast<cGZSndSys*>(Audio::SoundSystem()))
+        system->StoreMasterVolume(static_cast<std::int32_t>(sound * 0x400 + 0.5f));   // the game's own sounds
     g_audio->SetSongFilter([](const std::string& path) { return cSC4AudioPreferencesWinProc::IsSongEnabled(path); });
 }
 void PlayGameSound(std::uint32_t soundId) {
@@ -54,6 +57,8 @@ void PlayGameSound(std::uint32_t soundId) {
             if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "audio: sound %08x played %d\n", soundId, int(played));
             sound->Release();
             if (played) return;
+        } else if (std::getenv("SC4_DEBUG")) {
+            std::fprintf(stderr, "audio: sound %08x not built by the sound manager\n", soundId);
         }
     }
     if (g_audio) g_audio->PlayTrack(soundId);   // the direct track lookup when the sound system is not up

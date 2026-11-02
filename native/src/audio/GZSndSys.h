@@ -99,6 +99,9 @@ public:
     bool GetExtensionDefaultDataSourceClassIdMappingExtension(std::uint32_t index, cIGZString& extension) override;  // @ 0x100499400
     std::int32_t GetMasterVolume() const override { return masterVolume_; }   // @ 0x10048f910
     bool SetMasterVolume(std::int32_t volume) override;                // @ 0x10048f930 (argument ignored)
+    // PORT: the effects volume of the audio preferences (0..0x400, 0 when effects are off), stored where every sound
+    // reads it (cGZSnd::SetVolume scales by it) — the Windows build's master volume event 0x2a5b69c0 does this store.
+    void StoreMasterVolume(std::int32_t volume) { masterVolume_ = volume; SetMasterVolume(volume); }
     bool RegisterTarget(cIGZSndUpdateTarget* target, SndCallbackInterval interval) override;   // @ 0x100490830
     bool UnregisterTarget(cIGZSndUpdateTarget* target) override;       // @ 0x100491410
     bool EnumerateTargets(UpdateTargetFunction function, std::uint32_t arg, void* userData) override;   // @ 0x100494d00

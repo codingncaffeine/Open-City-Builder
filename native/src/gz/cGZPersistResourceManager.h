@@ -179,6 +179,10 @@ public:
                                            cIGZPersistResourceKeyFilter* filter) override;
     std::uint32_t GetAvailableResourceListForType(cIGZPersistResourceKeyList** list, std::uint32_t type) override;
     bool RegisterObjectFactory(std::uint32_t classId, std::uint32_t type, cIGZPersistResourceFactory* factory) override;
+    // The COM director the original asks for a factory registered by class id alone (null factory): returns the
+    // object with one reference, queried for `iid`.
+    using ClassCreator = bool (*)(std::uint32_t classId, std::uint32_t iid, void** out);
+    static void SetClassCreator(ClassCreator creator);
     bool UnregisterObjectFactory(std::uint32_t classId) override;
     void FindObjectFactory(cIGZPersistResource& resource, cIGZPersistResourceFactory** out) override;
     void FindObjectFactory(const cGZPersistResourceKey& key, cIGZPersistResourceFactory** out) override;

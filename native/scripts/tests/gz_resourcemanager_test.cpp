@@ -43,6 +43,28 @@ int main() {
         found->Release();
         CHECK(!mgr->FindObjectFactory(0x77, &found));
 
+        // a factory registered by class id alone comes from the class creator (the COM director); without one the
+        // registration is refused, and a second type of the same class shares the created factory
+        CHECK(!mgr->RegisterObjectFactory(0x5678, 0x66, nullptr) && !mgr->FindObjectFactory(0x66, &found));
+        static int created = 0;
+        cGZPersistResourceManager::SetClassCreator([](std::uint32_t classId, std::uint32_t, void** out) {
+            if (classId != 0x5678) return false;
+            auto* made = new cGZPersistBinaryResourceFactory();
+            made->AddRef();
+            *out = static_cast<cIGZPersistResourceFactory*>(made);
+            ++created;
+            return true;
+        });
+        CHECK(mgr->RegisterObjectFactory(0x5678, 0x66, nullptr) && mgr->RegisterObjectFactory(0x5678, 0x67, nullptr) && created == 1);
+        CHECK(!mgr->RegisterObjectFactory(0x9999, 0x68, nullptr));
+        cIGZPersistResourceFactory* first = nullptr;
+        cIGZPersistResourceFactory* second = nullptr;
+        CHECK(mgr->FindObjectFactory(0x66, &first) && mgr->FindObjectFactory(0x67, &second) && first && first == second);
+        if (first) first->Release();
+        if (second) second->Release();
+        cGZPersistResourceManager::SetClassCreator(nullptr);
+        CHECK(mgr->UnregisterObjectFactory(0x5678));
+
         auto* segA = OpenSegment(pathA, true, 11);
         auto* segB = OpenSegment(pathB, true, 22);
         CHECK(mgr->RegisterDBSegment(*segA) && mgr->RegisterDBSegmentBack(*segB));

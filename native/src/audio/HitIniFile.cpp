@@ -1,5 +1,9 @@
 #include "audio/HitIniFile.h"
 
+#include <cstdlib>
+
+#include <cstdio>
+
 #include <vector>
 
 #include "rz/RZConvert.h"
@@ -111,7 +115,9 @@ bool cHitIniFile::InitTrackDataBlocks() {
 
 bool cHitIniFile::ProcessTrackDataBlockEntry(const cRZString& path) {
     cIHitMan* hitMan = host_->HitManager();
-    return hitMan && hitMan->LoadHitFile(path);
+    const bool loaded = hitMan && hitMan->LoadHitFile(path);
+    if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "audio: hit file %s %s\n", path.ToChar(), loaded ? "loaded" : hitMan ? "FAILED" : "skipped (no hit manager)");
+    return loaded;
 }
 
 bool cHitIniFile::InitHitManTypeGroups() {
@@ -164,11 +170,14 @@ void cHitIniFile::SoundDefListCallback(const cRZString& key, const cRZString& va
 }
 
 // Each entry creates the sound creator whose class id is the key; its value names a section of sound
-// definitions ("section," - the text before the comma) that is then enumerated into the creator.
+// definitions (the text before the first comma, or the whole value without one) that is then enumerated
+// into the creator. SplitToken returns nothing when the comma is absent, as in the game's own
+// "0xdc45dcb1=TrackDefSegments".
 bool cHitIniFile::InitSndCreators() {
     for (auto& entry : ReadSection("SndCreators")) {
         cRZString value = entry.second;
-        const cRZString section = value.SplitToken(",");
+        cRZString section = value.SplitToken(",");
+        if (section.Strlen() == 0) section = value;
         Ref<cIGZSoundCreator> creator;
         if (!host_->CreateInstance(entry.first, kGZIID_cIGZSoundCreator, creator.Out()) || !creator.ptr) continue;
         if (cIGZSndMgr* manager = host_->SoundManager()) {
@@ -217,25 +226,25 @@ bool cHitIniFile::ProcessDBSegmentsEntryCreate(std::uint32_t segmentId, const cR
     return true;
 }
 
-// "path,id,id,..." style value: every comma separated member is a file id registered in the directory segment
-// under that id and associated with the segment as its group. The first member is the path and is skipped.
+// "type:extension[,type:extension...]" (stage 4c): every member binds its type to the extension in the group's
+// directory segment and associates the type with the group (hit manager slot 46); the remainder after the last
+// comma is a member too. The association does not depend on the segment: without a directory segment class (loose
+// sound files, none in the shipped data) the types still resolve to the group in the game's packed files.
 bool cHitIniFile::ProcessDBSegmentDirectoryFilesEntry(std::uint32_t segmentId, const cRZString& value) {
     cIHitMan* hitMan = host_->HitManager();
     if (!hitMan) return false;
     Ref<cIHitDirectoryDBSegment> segment;
-    if (!hitMan->FindDBSegment(segmentId, kGZIID_cIHitDirectoryDBSegment, segment.Out())) return false;
-    cIHitDirectoryFileMap* files = segment.ptr->GetFileMap();
-    if (!files) return false;
+    hitMan->FindDBSegment(segmentId, kGZIID_cIHitDirectoryDBSegment, segment.Out());
+    cIHitDirectoryFileMap* files = segment.ptr ? segment.ptr->GetFileMap() : nullptr;
+    auto bind = [&](cRZString member) {
+        const std::uint32_t type = ToUint(member);
+        member.SplitToken(":");
+        if (files) files->AddFile(type, member);
+        hitMan->AddTypeToGroupAssociation(type, segmentId);
+    };
     cRZString rest = value;
-    cRZString path = rest.SplitToken(",");
-    for (cRZString token = rest.SplitToken(","); token.Strlen() != 0; token = rest.SplitToken(",")) {
-        const std::uint32_t id = ToUint(token);
-        files->AddFile(id, path);
-        hitMan->AddTypeToGroupAssociation(id, segmentId);
-    }
-    const std::uint32_t id = ToUint(rest);
-    files->AddFile(id, value);
-    hitMan->AddTypeToGroupAssociation(id, segmentId);
+    for (cRZString token = rest.SplitToken(","); token.Strlen() != 0; token = rest.SplitToken(",")) bind(token);
+    bind(rest);
     return true;
 }
 

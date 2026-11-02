@@ -102,10 +102,12 @@ int main() {
         "[SndFileDefaultDataSourceClassIds]\n1=0x30,wav\n2=0x31,mp3\n"
         "[TrackDataBlocks]\n1=Sound\\Track.hit\n"
         "[HitManTypeGroups]\n0x500=0x1,0x2,0x3\n0x600=0x9\n"
+        "[DBSegmentDirectoryFiles]\n0x900=0x7b:hls,0x20:str\n"   // no directory segment: the types still join the group
         "[SndDataSourceCreators]\nMySources=0x40,7\n"
         "[MySources]\n100=first def\n101=second def\n"
-        "[SndCreators]\n0x50=Defs,\n"
+        "[SndCreators]\n0x50=Defs,\n0x51=Plain\n"          // the game's own line has no comma: the whole value is the section
         "[Defs]\n5=boom\n"
+        "[Plain]\n6=bang\n"
         "[ResourceFactories]\n0x700=0x800\n";
     CHECK(write(fd, text.data(), text.size()) == static_cast<ssize_t>(text.size()));
     close(fd);
@@ -119,12 +121,15 @@ int main() {
     CHECK(host.mgr.def2D == 0x10 && host.mgr.def3D == 0x20 && ini->AllowTextAsKeys());
     CHECK(host.sys.extensions.size() == 2 && host.sys.extensions[0].first == "wav" && host.sys.extensions[0].second == 0x30);
     CHECK(host.hit.loaded.size() == 1 && host.hit.loaded[0] == "/snd/Sound/Track.hit");     // data dir + path, separators fixed
-    CHECK(host.hit.groups.size() == 4 && host.hit.groups[0] == std::make_pair(0x500u, 1u) && host.hit.groups[2] == std::make_pair(0x500u, 3u) &&
-          host.hit.groups[3] == std::make_pair(0x600u, 9u));
+    // stage 4c (directory files) runs before the type groups: every "type:ext" member, the first one too
+    CHECK(host.hit.groups.size() == 6 && host.hit.groups[0] == std::make_pair(0x7bu, 0x900u) && host.hit.groups[1] == std::make_pair(0x20u, 0x900u));
+    CHECK(host.hit.groups.size() == 6 && host.hit.groups[2] == std::make_pair(0x500u, 1u) && host.hit.groups[4] == std::make_pair(0x500u, 3u) &&
+          host.hit.groups[5] == std::make_pair(0x600u, 9u));
     CHECK(host.mgr.creators.size() == 1 && host.mgr.creators[0].first == 7);
     CHECK(ini->DataSourceCreatorSections().at(7).str() == "MySources");
     CHECK(host.dataSource.defs.size() == 2 && host.dataSource.defs[0].first == 100 && host.dataSource.defs[1].second == "second def");
-    CHECK(host.mgr.soundCreators.size() == 1 && host.soundCreator.defs.size() == 1 && host.soundCreator.defs[0].second == "boom");
+    CHECK(host.mgr.soundCreators.size() == 2 && host.soundCreator.defs.size() == 2 && host.soundCreator.defs[0].second == "boom" &&
+          host.soundCreator.defs[1].first == 6 && host.soundCreator.defs[1].second == "bang");
     CHECK(host.res.factories.size() == 1 && host.res.factories[0] == std::make_pair(0x800u, 0x700u));
     void* qi = nullptr;
     CHECK(ini->QueryInterface(kGZIID_cIHitIniFile, &qi) && qi == ini && !ini->QueryInterface(0x1234, &qi));

@@ -506,9 +506,11 @@ void StartGameAudio() {
     if (!audio.Open(dat, error)) { std::printf("audio: %s\n", error.c_str()); return; }
     gAudio = &audio;
     native::SetGameAudio(&audio);
+    // The game's own sound system (sound manager, Hit tracks, the sound .ini): every game sound by id, the effects'
+    // random hit lists included. Without it only the plain one-sample tracks of the fallback play.
+    if (native::BootFramework() && !native::StartAudioDirectors(*native::BootFramework(), dat.substr(0, dat.rfind('/') + 1)))
+        std::printf("audio: the game's sound system did not start; plain tracks only\n");
     if (cSC4App* app = native::BootApplication()) native::ApplyAudioPreferences(app->GetPreferences());   // the saved volumes and songs
-    if (std::getenv("SC4_AUDIODIRECTORS") && native::BootFramework())
-        native::StartAudioDirectors(*native::BootFramework(), dat.substr(0, dat.rfind('/') + 1));
     std::printf("audio: %zu sounds\n", audio.SoundCount());
 }
 

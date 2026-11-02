@@ -1,5 +1,8 @@
 #include "audio/HitSegmentCreators.h"
 
+#include <cstdio>
+#include <cstdlib>
+
 #include "audio/AudioServices.h"
 #include "audio/HitMan.h"
 #include "audio/HitManServices.h"
@@ -74,12 +77,17 @@ bool cHitSegmentTrackCreator::CreateSound(std::uint32_t id, std::uint32_t, cIGZV
             break;
         }
     }
-    if (!definition) return false;
+    if (!definition) {
+        if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "audio: track creator: no definition %08x in %zu groups\n", id, groups_.size());
+        return false;
+    }
 
     bool result = false;
     cHitMan* hitMan = RZ::HitManInstance();
     void* rawPlayer = nullptr;
-    if (hitMan && hitMan->CreateTrackPlayer(kGZIID_cIHitTrackPlayer, &rawPlayer) && rawPlayer) {
+    const bool made = hitMan && hitMan->CreateTrackPlayer(kGZIID_cIHitTrackPlayer, &rawPlayer) && rawPlayer;
+    if (!made && std::getenv("SC4_DEBUG")) std::fprintf(stderr, "audio: track creator: no player for %08x (hit manager %p)\n", id, static_cast<void*>(hitMan));
+    if (made) {
         auto* player = static_cast<cIHitTrackPlayer*>(rawPlayer);
         player->SetTrackDef(definition);
         player->Reset();

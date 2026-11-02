@@ -426,10 +426,28 @@ bool cGZPersistResourceManager::CloseDBRecord(const cGZPersistResourceKey&, cIGZ
 
 // ------------------------------------------------------------------------------- factories
 
+namespace {
+cGZPersistResourceManager::ClassCreator g_classCreator = nullptr;
+}
+
+void cGZPersistResourceManager::SetClassCreator(ClassCreator creator) { g_classCreator = creator; }
+
+// Without a factory the class id is asked of the COM director; a class already registered keeps its factory, so
+// one factory serves every type registered under its class.
 bool cGZPersistResourceManager::RegisterObjectFactory(std::uint32_t classId, std::uint32_t type,
                                                       cIGZPersistResourceFactory* factory) {
-    if (!factory) return false;   // (the original asks the COM director for the class id here)
     std::lock_guard<std::recursive_mutex> guard(factoryMutex_);
+    if (!factory) {
+        if (factories_.find(classId) == factories_.end()) {
+            void* raw = nullptr;
+            if (!g_classCreator || !g_classCreator(classId, kGZIID_cIGZPersistResourceFactory, &raw) || !raw) return false;
+            auto* created = static_cast<cIGZPersistResourceFactory*>(raw);
+            factories_[classId] = cRZAutoRefCount<cIGZPersistResourceFactory>(created);
+            created->Release();   // the creator's reference
+        }
+        typeToClass_[type] = classId;
+        return true;
+    }
     typeToClass_[type] = classId;
     factories_[classId] = cRZAutoRefCount<cIGZPersistResourceFactory>(factory);
     return true;

@@ -25,6 +25,7 @@
 #include "audio/HitManDirector.h"
 #include "audio/HitManServices.h"
 #include "audio/HitPropertySetResource.h"
+#include "audio/HitResourceFactory.h"
 #include "audio/HitTrackPlayer.h"
 #include "gz/AudioPersistAdapter.h"
 #include "gz/GZCOM.h"
@@ -32,6 +33,7 @@
 #include "gz/cGZAny.h"
 #include "gz/cGZDBSegmentPackedFile.h"
 #include "gz/cGZPersistResourceManager.h"
+#include "gz/cIGZPersistDBSegment.h"
 #include "sc4/ServiceLocator.h"
 
 namespace native {
@@ -52,6 +54,7 @@ bool CreateByClass(std::uint32_t classId, std::uint32_t iid, void** out) {
         case HitIds::kClsidHitMan: unknown = static_cast<cIHitMan*>(new cHitMan()); break;
         case HitIds::kClsidHitSegmentTrackCreator: unknown = static_cast<cIGZSoundCreator*>(new cHitSegmentTrackCreator()); break;
         case HitIds::kClsidHitSegmentDataSourceChannelCreator: unknown = static_cast<cIGZSoundCreator*>(new cHitSegmentDataSourceChannelCreator()); break;
+        case HitIds::kClsidHitResourceFactory: unknown = static_cast<cIGZPersistResourceFactory*>(new sc4audio::cHitResourceFactory()); break;
         default: break;
     }
     if (!unknown) {
@@ -99,8 +102,20 @@ public:
         if (cIGZPersistRecordService* persist = Audio::PersistService()) persist->RegisterResource(unknown);
         return unknown;
     }
+    // Through the game's resource manager (Sound.dat's track program lives there), else the game's packages.
     bool ReadPersistRecord(const cGZPersistResourceKey& key, std::vector<std::uint8_t>& bytes, std::string& name) override {
-        if (!LoadResourceBytes(key.type, key.group, key.instance, bytes)) return false;
+        bool read = false;
+        cIGZPersistDBSegment* segment = nullptr;
+        if (SL::spRM && SL::spRM->FindDBSegment(key, &segment) && segment) {
+            const std::uint32_t size = segment->GetRecordSize(key);
+            if (size != 0xffffffffu) {
+                bytes.assign(size, 0);
+                std::uint32_t got = size;
+                read = segment->ReadRecord(key, bytes.data(), got) != 0xffffffffu && got == size;
+            }
+            segment->Release();
+        }
+        if (!read && !LoadResourceBytes(key.type, key.group, key.instance, bytes)) return false;
         char text[64];
         std::snprintf(text, sizeof text, "%08x-%08x-%08x", key.type, key.group, key.instance);
         name = text;
@@ -176,7 +191,15 @@ public:
     cIHitMan* HitManager() override { return hitMan; }
     cIHitDebugInfo* DebugInfo() override { return nullptr; }
     bool CreateInstance(std::uint32_t classId, std::uint32_t iid, void** out) override { return CreateByClass(classId, iid, out); }
-    void RegisterSystemService(cIGZUnknown* service) override { { cIGZSystemService* asService = nullptr; if (service && service->QueryInterface(kGZIID_cIGZSystemService, reinterpret_cast<void**>(&asService))) { g_framework->AddSystemService(asService); asService->Release(); } }; }
+    // The framework is already running, so the service is initialised here as the other sound services are below
+    // (cHitMan::Init makes it the hit manager instance the creators and the ini file reach).
+    void RegisterSystemService(cIGZUnknown* service) override {
+        cIGZSystemService* asService = nullptr;
+        if (!service || !service->QueryInterface(kGZIID_cIGZSystemService, reinterpret_cast<void**>(&asService))) return;
+        g_framework->AddSystemService(asService);
+        asService->Init();
+        asService->Release();
+    }
     void AddSystemServiceDirector(cIGZUnknown*) override {}
     cIHitMan* hitMan = nullptr;
 };
@@ -213,6 +236,7 @@ bool StartAudioDirectors(cGZFramework& framework, const std::string& dataDirecto
     g_dataDirectory = dataDirectory;
     // The persistence layer the sound classes read their resources through is the game's own resource manager.
     if (!SL::spRM) return false;
+    cGZPersistResourceManager::SetClassCreator(CreateByClass);   // the Hit resource factory, registered by class id
     g_persist = new AudioPersistAdapter(SL::spRM);
     Audio::SetPersistService(g_persist);
     Audio::SetMessageServer(SL::spMS2);
@@ -249,6 +273,10 @@ bool StartAudioDirectors(cGZFramework& framework, const std::string& dataDirecto
     sc4audio::cHitManCOMDirector hitDirector(&g_hitDirector);
     hitDirector.OnStart(nullptr);
     g_hitDirector.hitMan = RZ::HitManInstance();
+    if (g_hitDirector.hitMan && std::getenv("SC4_DEBUG"))
+        g_hitDirector.hitMan->SetTrackFlowErrorHandler([](cIHitTrackPlayer* player, const char* message) {
+            std::fprintf(stderr, "audio: track %p: %s\n", static_cast<void*>(player), message);
+        });
     hitDirector.PreAppInit();
 
     // cSC4AudioCOMDirector::PostAppInit: the game's sound configuration.
