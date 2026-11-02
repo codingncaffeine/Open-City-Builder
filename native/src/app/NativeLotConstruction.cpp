@@ -172,6 +172,8 @@ public:
     cISC4BuildingOccupant* AddNewBuildingOccupant(std::uint32_t type, float position[3], int rotation) override {
         return NativeAddNewBuildingOccupant(type, position, rotation);
     }
+    bool BuildingTypeValid(std::uint32_t type) override { return NativeIsBuildingType(type); }
+    void BuildingTypesInFamily(std::vector<std::uint32_t>& out, std::uint32_t family) override { NativeBuildingsInFamily(family, out); }
     void CellCornerToPosition(int x, int z, float& px, float& pz) override {
         if (cSC4City* city = HostCity()) city->CellCornerToPosition(x, z, px, pz);
         else { px = static_cast<float>(x) * 16.0f; pz = static_cast<float>(z) * 16.0f; }

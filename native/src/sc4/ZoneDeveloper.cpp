@@ -1039,9 +1039,162 @@ int cSC4ZoneDeveloper::CanCreateLot(int x, int z, int sizeX, int sizeZ, bool ski
     return result;
 }
 
-// @ 0x100131ecc. PARTIAL/SKIPPED: the plopped-lot path needs DecodeNetworkConnectionObject
-// (0x100132a04) and the network occupant edge flags; only the "cannot place" answer is produced.
-int cSC4ZoneDeveloper::CanCreatePloppedLot(SC4Rect<int>, int, cSC4LotConfiguration*) { return 8; }
+namespace {
+// RotateLotRect (PC 0x004bdfd0): a rect of lot cells in the lot's own frame (facing 2) onto the frame of `facing`.
+SC4Rect<int> RotateLotRect(int facing, int sizeX, int sizeZ, const SC4Rect<int>& in) {
+    const int X = sizeX - 1, Z = sizeZ - 1;
+    switch (facing) {
+        case 0: return {X - in.x1, Z - in.z1, X - in.x0, Z - in.z0};
+        case 1: return {in.z0, X - in.x1, in.z1, X - in.x0};
+        case 3: return {Z - in.z1, in.x0, Z - in.z0, in.x1};
+        default: return in;   // 2; a facing outside 0..3 never reaches here (the plop tool passes 0..3)
+    }
+}
+// Matches (PC 0x00729ec0): every non-zero byte of the mask must equal the edge byte's low nibble.
+bool MatchesEdgeMask(std::uint32_t mask, std::uint32_t edges) {
+    const std::uint32_t k = (((mask + 0x0f0f0f0fu) >> 4) & 0x01010101u) * 15u;
+    return ((mask ^ edges) & k) == 0;
+}
+std::uint32_t RotateLeft(std::uint32_t v, unsigned bits) { bits &= 31; return bits ? (v << bits) | (v >> (32 - bits)) : v; }
+}  // namespace
+
+// GetNetworkObjectPlacement (PC 0x0072ad00, zones.md 8.4.3): the cell, edge masks and network type of a lot's type-7 object.
+cSC4ZoneDeveloper::NetworkObjectPlacement cSC4ZoneDeveloper::GetNetworkObjectPlacement(
+    cSC4LotConfiguration* configuration, const cSC4LotConfigurationObject& object, int originX, int originZ, int facing) const {
+    std::uint32_t sx = 0, sz = 0;
+    configuration->GetSize(sx, sz);
+    const float cx = (object.minX + object.maxX) * 0.5f;
+    const float cz = (object.minZ + object.maxZ) * 0.5f;
+    int lx = 0, lz = 0;
+    if (city_) city_->PositionToCell(cx, cz, lx, lz);
+    const SC4Rect<int> r = RotateLotRect(facing, static_cast<int>(sx), static_cast<int>(sz), SC4Rect<int>{lx, lz, lx, lz});
+    NetworkObjectPlacement p{originX + r.x0, originZ + r.z0, 0, 0, 0};
+    // Shipped data always carries the three values; missing ones read as 0.
+    if (object.extra.size() > 0) p.type = object.extra[0];
+    if (object.extra.size() > 1) p.maskA = object.extra[1];
+    if (object.extra.size() > 2) p.maskB = object.extra[2];
+    const unsigned q = static_cast<unsigned>(object.orientation + facing) & 3u;
+    p.maskA = RotateLeft(p.maskA, 8 * q);
+    p.maskB = RotateLeft(p.maskB, 8 * q);
+    return p;
+}
+
+// CheckConstraintTiles (PC 0x0072b480, zones.md 8.4.2): 6 when a land tile is wet, else 5 when a water tile is dry or its open-water
+// strip is blocked, else 8.
+int cSC4ZoneDeveloper::CheckConstraintTiles(const SC4Rect<int>& rect, int facing, cSC4LotConfiguration* configuration) {
+    bool waterFailed = false, landFailed = false;
+    std::uint32_t sx = 0, sz = 0;
+    configuration->GetSize(sx, sz);
+    for (const cSC4LotConfigurationObject& object : configuration->GetLotConfigurationObjectArray()) {
+        if (object.type != 5 && object.type != 6) continue;
+        int a = 0, b = 0, c = 0, d = 0;
+        if (city_) {
+            city_->PositionToCell(object.minX + 8.0f, object.minZ + 8.0f, a, b);
+            city_->PositionToCell(object.maxX + 8.0f, object.maxZ + 8.0f, c, d);
+        }
+        SC4Rect<int> cells = RotateLotRect(facing, static_cast<int>(sx), static_cast<int>(sz), SC4Rect<int>{a, b, c - 1, d - 1});
+        cells.x0 += rect.x0; cells.x1 += rect.x0;
+        cells.z0 += rect.z0; cells.z1 += rect.z0;
+        if (object.type == 6) {
+            for (int z = cells.z0; z <= cells.z1; ++z)
+                for (int x = cells.x0; x <= cells.x1; ++x)
+                    if (IsCellWater(x, z)) { landFailed = true; break; }
+            continue;
+        }
+        for (int z = cells.z0; z <= cells.z1; ++z)
+            for (int x = cells.x0; x <= cells.x1; ++x)
+                if (!terrain_ || !terrain_->CellHasWater(x, z) || terrain_->CellHasLand(x, z)) { waterFailed = true; break; }
+        if (!object.extra.empty() && object.extra[0] == 1) {
+            const int r = (object.orientation + facing + 2) & 3;
+            SC4Rect<int> strip = cells;
+            switch (r) {
+                case 0: strip.z0 = cells.z0 - 2; strip.z1 = cells.z0 - 1; break;
+                case 1: strip.x0 = cells.x1 + 1; strip.x1 = cells.x1 + 2; break;
+                case 2: strip.z0 = cells.z1 + 1; strip.z1 = cells.z1 + 2; break;
+                default: strip.x0 = cells.x0 - 2; strip.x1 = cells.x0 - 1; break;
+            }
+            for (int z = strip.z0; z <= strip.z1; ++z)
+                for (int x = strip.x0; x <= strip.x1; ++x)
+                    if (!terrain_ || !terrain_->CellIsInBounds(x, z) || !terrain_->IsNavigable(x, z)) { waterFailed = true; break; }
+        }
+    }
+    return landFailed ? 6 : waterFailed ? 5 : 8;
+}
+
+// CanCreatePloppedLot (PC 0x007306c0, zones.md 8.4.1): 0 outside, 1 water, 3 a network / plopped zone / blocked connection, 4 too steep,
+// 5 / 6 a constraint tile, 7 a special zone, 8 free. Existing lots are not consulted: the plop tool demolishes them after an 8.
+int cSC4ZoneDeveloper::CanCreatePloppedLot(SC4Rect<int> rect, int facing, cSC4LotConfiguration* configuration) {
+    const bool waterOK = configuration->IsCompatibleWithWater();
+    if (waterOK) {
+        const int r = CheckConstraintTiles(rect, facing, configuration);
+        if (r != 8) return r;
+    }
+    const float slope = lotDeveloper_ ? lotDeveloper_->GetAreaSlope(rect, waterOK) : 0.0f;
+    if (slope > configuration->GetMaximumSlope()) return 4;
+    std::vector<cSC4LotConfigurationObject>& objects = configuration->GetLotConfigurationObjectArray();
+    int result = 8;
+    for (int x = rect.x0; x <= rect.x1; ++x) {
+        for (int z = rect.z0; z <= rect.z1; ++z) {
+            int code = 8;
+            bool inRegion = true;
+            if (currentRegion_) {
+                const std::uint32_t dx = static_cast<std::uint32_t>(x - currentRegion_->bounds.x0);
+                const std::uint32_t dz = static_cast<std::uint32_t>(z - currentRegion_->bounds.z0);
+                inRegion = dx < currentRegion_->rowCount && dz < currentRegion_->bitCount && dx < currentRegion_->rows.size() &&
+                           (dz >> 5) < currentRegion_->rows[dx].size() && ((currentRegion_->rows[dx][dz >> 5] >> (dz & 0x1f)) & 1u) != 0;
+            }
+            if (x < 0 || x >= cellsX_ || z < 0 || z >= cellsZ_ || !inRegion) {
+                code = 0;
+            } else if (!waterOK && IsCellWater(x, z)) {
+                code = 1;
+            } else if (IZoneDeveloperNetworkOccupant* network = GetNetwork(x, z, kNetworkFlagAnyConnection)) {
+                if (network->HasNetworkFlag(0x200000)) {
+                    code = 3;                                   // a lot's connection node
+                } else {
+                    code = 3;                                   // unless a network object of the lot takes the piece
+                    for (const cSC4LotConfigurationObject& object : objects) {
+                        if (object.type != 7) continue;
+                        const NetworkObjectPlacement p = GetNetworkObjectPlacement(configuration, object, rect.x0, rect.z0, facing);
+                        if (p.x != x || p.z != z) continue;
+                        if ((network->GetNetworkFlag() & 0x1fff) != (1u << (p.type & 31))) break;
+                        const std::uint32_t edges = network->GetEdgeTypesFlag(p.type);
+                        if (MatchesEdgeMask(p.maskA, edges) && MatchesEdgeMask(p.maskB, edges)) code = 8;
+                    }
+                }
+            } else {
+                const int zone = zoneManager_ ? zoneManager_->ZoneTypeAt(x, z) : 0;
+                code = zone == 15 ? 3 : (zone >= 10 && zone <= 14) ? 7 : 8;
+            }
+            if (code < 8 && std::getenv("SC4_PLOPDEBUG")) {
+                IZoneDeveloperNetworkOccupant* n = GetNetwork(x, z, kNetworkFlagAnyConnection);
+                std::fprintf(stderr, "plop test: cell %d,%d code %d (network flags %08x, zone %d)\n", x, z, code, n ? n->GetNetworkFlag() : 0u,
+                             zoneManager_ ? zoneManager_->ZoneTypeAt(x, z) : -1);
+            }
+            if (code < result) result = code;
+        }
+    }
+    if (result != 8) return result;
+    // The lot's network objects must not connect outward into a connection node or a pre-built piece.
+    static constexpr int kEdge[4][2] = {{-1, 0}, {0, -1}, {1, 0}, {0, 1}};
+    for (const cSC4LotConfigurationObject& object : objects) {
+        if (object.type != 7) continue;
+        const NetworkObjectPlacement p = GetNetworkObjectPlacement(configuration, object, rect.x0, rect.z0, facing);
+        for (int i = 0; i < 4; ++i) {
+            const int nx = p.x + kEdge[i][0], nz = p.z + kEdge[i][1];
+            if (static_cast<unsigned>(nx) >= static_cast<unsigned>(cellsX_) || static_cast<unsigned>(nz) >= static_cast<unsigned>(cellsZ_)) continue;
+            if (nx >= rect.x0 && nx <= rect.x1 && nz >= rect.z0 && nz <= rect.z1) continue;
+            if (((p.maskB >> (8 * i)) & 0xff) == 0) continue;
+            std::uint32_t flags = 1u << (p.type & 31);
+            if (flags & kNetworkFlagAnyConnection) flags = kNetworkFlagAnyConnection;
+            IZoneDeveloperNetworkOccupant* neighbour = GetNetwork(nx, nz, flags);
+            if (neighbour && neighbour->HasAnyNetworkFlag(0x600000)) {
+                result = 3;
+                break;
+            }
+        }
+    }
+    return result;
+}
 
 // @ 0x100132b32. In the deferred mode the placement is recorded in the pending-lot map (+0x178); in
 // the normal mode it creates the lot, either through CreateLot or (facing == -1) through

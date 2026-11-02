@@ -13,6 +13,7 @@
 #include <deque>
 #include <vector>
 #include <cstdint>
+#include <functional>
 
 #include "gz/cIGZIStream.h"
 #include "gz/cIGZOStream.h"
@@ -149,6 +150,9 @@ public:
     virtual bool FloraTypeValid(std::uint32_t type) = 0;                                      // +0x38 spFloraSim vslot 0x2c
     virtual void FloraTypesInFamily(std::vector<std::uint32_t>& out, std::uint32_t family) = 0;  // vslot 0x38 (hash-set order)
     virtual cISC4Occupant* AddFlora(std::uint32_t type, float position[3]) = 0;              // vslot 0x48 (type, position, false)
+    virtual bool BuildingTypeValid(std::uint32_t type) { (void)type; return false; }         // +0x18 vslot 0x38 IsBuildingTypeValid
+    // +0x18 vslot 0x44 GetBuildingTypesByFamily(set, family): the family's building types in the order they are added.
+    virtual void BuildingTypesInFamily(std::vector<std::uint32_t>& out, std::uint32_t family) { (void)out; (void)family; }
 };
 
 // The lot developer's own interface (class id 0xa990bfe0, iid 0x4818e5d2). Only the COM identity is
@@ -214,6 +218,11 @@ public:
     // ---- construction (i386 0x000f48d0 and the placement it uses)
     static void SetConstructionServices(ILotConstructionServices* services);
     bool StartConstruction(cSC4Lot* lot, cSC4LotConfiguration* configuration, std::uint32_t buildingType, bool construct);   // vslot 0x18
+    bool ConstructDefaultLot(cSC4Lot* lot, cSC4LotConfiguration* configuration, std::uint32_t buildingType, bool construct);  // i386 0x000f30f0
+    // ConstructDefaultLot's pick: the first id of a __gnu_cxx::hash_set holding `ids` (a building type as is, a family as its
+    // member types, in that order): identity hash over 193 buckets, a new id at the head of its bucket. 0 when the set is empty.
+    static std::uint32_t FirstBuildingTypeOf(const std::vector<std::uint32_t>& ids, const std::function<bool(std::uint32_t)>& isType,
+                                             const std::function<void(std::vector<std::uint32_t>&, std::uint32_t)>& familyMembers);
     void ClearLotBlockingObjects(cSC4Lot* lot);                                                                       // i386 0x000f044a
     // The lot-state-changed message (0xe8bda2e7) for the lot whose snapshot it carries: a lot reaching state 3 or 4 gets its
     // configuration's base textures, one finishing construction (2 -> 3) its props, flora and network nodes (DoMessage branch).

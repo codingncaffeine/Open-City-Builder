@@ -43,6 +43,21 @@ int main() {
     host.heights[2 * Host::kRow + 3] = 4.0f;       // vertex (3,2)
     host.water[2 * Host::kRow + 3] = 12.0f;        // water over the low vertex
     LotCellRect area{3, 2, 4, 5};                  // vertices x 3..5, z 2..6
+
+    // ConstructDefaultLot's building pick (i386 0x000f30f0): the first of a hash_set (193 buckets, identity hash, head insertion).
+    {
+        auto isType = [](std::uint32_t id) { return id != 0x5000; };                 // 0x5000 is a family
+        auto family = [](std::vector<std::uint32_t>& out, std::uint32_t) { out = {0x2000 + 1, 0x2000 + 2}; };
+        CHECK(cSC4LotDeveloper::FirstBuildingTypeOf({}, isType, family) == 0);
+        // 400 % 193 = 14, 200 % 193 = 7: the lower bucket wins whatever the order.
+        CHECK(cSC4LotDeveloper::FirstBuildingTypeOf({400, 200}, isType, family) == 200);
+        // 7 and 200 share bucket 7: the later insert heads it.
+        CHECK(cSC4LotDeveloper::FirstBuildingTypeOf({7, 200}, isType, family) == 200);
+        CHECK(cSC4LotDeveloper::FirstBuildingTypeOf({200, 7}, isType, family) == 7);
+        // A family adds its members: 0x2001 % 193 = 87, 0x2002 % 193 = 88, 400 % 193 = 14.
+        CHECK(cSC4LotDeveloper::FirstBuildingTypeOf({0x5000}, isType, family) == 0x2001);
+        CHECK(cSC4LotDeveloper::FirstBuildingTypeOf({0x5000, 400}, isType, family) == 400);
+    }
     CHECK(dev.GetTerrainAltitudeByVertex(3, 2, false) == 4.0f);
     CHECK(dev.GetTerrainAltitudeByVertex(3, 2, true) == 12.0f);
     CHECK(dev.GetLowestOrHighestAreaAltitude(area, true, false) == 4.0f);

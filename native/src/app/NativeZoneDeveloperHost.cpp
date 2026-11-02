@@ -40,6 +40,7 @@
 #include "sc4/cSC4City.h"
 #include "sc4/cSC4ZoneManager.h"
 #include "sc4/cSTETerrain.h"
+#include "sc4/SurfaceWater.h"
 
 namespace native {
 namespace {
@@ -93,6 +94,23 @@ struct TerrainApi final : IZoneDeveloperTerrainApi {
     float Altitude(float x, float z) override { cSTETerrain* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
     // terrain vslot 0x70: the altitude at the cell's centre
     float CellAltitude(int x, int z) override { return Altitude((static_cast<float>(x) + 0.5f) * 16.0f, (static_cast<float>(z) + 0.5f) * 16.0f); }
+    bool CellHasWater(int x, int z) override {
+        cSTETerrain* t = Terrain();
+        return t && x >= 0 && z >= 0 && t->CellHasWater(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z));
+    }
+    bool CellHasLand(int x, int z) override {
+        cSTETerrain* t = Terrain();
+        return t && x >= 0 && z >= 0 && t->CellHasLand(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z));
+    }
+    bool IsNavigable(int x, int z) override {
+        cIGZUnknown* object = g_city ? g_city->GetComponent(CityComponent::SurfaceWater) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(kGZIID_cISTESurfaceWater, &raw) || !raw) return false;
+        auto* water = static_cast<cSTESurfaceWater*>(static_cast<cIGZSerializable*>(raw));
+        static_cast<cIGZSerializable*>(raw)->Release();
+        return water->IsNavigable(x, z, 0, nullptr);
+    }
+    bool CellIsInBounds(int x, int z) override { return g_city && g_city->CellIsInBounds(x, z); }
 } g_terrainApi;
 
 struct ZoneManagerApi final : IZoneDeveloperZoneManagerApi {
@@ -144,10 +162,14 @@ struct OccupantApi final : IZoneDeveloperOccupantManagerApi {
 // SL::spLotDeveloper as the zone developer calls it.
 struct LotDeveloperApi final : IZoneDeveloperLotDeveloperApi {
     void RemoveLot(cSC4Lot* lot) override { if (cSC4LotDeveloper* d = LotDeveloper()) d->RemoveLotBaseTexture(lot); }   // PARTIAL: vslot 0x58 also drops props / foundations
-    void ConstructDefaultLot(cSC4Lot*, cSC4LotConfiguration*, std::uint32_t, bool) override {
-        SC4_UNWIRED("IZoneDeveloperLotDeveloperApi::ConstructDefaultLot (cSC4LotDeveloper construction not recovered)");
+    void ConstructDefaultLot(cSC4Lot* lot, cSC4LotConfiguration* configuration, std::uint32_t type, bool construct) override {
+        if (cSC4LotDeveloper* d = LotDeveloper()) d->ConstructDefaultLot(lot, configuration, type, construct);
     }
     void SetEmptyLotBaseTexture(cSC4Lot* lot) override { if (cSC4LotDeveloper* d = LotDeveloper()) d->SetEmptyLotBaseTexture(lot); }
+    float GetAreaSlope(const SC4Rect<int>& rect, bool withWater) override {
+        cSC4LotDeveloper* d = LotDeveloper();
+        return d ? d->GetAreaSlope(LotCellRect{rect.x0, rect.z0, rect.x1, rect.z1}, withWater) : 0.0f;
+    }
     bool GetForceEmptyLotBaseTextures() override { cSC4LotDeveloper* d = LotDeveloper(); return d && d->GetForceEmptyLotBaseTextures(); }
     bool GetLotBaseTextureOccupant(cSC4Lot* lot, cISC4Occupant*& out) override {
         out = nullptr;

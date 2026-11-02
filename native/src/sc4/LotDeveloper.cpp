@@ -1,5 +1,6 @@
 #include "sc4/LotDeveloper.h"
 
+#include <algorithm>
 #include <cfloat>
 #include <cstdlib>
 #include <cstdio>
@@ -481,6 +482,40 @@ ILotConstructionServices* g_construction = nullptr;
 }  // namespace
 
 void cSC4LotDeveloper::SetConstructionServices(ILotConstructionServices* services) { g_construction = services; }
+
+std::uint32_t cSC4LotDeveloper::FirstBuildingTypeOf(const std::vector<std::uint32_t>& ids, const std::function<bool(std::uint32_t)>& isType,
+                                                    const std::function<void(std::vector<std::uint32_t>&, std::uint32_t)>& familyMembers) {
+    std::vector<std::uint32_t> set;   // insertion order, unique
+    auto insert = [&set](std::uint32_t id) { if (std::find(set.begin(), set.end(), id) == set.end()) set.push_back(id); };
+    for (std::uint32_t id : ids) {
+        if (isType(id)) {
+            insert(id);
+        } else {
+            std::vector<std::uint32_t> members;
+            familyMembers(members, id);
+            for (std::uint32_t member : members) insert(member);
+        }
+    }
+    std::size_t best = set.size();
+    for (std::size_t k = 0; k < set.size(); ++k)
+        if (best == set.size() || set[k] % 193u <= set[best] % 193u) best = k;   // ties: the later insert heads the bucket
+    return best < set.size() ? set[best] : 0;
+}
+
+// ConstructDefaultLot (i386 0x000f30f0; vslot 0x38): with no building type given, the type is FirstBuildingTypeOf the primary
+// building object's ids; then StartConstruction. No ids, or none resolving, constructs with type 0.
+bool cSC4LotDeveloper::ConstructDefaultLot(cSC4Lot* lot, cSC4LotConfiguration* configuration, std::uint32_t buildingType,
+                                           bool construct) {
+    if (configuration && buildingType == 0) {
+        const cSC4LotConfigurationObject* object = configuration->GetPrimaryBuildingConfigurationObject();
+        if (object && !object->extra.empty() && g_construction) {
+            buildingType = FirstBuildingTypeOf(
+                object->extra, [](std::uint32_t id) { return g_construction->BuildingTypeValid(id); },
+                [](std::vector<std::uint32_t>& out, std::uint32_t family) { g_construction->BuildingTypesInFamily(out, family); });
+        }
+    }
+    return StartConstruction(lot, configuration, buildingType, construct);
+}
 
 // @ i386 0x000f48d0 (x64 0x1001434f8). The lot takes the configuration and building, goes to state 2 (under construction) with
 // condition 1 and locked vertices; the footprint is levelled (or given a foundation) when it is steeper than the tunable allows,

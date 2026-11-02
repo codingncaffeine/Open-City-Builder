@@ -188,6 +188,8 @@ struct FakeLotDeveloper : IZoneDeveloperLotDeveloperApi {
         return out != nullptr;
     }
     void ReleaseLotUnit(cSC4Lot* lot) override { unitsReleased.push_back(lot); }
+    float slope = 0.0f;
+    float GetAreaSlope(const SC4Rect<int>&, bool) override { return slope; }
     void AttemptAreaLevelling(const SC4Rect<int>& rect, float altitude, bool, bool, float,
                               cSC4Lot*) override {
         levelledAreas.push_back(rect);
@@ -1830,6 +1832,88 @@ void TestPlopAllLotTypes() {
     SetZoneDeveloperHost(nullptr);
 }
 
+
+// CanCreatePloppedLot (zones.md 8.4.1): 0 outside, 1 water, 3 network / plopped zone / blocked connection, 4 too steep, 7 a special
+// zone, 8 free; the minimum over the footprint. A type-7 network object of the lot takes a matching network piece.
+void TestCanCreatePloppedLot() {
+    FakeHost host;
+    SetZoneDeveloperHost(&host);
+    auto* developer = new cSC4ZoneDeveloper();
+    developer->AddRef();
+    CHECK(developer->Init());
+
+    cSC4LotConfigurationObject building;
+    building.type = 0;
+    auto* configuration = new cSC4LotConfiguration();
+    configuration->MakeGeneric(0x51, 2, 2, building);   // 2x2, maximum slope 90
+    const SC4Rect<int> rect{4, 4, 5, 5};
+
+    CHECK(developer->CanCreatePloppedLot(rect, 2, configuration) == 8);
+    CHECK(developer->CanCreatePloppedLot(SC4Rect<int>{15, 4, 16, 5}, 2, configuration) == 0);   // one column outside
+    host.terrain.water.insert({5, 4});
+    CHECK(developer->CanCreatePloppedLot(rect, 2, configuration) == 1);
+    host.terrain.water.clear();
+    host.lotDeveloper.slope = 90.5f;
+    CHECK(developer->CanCreatePloppedLot(rect, 2, configuration) == 4);
+    host.lotDeveloper.slope = 90.0f;   // strict: equal passes
+    CHECK(developer->CanCreatePloppedLot(rect, 2, configuration) == 8);
+    host.zoneManager.zones[{5, 5}] = 15;   // plopped
+    CHECK(developer->CanCreatePloppedLot(rect, 2, configuration) == 3);
+    host.zoneManager.zones[{5, 5}] = 12;   // seaport: special
+    CHECK(developer->CanCreatePloppedLot(rect, 2, configuration) == 7);
+    host.zoneManager.zones[{5, 5}] = 5;    // an RCI zone does not block (the plop tool demolishes)
+    CHECK(developer->CanCreatePloppedLot(rect, 2, configuration) == 8);
+    // Existing lots are not consulted.
+    cSC4Lot* lot = nullptr;
+    CHECK(developer->CreateLot(4, 4, 1, 1, 0, lot));
+    CHECK(developer->CanCreatePloppedLot(rect, 2, configuration) == 8);
+
+    // A street piece at (4, 4) blocks, unless the lot's network object sits there with matching edges.
+    FakeNetworkOccupant street;
+    street.flags = 0x8;
+    street.networkFlags = 0x8;              // network type 3 only
+    street.edgeFlags = 0x00020200;
+    FakeOccupant streetOccupant;
+    streetOccupant.occupantType = 0xc772bf98;
+    streetOccupant.network = &street;
+    host.occupantManager.occupants[{4, 4}].push_back(&streetOccupant);
+    CHECK(developer->CanCreatePloppedLot(rect, 2, configuration) == 3);
+    cSC4LotConfigurationObject piece;
+    piece.type = 7;
+    piece.minX = 0.0f; piece.maxX = 16.0f; piece.minZ = 0.0f; piece.maxZ = 16.0f;   // lot cell (0, 0)
+    // Type 3 with edge masks; at facing 2 (orientation 0) both masks turn left by 2 bytes (8.4.3 step 5): maskA -> byte 2,
+    // maskB -> byte 1 (edge 1, -z).
+    piece.extra = {3, 0x00000002, 0x02000000};
+    configuration->GetLotConfigurationObjectArray().push_back(piece);
+    CHECK(developer->CanCreatePloppedLot(rect, 2, configuration) == 8);
+    street.edgeFlags = 0x00020300;         // byte 1 no longer matches the turned maskB's 2
+    CHECK(developer->CanCreatePloppedLot(rect, 2, configuration) == 3);
+    street.edgeFlags = 0x00020200;
+    street.networkFlags = 0x9;             // a road on the same piece: not exactly the object's type
+    CHECK(developer->CanCreatePloppedLot(rect, 2, configuration) == 3);
+    street.networkFlags = 0x8;
+    // Facing 0 rotates the piece to lot cell (1, 1) = city (5, 5) and its masks one byte per facing step: no longer over (4, 4).
+    CHECK(developer->CanCreatePloppedLot(rect, 0, configuration) == 3);
+
+    // The piece's edge 1 (maskB byte 1, -z) leads to (4, 3): a connection node there blocks.
+    FakeNetworkOccupant node;
+    node.flags = 0x8 | 0x200000;
+    node.networkFlags = 0x8;
+    FakeOccupant nodeOccupant;
+    nodeOccupant.occupantType = 0xc772bf98;
+    nodeOccupant.network = &node;
+    host.occupantManager.occupants[{4, 3}].push_back(&nodeOccupant);
+    CHECK(developer->CanCreatePloppedLot(rect, 2, configuration) == 3);
+    node.flags = 0x8;                      // a plain piece does not
+    CHECK(developer->CanCreatePloppedLot(rect, 2, configuration) == 8);
+
+    host.occupantManager.occupants.clear();
+    configuration->Release();
+    developer->Shutdown();
+    developer->Release();
+    SetZoneDeveloperHost(nullptr);
+}
+
 }  // namespace
 
 int main() {
@@ -1854,6 +1938,7 @@ int main() {
     TestOnDezoneAndRemnants();
     TestConnectionFixups();
     TestPlopAllLotTypes();
+    TestCanCreatePloppedLot();
 
     if (g_failures != 0) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);

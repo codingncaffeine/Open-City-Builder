@@ -72,6 +72,7 @@ namespace sc4 {
 template <class T>
 class cSC4SimGrid;
 class cSC4LotConfiguration;
+struct cSC4LotConfigurationObject;
 
 // The three cell types the original uses (SC4Point<int>, SC4Rect<int>, SC4CellRegion<int>). They are
 // re-declared here because the class is the first recovered code that needs the int cell variants;
@@ -170,6 +171,11 @@ public:
     virtual bool IsCellWater(int x, int z) = 0;              // terrain vslot 0x110
     virtual float Altitude(float x, float z) = 0;            // terrain vslot 0x60
     virtual float CellAltitude(int x, int z) = 0;            // terrain vslot 0x70
+    // The plop test's constraint tiles (CheckConstraintTiles): terrain slots 34 / 35, cISTESurfaceWater slot 8, city slot 99.
+    virtual bool CellHasWater(int x, int z) { (void)x; (void)z; return false; }
+    virtual bool CellHasLand(int x, int z) { (void)x; (void)z; return true; }
+    virtual bool IsNavigable(int x, int z) { (void)x; (void)z; return false; }
+    virtual bool CellIsInBounds(int x, int z) { (void)x; (void)z; return false; }
 };
 
 class IZoneDeveloperZoneManagerApi : public IZoneDeveloperService {
@@ -228,6 +234,8 @@ public:
     virtual void ConstructDefaultLot(cSC4Lot* lot, cSC4LotConfiguration* configuration,
                                      std::uint32_t objectId, bool arg4) = 0;
     virtual void SetEmptyLotBaseTexture(cSC4Lot* lot) = 0;                    // vslot 0x158
+    // lot developer slot 29 GetAreaSlope(rect, withWater) (lot-developer.md 11.4); the plop test compares it with the configuration's maximum.
+    virtual float GetAreaSlope(const SC4Rect<int>& rect, bool withWater) { (void)rect; (void)withWater; return 0.0f; }
     virtual bool GetForceEmptyLotBaseTextures() = 0;                          // vslot 0x170
     // vslot 0x148 GetLotBaseTextureOccupant(lot, out, false), returned as its occupant (one reference the caller releases).
     virtual bool GetLotBaseTextureOccupant(cSC4Lot* lot, cISC4Occupant*& out) = 0;
@@ -554,6 +562,10 @@ public:
     bool ExistsConnectionOfType(int x, int z, std::uint32_t flags, int direction,
                                 int networkType);                            // @ 0x100130274
     int CanCreateLotOnCell(int x, int z, bool skipZoneCheck, bool allowWater);  // @ 0x1001307bc
+    int CheckConstraintTiles(const SC4Rect<int>& rect, int facing, cSC4LotConfiguration* configuration);   // PC 0x0072b480
+    struct NetworkObjectPlacement { int x, z; std::uint32_t maskA, maskB, type; };
+    NetworkObjectPlacement GetNetworkObjectPlacement(cSC4LotConfiguration* configuration, const cSC4LotConfigurationObject& object,
+                                                     int originX, int originZ, int facing) const;     // PC 0x0072ad00
     bool DoesCellHaveLot(int x, int z);                                      // @ 0x100130354
     void ExamineCell(int x, int z, BoundaryCondition& boundary, int& cost);  // @ 0x1001303ea
     // The parcellization pipeline (OnZone .. UpdateZoneType, see the ledger).
