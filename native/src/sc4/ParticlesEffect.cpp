@@ -1364,10 +1364,7 @@ bool cSC4ParticlesEffect::DoHeightBasedEmit(cSC4EffectsParticle* particle) {
     if ((flags & 0x4000) != 0) {
         if (static_cast<std::int16_t>(flags & 0xffff) < 0 && emitY < waterLevel_) emitY = waterLevel_;
     } else {
-        if (static_cast<std::int16_t>(flags & 0xffff) >= 0) {
-            particle->alive = 0;
-            return false;
-        }
+        if (static_cast<std::int16_t>(flags & 0xffff) >= 0) return true;   // neither pin: the particle keeps its emission point (i386: return 1)
         emitY = waterLevel_;
     }
     const float jitter = static_cast<float>(g_random.RandomDoubleRangeUniform(emissionBox_.min[1],

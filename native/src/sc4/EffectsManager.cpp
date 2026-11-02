@@ -731,7 +731,7 @@ bool cSC4EffectsManager::Update(SC4DrawContext* context) {
         const int before = effect->LiveParticleCount();
         effect->Update(elapsed, visible ? draw : nullptr);
         static int traced = 0;
-        if (std::getenv("SC4_FXDEBUG") && dynamic_cast<cSC4ModelBasedParticlesEffect*>(effect) && traced++ < 60)
+        if (std::getenv("SC4_FXDEBUG") && (std::getenv("SC4_PDRAWDEBUG") || dynamic_cast<cSC4ModelBasedParticlesEffect*>(effect)) && traced++ < 60)
             std::fprintf(stderr, "fx: update %p dt %.3f live %d -> %d started %d delayed %d box %.0f,%.0f,%.0f\n", static_cast<void*>(effect), elapsed, before,
                          effect->LiveParticleCount(), effect->IsStarted() ? 1 : 0, effect->IsInDelayedStop() ? 1 : 0,
                          effect->BoundingBox().min[0], effect->BoundingBox().min[1], effect->BoundingBox().min[2]);

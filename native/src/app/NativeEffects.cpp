@@ -12,12 +12,15 @@
 #include <typeinfo>
 #include <algorithm>
 #include <cmath>
+#include <memory>
+#include <map>
 
 #include "sc4/DrawContext.h"
 #include "sc4/PackedRenderState.h"
 #include "sc4/Render3D.h"
 #include "app/NativeAnimationTicks.h"
 #include "app/NativeCity.h"
+#include "app/NativeModelMaker.h"
 #include "app/NativeUi.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "gz/cIGZPersistResourceKeyList.h"
@@ -30,6 +33,7 @@
 #include "sc4/PropOccupantVisualEffect.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/cSC4City.h"
+#include "sc4/ViewUtilities.h"
 #include "sc4/cSTETerrain.h"
 
 namespace native {
@@ -76,22 +80,61 @@ public:
 ManagerTarget g_target;
 
 // ---- the renderer's effects pass (list 5, priority 0x76c): the manager's Update with the frame's draw context ----
+// The particle systems draw through the frame's SC4DrawContext (the original hands them the context itself); the billboard basis
+// is the view utilities' right (+0x68) and up (+0x74) vectors and the rotation the camera's.
 class ParticlesDraw final : public IParticlesDrawContext {
 public:
     SC4DrawContext* context = nullptr;
-    void SetVertexBuffer(std::uint32_t, std::uint32_t, const void*) override {}
-    void DrawPrims(std::uint32_t, int, int) override {}
-    void DrawPrimsIndexed(std::uint32_t, int, const std::uint16_t*) override {}
-    void SetTexture(int, int) override {}
-    void SetRenderState(const cSC4PackedRenderState&) override {}
-    void SetSelfLitShade(const cS3DVector3&) override {}
-    void ResetShade() override {}
-    void ResetModelViewTransform() override {}
-    int Rotation() const override { return 0; }
-    void GetBillboardBasis(cS3DVector3& a, cS3DVector3& b) const override { a = cS3DVector3{1, 0, 0}; b = cS3DVector3{0, 1, 0}; }
+    void SetVertexBuffer(std::uint32_t format, std::uint32_t count, const void* vertices) override {
+        if (context) context->SetVertexBuffer(static_cast<int>(format), count, vertices);
+    }
+    void DrawPrims(std::uint32_t primitive, int first, int count) override { if (context) context->DrawPrims(static_cast<int>(primitive), first, count); }
+    void DrawPrimsIndexed(std::uint32_t primitive, int count, const std::uint16_t* indices) override {
+        if (context) context->DrawPrimsIndexed(static_cast<int>(primitive), count, indices);
+    }
+    void SetTexture(int texture, int stage) override { if (context) context->SetTexture(texture, stage); }
+    void SetRenderState(const cSC4PackedRenderState& state) override { if (context) context->SetRenderState(state); }
+    void SetSelfLitShade(const cS3DVector3& shade) override { if (context) context->SetSelfLitShade(shade); }
+    void ResetShade() override { if (context) context->ResetShade(); }
+    void ResetModelViewTransform() override { if (context) context->ResetModelViewTransform(); }
+    int Rotation() const override {
+        sc4::cSC4CameraControl* camera = g_render ? g_render->GetCameraControl() : nullptr;
+        return camera ? camera->Rotation() : 0;
+    }
+    void GetBillboardBasis(cS3DVector3& a, cS3DVector3& b) const override {
+        SC4ViewUtilities* view = g_render ? g_render->GetViewUtilities() : nullptr;
+        a = view ? view->RightVector() : cS3DVector3{1, 0, 0};
+        b = view ? view->UpVector() : cS3DVector3{0, 1, 0};
+    }
     SC4DrawContext* DrawContext() override { return context; }
 };
 ParticlesDraw g_draw;
+
+// The particle systems' texture bindings: the FSH of the effects' texture group (0x1abe787d), kept for the process like the
+// model textures.
+class ParticleTexture final : public IParticlesTextureBinding {
+public:
+    explicit ParticleTexture(std::uint32_t id) : id_(id) {}
+    void Release() override {}
+    std::uint32_t TextureId() const override { return id_; }
+private:
+    std::uint32_t id_;
+};
+class ParticleTextures final : public IParticlesTextures {
+public:
+    IParticlesTextureBinding* Create(std::uint32_t instance) override {
+        auto& slot = bindings_[instance];
+        if (!slot) {
+            const unsigned id = FshTextureId(0x1abe787d, instance);
+            if (id == 0) return nullptr;
+            slot = std::make_unique<ParticleTexture>(id);
+        }
+        return slot.get();
+    }
+private:
+    std::map<std::uint32_t, std::unique_ptr<ParticleTexture>> bindings_;
+};
+ParticleTextures g_textures;
 
 class EffectsPass final : public cISC4ViewObject3D {
 public:
@@ -177,8 +220,13 @@ public:
     const char* EffectsResourceErrorString() override { return ""; }
     void SetView3DErrorReportString(const char*) override {}
     int ViewZoom() override { return 5; }
-    float WorldUnitsPerViewportUnit() override { return 1.0f; }
-    float RenderHeightScale() override { return 1.0f; }
+    // The particle size cap: SL::spViewUtilities +0x158 (world units per viewport unit at this zoom) times the render property
+    // kParticleSizeThreshold (float 11, default 300 viewport units).
+    float WorldUnitsPerViewportUnit() override {
+        SC4ViewUtilities* view = g_render ? g_render->GetViewUtilities() : nullptr;
+        return view ? view->ViewportUnitsToWorldUnits(1.0f) : 1.0f;
+    }
+    float RenderHeightScale() override { return 300.0f; }
     std::uint32_t AddShake(const cSC4ShakeDescription&, const cS3DVector2*) override { return 0; }
     void RemoveShake(std::uint32_t) override {}
     void SetLightingTint(float, const cS3DVector3&) override {}
@@ -308,6 +356,7 @@ bool BindManager() {
     if (!g_manager) return false;
     SetParticlesTerrain(&g_terrain);
     SetParticlesCity(&g_cityCells);
+    SetParticlesTextures(&g_textures);
     sc4::SetModelParticlesHost(&g_models);
     g_manager->SetHost(&g_host);
     sc4::SetPropVisualEffectHost(g_manager);  // visual-effect props create their effects through the manager (vslots 0x30 / 0x38)

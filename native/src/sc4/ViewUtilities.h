@@ -182,6 +182,8 @@ public:
     void SetCitySize(float citySizeX, float citySizeZ) { citySizeX_ = citySizeX; citySizeZ_ = citySizeZ; }
     int Zoom() const { return zoom_; }
     const cS3DVector3& EyePosition() const { return eye_; }   // +0x44
+    const cS3DVector3& RightVector() const { return right_; }   // +0x68
+    const cS3DVector3& UpVector() const { return up_; }         // +0x74
     int Rotation() const { return rotation_; }
     float RotationAngle() const { return rotationAngle_; }                              // +0x24
     bool DrawFrustumReduced() const { return drawReduced_; }
