@@ -21,6 +21,12 @@ public:
     float SeaLevel() override { return sea; }
     float TerrainHeight(float, float) override { return height; }
     int TerrainClass(float, float) override { return terrainClass; }
+    // planting a new flora occupant is not exercised here: no occupant manager, flat open ground, a 1 km city
+    cISC4OccupantManager* OccupantManager() override { return nullptr; }
+    float GroundHeight(float, float, bool& onLot) override { onLot = false; return height; }
+    float TerrainNormalY(float, float) override { return 1.0f; }
+    void CitySizeMeters(float& x, float& z) override { x = z = 1024.0f; }
+    std::uint32_t SimDate() override { return 0; }
 };
 cISCResExemplar* MakeFlora(std::uint32_t type, std::uint32_t familyKey, bool aquatic, std::vector<std::uint32_t> families,
                            float suit, int elevation, int terrainClass) {
