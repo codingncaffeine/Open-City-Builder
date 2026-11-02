@@ -6,11 +6,13 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 #include "gz/cIGZIStream.h"
 #include "gz/cIGZOStream.h"
 #include "sc4/RetainedReference.h"
+#include "sc4/SCProperty.h"
 
 namespace sc4 {
 
@@ -66,6 +68,14 @@ public:
         return items_.back().ref.get();
     }
 
+    // a property holder record (cSCPropertyHolder::Read), kept as read and written back whole
+    void Holder(cIGZIStream& s) {
+        Item item{kHolder, 0, nullptr, {}};
+        item.holder = std::make_shared<cSCPropertyHolder>();
+        item.holder->Read(s);
+        items_.push_back(std::move(item));
+    }
+
     bool Replay(cIGZOStream& s) const {
         for (const Item& item : items_) {
             const void* from = item.live ? item.live : &item.bits;
@@ -82,18 +92,20 @@ public:
                 case kF64: s.SetFloat64(Load<double>(from)); break;
                 case kBool: s.SetUint8(item.live ? (*static_cast<const bool*>(item.live) ? 1 : 0) : Load<std::uint8_t>(from)); break;
                 case kRef: item.ref.Write(s); break;
+                case kHolder: item.holder->Write(s); break;
             }
         }
         return !s.GetError();
     }
 
 private:
-    enum Kind : std::uint8_t { kU8, kS8, kS16, kU16, kU32, kS32, kU64, kS64, kF32, kF64, kBool, kRef };
+    enum Kind : std::uint8_t { kU8, kS8, kS16, kU16, kU32, kS32, kU64, kS64, kF32, kF64, kBool, kRef, kHolder };
     struct Item {
         Kind kind;
         std::uint64_t bits;
         void* live;
         cRetainedReference ref;
+        std::shared_ptr<cSCPropertyHolder> holder = {};
     };
     template <class T> static T Load(const void* p) { T v; std::memcpy(&v, p, sizeof v); return v; }
     template <class T> void Put(Kind kind, const T* value, T* live) {

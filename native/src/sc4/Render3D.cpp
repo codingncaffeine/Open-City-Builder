@@ -357,6 +357,21 @@ bool cSC43DRender::Shutdown() {
     if (!initialized_) return true;
     ClearModelChangeQueue();
     if (quadGrid_) {
+        // Every element gives up its model (the reference InsertModel took for the grid) before the grid lets go of the
+        // elements. The port also clears the model's link to its element: an occupant's placeable object that is hidden
+        // after this renderer is gone (an old city's queued removal reaching the next city's model maker) then finds no
+        // element instead of a freed one.
+        int count = quadGrid_->ElementCount();
+        std::vector<SC4GridElement*> elements(static_cast<std::size_t>(count));
+        if (count > 0) quadGrid_->GetAllElements(elements.data(), count);
+        for (int i = 0; i < count; ++i) {
+            auto* element = static_cast<SC43DGridElement*>(elements[static_cast<std::size_t>(i)]);
+            if (s3d::cIS3DModelInstance* model = element->model) {
+                if (model->GetCustomData() == element) model->SetCustomData(nullptr);
+                model->Release();
+            }
+            element->model = nullptr;
+        }
         quadGrid_->RemoveAllElements();
         delete quadGrid_;
         quadGrid_ = nullptr;

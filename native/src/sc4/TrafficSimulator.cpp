@@ -269,7 +269,7 @@ bool cSC4TrafficSimulator::Read(cIGZIStream& stream) {
     t.GetUint32(stream, u32);
     many(u32, [&] { t.GetUint32(stream, u32); });                     // up to four connection ids
     t.GetUint32(stream, u32);                                        // property holders keyed by 16-bit ids
-    many(u32, [&] { t.GetUint16(stream, u16); cSCPropertyHolder holder; holder.Read(stream); });
+    many(u32, [&] { t.GetUint16(stream, u16); t.Holder(stream); });
     if (version < 0x1b) return !stream.GetError();                // older records end here
     for (std::int32_t i = 0; i < tunnelWidth && !stream.GetError(); ++i) { t.GetUint32(stream, u32); t.GetUint32(stream, u32); }
     if (version > 0x26) t.GetUint32(stream, u32);

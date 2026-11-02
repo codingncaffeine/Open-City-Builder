@@ -417,7 +417,9 @@ public:
     void PostCrimeEvent(std::uint32_t typeId, ICrimeLot* lot, const std::string& description) override { Seam("ICrimeHost::PostCrimeEvent");}
     void PostCrimesUpdated() override { Seam("ICrimeHost::PostCrimesUpdated");}
     void StartArson(ICrimeLot* lot, ICrimeBuilding* building) override { Seam("ICrimeHost::StartArson");}
-    bool WriteLot(cIGZOStream& stream, ICrimeLot* lot) override { Seam("ICrimeHost::WriteLot"); return false; }
+    // SC4WriteGZSerializable(lot): the record holds a reference either way. No crime lot exists without the crime host (a loaded
+    // event's lot is consumed by Read), so it is written as the null reference the reader expects.
+    bool WriteLot(cIGZOStream& stream, ICrimeLot* lot) override { if (lot) Seam("ICrimeHost::WriteLot"); return SC4WriteGZSerializable(stream, nullptr); }
     ICrimeLot* ReadLot(cIGZIStream& stream) override { Seam("ICrimeHost::ReadLot"); return nullptr; }
     void LotPositionToIncidentXZ(float x, float z, float& outX, float& outZ) override { Seam("ICrimeHost::LotPositionToIncidentXZ");}
     std::vector<ICrimeOccupant*> OccupantsInBox(const float min[3], const float max[3]) override { Seam("ICrimeHost::OccupantsInBox"); return {}; }
