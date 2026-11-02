@@ -18,7 +18,12 @@ int main() {
     cRZTimer m(cRZTimer::kMinutes); m.SetElapsedTimeU64(std::uint64_t(2)); assert(m.GetElapsedTimeU32() == 2);
     cRZTimer us(cRZTimer::kMicroseconds); us.SetElapsedTimeU64(std::uint64_t(5000)); assert(us.GetElapsedTimeU32() == 5000);
     cRZTimer ns(cRZTimer::kNanoseconds); ns.SetElapsedTimeU64(std::uint64_t(3'000'000)); assert(ns.GetElapsedTimeU32() == 0 /*unsupported on read*/);
-    // tick wrap-around no longer explodes
-    cRZTimer w(cRZTimer::kMilliseconds); g_ticks = 0xFFFFFFF0u; w.Start(); g_ticks = 0x10; assert(w.GetElapsedTimeU32() == 0x20);
+    // sub-millisecond steps reach a microsecond timer (the frame loop's nanosecond clock)
+    cRZTimer f2(cRZTimer::kMicroseconds); g_ticksNS = 5'000'000'000ull; f2.Start(); g_ticksNS += 6'944'444ull;
+    assert(f2.GetElapsedTimeU32() == 6944);
+    cRZTimer m2(cRZTimer::kMilliseconds); m2.Start(); g_ticksNS += 2'500'000ull; assert(m2.GetElapsedTimeU32() == 2);
+    // a clock that steps back reads as no time, not as a huge interval
+    cRZTimer b(cRZTimer::kMilliseconds); b.Start(); g_ticksNS -= 1'000'000ull; assert(b.GetElapsedTimeU32() == 0);
+    g_ticksNS = 0;
     std::puts("cRZTimer ok");
 }

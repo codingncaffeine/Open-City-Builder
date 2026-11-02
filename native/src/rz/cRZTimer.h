@@ -1,7 +1,9 @@
 // cRZTimer — Maxis/EA RZ framework stopwatch, recovered from Sim City 4 Deluxe Editionsub 1.2.1.
 // Object layout (0x18 bytes, no vtable): +0x00 units, +0x08 startTick, +0x10 accumulated.
-// Internally everything is stored in milliseconds (SDL_GetTicks); Units only selects how
-// values are scaled on the way in/out.
+// Internally everything is stored in microseconds (SDL_GetTicksNS); Units only selects how
+// values are scaled on the way in/out. (The Mac build kept SDL_GetTicks milliseconds, so a
+// microsecond timer advanced in steps of 1000: the city view's scroll moved by whole-millisecond
+// frame times, unevenly at high refresh rates. The Windows build timed with the performance counter.)
 #pragma once
 #include <cstdint>
 
@@ -47,12 +49,12 @@ public:
     static double GetMillisecondsToCPUCyclesRatio() noexcept;
 
 private:
-    // Milliseconds elapsed including the currently running interval.
-    std::uint64_t ElapsedMilliseconds() const noexcept;
+    // Microseconds elapsed including the currently running interval.
+    std::uint64_t ElapsedMicroseconds() const noexcept;
 
     Units units_;
-    std::uint64_t startTick_ = 0;     // SDL tick at Start(); 0 = stopped
-    std::uint64_t accumulated_ = 0;   // milliseconds banked by Stop()
+    std::uint64_t startTick_ = 0;     // clock (microseconds) at Start(); 0 = stopped
+    std::uint64_t accumulated_ = 0;   // microseconds banked by Stop()
 };
 
 static_assert(sizeof(cRZTimer) == 0x18);

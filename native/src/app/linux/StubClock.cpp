@@ -14,10 +14,13 @@ double NowMs() {
     return duration<double, std::milli>(steady_clock::now().time_since_epoch()).count();
 }
 
-// SDL_GetTicks for the stub SDL clock: milliseconds since start-up, never 0 (a cRZTimer started at tick 0 counts as stopped).
+// SDL_GetTicks / SDL_GetTicksNS for the stub SDL clock: time since start-up, never 0 (a cRZTimer started at tick 0 counts as
+// stopped). The nanoseconds give the city view's per-frame scroll step its real frame time instead of whole milliseconds.
 void UpdateStubTicks() {
     static const double start = NowMs();
-    g_ticks = 1u + static_cast<std::uint32_t>(static_cast<std::uint64_t>(NowMs() - start));
+    const double ms = NowMs() - start;
+    g_ticks = 1u + static_cast<std::uint32_t>(static_cast<std::uint64_t>(ms));
+    g_ticksNS = 1'000'000ull + static_cast<std::uint64_t>(ms * 1'000'000.0);
 }
 
 // Fires the armed timer when its period has passed.

@@ -5,6 +5,10 @@
 
 inline std::uint32_t g_ticks = 0;
 inline std::uint32_t SDL_GetTicks() { return g_ticks; }
+// Nanoseconds for the timers that need finer steps than a millisecond (cRZTimer): the frame loop sets g_ticksNS; a test that
+// only sets g_ticks gets its milliseconds.
+inline std::uint64_t g_ticksNS = 0;
+inline std::uint64_t SDL_GetTicksNS() { return g_ticksNS ? g_ticksNS : std::uint64_t(g_ticks) * 1'000'000ull; }
 inline std::uint64_t SDL_GetPerformanceCounter() { return 12345; }
 inline std::uint64_t SDL_GetPerformanceFrequency() { return 1'000'000'000ull; }
 
