@@ -23,6 +23,7 @@
 #include "gz/cGZPersistResourceManager.h"
 #include "rz/cRZRandom.h"
 #include "sc4/BuildingOccupant.h"
+#include "sc4/FloraOccupant.h"
 #include "sc4/CommonIIDs.h"
 #include "sc4/FloraSimulator.h"
 #include "sc4/Exemplar.h"
@@ -199,6 +200,35 @@ public:
         }
     }
     void StartConstructionOccupant(cSC4Lot* lot) override { StartNativeConstructionOccupant(lot); }
+    cISC4Occupant* FirstBuildingOnLot(cSC4Lot* lot) override {
+        cISC4OccupantManager* occupants = Occupants();
+        if (!occupants) return nullptr;
+        std::int32_t rect[4] = {};
+        lot->GetBoundingRect(rect);
+        const int a[2] = {rect[0], rect[1]}, b[2] = {rect[2], rect[3]};
+        OccupantList found;
+        cISC4Occupant* first = nullptr;
+        if (occupants->GetOccupantsByStandardCityCells(found, a, b, kOccupantTypeBuilding, 1) && !found.empty()) first = found.front();
+        occupants->ReleaseOccupantList(found);   // the occupant manager keeps the building: the original returns it borrowed
+        return first;
+    }
+    void RemoveBuildingProps(cISC4Occupant* building) override { if (cSC4PropManager* p = Props()) p->RemoveBuildingProps(building); }
+    void RemoveLotProps(cSC4Lot* lot) override { if (cSC4PropManager* p = Props()) p->RemoveLotProps(lot); }
+    void RemoveLotFlora(cSC4Lot* lot) override {   // DemolishFloraInCellArea(rect, 0): every flora occupant on the lot's cells
+        cISC4OccupantManager* occupants = Occupants();
+        if (!occupants) return;
+        std::int32_t rect[4] = {};
+        lot->GetBoundingRect(rect);
+        const int a[2] = {rect[0], rect[1]}, b[2] = {rect[2], rect[3]};
+        OccupantList found;
+        if (occupants->GetOccupantsByStandardCityCells(found, a, b, kOccupantTypeFlora, 0xffffffffu))
+            for (cISC4Occupant* flora : found) occupants->RemoveOccupant(flora, true, 0);
+        occupants->ReleaseOccupantList(found);
+    }
+    void RemoveOccupant(cISC4Occupant* occupant, std::uint32_t flags) override {
+        if (cISC4OccupantManager* occupants = Occupants()) occupants->RemoveOccupant(occupant, true, flags);
+    }
+    void DeleteLot(cSC4Lot* lot) override { NativeDeleteLot(lot); }
 } g_services;
 
 }  // namespace

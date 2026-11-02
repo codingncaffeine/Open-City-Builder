@@ -846,7 +846,7 @@ bool cSC4ViewInputControlPlaceLot::CanDemolishLot(cSC4LotConfiguration* configur
     if (!host || !host->Demolition()) return false;
     // +0x1f8 == 0xf2 (a landmark / reward tool) demolishes with the 0x800 privilege, everything else 0x2800.
     const std::uint32_t flags = globalEffectId_ == 0xf2 ? 0x800 : 0x2800;
-    return host->Demolition()->DemolishRegion(rect, flags, cost);
+    return host->Demolition()->DemolishRegion(false, rect, flags, cost);
 }
 
 // @ 0x1003c00a0
@@ -1031,7 +1031,7 @@ bool cSC4ViewInputControlPlaceLot::PlaceLot(const cS3DVector3& position, int fac
 
     cSC4Lot* lot = nullptr;
     bool demolished = false;
-    if (host->Demolition()) demolished = host->Demolition()->DemolishRegion(rect, 0x2000, nullptr);
+    if (host->Demolition()) demolished = host->Demolition()->DemolishRegion(true, rect, 0x2000, nullptr);
     if (demolished && host->ZoneManager()) {
         if (host->ZoneManager()->PlaceZone(rect, 0, true, cost == 0, true, true, false)) {
             int zoneType = 0x0f;

@@ -1,6 +1,7 @@
 #include "app/NativeNetworkTool.h"
 
 #include <cmath>
+#include <algorithm>
 #include <cstdio>
 #include <vector>
 
@@ -17,6 +18,8 @@
 #include "sc4/TileRules.h"
 #include "sc4/Exemplar.h"
 #include "sc4/FloraOccupant.h"
+#include "sc4/Demolition.h"
+#include "app/NativeDemolition.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "app/NativeUi.h"
 #include "gz/cGZPersistResourceKey.h"
@@ -138,6 +141,18 @@ public:
 };
 PreviewHost g_previewHost;
 
+// cSC4DemolishByNetworksOccupantFilter (i386 0x0022ec0a): every occupant that does not answer interface 0xa9764c8c.
+struct DemolishByNetworksFilter final : sc4::IDemolishFilter {
+    bool IsOccupantIncluded(sc4::IDemolishable* occupant) override {
+        sc4::cISC4Occupant* o = native::DemolitionOccupant(occupant);
+        void* raw = nullptr;
+        if (!o || !o->QueryInterface(0xa9764c8c, &raw) || !raw) return true;
+        static_cast<cIGZUnknown*>(raw)->Release();
+        return false;
+    }
+    bool IsOccupantTypeIncluded(std::uint32_t) override { return true; }
+} g_byNetworks;
+
 class ToolHost final : public sc4::INetworkToolHost {
 public:
     void RegisterShutdownCallback(bool (*)(void*), void*) override {}
@@ -196,7 +211,8 @@ public:
         sc4::cISC4OccupantManager* occupants = Occupants();
         return occupants && occupants->InsertOccupant(static_cast<sc4::cISC4Occupant*>(occupant), data) ? 1 : 0;
     }
-    // The network occupants of the cell leave the manager. NOT PORTED: the flora on the cell (spDemolition).
+    // The network occupants of the cell leave the manager, and a flora occupant on the cell is demolished (i386 0x00125444:
+    // DemolishOccupant(true, flora, privilege 1, 0x2001, null, false, null)).
     void ClearCellForNetwork(std::uint32_t x, std::uint32_t z, std::uint32_t, std::uint32_t) override {
         sc4::cISC4OccupantManager* occupants = Occupants();
         for (int guard = 0; occupants && guard < 8; ++guard) {
@@ -205,27 +221,33 @@ public:
             occupants->RemoveOccupant(occupant, true, 0);
             occupant->Release();
         }
+        sc4::cISC4Occupant* flora = nullptr;
+        if (occupants && occupants->GetFirstOccupantByStandardCityCell(flora, static_cast<int>(x), static_cast<int>(z), sc4::kOccupantTypeFlora) && flora) {
+            native::DemolishOccupant(true, flora, 0x2001, nullptr);
+            flora->Release();
+        }
     }
     bool HasPrebuiltModelExemplar(std::uint32_t type, std::uint32_t piece) override {
         std::vector<std::uint8_t> bytes;
         return type < 13 && LoadResourceBytes(0x6534284a, kTypeRecords[type].exemplar, piece, bytes);
     }
-    // The demolition a road makes. INTERIM: cSC4Demolition has no native host yet, so only the flora on the cells goes
-    // (free, as the original's flora demolition); lots and buildings under a drag are not handled.
+    // DestroyHilightedOccupants (i386 0x00122e3c) and the pricing: spDemolition DemolishRegion(commit, the cells, privilege 1,
+    // 0x2001, false, cSC4DemolishByNetworksOccupantFilter, cost).
     bool DemolishForNetwork(bool commit, const std::vector<sc4::SC4PointU>& cells, std::int64_t& cost) override {
         cost = 0;
-        if (!commit) return true;
-        sc4::cISC4OccupantManager* occupants = Occupants();
-        if (!occupants) return true;
-        for (const sc4::SC4PointU& cell : cells) {
-            for (int guard = 0; guard < 16; ++guard) {
-                sc4::cISC4Occupant* occupant = nullptr;
-                if (!occupants->GetFirstOccupantByStandardCityCell(occupant, static_cast<int>(cell.x), static_cast<int>(cell.z), sc4::kOccupantTypeFlora) || !occupant) break;
-                occupants->RemoveOccupant(occupant, true, 0);
-                occupant->Release();
-            }
+        if (cells.empty()) return true;
+        sc4::DemolitionRegion region;
+        region.bounds = sc4::DemolitionCellRect{static_cast<int>(cells[0].x), static_cast<int>(cells[0].z), static_cast<int>(cells[0].x), static_cast<int>(cells[0].z)};
+        for (const sc4::SC4PointU& c : cells) {
+            region.bounds.x0 = std::min(region.bounds.x0, static_cast<int>(c.x));
+            region.bounds.z0 = std::min(region.bounds.z0, static_cast<int>(c.z));
+            region.bounds.x1 = std::max(region.bounds.x1, static_cast<int>(c.x));
+            region.bounds.z1 = std::max(region.bounds.z1, static_cast<int>(c.z));
         }
-        return true;
+        region.mask.assign(static_cast<std::size_t>(region.bounds.x1 - region.bounds.x0 + 1),
+                           std::vector<bool>(static_cast<std::size_t>(region.bounds.z1 - region.bounds.z0 + 1), false));
+        for (const sc4::SC4PointU& c : cells) region.mask[c.x - region.bounds.x0][c.z - region.bounds.z0] = true;
+        return native::DemolishRegion(commit, region, 1, 0x2001, false, &cost, nullptr, 0, 0, &g_byNetworks);
     }
     std::uint32_t PieceTexture(std::uint32_t piece, int&) override {
         int zoom = 0, rotation = 0;

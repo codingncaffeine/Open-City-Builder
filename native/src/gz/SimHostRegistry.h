@@ -22,6 +22,7 @@ class IResidentialHost;
 class IPowerHost;
 class IFireHost;
 class ITerrainViewHost;
+class IDemolitionHost;
 }  // namespace sc4
 
 namespace gzcom {
@@ -42,6 +43,7 @@ struct SimHosts {
     sc4::IPowerHost* power = nullptr;
     sc4::IFireHost* fire = nullptr;
     sc4::ITerrainViewHost* terrainView = nullptr;
+    sc4::IDemolitionHost* demolition = nullptr;   // SL::spDemolition (the probe's stub host when null)
     cIGZWinMgr* windowManager = nullptr;     // RZ::WM()
     cRZRandom* random = nullptr;             // the shared generator; a private one is used when null
 };

@@ -31,6 +31,7 @@
 #include "sc4/Ordinance.h"
 #include "sc4/PollutionSimulator.h"
 #include "sc4/FireProtectionSimulator.h"
+#include "app/NativeDemolition.h"
 #include "sc4/PoliceSimulator.h"
 #include "sc4/ResidentialSimulator.h"
 #include "sc4/Simulator.h"
@@ -551,6 +552,7 @@ void InstallNativeSimHosts() {
     hosts.fire = &g_fire;
     hosts.police = &g_police;
     hosts.residential = &g_residential;
+    hosts.demolition = NativeDemolitionHost();
 }
 
 }  // namespace native

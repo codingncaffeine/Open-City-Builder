@@ -315,7 +315,9 @@ struct FakeDemolition final : IPlaceLotDemolition {
     std::int64_t cost = 0;
     std::vector<std::uint32_t> flags;
     std::vector<SC4Rect<int>> rects;
-    bool DemolishRegion(const SC4Rect<int>& rect, std::uint32_t value, std::int64_t* outCost) override {
+    std::vector<bool> commits;
+    bool DemolishRegion(bool commit, const SC4Rect<int>& rect, std::uint32_t value, std::int64_t* outCost) override {
+        commits.push_back(commit);
         flags.push_back(value);
         rects.push_back(rect);
         if (outCost) *outCost = cost;

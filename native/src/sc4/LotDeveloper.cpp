@@ -483,6 +483,71 @@ ILotConstructionServices* g_construction = nullptr;
 
 void cSC4LotDeveloper::SetConstructionServices(ILotConstructionServices* services) { g_construction = services; }
 
+// ------------------------------------------------------------------------------------------------ demolition
+
+// Slot 38 (i386 0x000f12cc): the first building occupant on the lot's cells, not referenced for the caller.
+cISC4Occupant* cSC4LotDeveloper::GetFirstBuilding(cSC4Lot* lot) {
+    return lot && g_construction ? g_construction->FirstBuildingOnLot(lot) : nullptr;
+}
+
+// i386 0x000ec5f6: the lot takes `state`, then every building on it goes (its props, optionally its foundation, then the
+// occupant itself with `flags`). PARTIAL: building foundations (slot 60) and the zot props (RemoveBuildingZotProp) are not
+// ported, as in StartConstruction.
+bool cSC4LotDeveloper::ClearLotBuildings(cSC4Lot* lot, std::uint32_t state, bool removeFoundation, std::uint32_t flags) {
+    if (!lot || !g_construction) return false;
+    (void)removeFoundation;
+    cISC4Occupant* building = GetFirstBuilding(lot);
+    lot->SetState(state, 0, 0);                                                     // lot vslot 0x88
+    for (int guard = 0; building && guard < 64; ++guard) {
+        building->AddRef();
+        g_construction->RemoveBuildingProps(building);                                // prop manager slot 38
+        g_construction->RemoveOccupant(building, flags);                              // occupant manager slot 21 (b, 1, flags)
+        building->Release();
+        building = GetFirstBuilding(lot);
+    }
+    return true;
+}
+
+// Slot 12 (i386 0x000f1b84): the flora of a lot with flag 1, the lot's props, its network connection nodes and its buildings
+// (state 5, foundations too). PARTIAL: RemoveNetworkConnectionNodes (the lot's network pieces with flag 0x200000 handed to the
+// network manager) is not ported.
+bool cSC4LotDeveloper::StartDemolishLot(cSC4Lot* lot) {
+    if (!lot || !g_construction) return false;
+    if (lot->GetFlags() & 1) g_construction->RemoveLotFlora(lot);                   // lot vslot 0x30
+    g_construction->RemoveLotProps(lot);
+    return ClearLotBuildings(lot, 5, true, 0);
+}
+
+// i386 0x000f385c: the lot goes back to an empty lot of its zone. PARTIAL: the retaining walls and the lot / surrounding
+// foundations (no foundation occupants yet).
+void cSC4LotDeveloper::ClearLot(cSC4Lot* lot) {
+    lot->SetVerticesAreLocked(false);                                               // lot vslot 0x114
+    lot->SetState(1, 0, 0);                                                         // 0x88
+    lot->SetBuildingType(0);                                                        // 0xbc
+    lot->SetLotConfiguration(nullptr);                                              // 0x28
+    SetEmptyLotBaseTexture(lot);                                                    // this vslot 0xac
+}
+
+// Slot 13 (i386 0x000f392c): an initialized lot becomes state 6, is cleared, and a lot with no zone left (0, 11, 12, 15:
+// plopped, landfill, military, ...) is deleted from the lot manager.
+void cSC4LotDeveloper::EndDemolishLot(cSC4Lot* lot) {
+    if (!lot || !lot->IsInitialized()) return;                                      // lot vslot 0x18
+    lot->SetState(6, 0, 0);
+    ClearLot(lot);
+    const std::uint32_t zone = lot->GetZoneType();                                  // lot vslot 0x7c
+    if ((zone == 0 || zone == 15 || zone == 11 || zone == 12) && g_construction) g_construction->DeleteLot(lot);
+}
+
+// Slot 14 (lot-developer.md §7.2): a destroyed lot keeps rubble. PARTIAL: the burnt-building prop, the terrain decal and the
+// rubble props (AddLotRubbleProps) are not ported; the buildings, props and the building type go as in the original.
+void cSC4LotDeveloper::ExplodeLot(cSC4Lot* lot, bool burnt) {
+    if (!lot || lot->GetState() == 5 || lot->GetState() == 6) return;
+    ClearLotBuildings(lot, 6, false, 4);
+    if (g_construction) g_construction->RemoveLotProps(lot);
+    if (burnt) lot->SetCondition(6);
+    lot->SetBuildingType(0);
+}
+
 std::uint32_t cSC4LotDeveloper::FirstBuildingTypeOf(const std::vector<std::uint32_t>& ids, const std::function<bool(std::uint32_t)>& isType,
                                                     const std::function<void(std::vector<std::uint32_t>&, std::uint32_t)>& familyMembers) {
     std::vector<std::uint32_t> set;   // insertion order, unique

@@ -13,6 +13,7 @@ bool InstallZoneDeveloperHost(sc4::cSC4City* city);
 std::uint32_t NativeNetworkTypesAt(int x, int z);
 // cSC4LotDeveloper::GetAreaSlope over an inclusive cell rect {x0, z0, x1, z1} (0 without the lot developer).
 sc4::cSC4Lot* NativeLotAtCell(int x, int z, bool exactCell);   // the zone developer's lot map (lot manager vslot 0x28)
+void NativeDeleteLot(sc4::cSC4Lot* lot);                        // lot manager slot 24 DeleteLot
 float NativeAreaSlope(const std::int32_t rect[4], bool includeWater);
 
 }  // namespace native

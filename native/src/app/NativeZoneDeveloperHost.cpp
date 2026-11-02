@@ -469,6 +469,10 @@ std::uint32_t NativeNetworkTypesAt(int x, int z) {
     return types;
 }
 
+void NativeDeleteLot(cSC4Lot* lot) {
+    if (cSC4ZoneDeveloper* d = Developer()) d->DeleteLot(lot);
+}
+
 sc4::cSC4Lot* NativeLotAtCell(int x, int z, bool exactCell) {
     cSC4ZoneDeveloper* developer = Developer();
     return developer ? developer->GetLot(x, z, exactCell) : nullptr;

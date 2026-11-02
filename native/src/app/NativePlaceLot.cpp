@@ -15,6 +15,7 @@
 #include "sc4/CatalogItem.h"
 #include "sc4/CivicBuildingSimulator.h"
 #include "sc4/CommonIIDs.h"
+#include "sc4/Demolition.h"
 #include "sc4/Exemplar.h"
 #include "sc4/LotConfigurationManager.h"
 #include "sc4/SC4UI.h"
@@ -44,6 +45,7 @@
 #include "sc4/ZoneDeveloper.h"
 #include "app/NativeAudio.h"
 #include "app/NativeDecalOverlay.h"
+#include "app/NativeDemolition.h"
 #include "app/NativeEffects.h"
 #include "app/NativeModelMaker.h"
 #include "gz/cGZPersistResourceKey.h"
@@ -474,27 +476,19 @@ struct ZoneManager final : IPlaceLotZoneManager {
     }
 } g_zoneManager;
 
-// SL::spDemolition DemolishRegion. INTERIM: cSC4Demolition has no native port. The dry runs (flags with 0x800) answer yes at no
-// cost; the real one removes the lots (their buildings with them) and the flora on the cells.
+// cSC4PlaceLotDemolishFilter (i386 0x004bdf70 / type test 0x004bdfb0): everything but power poles and power lines.
+struct PlaceLotDemolishFilter final : IDemolishFilter {
+    static bool Type(std::uint32_t type) { return type != 0x2890d4de && type != 0x0990b2ea; }
+    bool IsOccupantIncluded(IDemolishable* occupant) override { return Type(occupant->Type()); }
+    bool IsOccupantTypeIncluded(std::uint32_t type) override { return Type(type); }
+} g_placeLotFilter;
+
+// SL::spDemolition DemolishRegion(commit, cells, privilege 1, flags, false, the clearing's filter, cost).
 struct Demolition final : IPlaceLotDemolition {
-    bool DemolishRegion(const SC4Rect<int>& rect, std::uint32_t flags, std::int64_t* cost) override {
-        if (cost) *cost = 0;
-        if (flags & 0x800) return true;
-        cSC4ZoneDeveloper* developer = ZoneDeveloper();
-        cISC4OccupantManager* occupants = Occupants();
-        for (int x = rect.x0; x <= rect.x1; ++x) {
-            for (int z = rect.z0; z <= rect.z1; ++z) {
-                if (developer)
-                    if (cSC4Lot* lot = developer->GetLot(x, z, false)) developer->DeleteLot(lot);
-                for (int guard = 0; occupants && guard < 16; ++guard) {
-                    sc4::cISC4Occupant* occupant = nullptr;
-                    if (!occupants->GetFirstOccupantByStandardCityCell(occupant, x, z, kOccupantTypeFlora) || !occupant) break;
-                    occupants->RemoveOccupant(occupant, true, 0);
-                    occupant->Release();
-                }
-            }
-        }
-        return true;
+    bool DemolishRegion(bool commit, const SC4Rect<int>& rect, std::uint32_t flags, std::int64_t* cost) override {
+        DemolitionRegion region;
+        region.bounds = DemolitionCellRect{rect.x0, rect.z0, rect.x1, rect.z1};
+        return native::DemolishRegion(commit, region, 1, flags, false, cost, nullptr, 0, 0, commit ? &g_placeLotFilter : nullptr);
     }
 } g_demolition;
 

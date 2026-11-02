@@ -153,6 +153,14 @@ public:
     virtual bool BuildingTypeValid(std::uint32_t type) { (void)type; return false; }         // +0x18 vslot 0x38 IsBuildingTypeValid
     // +0x18 vslot 0x44 GetBuildingTypesByFamily(set, family): the family's building types in the order they are added.
     virtual void BuildingTypesInFamily(std::vector<std::uint32_t>& out, std::uint32_t family) { (void)out; (void)family; }
+    // The demolition slots (lot-developer.md §7):
+    // GetFirstBuilding: +0x28 slot 41 GetOccupantsByStandardCityCells(lot rect, 0x278128a0, 1), the first entry (borrowed) or null.
+    virtual cISC4Occupant* FirstBuildingOnLot(cSC4Lot* lot) { (void)lot; return nullptr; }
+    virtual void RemoveBuildingProps(cISC4Occupant* building) { (void)building; }              // +0x30 prop manager slot 38
+    virtual void RemoveLotProps(cSC4Lot* lot) { (void)lot; }                                   // +0x30 prop manager slot 28
+    virtual void RemoveLotFlora(cSC4Lot* lot) { (void)lot; }                                   // flora slot 20 DemolishFloraInCellArea(rect, 0)
+    virtual void RemoveOccupant(cISC4Occupant* occupant, std::uint32_t flags) { (void)occupant; (void)flags; }   // +0x28 slot 21 (o, 1, flags)
+    virtual void DeleteLot(cSC4Lot* lot) { (void)lot; }                                        // +0x24 lot manager slot 24
 };
 
 // The lot developer's own interface (class id 0xa990bfe0, iid 0x4818e5d2). Only the COM identity is
@@ -213,6 +221,13 @@ public:
     bool GetLotBaseTextureOccupant(cSC4Lot* lot, cISC4LotBaseTextureOccupant*& out, bool create);   // @ 0x100145e4c
     void SetEmptyLotBaseTexture(cSC4Lot* lot);                                                    // @ 0x100146066
     void RemoveLotBaseTexture(cSC4Lot* lot);                                                      // @ 0x10014652e
+    // Demolition (lot-developer.md §7; i386 0x000f1b84 / 0x000f392c / 0x000ec5f6 / 0x000f12cc / 0x000f385c).
+    bool StartDemolishLot(cSC4Lot* lot);                                                          // slot 12
+    void EndDemolishLot(cSC4Lot* lot);                                                            // slot 13
+    void ExplodeLot(cSC4Lot* lot, bool burnt);                                                    // slot 14
+    cISC4Occupant* GetFirstBuilding(cSC4Lot* lot);                                                // slot 38
+    bool ClearLotBuildings(cSC4Lot* lot, std::uint32_t state, bool removeFoundation, std::uint32_t flags);
+    void ClearLot(cSC4Lot* lot);
     bool GetForceEmptyLotBaseTextures() const { return forceEmptyLotBaseTextures_; }             // @ 0x100148ec2
 
     // ---- construction (i386 0x000f48d0 and the placement it uses)

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "app/NativeAudio.h"
+#include "app/NativeDemolition.h"
 #include "app/NativeZoneOverlay.h"
 #include "app/NativeZoneDeveloperHost.h"
 #include "gz/cGZPersistResourceKey.h"
@@ -138,9 +139,15 @@ public:
     }
     int LotKind(sc4::cSC4Lot* lot) override { return lot->GetZoneType(); }
     bool LotCompatibleWithZone(sc4::cSC4Lot* lot, int zoneType) override { return lot->GetZoneType() == zoneType; }
-    std::int64_t DemolishCost(const std::vector<sc4::cSC4Lot*>&) override { return 0; }   // the demolition simulator is not wired natively
+    // spDemolition DemolishLots (zones.md §6): DemolishLots(false, lots, 1, 1, 0, 0, &cost, 0) to price, (true, lots, 1, 0x2000, ...)
+    // to clear them.
+    std::int64_t DemolishCost(const std::vector<sc4::cSC4Lot*>& lots) override {
+        std::int64_t cost = 0;
+        native::DemolishLots(false, lots.data(), static_cast<int>(lots.size()), 1, 1, false, &cost);
+        return cost;
+    }
     void DemolishLots(const std::vector<sc4::cSC4Lot*>& lots) override {
-        if (sc4::cISC4ZoneDeveloper* d = Developer()) for (sc4::cSC4Lot* lot : lots) d->DeleteLot(lot);
+        native::DemolishLots(true, lots.data(), static_cast<int>(lots.size()), 1, 0x2000, false, nullptr);
     }
     void ApplyZone(const sc4::SC4CellRegion<int>& changed, int zoneType, bool flag) override {
         if (sc4::cISC4ZoneDeveloper* d = Developer()) d->DoParcellization(changed, zoneType, flag);   // vslot 0x30

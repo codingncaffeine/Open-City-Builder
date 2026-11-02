@@ -207,7 +207,7 @@ cIGZSerializable* CreateCityProbeSerializable(std::uint32_t classId) {
 
         // ---- plain serializables (recovered Write/Read/GetGZCLSID, no COM base) ----------------------
         case 0x0990c38a:   // cSC4Demolition(IDemolitionHost*)
-            return WrapPlain(new cSC4Demolition(CityProbeDemolitionHost()));
+            return WrapPlain(new cSC4Demolition(gzcom::GetSimHosts().demolition ? gzcom::GetSimHosts().demolition : CityProbeDemolitionHost()));
         case 0x8990c09a:   // cSC4CrimeSimulator(ICrimeHost*, CrimeTypeRegistry*)
             return WrapPlain(new cSC4CrimeSimulator(CityProbeCrimeHost(), new CrimeTypeRegistry()));
         case 0x8990be7a:   // cSC4BuildingDevelopmentSimulator

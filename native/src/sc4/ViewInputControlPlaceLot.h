@@ -309,12 +309,13 @@ public:
                            bool arg5, bool arg6) = 0;
 };
 
-// SL::spDemolition vslot 0x30: the arguments that vary are the rectangle, the flags and the cost out
-// pointer (the occupier filter the original builds is folded in).
+// SL::spDemolition vslot 0x30 DemolishRegion(commit, cells, privilege 1, flags, false, filter, cost, ...): the arguments that vary
+// are whether it is done or only priced (CanDemolishLot), the rectangle, the flags and the cost out pointer. The clearing passes
+// the tool's cSC4PlaceLotDemolishFilter (power poles and power lines stay), folded into the host.
 class IPlaceLotDemolition {
 public:
     virtual ~IPlaceLotDemolition() = default;
-    virtual bool DemolishRegion(const SC4Rect<int>& rect, std::uint32_t flags, std::int64_t* cost) = 0;
+    virtual bool DemolishRegion(bool commit, const SC4Rect<int>& rect, std::uint32_t flags, std::int64_t* cost) = 0;
 };
 
 // The filter the lot configuration manager applies (cSC4LotConfigurationFilter subclasses the original
