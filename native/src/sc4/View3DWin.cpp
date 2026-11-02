@@ -1,5 +1,6 @@
 // cSC4View3DWin — see View3DWin.h for the layout, the vtable groups, the seams and the quirks.
 #include "sc4/View3DWin.h"
+#include "platform/PerfLog.h"
 
 #include <chrono>
 #include <cmath>
@@ -631,6 +632,7 @@ void cSC4View3DWin::RecalcScrollVelocity() {                                // 0
 }
 
 void cSC4View3DWin::DoScrollBegin() {                                       // 0x100781b86
+    platform::PerfNote("view: scroll begin");
     if (host_) host_->PostGameMessage(kMsgViewScrollBegin);
     cSC4RenderProperties* global = host_ ? host_->GlobalRenderProperties() : nullptr;
     if (!global || !global->BoolValue(kPropNoPartialBackingStoreCopies)) return;
@@ -651,6 +653,7 @@ void cSC4View3DWin::DoScrollBegin() {                                       // 0
 }
 
 void cSC4View3DWin::DoScrollEnd() {                                         // 0x100781908
+    platform::PerfNote("view: scroll end");
     if (host_) host_->PostGameMessage(kMsgViewScrollEnd);
     cSC4RenderProperties* global = host_ ? host_->GlobalRenderProperties() : nullptr;
     if (!global || !global->BoolValue(kPropNoPartialBackingStoreCopies)) return;
@@ -666,6 +669,7 @@ void cSC4View3DWin::DoTemporarySimHiddenPause() {                           // 0
     if (!simHiddenPaused_ && simulatorToPause_) {
         simHiddenPaused_ = true;
         simulatorToPause_->Pause();
+        platform::PerfNote("view: simulator hidden pause");
     }
     simHiddenTimer_.Restart();
 }
@@ -674,6 +678,7 @@ void cSC4View3DWin::DoTemporarySimHiddenResume() {                          // 0
     if (simHiddenPaused_) {
         simHiddenPaused_ = false;
         if (simulatorToPause_) simulatorToPause_->Resume();
+        platform::PerfNote("view: simulator hidden resume");
     }
     simHiddenTimer_.Reset();
 }
@@ -1151,7 +1156,6 @@ bool cSC4View3DWin::GZOnMouseMove(int x, int y, std::uint32_t modifiers) {   // 
         if (i < 1 || handled) break;
     }
     cSC4ViewInputControl* current = GetCurrentViewInputControl();
-    bool updateEdgeScroll = true;
     if (allowEdgeScroll && host_ && host_->Preferences()[kPrefsEdgeScrollEnabled]) {
         if (!current || !current->IsSelfScrollingView()) {
             int edgeX = -1;
@@ -1160,17 +1164,17 @@ bool cSC4View3DWin::GZOnMouseMove(int x, int y, std::uint32_t modifiers) {   // 
             int edgeY = -1;
             if (y > 1) edgeY = (GetH() - 1 <= y) ? 1 : 0;
             edgeScrollY_ = edgeY;
-            updateEdgeScroll = false;
-        } else {
-            if (host_->GraphicsSystemAllowsSelfScroll()) return true;
-            if (edgeScrollX_ == 0 && edgeScrollY_ == 0) return true;
-            updateEdgeScroll = false;
+            RecalcScrollVelocity();
+            return true;
         }
+        if (host_->GraphicsSystemAllowsSelfScroll()) return true;
     }
-    if (updateEdgeScroll) {
-        edgeScrollX_ = 0;
-        edgeScrollY_ = 0;
-    }
+    // Edge scrolling off (or a self-scrolling control): the edge directions go to 0, and only a change recomputes the velocity.
+    // DIVERGENCE: the original recomputes on every move while edge scrolling is off, and with no direction that stops the
+    // scroll, so a right-drag pan halted on every mouse move whenever the player had turned edge scrolling off.
+    if (edgeScrollX_ == 0 && edgeScrollY_ == 0) return true;
+    edgeScrollX_ = 0;
+    edgeScrollY_ = 0;
     RecalcScrollVelocity();
     return true;
 }

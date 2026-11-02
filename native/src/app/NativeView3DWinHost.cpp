@@ -126,8 +126,14 @@ private:
 struct StubView3DWin final : IView3DWinHost {
     View3DNotifications notifications_;
     cIGZMessageServer2* MessageServer2() override { return SL::spMS2; }   // SL::spMS2: erosion, view filter / level and tool changes
-    // the preferences blob (0x1734 bytes): all defaults off (no edge scrolling)
-    std::uint8_t* Preferences() override { static std::uint8_t blob[0x1734] = {}; return blob; }
+    // SL::spPreferences: the application's preferences blob (0x1734 bytes, SimCity 4.cfg; edge scrolling +0xf09 on by default).
+    // A zeroed stand-in turned edge scrolling off, and with it off every mouse move stopped a right-drag scroll (the edge pass
+    // recomputes the scroll velocity, finds no direction and stops), so panning ran a frame and halted, over and over.
+    std::uint8_t* Preferences() override {
+        if (cSC4App* app = native::BootApplication()) return app->GetPreferences();
+        static std::uint8_t blob[0x1734] = {};
+        return blob;
+    }
     bool CityExists() override { return LoadedCity() != nullptr; }
     // RZ::MS2 post of a bare message: scroll begin / end (the model maker pauses its per-step loading while the view
     // scrolls) and render properties changed.

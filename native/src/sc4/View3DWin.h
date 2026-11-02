@@ -903,6 +903,10 @@ public:
     void DoScrollEnd();                                            // @ 0x100781908
     void RecalcScrollVelocity();                                   // @ 0x100781d04
     void DoTemporarySimHiddenPause();                              // @ 0x1007819e0
+    // the frame log's view state (SC4_PERFLOG)
+    bool IsScrolling() const { return scrolling_; }
+    bool IsScrollStopping() const { return scrollStopping_; }
+    bool IsSimHiddenPaused() const { return simHiddenPaused_; }
     void DoTemporarySimHiddenResume();                             // @ 0x100781a20
     bool ProcessKeyDown(std::uint32_t key, std::uint32_t modifiers);   // @ 0x100782ba2
     bool ProcessKeyUp(std::uint32_t key, std::uint32_t modifiers);     // @ 0x100782d20
