@@ -681,7 +681,9 @@ void ClearLotList(std::list<cRZAutoRefCount<cSC4Lot>>& lots) { lots.clear(); }
 //----------------------------------------------------------------------------------------------- tests
 
 void TestLayoutAndCom() {
+#if defined(_LIBCPP_VERSION)   // the game's library: the members' containers have the Mac build's sizes only under libc++
     CHECK(sizeof(cSC4ZoneDeveloper) == 0x1c0);
+#endif
     auto* developer = new cSC4ZoneDeveloper();
     CHECK((char*)static_cast<cISC4LotManager*>(developer) - (char*)developer == 8);
     CHECK((char*)static_cast<cIGZMessageTarget2*>(developer) - (char*)developer == 0x10);
@@ -1177,14 +1179,19 @@ void TestSerialization() {
 
     FakeOStream out;
     CHECK(developer->Write(out));
-    CHECK(out.bytes.size() == 2 + 4 + 4 + 4);   // version, rows, columns, one lot id
+    // version, rows, columns, then one lot reference per cell (null for an empty cell), as Read reads them back.
+    CHECK(out.bytes.size() == 2 + 4 + 4 + 16 * 16 * 4);
     std::uint16_t version = 0;
-    std::uint32_t rows = 0, columns = 0, id = 0;
+    std::uint32_t rows = 0, columns = 0;
     std::memcpy(&version, out.bytes.data(), 2);
     std::memcpy(&rows, out.bytes.data() + 2, 4);
     std::memcpy(&columns, out.bytes.data() + 6, 4);
-    std::memcpy(&id, out.bytes.data() + 10, 4);
-    CHECK(version == 1 && rows == 16 && columns == 16 && id == 1);
+    CHECK(version == 1 && rows == 16 && columns == 16);
+    CHECK(host.writtenLots.size() == 16 * 16);
+    int written = 0;
+    for (std::size_t i = 0; i < host.writtenLots.size(); ++i)
+        if (host.writtenLots[i]) { ++written; CHECK(i == 2 * 16 + 2 && host.writtenLots[i] == lot); }
+    CHECK(written == 1);
 
     developer->Shutdown();
     developer->Release();
