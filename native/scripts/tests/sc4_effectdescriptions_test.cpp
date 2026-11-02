@@ -15,17 +15,17 @@ int main() {
         CHECK(b.amplitude == 1.5f && b.frequency == 2 && b.curveA.size() == 2 && b.curveB[0] == 3 && b.falloff == 4 && b.flags == 7 && !is.GetError());
     }
     {   // decal: kind 0 becomes 2 with flag 0x40
-        cSC4DecalDescription a; a.flags = 3; a.textureId = 9; a.mode = 1; a.kind = 0; a.scale = 0.5f; a.sizeCurve = {1}; a.path = {{1, 2, 3}, {4, 5, 6}};
-        a.values[2] = 8; a.offset = {7, 9};
+        cSC4DecalDescription a; a.flags = 3; a.textureId = 9; a.layer = 1; a.lifetime = 0; a.life = 0.5f; a.rotationCurve = {1}; a.colorCurve = {{1, 2, 3}, {4, 5, 6}};
+        a.rotationVariance = 8; a.offset = {7, 9};
         PortMemoryOStream os; os << a;
         PortMemoryIStream is(os.bytes().data(), os.bytes().size());
         cSC4DecalDescription b; is >> b;
-        CHECK(b.kind == 2 && (b.flags & 0x40) && (b.flags & 3) == 3 && b.textureId == 9 && b.path.size() == 2 && b.path[1].z == 6 && b.values[2] == 8 && b.offset.y == 9);
-        a.kind = 4;
+        CHECK(b.lifetime == 2 && (b.flags & 0x40) && (b.flags & 3) == 3 && b.textureId == 9 && b.colorCurve.size() == 2 && b.colorCurve[1].z == 6 && b.rotationVariance == 8 && b.offset.y == 9);
+        a.lifetime = 4;
         PortMemoryOStream os2; os2 << a;
         PortMemoryIStream is2(os2.bytes().data(), os2.bytes().size());
         cSC4DecalDescription c; is2 >> c;
-        CHECK(c.kind == 4 && c.flags == 3);
+        CHECK(c.lifetime == 4 && c.flags == 3);
     }
     {   // camera + light + message trigger
         cSC4CameraParams a; a.keys = {1, 2, 3}; a.values[3] = 5;

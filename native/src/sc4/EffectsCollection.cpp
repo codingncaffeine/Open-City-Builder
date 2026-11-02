@@ -117,17 +117,20 @@ void cSC4EffectsCollection::AddDecalDescription(const char* name, const cSC4Deca
     cSC4DecalDescription& target = decals_[static_cast<std::size_t>(index)];
     target.flags = description.flags;
     target.textureId = description.textureId;
-    target.mode = description.mode;
-    target.kind = description.kind;
-    target.scale = description.scale;
+    target.layer = description.layer;
+    target.lifetime = description.lifetime;
+    target.life = description.life;
     if (&target != &description) {
-        target.sizeCurve = description.sizeCurve;
-        target.alphaCurve = description.alphaCurve;
         target.rotationCurve = description.rotationCurve;
-        target.path = description.path;
-        target.extraCurve = description.extraCurve;
+        target.sizeCurve = description.sizeCurve;
+        target.opacityCurve = description.opacityCurve;
+        target.colorCurve = description.colorCurve;
+        target.aspectCurve = description.aspectCurve;
     }
-    for (int i = 0; i < 4; ++i) target.values[i] = description.values[i];
+    target.opacityVariance = description.opacityVariance;
+    target.sizeVariance = description.sizeVariance;
+    target.rotationVariance = description.rotationVariance;
+    target.mapping = description.mapping;
     target.offset = description.offset;
 }
 

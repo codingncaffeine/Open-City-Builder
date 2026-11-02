@@ -250,6 +250,8 @@ src/sc4/AuraSimulator.cpp
 src/sc4/ConstructionOccupant.cpp
 src/sc4/DemandSimulator.cpp
 src/sc4/EffectsManager.cpp
+src/sc4/DecalEffect.cpp
+src/sc4/OverlayManager.cpp
 src/sc4/FireProtectionSimulator.cpp
 src/sc4/cSC4FlammabilitySimulator.cpp
 src/sc4/GrowthDeveloper.cpp

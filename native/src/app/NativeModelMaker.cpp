@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "sc4/Render3D.h"
+#include "app/NativeDecalOverlay.h"
 #include "app/NativeShadowOverlay.h"
 #include "app/NativeUi.h"
 #include "gz/cGZPersistResourceManager.h"
@@ -593,6 +594,7 @@ sc4::cSC4ModelMaker* g_maker = nullptr;
 }  // namespace
 
 void DetachModelMaker() {
+    DetachDecalOverlays();   // after DetachEffects stopped the decal effects
     if (!g_maker) return;
     g_maker->Shutdown();
     g_maker->Release();
@@ -603,7 +605,10 @@ bool AttachModelMaker(sc4::cSC43DRender& render, sc4::cSC4City& city) {
     DetachModelMaker();
     g_render = &render;
     g_city = &city;
-    if (sc4::cSTETerrain* terrain = Terrain()) AttachShadowOverlay(render, *terrain);
+    if (sc4::cSTETerrain* terrain = Terrain()) {
+        AttachShadowOverlay(render, *terrain);
+        AttachDecalOverlays(render, city, *terrain);
+    }
     static ModelInstanceHost instanceHost;
     static PlaceableHost placeableHost;
     static ModelMakerHost makerHost;
@@ -646,6 +651,21 @@ bool AttachModelMaker(sc4::cSC43DRender& render, sc4::cSC4City& city) {
 
 namespace native {
 unsigned int FshTextureId(unsigned int group, unsigned int instance) { return TextureRecord(group, instance)->id; }
+bool FshTextureSize(unsigned int group, unsigned int instance, int& width, int& height) {
+    const TextureBinding* record = TextureRecord(group, instance);
+    width = record->width;
+    height = record->height;
+    return record->id != 0;
+}
+unsigned int CreateBgraTexture(int width, int height, const void* pixels) {
+    if (!g_driver || width <= 0 || height <= 0) return 0;
+    const std::uint32_t id = g_driver->CreateTexture(4, static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height), 1, 1);
+    g_driver->LoadTextureLevel(id, 0, 0, 0, static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height), 3, 1, static_cast<std::uint32_t>(width), pixels);
+    return id;
+}
+void DeleteDriverTexture(unsigned int id) {
+    if (g_driver && id != 0) g_driver->DeleteTextures(1, &id);
+}
 
 // Debug (scenario `audit`): the renderer's grid models whose resource was made for another zoom than the camera's, and
 // whether their owner's placeable still holds them (a model left in the renderer after its owner dropped it draws on).

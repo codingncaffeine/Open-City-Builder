@@ -13,6 +13,11 @@ namespace native {
 void InstallModelResources(gd::cIGZGDriver* driver);
 // The driver texture of an FSH resource {0x7ab50e44, group, instance} (0 when it is missing).
 unsigned int FshTextureId(unsigned int group, unsigned int instance);
+// Its size in texels (false when it is missing).
+bool FshTextureSize(unsigned int group, unsigned int instance, int& width, int& height);
+// A driver texture from 32-bit BGRA pixels (one level), and its deletion; 0 without a driver.
+unsigned int CreateBgraTexture(int width, int height, const void* pixels);
+void DeleteDriverTexture(unsigned int id);
 // "zooms Z models N: [group/instance tex instance:WxH ...] ..." of an occupant's placeable models (debug probes).
 std::string DescribeOccupantModels(sc4::cISC4Occupant* occupant);
 // Debug: building models in the renderer made for another zoom, and whether their owners still hold them (scenario `audit`).

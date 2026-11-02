@@ -79,7 +79,7 @@ struct RecordingSink final : IEffectsCollectionHost {
         calls.push_back({"dynamic", name, Num(description.values[0])});
     }
     void AddDecalDescription(const char* name, const cSC4DecalDescription& description) override {
-        calls.push_back({"decal", name, Num(description.scale)});
+        calls.push_back({"decal", name, Num(description.life)});
     }
     void AddShakeDescription(const char* name, const cSC4ShakeDescription& description) override {
         calls.push_back({"shake", name, Num(description.amplitude)});
@@ -123,7 +123,7 @@ void AddDecals(cSC4EffectsCollection& collection, const char* prefix, int count)
     for (int i = 0; i < count; ++i) {
         cSC4DecalDescription description;
         description.textureId = 0x100u + static_cast<std::uint32_t>(i);
-        description.scale = static_cast<float>(i) + 0.5f;
+        description.life = static_cast<float>(i) + 0.5f;
         collection.AddDecalDescription((std::string(prefix) + std::to_string(i)).c_str(), description);
     }
 }
@@ -255,18 +255,18 @@ void DecalTable() {
     cSC4DecalDescription scorch;
     scorch.flags = 0x40;
     scorch.textureId = 0xabc;
-    scorch.mode = 1;
-    scorch.kind = 2;
-    scorch.scale = 0.75f;
-    scorch.sizeCurve = {1.0f, 0.5f};
-    scorch.alphaCurve = {0.25f};
-    scorch.rotationCurve = {0.0f, 1.0f, 2.0f};
-    scorch.path = {Vec3(1, 2, 3), Vec3(4, 5, 6)};
-    scorch.extraCurve = {7.0f};
-    scorch.values[0] = 1.0f;
-    scorch.values[1] = 2.0f;
-    scorch.values[2] = 3.0f;
-    scorch.values[3] = 4.0f;
+    scorch.layer = 1;
+    scorch.lifetime = 2;
+    scorch.life = 0.75f;
+    scorch.rotationCurve = {1.0f, 0.5f};
+    scorch.sizeCurve = {0.25f};
+    scorch.opacityCurve = {0.0f, 1.0f, 2.0f};
+    scorch.colorCurve = {Vec3(1, 2, 3), Vec3(4, 5, 6)};
+    scorch.aspectCurve = {7.0f};
+    scorch.opacityVariance = 1.0f;
+    scorch.sizeVariance = 2.0f;
+    scorch.rotationVariance = 3.0f;
+    scorch.mapping = 4.0f;
     scorch.offset.x = 5.0f;
     scorch.offset.y = 6.0f;
     collection.AddDecalDescription("Scorch", scorch);
@@ -275,19 +275,19 @@ void DecalTable() {
     cSC4DecalDescription out;
     CHECK(collection.GetDecalDescription("SCORCH", &out));
     CHECK(out.flags == 0x40 && out.textureId == 0xabc);
-    CHECK(out.mode == 1 && out.kind == 2 && out.scale == 0.75f);
-    CHECK(Equals(out.sizeCurve, {1.0f, 0.5f}));
-    CHECK(Equals(out.alphaCurve, {0.25f}));
-    CHECK(Equals(out.rotationCurve, {0.0f, 1.0f, 2.0f}));
-    CHECK(out.path.size() == 2 && Same(out.path[1], Vec3(4, 5, 6)));
-    CHECK(Equals(out.extraCurve, {7.0f}));
-    CHECK(out.values[0] == 1.0f && out.values[3] == 4.0f);
+    CHECK(out.layer == 1 && out.lifetime == 2 && out.life == 0.75f);
+    CHECK(Equals(out.rotationCurve, {1.0f, 0.5f}));
+    CHECK(Equals(out.sizeCurve, {0.25f}));
+    CHECK(Equals(out.opacityCurve, {0.0f, 1.0f, 2.0f}));
+    CHECK(out.colorCurve.size() == 2 && Same(out.colorCurve[1], Vec3(4, 5, 6)));
+    CHECK(Equals(out.aspectCurve, {7.0f}));
+    CHECK(out.opacityVariance == 1.0f && out.mapping == 4.0f);
     CHECK(out.offset.x == 5.0f && out.offset.y == 6.0f);
     CHECK(!collection.GetDecalDescription("none", &out));
 
     AddDecals(collection, "mark", 2);
     CHECK(collection.Decals().size() == 3);
-    CHECK(collection.GetDecalDescription("mark1", &out) && out.scale == 1.5f);
+    CHECK(collection.GetDecalDescription("mark1", &out) && out.life == 1.5f);
 }
 
 void ShakeAndLightTables() {
@@ -619,7 +619,7 @@ void MergeWithNames() {
     dynamic.values[0] = 2.5f;
     source.AddDynamicParticleDescription("Wisp", dynamic);
     cSC4DecalDescription decal;
-    decal.scale = 0.75f;
+    decal.life = 0.75f;
     source.AddDecalDescription("Scorch", decal);
     cSC4ShakeDescription shake;
     shake.amplitude = 4.5f;
@@ -651,7 +651,7 @@ void MergeWithNames() {
     cSC4ParticlesDescription outParticle;
     CHECK(target.GetParticleDescription("dust", &outParticle) && outParticle.flags == 0x55);
     cSC4DecalDescription outDecal;
-    CHECK(target.GetDecalDescription("scorch", &outDecal) && outDecal.scale == 0.75f);
+    CHECK(target.GetDecalDescription("scorch", &outDecal) && outDecal.life == 0.75f);
     cISC4ComponentDescription* outComponent = nullptr;
     CHECK(target.GetComponentDescription("brush", 3, &outComponent));
     outComponent->Release();

@@ -239,6 +239,11 @@ bool cSC4EffectsManager::Shutdown() {
     particlesEffects_.clear();
     newParticlesEffectSlots_.clear();
     freeParticlesEffectSlots_.clear();
+    for (cRZAutoRefCount<cSC4DecalEffect>& decal : decalEffects_)
+        if (decal) decal->Shutdown();
+    decalEffects_.clear();
+    newDecalSlots_.clear();
+    freeDecalSlots_.clear();
     // Quirk: the description tables are only partly cleared (the light table, the camera parameters, the effect
     // bindings and the message triggers survive, as they do in the original).
     collection_.ClearForEffectManagerShutdown();
@@ -502,7 +507,16 @@ void cSC4EffectsManager::DeactivateUnusedVisualEffects() {
                 stillRunning.push_back(index);
         }
         newModelEffectSlots_.swap(stillRunning);
-        // The decal / geometry-sourced / dynamic-particle pools are not modelled (see the pending ledger).
+        // The geometry-sourced and dynamic-particle pools are not modelled (see the pending ledger).
+        stillRunning.clear();
+        for (int index : newDecalSlots_) {   // i386 0x0040700c: a decal only the pool holds and not started is free again
+            cSC4DecalEffect* decal = decalEffects_[static_cast<std::size_t>(index)].get();
+            if (decal->RefCount() == 1 && !decal->IsStarted())
+                freeDecalSlots_.push_back(index);
+            else
+                stillRunning.push_back(index);
+        }
+        newDecalSlots_.swap(stillRunning);
     }
     killing_ = false;
     ActivateNewVisualEffects();
@@ -694,7 +708,7 @@ void cSC4EffectsManager::GetStatsString(cRZString& out) {
                 static_cast<int>(activeVisualEffectSlots_.size()),
                 static_cast<int>(freeVisualEffectSlots_.size()),
                 static_cast<int>(visualEffects_.size()),
-                static_cast<int>(decalCount_), 0, 0,
+                static_cast<int>(decalCount_), static_cast<int>(newDecalSlots_.size()), static_cast<int>(freeDecalSlots_.size()),
                 static_cast<int>(particleSystemCount_),
                 static_cast<int>(newParticlesEffectSlots_.size()),
                 static_cast<int>(freeParticlesEffectSlots_.size()),
@@ -728,6 +742,13 @@ bool cSC4EffectsManager::Update(SC4DrawContext* context) {
     };
     for (int index : newParticlesEffectSlots_) run(particlesEffects_[static_cast<std::size_t>(index)].get());
     for (int index : newModelEffectSlots_) run(modelEffects_[static_cast<std::size_t>(index)].get());
+    decalCount_ = 0;
+    for (int index : newDecalSlots_) {   // i386 0x00407524: every started decal advances (vslot 0x24 Update)
+        cSC4DecalEffect* decal = decalEffects_[static_cast<std::size_t>(index)].get();
+        if (!decal->IsStarted()) continue;
+        decal->Update(elapsed);
+        ++decalCount_;
+    }
     particleSystemCount_ = systems;
     if (0.0f < flashInverseDuration_) DrawScreenFlashes(context, elapsed);
     if (0.0f < tintInverseDuration_) UpdateLightingTint(elapsed);
@@ -931,8 +952,8 @@ bool ModelBased(const cSC4ParticlesDescription& description) { return (descripti
 }  // namespace
 
 // @ i386 0x00406246. Kind 0 = particle systems (count of them, each delayed by the record's spacing; model-based ones
-// can chain), 3..15 = the component description tables (Instantiate). Decals (1), nested visual effects (2), dynamic
-// particles (16) and geometry-sourced particle systems are not ported: the component stays empty and the caller drops
+// can chain), 1 = a decal from the pool, 3..15 = the component description tables (Instantiate). Nested visual effects
+// (2), dynamic particles (16) and geometry-sourced particle systems are not ported: the component stays empty and the caller drops
 // it. Bit 0 of the record's type marks the component "not needed to finish".
 void cSC4EffectsManager::CreateComponentFromDescription(const cSC4EffectDescription::cDescriptionRec& record,
                                                         cSC4VisualEffect::cComponentRec* component,
@@ -976,6 +997,13 @@ void cSC4EffectsManager::CreateComponentFromDescription(const cSC4EffectDescript
             if (component->component) component->component->Release();
             component->component = wrapped;
         }
+    } else if (kind == 1) {   // i386 0x00406246: a decal from the pool with the record's description
+        if (record.intValue < 0 || static_cast<std::size_t>(record.intValue) >= collection_.Decals().size()) return;
+        cSC4DecalEffect* decal = NewDecalEffect();
+        decal->SetDescription(collection_.Decals()[static_cast<std::size_t>(record.intValue)]);
+        decal->AddRef();
+        if (component->component) component->component->Release();
+        component->component = decal;
     } else if (kind >= 3 && kind - 3 < 13) {
         if (record.intValue < 0) return;
         const auto& table = collection_.ComponentDescs()[kind - 3].descriptions;
@@ -989,6 +1017,21 @@ void cSC4EffectsManager::CreateComponentFromDescription(const cSC4EffectDescript
     }
     if (record.type & 1) component->flags |= 4;
     else component->flags &= ~std::uint64_t{4};
+}
+
+// @ i386 0x00405bb0: a recycled decal from the free list, or a new one Init'ed and added to the pool.
+cSC4DecalEffect* cSC4EffectsManager::NewDecalEffect() {
+    if (!freeDecalSlots_.empty()) {
+        const int index = freeDecalSlots_.back();
+        freeDecalSlots_.pop_back();
+        newDecalSlots_.push_back(index);
+        return decalEffects_[static_cast<std::size_t>(index)].get();
+    }
+    auto* decal = new cSC4DecalEffect();
+    decal->Init();
+    newDecalSlots_.push_back(static_cast<int>(decalEffects_.size()));
+    decalEffects_.emplace_back(decal);
+    return decal;
 }
 
 // @ i386 0x00405ed8: a recycled system from the free list, or a new one Init'ed with the global parameters.

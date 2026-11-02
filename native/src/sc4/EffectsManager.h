@@ -126,6 +126,7 @@
 #include "sc4/EffectDescriptions.h"
 #include "sc4/EffectMaps.h"
 #include "sc4/EffectsCollection.h"
+#include "sc4/DecalEffect.h"
 #include "sc4/ModelBasedParticlesEffect.h"
 #include "sc4/PackedRenderState.h"
 #include "sc4/ParticlesEffect.h"
@@ -334,10 +335,11 @@ public:
     void DrawScreenFlashes(SC4DrawContext* context, float elapsed);         // @ 0x1005dfb64 (PARTIAL)
 
     // ---- particles ---------------------------------------------------------------------------------------------
-    // The four other factories (model-based 0x1005e279c, geometry-sourced 0x1005e2908, dynamic 0x1005e2c12 and
-    // decal 0x1005e2d80) are SKIPPED: their classes are not recovered, so they are not declared here.
+    // The geometry-sourced (0x1005e2908) and dynamic (0x1005e2c12) factories are SKIPPED: their classes are not
+    // recovered, so they are not declared here.
     cSC4ParticlesEffect* NewParticlesEffect();                              // @ 0x1005e2a74
     cSC4ModelBasedParticlesEffect* NewModelBasedParticlesEffect();          // @ i386 0x00405ed8
+    cSC4DecalEffect* NewDecalEffect();                                      // @ i386 0x00405bb0
     // LoadAllEffects (i386 0x00409e36): BeginCollection, every packed effects library into the collection,
     // EndCollection. The plug-in "main.fx" text path is not ported.
     void LoadAllEffects();
@@ -477,6 +479,9 @@ private:
     std::vector<cRZAutoRefCount<cSC4ModelBasedParticlesEffect>> modelEffects_;   // +0xe20
     std::vector<int> newModelEffectSlots_;              // +0xe38
     std::vector<int> freeModelEffectSlots_;             // +0xe50
+    std::vector<cRZAutoRefCount<cSC4DecalEffect>> decalEffects_;   // i386 +0xbbc
+    std::vector<int> newDecalSlots_;                    // i386 +0xbc8
+    std::vector<int> freeDecalSlots_;                   // i386 +0xbd4
 
     cIGZUnknown* effectsResource_ = nullptr;            // +0xeb0 the nSCRes::cFileParser (one reference)
     cIGZUnknown* effectsParser_ = nullptr;              // +0xeb8 (one reference)

@@ -58,18 +58,18 @@ cIGZOStream& operator<<(cIGZOStream& s, const cSC4ShakeDescription& v) {
 cIGZIStream& operator>>(cIGZIStream& s, cSC4DecalDescription& v) {
     v.flags = ReadU32(s);
     s.GetUint32(v.textureId);
-    s.GetUint8(v.mode);
-    s.GetUint8(v.kind);
-    s.GetFloat32(v.scale);
-    s >> v.sizeCurve;
-    s >> v.alphaCurve;
+    s.GetUint8(v.layer);
+    s.GetUint8(v.lifetime);
+    s.GetFloat32(v.life);
     s >> v.rotationCurve;
-    ReadVector3s(s, v.path);
-    s >> v.extraCurve;
-    for (float& f : v.values) s.GetFloat32(f);
+    s >> v.sizeCurve;
+    s >> v.opacityCurve;
+    ReadVector3s(s, v.colorCurve);
+    s >> v.aspectCurve;
+    for (float* f : {&v.opacityVariance, &v.sizeVariance, &v.rotationVariance, &v.mapping}) s.GetFloat32(*f);
     s >> v.offset;
-    if (v.kind == 0) {
-        v.kind = 2;
+    if (v.lifetime == 0) {
+        v.lifetime = 2;
         v.flags |= 0x40;
     }
     return s;
@@ -77,15 +77,15 @@ cIGZIStream& operator>>(cIGZIStream& s, cSC4DecalDescription& v) {
 cIGZOStream& operator<<(cIGZOStream& s, const cSC4DecalDescription& v) {
     s.SetUint32(static_cast<std::uint32_t>(v.flags));
     s.SetUint32(v.textureId);
-    s.SetUint8(v.mode);
-    s.SetUint8(v.kind);
-    s.SetFloat32(v.scale);
-    s << v.sizeCurve;
-    s << v.alphaCurve;
+    s.SetUint8(v.layer);
+    s.SetUint8(v.lifetime);
+    s.SetFloat32(v.life);
     s << v.rotationCurve;
-    WriteVector3s(s, v.path);
-    s << v.extraCurve;
-    for (float f : v.values) s.SetFloat32(f);
+    s << v.sizeCurve;
+    s << v.opacityCurve;
+    WriteVector3s(s, v.colorCurve);
+    s << v.aspectCurve;
+    for (float f : {v.opacityVariance, v.sizeVariance, v.rotationVariance, v.mapping}) s.SetFloat32(f);
     s << v.offset;
     return s;
 }

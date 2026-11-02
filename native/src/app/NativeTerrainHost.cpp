@@ -9,6 +9,7 @@
 #include "app/NativeUi.h"
 #include "app/NativeLighting.h"
 #include "sc4/LightingManager.h"
+#include "sc4/OverlayManager.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "rz/cRZIniFile.h"
 #include "gz/cIGZPersistResourceKeyList.h"
@@ -18,6 +19,7 @@
 #include "sc4/cSC4City.h"
 #include "app/NativeCity.h"
 #include "app/NativeFlora.h"
+#include "app/NativeDecalOverlay.h"
 #include "app/NativeEffects.h"
 #include "sc4/AuraSimulator.h"
 #include "sc4/FloraSimulator.h"
@@ -347,7 +349,12 @@ struct NativeTerrainHost final : ITerrainHost {
         aura->AddTransientEffect(x, z, static_cast<TransientAuraEffect>(1));
         aura->Release();
     }
-    bool AddOverlayDecal(cIGZUnknown* overlay, const cGZPersistResourceKey& key, const TerrainPoint& position, float strength, float randomAmount) override { return {}; }
+    // The terrain caches the view's overlay managers at its Init, before the city view makes them: the land manager is asked for here.
+    // Vslot 0x20 is AddDecal(key, position, width, turns): the brush's strength is the width and its random amount the turn.
+    bool AddOverlayDecal(cIGZUnknown*, const cGZPersistResourceKey& key, const TerrainPoint& position, float strength, float randomAmount) override {
+        sc4::cSTEOverlayManager* manager = DecalOverlayManager(2);
+        return manager && manager->AddDecal(key, cS3DVector2{position.x, position.z}, strength, randomAmount) != 0xffffffffu;
+    }
     void ListBrushResources(std::vector<cGZPersistResourceKey>& out) override { ListResources(out, 0x6534284a, 0x6a01fc2a); }
     ITerrainEffect* CreateTerrainEffect(std::uint32_t id0, std::uint32_t id1) override { return native::CreateTerrainEffect(id0, id1); }
     cRZString NewCityName() override { return {}; }

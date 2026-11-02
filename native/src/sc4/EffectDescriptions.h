@@ -19,19 +19,26 @@ struct cSC4ShakeDescription {
     std::uint32_t flags = 0;                 // +0x3c (one byte in the stream)
 };
 
+// The fields as cSC4DecalEffect reads them (i386 0x0041318e..0x00412f4a; the shipped decals confirm the order: the
+// footprint has size [1] and opacity [0.5], the brush rings a pulsing opacity curve).
+// Flags (a bitset<7>): 2 self-lit (SetOverlayFlags 1), 4 water overlay manager, 8 texture repeat from `mapping`,
+// 0x10 the whole city, 0x20 a ring decal, 0x40 the dynamic overlay manager (opacity-only updates).
 struct cSC4DecalDescription {
-    std::uint64_t flags = 0;                 // +0 (32 bits in the stream; bit 0x40 is set when kind is missing)
-    std::uint32_t textureId = 0;             // +8
-    std::uint8_t mode = 0;                   // +0xc
-    std::uint8_t kind = 0;                   // +0xd (0 on load becomes 2 and sets flag 0x40)
-    float scale = 0;                         // +0x10
-    std::vector<float> sizeCurve;            // +0x18
-    std::vector<float> alphaCurve;           // +0x30
-    std::vector<float> rotationCurve;        // +0x48
-    std::vector<cS3DVector3> path;           // +0x60 (u32 count first)
-    std::vector<float> extraCurve;           // +0x78
-    float values[4] = {0, 0, 0, 0};          // +0x90..+0x9c
-    cS3DVector2 offset;                      // +0xa0
+    std::uint64_t flags = 0;                 // +0 (32 bits in the stream; bit 0x40 is set when lifetime is missing)
+    std::uint32_t textureId = 0;             // +8 FSH instance (group 0x1abe787d)
+    std::uint8_t layer = 0;                  // +0xc the overlay draw mode (0..3; 3 draws where the terrain is hidden)
+    std::uint8_t lifetime = 0;               // +0xd 1 loop, 2 stop at the end, 3 a non-zero Start begins at the end (0 on load becomes 2 and sets flag 0x40)
+    float life = 0;                          // +0x10 seconds
+    std::vector<float> rotationCurve;        // +0x18 turns
+    std::vector<float> sizeCurve;            // +0x30
+    std::vector<float> opacityCurve;         // +0x48
+    std::vector<cS3DVector3> colorCurve;     // +0x60 (u32 count first)
+    std::vector<float> aspectCurve;          // +0x78
+    float opacityVariance = 0;               // +0x90
+    float sizeVariance = 0;                  // +0x94
+    float rotationVariance = 0;              // +0x98
+    float mapping = 0;                       // +0x9c texture repeats per world unit (flag 8)
+    cS3DVector2 offset;                      // +0xa0 uv offset, user value
 };
 
 struct cSC4CameraParams {

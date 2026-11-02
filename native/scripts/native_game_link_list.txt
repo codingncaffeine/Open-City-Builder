@@ -348,6 +348,7 @@ src/sc4/AirportDeveloper.cpp
 src/sc4/ConstructionOccupant.cpp
 src/sc4/DemandSimulator.cpp
 src/sc4/EffectsManager.cpp
+src/sc4/DecalEffect.cpp
 src/sc4/LandfillDeveloper.cpp
 src/sc4/LandfillOccupant.cpp
 src/sc4/LotBaseTextureOccupant.cpp
@@ -658,6 +659,7 @@ src/gz/gzcom_creators/cSC4MySimAgentSimulator.cpp
 src/sc4/MySimAgentSimulator.cpp
 src/app/NativeSurfaceWaterNeighbors.cpp
 src/app/NativeShadowOverlay.cpp
+src/app/NativeDecalOverlay.cpp
 src/app/NativeCityComponents.cpp
 src/app/citycomp/cSC4Simulator.cpp
 src/app/citycomp/cSC4HistoryWarehouse.cpp
