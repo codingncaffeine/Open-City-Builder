@@ -570,8 +570,9 @@ bool cSC4COMSerializer::LoadClassObjects(std::uint32_t version) {
                                 if (std::getenv("SC4_DEBUG") && (!readOk || stream->GetError() || record->GetPosition() != position + size))
                                     std::fprintf(stderr, "LoadClassObjects: class %08x object %u read %s, error %d, consumed %d of %u\n", classId, info.expected - n, readOk ? "ok" : "FAILED", int(stream->GetError()), int(record->GetPosition()) - int(position), size);
                                 if (!whole.empty() && (!readOk || record->GetPosition() != position + size)) {
-                                    char name[64];
-                                    std::snprintf(name, sizeof name, "/tmp/payload_%08x.bin", classId);
+                                    const char* dir = std::getenv("SC4_DUMPFULL");   // a directory, or /tmp for any other value
+                                    char name[512];
+                                    std::snprintf(name, sizeof name, "%s/payload_%08x.bin", dir[0] == '/' ? dir : "/tmp", classId);
                                     if (FILE* f = std::fopen(name, "wb")) { std::fwrite(whole.data(), 1, whole.size(), f); std::fclose(f); }
                                 }
                                 if (!readOk && !peek.empty()) std::fprintf(stderr, "payload %08x:%s\n", classId, peek.c_str());
