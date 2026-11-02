@@ -30,11 +30,6 @@ struct Host : IResidentialHost {
     void PostStrikeMessage(std::uint32_t, IResidentialOccupant*, bool, std::uint32_t) override {}
     void SetStrikerGroup(bool, IResidentialOccupant*, bool) override {}
     bool CityHasOccupantManager() override { return true; }
-    bool IsBudgeted(IResidentialOccupant*, std::uint32_t) override { return false; }
-    IBudgetRecord* GetBudgetRecord(IResidentialOccupant*, std::uint32_t) override { return nullptr; }
-    void GetSchoolQueryData(IResidentialOccupant*, ResidentialQueryData&) override {}
-    void GetHospitalQueryData(IResidentialOccupant*, ResidentialQueryData&) override {}
-    void GetOccupantEfficiencyRatings(IResidentialOccupant*, float&, bool) override {}
     std::uint8_t CellWorkforce(unsigned, unsigned) override { return 0; }
     std::uint8_t GlobalWorkforce() override { return 0; }
     float CellLifeExpectancyBase(unsigned, unsigned) override { return 0.0f; }

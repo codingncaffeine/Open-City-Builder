@@ -2,6 +2,7 @@
 // they were left uninitialised (NativeCityComponents.cpp kProbeHosted): no agents, no history, so the opinion polls never moved.
 // Each host answers from the city's own components (terrain, zone manager, lot developer, growth developers, history warehouse) and
 // registers the simulator's agents with the city simulator, as the original's Init does through SL::spSimulator / SL::spMS2.
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -22,6 +23,9 @@
 #include "sc4/HistoryWarehouse.h"
 #include "sc4/LandValueSimulator.h"
 #include "sc4/Budget.h"
+#include "sc4/BuildingOccupant.h"
+#include "sc4/Lot.h"
+#include "sc4/ZoneDeveloper.h"
 #include "sc4/BudgetSimulator.h"
 #include "sc4/Occupant.h"
 #include "sc4/Ordinance.h"
@@ -395,21 +399,70 @@ private:
     const char* name_;
 };
 
+// A school, hospital or health-affecting building as the residential simulator's lists keep it (REH 4.1): one adapter per
+// occupant, holding no reference of its own (the lists AddRef the occupant through it).
+class ResidentialOccupant final : public IResidentialOccupant {
+public:
+    explicit ResidentialOccupant(cISC4Occupant* occupant) : occupant_(occupant) {}
+    cISCPropertyHolder* PropertyHolder() override { return occupant_->AsPropertyHolder(); }
+    bool IsInGroup(std::uint32_t group) override { return occupant_->IsOccupantGroup(group); }
+    std::uint32_t BuildingType() override {
+        void* raw = nullptr;
+        if (!occupant_->QueryInterface(kGZIID_cISC4BuildingOccupant, &raw) || !raw) return 0;
+        auto* building = static_cast<cISC4BuildingOccupant*>(raw);
+        const std::uint32_t type = building->GetBuildingType();
+        building->Release();
+        return type;
+    }
+    void Position(float xyz[3]) override { occupant_->GetPosition(xyz); }
+    // lot manager GetOccupantLot -> GetCenter; the port's lot map is the zone developer's
+    void LotCenter(float xyz[3]) override {
+        auto* lots = Component<cSC4ZoneDeveloper>(CityComponent::ZoneDeveloper, cSC4ZoneDeveloper::kZoneDeveloperClassId);
+        if (cSC4Lot* lot = lots ? lots->GetOccupantLot(occupant_) : nullptr) lot->GetCenter(xyz);
+        else occupant_->GetPosition(xyz);
+    }
+    void AddRef() override { occupant_->AddRef(); }
+    void Release() override { occupant_->Release(); }
+    cIGZUnknown* Object() override { return occupant_; }
+private:
+    cISC4Occupant* occupant_;
+};
+
 class ResidentialHost final : public IResidentialHost {
 public:
-    // ---- the education/health half's seams (PARTIAL: no school / hospital lists natively yet) ----
     std::uint32_t CurrentDay() override { cSC4Simulator* s = Simulator(); return s ? s->GetSimDateNumber() : 0; }
     void PostStrikeMessage(std::uint32_t message, IResidentialOccupant*, bool, std::uint32_t) override { PostCityMessage(message); }
-    void SetStrikerGroup(bool, IResidentialOccupant*, bool) override {}
+    void SetStrikerGroup(bool, IResidentialOccupant*, bool) override {}   // PARTIAL: no automata controllers for strikers yet
     bool CityHasOccupantManager() override { cSC4City* c = HostCity(); return c && c->GetComponent(CityComponent::OccupantManager); }
-    bool IsBudgeted(IResidentialOccupant*, std::uint32_t) override { return false; }
-    IBudgetRecord* GetBudgetRecord(IResidentialOccupant*, std::uint32_t) override { return nullptr; }
-    void GetSchoolQueryData(IResidentialOccupant*, ResidentialQueryData& out) override { out = {}; }
-    void GetHospitalQueryData(IResidentialOccupant*, ResidentialQueryData& out) override { out = {}; }
-    void GetOccupantEfficiencyRatings(IResidentialOccupant*, float& staff, bool) override { staff = 1.0f; }
     std::uint8_t CellWorkforce(unsigned, unsigned) override { return 0; }   // only without grids (the class answers itself)
     std::uint8_t GlobalWorkforce() override { return 0; }
     float CellLifeExpectancyBase(unsigned, unsigned) override { return 0.0f; }
+
+    // ---- the education/health half ----
+    IResidentialOccupant* Occupant(cIGZUnknown* object) override {
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(kGZIID_cISC4BuildingOccupant, &raw) || !raw) return nullptr;
+        static_cast<cIGZUnknown*>(raw)->Release();
+        raw = nullptr;
+        if (!object->QueryInterface(kGZIID_cISC4Occupant, &raw) || !raw) return nullptr;
+        auto* occupant = static_cast<cISC4Occupant*>(raw);
+        occupant->Release();
+        auto& adapter = occupants_[occupant];
+        if (!adapter) adapter = std::make_unique<ResidentialOccupant>(occupant);
+        return adapter.get();
+    }
+    cSC4BudgetSimulator* BudgetSimulator() override { return Component<cSC4BudgetSimulator>(CityComponent::BudgetSimulator, kGZCLSID_cSC4BudgetSimulator); }
+    void EnactedOrdinances(std::vector<const cISCPropertyHolder*>& out) override {
+        auto* ordinances = Component<cSC4OrdinanceSimulator>(CityComponent::OrdinanceSimulator, kGZCLSID_cSC4OrdinanceSimulator);
+        if (!ordinances) return;
+        std::uint32_t count = static_cast<std::uint32_t>(ordinances->GetOrdinanceOnCount());
+        std::vector<std::uint32_t> ids(count);
+        if (count) ordinances->GetOrdinanceOnArray(ids.data(), count);
+        ids.resize(count);
+        std::sort(ids.begin(), ids.end());
+        for (std::uint32_t id : ids)
+            if (cISC4Ordinance* ordinance = ordinances->GetOrdinanceByID(id)) out.push_back(ordinance->GetMiscProperties());
+    }
 
     // ---- the population half ----
     bool AcquireServices() override { return HostCity() != nullptr; }
@@ -454,6 +507,8 @@ public:
     float TerrainAltitude(float x, float z) override { cSTETerrain* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
     std::uint64_t BeginSlice(std::uint32_t milliseconds) override { return NowMicroseconds() + std::uint64_t{milliseconds} * 1000u; }
     bool SliceExpired(std::uint64_t slice) override { return NowMicroseconds() >= slice; }
+private:
+    std::map<cISC4Occupant*, std::unique_ptr<ResidentialOccupant>> occupants_;
 };
 
 ResidentialHost g_residential;

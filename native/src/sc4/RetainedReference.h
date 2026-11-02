@@ -24,6 +24,7 @@ public:
     }
     bool Write(cIGZOStream& stream) const { return SC4WriteGZSerializable(stream, object_.get()); }
     cIGZUnknown* get() const { return object_.get(); }
+    void reset(cIGZUnknown* object) { object_ = cRZAutoRefCount<cIGZUnknown>(object); }   // holds its own reference
 
 private:
     cRZAutoRefCount<cIGZUnknown> object_;

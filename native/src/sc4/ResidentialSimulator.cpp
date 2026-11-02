@@ -9,20 +9,85 @@
 
 #include "gz/cIGZIStream.h"
 #include "gz/cIGZOStream.h"
+#include "sc4/Budget.h"
+#include "sc4/BudgetSimulator.h"
 
 namespace sc4 {
 
 namespace {
-constexpr std::uint32_t kEducationOccupantGroupName = 0;   // groups are addressed through the host
-constexpr std::uint32_t kPropertyStaffEfficiencyEducation = 0xea5654b6, kPropertyStaffEfficiencyHealth = 0xca565486;
-constexpr std::uint32_t kPropertyBudgetEducation = 0x4a5654ba, kPropertyBudgetHealth = 0xea56549e;
+// Building recognition, budget purposes, per-building properties and curves of the two services (REH 2, 4.1, 4.13).
+struct Service {
+    bool school;
+    std::uint32_t staffPurpose, vehiclePurpose;
+    std::uint32_t recognitionGroups[2];
+    std::uint32_t served, effectiveCapacity, grade, staffRatio, capacity, radius, effect;
+    std::uint32_t ageCurve, wealthCurve, distanceCurve;
+    std::uint32_t strikeGroup;
+    std::uint32_t groups[7];
+    std::size_t groupCount;
+    // ordinance effect properties: radius, distance curve, effect, capacity, age curve, decay
+    std::uint32_t ordRadius, ordDistance, ordEffect, ordCapacity, ordAge, ordDecay;
+};
+constexpr Service kSchool{true, 0xea5654b6, 0x4a5654ba, {0x1503, 0x151b}, 0x09220161, 0xe9244b2e, 0x292453c5, 0x2a976c20,
+                          0x8922041b, 0x691b42b3, 0xa92ae446, 0xc9299662, 0xc92d7ec0, 0xe921a936, 0x1a03,
+                          {0x150f, 0x1510, 0x1514, 0x1504, 0x1505, 0x1506, 0x151b}, 7,
+                          0xa91b3af4, 0xa91b3afa, 0xa92d9d7a, 0x892d9d02, 0xc91b3b02, 0x692ef65a};
+constexpr Service kHospital{false, 0xca565486, 0xea56549e, {0x1507, 0x151c}, 0xc922015c, 0x49244b21, 0x092453cb, 0xaa976be7,
+                            0x69220415, 0x091b42a2, 0xc9299659, 0xa92ae3bd, 0xa92d9fcd, 0x2921a9cc, 0x1a02,
+                            {0x1512, 0x1513, 0x151c}, 3,
+                            0x491b3ad5, 0x891b3ae6, 0xe91b3aee, 0x092d909b, 0xe92d9db4, 0xc92d9c7a};
+const Service& Svc(bool school) { return school ? kSchool : kHospital; }
 
-// The three-point curves of the original: staff efficiency saturates at 110% for 120% funding; the other
-// curves rise from 20% at no funding.
-const std::vector<SC4Point> kCurveA = {{0.0f, 0.0f}, {100.0f, 100.0f}, {120.0f, 110.0f}};
-const std::vector<SC4Point> kCurveB = {{0.0f, 20.0f}, {100.0f, 100.0f}};
+constexpr std::uint32_t kHealthAffectingA = 0x6a19f6b5, kHealthAffectingB = 0xaa19f6ea;
+constexpr std::uint32_t kDepartmentGroup = 0x6a357b7f, kDepartmentNameGroup = 0x6a3ff01c;
+constexpr std::uint32_t kNotGraded = 0xffffffffu;
 
-bool GetResidentialFloat(const cISCPropertyHolder* e, std::uint32_t id, float& out) { return cSCPropertyHelp::GetPropertyValue(e, id, out); }
+// The code defaults of the department curves (REH 4.13).
+const std::vector<SC4Point> kEfficiencyCurve = {{0.0f, 0.0f}, {100.0f, 100.0f}, {120.0f, 110.0f}};
+const std::vector<SC4Point> kRisingCurve = {{0.0f, 20.0f}, {100.0f, 100.0f}};
+const std::vector<SC4Point> kFlatCurve = {{0.0f, 100.0f}, {100.0f, 100.0f}};
+
+// The property-pointer loader of a curve after a rebuild from its code default (foundations 4.1 "default" pattern).
+void LoadCurve(const cISCPropertyHolder* holder, std::uint32_t id, cSC4ResponseCurve& curve, const std::vector<SC4Point>& fallback) {
+    curve.SetResponseCurveData(fallback);
+    std::vector<float> values;
+    if (holder && holder->HasProperty(id) && cSCPropertyHelp::GetPropertyValue(holder, id, values)) curve.SetResponseCurveData(values.data(), values.size());
+}
+
+template <class T> T PropertyOr(const cISCPropertyHolder* holder, std::uint32_t id, T fallback) {
+    T value = fallback;
+    if (!cSCPropertyHelp::GetPropertyValue(holder, id, value)) value = fallback;
+    return value;
+}
+
+// _ftol into a u32 (the product is never negative in practice; REH 4.5 compat note)
+std::uint32_t Trunc32(float v) { return static_cast<std::uint32_t>(static_cast<std::int64_t>(v)); }
+
+template <class T> T TractOr0(const cSC4SimGrid<T>* grid, std::int32_t x, std::int32_t z) {
+    return grid && grid->TractIsInBounds(x, z) ? grid->GetTractValue(x, z) : T{};   // a smaller grid reads 0 (REH 4.6 choice)
+}
+
+// GetTractsInRadius (0x005e5200): x-major, the centre advanced by += w, the upper clamp unsigned.
+void TractsInRadius(float px, float pz, float r, float w, std::int32_t countX, std::int32_t countZ,
+                    cSC4ResidentialSimulator::TractList& out) {
+    const float inv = 1.0f / w;
+    std::int32_t x0 = static_cast<std::int32_t>((px - r) * inv), x1 = static_cast<std::int32_t>((px + r) * inv);
+    std::int32_t z0 = static_cast<std::int32_t>((pz - r) * inv), z1 = static_cast<std::int32_t>((pz + r) * inv);
+    if (x0 < 0) x0 = 0;
+    if (static_cast<std::uint32_t>(x1) >= static_cast<std::uint32_t>(countX)) x1 = countX - 1;
+    if (z0 < 0) z0 = 0;
+    if (static_cast<std::uint32_t>(z1) >= static_cast<std::uint32_t>(countZ)) z1 = countZ - 1;
+    const float rr = r * r;
+    float cx = static_cast<float>(x0) * w + w * 0.5f;
+    for (std::int32_t x = x0; x <= x1; ++x, cx += w) {
+        float cz = static_cast<float>(z0) * w + w * 0.5f;
+        for (std::int32_t z = z0; z <= z1; ++z, cz += w) {
+            const float dx = cx - px, dz = cz - pz;
+            const float dx2 = dx * dx;
+            if (dz * dz + dx2 <= rr) out.emplace_back(x, z);
+        }
+    }
+}
 }  // namespace
 
 cSC4ResidentialSimulator::cSC4ResidentialSimulator(IResidentialHost* host, cRZRandom* random)
@@ -44,166 +109,757 @@ bool cSC4ResidentialSimulator::QueryInterface(std::uint32_t iid, void** out) {
 std::uint32_t cSC4ResidentialSimulator::Release() {
     if (refCount_ < 2) {
         Shutdown();
+        ReleaseBuildingLists();
         delete this;
         return 0;
     }
     return --refCount_;
 }
 
+// ---- tuning (REH 4.13) ------------------------------------------------------------------------------------
 
-void cSC4ResidentialSimulator::SetDefaultCurves(DepartmentData& d, const std::vector<SC4Point>& a, const std::vector<SC4Point>& b) {
-    d.staffCurve.SetResponseCurveData(a);
-    d.strikeChance.SetResponseCurveData(b);
-    d.thirdCurve.SetResponseCurveData(b);
+void cSC4ResidentialSimulator::SetDefaultCurves(DepartmentData& d) {
+    d.efficiencyCurve.SetResponseCurveData(kEfficiencyCurve);
+    d.coverageCurve.SetResponseCurveData(kRisingCurve);
+    d.strikeCurve.SetResponseCurveData(kRisingCurve);
     d.minimumFunding = 0.6f;
-    d.strikeThreshold = 1.2f;
-    d.value08 = 0.2f;
+    d.initialFunding = 0.25f;
+    d.maxFunding = 1.2f;
+    d.strikeEfficiency = 0.2f;
     d.strikeDays = 10;
-    d.strikeEndFunding = 0.9f;
-    d.value90 = 0.25f;
+    d.minGradeToEnd = 0.9f;
     d.value94 = 100.0f;
     d.onStrike = false;
     d.strikeStartDay = 0;
 }
 
 void cSC4ResidentialSimulator::ReadSimulatorTunableValues(const cISCPropertyHolder* exemplar) {
-    SetDefaultCurves(health_, kCurveA, kCurveB);
+    SetDefaultCurves(health_);
     health_.messageId = kMessageHealthStrike;
-    SetDefaultCurves(education_, kCurveA, kCurveB);
+    SetDefaultCurves(education_);
     education_.messageId = kMessageEducationStrike;
-    for (cSC4ResponseCurve& curve : wealthCurves) curve.SetResponseCurveData(kCurveA);
+    for (cSC4ResponseCurve& curve : wealthCurves) curve.SetResponseCurveData(kEfficiencyCurve);
     if (!exemplar) return;
 
     using H = cSCPropertyHelp;
-    const auto loadCurve = [&](cSC4ResponseCurve& curve, std::uint32_t id) {
-        std::vector<float> values;
-        if (exemplar->HasProperty(id) && H::GetPropertyValue(exemplar, id, values)) curve.SetResponseCurveData(values.data(), values.size());
+    struct Ids { std::uint32_t obsolete, initMax, strikeEfficiency, duration, minGrade, efficiency, coverage, strike; };
+    const auto department = [&](DepartmentData& d, const Ids& id, const std::vector<SC4Point>& coverageDefault) {
+        float f = 0;
+        if (H::GetPropertyValue(exemplar, id.obsolete, f)) d.minimumFunding = f * 0.01f;
+        std::vector<float> pair;
+        if (H::GetPropertyValue(exemplar, id.initMax, pair) && pair.size() > 1) {
+            d.initialFunding = pair[0] * 0.01f;
+            d.maxFunding = pair[1] * 0.01f;
+        }
+        if (H::GetPropertyValue(exemplar, id.strikeEfficiency, f)) d.strikeEfficiency = f * 0.01f;
+        std::int32_t days = 0;
+        if (H::GetPropertyValue(exemplar, id.duration, days)) d.strikeDays = static_cast<std::uint32_t>(days);
+        SC4Percentage percentage;
+        if (H::GetPropertyValue(exemplar, id.minGrade, percentage)) d.minGradeToEnd = percentage.value;
+        LoadCurve(exemplar, id.efficiency, d.efficiencyCurve, kEfficiencyCurve);
+        LoadCurve(exemplar, id.coverage, d.coverageCurve, coverageDefault);
+        LoadCurve(exemplar, id.strike, d.strikeCurve, kRisingCurve);
     };
-    float f = 0;
-    std::vector<float> pair;
-    SC4Percentage percentage;
+    department(health_, {0xe918946f, 0xa9189479, 0x89189482, 0x8918948b, 0x89189495, 0x2918949e, 0x0a53b2f9, 0x691894a4}, kRisingCurve);
+    department(education_, {0xc91894a8, 0x891894ad, 0xe91894b3, 0xa91894bc, 0x691894c0, 0x691894c6, 0xea53b30f, 0xc91894cb}, kRisingCurve);
 
-    // health department
-    if (GetResidentialFloat(exemplar, 0xe918946f, f)) health_.minimumFunding = f * 0.01f;
-    loadCurve(health_.staffCurve, 0x2918949e);
-    loadCurve(health_.thirdCurve, 0x0a53b2f9);
-    if (H::GetPropertyValue(exemplar, 0xa9189479, pair) && pair.size() > 1) {
-        health_.value90 = pair[0] * 0.01f;
-        health_.strikeThreshold = pair[1] * 0.01f;
-    }
-    if (GetResidentialFloat(exemplar, 0x89189482, f)) health_.value08 = f * 0.01f;
-    std::int32_t integer = 0;
-    if (H::GetPropertyValue(exemplar, 0x8918948b, integer)) health_.strikeDays = static_cast<std::uint32_t>(integer);
-    if (H::GetPropertyValue(exemplar, 0x89189495, percentage)) health_.strikeEndFunding = percentage.value;
-    loadCurve(health_.strikeChance, 0x691894a4);
-
-    // education department
-    if (GetResidentialFloat(exemplar, 0xc91894a8, f)) education_.minimumFunding = f * 0.01f;
-    loadCurve(education_.staffCurve, 0x691894c6);
-    loadCurve(education_.thirdCurve, 0xea53b30f);
-    if (H::GetPropertyValue(exemplar, 0x891894ad, pair) && pair.size() > 1) {
-        education_.value90 = pair[0] * 0.01f;
-        education_.strikeThreshold = pair[1] * 0.01f;
-    }
-    if (GetResidentialFloat(exemplar, 0xe91894b3, f)) education_.value08 = f * 0.01f;
-    if (H::GetPropertyValue(exemplar, 0xa91894bc, integer)) education_.strikeDays = static_cast<std::uint32_t>(integer);
-    if (H::GetPropertyValue(exemplar, 0x691894c0, percentage)) education_.strikeEndFunding = percentage.value;
-    loadCurve(education_.strikeChance, 0xc91894cb);
-
-    for (std::size_t i = 0; i < wealthCurves.size(); ++i) loadCurve(wealthCurves[i], 0xea540621u + std::uint32_t(i));
-    value520 = value524 = 30;
-    H::GetPropertyValue(exemplar, 0x8a891421, value520);
-    H::GetPropertyValue(exemplar, 0x8a89142a, value524);
-    value568 = 1.1f;
-    H::GetPropertyValue(exemplar, 0x6a9f6edd, value568);
-    value560 = value564 = 10.0f;
-    H::GetPropertyValue(exemplar, 0x4aa84161, value560);
-    H::GetPropertyValue(exemplar, 0x2aa84164, value564);
-    H::GetPropertyValue(exemplar, 0xec43826b, list528);
-    H::GetPropertyValue(exemplar, 0xac43826d, list540);
+    for (std::size_t i = 0; i < wealthCurves.size(); ++i) LoadCurve(exemplar, 0xea540621u + std::uint32_t(i), wealthCurves[i], kEfficiencyCurve);
+    // set only when the exemplar exists; the values here are that branch's code defaults
+    schoolStaffDivisor = hospitalStaffDivisor = 30;
+    H::GetPropertyValue(exemplar, 0x8a891421, schoolStaffDivisor);
+    H::GetPropertyValue(exemplar, 0x8a89142a, hospitalStaffDivisor);
+    coverageSlop = 1.1f;
+    H::GetPropertyValue(exemplar, 0x6a9f6edd, coverageSlop);
+    maxEQBoost = maxHQBoost = 10.0f;
+    H::GetPropertyValue(exemplar, 0x4aa84161, maxEQBoost);
+    H::GetPropertyValue(exemplar, 0x2aa84164, maxHQBoost);
+    schoolChunks.clear();
+    hospitalChunks.clear();
+    H::GetPropertyValue(exemplar, 0xec43826b, schoolChunks);
+    H::GetPropertyValue(exemplar, 0xac43826d, hospitalChunks);
 }
 
-// ---- building lists --------------------------------------------------------------------------------------
+// ---- departments and budget items (REH 4.2) -----------------------------------------------------------------
+
+// budget.GetBudgetItemForPurpose; false without a budget simulator. The departments key locally funded objects by the purpose id,
+// the ChangeBudgetItem* calls take the item's index (BudgetItem::purpose).
+bool cSC4ResidentialSimulator::FindBudgetItem(cISCPropertyHolder* holder, std::uint32_t purpose, BudgetItem& item) const {
+    cSC4BudgetSimulator* budget = host_ ? host_->BudgetSimulator() : nullptr;
+    return budget && holder && budget->GetBudgetItemForPurpose(holder, purpose, item);
+}
+
+void cSC4ResidentialSimulator::CreateDepartments() {
+    cSC4BudgetSimulator* budget = host_ ? host_->BudgetSimulator() : nullptr;
+    if (!budget) return;
+    struct Spec { std::uint32_t id, name; const DepartmentData* data; bool secondary; };
+    const Spec specs[4] = {{0x09188f42, 0xca493a56, &health_, false}, {0xaa538cb3, 0xca538d98, &health_, true},
+                           {0x09188f4c, 0x6a493a66, &education_, false}, {0x4a538cc6, 0x8a538dac, &education_, true}};
+    for (int k = 0; k < 4; ++k) {
+        if (departmentRefs_[k].get()) continue;
+        cSC4DepartmentBudget* department = budget->GetDepartmentBudget(specs[k].id);
+        if (!department) {
+            department = budget->CreateDepartmentBudget(specs[k].id, kDepartmentGroup);
+            department->SetDepartmentName(kDepartmentNameGroup, specs[k].name);
+            department->SetMaxAllowedFundingPercentage(specs[k].data->maxFunding);
+            department->SetFundingPercentage(specs[k].secondary ? 1.0f : specs[k].data->initialFunding, 0);
+            if (specs[k].secondary) department->CreateLineItem(1, true)->SetDisplayFlag(1, false);
+        }
+        departmentRefs_[k].reset(static_cast<cIGZSerializable*>(department));
+    }
+}
+
+// The budget part of DoBuildingChanged for a building with the staff item (REH 4.1 step 1); false = a null department, which
+// aborts the whole call.
+bool cSC4ResidentialSimulator::RegisterWithDepartment(IResidentialOccupant* building, bool added, std::uint32_t staffPurpose,
+                                                      std::uint32_t vehiclePurpose) {
+    cSC4BudgetSimulator* budget = host_->BudgetSimulator();
+    cISCPropertyHolder* holder = building->PropertyHolder();
+    BudgetItem item;
+    FindBudgetItem(holder, staffPurpose, item);
+    std::uint32_t line = static_cast<std::uint32_t>(item.lineItemId);
+    if (line == 0) {
+        line = building->BuildingType();
+        budget->ChangeBudgetItemLine(holder, static_cast<int>(item.purpose), line);
+    }
+    cSC4DepartmentBudget* department = budget->GetDepartmentBudget(static_cast<std::uint32_t>(item.departmentId));
+    if (!department) return false;
+    if (added) {
+        if (!department->GetLineItem(line)) department->CreateLineItemForBuildingType(line, true)->SetDisplayFlag(2, true);
+        department->AddLocallyFundedObject(holder, staffPurpose);
+    } else {
+        department->RemoveLocallyFundedObject(holder, staffPurpose);
+    }
+    // the line item's building count; the original fetches it with no null check on removal (choice: skip when missing)
+    if (cSC4LineItem* lineItem = department->GetLineItem(line)) {
+        const std::int64_t count = lineItem->GetSecondaryInfoField() + (added ? 1 : -1);
+        lineItem->SetSecondaryInfoField(count);
+        if (!added && count == 0) department->RemoveLineItem(line);
+    }
+    BudgetItem vehicle;
+    if (FindBudgetItem(holder, vehiclePurpose, vehicle)) {
+        cSC4DepartmentBudget* second = budget->GetDepartmentBudget(static_cast<std::uint32_t>(vehicle.departmentId));
+        if (!second) return false;
+        if (added) second->AddLocallyFundedObject(holder, vehiclePurpose);
+        else second->RemoveLocallyFundedObject(holder, vehiclePurpose);
+    }
+    return true;
+}
+
+// slot 20: a = the building's local funding when it is locally funded, else the department's; b the same for the vehicle item.
+// No staff item -> 1.0 / 1.0; an item whose department is missing leaves the outputs as the caller set them (RG10).
+void cSC4ResidentialSimulator::GetOccupantFundingPercentages(IResidentialOccupant* occupant, float& staff, float& vehicle, bool school) {
+    const Service& s = Svc(school);
+    cISCPropertyHolder* holder = occupant->PropertyHolder();
+    BudgetItem item;
+    if (!FindBudgetItem(holder, s.staffPurpose, item)) {
+        staff = vehicle = 1.0f;
+        return;
+    }
+    cSC4BudgetSimulator* budget = host_->BudgetSimulator();
+    const auto funding = [&](const BudgetItem& it, std::uint32_t purpose, float& out) {
+        cSC4DepartmentBudget* department = budget->GetDepartmentBudget(static_cast<std::uint32_t>(it.departmentId));
+        if (!department) return false;
+        out = department->IsLocallyFundedObjectInDepartment(holder, purpose) ? it.localFunding : department->GetFundingPercentage();
+        return true;
+    };
+    if (!funding(item, s.staffPurpose, staff)) return;
+    BudgetItem second;
+    if (!FindBudgetItem(holder, s.vehiclePurpose, second)) {
+        vehicle = 1.0f;
+        return;
+    }
+    funding(second, s.vehiclePurpose, vehicle);
+}
+
+// slot 19: SetLocalFundingPercent for the staff item, then the vehicle item.
+void cSC4ResidentialSimulator::SetOccupantFundingPercentages(IResidentialOccupant* occupant, float staff, float vehicle, bool school) {
+    const Service& s = Svc(school);
+    cISCPropertyHolder* holder = occupant->PropertyHolder();
+    for (auto [purpose, value] : {std::pair{s.staffPurpose, staff}, std::pair{s.vehiclePurpose, vehicle}}) {
+        BudgetItem item;
+        if (!FindBudgetItem(holder, purpose, item)) {
+            fundingChanged_ = true;
+            return;
+        }
+        cSC4DepartmentBudget* department = host_->BudgetSimulator()->GetDepartmentBudget(static_cast<std::uint32_t>(item.departmentId));
+        if (!department) return;
+        department->SetLocalFundingPercent(holder, value, purpose);
+    }
+    fundingChanged_ = true;
+}
+
+void cSC4ResidentialSimulator::GetOccupantEfficiencyRatings(IResidentialOccupant* occupant, float& e1, float& e2, bool school,
+                                                           bool ignoreStrike) {
+    e1 = e2 = 1.0f;
+    float a = 0.0f, b = 0.0f;
+    GetOccupantFundingPercentages(occupant, a, b, school);
+    BudgetItem item;
+    if (!FindBudgetItem(occupant->PropertyHolder(), Svc(school).staffPurpose, item)) return;
+    const DepartmentData& d = school ? education_ : health_;
+    const std::uint32_t strike = PropertyOr<std::uint32_t>(occupant->PropertyHolder(), kResidentialStrikeStartDate, 0);
+    if (!ignoreStrike && strike != 0) e1 = a * d.strikeEfficiency;
+    else e1 = d.efficiencyCurve.GetOutputValue(a * 100.0f) * 0.01f;
+    e2 = d.coverageCurve.GetOutputValue(b * 100.0f) * 0.01f;
+}
+
+float cSC4ResidentialSimulator::GetBaseStaffEfficiency(IResidentialOccupant* occupant, bool school) {
+    float a = 0.0f, b = 0.0f;
+    GetOccupantFundingPercentages(occupant, a, b, school);
+    BudgetItem item;
+    if (!FindBudgetItem(occupant->PropertyHolder(), Svc(school).staffPurpose, item)) return a;
+    return (school ? education_ : health_).efficiencyCurve.GetOutputValue(a * 100.0f) * 0.01f;
+}
+
+bool cSC4ResidentialSimulator::GetAutoBudget(const IResidentialOccupant* occupant) {
+    return PropertyOr<bool>(const_cast<IResidentialOccupant*>(occupant)->PropertyHolder(), kOccupantAutoBudget, false);
+}
+
+void cSC4ResidentialSimulator::SetAutoBudget(IResidentialOccupant* occupant, bool value) {
+    cSCPropertyHelp::SetPropertyValue(occupant->PropertyHolder(), kOccupantAutoBudget, value);
+}
+
+// ---- buildings (REH 4.1, residential.md 5.8) -------------------------------------------------------------------
+
+void cSC4ResidentialSimulator::DoBuildingChanged(IResidentialOccupant* building, bool added) {
+    if (!building) return;
+    cISCPropertyHolder* holder = building->PropertyHolder();
+    if (!holder) return;
+    const auto erase = [](OccupantList& list, IResidentialOccupant* o) {
+        auto it = std::find(list.begin(), list.end(), o);
+        if (it == list.end()) return false;
+        list.erase(it);
+        return true;
+    };
+    for (bool school : {false, true}) {   // the hospital test runs first; a building may pass both
+        const Service& s = Svc(school);
+        BudgetItem item;
+        bool member;
+        if (FindBudgetItem(holder, s.staffPurpose, item)) {
+            if (!RegisterWithDepartment(building, added, s.staffPurpose, s.vehiclePurpose)) return;
+            member = true;
+        } else {
+            member = building->IsInGroup(s.recognitionGroups[0]) || building->IsInGroup(s.recognitionGroups[1]);
+        }
+        if (!member) continue;
+        OccupantList& pending = school ? pendingSchools_ : pendingHospitals_;
+        if (added) {
+            cSCPropertyHelp::SetPropertyValue(holder, s.served, kNotGraded);
+            cSCPropertyHelp::SetPropertyValue(holder, s.grade, 1.0f);
+            cSCPropertyHelp::SetPropertyValue(holder, s.staffRatio, 1.0f);
+            // a missing capacity writes whatever the stack held (quirk); the port writes 0
+            cSCPropertyHelp::SetPropertyValue(holder, s.effectiveCapacity, PropertyOr<std::uint32_t>(holder, s.capacity, 0));
+            building->AddRef();
+            pending.push_back(building);
+        } else {
+            bool erased = false;
+            for (OccupantList& list : school ? schools_ : hospitals_)
+                if ((erased = erase(list, building))) break;
+            if (!erased) erased = erase(pending, building);
+            if (erased) building->Release();
+        }
+        fundingChanged_ = true;
+    }
+    float a = 0.0f, b = 0.0f;
+    if (cSCPropertyHelp::GetPropertyValue(holder, kHealthAffectingA, a) && cSCPropertyHelp::GetPropertyValue(holder, kHealthAffectingB, b) &&
+        a > 0.0f && b > 0.0f) {
+        if (added) {
+            building->AddRef();
+            pendingHealthAffecting_.push_back(building);
+        } else if (erase(healthAffecting_, building) || erase(pendingHealthAffecting_, building)) {
+            building->Release();
+        }
+        fundingChanged_ = true;
+    }
+}
+
+// State 0: each pending school / hospital goes to the first group it is in (none: dropped and leaked, the quirk); the pending
+// health-affecting buildings move to the end of their list.
+void cSC4ResidentialSimulator::DistributePendingBuildings() {
+    for (bool school : {true, false}) {
+        const Service& s = Svc(school);
+        std::vector<OccupantList>& lists = school ? schools_ : hospitals_;
+        OccupantList& pending = school ? pendingSchools_ : pendingHospitals_;
+        for (IResidentialOccupant* building : pending) {
+            for (std::size_t k = 0; k < s.groupCount && k < lists.size(); ++k) {
+                if (building->IsInGroup(s.groups[k])) {
+                    lists[k].push_back(building);
+                    break;
+                }
+            }
+        }
+        pending.clear();
+    }
+    healthAffecting_.splice(healthAffecting_.end(), pendingHealthAffecting_);
+}
 
 int cSC4ResidentialSimulator::GetSchoolBuildingCount() const {
-    int n = int(extraSchools_.size());
+    int n = int(pendingSchools_.size());
     for (const auto& list : schools_) n += int(list.size());
     return n;
 }
 
 int cSC4ResidentialSimulator::GetHospitalBuildingCount() const {
-    int n = int(extraHospitals_.size());
+    int n = int(pendingHospitals_.size());
     for (const auto& list : hospitals_) n += int(list.size());
     return n;
 }
 
-void cSC4ResidentialSimulator::GetBuildings(const std::list<IResidentialOccupant*>& source, std::list<IResidentialOccupant*>& out,
-                                            const std::vector<std::uint32_t>* groups) {
-    for (IResidentialOccupant* occupant : source) {
-        if (!groups) {
-            out.push_back(occupant);
-            continue;
+namespace {
+// GetBuildings: the group lists whose group id is in `groups` (null = all, empty = none), AddRef each.
+void AppendGroupLists(const std::vector<std::list<IResidentialOccupant*>>& lists, const std::uint32_t* ids, std::size_t idCount,
+                      std::list<IResidentialOccupant*>& out, const std::vector<std::uint32_t>* groups) {
+    for (std::size_t k = 0; k < lists.size(); ++k) {
+        if (groups && (k >= idCount || std::find(groups->begin(), groups->end(), ids[k]) == groups->end())) continue;
+        for (IResidentialOccupant* o : lists[k]) {
+            o->AddRef();
+            out.push_back(o);
         }
-        for (std::uint32_t group : *groups) {
-            if (occupant->IsInGroup(group)) {
-                out.push_back(occupant);
-                break;
+    }
+}
+void AppendList(const std::list<IResidentialOccupant*>& list, std::list<IResidentialOccupant*>& out) {
+    for (IResidentialOccupant* o : list) {
+        o->AddRef();
+        out.push_back(o);
+    }
+}
+}  // namespace
+
+void cSC4ResidentialSimulator::GetSchoolBuildings(OccupantList& out, const std::vector<std::uint32_t>* groups) const {
+    AppendGroupLists(schools_, kSchool.groups, kSchool.groupCount, out, groups);
+    AppendList(pendingSchools_, out);
+}
+
+void cSC4ResidentialSimulator::GetHospitalBuildings(OccupantList& out, const std::vector<std::uint32_t>* groups) const {
+    AppendGroupLists(hospitals_, kHospital.groups, kHospital.groupCount, out, groups);
+    AppendList(pendingHospitals_, out);
+}
+
+void cSC4ResidentialSimulator::GetHealthAffectingBuildings(OccupantList& out) const {
+    AppendList(healthAffecting_, out);
+    AppendList(pendingHealthAffecting_, out);
+}
+
+void cSC4ResidentialSimulator::ReleaseBuildingLists() {
+    const auto drop = [](OccupantList& list) {
+        for (IResidentialOccupant* o : list) o->Release();
+        list.clear();
+    };
+    for (OccupantList& list : schools_) drop(list);
+    for (OccupantList& list : hospitals_) drop(list);
+    drop(pendingSchools_);
+    drop(pendingHospitals_);
+    drop(healthAffecting_);
+    drop(pendingHealthAffecting_);
+}
+
+// A loaded record's occupant references become the lists once the host can name the buildings (Init).
+void cSC4ResidentialSimulator::AdoptFileLists() {
+    if (fileLists_.empty() || !host_) return;
+    std::vector<OccupantList*> targets = {&pendingSchools_, &pendingHospitals_, &pendingHealthAffecting_};
+    for (OccupantList& list : schools_) targets.push_back(&list);
+    for (OccupantList& list : hospitals_) targets.push_back(&list);
+    targets.push_back(&healthAffecting_);
+    for (std::size_t i = 0; i < fileLists_.size() && i < targets.size(); ++i) {
+        for (const cRetainedReference& ref : fileLists_[i]) {
+            IResidentialOccupant* o = host_->Occupant(ref.get());
+            if (!o) continue;
+            o->AddRef();
+            targets[i]->push_back(o);
+        }
+    }
+    fileLists_.clear();
+    if (std::getenv("SC4_RESDEBUG"))
+        std::fprintf(stderr, "residential: adopted %d schools, %d hospitals, %zu health-affecting\n", GetSchoolBuildingCount(),
+                     GetHospitalBuildingCount(), healthAffecting_.size() + pendingHealthAffecting_.size());
+}
+
+// ---- ordinance effects (REH 4.3) --------------------------------------------------------------------------------
+
+void cSC4ResidentialSimulator::GetOrdinanceEffects() {
+    schoolEffects_.clear();
+    healthEffects_.clear();
+    if (!host_) return;
+    std::vector<const cISCPropertyHolder*> ordinances;
+    host_->EnactedOrdinances(ordinances);
+    for (const cISCPropertyHolder* properties : ordinances) {
+        if (!properties) continue;
+        for (bool school : {true, false}) {
+            const Service& s = Svc(school);
+            OrdinanceEffect effect;
+            bool present = false;
+            const auto factor = [&](std::uint32_t id, float& out) {
+                float v;
+                if (cSCPropertyHelp::GetPropertyValue(properties, id, v)) {
+                    out = v * 0.01f;
+                    present = true;
+                }
+            };
+            const auto curve = [&](std::uint32_t id, cSC4ResponseCurve& out) {
+                LoadCurve(properties, id, out, kFlatCurve);
+                present = present || properties->HasProperty(id);
+            };
+            factor(s.ordRadius, effect.radiusFactor);
+            curve(s.ordDistance, effect.distanceCurve);
+            factor(s.ordEffect, effect.effectFactor);
+            factor(s.ordCapacity, effect.capacityFactor);
+            curve(s.ordAge, effect.ageCurve);
+            factor(s.ordDecay, effect.decayFactor);
+            if (present) (school ? schoolEffects_ : healthEffects_).push_back(std::move(effect));
+        }
+    }
+}
+
+// m1 = product of the radius factors, m2 capacity, m3 effect (the group filter is never filled: every element applies).
+void cSC4ResidentialSimulator::OrdinanceModifiers(bool school, float& radius, float& capacity, float& effect) const {
+    radius = capacity = effect = 1.0f;
+    for (const OrdinanceEffect& e : OrdinanceEffects(school)) {
+        radius *= e.radiusFactor;
+        capacity *= e.capacityFactor;
+        effect *= e.effectFactor;
+    }
+}
+
+// ---- coverage (REH 4.4) -------------------------------------------------------------------------------------------
+
+// The shipped chunk arrays have one entry per group; a missing entry or 0 (the original indexes out of range or divides by zero)
+// gives the building no coverage units.
+std::uint32_t cSC4ResidentialSimulator::Chunk(bool school, std::size_t group) const {
+    const std::vector<std::uint32_t>& chunks = school ? schoolChunks : hospitalChunks;
+    return group < chunks.size() ? chunks[group] : 0;
+}
+
+// The geometry is the grid's: the coverage grid in states 5 / 7, the R$ population grid when grading (both tract size P).
+void cSC4ResidentialSimulator::GetCoveredTractList(IResidentialOccupant* occupant, float radius, float tractWidth, std::int32_t countX,
+                                                   std::int32_t countZ, TractList& tracts) const {
+    float centre[3];
+    occupant->LotCenter(centre);
+    TractsInRadius(centre[0], centre[2], radius * coverageSlop, tractWidth, countX, countZ, tracts);
+}
+
+void cSC4ResidentialSimulator::UpdateCoverageMap(bool school, std::size_t group) {
+    const Service& s = Svc(school);
+    cSC4SimGrid<std::uint8_t>* grid = GetCoverageMap(school, group);
+    const std::vector<OccupantList>& lists = school ? schools_ : hospitals_;
+    if (!grid || group >= lists.size()) return;
+    grid->SetTractValues(0);
+    const std::uint32_t chunk = Chunk(school, group);
+    std::int32_t& served = school ? schoolCovered_ : hospitalCovered_;
+    for (IResidentialOccupant* occupant : lists[group]) {
+        float e1, e2;
+        GetOccupantEfficiencyRatings(occupant, e1, e2, school, false);
+        float m = e2;
+        for (const OrdinanceEffect& e : OrdinanceEffects(school)) m *= e.radiusFactor;
+        // MarkBuildingCoverage
+        cISCPropertyHolder* holder = occupant->PropertyHolder();
+        float radius;
+        std::uint32_t capacity;
+        if (!cSCPropertyHelp::GetPropertyValue(holder, s.radius, radius) || !cSCPropertyHelp::GetPropertyValue(holder, s.capacity, capacity)) continue;
+        const float r = radius * m;
+        if (!(r > 0.0f)) continue;
+        const std::uint32_t units = chunk ? capacity / chunk : 0;
+        TractList tracts;
+        GetCoveredTractList(occupant, r, grid->GetTractWidthX(), grid->GetTractCountX(), grid->GetTractCountZ(), tracts);
+        for (auto [x, z] : tracts) {
+            const std::uint8_t old = grid->GetTractValue(x, z);
+            grid->SetTractValue(x, z, ((old + units) & 0xffffu) > 255u ? 255 : static_cast<std::uint8_t>(old + units));
+            if (old != 0) continue;
+            bool lower = false;
+            for (std::size_t j = 0; j < group && !lower; ++j) lower = TractOr0(GetCoverageMap(school, j), x, z) != 0;
+            if (lower) continue;
+            for (int w = 0; w < 3; ++w) served += TractOr0(populationGrids_[w].get(), x, z);
+        }
+    }
+}
+
+// ---- grading and the EQ / HQ boost (REH 4.5, 4.6) ---------------------------------------------------------------------
+
+void cSC4ResidentialSimulator::LoadBuildingCurves(IResidentialOccupant* occupant, bool school, CurveSet& curves) const {
+    const Service& s = Svc(school);
+    const cISCPropertyHolder* holder = occupant->PropertyHolder();
+    LoadCurve(holder, s.ageCurve, curves.age, kFlatCurve);
+    LoadCurve(holder, s.wealthCurve, curves.wealth, kFlatCurve);
+    LoadCurve(holder, s.distanceCurve, curves.distance, kFlatCurve);
+}
+
+std::uint32_t cSC4ResidentialSimulator::GetPopulationServed(IResidentialOccupant* occupant, float radius, std::uint32_t capacity,
+                                                            const CurveSet& curves, bool school, const cSC4SimGrid<std::uint8_t>& coverage,
+                                                            std::uint32_t chunk, const TractList& tracts) const {
+    if (!(radius > 0.0f)) return 0;
+    float position[3];
+    occupant->Position(position);   // the occupant's own position, no lot lookup
+    std::int32_t tx = 0, tz = 0;
+    populationGrids_[0]->PositionToTract(position[0], position[2], tx, tz);
+    const std::uint32_t units = chunk ? capacity / chunk : 0;
+    float sum = 0.0f;
+    for (auto [x, z] : tracts) {
+        const std::uint8_t n = TractOr0(&coverage, x, z);
+        if (n == 0) continue;
+        const float dx = static_cast<float>(static_cast<std::uint32_t>(tx - x));
+        const float dz2 = static_cast<float>(static_cast<std::uint32_t>((tz - z) * (tz - z)));
+        const float d = std::sqrt(dz2 + dx * dx);
+        const float xd = d / radius * 100.0f;
+        float md = curves.distance.GetOutputValue(xd) * 0.01f;
+        const float age = static_cast<float>(TractOr0(ageGrid_.get(), x, z));
+        float ma = curves.age.GetOutputValue(age) * 0.01f;
+        for (const OrdinanceEffect& e : OrdinanceEffects(school)) {
+            md = (e.distanceCurve.GetOutputValue(xd) * md) * 0.01f;
+            ma = (e.ageCurve.GetOutputValue(age) * ma) * 0.01f;
+        }
+        for (int w = 0; w < 3; ++w) {
+            const float share = (static_cast<float>(units) / static_cast<float>(n)) * static_cast<float>(TractOr0(populationGrids_[w].get(), x, z));
+            sum = sum + (((curves.wealth.GetOutputValue(static_cast<float>(w)) * 0.01f) * share) * ma) * md;
+        }
+    }
+    return static_cast<std::uint32_t>(std::nearbyint(sum));   // round half to even (the + 12582912 trick)
+}
+
+// AddRadiusEffectWithCurves (0x005e48f0) on one wealth's EQ or HQ grid. The geometry is the target's; a tract with no population
+// is skipped WITHOUT advancing the z centre (quirk), so the rest of that column uses a centre one tract too far back.
+void cSC4ResidentialSimulator::AddRadiusEffect(cSC4SimGrid<float>& target, int wealth, const std::vector<const cSC4ResponseCurve*>& ageCurves,
+                                               float px, float pz, float radius, const std::vector<const cSC4ResponseCurve*>& distanceCurves,
+                                               float value, float maximum, std::uint32_t units, const cSC4SimGrid<std::uint8_t>& coverage,
+                                               float& total) const {
+    const float w = target.GetTractWidthX();
+    const std::int32_t size = target.GetTractSize(), countX = target.GetTractCountX(), countZ = target.GetTractCountZ();
+    const float inv = 1.0f / w;
+    std::int32_t x0 = static_cast<std::int32_t>((px - radius) * inv), x1 = static_cast<std::int32_t>((px + radius) * inv);
+    std::int32_t z0 = static_cast<std::int32_t>((pz - radius) * inv), z1 = static_cast<std::int32_t>((pz + radius) * inv);
+    if (x0 < 0) x0 = 0;
+    if (x1 >= countX) x1 = countX - 1;
+    if (z0 < 0) z0 = 0;
+    if (z1 >= countZ) z1 = countZ - 1;
+    const cSC4SimGrid<std::uint16_t>* population = populationGrids_[wealth].get();
+    const cSC4SimGrid<std::uint8_t>* age = ageGrid_.get();
+    float cx = static_cast<float>(x0) * w + w * 0.5f;
+    for (std::int32_t x = x0; x <= x1; ++x, cx += w) {
+        float cz = static_cast<float>(z0) * w + w * 0.5f;
+        for (std::int32_t z = z0; z <= z1; ++z) {
+            const std::uint16_t pop = TractOr0(population, x, z);
+            if (pop == 0) continue;
+            const float dx = cx - px, dz = cz - pz;
+            const float d = std::sqrt(dz * dz + dx * dx);
+            if (!(d <= radius)) {
+                cz += w;
+                continue;
             }
+            float mult = 1.0f;
+            const float xd = 1.0f - (radius - d) / radius;
+            for (const cSC4ResponseCurve* curve : distanceCurves) mult = (mult * curve->GetOutputValue(xd)) * 0.01f;
+            if (age) {
+                const std::int32_t ax = (x * size) >> age->GetTractShift(), az = (z * size) >> age->GetTractShift();
+                const float a = static_cast<float>(TractOr0(age, ax, az));
+                for (const cSC4ResponseCurve* curve : ageCurves) mult = (mult * curve->GetOutputValue(a)) * 0.01f;
+            }
+            float eff = mult * value;
+            std::uint32_t people = pop;
+            const std::uint8_t n = TractOr0(&coverage, x, z);
+            if (n != 0) {
+                const float k = static_cast<float>(units) / static_cast<float>(n);
+                eff = eff * k;
+                people = Trunc32(static_cast<float>(pop) * k);
+            }
+            total = total + static_cast<float>(people & 0xffffu) * eff;
+            const float next = target.GetTractValue(x, z) + eff;
+            target.SetTractValue(x, z, next > maximum ? maximum : next);
+            cz += w;
         }
     }
 }
 
-void cSC4ResidentialSimulator::GetSchoolBuildings(std::list<IResidentialOccupant*>& out, const std::vector<std::uint32_t>* groups) const {
-    for (const auto& list : schools_) GetBuildings(list, out, groups);
-    GetBuildings(extraSchools_, out, groups);
+void cSC4ResidentialSimulator::ComputeOccupantGrade(IResidentialOccupant* occupant, bool school, std::size_t group) {
+    const Service& s = Svc(school);
+    cISCPropertyHolder* holder = occupant->PropertyHolder();
+    cSC4SimGrid<std::uint8_t>* coverage = GetCoverageMap(school, group);
+    cSC4SimGrid<float>* gradeGrid = GetGradeMap(school);
+    if (!coverage || !gradeGrid || !populationGrids_[0]) return;
+    float radius;
+    if (!cSCPropertyHelp::GetPropertyValue(holder, s.radius, radius)) {
+        cSCPropertyHelp::SetPropertyValue(holder, s.served, std::uint32_t{0});
+        cSCPropertyHelp::SetPropertyValue(holder, s.effectiveCapacity, std::uint32_t{0});
+        cSCPropertyHelp::SetPropertyValue(holder, s.grade, 0.0f);
+        return;
+    }
+    // a missing capacity reads the radius property id from the stack (quirk); the port uses 0
+    const std::uint32_t capacity = PropertyOr<std::uint32_t>(holder, s.capacity, 0);
+    float e1, e2;
+    GetOccupantEfficiencyRatings(occupant, e1, e2, school, false);
+    const float base = GetBaseStaffEfficiency(occupant, school);
+    CurveSet curves;
+    LoadBuildingCurves(occupant, school, curves);
+    float m1, m2, m3;
+    OrdinanceModifiers(school, m1, m2, m3);
+    const std::uint32_t chunk = Chunk(school, group);
+
+    const float r = (e2 * m1) * radius;
+    TractList tracts;
+    const cSC4SimGrid<std::uint16_t>& geometry = *populationGrids_[0];
+    GetCoveredTractList(occupant, r, geometry.GetTractWidthX(), geometry.GetTractCountX(), geometry.GetTractCountZ(), tracts);
+    const std::uint32_t served = GetPopulationServed(occupant, r, capacity, curves, school, *coverage, chunk, tracts);
+    const std::uint32_t staffCapacity = Trunc32((static_cast<float>(capacity) * base) * m2);
+    const float staff = staffCapacity == 0 ? 0.0f : served == 0 ? 1.0f : std::min(1.0f, static_cast<float>(staffCapacity) / static_cast<float>(served));
+    const std::uint32_t effective = Trunc32((static_cast<float>(capacity) * e1) * m2);
+    const float grade = effective == 0 ? 0.0f : served == 0 ? 1.0f : std::min(1.0f, static_cast<float>(effective) / static_cast<float>(served));
+    cSCPropertyHelp::SetPropertyValue(holder, s.staffRatio, staff);
+    cSCPropertyHelp::SetPropertyValue(holder, s.grade, grade);
+    cSCPropertyHelp::SetPropertyValue(holder, s.effectiveCapacity, effective);
+    cSCPropertyHelp::SetPropertyValue(holder, s.served, served);
+
+    // the shared grade grid: not a weighted mean (quirk); n = 0 only with units = 0, which stores NaN as the original does
+    const std::uint32_t units = chunk ? capacity / chunk : 0;
+    const float t = static_cast<float>(units) * grade;
+    for (auto [x, z] : tracts) {
+        if (!gradeGrid->TractIsInBounds(x, z)) continue;
+        const std::uint8_t n = TractOr0(coverage, x, z);
+        const float v = (n > 1 ? gradeGrid->GetTractValue(x, z) * static_cast<float>(n - 1) : 0.0f) + t / static_cast<float>(n);
+        gradeGrid->SetTractValue(x, z, v > 1.0f ? 1.0f : v);
+    }
+    if (std::getenv("SC4_RESDEBUG")) {
+        float a = -1.0f, b = -1.0f;
+        GetOccupantFundingPercentages(occupant, a, b, school);
+        std::fprintf(stderr, "residential: grade %s group %zu capacity %u served %u effective %u grade %.3f staff %.3f tracts %zu funding %.3f/%.3f\n",
+                     school ? "school" : "hospital", group, capacity, served, effective, grade, staff, tracts.size(), a, b);
+    }
+
+    // 4.6 the EQ / HQ boost
+    if (!(r > 0.0f)) return;
+    const float multiplier = PropertyOr<float>(holder, s.effect, 1.0f);
+    float centre[3];
+    occupant->LotCenter(centre);
+    std::vector<const cSC4ResponseCurve*> distanceCurves, ageCurves;
+    for (const OrdinanceEffect& e : OrdinanceEffects(school)) {
+        distanceCurves.push_back(&e.distanceCurve);
+        ageCurves.push_back(&e.ageCurve);
+    }
+    distanceCurves.push_back(&curves.distance);
+    ageCurves.push_back(&curves.age);
+    float& total = school ? schoolGradeTotal_ : hospitalGradeTotal_;
+    for (int w = 0; w < 3; ++w) {
+        cSC4SimGrid<float>* target = school ? eq_[w].get() : hq_[w].get();
+        if (!target) continue;
+        const float value = ((grade * (curves.wealth.GetOutputValue(static_cast<float>(w)) * 0.01f)) * multiplier) * m3;
+        AddRadiusEffect(*target, w, ageCurves, centre[0], centre[2], r * coverageSlop, distanceCurves, value, 200.0f, units, *coverage, total);
+    }
 }
 
-void cSC4ResidentialSimulator::GetHospitalBuildings(std::list<IResidentialOccupant*>& out, const std::vector<std::uint32_t>* groups) const {
-    for (const auto& list : hospitals_) GetBuildings(list, out, groups);
-    GetBuildings(extraHospitals_, out, groups);
+// States 6 and 8: the grade grid restarts at 0; every building of every group gets its auto-budget step, then its grade.
+void cSC4ResidentialSimulator::GradeBuildings(bool school) {
+    if (cSC4SimGrid<float>* grid = GetGradeMap(school)) grid->SetTractValues(0.0f);
+    const bool global = school ? autoBudgetSchools_ : autoBudgetHospitals_;
+    std::vector<OccupantList>& lists = school ? schools_ : hospitals_;
+    for (std::size_t k = 0; k < lists.size(); ++k) {
+        for (IResidentialOccupant* occupant : lists[k]) {
+            if (global || GetAutoBudget(occupant)) {
+                float a = 0.0f, b = 0.0f;
+                GetOccupantFundingPercentages(occupant, a, b, school);
+                if (EstimateIdealFunding(occupant, a)) SetOccupantFundingPercentages(occupant, a, b, school);
+            }
+            ComputeOccupantGrade(occupant, school, k);
+        }
+    }
 }
 
-void cSC4ResidentialSimulator::GetHealthAffectingBuildings(std::list<IResidentialOccupant*>& out) const {
-    for (IResidentialOccupant* o : healthAffecting1_) out.push_back(o);
-    for (IResidentialOccupant* o : healthAffecting2_) out.push_back(o);
+// ---- auto-budget, capacity, coverage geometry (REH 4.10, 4.11) ---------------------------------------------------------
+
+bool cSC4ResidentialSimulator::EstimateIdealFunding(IResidentialOccupant* occupant, float& funding) {
+    ResidentialQueryData query;
+    bool school = true;
+    if (!QueryData(occupant, true, query)) {
+        if (!QueryData(occupant, false, query)) return false;
+        school = false;
+    }
+    if (PropertyOr<std::uint32_t>(occupant->PropertyHolder(), Svc(school).served, kNotGraded) == kNotGraded) return false;
+    float m1, m2, m3;
+    OrdinanceModifiers(school, m1, m2, m3);
+    const float r = static_cast<float>(query.served) / static_cast<float>(Trunc32(static_cast<float>(query.capacity) * m2));
+    const DepartmentData& d = school ? education_ : health_;
+    float f = r;
+    float v = d.efficiencyCurve.GetOutputValue(f * 100.0f) * 0.01f;
+    while (v > r) {
+        f = f - 0.01f;
+        v = d.efficiencyCurve.GetOutputValue(f * 100.0f) * 0.01f;
+        if (f <= 0.0f) { f = 0.0f; break; }
+    }
+    while (v < r) {
+        f = f + 0.01f;
+        v = d.efficiencyCurve.GetOutputValue(f * 100.0f) * 0.01f;
+        if (f > d.maxFunding) { f = d.maxFunding; break; }
+    }
+    funding = f;
+    return true;
 }
 
-// ---- strikes -----------------------------------------------------------------------------------------------
+bool cSC4ResidentialSimulator::EstimateCurrentOccupantCapacity(IResidentialOccupant* occupant, std::uint32_t& capacity, std::uint32_t& staff) {
+    cISCPropertyHolder* holder = occupant->PropertyHolder();
+    std::uint32_t raw = 0;
+    const bool school = cSCPropertyHelp::GetPropertyValue(holder, kSchool.capacity, raw);
+    if (!school) raw = PropertyOr<std::uint32_t>(holder, kHospital.capacity, 0);
+    float e1, e2, m1, m2, m3;
+    GetOccupantEfficiencyRatings(occupant, e1, e2, school, true);
+    OrdinanceModifiers(school, m1, m2, m3);
+    capacity = Trunc32((static_cast<float>(raw) * e1) * m2);
+    staff = schoolStaffDivisor ? (capacity + schoolStaffDivisor - 1) / schoolStaffDivisor : 0;   // the school divisor for both (quirk)
+    return true;
+}
 
-float cSC4ResidentialSimulator::GetChanceOfStrike(DepartmentData& dept, const std::list<IResidentialOccupant*>& buildings,
-                                                  std::uint32_t fundingProperty, std::uint32_t groupFilter) {
-    if (dept.onStrike || buildings.empty()) return 0.0f;
-    float funding = 0.0f, combined = 0.0f, chance = 0.0f;
+bool cSC4ResidentialSimulator::GetOccupantCoverage(IResidentialOccupant* occupant, float level, float& distance, float& radius) {
+    cISCPropertyHolder* holder = occupant->PropertyHolder();
+    std::uint32_t probe;
+    const bool school = cSCPropertyHelp::GetPropertyValue(holder, kSchool.capacity, probe);
+    const bool hospital = cSCPropertyHelp::GetPropertyValue(holder, kHospital.capacity, probe);
+    if (!school && !hospital) return false;
+    const Service& s = hospital ? kHospital : kSchool;   // the hospital's radius and ordinances win; the funding flag stays the school's
+    float e1, e2, m1, m2, m3;
+    GetOccupantEfficiencyRatings(occupant, e1, e2, school, false);
+    OrdinanceModifiers(!hospital, m1, m2, m3);
+    radius = (e2 * m1) * PropertyOr<float>(holder, s.radius, 0.0f);
+    CurveSet curves;
+    LoadBuildingCurves(occupant, school, curves);
+    std::vector<SC4Point> points;
+    curves.distance.GetResponseCurveData(points);
+    distance = 0.0f;
+    const float limit = level * 100.0f;
+    for (std::size_t i = 1; i < points.size(); ++i) {
+        if (points[i].y > limit) continue;
+        const SC4Point& prev = points[i - 1];
+        distance = (((prev.y - limit) / (prev.y - points[i].y)) * ((points[i].x - prev.x) * 0.01f)) * radius + prev.x * radius;
+        break;
+    }
+    return true;
+}
+
+// ---- strikes (REH 4.9) -----------------------------------------------------------------------------------------------
+
+float cSC4ResidentialSimulator::GetChanceOfStrike(DepartmentData& dept, const OccupantList& buildings, std::uint32_t gradeProperty,
+                                                  std::uint32_t strikeGroup) {
+    float q = 0.0f, g = 0.0f, c = 0.0f;
     for (IResidentialOccupant* occupant : buildings) {
-        if (occupant->IsInGroup(groupFilter)) {
-            float value;
-            if (cSCPropertyHelp::GetPropertyValue(occupant->PropertyHolder(), fundingProperty, value)) funding = value;
-            chance = dept.strikeChance.GetOutputValue(funding * 100.0f) * 0.01f;
+        if (occupant->IsInGroup(strikeGroup)) {
+            cSCPropertyHelp::GetPropertyValue(occupant->PropertyHolder(), gradeProperty, g);   // absent: g keeps its value
+            c = dept.strikeCurve.GetOutputValue(g * 100.0f) * 0.01f;
         }
-        // an occupant outside the group re-applies the previous chance, as the original does
-        combined = (combined + chance) - combined * chance;
+        q = (q + c) - q * c;   // a building outside the strike group reuses the previous c (quirk)
     }
-    return combined;
+    return q;
 }
 
 float cSC4ResidentialSimulator::ChanceOfSchoolStrike() {
     if (SchoolIsOnStrike()) return 1.0f;
-    float total = 0.0f;
+    float p = 0.0f;
     for (const auto& list : schools_) {
-        const float c = GetChanceOfStrike(education_, list, 0x292453c5, 0x1a03);
-        total = (total + c) - total * c;
+        const float c = GetChanceOfStrike(education_, list, kSchool.grade, kSchool.strikeGroup);
+        p = (c + p) - c * p;
     }
-    return total;
+    return p;
 }
 
 float cSC4ResidentialSimulator::ChanceOfHealthStrike() {
     if (HealthIsOnStrike()) return 1.0f;
-    float total = 0.0f;
+    float p = 0.0f;
     for (const auto& list : hospitals_) {
-        const float c = GetChanceOfStrike(health_, list, 0x092453cb, 0x1a02);
-        total = (total + c) - total * c;
+        const float c = GetChanceOfStrike(health_, list, kHospital.grade, kHospital.strikeGroup);
+        p = (c + p) - c * p;
     }
-    return total;
+    return p;
 }
 
 bool cSC4ResidentialSimulator::BeginStrike(DepartmentData& dept, IResidentialOccupant* occupant) {
@@ -232,168 +888,120 @@ bool cSC4ResidentialSimulator::EndHealthStrike() {
     return EndStrike(health_, host_->CurrentDay() - health_.strikeStartDay);
 }
 
-bool cSC4ResidentialSimulator::UpdateStrikingState(IResidentialOccupant* occupant, DepartmentData& dept,
-                                                   std::uint32_t strikingFundingProperty, std::uint32_t idleFundingProperty) {
+// A striking building stops after the duration (days) or once its staff ratio reaches the minimum grade; a working one rolls the
+// strike curve at its grade, exactly one draw per check.
+bool cSC4ResidentialSimulator::UpdateStrikingState(IResidentialOccupant* occupant, DepartmentData& dept, std::uint32_t staffProperty,
+                                                   std::uint32_t gradeProperty) {
+    cISCPropertyHolder* holder = occupant->PropertyHolder();
     const std::uint32_t today = host_->CurrentDay();
-    std::uint32_t start = 0;
-    cSCPropertyHelp::GetPropertyValue(occupant->PropertyHolder(), kResidentialStrikeStartDate, start);
-    std::uint32_t next;
-    if (start == 0) {
-        float funding;
-        if (!cSCPropertyHelp::GetPropertyValue(occupant->PropertyHolder(), idleFundingProperty, funding)) funding = 0.0f;
-        else funding *= 100.0f;
-        const float chance = dept.strikeChance.GetOutputValue(funding);
-        next = (float(random_->RandomDoubleRangeUniform(0.0, 100.0)) < chance) ? today : 0;
-    } else {
-        float funding;
-        const bool found = cSCPropertyHelp::GetPropertyValue(occupant->PropertyHolder(), strikingFundingProperty, funding);
-        next = 0;
-        if (today - start <= dept.strikeDays) {
-            if (!found) funding = 1.0f;
-            next = dept.strikeEndFunding <= funding ? 0 : start;
+    const std::uint32_t start = PropertyOr<std::uint32_t>(holder, kResidentialStrikeStartDate, 0);
+    std::uint32_t next = start;
+    if (start != 0) {
+        if (today - start > dept.strikeDays) {
+            next = 0;
+        } else {
+            const float ratio = PropertyOr<float>(holder, staffProperty, 1.0f);
+            if (ratio >= dept.minGradeToEnd) next = 0;   // a NaN ratio keeps the strike
         }
+    } else {
+        const float grade = PropertyOr<float>(holder, gradeProperty, 0.0f);
+        const float p = dept.strikeCurve.GetOutputValue(grade * 100.0f);
+        const double roll = random_->RandomDoubleRangeUniform(0.0, 100.0);
+        if (roll < static_cast<double>(p)) next = today;
     }
     if (next == start) return false;
-    cSCPropertyHelp::SetPropertyValue(occupant->PropertyHolder(), kResidentialStrikeStartDate, next);
-    if (host_->CityHasOccupantManager()) {
-        const bool education = dept.messageId != kMessageHealthStrike;
-        host_->SetStrikerGroup(education, occupant, next != 0);
-    }
+    cSCPropertyHelp::SetPropertyValue(holder, kResidentialStrikeStartDate, next);
+    if (host_->CityHasOccupantManager()) host_->SetStrikerGroup(dept.messageId != kMessageHealthStrike, occupant, next != 0);
     return true;
 }
 
-void cSC4ResidentialSimulator::DoMonthlyStrikeCheck(DepartmentData& dept, std::vector<std::list<IResidentialOccupant*>>& lists,
-                                                    std::uint32_t strikingFundingProperty, std::uint32_t idleFundingProperty,
-                                                    std::uint32_t groupFilter) {
-    if (lists.empty()) return;
-    bool fromEarlierChange = false;
-    std::uint32_t strikers = 0;
+void cSC4ResidentialSimulator::DoMonthlyStrikeCheck(DepartmentData& dept, std::vector<OccupantList>& lists, std::uint32_t staffProperty,
+                                                    std::uint32_t gradeProperty, std::uint32_t strikeGroup) {
+    bool changed = false;
+    std::uint32_t count = 0;
     for (auto& list : lists) {
         for (IResidentialOccupant* occupant : list) {
-            if (!occupant->IsInGroup(groupFilter)) continue;
-            const bool changed = UpdateStrikingState(occupant, dept, strikingFundingProperty, idleFundingProperty);
-            const bool begin = changed ? true : fromEarlierChange;
-            std::uint32_t start = 0;
-            cSCPropertyHelp::GetPropertyValue(occupant->PropertyHolder(), kResidentialStrikeStartDate, start);
-            if (start != 0) {
-                ++strikers;
-                if (begin) BeginStrike(dept, occupant);
+            if (!occupant->IsInGroup(strikeGroup)) continue;
+            changed = UpdateStrikingState(occupant, dept, staffProperty, gradeProperty) || changed;
+            if (PropertyOr<std::uint32_t>(occupant->PropertyHolder(), kResidentialStrikeStartDate, 0) > 0) {
+                ++count;
+                if (changed) BeginStrike(dept, occupant);   // changed is sticky (quirk)
             }
-            fromEarlierChange = begin;
         }
     }
-    if (fromEarlierChange && strikers == 0 && dept.onStrike) EndStrike(dept, host_->CurrentDay() - dept.strikeStartDay);
+    if (changed && dept.onStrike && count == 0) EndStrike(dept, host_->CurrentDay() - dept.strikeStartDay);
 }
 
-// ---- funding ------------------------------------------------------------------------------------------------
+// ---- query data, totals, ratings (REH 4.11) ----------------------------------------------------------------------------
 
-void cSC4ResidentialSimulator::SetOccupantFundingPercentages(IResidentialOccupant* occupant, const SC4Percentage& staff,
-                                                             const SC4Percentage& budget, bool education) {
+// Reads capacity, effective capacity, served (raw) and grade in that order, writing each as it goes; the hospital query then
+// requires the staff item. Only a successful query fills the rest and maps served 0xffffffff to 0.
+bool cSC4ResidentialSimulator::QueryData(IResidentialOccupant* occupant, bool school, ResidentialQueryData& out) {
+    const Service& s = Svc(school);
     cISCPropertyHolder* holder = occupant->PropertyHolder();
-    const std::uint32_t staffProp = education ? kPropertyStaffEfficiencyEducation : kPropertyStaffEfficiencyHealth;
-    const std::uint32_t budgetProp = education ? kPropertyBudgetEducation : kPropertyBudgetHealth;
-    if (host_->IsBudgeted(occupant, staffProp)) {
-        IBudgetRecord* record = host_->GetBudgetRecord(occupant, staffProp);
-        if (!record) return;
-        record->SetFunding(holder, staff, staffProp);
-        if (host_->IsBudgeted(occupant, budgetProp)) {
-            IBudgetRecord* second = host_->GetBudgetRecord(occupant, budgetProp);
-            if (!second) return;
-            second->SetFunding(holder, budget, budgetProp);
-        }
-    }
-    fundingChanged_ = true;
+    if (!cSCPropertyHelp::GetPropertyValue(holder, s.capacity, out.capacity)) return false;
+    if (!cSCPropertyHelp::GetPropertyValue(holder, s.effectiveCapacity, out.effectiveCapacity)) return false;
+    if (!cSCPropertyHelp::GetPropertyValue(holder, s.served, out.served)) return false;
+    float grade;
+    if (!cSCPropertyHelp::GetPropertyValue(holder, s.grade, grade)) return false;
+    BudgetItem staff;
+    const bool hasStaff = FindBudgetItem(holder, s.staffPurpose, staff);
+    if (!school && !hasStaff) return false;
+    const std::uint32_t divisor = school ? schoolStaffDivisor : hospitalStaffDivisor;   // 0 divides by zero in the original
+    out.staff = divisor ? out.capacity / divisor : 0;
+    out.effectiveStaff = !divisor ? 0 : school ? (out.effectiveCapacity + divisor - 1) / divisor : out.effectiveCapacity / divisor;
+    if (out.served == kNotGraded) out.served = 0;
+    out.grade = grade;
+    out.staffFunding = hasStaff ? staff.localFunding : 1.0f;
+    out.staffCost = hasStaff ? static_cast<std::uint32_t>(staff.cost) : 0;
+    BudgetItem vehicle;
+    const bool hasVehicle = FindBudgetItem(holder, s.vehiclePurpose, vehicle);
+    out.vehicleFunding = hasVehicle ? vehicle.localFunding : 1.0f;
+    out.vehicleCost = hasVehicle ? static_cast<std::uint32_t>(vehicle.cost) : 0;
+    return true;
 }
 
-void cSC4ResidentialSimulator::GetRawOccupantFundingPercentages(IResidentialOccupant* occupant, SC4Percentage& staff,
-                                                                SC4Percentage& budget, bool education) {
-    cISCPropertyHolder* holder = occupant->PropertyHolder();
-    const std::uint32_t staffProp = education ? kPropertyStaffEfficiencyEducation : kPropertyStaffEfficiencyHealth;
-    const std::uint32_t budgetProp = education ? kPropertyBudgetEducation : kPropertyBudgetHealth;
-    if (!host_->IsBudgeted(occupant, staffProp)) {
-        staff.value = 1.0f;
-        budget.value = 1.0f;
-        return;
-    }
-    IBudgetRecord* record = host_->GetBudgetRecord(occupant, staffProp);
-    if (!record) return;    // outputs stay untouched, as in the original
-    staff.value = record->HasExplicitFunding(holder, staffProp) ? 0.0f : record->DefaultFunding();
-    if (!host_->IsBudgeted(occupant, budgetProp)) {
-        budget.value = 1.0f;
-        return;
-    }
-    IBudgetRecord* second = host_->GetBudgetRecord(occupant, budgetProp);
-    if (!second) return;
-    budget.value = second->HasExplicitFunding(holder, budgetProp) ? 0.0f : second->DefaultFunding();
-}
-
-float cSC4ResidentialSimulator::GetBaseStaffEfficiency(IResidentialOccupant* occupant, bool education) {
-    float staff = 0.0f;
-    host_->GetOccupantEfficiencyRatings(occupant, staff, education);
-    const std::uint32_t prop = education ? kPropertyStaffEfficiencyEducation : kPropertyStaffEfficiencyHealth;
-    if (!host_->IsBudgeted(occupant, prop)) return staff;
-    cSC4ResponseCurve& curve = education ? education_.staffCurve : health_.staffCurve;
-    return curve.GetOutputValue(staff * 100.0f) * 0.01f;
-}
-
-bool cSC4ResidentialSimulator::GetAutoBudget(const IResidentialOccupant* occupant) {
-    bool value = false;
-    cSCPropertyHelp::GetPropertyValue(const_cast<IResidentialOccupant*>(occupant)->PropertyHolder(), kOccupantAutoBudget, value);
-    return value;
-}
-
-void cSC4ResidentialSimulator::SetAutoBudget(IResidentialOccupant* occupant, bool value) {
-    cSCPropertyHelp::SetPropertyValue(occupant->PropertyHolder(), kOccupantAutoBudget, value);
-}
-
-// ---- totals and ratings ---------------------------------------------------------------------------------------
-
-int cSC4ResidentialSimulator::GetSystemTotals(const std::vector<std::list<IResidentialOccupant*>>& lists, ResidentialQueryData& totals,
-                                              bool education, const std::vector<std::uint32_t>& groups) {
-    totals.field28 = totals.served = totals.field30 = totals.field34 = totals.field38 = 0;   // +0x28..+0x3c are cleared
-    totals.field3c = 0.0f;
+// Totals: the caller's fields reset, then one record (never reset between buildings) summed for every group-list building in at
+// least one of `groups`, whatever its query returns. Null groups (a crash in the original once a list holds a building) count none.
+int cSC4ResidentialSimulator::SystemTotals(bool school, ResidentialQueryData& totals, const std::vector<std::uint32_t>* groups) {
+    totals.capacity = totals.effectiveCapacity = totals.staff = totals.effectiveStaff = totals.served = 0;
+    totals.grade = 0.0f;
+    if (!groups) return 0;
+    ResidentialQueryData record;
     int count = 0;
-    for (const auto& list : lists) {
+    for (const auto& list : school ? schools_ : hospitals_) {
         for (IResidentialOccupant* occupant : list) {
             bool matches = false;
-            for (std::uint32_t group : groups) {
-                if (occupant->IsInGroup(group)) { matches = true; break; }
-            }
+            for (std::uint32_t group : *groups)
+                if ((matches = occupant->IsInGroup(group))) break;
             if (!matches) continue;
-            ResidentialQueryData one;
-            if (education) host_->GetSchoolQueryData(occupant, one);
-            else host_->GetHospitalQueryData(occupant, one);
-            totals.field28 += one.field28;
-            totals.served += one.served;
-            totals.field30 += one.field30;
-            totals.field34 += one.field34;
-            totals.field38 += one.field38;
-            totals.field3c += one.field3c;
+            QueryData(occupant, school, record);
+            totals.capacity += record.capacity;
+            totals.effectiveCapacity += record.effectiveCapacity;
+            totals.staff += record.staff;
+            totals.effectiveStaff += record.effectiveStaff;
+            totals.served += record.served;
+            totals.grade += record.grade;
             ++count;
         }
     }
     return count;
 }
 
-float cSC4ResidentialSimulator::RatingFor(const std::vector<std::list<IResidentialOccupant*>>& lists, bool education) {
-    if (lists.empty()) return 0.0f;
-    unsigned served = 0;
-    for (const auto& list : lists) {
+// Rating: the summed effective capacity over the population, capped at 1 (a failed query re-adds the record's previous value).
+float cSC4ResidentialSimulator::SystemRating(bool school) {
+    ResidentialQueryData record;
+    std::uint32_t sum = 0;
+    for (const auto& list : school ? schools_ : hospitals_) {
         for (IResidentialOccupant* occupant : list) {
-            ResidentialQueryData data;
-            if (education) host_->GetSchoolQueryData(occupant, data);
-            else host_->GetHospitalQueryData(occupant, data);
-            served += unsigned(data.served);
+            QueryData(occupant, school, record);
+            sum += record.effectiveCapacity;
         }
     }
-    if (served == 0) return 0.0f;
+    if (sum == 0) return 0.0f;
     if (population_ == 0) return 1.0f;
-    const float ratio = float(served) / float(population_);
-    return ratio <= 1.0f ? ratio : 1.0f;
+    return std::min(1.0f, static_cast<float>(sum) / static_cast<float>(population_));
 }
-
-float cSC4ResidentialSimulator::GetHealthSystemRating() { return RatingFor(hospitals_, false); }
-float cSC4ResidentialSimulator::GetSchoolSystemRating() { return RatingFor(schools_, true); }
 
 // ---- exemplar-driven queries ------------------------------------------------------------------------------------
 
@@ -454,6 +1062,7 @@ constexpr std::uint32_t kHistoryLifeExpectancy = 0x2a5e7009, kHistoryAgeGroupPop
 constexpr std::uint32_t kHistoryGlobalEQ = 0xaa1a2864, kHistoryGlobalHQ = 0xaa1a2866, kHistoryPopulation = 0xaa1a2cca;
 constexpr std::uint32_t kHistoryHospitalCoverage = 0x4a8a3fe2, kHistorySchoolCoverage = 0x4a8a3fe5;
 constexpr const char* kAgentName = "cSC4ResidentialSimulator";
+constexpr std::uint32_t kSchoolStaffRatio = 0x2a976c20, kSchoolGrade = 0x292453c5, kHospitalStaffRatio = 0xaa976be7, kHospitalGrade = 0x092453cb;
 constexpr std::uint32_t kStateIdle = 10;
 
 template <class T> SimGridPtr<T> NewGrid(std::int32_t tractSize, std::uint32_t id) {
@@ -492,11 +1101,13 @@ bool cSC4ResidentialSimulator::Init() {
         cityStarted_ = true;
     }
     if (!initialized_) {
-        // The defaults overwrite a loaded record's department scalars, strikes included (9.3 quirk). PARTIAL: the ordinance-effect
-        // lists are not built (education/health half).
+        // The defaults overwrite a loaded record's department scalars, strikes included (9.3 quirk).
         ReadSimulatorTunableValues(host_->SimulatorExemplar());
+        GetOrdinanceEffects();
     }
     CreateGrids();
+    CreateDepartments();
+    AdoptFileLists();
     ResetIterator();
     ReadTunablePopulationValues(host_->SimulatorExemplar());
     leSum_ = 0;
@@ -518,6 +1129,7 @@ bool cSC4ResidentialSimulator::Shutdown() {
     ReleaseGrids();
     for (cRetainedReference& ref : departmentRefs_) ref = cRetainedReference();
     fileLists_.clear();
+    ReleaseBuildingLists();
     return true;
 }
 
@@ -698,6 +1310,9 @@ void cSC4ResidentialSimulator::ReadTunablePopulationValues(const cISCPropertyHol
         H::GetPropertyValue(exemplar, 0x4ab71659, t.deathsDoorDelta);
         H::GetPropertyValue(exemplar, 0x4ab70dac, t.deathsDoorChance);
     }
+    // the ordinance decay factors (REH 4.3), multiplied in list order
+    for (const OrdinanceEffect& e : schoolEffects_) t.eqDecay *= e.decayFactor;
+    for (const OrdinanceEffect& e : healthEffects_) t.hqDecay *= e.decayFactor;
     tuningLoaded_ = true;
 }
 
@@ -872,7 +1487,11 @@ bool cSC4ResidentialSimulator::DoDailySimulation(std::uint32_t milliseconds) {
     };
     switch (state_) {
     case 0:
-        // PARTIAL (education/health half): grade totals, strike checks, ordinance effects, pending building lists.
+        schoolGradeTotal_ = hospitalGradeTotal_ = 0.0f;
+        DoMonthlyStrikeCheck(education_, schools_, kSchoolStaffRatio, kSchoolGrade, 0x1a03);
+        DoMonthlyStrikeCheck(health_, hospitals_, kHospitalStaffRatio, kHospitalGrade, 0x1a02);
+        GetOrdinanceEffects();
+        DistributePendingBuildings();
         state_ = 13;
         return true;
     case 13: SeedProximity(1); state_ = 1; return true;
@@ -921,11 +1540,18 @@ bool cSC4ResidentialSimulator::DoDailySimulation(std::uint32_t milliseconds) {
         PostPopulationChange();
         state_ = 5;
         return true;
-    // PARTIAL (education/health half): school coverage and grading, hospital coverage and grading.
-    case 5: schoolCovered_ = 0; state_ = 6; return true;
-    case 6: state_ = 7; return true;
-    case 7: hospitalCovered_ = 0; state_ = 8; return true;
-    case 8: state_ = 9; return true;
+    case 5:
+        schoolCovered_ = 0;
+        for (std::size_t k = 0; k < schools_.size(); ++k) UpdateCoverageMap(true, k);
+        state_ = 6;
+        return true;
+    case 6: GradeBuildings(true); state_ = 7; return true;
+    case 7:
+        hospitalCovered_ = 0;
+        for (std::size_t k = 0; k < hospitals_.size(); ++k) UpdateCoverageMap(false, k);
+        state_ = 8;
+        return true;
+    case 8: GradeBuildings(false); state_ = 9; return true;
     case 9:
         RecordHistoryData(kHistoryGlobalEQ, static_cast<std::int32_t>(GetGlobalEQ()));
         RecordHistoryData(kHistoryGlobalHQ, static_cast<std::int32_t>(GetGlobalHQ()));
@@ -963,7 +1589,15 @@ bool cSC4ResidentialSimulator::DoMessage(cIGZMessage2* message) {
             fundingChanged_ = true;
         }
         return true;
-    // PARTIAL (education/health half): occupant inserted / removed -> DoBuildingChanged (school, hospital, health-affecting lists).
+    case kMessageOccupantInserted:
+    case kMessageOccupantRemoved: {
+        // data3 = 0x278128a0 (a building occupant); the host answers only for buildings (cISC4BuildingOccupant)
+        auto* standard = static_cast<cIGZMessage2Standard*>(message);
+        if (standard->GetData3() != 0x278128a0u || !host_) return true;
+        if (IResidentialOccupant* building = host_->Occupant(standard->GetIGZUnknown()))   // void1 and IGZUnknown: the occupant
+            DoBuildingChanged(building, message->GetType() == kMessageOccupantInserted);
+        return true;
+    }
     default: return true;
     }
 }
@@ -1056,15 +1690,15 @@ template <class T> void WriteGrid(cIGZOStream& stream, const SimGridPtr<T>& grid
 // init funding, the 100.0 field, the message id. Version < 5 stores the percentages unscaled, version < 6 the min grade too.
 void WriteDepartment(cIGZOStream& stream, const DepartmentData& d, const cRetainedReference* refs) {
     stream.SetFloat32(d.minimumFunding);
-    stream.SetFloat32(d.strikeThreshold);
-    stream.SetFloat32(d.value08);
+    stream.SetFloat32(d.maxFunding);
+    stream.SetFloat32(d.strikeEfficiency);
     stream.SetSint32(static_cast<std::int32_t>(d.strikeDays));
-    stream.SetFloat32(d.strikeEndFunding);
+    stream.SetFloat32(d.minGradeToEnd);
     stream.SetUint8(d.onStrike ? 1 : 0);
     stream.SetSint32(static_cast<std::int32_t>(d.strikeStartDay));
     refs[0].Write(stream);
     refs[1].Write(stream);
-    stream.SetFloat32(d.value90);
+    stream.SetFloat32(d.initialFunding);
     stream.SetFloat32(d.value94);
     stream.SetUint32(d.messageId);
 }
@@ -1076,12 +1710,12 @@ void ReadDepartment(cIGZIStream& stream, DepartmentData& d, cRetainedReference* 
         field = scaled ? v * 0.01f : v;
     };
     pct(d.minimumFunding, version < 5);
-    pct(d.strikeThreshold, version < 5);
-    pct(d.value08, version < 5);
+    pct(d.maxFunding, version < 5);
+    pct(d.strikeEfficiency, version < 5);
     std::int32_t days = 0;
     stream.GetSint32(days);
     d.strikeDays = static_cast<std::uint32_t>(days);
-    pct(d.strikeEndFunding, version < 6);
+    pct(d.minGradeToEnd, version < 6);
     std::uint8_t onStrike = 0;
     stream.GetUint8(onStrike);
     d.onStrike = onStrike != 0;
@@ -1090,9 +1724,14 @@ void ReadDepartment(cIGZIStream& stream, DepartmentData& d, cRetainedReference* 
     d.strikeStartDay = static_cast<std::uint32_t>(start);
     refs[0].Read(stream);
     refs[1].Read(stream);
-    pct(d.value90, version < 5);
+    pct(d.initialFunding, version < 5);
     stream.GetFloat32(d.value94);
     stream.GetUint32(d.messageId);
+}
+
+void WriteOccupants(cIGZOStream& stream, const std::list<IResidentialOccupant*>& list) {
+    stream.SetUint32(static_cast<std::uint32_t>(list.size()));
+    for (IResidentialOccupant* o : list) SC4WriteGZSerializable(stream, o->Object());
 }
 
 void WriteList(cIGZOStream& stream, const cRetainedReferences& list) {
@@ -1138,16 +1777,28 @@ bool cSC4ResidentialSimulator::WriteCityRecord(cIGZOStream& stream) const {
     stream.SetSint32(population_);
     WriteDepartment(stream, health_, &departmentRefs_[0]);
     WriteDepartment(stream, education_, &departmentRefs_[2]);
-    // the occupant lists as read: 3 pending lists, the school lists, the hospital lists, the health-affecting list
-    static const cRetainedReferences none;
-    const auto list = [&](std::size_t i) -> const cRetainedReferences& { return i < fileLists_.size() ? fileLists_[i] : none; };
-    std::size_t next = 0;
-    for (int i = 0; i < 3; ++i) WriteList(stream, list(next++));
-    stream.SetUint32(fileSchoolListCount_);
-    for (std::uint32_t i = 0; i < fileSchoolListCount_; ++i) WriteList(stream, list(next++));
-    stream.SetUint32(fileHospitalListCount_);
-    for (std::uint32_t i = 0; i < fileHospitalListCount_; ++i) WriteList(stream, list(next++));
-    WriteList(stream, list(next++));
+    // 3 pending lists, the school lists, the hospital lists, the health-affecting list; a record read but not yet adopted by
+    // Init writes its references back as read
+    if (!fileLists_.empty()) {
+        static const cRetainedReferences none;
+        const auto list = [&](std::size_t i) -> const cRetainedReferences& { return i < fileLists_.size() ? fileLists_[i] : none; };
+        std::size_t next = 0;
+        for (int i = 0; i < 3; ++i) WriteList(stream, list(next++));
+        stream.SetUint32(7);
+        for (int i = 0; i < 7; ++i) WriteList(stream, list(next++));
+        stream.SetUint32(3);
+        for (int i = 0; i < 3; ++i) WriteList(stream, list(next++));
+        WriteList(stream, list(next++));
+    } else {
+        WriteOccupants(stream, pendingSchools_);
+        WriteOccupants(stream, pendingHospitals_);
+        WriteOccupants(stream, pendingHealthAffecting_);
+        stream.SetUint32(static_cast<std::uint32_t>(schools_.size()));
+        for (const OccupantList& list : schools_) WriteOccupants(stream, list);
+        stream.SetUint32(static_cast<std::uint32_t>(hospitals_.size()));
+        for (const OccupantList& list : hospitals_) WriteOccupants(stream, list);
+        WriteOccupants(stream, healthAffecting_);
+    }
     stream << iterator_;
     stream.SetUint64(leSum_);
     stream.SetSint32(runningPopulation_);
@@ -1193,13 +1844,14 @@ bool cSC4ResidentialSimulator::ReadCityRecord(cIGZIStream& stream) {
         fileLists_.clear();
         const auto list = [&]() { fileLists_.emplace_back(); ReadList(stream, fileLists_.back()); };
         for (int i = 0; i < 3; ++i) list();
-        stream.GetUint32(fileSchoolListCount_);
-        damaged = fileSchoolListCount_ != 7;
-        for (std::uint32_t i = 0; !damaged && i < fileSchoolListCount_; ++i) list();
+        std::uint32_t schoolLists = 0, hospitalLists = 0;
+        stream.GetUint32(schoolLists);
+        damaged = schoolLists != 7;
+        for (std::uint32_t i = 0; !damaged && i < schoolLists; ++i) list();
         if (!damaged) {
-            stream.GetUint32(fileHospitalListCount_);
-            damaged = fileHospitalListCount_ != 3;
-            for (std::uint32_t i = 0; !damaged && i < fileHospitalListCount_; ++i) list();
+            stream.GetUint32(hospitalLists);
+            damaged = hospitalLists != 3;
+            for (std::uint32_t i = 0; !damaged && i < hospitalLists; ++i) list();
         }
         if (!damaged) list();
     }
@@ -1231,15 +1883,13 @@ bool cSC4ResidentialSimulator::ReadCityRecord(cIGZIStream& stream) {
     for (const auto& grid : schoolCoverage_) nullGrids += !grid;
     for (const auto& grid : hospitalCoverage_) nullGrids += !grid;
     if (std::getenv("SC4_RESDEBUG"))
-        std::fprintf(stderr, "residential: read v%u null grids %d damaged=%d error=%d sizes %d/%d/%d state %u pop %d lists %u/%u grid0 %d\n", version, nullGrids, damaged,
-                     int(stream.GetError()), proximityTractSize_, populationTractSize_, eqTractSize_, state_, population_, fileSchoolListCount_,
-                     fileHospitalListCount_, populationGrids_[0] ? populationGrids_[0]->GetTractSize() : -1);
+        std::fprintf(stderr, "residential: read v%u null grids %d damaged=%d error=%d sizes %d/%d/%d state %u pop %d lists %zu grid0 %d\n", version, nullGrids, damaged,
+                     int(stream.GetError()), proximityTractSize_, populationTractSize_, eqTractSize_, state_, population_, fileLists_.size(),
+                     populationGrids_[0] ? populationGrids_[0]->GetTractSize() : -1);
     if (damaged) {
         ReleaseGrids();
         for (cRetainedReference& ref : departmentRefs_) ref = cRetainedReference();
         fileLists_.clear();
-        fileSchoolListCount_ = 7;
-        fileHospitalListCount_ = 3;
         proximityTractSize_ = 1;
         populationTractSize_ = eqTractSize_ = 4;
         state_ = 0;

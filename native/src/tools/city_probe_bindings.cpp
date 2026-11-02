@@ -265,11 +265,6 @@ public:
     void PostStrikeMessage(std::uint32_t messageId, IResidentialOccupant* occupant, bool begin, std::uint32_t days) override { Seam("IResidentialHost::PostStrikeMessage");}
     void SetStrikerGroup(bool education, IResidentialOccupant* occupant, bool add) override { Seam("IResidentialHost::SetStrikerGroup");}
     bool CityHasOccupantManager() override { Seam("IResidentialHost::CityHasOccupantManager"); return false; }
-    bool IsBudgeted(IResidentialOccupant* occupant, std::uint32_t propertyId) override { Seam("IResidentialHost::IsBudgeted"); return false; }
-    IBudgetRecord* GetBudgetRecord(IResidentialOccupant* occupant, std::uint32_t propertyId) override { Seam("IResidentialHost::GetBudgetRecord"); return nullptr; }
-    void GetSchoolQueryData(IResidentialOccupant* occupant, ResidentialQueryData& out) override { Seam("IResidentialHost::GetSchoolQueryData");}
-    void GetHospitalQueryData(IResidentialOccupant* occupant, ResidentialQueryData& out) override { Seam("IResidentialHost::GetHospitalQueryData");}
-    void GetOccupantEfficiencyRatings(IResidentialOccupant* occupant, float& staff, bool education) override { Seam("IResidentialHost::GetOccupantEfficiencyRatings");}
     std::uint8_t CellWorkforce(unsigned x, unsigned z) override { Seam("IResidentialHost::CellWorkforce"); return {}; }
     std::uint8_t GlobalWorkforce() override { Seam("IResidentialHost::GlobalWorkforce"); return {}; }
     float CellLifeExpectancyBase(unsigned x, unsigned z) override { Seam("IResidentialHost::CellLifeExpectancyBase"); return 0; }
