@@ -418,7 +418,7 @@ public:
     // Non-virtual helpers of the original, recovered.
     void ReadSimulatorTunableValues();                     // @ 0x100156c0c
     void SetTractSize(std::uint8_t size);                  // @ 0x100157dc0
-    void UpdatePopulationCount(cSC4Lot* lot, std::uint32_t population, bool add);   // @ 0x100158140
+    void UpdatePopulationCount(cSC4Lot* lot, std::uint32_t buildingType, bool add);   // @ 0x100158140
     void DoIdle(std::uint32_t budgetMilliseconds);         // @ 0x10015837c
     void UpdateMaxCapacity(const SC4Rect<int>& rect);      // @ 0x100159800
     static std::int32_t ConvertZoneToType(int zoneType);   // @ 0x10015a6bc

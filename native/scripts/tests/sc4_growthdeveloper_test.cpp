@@ -115,7 +115,8 @@ struct FakeBuildingDev final : IGrowthBuildingDevelopmentApi {
     std::vector<std::array<int, 3>> maxCapacityCalls;
     float maxCapacity = 0.0f;
     float stageMultiplier = 1.0f;
-    const BuildingProfile& GetBuildingProfile(std::uint32_t) override { return profile; }
+    std::uint32_t profileAsked = 0;   // the last building type whose profile was asked for
+    const BuildingProfile& GetBuildingProfile(std::uint32_t type) override { profileAsked = type; return profile; }
     void GetSpecialBuildings(std::list<cRZAutoRefCount<cISC4Occupant>>& out) override { out = specialBuildings; }
     float GetMaxCapacity(int zoneType, int purpose, int wealth) override {
         maxCapacityCalls.push_back({zoneType, purpose, wealth});
@@ -897,23 +898,24 @@ void TestPopulationCount() {
     fixture.buildingDev.profile.purpose = 1;
     auto* lot = new cSC4Lot(0, 0, 2, 2, 0);
     lot->SetBuildingType(0x1000);
-    developer->UpdatePopulationCount(lot, 0, true);       // the population argument is ignored
+    developer->UpdatePopulationCount(lot, 0x1000, true);  // data3: the lot's building type, whose purpose must match
+    CHECK(fixture.buildingDev.profileAsked == 0x1000);    // the building's profile, not the developer type's (0x1010)
     // 100 over four cells -> 25 each, all of them in tract (0,0); the total capacity grows by 100.
     CHECK(developer->GetCapacityMap()->GetTractValue(0, 0) == 100);
     CHECK(developer->GetTotalCapacity() == 100);
-    developer->UpdatePopulationCount(lot, 0, false);
+    developer->UpdatePopulationCount(lot, 0x1000, false);
     CHECK(developer->GetCapacityMap()->GetTractValue(0, 0) == 0);
     CHECK(developer->GetTotalCapacity() == 0);
     // A cell that would go negative clamps to zero and asks the lot configuration for its id (kept quirk).
     FakeLotConfiguration configuration;
     lot->SetLotConfiguration(&configuration);
-    developer->UpdatePopulationCount(lot, 0, false);
+    developer->UpdatePopulationCount(lot, 0x1000, false);
     CHECK(developer->GetCapacityMap()->GetTractValue(0, 0) == 0);
     CHECK(configuration.getIds > 0);
     CHECK(developer->GetTotalCapacity() == -100);
     // A purpose mismatch does nothing.
     fixture.buildingDev.profile.purpose = 9;
-    developer->UpdatePopulationCount(lot, 0, true);
+    developer->UpdatePopulationCount(lot, 0x1000, true);
     CHECK(developer->GetCapacityMap()->GetTractValue(0, 0) == 0);
     lot->SetLotConfiguration(nullptr);
     delete lot;
@@ -1173,7 +1175,7 @@ void TestStreams() {
     fixture.buildingDev.profile.purpose = 1;
     auto* lot = new cSC4Lot(0, 0, 2, 2, 0);
     lot->SetBuildingType(0x1000);
-    d->UpdatePopulationCount(lot, 0, true);
+    d->UpdatePopulationCount(lot, 0x1000, true);
     CHECK(d->GetTotalCapacity() == 40);
     delete lot;
 

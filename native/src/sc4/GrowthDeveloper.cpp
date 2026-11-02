@@ -606,14 +606,13 @@ bool cSC4GrowthDeveloper::DoMessage(cIGZMessage2* message) {
     return true;
 }
 
-// @ 0x100158140. Spreads the lot's capacity delta over the cells of its bounding rectangle (one share per
-// cell, the remainder on the lot's own cell) in the capacity map, then adds the delta to the total capacity.
-// The `population` argument (the message's data3) is never read: the original takes the capacity from the
-// lot instead. Kept.
-void cSC4GrowthDeveloper::UpdatePopulationCount(cSC4Lot* lot, [[maybe_unused]] std::uint32_t population,
-                                               bool add) {
+// @ 0x100158140 (i386 0x000fd6c6). Spreads the lot's capacity delta over the cells of its bounding rectangle (one share
+// per cell, the remainder on the lot's own cell) in the capacity map, then adds the delta to the total capacity. The
+// message's data3 is the lot's building type: its profile's purpose must be this developer's (the port looked up the
+// developer's own type, whose profile is empty, so no building ever added capacity).
+void cSC4GrowthDeveloper::UpdatePopulationCount(cSC4Lot* lot, std::uint32_t buildingType, bool add) {
     if (!lot || !buildingDevelopment_ || !capacityMap_) return;
-    const BuildingProfile& profile = buildingDevelopment_->GetBuildingProfile(static_cast<std::uint32_t>(subType_));
+    const BuildingProfile& profile = buildingDevelopment_->GetBuildingProfile(buildingType);   // BDS vslot 0x9c
     if (purpose_ != static_cast<std::int32_t>(profile.purpose)) return;
     const std::uint16_t capacity = lot->GetCapacity(static_cast<std::uint32_t>(subType_), true);   // lot slot 0x198
     std::int32_t delta = -static_cast<std::int32_t>(capacity);
