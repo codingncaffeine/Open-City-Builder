@@ -1,5 +1,8 @@
 #include "sc4/BudgetSimulator.h"
 
+#include <cstdio>
+#include <cstdlib>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -267,12 +270,18 @@ std::int64_t cSC4BudgetSimulator::GetEstExpenses() {
     return GetTotalMonthlyExpense() * (13 - month) + ytdExpenses_;
 }
 
+namespace {
+// One x87 multiplication stored to float32: the operands enter exactly (a 64-bit integer too), the product rounds once.
+inline float MulF(long double a, float b) { return static_cast<float>(a * static_cast<long double>(b)); }
+constexpr float kInv1200 = 1.0f / 1200.0f;   // the float32 nearest 1/1200; the original multiplies by it
+}  // namespace
+
 std::int64_t cSC4BudgetSimulator::GetTaxIncome(int taxType) const {
     const int difficulty = g_environment ? g_environment->DifficultyLevel() : 0;
     const float scale = static_cast<std::size_t>(difficulty) < tunables_.difficultyScale.size()
                             ? tunables_.difficultyScale[difficulty] : 0.0f;
-    return static_cast<std::int64_t>((static_cast<float>(taxTypes_[taxType].weightedAssessed) * scale *
-                                      taxTypes_[taxType].rate) / 1200.0f);
+    if (taxType < 0 || taxType >= 12) return 0;   // (budget.md: the original does not check)
+    return static_cast<std::int64_t>(MulF(MulF(MulF(static_cast<long double>(taxTypes_[taxType].weightedAssessed), scale), taxTypes_[taxType].rate), kInv1200));
 }
 
 std::int64_t cSC4BudgetSimulator::GetTotalMonthlyIncome() {
@@ -293,33 +302,52 @@ std::int64_t cSC4BudgetSimulator::GetTotalMonthlyExpense() {
 
 // ----------------------------------------------------------------------------------------------- taxes
 
-// Every taxable lot contributes (value of the lot area through the land value curve + assessed value) times
-// the type's land value factor and wealth weight; the monthly tax is that times rate * difficulty scale / 1200.
+// @ i386 0x00691e20 (budget.md §5.2): for every taxable lot, in the lot manager's order,
+//   land     = roundHalfEven(LVCurve(lv) * sizeX * sizeZ)
+//   assessed = trunc(float(land + value) * WaningWealth[bWealth - lWealth] * OccWeight[t])
+//   lotTax   = float(assessed) * DifficultyTaxMultiplier * rate[t] * INV1200
+// each product left to right with one float32 rounding, the lot's tax added to the total first and then to its group, both as
+// float32 running sums; the month's group taxes and the total are truncated to 64 bits.
 std::int64_t cSC4BudgetSimulator::ComputeTax() {
     for (TaxType& tax : taxTypes_) tax.weightedAssessed = 0;
-    double perType[12] = {};
-    double total = 0.0;
+    float perType[12] = {};
+    float total = 0.0f;
     const int difficulty = g_environment ? g_environment->DifficultyLevel() : 0;
+    const float scale = static_cast<std::size_t>(difficulty) < tunables_.difficultyScale.size() ? tunables_.difficultyScale[difficulty] : 0.0f;
     if (g_environment) {
         g_environment->ForEachTaxableLot([&](const LotTaxInfo& lot) {
             if (lot.taxType < 0 || lot.taxType >= 12) return;
-            const float rate = GetTaxRate(lot.taxType);
-            float assessed = tunables_.factors[lot.taxType];
             const float valueCurve = landValueCurve_.GetOutputValue(static_cast<float>(lot.landValue));
-            const std::int32_t area = static_cast<std::int32_t>(std::nearbyint(
-                static_cast<float>(lot.lotSizeZ) * valueCurve * static_cast<float>(lot.lotSizeX)));
+            const float landArea = MulF(MulF(valueCurve, static_cast<float>(lot.lotSizeX)), static_cast<float>(lot.lotSizeZ));
+            const std::int64_t land = static_cast<std::int64_t>(std::nearbyint(landArea));
             const std::size_t weightIndex = static_cast<std::size_t>(lot.wealthDelta);
-            const float weight = weightIndex < tunables_.wealthWeights.size() ? tunables_.wealthWeights[weightIndex] : 0.0f;
-            assessed = assessed * static_cast<float>(static_cast<std::int64_t>(area) + lot.assessedValue) * weight;
-            const float scale = static_cast<std::size_t>(difficulty) < tunables_.difficultyScale.size()
-                                    ? tunables_.difficultyScale[difficulty] : 0.0f;
-            taxTypes_[lot.taxType].weightedAssessed += static_cast<std::int64_t>(assessed);
-            const double tax = (static_cast<float>(static_cast<std::int64_t>(assessed)) * rate * scale) / 1200.0f;
-            total += tax;
-            perType[lot.taxType] += tax;
+            // the original indexes past the table for a delta outside 0..2 (budget.md §5.2 choice: 1.0)
+            const float waning = weightIndex < tunables_.wealthWeights.size() ? tunables_.wealthWeights[weightIndex] : 1.0f;
+            const float weighted = MulF(MulF(static_cast<long double>(land + lot.assessedValue), waning), tunables_.factors[lot.taxType]);
+            const std::int64_t assessed = static_cast<std::int64_t>(weighted);
+            taxTypes_[lot.taxType].weightedAssessed += assessed;
+            const float tax = MulF(MulF(MulF(static_cast<long double>(assessed), scale), GetTaxRate(lot.taxType)), kInv1200);
+            total = total + tax;
+            perType[lot.taxType] = perType[lot.taxType] + tax;
         });
     }
     for (int i = 0; i < 12; ++i) taxTypes_[i].income = static_cast<std::int64_t>(perType[i]);
+    if (static const bool trace = std::getenv("SC4_TAXDEBUG") != nullptr; trace) {
+        static int months = 0;
+        if (months++ < 3) {
+            std::fprintf(stderr, "tax: month %d total %lld (difficulty %d scale %.3f) weights", months, static_cast<long long>(total), difficulty, scale);
+            for (float f : tunables_.factors) std::fprintf(stderr, " %.3f", f);
+            std::fprintf(stderr, " waning");
+            for (float f : tunables_.wealthWeights) std::fprintf(stderr, " %.3f", f);
+            std::fprintf(stderr, "\n");
+            for (int i = 0; i < 12; ++i)
+                if (taxTypes_[i].weightedAssessed || loadedTax_[i].first)
+                    std::fprintf(stderr, "tax:   type %2d rate %.2f assessed %lld income %lld | file assessed %lld income %lld\n", i,
+                                 taxTypes_[i].rate, static_cast<long long>(taxTypes_[i].weightedAssessed),
+                                 static_cast<long long>(taxTypes_[i].income), static_cast<long long>(loadedTax_[i].first),
+                                 static_cast<long long>(loadedTax_[i].second));
+        }
+    }
     return static_cast<std::int64_t>(total);
 }
 
@@ -803,6 +831,7 @@ bool cSC4BudgetSimulator::Read(cIGZIStream& stream) {
         stream.GetSint64(tax.value68);
         stream.GetSint64(tax.weightedAssessed);
         stream.GetSint64(tax.income);
+        loadedTax_[std::size_t(&tax - &taxTypes_[0])] = {tax.weightedAssessed, tax.income};   // SC4_TAXDEBUG
     }
     stream.GetSint64(ordinanceExpenseYtd_);
     stream.GetSint64(ordinanceIncomeYtd_);

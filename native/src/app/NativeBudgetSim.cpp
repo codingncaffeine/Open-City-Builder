@@ -14,6 +14,11 @@
 #include "rz/cRZRandom.h"
 #include "rz/cRZString.h"
 #include "sc4/BudgetSimulator.h"
+#include "sc4/BuildingOccupant.h"
+#include "sc4/LandValueSimulator.h"
+#include "sc4/Lot.h"
+#include "sc4/Occupant.h"
+#include "sc4/ZoneDeveloper.h"
 #include "sc4/Exemplar.h"
 #include "sc4/HistoryWarehouse.h"
 #include "sc4/NeighborsSimulator.h"
@@ -155,8 +160,50 @@ struct BudgetEnvironment final : sc4::IBudgetSimEnvironment {
         sc4::cSC4City* city = HostCity();
         return city ? static_cast<int>(city->GetDifficultyLevel()) : 0;
     }
-    void ForEachTaxableLot(const std::function<void(const sc4::LotTaxInfo&)>&) override {
-        SC4_UNWIRED("IBudgetSimEnvironment::ForEachTaxableLot (lot manager walk: no tax income yet)");
+    // ComputeTax's lot walk (budget.md §5.2, i386 0x00691e20): the lot manager's list in its order; a lot with a building in the
+    // livable state whose purpose and lot wealth have a tax group gives its size, the land value at its origin cell, the building's
+    // value (0xe91a0b5f) and building wealth minus lot wealth.
+    void ForEachTaxableLot(const std::function<void(const sc4::LotTaxInfo&)>& visit) override {
+        static constexpr int kTaxType[9][4] = {{-1, -1, -1, -1}, {-1, 0, 1, 2}, {-1, 3, 4, 5}, {-1, -1, 6, 7}, {-1, 3, 4, 5},
+                                               {-1, 8, 8, 8},    {-1, 9, 9, 9}, {-1, 10, 10, 10}, {-1, 11, 11, 11}};
+        auto* lots = Component<sc4::cSC4ZoneDeveloper>(CityComponent::ZoneDeveloper, sc4::cSC4ZoneDeveloper::kZoneDeveloperClassId);
+        if (!lots) return;
+        auto* landValue = Component<sc4::cSC4LandValueSimulator>(CityComponent::LandValueSimulator, sc4::kGZCLSID_cSC4LandValueSimulator);
+        static const bool trace = std::getenv("SC4_TAXDEBUG") != nullptr;
+        int counts[5] = {};   // lots, with building, livable, building view, taxed
+        for (sc4::cSC4Lot* lot : lots->Lots()) {
+            ++counts[0];
+            cIGZUnknown* object = lot ? lot->GetBuilding() : nullptr;
+            counts[1] += object != nullptr;
+            if (object && lot->IsInLivableState()) ++counts[2];
+            if (!object || !lot->IsInLivableState()) continue;
+            void* raw = nullptr;
+            if (!object->QueryInterface(sc4::kGZIID_cISC4BuildingOccupant, &raw) || !raw) continue;
+            ++counts[3];
+            auto* building = static_cast<sc4::cISC4BuildingOccupant*>(raw);
+            const sc4::BuildingProfile& profile = building->GetBuildingProfile();
+            const std::uint32_t lotWealth = lot->GetOccupantWealth();
+            sc4::LotTaxInfo info;
+            if (profile.purpose < 9 && lotWealth < 4) info.taxType = kTaxType[profile.purpose][lotWealth];
+            if (info.taxType >= 0) {
+                std::uint8_t sizeX = 0, sizeZ = 0;
+                lot->GetSize(sizeX, sizeZ);
+                info.lotSizeX = sizeX;
+                info.lotSizeZ = sizeZ;
+                int x = 0, z = 0;
+                lot->GetLocation(x, z);
+                info.landValue = landValue ? landValue->GetLandValue(x, z) : 0;
+                if (sc4::cISC4Occupant* occupant = building->AsOccupant())
+                    sc4::cSCPropertyHelp::GetPropertyValue(occupant->AsPropertyHolder(), 0xe91a0b5f, info.assessedValue);
+                info.wealthDelta = int(profile.wealth) - int(lotWealth);
+                ++counts[4];
+                visit(info);
+            }
+            building->Release();
+        }
+        if (trace)
+            std::fprintf(stderr, "tax: lots %d with building %d livable %d building view %d taxed %d\n", counts[0], counts[1], counts[2], counts[3],
+                         counts[4]);
     }
     void PostMessage(std::uint32_t type, std::uint32_t a, std::int64_t b, std::int64_t c) override {
         if (!SL::spMS2) return;

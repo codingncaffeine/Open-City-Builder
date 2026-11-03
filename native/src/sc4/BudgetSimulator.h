@@ -275,6 +275,7 @@ private:
     std::map<std::uint32_t, cSC4DepartmentBudget*> departments_;   // +0x78
     std::map<std::uint32_t, BudgetGroup> groups_;       // +0x90
     TaxType taxTypes_[12];                              // +0xa8
+    std::pair<std::int64_t, std::int64_t> loadedTax_[12] = {};   // the city file's assessed / income per tax type (SC4_TAXDEBUG)
     std::int64_t monthlyTax_ = 0;                       // +0x6a8
     std::int64_t ordinanceExpenseYtd_ = 0, ordinanceIncomeYtd_ = 0;      // +0x6b8, +0x6c0
     std::int64_t ordinanceExpenseByMonth_[12] = {};     // +0x6c8

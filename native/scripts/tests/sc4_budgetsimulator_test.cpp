@@ -67,6 +67,40 @@ int main() {
     CHECK(sim->GetTaxIncome(2) == 50);
     CHECK(sim->GetTaxRate(2) == 0.5f && sim->GetTaxRate(12) == 0.0f);
 
+    // budget.md §5.2's example with the shipped data (flat land value curve here: lv 0): a building worth 10,000 at 9 % pays
+    // 90 / 82 / 75 a month on easy / medium / hard (DifficultyTaxMultiplier 1.2 / 1.1 / 1.0)
+    {
+        const auto savedScale = t.difficultyScale;
+        const auto savedWeights = t.wealthWeights;
+        t.difficultyScale = {1.2f, 1.1f, 1.0f};
+        t.wealthWeights = {1.0f, 1.0f, 1.0f};
+        t.factors[1] = 1.0f;
+        sim->SetTaxRate(1, 9.0f);
+        LotTaxInfo house;
+        house.taxType = 1; house.lotSizeX = 1; house.lotSizeZ = 2; house.landValue = 0; house.assessedValue = 10000; house.wealthDelta = 0;
+        env.lots = {house};
+        const std::int64_t expected[3] = {90, 82, 75};
+        for (int level = 0; level < 3; ++level) {
+            env.difficulty = level;
+            CHECK(sim->ComputeTax() == expected[level] && sim->GetTaxIncome(1) == expected[level]);
+        }
+        // an out-of-range wealth delta weighs 1.0 (budget.md §5.2 choice)
+        env.difficulty = 2;
+        env.lots[0].wealthDelta = -1;
+        CHECK(sim->ComputeTax() == 75);
+        // the total keeps the fractions the group lines drop: three lots of 33.3 -> lines 33 + 33 + 33, total 99 or more
+        env.lots = {house, house, house};
+        for (LotTaxInfo& l : env.lots) { l.assessedValue = 4000; l.taxType = 1; l.wealthDelta = 0; }
+        sim->SetTaxRate(1, 10.0f);
+        CHECK(sim->ComputeTax() == 100 && sim->GetTaxIncome(1) == 100);
+        t.difficultyScale = savedScale;
+        t.wealthWeights = savedWeights;
+        env.difficulty = 1;
+        sim->SetTaxRate(1, 0.0f);
+        env.lots = {lot};
+        sim->ComputeTax();   // the state the checks below expect
+    }
+
     // bonds
     t.bondIncrement = 1000; t.bondLimit = 10000; t.maxOutstandingBonds = 2; t.loanInterest = 0.12f; t.loanMonths = 12;
     CHECK(!sim->IssueBond(0));
