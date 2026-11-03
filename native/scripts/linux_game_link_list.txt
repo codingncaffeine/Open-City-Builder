@@ -735,6 +735,7 @@ src/app/linux/GameAudioSDL.cpp
 src/app/linux/StubClock.cpp
 src/app/linux/game_main_linux.cpp
 src/app/NativeNetworkTool.cpp
+src/app/NativeNetworkManager.cpp
 src/sc4/NetworkToolUI.cpp
 src/sc4/ViewInputControlNetworkTool.cpp
 src/sc4/NetworkWorldCache.cpp

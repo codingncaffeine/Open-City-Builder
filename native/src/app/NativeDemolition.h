@@ -5,7 +5,7 @@
 
 #include <cstdint>
 
-namespace sc4 { class cISC4Occupant; class cSC4Lot; class IDemolitionHost; class IDemolishFilter; class IDemolishable; struct DemolitionRegion; }
+namespace sc4 { class cISC4Occupant; class cSC4Lot; class cSC4NetworkManager; class IDemolitionHost; class IDemolishFilter; class IDemolishable; struct DemolitionRegion; }
 
 namespace native {
 
@@ -18,6 +18,7 @@ bool DemolishRegion(bool commit, const sc4::DemolitionRegion& region, int privil
 bool DemolishOccupant(bool commit, sc4::cISC4Occupant* occupant, std::uint32_t flags, std::int64_t* cost);
 // The city occupant behind an occupant a caller's filter is asked about.
 sc4::cISC4Occupant* DemolitionOccupant(sc4::IDemolishable* occupant);
+sc4::cSC4NetworkManager* CityNetworkManager();   // the city's network manager, or null
 bool DemolishLots(bool commit, sc4::cSC4Lot* const* lots, int count, int privilege, std::uint32_t flags, bool dezone,
                   std::int64_t* cost);
 

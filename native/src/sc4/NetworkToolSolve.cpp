@@ -18,6 +18,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <set>
+#include <list>
+#include <deque>
 #include <unordered_map>
 
 #include "sc4/NetworkOccupant.h"
@@ -1268,6 +1271,265 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, bool allowDiagonals, bool connect
         // The construction crew (cSC4NetworkConstructionCrew::AddNetworkSegment) is not ported: the pieces are usable at once.
         MarkOccupantsUsable(placed, true);
     }
+    return true;
+}
+
+// ============================================================================================================
+// demolition: DestroyOccupantsAndResolve
+// ============================================================================================================
+
+namespace {
+constexpr std::uint32_t kNetworkFlagTunnelPortal = 0x80000;      // network-manager.md §5 flag table
+constexpr std::uint32_t kNetworkFlagComplexPiece = 0x100000;     // part of an intersection or complex piece
+constexpr std::uint32_t kNetworkFlagConnectionNode = 0x200000;   // a lot connection node
+// DestroyOccupantsAndResolve::kEdgesToFixVertex (i386 0x00844dd4): the sides whose edges pin each corner (corner 0
+// (x, z), 1 (x, z+1), 2 (x+1, z+1), 3 (x+1, z); side 0 -x, 1 -z, 2 +x, 3 +z).
+constexpr std::uint8_t kEdgesToFixVertex[4] = {0x03, 0x09, 0x0c, 0x06};
+
+std::uint32_t CellKeyOf(const cSC4NetworkOccupant* occupant) {
+    std::uint32_t x = 0, z = 0;
+    occupant->GetOccupiedCell(x, z);
+    return Key(x, z);
+}
+bool HasSeveralTypes(cSC4NetworkOccupant* occupant) {
+    const std::uint32_t types = occupant->GetNetworkFlag() & 0x1fff;
+    return (types & (types - 1)) != 0;
+}
+// The sides (bytes) of an edge-types word with any of bits 0-2 set.
+std::uint32_t ConnectedSideCount(std::uint32_t edges) {
+    return (((edges & 0x07070707u) + 0x07070707u) & 0x08080808u) * 0x01010101u >> 27;
+}
+// The first network type whose flag meets `flags` (the scan stops at 12, as the original's).
+std::uint32_t FirstTypeOf(std::uint32_t flags) {
+    std::uint32_t type = 0;
+    while (type != 12 && (kFlagForNetworkType[type] & flags) == 0) ++type;
+    return type;
+}
+}  // namespace
+
+// Mac i386 0x00128fae (network-tools.md §10). Rounds until nothing is queued and no cell waits for a re-solve:
+//   1. close the set: every queued piece drops its edge from the neighbours it connects to (their cells are re-solved);
+//      a grouped edge, an immovable neighbour, an intersection or a tunnel portal pulls more pieces in;
+//   2. remove the pieces in pointer order (std::set): those on a destroyed cell (the caller's cells, and the cells a
+//      destroyed piece's grouped edges lead to) go outright, the others through RemoveOrReplaceOccupant;
+//   3. re-solve: the movable pieces within two cells of every re-solve cell, then insert the solved pieces;
+//   4. a piece the solve left unsolved loses its weaker network type (two types) or is queued for removal; a lot
+//      connection node is only marked unusable.
+// PARTIAL: the first constraint satisfier's Shutdown / Init(0, terrain maximum + kDefaultMaxDensity) are not on the
+// INetworkConstraintSatisfier seam; the fixed corners go in only when the host supplies one (natively it does not, as
+// for placement).
+void cSC4NetworkTool::DestroyOccupantsAndResolve(const std::vector<cSC4NetworkOccupant*>& occupants) {
+    if (occupants.empty()) return;
+    INetworkToolHost* host = GetNetworkToolHost();
+    forceReload_ = true;                       // +0x53
+    const bool saved = unknown98_;             // +0x50, restored at the end
+    unknown98_ = true;
+
+    std::deque<cSC4NetworkOccupant*> queue;              // one reference each
+    std::unordered_set<std::uint32_t> resolveCells;      // the cells to re-solve
+    std::unordered_set<std::uint32_t> destroyedCells;    // the cells whose pieces go outright
+    for (cSC4NetworkOccupant* occupant : occupants) {
+        if (!occupant) continue;
+        occupant->AddRef();
+        queue.push_back(occupant);
+        destroyedCells.insert(CellKeyOf(occupant));
+    }
+
+    int rounds = 0;
+    do {
+        std::set<cSC4NetworkOccupant*> removal;   // one reference each
+        std::set<cSC4NetworkOccupant*> visited;
+        auto addToRemoval = [&removal](cSC4NetworkOccupant* piece) {   // takes over the caller's reference
+            if (!removal.insert(piece).second) piece->Release();
+        };
+        auto addIntersectionPieces = [&](cSC4NetworkOccupant* piece) {
+            std::vector<cSC4NetworkOccupant*> pieces;
+            if (host) host->GetIntersectionPieces(piece, pieces);
+            for (cSC4NetworkOccupant* p : pieces)
+                if (p) addToRemoval(p);
+        };
+
+        // 1. close the set
+        while (!queue.empty()) {
+            cSC4NetworkOccupant* occupant = queue.front();
+            queue.pop_front();
+            if (!visited.insert(occupant).second) {
+                occupant->Release();
+                continue;
+            }
+            occupant->AddRef();
+            addToRemoval(occupant);
+            const std::uint32_t flags = occupant->GetNetworkFlag();
+            std::uint32_t x = 0, z = 0;
+            occupant->GetOccupiedCell(x, z);
+            for (int side = 0; side < 4; ++side) {
+                const std::uint32_t nx = x + static_cast<std::uint32_t>(kNextX[side]);
+                const std::uint32_t nz = z + static_cast<std::uint32_t>(kNextZ[side]);
+                if (nx >= static_cast<std::uint32_t>(cityWidth_) || nz >= static_cast<std::uint32_t>(cityHeight_)) continue;
+                cSC4NetworkOccupant* neighbor = GetNetworkOccupant(nx, nz);
+                if (!neighbor) continue;
+                const int opposite = (side + 2) & 3;
+                bool connected = false;
+                for (std::uint32_t type = 0; type < kNetworkTypeCount; ++type) {
+                    if ((flags & kFlagForNetworkType[type]) == 0) continue;
+                    const std::uint32_t edge = occupant->GetEdgeTypesFlag(static_cast<std::uint8_t>(type)) >> (8 * side);
+                    if (edge & 4) {   // a grouped edge: the neighbour goes as well
+                        neighbor->AddRef();
+                        queue.push_back(neighbor);
+                        neighbor->SetEdgeType(static_cast<std::uint8_t>(type), opposite, 0);
+                        if (destroyedCells.count(Key(x, z))) destroyedCells.insert(Key(nx, nz));
+                    } else if ((edge & 0xff) != 0) {
+                        neighbor->SetEdgeType(static_cast<std::uint8_t>(type), opposite, 0);
+                        if (type == 10)   // one-way road: the arrows through that side go too
+                            neighbor->SetOneWayDirections(static_cast<std::uint8_t>(neighbor->GetOneWayDirections() & ~(3u << (opposite * 2))));
+                        if (neighbor->GetEdgeTypesFlag(static_cast<std::uint8_t>(type)) == 0 && HasSeveralTypes(neighbor))
+                            neighbor->ClearNetworkFlag(kFlagForNetworkType[type]);
+                        connected = true;
+                    }
+                }
+                if (connected) {
+                    if (neighbor->HasNetworkFlag(kNetworkFlagConnectionNode) || !neighbor->IsImmovable()) {
+                        resolveCells.insert(Key(nx, nz));
+                    } else if (!neighbor->HasNetworkFlag(kNetworkFlagComplexPiece)) {
+                        neighbor->AddRef();
+                        queue.push_back(neighbor);
+                    } else {
+                        addIntersectionPieces(neighbor);
+                    }
+                }
+                neighbor->Release();
+            }
+            if (flags & kNetworkFlagTunnelPortal) {
+                if (cSC4NetworkOccupant* other = host ? host->TunnelOtherEnd(occupant) : nullptr) queue.push_back(other);
+            }
+            if (flags & kNetworkFlagComplexPiece) addIntersectionPieces(occupant);
+            occupant->Release();
+        }
+        if (worldCache_) worldCache_->Clear();
+
+        // 2. remove
+        for (cSC4NetworkOccupant* occupant : removal) {
+            if (host) host->SendOccupantDemolished(occupant);
+            bool replaced = false;
+            const std::uint32_t key = CellKeyOf(occupant);
+            if (destroyedCells.count(key) == 0) {
+                RemoveOrReplaceOccupant(occupant, replaced);
+            } else if (host) {
+                host->RemoveNetworkOccupant(occupant);
+            }
+            if (replaced) resolveCells.insert(key);
+            else resolveCells.erase(key);
+            occupant->Shutdown();
+            occupant->Release();
+        }
+        removal.clear();
+
+        // 3. re-solve around the cells
+        solvedCells_.clear();
+        solvedCellList_.clear();
+        for (std::uint32_t key : resolveCells) {
+            const std::uint32_t cx = key & 0xffff, cz = key >> 16;
+            const std::uint32_t x0 = cx < 3 ? 0 : cx - 2, z0 = cz < 3 ? 0 : cz - 2;
+            const std::uint32_t x1 = std::min<std::uint32_t>(cx + 2, static_cast<std::uint32_t>(cityWidth_) - 1);
+            const std::uint32_t z1 = std::min<std::uint32_t>(cz + 2, static_cast<std::uint32_t>(cityHeight_) - 1);
+            for (std::uint32_t z = z0; z <= z1; ++z) {
+                for (std::uint32_t x = x0; x <= x1; ++x) {
+                    cSC4NetworkOccupant* piece = GetNetworkOccupant(x, z);
+                    if (!piece) continue;
+                    if (constraintA_) {
+                        std::uint32_t fixed = 0xf;
+                        if (piece->HasNetworkFlag(kNetworkFlagConnectionNode)) {
+                            const std::uint32_t active = piece->GetActiveEdges();
+                            for (int corner = 0; corner < 4; ++corner)
+                                if ((kEdgesToFixVertex[corner] & active) == 0) fixed &= ~(1u << corner);
+                        }
+                        float heights[4] = {};
+                        piece->GetVertexHeights(heights);
+                        const int vertex = static_cast<int>(x) + static_cast<int>(z) * widthPlusOne_;
+                        if (fixed & 1) constraintA_->InsertFixedVertex(vertex, heights[0]);
+                        if (fixed & 2) constraintA_->InsertFixedVertex(vertex + widthPlusOne_, heights[1]);
+                        if (fixed & 4) constraintA_->InsertFixedVertex(vertex + widthPlusOne_ + 1, heights[2]);
+                        if (fixed & 8) constraintA_->InsertFixedVertex(vertex + 1, heights[3]);
+                    }
+                    if (!piece->IsImmovable()) solvedCells_.insert(Key(x, z));
+                    piece->Release();
+                }
+            }
+        }
+        resolveCells.clear();
+        validSteps_ = 0;
+        SolveNetwork(0xffffffffu, true);
+        std::list<cSC4NetworkOccupant*> inserted;
+        InsertOccupantsForSolvedCells(solvedCellList_, &inserted, false);
+
+        // 4. what the solve left unsolved
+        for (std::uint32_t key : solvedCells_) {
+            cSC4NetworkOccupant* piece = GetNetworkOccupant(key & 0xffff, key >> 16);
+            if (!piece) continue;
+            if (piece->HasNetworkFlag(kNetworkFlagConnectionNode)) {
+                piece->SetUsable(false);
+                piece->Release();
+                continue;
+            }
+            std::uint32_t px = 0, pz = 0;
+            piece->GetOccupiedCell(px, pz);
+            const std::uint32_t types = piece->GetNetworkFlag() & 0x1fff;
+            const std::uint32_t second = types & (types - 1);
+            const std::uint32_t first = types ^ second;
+            if (second != 0 && (second & (second - 1)) == 0) {   // exactly two types: the one with fewer sides goes
+                const std::uint32_t typeA = FirstTypeOf(first), typeB = FirstTypeOf(second);
+                const std::uint32_t edgesA = piece->GetEdgeTypesFlag(static_cast<std::uint8_t>(typeA));
+                const std::uint32_t edgesB = piece->GetEdgeTypesFlag(static_cast<std::uint8_t>(typeB));
+                const std::uint32_t sidesA = ConnectedSideCount(edgesA), sidesB = ConnectedSideCount(edgesB);
+                if (sidesA != sidesB) {
+                    const bool dropA = sidesA < sidesB;
+                    const std::uint32_t flag = dropA ? first : second;
+                    const std::uint32_t type = dropA ? typeA : typeB;
+                    const std::uint32_t edges = dropA ? edgesA : edgesB;
+                    for (int side = 0; side < 4; ++side) {
+                        if ((edges & (0xffu << (8 * side))) == 0) continue;
+                        const std::uint32_t nx = px + static_cast<std::uint32_t>(kNextX[side]);
+                        const std::uint32_t nz = pz + static_cast<std::uint32_t>(kNextZ[side]);
+                        cSC4NetworkOccupant* neighbor = GetNetworkOccupant(nx, nz);
+                        if (!neighbor) continue;
+                        neighbor->SetEdgeType(static_cast<std::uint8_t>(type), (side + 2) & 3, 0);
+                        if (neighbor->GetEdgeTypesFlag(static_cast<std::uint8_t>(type)) == 0 && HasSeveralTypes(neighbor))
+                            neighbor->ClearNetworkFlag(flag);
+                        resolveCells.insert(Key(nx, nz));
+                        neighbor->Release();
+                    }
+                    piece->SetEdgeTypesFlag(static_cast<std::uint8_t>(type), 0);
+                    piece->ClearNetworkFlag(flag);
+                    resolveCells.insert(Key(px, pz));
+                    piece->Release();
+                    continue;
+                }
+            }
+            queue.push_back(piece);   // keeps the reference: removed next round
+        }
+        MarkOccupantsUsable(inserted, true);
+        // PORT: a guard the original does not have; a solve that never settles stops here instead of spinning.
+        if (++rounds >= 64) {
+            std::fprintf(stderr, "network tool: demolition re-solve did not settle after %d rounds\n", rounds);
+            for (cSC4NetworkOccupant* left : queue) left->Release();
+            queue.clear();
+            resolveCells.clear();
+        }
+    } while (!resolveCells.empty() || !queue.empty());
+    unknown98_ = saved;
+}
+
+// network-manager.md §7.4 with this tool: a piece that is not in the city or not a network piece is refused; a piece
+// of an intersection is removed and a plain piece built from its cell's record (taken before the removal) goes back.
+bool cSC4NetworkTool::RemoveOrReplaceOccupant(cSC4NetworkOccupant* occupant, bool& replaced) {
+    INetworkToolHost* host = GetNetworkToolHost();
+    if (!occupant || !host || (occupant->GetFlags() & 1) == 0) return false;
+    if (!occupant->HasNetworkFlag(kNetworkFlagComplexPiece)) return host->RemoveNetworkOccupant(occupant);
+    cSC4NetworkCellInfo* cell = GetCellInfo(CellKeyOf(occupant));
+    if (!host->RemoveNetworkOccupant(occupant)) return false;
+    unknown98_ = true;
+    if (cell) InsertNetworkOccupant(*cell, tSolvedCell{}, nullptr);
+    replaced = true;
     return true;
 }
 

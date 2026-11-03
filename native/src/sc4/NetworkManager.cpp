@@ -27,9 +27,15 @@ constexpr eNetworkType kNetworkDestroyResolverTypes[3] = {kNetworkRoad, kNetwork
 
 // cISC4NetworkOccupant query helper: on success *out is the interface pointer with one reference, as
 // QueryInterface hands it back (the original stores it without a cast and releases it explicitly).
+NetworkOccupantViewProvider g_viewProvider = nullptr;
+
 bool QueryNetworkOccupant(cISC4Occupant* occupant, INetworkManagerOccupant** out) {
     *out = nullptr;
     if (occupant == nullptr) return false;
+    if (g_viewProvider != nullptr) {
+        *out = g_viewProvider(occupant);
+        return *out != nullptr;
+    }
     void* raw = nullptr;
     if (!occupant->QueryInterface(kGZIID_cISC4NetworkOccupant, &raw) || raw == nullptr) return false;
     *out = static_cast<INetworkManagerOccupant*>(raw);
@@ -53,6 +59,7 @@ const char* const kNetworkTypeNameTable[kNetworkToolCount] = {
 
 INetworkManagerHost* NetworkManagerHost() { return g_host; }
 void SetNetworkManagerHost(INetworkManagerHost* host) { g_host = host; }
+void SetNetworkOccupantViewProvider(NetworkOccupantViewProvider provider) { g_viewProvider = provider; }
 
 // ============================================================================================================
 // construction / destruction
@@ -330,6 +337,11 @@ void cSC4NetworkManager::SetNetworkTool(eNetworkType type, INetworkManagerTool* 
     INetworkManagerTool* previous = networkTools_[index];
     networkTools_[index] = tool;
     if (previous != nullptr) previous->Release();
+}
+
+void cSC4NetworkManager::AdoptNetworkTool(eNetworkType type, INetworkManagerTool* tool) {
+    const auto index = static_cast<std::size_t>(type);
+    if (index < static_cast<std::size_t>(kNetworkTypeCount) && networkTools_[index] == nullptr) SetNetworkTool(type, tool);
 }
 
 // 0x10016e6c8. create == false hands out the borrowed tool Init made (the caller AddRefs it);

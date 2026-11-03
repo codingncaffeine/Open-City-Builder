@@ -166,6 +166,7 @@ public:
     virtual void SetLit(bool lit) = 0;             // +0x1e8 (cSC4NetworkOccupantWithPreBuiltModel::SetLit)
     virtual bool SupportsLighting() = 0;           // +0x1f0
     virtual void UpdateViewRotation() = 0;         // +0x170 (DoViewRotationChange)
+    virtual cISC4Occupant* AsOccupant() { return nullptr; }   // slot 48 (not counted)
 };
 
 // cISC4OccupantManager (SL::spOccupantManager) as the three queries of this slice use it. The real class is
@@ -230,6 +231,10 @@ public:
 };
 
 void SetNetworkManagerHost(INetworkManagerHost* host);
+// PORT: the port's network occupants do not answer cISC4NetworkOccupant (0xa821ef94; their QueryInterface is shared
+// with other seams), so a host can supply the manager's view of one: one reference, or null.
+using NetworkOccupantViewProvider = INetworkManagerOccupant* (*)(cISC4Occupant* occupant);
+void SetNetworkOccupantViewProvider(NetworkOccupantViewProvider provider);
 INetworkManagerHost* NetworkManagerHost();
 
 // cISC4NetworkManager: the primary interface (vtable 0x100a796f0, 30 slots). Only the virtuals this slice
@@ -295,6 +300,9 @@ public:
     bool Init() override;                                                          // 0x100170928
     bool Shutdown() override;                                                      // 0x100170ee6
     INetworkManagerTool* GetNetworkTool(eNetworkType type, bool create) override;  // 0x10016e6c8
+    // PORT: a tool the host supplies after Init ran (the city loads before the view's hosts are installed); an
+    // occupied slot keeps its tool.
+    void AdoptNetworkTool(eNetworkType type, INetworkManagerTool* tool);
     void DestroyNetworkOccupants(const ilist<cISC4Occupant*>& occupants) override; // 0x10016e8d8
     void QueueRemovals(bool queue) override;                                       // 0x10016eaee
     bool RemoveOrReplaceOccupant(INetworkManagerTool* tool, cISC4Occupant* occupant,

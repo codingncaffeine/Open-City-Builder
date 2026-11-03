@@ -1,4 +1,5 @@
 #include "app/NativeNetworkTool.h"
+#include "app/NativeNetworkManager.h"
 
 #include <cmath>
 #include <algorithm>
@@ -10,6 +11,7 @@
 #include "app/NativeZoneTool.h"
 #include "sc4/BudgetSimulator.h"
 #include "sc4/NetworkTool.h"
+#include "rz/cRZMessage2Standard.h"
 #include "sc4/NetworkToolUI.h"
 #include "sc4/NetworkPreview.h"
 #include "app/NativeModelMaker.h"
@@ -201,6 +203,24 @@ public:
         if (!network) occupant->Release();
         return network;
     }
+    // DestroyOccupantsAndResolve's outside calls (network-tools.md §10).
+    void SendOccupantDemolished(sc4::cSC4NetworkOccupant* occupant) override {
+        if (!SL::spMS2 || !occupant) return;
+        auto* message = new cRZMessage2Standard();
+        message->AddRef();
+        message->SetType(sc4::kMessageOccupantDemolished);
+        message->SetVoid1(static_cast<sc4::cISC4Occupant*>(occupant));
+        message->SetIGZUnknown(static_cast<sc4::cISC4Occupant*>(occupant));
+        SL::spMS2->MessageSend(message);
+        message->Release();
+    }
+    bool RemoveNetworkOccupant(sc4::cSC4NetworkOccupant* occupant) override {
+        sc4::cISC4OccupantManager* occupants = Occupants();
+        return occupants && occupant && occupants->RemoveOccupant(occupant, false, 0);
+    }
+    void GetIntersectionPieces(sc4::cSC4NetworkOccupant* occupant, std::vector<sc4::cSC4NetworkOccupant*>& out) override {
+        NetworkIntersectionPieces(occupant, out);
+    }
     float WaterSurfaceAtVertex(std::int32_t x, std::int32_t z) override {
         sc4::cSTETerrain* t = Terrain();
         if (!t || !t->IsWaterVertex(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z))) return -3.4e38f;
@@ -325,6 +345,7 @@ void InstallNetworkTool(sc4::cSC4View3DWin& view, cISC4City* city) {
     g_view = &view;
     g_city = dynamic_cast<sc4::cSC4City*>(city);
     sc4::SetNetworkToolHost(&g_toolHost);
+    InstallNetworkManagerTools();
     // The tile rules (RUL files) the solver matches drags against, once.
     static bool rulesLoaded = false;
     if (!rulesLoaded) {

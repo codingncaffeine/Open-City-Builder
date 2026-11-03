@@ -466,6 +466,14 @@ public:
     // cSC4DemolishByNetworksOccupantFilter): price (commit false) or demolish (true) what stands on the cells; false when
     // the region may not be cleared.
     virtual bool DemolishForNetwork(bool /*commit*/, const std::vector<SC4PointU>& /*cells*/, std::int64_t& cost) { cost = 0; return true; }
+    // DestroyOccupantsAndResolve's outside calls (network-tools.md §10): the synchronous 0xaa7a014d send (message server
+    // slot 3; void1 and IGZUnknown = the occupant), occupant manager RemoveOccupant(o, false, 0) (slot 21), the network
+    // manager's GetAllIntersectionPieces (slot 12; one reference each) and a tunnel portal's other end (QI 0x8a4bd52b,
+    // GetOtherEndOccupant; one reference).
+    virtual void SendOccupantDemolished(cSC4NetworkOccupant* /*occupant*/) {}
+    virtual bool RemoveNetworkOccupant(cSC4NetworkOccupant* /*occupant*/) { return false; }
+    virtual void GetIntersectionPieces(cSC4NetworkOccupant* /*occupant*/, std::vector<cSC4NetworkOccupant*>& /*out*/) {}
+    virtual cSC4NetworkOccupant* TunnelOtherEnd(cSC4NetworkOccupant* /*portal*/) { return nullptr; }
 };
 
 void SetNetworkToolHost(INetworkToolHost* host);
@@ -530,7 +538,7 @@ public:
     virtual std::uint32_t GetToolViewId() = 0;                                             // [47] 0x178
     virtual void GetPlacementParams(cSC4NetworkPlacementParams& out) = 0;                  // [48] 0x180
     virtual void QueryUserForPotentialIntersections() = 0;                                 // [49] 0x188
-    // [50] 0x190 DestroyOccupantsAndResolve — not recovered.
+    // [50] 0x190 DestroyOccupantsAndResolve — on cSC4NetworkTool (the vector of the port's occupant class).
     // [51] / [52] 0x198 / 0x1a0 the complete / deleting destructor.
     virtual void GetFailureReasonString(std::uint32_t reason, cRZString& out) = 0;         // [54] 0x1b0
     // [55] 0x1b8 DoNetworkSpecificPlacement .. [62] 0x1f0 DestroyHilightedOccupants — not recovered.
@@ -687,6 +695,13 @@ public:
     virtual void SetQuadTrianglesToDraw(cSC4NetworkOccupant* occupant, std::uint32_t compact);
     void ClearNetworkOccsFromCell(std::uint32_t x, std::uint32_t z);
     static void MarkOccupantsUsable(std::list<cSC4NetworkOccupant*>& occupants, bool release);
+    // vslot 0x190 (Mac i386 0x00128fae, network-tools.md §10): removes the pieces (and what they pull in: grouped edges,
+    // immovable neighbours, whole intersections, a tunnel's other portal) and re-solves the neighbours around them.
+    // The pointers are borrowed; the caller keeps its references.
+    void DestroyOccupantsAndResolve(const std::vector<cSC4NetworkOccupant*>& occupants);
+    // The network manager's RemoveOrReplaceOccupant (slot 8, i386 0x006110b0, network-manager.md §7.4) as this tool
+    // calls it: a piece of an intersection is replaced by a plain piece built from its cell.
+    bool RemoveOrReplaceOccupant(cSC4NetworkOccupant* occupant, bool& replaced);
     const std::vector<tSolvedCell>& SolvedCells() const { return solvedCellList_; }
     void SetTerrainHilight(int param);                                    // 0x10018cd24
     // i386 0x004cc96a: the drag's cells (+0xb8) and steps (+0xa0); zMajor / xMajor = the splitter's two flags.

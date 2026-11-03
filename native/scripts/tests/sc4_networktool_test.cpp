@@ -3,11 +3,13 @@
 // straight/diagonal splitter). The engine globals the original touches are replaced by INetworkToolHost.
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <vector>
 
 #include "gz/cIGZMessage2.h"
 #include "rz/cRZString.h"
 #include "sc4/NetworkTool.h"
+#include "sc4/NetworkOccupant.h"
 #include "sc4/TileRules.h"
 
 static int failures = 0;
@@ -108,12 +110,21 @@ struct FakePreview : INetworkPreview {
 };
 
 struct FakeWorldCache : INetworkWorldCache {
-    void Clear() override { ++clears; }
-    // IsTerrainOK reads the tool's own cache (i386 0x...): it answers the host's test cell.
-    cSC4NetworkCellInfo* GetCell(std::uint32_t) override { return source ? *source : nullptr; }
+    void Clear() override {
+        ++clears;
+        cells.clear();
+    }
+    // IsTerrainOK reads the tool's own cache (i386 0x...): it answers the host's test cell. Cells made from a world
+    // piece (CreateCell) answer first.
+    cSC4NetworkCellInfo* GetCell(std::uint32_t key) override {
+        auto it = cells.find(key);
+        if (it != cells.end()) return &it->second;
+        return source ? *source : nullptr;
+    }
     cSC4NetworkCellInfo** source = nullptr;
     void GetAllCells(std::vector<cSC4NetworkCellInfo>& out) override { out.clear(); }
-    cSC4NetworkCellInfo* CreateCell(std::uint32_t) override { return nullptr; }
+    cSC4NetworkCellInfo* CreateCell(std::uint32_t key) override { return &cells[key]; }
+    std::map<std::uint32_t, cSC4NetworkCellInfo> cells;
     int clears = 0;
 };
 
@@ -222,6 +233,26 @@ struct FakeHost : INetworkToolHost {
         return worldCache;
     }
     INetworkConstraintSatisfier* CreateConstraintSatisfier() override { return &satisfier; }
+    // The pieces of a small world for DestroyOccupantsAndResolve: cell key -> piece (one reference each).
+    std::map<std::uint32_t, cSC4NetworkOccupant*> pieces;
+    std::vector<cSC4NetworkOccupant*> removedPieces, demolishedPieces;   // identities only
+    cSC4NetworkOccupant* NetworkOccupantAt(std::uint32_t x, std::uint32_t z, std::uint32_t) override {
+        auto it = pieces.find(x | (z << 16));
+        if (it == pieces.end()) return nullptr;
+        it->second->AddRef();
+        return it->second;
+    }
+    void SendOccupantDemolished(cSC4NetworkOccupant* occupant) override { demolishedPieces.push_back(occupant); }
+    bool RemoveNetworkOccupant(cSC4NetworkOccupant* occupant) override {
+        for (auto it = pieces.begin(); it != pieces.end(); ++it) {
+            if (it->second != occupant) continue;
+            removedPieces.push_back(occupant);
+            pieces.erase(it);
+            occupant->Release();
+            return true;
+        }
+        return false;
+    }
     const INetworkTypeInfo* NetworkTypeInfo(std::uint32_t type) override {
         lastNetworkType = type;
         return &typeInfo;
@@ -1025,6 +1056,55 @@ int main() {
         f.host.cell = nullptr;
         SetTileRuleResourceLoader(nullptr);
         cSC4NetworkTool::ReloadRules();
+    }
+
+    // ---- DestroyOccupantsAndResolve (network-tools.md §10) ------------------------------------------------------
+    {
+        // three road pieces in a row at (5..7, 5); edge bytes per side (0 -x, 1 -z, 2 +x, 3 +z)
+        auto makePiece = [](FakeHost& host, std::uint32_t x, std::uint32_t z, std::uint32_t edges, std::uint32_t extraFlags) {
+            auto* piece = new cSC4NetworkOccupant();
+            piece->AddRef();
+            const float fx = static_cast<float>(x) * 16.0f, fz = static_cast<float>(z) * 16.0f;
+            const float corners[4][3] = {{fx, 0, fz}, {fx, 0, fz + 16}, {fx + 16, 0, fz + 16}, {fx + 16, 0, fz}};
+            piece->Init(corners);
+            piece->SetNetworkFlag(kFlagForNetworkType[kNetworkRoad] | extraFlags);
+            piece->SetEdgeTypesFlag(kNetworkRoad, edges);
+            piece->SetUsable(true);
+            host.pieces[x | (z << 16)] = piece;
+            return piece;
+        };
+        // (a) plain edges: the middle goes; the lot connection nodes beside it lose the facing edge and stay, unusable
+        {
+            Fixture f;
+            SetNetworkToolHost(&f.host);
+            CHECK(f.tool->Init());
+            cSC4NetworkOccupant* west = makePiece(f.host, 5, 5, 0x00010000, 0x200000);
+            cSC4NetworkOccupant* middle = makePiece(f.host, 6, 5, 0x00010001, 0);
+            cSC4NetworkOccupant* east = makePiece(f.host, 7, 5, 0x00000001, 0x200000);
+            f.tool->DestroyOccupantsAndResolve({middle});
+            CHECK(f.host.removedPieces.size() == 1 && f.host.removedPieces[0] == middle);
+            CHECK(f.host.demolishedPieces.size() == 1 && f.host.demolishedPieces[0] == middle);
+            CHECK(f.host.pieces.size() == 2 && f.host.pieces.count(5 | (5 << 16)) && f.host.pieces.count(7 | (5 << 16)));
+            CHECK(west->GetEdgeTypesFlag(kNetworkRoad) == 0 && east->GetEdgeTypesFlag(kNetworkRoad) == 0);
+            CHECK(!west->IsUsable() && !east->IsUsable());
+            CHECK(west->HasNetworkFlag(kFlagForNetworkType[kNetworkRoad]));   // a single type is never cleared
+            for (auto& entry : f.host.pieces) entry.second->Release();
+            f.host.pieces.clear();
+            SetNetworkToolHost(nullptr);
+        }
+        // (b) a grouped edge (bit 2) pulls the neighbour in: both go, and only the caller's piece was asked for
+        {
+            Fixture f;
+            SetNetworkToolHost(&f.host);
+            CHECK(f.tool->Init());
+            cSC4NetworkOccupant* a = makePiece(f.host, 10, 8, 0x00040000, 0);
+            cSC4NetworkOccupant* b = makePiece(f.host, 11, 8, 0x00000004, 0);
+            f.tool->DestroyOccupantsAndResolve({a});
+            CHECK(f.host.removedPieces.size() == 2 && f.host.pieces.empty());
+            CHECK(f.host.demolishedPieces.size() == 2);
+            (void)b;
+            SetNetworkToolHost(nullptr);
+        }
     }
 
     // ---- Unregister the host and finish ---------------------------------------------------------------------
