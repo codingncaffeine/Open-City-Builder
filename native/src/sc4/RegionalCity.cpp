@@ -1,5 +1,8 @@
 #include "sc4/RegionalCity.h"
 
+#include <cstdio>
+#include <cstdlib>
+
 #include <cstring>
 #include <iterator>
 #include <string>
@@ -451,6 +454,9 @@ void cSC4RegionalCity::TreatAllIncomingConnectionsAsNew() {
 // cells have no city are always dropped from `deals` (whatever `removeEmpty` says). `removeEmpty` additionally
 // moves the surviving local deals out of `deals`.
 void cSC4RegionalCity::ExtractLocalDeals(NeighborDealList& deals, NeighborDealList& out, bool removeEmpty) {
+    static const bool trace = std::getenv("SC4_NEIGHBORDEBUG") != nullptr;
+    if (trace) std::fprintf(stderr, "regionalcity %p: extract from %zu deals, host %d city %d neighbours %d\n", static_cast<void*>(this), deals.size(),
+                            host_ != nullptr, host_ && host_->CurrentCity(), host_ && host_->HasNeighborsSimulator());
     if (!host_ || !host_->CurrentCity() || !host_->HasNeighborsSimulator()) return;
     cISC4RegionalCity* current = host_->CurrentRegionalCity();
     std::vector<NeighborDealList::iterator> toErase;
@@ -462,6 +468,8 @@ void cSC4RegionalCity::ExtractLocalDeals(NeighborDealList& deals, NeighborDealLi
         deal->GetRegionCellOnOtherSideOfConnection(cellX, cellZ);
         cISC4RegionalCity* cityB = host_->RegionCityAt(cellX, cellZ);
         if (!cityA || !cityB) {
+            if (trace) std::fprintf(stderr, "regionalcity %p:   deal type %08x dropped: cities %p %p\n", static_cast<void*>(this), deal->GetType(),
+                                    static_cast<void*>(cityA), static_cast<void*>(cityB));
             toErase.push_back(it);
             continue;
         }
@@ -471,6 +479,8 @@ void cSC4RegionalCity::ExtractLocalDeals(NeighborDealList& deals, NeighborDealLi
         } else {
             local = (cityA == current && cityB == this) || (cityA == this && cityB == current);
         }
+        if (trace) std::fprintf(stderr, "regionalcity %p:   deal type %08x cities %p %p current %p\n", static_cast<void*>(this), deal->GetType(),
+                                static_cast<void*>(cityA), static_cast<void*>(cityB), static_cast<void*>(current));
         if (!local) continue;
         out.push_back(*it);
         if (removeEmpty) toErase.push_back(it);

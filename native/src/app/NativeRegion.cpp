@@ -54,6 +54,10 @@ bool ReadRegionalCityFile(const cIGZString& path, cISC4RegionalCity*& out) {
 // the simulators (rating, taxes, connections, populations, jobs) still answers neutrally and keeps the record's values.
 sc4::cSC4City* LiveCity(const cISC4City* city) { return dynamic_cast<sc4::cSC4City*>(const_cast<cISC4City*>(city)); }
 
+cISC4RegionalCity* RegionCity(int x, int z);
+// SL::spNeighborsSim: the city's neighbours simulator, bound before the simulators' Init (SL::OnCityInit).
+sc4::cSC4NeighborsSimulator* NeighborsSim() { return dynamic_cast<sc4::cSC4NeighborsSimulator*>(SL::spNeighborsSim); }
+
 class CityHost final : public IRegionalCityHost {
 public:
     std::uint32_t DefaultDifficultyLevel() override { return 0; }
@@ -69,14 +73,23 @@ public:
     }
     cISC4RegionalCity* CurrentRegionalCity() override { return g_app ? g_app->GetRegionalCity() : nullptr; }
     cISC4City* CurrentCity() override { return g_app ? g_app->GetCity() : nullptr; }
-    cISC4RegionalCity* RegionCityAt(int, int) override { return nullptr; }
-    void ConvertConnectionCellToNeighborCell(int, int, int&, int&, cISC4RegionalCity*&, int&, int&) override {}
-    void ConvertNeighborCellToConnectionCell(cISC4RegionalCity*, int, int, int&, int&) override {}
-    bool HasNeighborsSimulator() override { return false; }
-    cISC4RegionalCity* FindCityOnOtherSideOfConnection(int, int) override { return nullptr; }
+    cISC4RegionalCity* RegionCityAt(int x, int z) override { return RegionCity(x, z); }
+    void ConvertConnectionCellToNeighborCell(int x, int z, int& neighborX, int& neighborZ, cISC4RegionalCity*& city, int& cellX, int& cellZ) override {
+        sc4::cSC4NeighborsSimulator::ConvertConnectionCellToNeighborCell(x, z, neighborX, neighborZ, &city, cellX, cellZ);
+    }
+    void ConvertNeighborCellToConnectionCell(cISC4RegionalCity* city, int x, int z, int& outX, int& outZ) override {
+        sc4::cSC4NeighborsSimulator::ConvertNeighborCellToConnectionCell(city, x, z, outX, outZ);
+    }
+    bool HasNeighborsSimulator() override { return NeighborsSim() != nullptr; }
+    cISC4RegionalCity* FindCityOnOtherSideOfConnection(int x, int z) override {
+        const sc4::cSC4NeighborsSimulator* neighbors = NeighborsSim();
+        return neighbors ? neighbors->FindCityOnOtherSideOfConnection(x, z) : nullptr;
+    }
     bool RegionalCityEstablished(const cISC4RegionalCity* city) override { return Concrete(city)->GetEstablished(); }
     void RegionalCityConnections(const cISC4RegionalCity* city, NeighborConnectionList& out) override { Concrete(city)->GetAllConnections(out); }
-    void GetAdjacentCities(std::list<cRZAutoRefCount<cISC4RegionalCity>>&, bool) override {}
+    void GetAdjacentCities(std::list<cRZAutoRefCount<cISC4RegionalCity>>& out, bool includeUnestablished) override {
+        if (const sc4::cSC4NeighborsSimulator* neighbors = NeighborsSim()) neighbors->GetAdjacentCities(out, includeUnestablished);
+    }
     void CreateSavePathForCity(const cIGZString& cityName, std::uint32_t serial, cRZString& out) override {
         out = cRZString(cityName.ToChar());
         char tail[24];
