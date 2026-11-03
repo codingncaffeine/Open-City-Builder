@@ -114,6 +114,37 @@ public:
     virtual std::uint32_t TripCapacityLimit() = 0;      // traffic simulator slot 0xa0 (no arguments in the call)
     virtual std::uint32_t UsedTripCapacity(cISCPropertyHolder* holder, std::uint32_t kind) = 0;   // 0x1000885b8
     virtual bool NeighborConnectionCost(int x, int z, float& cost) = 0;    // GetTrafficNeighborConnection(x, z)->+4
+
+    // ---- the traffic simulator's cell graph (traffic-network.md §2; pathfinder.md §4.1). Defaults: an empty city. ----
+    virtual std::uint16_t Connections(int t, int x, int z) { (void)t; (void)x; (void)z; return 0; }      // conn[t] (in city)
+    virtual std::uint16_t Switches(int t, int x, int z) { (void)t; (void)x; (void)z; return 0xffff; }    // switch[t]
+    virtual std::uint16_t PriorCar(int side, int x, int z) { (void)side; (void)x; (void)z; return 0xffff; }
+    virtual std::uint8_t Wormhole(int x, int z) { (void)x; (void)z; return 0; }
+    // The first network-info record of transit network n at the cell: inverse capacity, piece type, extra step cost.
+    virtual bool CellNetwork(int n, int x, int z, float& inverseCapacity, std::uint8_t& type, float& extraCost) {
+        (void)n; (void)x; (void)z; (void)inverseCapacity; (void)type; (void)extraCost; return false;
+    }
+    virtual float Volume(int n, int x, int z) { (void)n; (void)x; (void)z; return 0.0f; }
+    virtual std::uint32_t TransitSwitchId(int x, int z) { (void)x; (void)z; return 0; }
+    virtual float TransitSwitchCost(std::uint32_t id) { (void)id; return 0.0f; }
+    // The destination bitmask map, [x + 1][z + 1] (off-map ring included), and the free destination counts per type.
+    virtual std::uint8_t DestinationByte(int x, int z) { (void)x; (void)z; return 0; }
+    virtual void SetDestinationByte(int x, int z, std::uint8_t value) { (void)x; (void)z; (void)value; }
+    virtual std::uint32_t FreeDestinations(int k) { (void)k; return 0; }
+    virtual void DecrementFreeDestinations(int k) { (void)k; }
+    // The lot covering a cell (GetLot(x, z, false)): its bounding rect and property holder.
+    virtual bool LotAtCell(int x, int z, SC4RectInt32& rect, cISCPropertyHolder*& holder) { (void)x; (void)z; (void)rect; holder = nullptr; return false; }
+    virtual cISCPropertyHolder* NeighborPool(int t, int x, int z) { (void)t; (void)x; (void)z; return nullptr; }
+    virtual std::uint32_t MaxTripCapacity(cISCPropertyHolder* holder, std::uint32_t k) { (void)holder; (void)k; return 0; }
+    // Per travel type t: 1 / max speed on network type `type`, and the three tuning flags.
+    virtual float InverseMaxSpeed(int t, int type) { (void)t; (void)type; return 3.4028235e38f; }
+    virtual bool AffectedByTraffic(int t) { (void)t; return true; }
+    virtual bool CanReachDestination(int t) { (void)t; return true; }
+    virtual const float* DefaultStartingCosts() { return nullptr; }
+    virtual std::uint32_t MaxDistanceOriginToNetwork() { return 1; }
+    virtual float NearestDestinationAttractiveness() { return 0.75f; }
+    virtual float CongestionSpeedFactor(float ratio) { (void)ratio; return 1.0f; }   // the congestion -> inverse speed curve
+    virtual bool StrikeOn() { return false; }
 };
 
 class cISC4PathFinder : public cIGZUnknown {
@@ -143,6 +174,10 @@ public:
     virtual float GetTripLengthScaledForDisplay() = 0;                // 0xd0
     virtual void GetEndCell(int& x, int& z) const = 0;                // 0xd8
     virtual std::uint8_t GetLastTravelType() const = 0;               // 0xe0
+    // 1 found, 0 not found, 2 suspended (a work-time limit ran out; call again to resume). pathfinder.md §4.3.
+    virtual int FindPath() = 0;
+    virtual bool WasTripReversible() = 0;
+    virtual void GetCompressedRoute(std::vector<std::uint8_t>& out, std::uint32_t& travelTypes) = 0;
 };
 
 class cSC4PathFinder final : public cISC4PathFinder {
@@ -178,6 +213,17 @@ public:
     float GetTripLengthScaledForDisplay() override { return host_->TripScaleForDisplay() * tripLength_; }
     void GetEndCell(int& x, int& z) const override { x = endCellX_; z = endCellZ_; }
     std::uint8_t GetLastTravelType() const override { return goal_ ? goal_->travelType : 0; }
+    int FindPath() override;                                  // 0x006D8FD0 (Windows)
+    bool WasTripReversible() override;                        // pathfinder.md §4.16
+    void GetCompressedRoute(std::vector<std::uint8_t>& out, std::uint32_t& travelTypes) override;   // §4.15
+    // pf2's return-leg setup writes these directly in the original (traffic-simulator.md §4.4).
+    SC4RectInt32 StartRect() const { return startRect_; }
+    std::uint16_t AllowedTravelTypes() const { return std::uint16_t(travelTypes_ & 0xffff); }
+    void SetTravelTypeMasks(std::uint16_t allowed, std::uint16_t start) { travelTypes_ = std::uint32_t(allowed) | (std::uint32_t(start) << 16); }
+    const float* StartingCosts() const { return startingCosts_; }
+    bool ParkAndRide(int& x, int& z, std::uint8_t& side) const { x = reversalX_; z = reversalZ_; side = reversalDirection_; return x != -2; }
+    void SetParkAndRide(int x, int z, std::uint8_t side) { reversalX_ = std::int16_t(x); reversalZ_ = std::int16_t(z); reversalDirection_ = side; }
+    std::uint32_t NodesExpanded() const { return expanded_; }
 
     // ---- search internals (the original's private methods)
     void ReleasePathNodes();                                  // 0x1000d1664
@@ -189,6 +235,10 @@ public:
     void AddTripNode(int x, int z, std::uint8_t direction, std::uint8_t travelType, float stepCost, TripNode* parent,
                      float limit, bool outside);              // 0x1000d3994
     static float DistanceToRectangle(int x, int z, SC4RectInt32 rect);    // 0x1000d3b32
+    bool FindNearestStandardDest();                           // pathfinder.md §4.5
+    bool CreateStartNodes();                                  // §4.6
+    bool AtGoal(TripNode* node, bool cannotEnd);              // §4.10
+    float Heuristic(int x, int z) const;                      // §4.4
 
     // ---- state access for the host / tests
     TripNodeHashMap& Nodes() { return nodes_; }
@@ -245,6 +295,7 @@ private:
     std::uint8_t blockedTypes_ = 0;                // +0x110
     std::int16_t reversalX_ = 0, reversalZ_ = 0;   // +0x112 / +0x114
     std::uint8_t reversalDirection_ = 0;           // +0x116
+    std::uint32_t expanded_ = 0;                   // nodes expanded by the last FindPath (diagnostics)
     std::vector<int> xDistance_, zDistance_;       // +0x118 / +0x130
     TripNodePriorityQueue queue_;                  // +0x158
     TripNodeHashMap nodes_;                        // +0x178

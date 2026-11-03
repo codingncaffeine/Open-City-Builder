@@ -22,6 +22,37 @@ struct Host : IPathFinderHost {
     std::uint32_t TripCapacityLimit() override { return limit; }
     std::uint32_t UsedTripCapacity(cISCPropertyHolder*, std::uint32_t) override { return used; }
     bool NeighborConnectionCost(int, int, float& c) override { c = toll; return hasToll; }
+    std::uint32_t MaxTripCapacity(cISCPropertyHolder*, std::uint32_t) override { return limit; }
+};
+
+// A 12 x 9 city with one east-west road on row 5 from x = 1 to 8 (car travel type 1, network type 0 Road), a start lot at
+// (0, 5) and a destination lot at (9, 5) with free capacity of type 0 (destination byte bit 0).
+struct RoadHost : IPathFinderHost {
+    std::uint16_t conn[12][9] = {};
+    bool road[12][9] = {};
+    int CityWidthInCells() override { return 12; }
+    int CityDepthInCells() override { return 9; }
+    float TripScaleForDisplay() override { return 1.0f; }
+    std::uint32_t TripCapacityLimit() override { return 0; }
+    std::uint32_t UsedTripCapacity(cISCPropertyHolder*, std::uint32_t) override { return 0; }
+    bool NeighborConnectionCost(int, int, float& c) override { c = 0; return true; }
+    bool In(int x, int z) const { return unsigned(x) < 12 && unsigned(z) < 9; }
+    std::uint16_t Connections(int t, int x, int z) override { return t == 1 && In(x, z) ? conn[x][z] : 0; }
+    bool CellNetwork(int n, int x, int z, float& inverse, std::uint8_t& type, float& extra) override {
+        if (n != 1 || !In(x, z) || !road[x][z]) return false;
+        inverse = 0.001f; type = 0; extra = 0.0f;
+        return true;
+    }
+    std::uint8_t DestinationByte(int x, int z) override { return x == 9 && z == 5 ? 1 : 0; }
+    std::uint32_t FreeDestinations(int k) override { return k == 0 ? 1 : 0; }
+    bool LotAtCell(int x, int z, SC4RectInt32& rect, cISCPropertyHolder*& holder) override {
+        if ((x == 9 || x == 0) && z == 5) { rect = {x, z, x, z}; holder = reinterpret_cast<cISCPropertyHolder*>(this); return true; }
+        holder = nullptr;
+        return false;
+    }
+    std::uint32_t MaxTripCapacity(cISCPropertyHolder*, std::uint32_t) override { return 40; }
+    float InverseMaxSpeed(int t, int) override { return t == 1 ? 0.5f : 3.4028235e38f; }
+    bool AffectedByTraffic(int) override { return false; }
 };
 }  // namespace
 
@@ -264,6 +295,58 @@ int main() {
         CHECK(finder->GetTripLength() == 9.0f);
         finder->SetRouteInfo(nullptr);
     }
+    // --- FindPath over a road (pathfinder.md §4.4 - §4.15) ---
+    {
+        RoadHost roads;
+        for (int x = 1; x <= 8; ++x) {
+            roads.road[x][5] = true;
+            roads.conn[x][5] = std::uint16_t((1u << (2 + 4 * 0)) | (1u << (0 + 4 * 2)));   // in from the west -> out east; in from the east -> out west
+        }
+        auto run = [&](RoadHost& host, int& result, std::vector<std::uint8_t>& route, float& length, int& ex, int& ez, bool& reversible) {
+            cSC4PathFinder* pf = new cSC4PathFinder(&host);
+            pf->AddRef();
+            pf->Init();
+            pf->SetTrafficDensity(25);
+            pf->SetTripDestinationFilter(0);
+            pf->ClearAllDestinationFlags();
+            pf->SetDestinationFlag(1);
+            pf->SetStartRect({0, 5, 0, 5});
+            pf->ClearAllFlags();
+            pf->ClearAllTravelTypeFlags();
+            pf->SetTravelTypeFlag(0x2, true);
+            pf->SetMaxTripLength(10.0f);
+            result = pf->FindPath();
+            std::uint32_t types = 0;
+            pf->GetCompressedRoute(route, types);
+            length = pf->GetTripLength();
+            pf->GetEndCell(ex, ez);
+            reversible = pf->WasTripReversible();
+            CHECK(result != 1 || (types == 2 && pf->GetTrafficArrived() == 25 && pf->GetLastTravelType() == 1));
+            pf->Release();
+        };
+        int result = 0, ex = 0, ez = 0;
+        float length = 0;
+        bool reversible = false;
+        std::vector<std::uint8_t> route;
+        run(roads, result, route, length, ex, ez, reversible);
+        CHECK(result == 1 && ex == 9 && ez == 5);
+        CHECK(length == 3.5f);   // seven steps (1 -> 8) at 0.5, the start node's cost (0) taken off
+        // header: car at (1, 5); one run of seven east steps (code 2), four to a byte, low bits first
+        const std::vector<std::uint8_t> expected{1, 1, 5, 0x41, 7, 0xaa, 0x2a};
+        CHECK(route == expected);
+        CHECK(reversible);
+        // planted control: a gap in the road (no exit east at x = 5) leaves the destination unreachable
+        RoadHost broken = roads;
+        broken.conn[5][5] = std::uint16_t(1u << (0 + 4 * 2));
+        run(broken, result, route, length, ex, ez, reversible);
+        CHECK(result == 0 && route.empty());
+        // a one-way road (east only) is not reversible
+        RoadHost oneWay = roads;
+        for (int x = 1; x <= 8; ++x) oneWay.conn[x][5] = std::uint16_t(1u << (2 + 4 * 0));
+        run(oneWay, result, route, length, ex, ez, reversible);
+        CHECK(result == 1 && !reversible);
+    }
+
     // --- shutdown ---
     CHECK(finder->Shutdown() && !finder->Shutdown());
     CHECK(finder->GetLastTravelType() == 0);   // goal released
