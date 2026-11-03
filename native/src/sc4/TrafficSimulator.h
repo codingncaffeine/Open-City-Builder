@@ -633,8 +633,27 @@ private:
     void SyncBudgetCounters();
     template <class T> cSC4SimGrid<T>* MakeGrid(std::uint32_t id, int tract);
     template <class T> void AdoptSavedGrid(cSC4SimGrid<T>*& member, std::uint32_t id);   // Init keeps what Read loaded
+    // §3.5: the record's cycle position and accumulators, kept by Read (which runs before Init) for DoPostCityInit to resume from
+    struct LoadedCycle {
+        bool valid = false;
+        std::uint32_t state = 0;
+        std::int16_t phaseX = 0, phaseZ = 0;
+        std::uint32_t strategyBucketCounter = 0, strategyBucket = 0;
+        std::uint32_t processed = 0, dayIndex = 0, total = 0, days = 0, passTotal = 0, toReRoute = 0, toSearch = 0;
+        std::array<std::uint32_t, 10> passCounters{};
+        std::array<std::uint32_t, 3> jobCapacity{}, attempted{}, routed{};
+        float carLenSum = 0, freightLenSum = 0;
+        std::uint32_t carLenCount = 0, freightCount = 0;
+        std::array<std::uint32_t, 9> typeCountsPublished{}, typeCountsBuilding{};
+        std::vector<std::pair<std::uint32_t, TrafficEdgeDensity>> edgeDensities;
+        std::vector<std::pair<std::uint16_t, cSCPropertyHolder>> pools;   // capacities and arrivals per neighbouring city
+        std::vector<std::vector<std::uint8_t>> destinations;                // the destination map, [x + 1][z + 1]
+        std::array<std::uint32_t, 4> freeDestinations{};
+    } loaded_;
+    void ResumeLoadedCycle();                        // §3.5 steps 11-13
     std::vector<std::uint8_t> savedCongestion_, savedTripLength_;   // the file's maps as loaded (SC4_TRAFFICDEBUG scoring)
     void ScoreAgainstSaved();
+    void DumpTrips(const char* path);                // SC4_TRAFFICDUMP: every lot's trips, one line each
 };
 
 }  // namespace sc4

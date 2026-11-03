@@ -637,12 +637,21 @@ void cSC4TrafficSimulator::DoLotDeactivated(ITrafficLot* lot) {
 void cSC4TrafficSimulator::DoPostCityInit() {
     if (!initialized_ || cellsX_ <= 0) return;
     const auto t0 = std::chrono::steady_clock::now();
+    if (std::getenv("SC4_TRAFFICDUMP")) DumpTrips("trips_saved.txt");
     // The saved cell counts and pothole sets are not read (the record is replayed as loaded): the pieces give them again, with the
     // occupant-message rules of §3.6.
     cellCounts_.fill(0);
     healthyRoads_.Clear(); damagedRoads_.Clear(); healthyRail_.Clear(); damagedRail_.Clear();
     roadPotholeTotal_ = railPotholeTotal_ = 0;
     roadPotholeCount_ = railPotholeCount_ = 0;
+    // the saved edge densities; DoConnectionsChanged below adds the missing network cells and drops cells that lost their network
+    if (loaded_.valid) {
+        for (const auto& [key, record] : loaded_.edgeDensities) edgeDensities_[key] = record;
+        for (const auto& [id, holder] : loaded_.pools) neighborPools_[id] = holder;   // a repeated id: the last one wins
+        if (loaded_.destinations.size() == cellTripFlags_.size())
+            for (std::size_t row = 0; row < cellTripFlags_.size(); ++row)
+                if (loaded_.destinations[row].size() == cellTripFlags_[row].size()) cellTripFlags_[row] = loaded_.destinations[row];
+    }
     {
         std::vector<cSC4NetworkOccupant*> all;
         host_->NetworkOccupantsInRect(0, 0, cellsX_ - 1, cellsZ_ - 1, all);
@@ -674,12 +683,22 @@ void cSC4TrafficSimulator::DoPostCityInit() {
             if (ring && !HasMapExit(x, z)) graph_->SetDestinationByte(x, z, 0);
         }
     ClearSubnetworks();
-    if (cycleState_ == 12 || cycleState_ == 13) cycleState_ = 8;
-    // The cycle starts over after a load (the save's cycle state is not read): the destination map from the lots, then state 0.
-    std::fill(connectionCounts_.begin(), connectionCounts_.end(), 0);
-    WorkOnClearTripDestinations();
-    WorkOnRefreshCommuteMap();
-    cycleState_ = 0;
+    // The destination map and its free counts come from the record; a city without one builds them from the lots (as states 5
+    // and 10 do). Then the interrupted phase resumes (§3.5 steps 8 and 11).
+    if (loaded_.valid) {
+        for (int k = 0; k < 4; ++k) connectionCounts_[std::size_t(k)] = int(loaded_.freeDestinations[std::size_t(k)]);
+    } else {
+        std::fill(connectionCounts_.begin(), connectionCounts_.end(), 0);
+        cycleState_ = 0;
+        WorkOnClearTripDestinations();
+        WorkOnRefreshCommuteMap();
+    }
+    if (Debug()) {
+        double road = 0;
+        if (volume_[1]) for (auto& column : volume_[1]->GetGridData()) for (float v : column) road += v;
+        std::fprintf(stderr, "traffic: volume at load: road %.0f\n", road);
+    }
+    ResumeLoadedCycle();
     // strategy buckets from the lots, in list order
     strategyBuckets_.clear();
     std::vector<std::unique_ptr<ITrafficLot>> lots;
@@ -690,7 +709,7 @@ void cSC4TrafficSimulator::DoPostCityInit() {
         lot->Location(lx, lz);
         if (lot->Properties() && cSCPropertyHelp::GetPropertyValue(lot->Properties(), kLotStrategyBucket, b)) strategyBuckets_.emplace(b, std::make_pair(lx, lz));
     }
-    days_ = std::uint32_t(lots.size()) / 18;
+    days_ = std::uint32_t(lots.size()) / 18;   // step 13: total, dayIndex and processed keep their loaded values
     UpdateMassTransitBudget();
     UpdateRoadsBudget();
     UpdateIntersectionData();
@@ -706,6 +725,45 @@ void cSC4TrafficSimulator::DoPostCityInit() {
                      records, lots.size(), connectionCounts_[0], connectionCounts_[1], connectionCounts_[2], connectionCounts_[3], ms);
     }
     host_->EndOfWork();
+}
+
+// §3.5 steps 8 and 11: the cycle goes on from the saved state. 16-18 hold the source at the saved phase cell again (ConfirmTrips
+// takes a source whole, so it goes on after it; the trip searches go on inside it), 15 goes on after the lot at that cell, 12/13
+// become 8, 1/14 restart at 0. A city without a record (new) starts at 0.
+void cSC4TrafficSimulator::ResumeLoadedCycle() {
+    const LoadedCycle& L = loaded_;
+    if (!L.valid) return;
+    tripCapacityTotals_ = {int(L.jobCapacity[0]), int(L.jobCapacity[1]), int(L.jobCapacity[2]), tripCapacityTotals_[3]};
+    attempted_ = L.attempted;
+    routed_ = L.routed;
+    carLenSum_ = L.carLenSum; carLenCount_ = L.carLenCount;
+    freightLenSum_ = L.freightLenSum; freightCount_ = L.freightCount;
+    typeCountsPublished_ = L.typeCountsPublished;
+    typeCountsBuilding_ = L.typeCountsBuilding;
+    processed_ = L.processed; dayIndex_ = L.dayIndex; total_ = L.total;
+    passTotal_ = L.passTotal; toReRoute_ = L.toReRoute; toSearch_ = L.toSearch;
+    passCounters_ = L.passCounters;
+    rerouteBucket_ = std::uint8_t(L.passCounters[2] & 3);
+    strategyBucketCounter_ = L.strategyBucketCounter;
+    strategyBucket_ = L.strategyBucket;
+    std::uint32_t state = L.state;
+    if (state == 12 || state == 13) state = 8;
+    if (state == 1 || state == 14 || state > 19) state = 0;
+    cycleState_ = state;
+    std::size_t held = 0;
+    bool found = false;
+    if (state >= 15 && state <= 18) {
+        ResetSources();
+        for (std::size_t i = 0; i < sources_.size() && !found; ++i) {
+            int x = 0, z = 0;
+            sources_[i]->Location(x, z);
+            if (std::int16_t(x) == L.phaseX && std::int16_t(z) == L.phaseZ) { held = i; found = true; }
+        }
+        sourceIndex_ = !found ? 0 : (state == 15 || state == 16) ? held + 1 : held;
+    }
+    if (Debug())
+        std::fprintf(stderr, "traffic: resume state %u at (%d,%d): source %zu of %zu%s, processed %u of %u, day %u, %zu edge densities\n", state, L.phaseX,
+                     L.phaseZ, sourceIndex_, sources_.size(), found ? "" : " (cell not found)", processed_, total_, dayIndex_, L.edgeDensities.size());
 }
 
 // ---- the work cycle (§3.2 - §3.4) -------------------------------------------------------------------------------------------
@@ -1194,6 +1252,13 @@ void cSC4TrafficSimulator::FinishTripMap() {
 
 // §4.9
 void cSC4TrafficSimulator::CreateMaps() {
+    if (Debug()) {
+        double sums[6] = {};
+        for (int n = 0; n < 6; ++n)
+            if (volume_[std::size_t(n)])
+                for (auto& column : volume_[std::size_t(n)]->GetGridData()) for (float v : column) sums[n] += v;
+        std::fprintf(stderr, "traffic: volume before maps: walk %.0f road %.0f rail %.0f subway %.0f el %.0f mono %.0f\n", sums[0], sums[1], sums[2], sums[3], sums[4], sums[5]);
+    }
     auto usage = [&](int x, int z, int t, bool evening) -> std::uint16_t {
         const auto it = edgeDensities_.find(EdgeDensityKey(x & 0xff, z & 0xff, t, evening));
         return it == edgeDensities_.end() ? 0 : it->second.density;
@@ -1322,6 +1387,39 @@ void cSC4TrafficSimulator::ScoreAgainstSaved() {
     };
     score("congestion", congestionMap_, savedCongestion_, 1);
     score("trip length", tripLengthMap_, savedTripLength_, 0);
+    if (std::getenv("SC4_TRAFFICDUMP")) {
+        static int cycle = 0;
+        char path[64];
+        std::snprintf(path, sizeof path, "trips_ours%d.txt", ++cycle);
+        DumpTrips(path);
+        std::snprintf(path, sizeof path, "maps%d.txt", cycle);
+        if (std::FILE* f = std::fopen(path, "w")) {   // x z saved-trip ours-trip saved-congestion ours-congestion
+            std::vector<std::uint8_t> trip, cong;
+            for (auto& column : tripLengthMap_->GetGridData()) trip.insert(trip.end(), column.begin(), column.end());
+            for (auto& column : congestionMap_->GetGridData()) cong.insert(cong.end(), column.begin(), column.end());
+            for (std::size_t i = 0; i < trip.size() && i < savedTripLength_.size() && i < cong.size() && i < savedCongestion_.size(); ++i)
+                if (trip[i] || savedTripLength_[i] || cong[i] || savedCongestion_[i])
+                    std::fprintf(f, "%zu %zu %d %d %d %d\n", i / std::size_t(cellsZ_), i % std::size_t(cellsZ_), savedTripLength_[i], trip[i], savedCongestion_[i], cong[i]);
+            std::fclose(f);
+        }
+    }
+}
+
+void cSC4TrafficSimulator::DumpTrips(const char* path) {
+    std::FILE* f = std::fopen(path, "w");
+    if (!f) return;
+    std::vector<std::unique_ptr<ITrafficLot>> lots;
+    host_->AllLots(lots);
+    for (auto& lot : lots) {
+        std::list<cSC4TripData>* trips = lot->TripList(lot->TrafficSource());
+        if (!trips) continue;
+        SC4RectInt32 r;
+        lot->OccupiedRect(r);
+        for (const cSC4TripData& t : *trips)
+            std::fprintf(f, "%d %d %d %d %d type %u strategy %u flags %u status %u count %u dest %d %d len %.3f types %x route %zu back %zu\n", r.x0, r.z0, r.x1, r.z1,
+                         lot->ZoneType(), t.type, t.index, t.flags, t.kind, t.count, t.sourceX, t.sourceZ, t.distance, t.extra, t.route.size(), t.routeReversed.size());
+    }
+    std::fclose(f);
 }
 
 void cSC4TrafficSimulator::ReduceTransitSwitches() {

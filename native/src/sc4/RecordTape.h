@@ -69,11 +69,12 @@ public:
     }
 
     // a property holder record (cSCPropertyHolder::Read), kept as read and written back whole
-    void Holder(cIGZIStream& s) {
+    const cSCPropertyHolder& Holder(cIGZIStream& s) {
         Item item{kHolder, 0, nullptr, {}};
         item.holder = std::make_shared<cSCPropertyHolder>();
         item.holder->Read(s);
         items_.push_back(std::move(item));
+        return *items_.back().holder;
     }
 
     // every object reference read, in record order (borrowed)

@@ -114,6 +114,8 @@ bool cSC4TrafficSimulator::Read(cIGZIStream& stream) {
     constexpr std::uint32_t kMaxCount = 1u << 22;
     cRecordTape& t = cityRecord_;   // kept as read and saved back (RecordTape.h)
     t.Clear();
+    LoadedCycle& L = loaded_;
+    L = LoadedCycle{};
     std::uint16_t version = 0;
     t.GetUint16(stream, version);
     if (version < 0x13) return false;
@@ -145,19 +147,26 @@ bool cSC4TrafficSimulator::Read(cIGZIStream& stream) {
     t.GetUint32(stream, rows);
     t.GetUint32(stream, columns);
     if (rows > kMaxCount || columns > kMaxCount || static_cast<std::uint64_t>(rows) * columns > (1u << 26)) return false;
-    for (std::uint64_t i = static_cast<std::uint64_t>(rows) * columns; i != 0 && !stream.GetError(); --i) t.GetUint8(stream, u8);   // a rows x columns byte table
+    L.destinations.assign(rows, std::vector<std::uint8_t>(columns, 0));   // the destination map, rows x columns bytes
+    for (auto& row : L.destinations)
+        for (std::uint8_t& v : row) t.GetUint8(stream, v);
     t.GetUint32(stream, u32);                                       // the float grids
     many(u32, [&] { reference(0xc9bd939a); });
     reference(0xc9bd939a);
     reference(0xc9bd939a);
     t.GetUint32(stream, u32);                                       // edge densities: key, 4 x 4 + 1 + 4 x 4 shorts
     many(u32, [&] {
-        t.GetUint32(stream, u32);
+        std::uint32_t key = 0;
+        t.GetUint32(stream, key);
         // before version 0x14 the 33 shorts are stored as floats, followed by one more float the original reads and drops
-        if (version < 0x14) for (int k = 0; k < 34; ++k) t.GetFloat32(stream, f32);
-        else for (int k = 0; k < 33; ++k) t.GetUint16(stream, u16);
+        if (version < 0x14) { for (int k = 0; k < 34; ++k) t.GetFloat32(stream, f32); return; }
+        TrafficEdgeDensity record;
+        for (std::uint16_t& v : record.last) t.GetUint16(stream, v);
+        t.GetUint16(stream, record.density);
+        for (std::uint16_t& v : record.current) t.GetUint16(stream, v);
+        L.edgeDensities.emplace_back(key, record);
     });
-    for (int i = 0; i < 9; ++i) t.GetUint32(stream, u32);
+    for (int k = 0; k < 3; ++k) { t.GetUint32(stream, L.jobCapacity[k]); t.GetUint32(stream, L.attempted[k]); t.GetUint32(stream, L.routed[k]); }
     reference(0xc9bd939a);
     reference(0xc9bd939a);
     t.GetUint32(stream, u32);
@@ -202,7 +211,8 @@ bool cSC4TrafficSimulator::Read(cIGZIStream& stream) {
             many(u32, [&] { t.GetUint16(stream, u16); });
         }
     }
-    t.GetUint8(stream, u8);
+    t.GetUint8(stream, u8);                                       // the cycle state
+    L.state = u8;
     {
         std::int8_t state = 0;                                    // ScanningIterator
         t.GetSint8(stream, state);
@@ -212,9 +222,14 @@ bool cSC4TrafficSimulator::Read(cIGZIStream& stream) {
     t.GetBool(stream, flag);
     for (int i = 0; i < 4; ++i) t.GetSint32(stream, s32);
     t.GetBool(stream, flag);
-    t.GetUint32(stream, u32);
-    t.GetUint32(stream, u32);
-    if (version < 0x19) { t.GetUint8(stream, u8); t.GetUint8(stream, u8); } else { t.GetSint16(stream, s16); t.GetSint16(stream, s16); }
+    t.GetUint32(stream, L.strategyBucketCounter);
+    t.GetUint32(stream, L.strategyBucket);
+    if (version < 0x19) {                                         // the phase positions: the saved source or lot cell
+        t.GetUint8(stream, u8); L.phaseX = u8;
+        t.GetUint8(stream, u8); L.phaseZ = u8;
+    } else {
+        t.GetSint16(stream, L.phaseX); t.GetSint16(stream, L.phaseZ);
+    }
     {
         std::int8_t state = 0;                                    // BoundaryIterator
         t.GetSint8(stream, state); t.GetSint8(stream, state);
@@ -231,14 +246,18 @@ bool cSC4TrafficSimulator::Read(cIGZIStream& stream) {
     for (int row = 0; row < 3; ++row)
         for (std::int32_t i = 0; i < tunnelWidth && !stream.GetError(); ++i) t.GetUint32(stream, u32);
     t.GetUint8(stream, u8); t.GetUint8(stream, u8);
-    t.GetSint32(stream, s32); t.GetSint32(stream, s32);
-    if (version > 0x18) t.GetSint32(stream, s32);
-    for (int i = 0; i < 4; ++i) t.GetUint32(stream, u32);
+    t.GetSint32(stream, s32); L.processed = std::uint32_t(s32);   // pacing (§3.3)
+    t.GetSint32(stream, s32); L.dayIndex = std::uint32_t(s32);
+    if (version > 0x18) { t.GetSint32(stream, s32); L.total = std::uint32_t(s32); }
+    t.GetUint32(stream, L.days);
+    for (int i = 0; i < 3; ++i) t.GetUint32(stream, u32);
     if (version >= 0x19) {
-        for (int i = 0; i < 3; ++i) t.GetSint32(stream, s32);
-        for (int i = 0; i < 4; ++i) t.GetUint32(stream, u32);
+        t.GetSint32(stream, s32); L.passTotal = std::uint32_t(s32);
+        t.GetSint32(stream, s32); L.toReRoute = std::uint32_t(s32);
+        t.GetSint32(stream, s32); L.toSearch = std::uint32_t(s32);
+        for (int i = 0; i < 4; ++i) t.GetUint32(stream, L.passCounters[std::size_t(i)]);
     }
-    if (version >= 0x28) for (int i = 0; i < 6; ++i) t.GetUint32(stream, u32);
+    if (version >= 0x28) for (int i = 4; i < 10; ++i) t.GetUint32(stream, L.passCounters[std::size_t(i)]);
 
     for (int pass = 0; pass < 2; ++pass) {                        // the two density tables
         for (std::int32_t i = 0, n = version < 0x23 ? edgeSets : pathTypes; i < n && !stream.GetError(); ++i) rangedEntry();
@@ -261,17 +280,25 @@ bool cSC4TrafficSimulator::Read(cIGZIStream& stream) {
         t.GetUint16(stream, u16); t.GetUint8(stream, u8); t.GetUint8(stream, u8); t.GetUint16(stream, u16); t.GetUint16(stream, u16);
         for (std::int32_t i = 0; i < tunnelWidth; ++i) t.GetFloat32(stream, f32);
     });
-    t.GetFloat32(stream, f32); t.GetFloat32(stream, f32); t.GetUint32(stream, u32);
-    if (version >= 0x15) { t.GetFloat32(stream, f32); t.GetUint32(stream, u32); }
+    t.GetFloat32(stream, f32);                                       // average car commute (recomputed)
+    t.GetFloat32(stream, L.carLenSum); t.GetUint32(stream, L.carLenCount);
+    if (version >= 0x15) { t.GetFloat32(stream, L.freightLenSum); t.GetUint32(stream, L.freightCount); }
     for (std::int32_t i = 0; i < pathTypes && !stream.GetError(); ++i) t.GetUint32(stream, u32);
-    t.GetUint32(stream, u32);
-    many(u32, [&] { t.GetUint32(stream, u32); });                     // up to four connection ids
+    t.GetUint32(stream, u32);                                        // the free destinations per lane group (4)
+    {
+        std::uint32_t i = 0;
+        many(u32, [&] { t.GetUint32(stream, u32); if (i < 4) L.freeDestinations[i] = u32; ++i; });
+    }
     t.GetUint32(stream, u32);                                        // property holders keyed by 16-bit ids
-    many(u32, [&] { t.GetUint16(stream, u16); t.Holder(stream); });
-    if (version < 0x1b) return !stream.GetError();                // older records end here
-    for (std::int32_t i = 0; i < tunnelWidth && !stream.GetError(); ++i) { t.GetUint32(stream, u32); t.GetUint32(stream, u32); }
+    many(u32, [&] { t.GetUint16(stream, u16); L.pools.emplace_back(u16, t.Holder(stream)); });
+    if (version < 0x1b) return L.valid = !stream.GetError();                // older records end here
+    for (std::int32_t i = 0; i < tunnelWidth && !stream.GetError(); ++i) {   // per travel type: (published, building) counts
+        std::uint32_t published = 0, building = 0;
+        t.GetUint32(stream, published); t.GetUint32(stream, building);
+        if (i < 9) { L.typeCountsPublished[std::size_t(i)] = published; L.typeCountsBuilding[std::size_t(i)] = building; }
+    }
     if (version > 0x26) t.GetUint32(stream, u32);
-    if (version <= 0x1d) return !stream.GetError();               // no ferry terminals before version 0x1e
+    if (version <= 0x1d) return L.valid = !stream.GetError();               // no ferry terminals before version 0x1e
     t.GetUint32(stream, u32);                                        // ferry terminals
     many(u32, [&] {
         if (version < 0x20) t.GetUint16(stream, u16);
@@ -295,7 +322,8 @@ bool cSC4TrafficSimulator::Read(cIGZIStream& stream) {
             if (version >= 0x24) for (int i = 0; i < 4; ++i) t.GetUint16(stream, u16);
         });
     });
-    return !stream.GetError();
+    L.valid = !stream.GetError();
+    return L.valid;
 }
 
 bool cSC4TrafficSimulator::ReadSimulatorTunableValues(const cISCPropertyHolder* exemplar) {
