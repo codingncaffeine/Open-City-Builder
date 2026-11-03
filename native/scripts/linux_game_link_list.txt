@@ -613,6 +613,7 @@ src/app/NativeProps.cpp
 src/app/NativeDemandHost.cpp
 src/app/NativeSimHosts.cpp
 src/app/NativePower.cpp
+src/app/NativePlumbing.cpp
 src/app/NativeLotConfigHost.cpp
 src/app/NativeCatalogUi.cpp
 src/sc4/WinCalloutBox.cpp
@@ -710,6 +711,7 @@ src/app/citycomp/cSC4IndustrialSimulator.cpp
 src/app/citycomp/cSC4LandValueSimulator.cpp
 src/app/citycomp/cSC4PollutionSimulator.cpp
 src/app/citycomp/cSC4PowerSimulator.cpp
+src/app/citycomp/cSC4PlumbingSimulator.cpp
 src/app/citycomp/cSC4ResidentialSimulator.cpp
 src/app/citycomp/cSC4FireProtectionSimulator.cpp
 src/app/citycomp/cSC4PoliceSimulator.cpp

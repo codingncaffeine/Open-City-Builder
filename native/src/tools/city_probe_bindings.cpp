@@ -119,25 +119,40 @@ class Probe2 final : public IPlumbingHost {
 public:
     int CityCellsX() override { Seam("IPlumbingHost::CityCellsX"); return {}; }
     int CityCellsZ() override { Seam("IPlumbingHost::CityCellsZ"); return {}; }
-    IPlumbingWaterMap* WaterMap() override { Seam("IPlumbingHost::WaterMap"); return nullptr; }
-    void PositionToCell(float x, float z, int& cellX, int& cellZ) override { Seam("IPlumbingHost::PositionToCell");}
+    void PositionToCell(float, float, int&, int&) override { Seam("IPlumbingHost::PositionToCell"); }
+    void OccupantsAtCell(int, int, std::uint32_t, std::vector<cISC4Occupant*>&) override { Seam("IPlumbingHost::OccupantsAtCell"); }
+    bool IsWaterCell(int, int) override { Seam("IPlumbingHost::IsWaterCell"); return false; }
+    int WaterPollutionAt(int, int) override { Seam("IPlumbingHost::WaterPollutionAt"); return 0; }
+    bool LotRectAt(int, int, PlumbingRect&) override { Seam("IPlumbingHost::LotRectAt"); return false; }
+    bool ProducerLotUnpowered(cISC4Occupant*) override { Seam("IPlumbingHost::ProducerLotUnpowered"); return false; }
+    void SetLotConditionAt(int, int, int) override { Seam("IPlumbingHost::SetLotConditionAt"); }
     float DepartmentFundingFraction() override { Seam("IPlumbingHost::DepartmentFundingFraction"); return 0; }
-    std::uint32_t PollutionAt(int x, int z) override { Seam("IPlumbingHost::PollutionAt"); return {}; }
-    std::vector<IPlumbingOccupant*> BuildingsAtCell(int x, int z) override { Seam("IPlumbingHost::BuildingsAtCell"); return {}; }
-    PlumbingBudgetEntry GetBudgetEntry(cISCPropertyHolder* holder) override { Seam("IPlumbingHost::GetBudgetEntry"); return {}; }
-    void SetPipeInfrastructureCost(int cost) override { Seam("IPlumbingHost::SetPipeInfrastructureCost");}
-    void ApplyBuildingBudget(IPlumbingOccupant* building, bool added) override { Seam("IPlumbingHost::ApplyBuildingBudget");}
-    bool GetLotRect(int cellX, int cellZ, PlumbingRect& out) override { Seam("IPlumbingHost::GetLotRect"); return false; }
-    std::int32_t LotWaterCapacity(IPlumbingOccupant* building) override { Seam("IPlumbingHost::LotWaterCapacity"); return {}; }
-    void SetLotCondition(int cellX, int cellZ, int state) override { Seam("IPlumbingHost::SetLotCondition");}
-    void BurstPipeAt(int cellX, int cellZ) override { Seam("IPlumbingHost::BurstPipeAt");}
-    bool ProducerLotDisabled(IPlumbingOccupant* occupant) override { Seam("IPlumbingHost::ProducerLotDisabled"); return false; }
-    std::vector<IPlumbingNeighborConnection*> NeighborConnections(void* regionalCity) override { Seam("IPlumbingHost::NeighborConnections"); return {}; }
+    bool IsPipe(cISC4Occupant*) override { Seam("IPlumbingHost::IsPipe"); return false; }
+    std::uint32_t PipeFlags(cISC4Occupant*) override { Seam("IPlumbingHost::PipeFlags"); return 0; }
+    void SetPipeFlag(cISC4Occupant*, std::uint32_t, bool) override { Seam("IPlumbingHost::SetPipeFlag"); }
+    bool PipeConnects(cISC4Occupant*, int) override { Seam("IPlumbingHost::PipeConnects"); return false; }
+    void PipeCell(cISC4Occupant*, int&, int&) override { Seam("IPlumbingHost::PipeCell"); }
+    void SetPipeWatered(cISC4Occupant*, bool) override { Seam("IPlumbingHost::SetPipeWatered"); }
     bool ReadGrid(cIGZIStream& stream, cSC4SimGrid<std::uint8_t>** out) override { *out = SimGridCast<std::uint8_t>(ReadNested(stream, 1)); return true; }
     void WriteGrid(cIGZOStream& stream, cSC4SimGrid<std::uint8_t>* grid) override { SC4WriteGZSerializable(stream, static_cast<cISC4SimGridBase*>(grid)); }
-    bool ReadWaterGrid(cIGZIStream& stream) override { DropNested(stream); return true; }
-    bool ReadOccupant(cIGZIStream& stream, IPlumbingOccupant** out) override { *out = nullptr; DropNested(stream); return true; }
-    bool ReadPipe(cIGZIStream& stream, IPlumbingPipe** out) override { *out = nullptr; DropNested(stream); return true; }
+    // The probe does not resolve the producer, pipe and department references: they are kept as read and written back in the same
+    // order (Write calls these in Read's order).
+    bool ReadOccupant(cIGZIStream& stream, std::uint32_t, cISC4Occupant** out) override {
+        *out = nullptr;
+        if (!reading_) { occupants_.clear(); reading_ = true; }
+        occupants_.emplace_back();
+        return occupants_.back().Read(stream);
+    }
+    bool ReadDepartment(cIGZIStream& stream) override { reading_ = false; department_ = cRetainedReference(); return department_.Read(stream); }
+    void WriteOccupant(cIGZOStream& stream, cISC4Occupant*) override {
+        if (occupantAt_ < occupants_.size()) occupants_[occupantAt_++].Write(stream); else SC4WriteGZSerializable(stream, nullptr);
+    }
+    void WriteDepartment(cIGZOStream& stream) override { occupantAt_ = 0; department_.Write(stream); }
+private:
+    cRetainedReference department_;
+    std::vector<cRetainedReference> occupants_;
+    std::size_t occupantAt_ = 0;
+    bool reading_ = false;
 };
 Probe2 g_IPlumbingHost;
 }

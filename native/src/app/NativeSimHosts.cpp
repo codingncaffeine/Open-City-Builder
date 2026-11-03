@@ -35,6 +35,7 @@
 #include "sc4/PollutionSimulator.h"
 #include "sc4/FireProtectionSimulator.h"
 #include "app/NativeDemolition.h"
+#include "app/NativePlumbing.h"
 #include "sc4/PoliceSimulator.h"
 #include "sc4/ResidentialSimulator.h"
 #include "sc4/Simulator.h"
@@ -560,6 +561,7 @@ void InstallNativeSimHosts() {
     hosts.landValue = &g_landValue;
     hosts.pollution = &g_pollution;
     hosts.power = NativePowerHost();
+    hosts.plumbing = NativePlumbingHost();
     hosts.fire = &g_fire;
     hosts.police = &g_police;
     hosts.residential = &g_residential;
@@ -568,4 +570,19 @@ void InstallNativeSimHosts() {
     InstallNeighborHosts();
 }
 
+}  // namespace native
+
+namespace native {
+int NativeWaterPollutionAt(int x, int z) {
+    sc4::cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::PollutionSimulator) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(0xe4fda3d4, &raw) || !raw) return 0;
+    auto* serializable = static_cast<cIGZSerializable*>(raw);
+    serializable->Release();
+    if (serializable->GetGZCLSID() != sc4::kGZCLSID_cSC4PollutionSimulator) return 0;
+    int value = 0;
+    if (x >= 0 && z >= 0) static_cast<sc4::cSC4PollutionSimulator*>(serializable)->GetWaterValue(unsigned(x), unsigned(z), value);
+    return value;
+}
 }  // namespace native
