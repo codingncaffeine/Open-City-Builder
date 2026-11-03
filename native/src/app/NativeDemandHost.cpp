@@ -10,7 +10,9 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <list>
 #include <map>
+#include <memory>
 
 #include "app/NativeBuildingDevelopment.h"
 #include "app/NativeCity.h"
@@ -19,6 +21,9 @@
 #include "gz/cIGZPersistResourceKeyList.h"
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/DemandSimulator.h"
+#include "sc4/NeighborsSimulator.h"
+#include "sc4/RegionalCity.h"
+#include "app/NativeRegion.h"
 #include "sc4/Exemplar.h"
 #include "sc4/HistoryWarehouse.h"
 #include "sc4/Lot.h"
@@ -95,9 +100,49 @@ const sc4::DemandBuildingProfile* NativeDemandBuildingProfile(std::uint32_t buil
 
 namespace {
 
+// A region city as the demand simulator reads it (demand.md §9): place, size, workforce, taxes, populations.
+class RegionCityView final : public IDemandRegionCity {
+public:
+    explicit RegionCityView(cSC4RegionalCity* city) : city_(city) {}
+    void GetPosition(int& x, int& z) const override { city_->GetPosition(x, z); }
+    void GetCitySize(int& w, int& h) const override { city_->GetCitySize(w, h); }
+    float WorkforcePercentage() const override { return city_->GetWorkforcePercentage(); }
+    float GetTaxRate(std::uint32_t purpose) const override { return city_->GetTaxRate(purpose); }
+    int GetPopulation(std::uint32_t purpose) const override { return city_->GetPopulation(purpose); }
+    int GetExtrapolatedPopulation(std::uint32_t purpose) const override { return city_->GetExtrapolatedPopulation(purpose); }
+    int GetAllowableExtrapolation(std::uint32_t purpose) const override { return city_->GetAllowableExtrapolation(purpose); }
+    void ExtrapolateGrowth(std::uint32_t purpose, float amount) override { city_->ExtrapolateGrowth(purpose, amount); }
+private:
+    cSC4RegionalCity* city_;
+};
+std::map<cISC4RegionalCity*, std::unique_ptr<RegionCityView>> g_regionViews;   // the region keeps its cities for the session
+IDemandRegionCity* RegionView(cISC4RegionalCity* city) {
+    if (!city) return nullptr;
+    auto& view = g_regionViews[city];
+    if (!view) view = std::make_unique<RegionCityView>(static_cast<cSC4RegionalCity*>(city));
+    return view.get();
+}
+// The neighbours simulator's cities (slots 21 / 22, unestablished ones left out).
+void NeighborCities(bool all, std::list<IDemandRegionCity*>& out) {
+    out.clear();
+    cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(CityComponent::NeighborsSimulator) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(0xe4fda3d4, &raw) || !raw) return;
+    auto* serializable = static_cast<cIGZSerializable*>(raw);
+    auto* neighbors = serializable->GetGZCLSID() == kGZCLSID_cSC4NeighborsSimulator ? static_cast<cSC4NeighborsSimulator*>(serializable) : nullptr;
+    serializable->Release();
+    if (!neighbors) return;
+    std::list<cRZAutoRefCount<cISC4RegionalCity>> cities;
+    if (all) neighbors->GetAllConnectedCities(cities, false);
+    else neighbors->GetConnectedCities(cities, false);
+    for (auto& ref : cities)
+        if (IDemandRegionCity* view = RegionView(ref.get())) out.push_back(view);
+}
+
 class DemandHost final : public IDemandSimulatorHost {
 public:
-    bool MessageLot(cIGZUnknown* object, std::uint32_t& buildingType, cISCPropertyHolder*& building) override {
+    bool MessageLot(cIGZUnknown* object, std::uint32_t& buildingType, sc4::cISCPropertyHolder*& building) override {
         buildingType = 0;
         building = nullptr;
         void* raw = nullptr;
@@ -145,16 +190,16 @@ public:
         for (std::uint32_t i = 0; i < list->Size(); ++i) out.push_back(*list->GetKey(i));
         list->Release();
     }
-    cISCPropertyHolder* LoadExemplar(const cGZPersistResourceKey& key) override {
+    sc4::cISCPropertyHolder* LoadExemplar(const cGZPersistResourceKey& key) override {
         if (!SL::spRM) return nullptr;
         void* raw = nullptr;
         if (!SL::spRM->GetResource(key, 0xa52160f5, &raw, 0, nullptr) || !raw) return nullptr;
         auto* exemplar = static_cast<cISCResExemplar*>(raw);
-        cISCPropertyHolder* holder = exemplar->AsISCPropertyHolder();
+        sc4::cISCPropertyHolder* holder = exemplar->AsISCPropertyHolder();
         held_[holder] = exemplar;
         return holder;
     }
-    void ReleaseExemplar(cISCPropertyHolder* holder) override {
+    void ReleaseExemplar(sc4::cISCPropertyHolder* holder) override {
         auto it = held_.find(holder);
         if (it == held_.end()) return;
         it->second->Release();
@@ -167,7 +212,7 @@ public:
     }
     std::uint32_t AirportTrips() override { return 0; }
     std::uint32_t SeaportTrips() override { return 0; }
-    IDemandRegionCity* CurrentRegionCity() override { return nullptr; }
+    IDemandRegionCity* CurrentRegionCity() override { return RegionView(NativeCurrentRegionalCity()); }
     void HistoryMinMaxAverage(std::uint32_t series, std::uint32_t fromDay, std::uint32_t toDay, float& minimum, float& maximum, float& average) override {
         minimum = maximum = average = 0.0f;
         if (cSC4HistoryWarehouse* history = History()) history->GetMinMaxAverageDays(series, fromDay, toDay, minimum, maximum, average);
@@ -178,9 +223,9 @@ public:
     float OrdinanceFactor(std::uint32_t, std::uint32_t) override { return 1.0f; }
     void AllConnections(std::vector<IDemandConnection*>& out) override { out.clear(); }
     void ConnectionsOfType(std::uint32_t, std::vector<IDemandConnection*>& out) override { out.clear(); }
-    void AllConnectedCities(std::list<IDemandRegionCity*>& out) override { out.clear(); }
-    void ConnectedCities(std::list<IDemandRegionCity*>& out) override { out.clear(); }
-    std::uint32_t TrafficArrived(cISCPropertyHolder*, std::uint32_t) override { return 0; }
+    void AllConnectedCities(std::list<IDemandRegionCity*>& out) override { NeighborCities(true, out); }
+    void ConnectedCities(std::list<IDemandRegionCity*>& out) override { NeighborCities(false, out); }
+    std::uint32_t TrafficArrived(sc4::cISCPropertyHolder*, std::uint32_t) override { return 0; }
     const DemandBuildingProfile* BuildingProfile(std::uint32_t buildingType) override { return NativeDemandBuildingProfile(buildingType); }
     std::uint32_t DeveloperType(std::uint32_t purpose, std::int32_t wealth) override { return NativeDeveloperType(purpose, wealth); }
     IDemandDeveloper* Developer(std::uint32_t developerType) override {
@@ -213,7 +258,7 @@ public:
 
 private:
     static cSC4HistoryWarehouse* History() { return Com<cSC4HistoryWarehouse>(sc4::CityComponent::HistoryWarehouse, kGZCLSID_cSC4HistoryWarehouse); }
-    std::map<cISCPropertyHolder*, cISCResExemplar*> held_;
+    std::map<sc4::cISCPropertyHolder*, cISCResExemplar*> held_;
     std::map<void*, DeveloperView> views_;
     LotView lot_;
 };

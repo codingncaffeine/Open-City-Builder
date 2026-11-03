@@ -1,5 +1,6 @@
 #include "app/NativeRegion.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 
@@ -10,6 +11,11 @@
 #include "sc4/SaveGame.h"
 #include "sc4/cSC4City.h"
 #include "sc4/ServiceLocator.h"
+#include "sc4/NeighborConnection.h"
+#include "sc4/NeighborsSimulator.h"
+#include "sc4/Region.h"
+#include "sc4/RegionalCity.h"
+#include "gz/cGZPersistResourceManager.h"
 
 namespace native {
 
@@ -176,10 +182,145 @@ public:
     std::int32_t CityTutorialGUID(cISC4RegionalCity* city) override { return Concrete(city)->GetTutorialGUID(); }
 } g_nationHost;
 
+
+// ---- the neighbours simulator and its connections -----------------------------------------------------------------------------
+// The region side of the city's border connections: the cities around this one (the region's cities by region cell), their saved
+// connections and the cell conversions, so the neighbours simulator and the traffic simulator find the city and the connection on
+// the other side. PARTIAL: the deal pass (power / water / garbage trades) is not run natively (no simulator agent is registered and
+// every budget / utility seam answers neutrally), and no connection occupants are created or moved.
+cISC4RegionalCity* RegionCity(int x, int z) {
+    cISC4Region* region = g_app ? g_app->GetRegion() : nullptr;
+    cRZAutoRefCount<cISC4RegionalCity>* entry = region ? region->GetCity(x, z) : nullptr;
+    return entry ? entry->get() : nullptr;
+}
+int CurrentCellsX() { cISC4City* city = g_app ? g_app->GetCity() : nullptr; auto* live = LiveCity(city); return live ? live->CellCountX() : 0; }
+int CurrentCellsZ() { cISC4City* city = g_app ? g_app->GetCity() : nullptr; auto* live = LiveCity(city); return live ? live->CellCountZ() : 0; }
+
+class NeighborsHost final : public sc4::INeighborsHost {
+public:
+    cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
+    cISC4City* City() override { return g_app ? g_app->GetCity() : nullptr; }
+    cISC4RegionalCity* CurrentRegionalCity() override { return g_app ? g_app->GetRegionalCity() : nullptr; }
+    sc4::cISCResExemplar* TuningExemplar() override {
+        void* raw = nullptr;
+        const cGZPersistResourceKey key{0x6534284a, 0x7a4a8458, 0x6a469021};
+        return SL::spRM && SL::spRM->GetResource(key, 0xa52160f5, &raw, 0, nullptr) ? static_cast<sc4::cISCResExemplar*>(raw) : nullptr;
+    }
+    void AddSimulatorAgent(cIGZMessageTarget2*, int, const char*) override {}   // PARTIAL: the deal pass does not run natively
+    void RemoveSimulatorAgent(cIGZMessageTarget2*) override {}
+    void SimDate(cIGZDate&) override {}
+    void PostMessage(std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, cIGZUnknown*) override {}
+    void PostDealStatusMessage(std::uint32_t, cIGZUnknown*) override {}
+    cISC4RegionalCity* RegionCityAt(int x, int z) override { return RegionCity(x, z); }
+    void ReloadCityAt(int, int) override {}
+    int CityCellCountX() override { return CurrentCellsX(); }
+    int CityCellCountZ() override { return CurrentCellsZ(); }
+    void CityCellCenterToPosition(int x, int z, float& outX, float& outZ) override { outX = (float(x) + 0.5f) * 16.0f; outZ = (float(z) + 0.5f) * 16.0f; }
+    void CityPositionToCell(float x, float z, int& outX, int& outZ) override { outX = int(std::floor(x / 16.0f)); outZ = int(std::floor(z / 16.0f)); }
+    float TerrainAltitudeAtCell(int, int) override { return 0.0f; }
+    float TerrainAltitudeAtPosition(float, float) override { return 0.0f; }
+    void RecordHistory(std::uint32_t, int) override {}
+    double BudgetTotal() override { return 0.0; }
+    double BudgetIncome() override { return 0.0; }
+    bool BudgetLineItemAmount(std::uint32_t, double&) override { return false; }
+    bool BudgetSubLineItemAmount(std::uint32_t, std::uint32_t, double&) override { return false; }
+    int PowerCapacity() override { return 0; }
+    int PowerDemand() override { return 0; }
+    int WaterCapacity() override { return 0; }
+    int WaterDemand() override { return 0; }
+    void LandfillRange(int& start, int& end) override { start = end = 0; }
+    int PollutionValue(int) override { return 0; }
+    void OccupantsInRect(int, int, int, int, std::vector<sc4::cISC4Occupant*>&) override {}
+    void DeleteProp(sc4::cISC4Occupant*) override {}
+    bool CreateProp(std::uint32_t, void** out) override { if (out) *out = nullptr; return false; }
+    void FinishProp(void*) override {}
+    void SetPropPosition(void*, const float[3]) override {}
+    void SetPropEdgeFlags(void*, std::uint32_t) override {}
+    void AddPropConnectionProperties(void*, std::uint32_t) override {}
+    void ReleaseProp(void*) override {}
+    void ReleaseOccupantList(std::vector<sc4::cISC4Occupant*>&) override {}
+    void DeactivateOccupant(sc4::cISC4Occupant*) override {}
+    const sc4::cISCPropertyHolder* OccupantProperties(sc4::cISC4Occupant*) override { return nullptr; }
+    void OccupantPosition(sc4::cISC4Occupant*, float& x, float& z) override { x = z = 0.0f; }
+    void SetOccupantPosition(sc4::cISC4Occupant*, const float[3]) override {}
+    std::uint32_t OccupantType(sc4::cISC4Occupant*) override { return 0; }
+    bool OccupantHasNetworkType(sc4::cISC4Occupant*, std::uint32_t) override { return false; }
+    bool OccupantRetained(sc4::cISC4Occupant*) override { return true; }
+    void CityPosition(const cISC4RegionalCity* city, int& x, int& z) override { Concrete(city)->GetPosition(x, z); }
+    void CitySize(const cISC4RegionalCity* city, int& w, int& h) override { Concrete(city)->GetCitySize(w, h); }
+    bool CityEstablished(const cISC4RegionalCity* city) override { return Concrete(city)->GetEstablished(); }
+    void CityName(const cISC4RegionalCity* city, cIGZString& out) override {
+        cRZString name;
+        Concrete(city)->GetCityName(name);
+        out.AssignFromCString(name.ToChar());
+    }
+    double CityGetBudget(const cISC4RegionalCity*) override { return 0.0; }
+    void CitySetBudget(cISC4RegionalCity*, double) override {}
+    void CitySetIncome(cISC4RegionalCity*, double) override {}
+    sc4::cISC4NeighborConnection* CityFindConnection(const cISC4RegionalCity* city, int type, int x, int z) override {
+        sc4::cISC4NeighborConnection* found = Concrete(city)->FindConnection(type, x, z);
+        static const bool trace = std::getenv("SC4_TRAFFICDEBUG") != nullptr;
+        if (trace) {
+            NeighborConnectionList all;
+            Concrete(city)->GetAllConnections(all);
+            std::fprintf(stderr, "neighbours: other city has %zu connections; type %d at (%d,%d): %s", all.size(), type, x, z, found ? "found" : "none");
+            for (auto& ref : all) {
+                int cx = 0, cz = 0;
+                ref->GetConnectionCell(cx, cz);
+                std::fprintf(stderr, " [%u (%d,%d)]", ref->GetType(), cx, cz);
+            }
+            std::fprintf(stderr, "\n");
+        }
+        return found;
+    }
+    void CityAllConnections(const cISC4RegionalCity* city, sc4::ConnectionList& out) override { Concrete(city)->GetAllConnections(out); }
+    void CityChangeSymmetricConnection(cISC4RegionalCity*, sc4::cISC4NeighborConnection*, bool) override {}
+    void CityUpdateLocalDeals(cISC4RegionalCity*) override {}
+    void CitySetLocalDeals(cISC4RegionalCity*, const sc4::DealList&) override {}
+    void CityGetLocalDeals(cISC4RegionalCity*, sc4::DealList&) override {}
+    void CityUpdateImportExport(cISC4RegionalCity*) override {}
+    double CityGetExported(const cISC4RegionalCity*, int) override { return 0.0; }
+    void CitySetExported(cISC4RegionalCity*, int, double) override {}
+    double CityGetImported(const cISC4RegionalCity*, int) override { return 0.0; }
+    void CitySetImported(cISC4RegionalCity*, int, double) override {}
+    double CityGetProduced(const cISC4RegionalCity*, int) override { return 0.0; }
+    void CitySetProduced(cISC4RegionalCity*, int, double) override {}
+    double CityGetDemanded(const cISC4RegionalCity*, int) override { return 0.0; }
+    void CitySetDemanded(cISC4RegionalCity*, int, double) override {}
+    double CityGetCostPerUnit(const cISC4RegionalCity*, int) override { return 0.0; }
+    void CitySetCostPerUnit(cISC4RegionalCity*, int, double) override {}
+    bool ConfirmationDialog(std::uint32_t, std::uint32_t, std::uint32_t, const cIGZString&) override { return false; }
+} g_neighborsHost;
+
+class ConnectionHost final : public sc4::INeighborConnectionHost {
+public:
+    int CityCellsX() override { return CurrentCellsX(); }
+    int CityCellsZ() override { return CurrentCellsZ(); }
+    bool CityEntryAtCell(int x, int z, void*& city) override {
+        city = RegionCity(x, z);
+        return city != nullptr;
+    }
+    void ConvertConnectionCell(int x, int z, int& outX, int& outZ, void* regionalCity) override {
+        sc4::cSC4NeighborsSimulator::ConvertConnectionCellToNeighboringRegionCell(x, z, outX, outZ, static_cast<cISC4RegionalCity*>(regionalCity));
+    }
+} g_connectionHost;
+
+}  // namespace
+
+cISC4RegionalCity* NativeCurrentRegionalCity() { return g_app ? g_app->GetRegionalCity() : nullptr; }
+
+void InstallNeighborHosts() {
+    sc4::SetNeighborsHost(&g_neighborsHost);
+    sc4::SetNeighborConnectionHost(&g_connectionHost);
+}
+
+namespace {
 }  // namespace
 
 void InstallRegionServices(cSC4App& app, const RegionCallbacks& callbacks) {
     g_app = &app;
+    // cSC4App::GetRegion (i386 0x005ee07a): the nation's active region (nation slot 8).
+    app.SetNationRegionSource(+[](cISC4Nation* nation) -> cISC4Region* { return nation ? nation->GetActiveRegion() : nullptr; });
     g_callbacks = callbacks;
     SetNationHost(&g_nationHost);
     SetRegionHost(&g_regionHost);

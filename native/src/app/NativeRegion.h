@@ -10,6 +10,7 @@
 #include "sc4/RegionalCity.h"
 
 class cSC4App;
+class cISC4RegionalCity;
 
 namespace native {
 
@@ -22,6 +23,9 @@ struct RegionCallbacks {
 
 // Installs the three hosts and the save-game services (city segment and regional city factories).
 void InstallRegionServices(cSC4App& app, const RegionCallbacks& callbacks);
+// The neighbours simulator's and its connections' region side (after the per-city stub hosts, before the components Init).
+void InstallNeighborHosts();
+cISC4RegionalCity* NativeCurrentRegionalCity();   // the open city's regional city (cSC4App::GetRegionalCity)
 
 // Creates the nation (one reference) and initialises it: the regions directory is scanned and the active region chosen from the
 // preferences. Call after InstallRegionServices and after the application's Init.

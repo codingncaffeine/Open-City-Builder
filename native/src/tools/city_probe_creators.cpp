@@ -174,7 +174,8 @@ cIGZSerializable* CreateCityProbeSerializable(std::uint32_t classId) {
             return object;
         }
         case 0xc990c0a4: {  // cSC4NeighborsSimulator(INeighborsHost*)
-            auto* object = new cSC4NeighborsSimulator(CityProbeNeighborsHost());
+            // the native game installs a real host (app/NativeRegion.cpp InstallNeighborHosts): then the simulator uses it
+            auto* object = new cSC4NeighborsSimulator(sc4::NeighborsHost() ? nullptr : CityProbeNeighborsHost());
             object->AddRef();
             return object;
         }
