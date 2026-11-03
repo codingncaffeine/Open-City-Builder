@@ -465,10 +465,10 @@ struct LotHost final : ILotHost {
         if (occupants->GetOccupantsByStandardCityCells(found, a, b, 0u, 0xffffffffu)) {
             const float x0 = static_cast<float>(r[0]) * 16.0f, z0 = static_cast<float>(r[1]) * 16.0f;
             const float x1 = static_cast<float>(r[2] + 1) * 16.0f, z1 = static_cast<float>(r[3] + 1) * 16.0f;
-            for (cISC4Occupant* occupant : found) {
+            for (cISC4Occupant* occupant : found) {   // cSC4InsideLotOccupantFilter: inside the lot, default + realistic filters
                 float p[3] = {};
                 occupant->GetPosition(p);
-                if (x0 <= p[0] && p[0] <= x1 && z0 <= p[2] && p[2] <= z1) out.push_back(occupant);
+                if (x0 <= p[0] && p[0] <= x1 && z0 <= p[2] && p[2] <= z1 && NativeRealisticOccupant(occupant)) out.push_back(occupant);
             }
         }
         occupants->ReleaseOccupantList(found);
@@ -570,6 +570,33 @@ bool InstallZoneDeveloperHost(sc4::cSC4City* city) {
     if (cSC4LotDeveloper* lots = LotDeveloper()) AddCitySimulatorAgent(static_cast<cIGZMessageTarget2*>(lots), 4, "cSC4LotDeveloper", 2);
     std::printf("city view: zone developer %s (lot developer %s)\n", ok ? "up" : "NOT initialised", LotDeveloper() ? "found" : "MISSING");
     return ok;
+}
+
+
+bool NativeRealisticOccupant(sc4::cISC4Occupant* occupant) {
+    using namespace sc4;
+    if (!occupant) return false;
+    const auto answers = [occupant](std::uint32_t iid) {
+        void* raw = nullptr;
+        if (!occupant->QueryInterface(iid, &raw) || !raw) return false;
+        static_cast<cIGZUnknown*>(raw)->Release();
+        return true;
+    };
+    // the default filter
+    if (answers(0x4a10afc2) || answers(0x8a139184)) return false;
+    for (std::uint32_t group : {0x4217u, 0x4208u, 0x421du})
+        if (occupant->IsOccupantGroup(group)) return false;
+    // the realistic filter (0x005e9990)
+    if (occupant->IsOccupantGroup(0x5001)) return false;
+    const std::uint32_t type = occupant->GetType();
+    if (type == 0x497f6d9d && answers(kGZIID_cISC4LotBaseTextureOccupant)) {
+        float p[3] = {};
+        occupant->GetPosition(p);
+        cSC4Lot* lot = g_city ? NativeLotAtCell(int(p[0] / 16.0f), int(p[2] / 16.0f), false) : nullptr;
+        if (lot && lot->GetState() == 1) return false;
+    }
+    if (type == 0xa823821e && (answers(0x4b44fbe2) || answers(0x2b3b7d86))) return false;
+    return true;
 }
 
 }  // namespace native

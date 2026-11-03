@@ -2,7 +2,7 @@
 #pragma once
 #include <cstdint>
 
-namespace sc4 { class cSC4City; class cSC4Lot; }
+namespace sc4 { class cSC4City; class cSC4Lot; class cISC4Occupant; }
 
 namespace native {
 
@@ -15,5 +15,8 @@ std::uint32_t NativeNetworkTypesAt(int x, int z);
 sc4::cSC4Lot* NativeLotAtCell(int x, int z, bool exactCell);   // the zone developer's lot map (lot manager vslot 0x28)
 void NativeDeleteLot(sc4::cSC4Lot* lot);                        // lot manager slot 24 DeleteLot
 float NativeAreaSlope(const std::int32_t rect[4], bool includeWater);
+// cSC4RealisticOccupantFilter with its three flags clear (occupant-manager.md §13.2.3): the default filter's test, then not in
+// group 0x5001 (zots, signs), not a lot base texture on an empty lot, not a signpost or text decal prop.
+bool NativeRealisticOccupant(sc4::cISC4Occupant* occupant);
 
 }  // namespace native

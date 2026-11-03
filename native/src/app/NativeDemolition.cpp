@@ -1,12 +1,14 @@
 // The demolition utility's host on the native application (src/sc4/Demolition.h; demolition.md §4). What is not wired is
 // marked PARTIAL where the original calls it.
 #include "app/NativeDemolition.h"
+#include "app/NativeZoneDeveloperHost.h"
 
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <list>
 #include <map>
+#include <set>
 #include <memory>
 #include <vector>
 
@@ -218,13 +220,28 @@ bool DefaultFilterIncludes(cISC4Occupant* occupant) {
     return true;
 }
 
-// The demolition filter Φ (demolition.md §4.2). PARTIAL: the "realistic occupant" half of step 1 and the foundation
+// The demolition filter Φ (demolition.md §4.2). PARTIAL: the foundation
 // interface's slot 9 of step 5 (foundations pass); the view level is 1 (no underground view natively).
 bool PhiIncludes(cISC4Occupant* occupant, const DemolitionFilterState& state) {
-    if (!DefaultFilterIncludes(occupant)) return false;
+    if (!DefaultFilterIncludes(occupant) || !NativeRealisticOccupant(occupant)) {   // step 1
+        if (Debug()) std::fprintf(stderr, "demolition: %08x refused by the default filter\n", occupant->GetType());
+        return false;
+    }
     IDemolishable* adapter = g_arena.Of(occupant);
     if (state.user && !state.user->IsOccupantIncluded(adapter)) return false;
-    if (state.active && !occupant->CanRemove(state.mode)) return false;
+    if (state.active && !occupant->CanRemove(state.mode)) {
+        if (Debug()) {
+            std::set<std::uint32_t> groups;
+            occupant->GetOccupantGroups(groups);
+            std::uint32_t zot = 0;
+            const bool hasZot = occupant->AsPropertyHolder() && cSCPropertyHelp::GetPropertyValue(occupant->AsPropertyHolder(), 0x48e95539, zot);
+            std::fprintf(stderr, "demolition: %08x refused: CanRemove(%d) false, flags %08x zot %d/%u groups", occupant->GetType(), state.mode,
+                         occupant->GetFlags(), hasZot, zot);
+            for (std::uint32_t g : groups) std::fprintf(stderr, " %x", g);
+            std::fprintf(stderr, "\n");
+        }
+        return false;
+    }
     switch (occupant->GetType()) {
     case kDemolishTypeFoundation: return true;
     case kDemolishTypeBuilding: case kDemolishTypePole: case kDemolishTypeSpecial: case kDemolishTypeProp:
