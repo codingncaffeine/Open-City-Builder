@@ -11,6 +11,7 @@
 // +0x140 maximum levelling amount, +0x148 development-cost response curve.
 #pragma once
 #include <deque>
+#include <list>
 #include <vector>
 #include <cstdint>
 #include <functional>
@@ -177,7 +178,15 @@ public:
     bool QueryInterface(std::uint32_t iid, void** out) override;
     std::uint32_t AddRef() override { return ++refCount_; }
     std::uint32_t Release() override;
-    bool DoMessage(cIGZMessage2* message) override;   // unrecovered
+    bool DoMessage(cIGZMessage2* message) override;   // the day agent (0x66956814) runs the daily pass; the rest: true
+    // lot-developer.md §4.1 (0x006CD770): perDay = lots / 28 + 1 lots a day, in the lot manager's list order; false = not done today.
+    bool DoDailySimulation();
+    // §4.2 (0x006CD3A0). PARTIAL: only step 5 (the business-unit step for a lot with no unit: its travel populations and job
+    // capacities from its own population). The network refresh, the state tests (desirability, power, water, commute) and the zots
+    // are not run natively yet (power and water are not simulated, so the tests would abandon every building).
+    bool UpdateLot(cSC4Lot* lot);
+    // The lot manager's lot list (the zone developer's), for the daily pass.
+    static void SetLotListProvider(const std::list<cSC4Lot*>* (*provider)());
     bool Write(cIGZOStream& stream) const override;   // @ 0x10014009a
     bool Read(cIGZIStream& stream) override;          // @ 0x100140242
     std::uint32_t GetGZCLSID() const override { return kGZCLSID_cSC4LotDeveloper; }
@@ -271,6 +280,9 @@ private:
     std::uint32_t stage_ = 0;                                          // +0xe8
     bool forceEmptyLotBaseTextures_ = false;                           // +0xa0
     bool flagF4_ = false;                                              // +0xf4
+    int dailyState_ = 0;                                               // §4.1: 0 / 3 start a cycle, 1 working
+    std::uint32_t visited_ = 0;
+    cSC4Lot* nextLot_ = nullptr;                                       // the iterator: the next lot to visit (one reference)
 public:
     ~cSC4LotDeveloper() { for (cIGZUnknown* occupant : constructionQueue_) if (occupant) occupant->Release(); }
 private:

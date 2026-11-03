@@ -6,9 +6,15 @@
 // The lots get a native ILotHost here as well (zone type, date, altitude). Still neutral (each a to-do): the building development simulator (GROWTH-1: no growth developers, so DetermineLotSize falls
 // back to 2x2 lots and no building is ever proposed), the lot configuration manager queries, and the terrain view's highlight textures (the drag preview stays the native
 // overlay's).
+#include "sc4/DemandSimulator.h"
+#include "app/NativeCity.h"
+#include "app/NativeSimHosts.h"
+#include "app/NativeTraffic.h"
+#include "sc4/TrafficSimulator.h"
 #include "app/NativeZoneDeveloperHost.h"
 
 #include <cstdio>
+#include <set>
 #include <cstdlib>
 
 #include "app/NativeBuildingDevelopment.h"
@@ -395,13 +401,42 @@ struct LotHost final : ILotHost {
         object->Release();
     }
     void SetLotHighlight(int x, int z, bool on, float altitude) override {}
-    std::int32_t TrafficJobs(const cSC4Lot& lot, int kind) override { return {}; }
-    void SetTrafficJobs(const cSC4Lot& lot, int kind, std::int32_t jobs) override {}
-    float ResidentialTravelFactor(int x, int z) override { return {}; }
-    float TravelVolumeFactor() override { return {}; }
-    void TravelDistribution(int kind, float out[3]) override {}
-    void JobsPerOccupant(float out[4], int developerType) override {}
-    void ExemplarJobs(const cSC4Lot& lot, float out[4]) override {}
+    // The lot's destination capacity (property 0x8a0b4100 through the traffic simulator's slots 19 / 20).
+    std::int32_t TrafficJobs(const cSC4Lot& lot, int kind) override {
+        return static_cast<std::int32_t>(cSC4TrafficSimulator::GetMaxTripCapacity(&const_cast<cSC4Lot&>(lot).Properties(), std::uint32_t(kind)));
+    }
+    void SetTrafficJobs(const cSC4Lot& lot, int kind, std::int32_t jobs) override {
+        cSC4TrafficSimulator::SetMaxTripCapacity(&const_cast<cSC4Lot&>(lot).Properties(), std::uint32_t(kind), std::uint32_t(jobs));
+    }
+    float ResidentialTravelFactor(int x, int z) override { return NativeResidentialWorkforcePercent(x, z); }   // residential slot 30
+    float TravelVolumeFactor() override { return NativeTrafficFreightScaling(); }                             // traffic slot 27
+    void TravelDistribution(int kind, float out[3]) override { NativeTrafficStrategyPercentages(kind, out); }  // traffic slot 26
+    // cSC4Lot::GetJobs (i386 0x0011dec4): a grown building's jobs per occupant from the demand simulator (slot 8,
+    // CalculateJobsPerUnitOfDemand(developer type + 1, mode 0)); otherwise the building exemplar's (resource, count) pairs
+    // 0x27812841 for 0x2010 / 0x2020 / 0x2030, with the optional float counts 0x27812843 in their place.
+    void JobsPerOccupant(float out[4], int developerType) override {
+        auto* demand = Component<cSC4DemandSimulator>(CityComponent::DemandSimulator, kGZCLSID_cSC4DemandSimulator);
+        if (demand) demand->CalculateJobsPerUnitOfDemand(out, static_cast<std::uint32_t>(developerType), 0);
+        static const bool trace = std::getenv("SC4_LOTDEBUG") != nullptr;
+        static std::set<int> shown;
+        if (trace && shown.insert(developerType).second)
+            std::fprintf(stderr, "lot jobs: resource %04x per occupant %.3f/%.3f/%.3f\n", developerType, out[1], out[2], out[3]);
+    }
+    void ExemplarJobs(const cSC4Lot& lot, float out[4]) override {
+        auto* building = dynamic_cast<cSC4BuildingOccupant*>(static_cast<cISC4BuildingOccupant*>(FindBuildingOccupant(lot)));
+        cISCPropertyHolder* holder = building ? building->AsPropertyHolder() : nullptr;
+        std::vector<std::uint32_t> pairs;
+        if (!holder || !cSCPropertyHelp::GetPropertyValue(holder, 0x27812841, pairs)) return;
+        std::vector<float> counts;
+        const bool floats = cSCPropertyHelp::GetPropertyValue(holder, 0x27812843, counts);
+        for (std::size_t i = 0; i + 1 < pairs.size(); i += 2) {
+            float value = static_cast<float>(pairs[i + 1]);
+            if (floats && (i + 1) / 2 < counts.size()) value = counts[(i + 1) / 2];
+            if (pairs[i] == 0x2010) out[1] = value;
+            else if (pairs[i] == 0x2020) out[2] = value;
+            else if (pairs[i] == 0x2030) out[3] = value;
+        }
+    }
     bool ExemplarProperty(const cSC4Lot& lot, std::uint32_t id, std::int32_t& value) override { return {}; }
     bool PowerRequirementExceeded(const cSC4Lot& lot, const LotBuildingProfile& profile, bool& available) override { return {}; }
     bool TrafficHasJobAccess(const cSC4Lot& lot, int kind) override { return {}; }
@@ -510,6 +545,12 @@ bool InstallZoneDeveloperHost(sc4::cSC4City* city) {
     // The component pass ran Init against the stub host, which failed on its first service; with the real services it completes.
     cSC4ZoneDeveloper* developer = Developer();
     const bool ok = developer && developer->Init();
+    // The lot developer's daily lot pass (lot-developer.md §4.1; agent level 4, flags 2): its lots are the zone developer's.
+    cSC4LotDeveloper::SetLotListProvider(+[]() -> const std::list<cSC4Lot*>* {
+        cSC4ZoneDeveloper* zones = Developer();
+        return zones ? &zones->Lots() : nullptr;
+    });
+    if (cSC4LotDeveloper* lots = LotDeveloper()) AddCitySimulatorAgent(static_cast<cIGZMessageTarget2*>(lots), 4, "cSC4LotDeveloper", 2);
     std::printf("city view: zone developer %s (lot developer %s)\n", ok ? "up" : "NOT initialised", LotDeveloper() ? "found" : "MISSING");
     return ok;
 }

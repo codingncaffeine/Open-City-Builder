@@ -45,7 +45,77 @@ std::uint32_t cSC4LotDeveloper::Release() {
 }
 
 // The original's DoMessage drives construction/demolition; that stage machine is unrecovered.
-bool cSC4LotDeveloper::DoMessage(cIGZMessage2*) {
+bool cSC4LotDeveloper::DoMessage(cIGZMessage2* message) {
+    if (message && message->GetType() == 0x66956814) return DoDailySimulation();
+    return true;
+}
+
+namespace {
+const std::list<cSC4Lot*>* (*g_lotList)() = nullptr;
+}  // namespace
+
+void cSC4LotDeveloper::SetLotListProvider(const std::list<cSC4Lot*>* (*provider)()) { g_lotList = provider; }
+
+bool cSC4LotDeveloper::DoDailySimulation() {
+    const std::list<cSC4Lot*>* lots = g_lotList ? g_lotList() : nullptr;
+    if (!lots) return true;
+    auto position = lots->end();
+    if (dailyState_ == 0 || dailyState_ == 3) {
+        if (lots->empty()) return true;
+        position = lots->begin();
+        visited_ = 0;
+        dailyState_ = 1;
+    } else if (dailyState_ == 1) {
+        // the safe iterator: carry on at the remembered lot (a lot deleted meanwhile restarts the cycle at the first lot)
+        position = nextLot_ ? std::find(lots->begin(), lots->end(), nextLot_) : lots->end();
+        if (nextLot_ && position == lots->end()) position = lots->begin();
+    } else {
+        return true;
+    }
+    if (nextLot_) { nextLot_->Release(); nextLot_ = nullptr; }
+    if (lots->empty()) { dailyState_ = 3; return true; }
+    const std::uint32_t perDay = std::uint32_t(lots->size()) / 28 + 1;
+    while (visited_ < perDay) {
+        if (position == lots->end()) { dailyState_ = 3; break; }
+        cSC4Lot* lot = *position++;
+        if (lot) UpdateLot(lot);
+        ++visited_;
+    }
+    if (dailyState_ == 1 && position != lots->end()) {
+        nextLot_ = *position;
+        nextLot_->AddRef();
+    }
+    if (visited_ >= perDay) {
+        visited_ = 0;
+        return true;
+    }
+    return false;
+}
+
+
+// Step 5 for a lot with no business unit: its travel populations are its own population (and its jobs its own). PARTIAL: lots in a
+// unit keep the travel populations and capacities they were saved with - the unit's step (UpdateTravelDesignates, then
+// UpdateTravelPopulations onto the designates, §5.7) needs the units' member lists, which the port does not link to the lots yet -
+// and PickUnitToJoin is not ported.
+bool cSC4LotDeveloper::UpdateLot(cSC4Lot* lot) {
+    static const bool trace = std::getenv("SC4_LOTDEBUG") != nullptr;
+    std::vector<std::uint32_t> before, after;
+    if (trace) cSCPropertyHelp::GetPropertyValue(&lot->Properties(), 0x8a0b4100, before);
+    if (lot->GetUnit()) return false;
+    lot->ResetTravelPopulation();
+    lot->AddTravelPopulation(*lot);
+    if (trace && lot->GetZoneType() >= 4) {
+        cSCPropertyHelp::GetPropertyValue(&lot->Properties(), 0x8a0b4100, after);
+        float jobs[4] = {};
+        lot->GetJobs(jobs);
+        int x = 0, z = 0;
+        lot->GetLocation(x, z);
+        std::fprintf(stderr, "lot pass: pop 4100 %u 4200 %u 3110 %u 3310 %u ", lot->GetPopulation(0x4100), lot->GetPopulation(0x4200), lot->GetPopulation(0x3110),
+                     lot->GetPopulation(0x3310));
+        std::fprintf(stderr, "(%d,%d) zone %u building %08x jobs %.1f/%.1f/%.1f capacity %u/%u/%u -> %u/%u/%u\n", x, z, lot->GetZoneType(),
+                     lot->GetBuildingType(true), jobs[1], jobs[2], jobs[3], before.size() > 2 ? before[0] : 0, before.size() > 2 ? before[1] : 0,
+                     before.size() > 2 ? before[2] : 0, after.size() > 2 ? after[0] : 0, after.size() > 2 ? after[1] : 0, after.size() > 2 ? after[2] : 0);
+    }
     return false;
 }
 
