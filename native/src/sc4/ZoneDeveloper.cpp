@@ -524,7 +524,7 @@ bool cSC4ZoneDeveloper::Read(cIGZIStream& stream) {
             if (!seen.insert(lot).second) {
                 if (adapter) adapter->Release(); else lot->Release();   // the stream handed out a second reference for a duplicate cell
             } else {
-                lots_.push_front(lot);
+                lots_.push_back(lot);
                 ++lotCount_;
                 if (adapter && g_host) g_host->LotRead(lot, adapter);
             }
@@ -1250,11 +1250,11 @@ bool cSC4ZoneDeveloper::CreateLot(int x, int z, int sizeX, int sizeZ, int facing
             // iterator, so it is not bumped here (like the original).
             iterator->AddAfter(lot);
         } else {
-            lots_.push_front(lot);
+            lots_.push_back(lot);
             ++lotCount_;
         }
     } else {
-        lots_.push_front(lot);
+        lots_.push_back(lot);
         ++lotCount_;
     }
     // SL::spBuildingDevelopmentSim vslot 0x120 is the lot developer; its vslot 0x158 gives the new lot its empty base texture.
