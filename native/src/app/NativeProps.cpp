@@ -76,6 +76,10 @@ public:
         it->second->Release();
         held_.erase(it);
     }
+    void SetDefaultExemplar(cSC4PropOccupant* prop, cISCPropertyHolder* exemplar) override {
+        auto it = held_.find(exemplar);
+        if (it != held_.end() && prop) prop->SetDefaultExemplar(it->second);
+    }
     cSC4PropOccupant* CreateRegisteredProp(std::uint32_t) override { return nullptr; }   // PARTIAL: no registered prop classes
     cSC4PropOccupant* CreateTerrainDecalProp() override { return nullptr; }               // PARTIAL
     cSC4PropOccupant* CreateVisualEffectProp() override {                                  // prop class 0x2977aa49 (one reference)

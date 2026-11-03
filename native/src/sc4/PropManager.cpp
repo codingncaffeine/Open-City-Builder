@@ -268,6 +268,7 @@ bool cSC4PropManager::LoadPropProperties(cSC4PropOccupant* prop, std::uint32_t t
     if (it == g_keys.end() || !g_host) return true;
     cISCPropertyHolder* exemplar = g_host->AcquireExemplar(it->second);
     if (!exemplar) return true;
+    g_host->SetDefaultExemplar(prop, exemplar);   // @ i386 0x0012eb1c: holder QI 0x0ac2b5f7, vslot 0xc
     // bounding box: origin to the exemplar's size (a default box when the property is missing)
     float lo[3] = {0, 0, 0}, hi[3] = {1, 1, 1};
     std::vector<float> size;

@@ -86,6 +86,9 @@ public:
     virtual void ForEachExemplarKey(const std::function<void(const cGZPersistResourceKey&)>& fn) = 0;
     virtual cISCPropertyHolder* AcquireExemplar(const cGZPersistResourceKey& key) = 0;   // borrowed
     virtual void ReleaseExemplar(cISCPropertyHolder* holder) = 0;
+    // The exemplar becomes the prop's default exemplar (its holder's 0x0ac2b5f7 view, vslot 0xc): the prop answers every exemplar
+    // property it does not set itself (occupant groups, demolition effect, ...).
+    virtual void SetDefaultExemplar(cSC4PropOccupant* prop, cISCPropertyHolder* exemplar) { (void)prop; (void)exemplar; }
     // A registered occupant class (GZCOM class factory) for a custom prop class id, or null.
     virtual cSC4PropOccupant* CreateRegisteredProp(std::uint32_t classId) = 0;
     // Terrain-decal / visual-effect props are separate classes in the original.
