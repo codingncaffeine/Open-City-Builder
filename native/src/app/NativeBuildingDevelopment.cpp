@@ -421,9 +421,36 @@ bool NativeBuildingFitsInZone(std::uint32_t buildingPurpose, std::uint32_t zoneT
     return cSC4BuildingDevelopmentSimulator::BuildingFitsInZone(buildingPurpose, zoneType);
 }
 
+namespace {
+// cSC4BuildingOccupant's per-type answers (the building development simulator's vslots 0x128 / 0x130 / 0x138): exemplar name,
+// building name and profile (purpose, wealth, capacities, ...). Without it every building's profile was empty: no taxes, no
+// purpose for the systems that read one.
+class BuildingTypeHost final : public sc4::IBuildingDevelopmentHost {
+public:
+    const cRZString& ExemplarName(std::uint32_t type) override {
+        cSC4BuildingDevelopmentSimulator* simulator = CityBuildingDevelopment();
+        return simulator ? simulator->GetExemplarName(type) : empty_;
+    }
+    const cRZString& BuildingName(std::uint32_t type) override {
+        cSC4BuildingDevelopmentSimulator* simulator = CityBuildingDevelopment();
+        return simulator ? simulator->GetBuildingName(type) : empty_;
+    }
+    const sc4::BuildingProfile& Profile(std::uint32_t type) override {
+        cSC4BuildingDevelopmentSimulator* simulator = CityBuildingDevelopment();
+        const sc4::BuildingProfile* profile = simulator ? simulator->GetBuildingProfilePtr(type) : nullptr;
+        return profile ? *profile : emptyProfile_;
+    }
+private:
+    cRZString empty_;
+    sc4::BuildingProfile emptyProfile_;
+};
+}  // namespace
+
 void InstallBuildingDevelopmentHost() {
     static BuildingDevelopmentHost host;
     sc4::SetBuildingDevelopmentSimHost(&host);
+    static BuildingTypeHost types;
+    sc4::SetBuildingDevelopment(&types);
 }
 
 }  // namespace native
