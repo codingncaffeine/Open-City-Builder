@@ -226,6 +226,15 @@ bool cSC4PowerSimulator::Read(cIGZIStream& stream) {
     for (auto& slot : monthlyPower_)
         for (int& value : slot) stream.GetSint32(value);
     for (int& value : annualPower_) stream.GetSint32(value);
+    if (std::getenv("SC4_POWERDEBUG")) {
+        std::fprintf(stderr, "power %p: loaded consumers %d total %d month %d produced %d consumed %d; last produced %d consumed %d imported %d exported %d demand %d\n",
+                     static_cast<const void*>(this), consumers, totalConsumption, month_, pass.produced, pass.consumed, last.produced, last.consumed, last.imported, last.exported, last.demand);
+        for (const auto& slot : monthlyPower_) {
+            std::fprintf(stderr, "power: loaded monthly");
+            for (int value : slot) std::fprintf(stderr, " %d", value);
+            std::fprintf(stderr, "\n");
+        }
+    }
     stream.GetSint32(plantCount);
     for (std::int32_t& value : plantCountByType) stream.GetSint32(value);
     for (PowerPlantEntry& entry : plants_) if (entry.occupant) entry.occupant->Release();
@@ -703,8 +712,8 @@ void cSC4PowerSimulator::DoIdle() {
                                  deal->GetFlags(), host_->DealCity(deal));
             }
             if (passes++ < 4)
-                std::fprintf(stderr, "power: pass %d produced %d consumed %d demand %d imported %d exported %d; consumers %d powered %d; plants %zu\n",
-                             passes, pass.produced, pass.consumed, pass.demand, pass.imported, pass.exported, consumers, poweredConsumers, plants_.size());
+                std::fprintf(stderr, "power %p: pass %d produced %d consumed %d demand %d imported %d exported %d; consumers %d powered %d; plants %zu\n",
+                             static_cast<const void*>(this), passes, pass.produced, pass.consumed, pass.demand, pass.imported, pass.exported, consumers, poweredConsumers, plants_.size());
         }
         last = pass;
         host_->AddHistory(0xaa11f7ce, pass.produced);

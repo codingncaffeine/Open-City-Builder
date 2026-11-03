@@ -281,6 +281,9 @@ public:
         supply_->SetTractValues(0);
     }
 
+    // The supply grid's value at a cell (GetPoweredGrid, grid vslot 0x38): 0 not wired, 1 wired, 2 powered.
+    std::uint8_t SupplyAt(int x, int z) const { return supply_ && supply_->TractIsInBounds(x, z) ? supply_->GetTractValue(x, z) : 0; }
+
 private:
     static void Drop(OccupantList& list) {
         if (list.empty()) return;
@@ -312,6 +315,8 @@ bool NativeCellPowered(int x, int z) {
     cSC4PowerSimulator* simulator = NativePowerSimulator();
     return simulator ? simulator->IsPowered(x, z) : true;   // no simulator: every cell counts as powered (as before the port)
 }
+
+std::uint8_t NativePowerSupplyAt(int x, int z) { return NativePowerSimulator() ? g_power.SupplyAt(x, z) : 2; }
 
 void NativePowerCityClosed() { g_power.CityClosed(); }
 void NativePowerCityOpened() { g_power.EnsureSupplyGrid(); }

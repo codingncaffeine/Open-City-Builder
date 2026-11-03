@@ -18,6 +18,7 @@
 #include "app/NativeConstruction.h"
 #include "app/NativeFlora.h"
 #include "app/NativeLotConstruction.h"
+#include "app/NativePower.h"
 #include "app/NativeTraffic.h"
 #include "app/NativeGrowthDevelopers.h"
 #include "app/NativeCityView.h"
@@ -286,12 +287,9 @@ public:
     }
     bool CheatIgnorePower() override { return NativeBuildingCheat(1); }
     bool CheatIgnorePlumbing() override { return NativeBuildingCheat(0); }
-    // PARTIAL: no power or plumbing simulator runs natively yet; every cell counts as powered and watered, the same answer the
-    // tract developer's host gives (NativeTractDevelopment.cpp), so growth and abandonment agree until both are live.
-    // PARTIAL: the power simulator runs (its passes power the same cells as the original's on plant-powered cities), but a city that
-    // buys its power gets no neighbour deals yet (the neighbours simulator's deal loading is not wired), so the lots keep answering
-    // powered until the deals are ported; NativeCellPowered(x, z) is the grid's answer.
-    bool IsPowered(int, int) override { return true; }
+    // PARTIAL: no plumbing simulator runs natively yet; every cell counts as watered, the same answer the tract developer's host
+    // gives (NativeTractDevelopment.cpp), so growth and abandonment agree until it is live.
+    bool IsPowered(int x, int z) override { return NativeCellPowered(x, z); }
     bool IsCellWatered(int, int) override { return true; }
     std::uint8_t TripLengthAt(int x, int z) override {
         cSC4SimGrid<std::uint8_t>* map = NativeTrafficTripLengthMap();

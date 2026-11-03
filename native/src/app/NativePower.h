@@ -9,6 +9,7 @@ namespace native {
 sc4::IPowerHost* NativePowerHost();
 sc4::cSC4PowerSimulator* NativePowerSimulator();   // the city's power simulator once initialised, else null
 bool NativeCellPowered(int x, int z);              // the powered bit of a city cell (true without a simulator)
+std::uint8_t NativePowerSupplyAt(int x, int z);    // the supply grid value of a cell: 0 / 1 wired / 2 powered (2 without a simulator)
 void NativePowerCityOpened();                      // a new city without a supply grid gets one
 void NativePowerCityClosed();                      // drops the host's references into the old city
 const sc4::cISCPropertyHolder* NativeSimulatorExemplar(std::uint32_t instance);   // NativeSimHosts.cpp

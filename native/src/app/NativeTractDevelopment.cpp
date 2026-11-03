@@ -18,6 +18,7 @@
 #include "app/NativeCity.h"
 #include "app/NativeGrowthDevelopers.h"
 #include "app/NativeLotConstruction.h"
+#include "app/NativePower.h"
 #include "platform/Unwired.h"
 #include "app/NativeZoneDeveloperHost.h"
 #include "gz/cGZPersistResourceManager.h"
@@ -227,7 +228,7 @@ struct TractHost final : ITractDeveloperHost {
     ITractNetworkManagerApi* NetworkManager() override { return &g_networkManager; }
     std::uint8_t LandValueAt(int, int) override { return 0; }          // PARTIAL: the land value simulator is not run natively
     bool IsCellWatered(int, int) override { return true; }             // PARTIAL: no plumbing simulator natively
-    std::uint8_t PoweredAt(int, int) override { return 2; }            // PARTIAL: no power simulator natively
+    std::uint8_t PoweredAt(int x, int z) override { return NativePowerSupplyAt(x, z); }
     bool FireProtectedAt(int, int) override { return true; }           // PARTIAL: no fire protection simulator natively
     std::int16_t ParkEffectAt(int, int) override { return 1; }         // PARTIAL: no aura simulator natively
     bool HasTripLengthAt(int x, int z) override {                      // PARTIAL: no traffic simulator; the lot's road access stands in
