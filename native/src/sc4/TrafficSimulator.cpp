@@ -840,6 +840,149 @@ void cSC4TrafficSimulator::ClearSubnetworks() {
             for (NetworkInfo& info : cell) info.subnetwork.fill(0);
 }
 
+// §4.11 seeds: forward over sides 0 and 1, backward over 2 and 3; the last row and column are never seeds (quirk).
+void cSC4TrafficSimulator::UpdateSubnetworks() {
+    ClearSubnetworks();
+    for (int x = 0; x <= cellsX_ - 2; ++x)
+        for (int z = 0; z <= cellsZ_ - 2; ++z)
+            for (int e = 0; e < 2; ++e) {
+                const NetworkInfo* car = GetNetworkInfo(1, x, z);
+                if (car && car->subnetwork[std::size_t(e)] == 0) FloodSubnetwork(x, z, e);
+            }
+    for (int x = cellsX_ - 2; x >= 0; --x)
+        for (int z = cellsZ_ - 2; z >= 0; --z)
+            for (int e = 2; e < 4; ++e) {
+                const NetworkInfo* car = GetNetworkInfo(1, x, z);
+                if (car && car->subnetwork[std::size_t(e)] == 0) FloodSubnetwork(x, z, e);
+            }
+    subnetworksStale_ = false;
+}
+
+// §4.11 Fill (0x00717EC0): the states reachable along directed car connections (bit exit + 4 * entry of travel type 1) get the
+// current label; a state resumes at its stored k (0..3 the sides, 4 the tunnel step, 5 done). PARTIAL: tunnel portals are never
+// followed (the port keeps no tunnel table), so a tunnel's two ends get separate labels.
+void cSC4TrafficSimulator::FloodSubnetwork(int startX, int startZ, int startEntry) {
+    const NetworkInfo* start = GetNetworkInfo(1, startX, startZ);
+    if (!start || start->subnetwork[std::size_t(startEntry)] != 0 || start->connectionCount > 2) return;
+    if (CellConnections(startX, startZ).wormhole & 2) return;
+    struct State { int x, z, e, k; };
+    std::vector<State> stack;
+    State cur{startX, startZ, startEntry, 0};
+    const std::uint16_t label = nextSubnetworkId_;
+    bool labelled = false;
+    const auto inCity = [this](int x, int z) { return unsigned(x) < unsigned(cellsX_) && unsigned(z) < unsigned(cellsZ_); };
+    for (;;) {
+        NetworkInfo* info = GetNetworkInfo(1, cur.x, cur.z);
+        bool moved = false;
+        for (; info && cur.k < 4; ++cur.k) {
+            const int k = cur.k;
+            const std::uint16_t mask = CellConnections(cur.x, cur.z).masks[1];
+            if (!(mask & (1u << (k + 4 * cur.e)))) continue;
+            info->subnetwork[std::size_t(cur.e)] = label;
+            labelled = true;
+            const int nx = cur.x + kCellStepX[k], nz = cur.z + kCellStepZ[k];
+            const int entry = (k + 2) & 3;
+            State next{};
+            bool found = false;
+            if (!inCity(nx, nz)) {
+                // a map edge: turn round in the same cell when the connection back exists
+                if ((mask & (1u << (cur.e + 4 * k))) && info->subnetwork[std::size_t(k)] == 0) { next = {cur.x, cur.z, k, 0}; found = true; }
+            } else if (const NetworkInfo* neighbour = GetNetworkInfo(1, nx, nz)) {
+                if (neighbour->subnetwork[std::size_t(entry)] == 0) { next = {nx, nz, entry, 0}; found = true; }
+            } else if (const std::uint32_t id = host_->TransitSwitchIdAtCell(nx, nz)) {
+                // straight across a switch lot to the first cell with another id
+                int sx = nx, sz = nz;
+                while (inCity(sx, sz) && host_->TransitSwitchIdAtCell(sx, sz) == id) { sx += kCellStepX[k]; sz += kCellStepZ[k]; }
+                const NetworkInfo* beyond = inCity(sx, sz) ? GetNetworkInfo(1, sx, sz) : nullptr;
+                if (beyond && beyond->subnetwork[std::size_t(entry)] == 0) { next = {sx, sz, entry, 0}; found = true; }
+            }
+            if (found) {
+                stack.push_back({cur.x, cur.z, cur.e, k + 1});
+                cur = next;
+                moved = true;
+                break;
+            }
+        }
+        if (moved) continue;
+        if (cur.k == 4) cur.k = 5;   // the tunnel step (see above)
+        if (stack.empty()) break;
+        cur = stack.back();
+        stack.pop_back();
+    }
+    if (labelled) ++nextSubnetworkId_;
+}
+
+// §4.12: each lot once (at its anchor cell); the ring just outside it without its corners, walked row by row.
+void cSC4TrafficSimulator::UpdateSubnetworkInfo() {
+    std::vector<SubnetworkInfo>& work = workingSubnetworks_;
+    work.assign(nextSubnetworkId_, SubnetworkInfo{});
+    std::vector<std::map<std::uint32_t, std::uint16_t>> populations;
+    for (int z = 0; z < cellsZ_; ++z)
+        for (int x = 0; x < cellsX_; ++x) {
+            ITrafficLot* lot = host_->LotAt(x, z, 1);
+            if (!lot) continue;
+            cISCPropertyHolder* holder = lot->Properties();
+            if (!holder) continue;
+            SC4RectInt32 r;
+            lot->OccupiedRect(r);
+            const int x0 = std::max(r.x0 - 1, 0), z0 = std::max(r.z0 - 1, 0);
+            const int x1 = std::min(r.x1 + 1, cellsX_ - 1), z1 = std::min(r.z1 + 1, cellsZ_ - 1);
+            std::vector<std::uint32_t> ids;
+            const auto visit = [&](int cx, int cz) {
+                if ((cx < r.x0 || cx > r.x1) && (cz < r.z0 || cz > r.z1)) return;   // a corner
+                const NetworkInfo* car = GetNetworkInfo(1, cx, cz);
+                if (!car) return;
+                for (std::uint16_t id : car->subnetwork)
+                    if (id != 0 && std::find(ids.begin(), ids.end(), std::uint32_t(id)) == ids.end()) ids.push_back(id);
+            };
+            for (int cz = z0; cz <= z1; ++cz) {
+                if (cz == z0 || cz == z1) {
+                    for (int cx = x0; cx <= x1; ++cx) visit(cx, cz);
+                } else {
+                    visit(x0, cz);
+                    if (x1 != x0) visit(x1, cz);
+                }
+            }
+            if (ids.empty()) {
+                holder->RemoveProperty(kLotSubnetworksProperty, false);
+                continue;
+            }
+            cSCPropertyHelp::SetPropertyValue(holder, kLotSubnetworksProperty, ids);
+            lot->Populations(populations);
+            for (std::uint32_t id : ids) {
+                if (id >= work.size()) continue;
+                for (const auto& group : populations)
+                    for (const auto& [type, count] : group) work[id].occupantsByType[type] += count;
+                for (int k = 0; k < 4; ++k) work[id].destinations[std::size_t(k)] += GetMaxTripCapacity(holder, std::uint32_t(k));
+            }
+        }
+    // the neighbour connections: each labelled entry side of the in-city cell gets the pool's capacities (not deduplicated, quirk)
+    std::vector<void*> connections;
+    host_->NeighborGetAllConnections(connections);
+    for (void* connection : connections) {
+        int x = 0, z = 0;
+        host_->NeighborConnectionCell(connection, x, z);
+        int ix = x, iz = z;
+        if (x == -1) ix = 0;
+        else if (x == cellsX_) ix = cellsX_ - 1;
+        else if (z == -1) iz = 0;
+        else if (z == cellsZ_) iz = cellsZ_ - 1;
+        const NetworkInfo* car = GetNetworkInfo(1, ix, iz);
+        cISCPropertyHolder* pool = car ? GetNeighborPoolPropertyHolder(1, x, z) : nullptr;
+        if (!pool) continue;
+        for (std::uint16_t id : car->subnetwork) {
+            if (id == 0 || id >= work.size()) continue;
+            for (int k = 0; k < 4; ++k) work[id].destinations[std::size_t(k)] += GetMaxTripCapacity(pool, std::uint32_t(k));
+        }
+    }
+    PublishSubnetworks();
+    if (std::getenv("SC4_TRAFFICDEBUG")) {
+        std::uint32_t withJobs = 0;
+        for (std::size_t i = 1; i < subnetworks_.size(); ++i) withJobs += subnetworks_[i].destinations[0] + subnetworks_[i].destinations[1] > 0;
+        std::fprintf(stderr, "traffic: %zu subnetworks, %u with jobs\n", subnetworks_.size() > 0 ? subnetworks_.size() - 1 : 0, withJobs);
+    }
+}
+
 void cSC4TrafficSimulator::GetSubnetworksForLot(const cISCPropertyHolder* lot, std::vector<std::uint32_t>& out) const {
     out.clear();
     cSCPropertyHelp::GetPropertyValue(lot, kLotSubnetworksProperty, out);

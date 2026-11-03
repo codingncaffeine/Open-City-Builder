@@ -109,6 +109,7 @@ public:
     void Location(int& x, int& z) override { lot_->GetLocation(x, z); }
     int ZoneType() override { return lot_->GetZoneType(); }
     bool HasRoadAccess() override { return lot_->HasRoadAccess(); }
+    void Populations(std::vector<std::map<std::uint32_t, std::uint16_t>>& out) override { out = lot_->GetPopulations(); }
     bool IsSameLot(ITrafficLot* other) override {
         auto* view = dynamic_cast<LotView*>(other);
         return view && view->lot_ == lot_;
@@ -313,6 +314,11 @@ void NativeTrafficStrategyPercentages(int wealth, float out[3]) {
 cSC4SimGrid<std::uint8_t>* NativeTrafficCongestionMap() {
     cSC4TrafficSimulator* traffic = Traffic();
     return traffic && traffic->IsInitialized() ? traffic->GetCongestionMap() : nullptr;
+}
+
+std::uint32_t NativeTrafficConnectedDestinationCount(const sc4::cISCPropertyHolder* lot, int kind) {
+    cSC4TrafficSimulator* traffic = Traffic();
+    return traffic && traffic->IsInitialized() ? traffic->GetConnectedDestinationCount(lot, kind) : 0;
 }
 
 cSC4SimGrid<std::uint8_t>* NativeTrafficCommercialMap() {

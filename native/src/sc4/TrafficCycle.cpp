@@ -682,7 +682,8 @@ void cSC4TrafficSimulator::DoPostCityInit() {
             const bool ring = x == -1 || z == -1 || x == cellsX_ || z == cellsZ_;
             if (ring && !HasMapExit(x, z)) graph_->SetDestinationByte(x, z, 0);
         }
-    ClearSubnetworks();
+    UpdateSubnetworks();       // §1 step 7: the labels, then the info at once
+    UpdateSubnetworkInfo();
     // The destination map and its free counts come from the record; a city without one builds them from the lots (as states 5
     // and 10 do). Then the interrupted phase resumes (§3.5 steps 8 and 11).
     if (loaded_.valid) {
@@ -817,7 +818,9 @@ bool cSC4TrafficSimulator::WorkOnSimCycle() {
         case 6: ReduceEdgeDensities(); break;
         case 10: WorkOnRefreshCommuteMap(); break;
         case 8: FinalCalculations(); break;
-        default: break;   // 12, 13 (subnetworks) and 19 (ferries): PARTIAL, nothing to do natively yet
+        case 12: UpdateSubnetworks(); break;
+        case 13: UpdateSubnetworkInfo(); break;
+        default: break;   // 19 (ferries): PARTIAL, nothing to do natively yet
     }
     if (!finished) return false;
     std::uint32_t next = kNext[cycleState_ % 20];

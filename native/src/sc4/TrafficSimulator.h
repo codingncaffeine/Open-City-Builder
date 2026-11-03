@@ -165,6 +165,8 @@ public:
     virtual ITrafficLot* LinkedLot() { return nullptr; }            // slot 59: the lot whose trips this one shares (none natively)
     virtual void ClearTripFlag() {}                                 // flag 0x80 (FinishTripMap)
     virtual bool IsSameLot(ITrafficLot* other) { return other == this; }
+    // lot slot 54 GetPopulations: occupant counts by developer type, one map per occupant group (none: empty)
+    virtual void Populations(std::vector<std::map<std::uint32_t, std::uint16_t>>& out) { out.clear(); }
 };
 
 // One budget department (road or mass transit) line items by index.
@@ -482,6 +484,12 @@ public:
 
     // ---- subnetworks (lots hold property 0x2a4f9c74 with the ids of the subnetworks they touch) ----
     void ClearSubnetworks();                                        // 0x100082bf4: next id back to 1, every cell id to 0
+    // traffic-network.md §4.11 (UpdateSubnetworks 0x007183B0, work state 12): label the car network's (cell, entry side) states by
+    // flood fill from the seeds; §4.12 (UpdateSubnetworkInfo 0x00716180, state 13): each lot's subnetworks (property 0x2a4f9c74),
+    // their populations and trip capacities, plus the neighbour connections, published at the end. Both run whole in one call.
+    void UpdateSubnetworks();
+    void FloodSubnetwork(int x, int z, int entry);
+    void UpdateSubnetworkInfo();
     // Output order is first-found; the original's hash-set order is unspecified.
     void GetSubnetworksForLot(const cISCPropertyHolder* lot, std::vector<std::uint32_t>& out) const;
     void GetSubnetworksInRectangle(const TrafficCellRect& rect, std::vector<std::uint32_t>& out) const;
