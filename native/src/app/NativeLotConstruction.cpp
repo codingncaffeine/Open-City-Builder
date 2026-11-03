@@ -18,10 +18,18 @@
 #include "app/NativeConstruction.h"
 #include "app/NativeFlora.h"
 #include "app/NativeLotConstruction.h"
+#include "app/NativeTraffic.h"
+#include "app/NativeGrowthDevelopers.h"
+#include "app/NativeCityView.h"
 #include "app/NativeZoneDeveloperHost.h"
 #include "gz/SimHostRegistry.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "rz/cRZRandom.h"
+#include "sc4/cSC4Demand.h"
+#include "sc4/SCPropertyHelp.h"
+#include "sc4/Simulator.h"
+#include "sc4/GrowthDeveloper.h"
+#include "rz/cRZMessage2Standard.h"
 #include "sc4/BuildingOccupant.h"
 #include "sc4/FloraOccupant.h"
 #include "sc4/CommonIIDs.h"
@@ -77,6 +85,21 @@ cSC4PropManager* Props() {
 
 // The manager's COM reference to one lot configuration (cISC4LotConfiguration, the id is all a lot asks of it). One per id, kept
 // for the process like the manager's own table.
+// A COM city component through its serializable view's class id.
+template <class T> T* CityComponent(sc4::CityComponent c, std::uint32_t clsid) {
+    cIGZUnknown* object = Component(c);
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(0xe4fda3d4, &raw) || !raw) return nullptr;
+    auto* serializable = static_cast<cIGZSerializable*>(raw);
+    T* out = serializable->GetGZCLSID() == clsid ? static_cast<T*>(serializable) : nullptr;
+    serializable->Release();
+    return out;
+}
+template <class T> bool CellInBounds(const cSC4SimGrid<T>& map, int x, int z) {
+    const int shift = map.GetTractShift();
+    return x >= 0 && z >= 0 && map.TractIsInBounds(x >> shift, z >> shift);
+}
+
 class ConfigurationRef final : public cISC4LotConfigurationRef {
 public:
     explicit ConfigurationRef(std::uint32_t id) : id_(id) {}
@@ -231,6 +254,145 @@ public:
     void DeleteLot(cSC4Lot* lot) override { NativeDeleteLot(lot); }
 } g_services;
 
+// The building profiles the lot developer's tests read (BDS vslot 0x9c).
+class GateServices final : public ILotGateServices {
+public:
+    const BuildingProfile* ProfileOfBuilding(std::uint32_t type) override { return NativeBuildingProfile(type); }
+} g_gates;
+
+// The daily pass's city (lot-developer.md §4.2, §5).
+class DailyServices final : public ILotDailyServices {
+public:
+    bool DeveloperDesirability(std::uint32_t purpose, std::uint32_t wealth, int x, int z, std::int32_t& developerPurpose,
+                               std::int16_t& desirability) override {
+        cSC4GrowthDeveloper* developer = GrowthDeveloperOfType(NativeDeveloperType(purpose, static_cast<std::int32_t>(wealth)));
+        cSC4SimGrid<std::int16_t>* map = developer ? developer->GetDesirabilityMap() : nullptr;
+        if (!developer) return false;
+        developerPurpose = developer->GetPurpose();
+        desirability = map && CellInBounds(*map, x, z) ? map->GetCellValue(x, z) : 0;
+        return true;
+    }
+    bool DeveloperWaterSupplyCap(std::uint32_t purpose, std::uint32_t wealth, std::uint8_t& cap) override {
+        cSC4GrowthDeveloper* developer = GrowthDeveloperOfType(NativeDeveloperType(purpose, static_cast<std::int32_t>(wealth)));
+        if (!developer) return false;
+        cap = developer->GetWaterSupplyCap();
+        return true;
+    }
+    bool LotGrowthStage(const cSC4Lot& lot, std::uint8_t& stage) override {
+        cSC4LotConfiguration* configuration = g_services.Configuration(lot.GetLotConfiguration());
+        if (!configuration) return false;
+        stage = configuration->GetGrowthStage();
+        return true;
+    }
+    bool CheatIgnorePower() override { return NativeBuildingCheat(1); }
+    bool CheatIgnorePlumbing() override { return NativeBuildingCheat(0); }
+    // PARTIAL: no power or plumbing simulator runs natively yet; every cell counts as powered and watered, the same answer the
+    // tract developer's host gives (NativeTractDevelopment.cpp), so growth and abandonment agree until both are live.
+    bool IsPowered(int, int) override { return true; }
+    bool IsCellWatered(int, int) override { return true; }
+    std::uint8_t TripLengthAt(int x, int z) override {
+        cSC4SimGrid<std::uint8_t>* map = NativeTrafficTripLengthMap();
+        if (!map) return 1;   // no traffic simulator: the commute is not judged
+        return CellInBounds(*map, x, z) ? map->GetCellValue(x, z) : 0;
+    }
+    void CellWidths(float& x, float& z) override {
+        cSC4City* city = HostCity();
+        x = city ? city->CellWidthX() : 16.0f;
+        z = city ? city->CellWidthZ() : 16.0f;
+    }
+    std::int32_t SimDateNumber() override {
+        cSC4Simulator* simulator = CityComponent<cSC4Simulator>(sc4::CityComponent::Simulator, kGZCLSID_cSC4Simulator);
+        return simulator ? static_cast<std::int32_t>(simulator->GetSimDateNumber()) : 0;
+    }
+    bool CityHasJobs() override {
+        cSC4Demand* jobs = NativeDemandChannel(0x2000, 0x20000);
+        return jobs && jobs->QueryDemandValue() > 0.0f;
+    }
+    bool BuildingBounds(const cSC4Lot& lot, float lo[3], float hi[3]) override {
+        cIGZUnknown* building = lot.GetBuilding();
+        void* raw = nullptr;
+        if (!building || !building->QueryInterface(kGZIID_cISC4Occupant, &raw) || !raw) return false;
+        auto* occupant = static_cast<cISC4Occupant*>(raw);
+        occupant->GetBoundingBox(lo, hi);
+        occupant->Release();
+        return true;
+    }
+    cISC4Occupant* AddZotProp(std::uint32_t type, const float position[3]) override {
+        cSC4PropManager* props = Props();
+        cSC4PropOccupant* prop = props ? props->AddLotProp(type, position, CityViewRotation()) : nullptr;
+        if (!prop) return nullptr;
+        cISC4Occupant* occupant = prop;
+        occupant->Release();   // the occupant manager keeps it
+        return occupant;
+    }
+    bool RemoveLotPropsWithZot(cSC4Lot& lot, std::uint32_t zot) override {
+        cSC4PropManager* props = Props();
+        cISC4OccupantManager* occupants = Occupants();
+        if (!props || !occupants) return false;
+        OccupantList found;
+        bool removed = false;
+        if (props->GetLotProps(found, &lot)) {
+            for (cISC4Occupant* prop : found) {
+                std::uint32_t value = 0;
+                cISCPropertyHolder* holder = prop ? prop->AsPropertyHolder() : nullptr;
+                if (holder && cSCPropertyHelp::GetPropertyValue(holder, kPropPropZot, value) && value == zot) {
+                    props->RemovePropA(prop);   // prop manager slot 29
+                    removed = true;
+                }
+            }
+        }
+        occupants->ReleaseOccupantList(found);
+        return removed;
+    }
+    void PostLotNotification(cSC4Lot& lot, std::uint32_t data1) override {
+        if (!SL::spMS2) return;
+        // the lot as the message object: its plain view (the message keeps the lot alive while it is queued)
+        struct LotObject final : cIGZUnknown {
+            explicit LotObject(cSC4Lot& lot) : lot_(&lot) { lot_->AddRef(); }
+            ~LotObject() { lot_->Release(); }
+            bool QueryInterface(std::uint32_t iid, void** out) override {
+                if (iid != kGZIID_PlainObject || !out) return false;
+                *out = lot_;   // borrowed
+                return true;
+            }
+            std::uint32_t AddRef() override { return ++refs_; }
+            std::uint32_t Release() override {
+                if (refs_ < 2) { delete this; return 0; }
+                return --refs_;
+            }
+            cSC4Lot* lot_;
+            std::uint32_t refs_ = 0;
+        };
+        auto* object = new LotObject(lot);
+        object->AddRef();
+        auto* message = new cRZMessage2Standard();
+        message->AddRef();
+        message->SetType(0x4c04de69);
+        message->SetData1(data1);
+        message->SetIGZUnknown(object);
+        SL::spMS2->MessagePost(message, false);
+        message->Release();
+        object->Release();
+    }
+} g_daily;
+
+// The lot developer's subscriptions (lot-developer.md §3.2): delivered to the city's current lot developer, so a city switch never
+// leaves a dangling target.
+class LotDeveloperTarget final : public cIGZMessageTarget2 {
+public:
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid != kGZIID_cIGZMessageTarget2 && iid != 1) return false;
+        *out = static_cast<cIGZMessageTarget2*>(this);
+        return true;
+    }
+    std::uint32_t AddRef() override { return 1; }
+    std::uint32_t Release() override { return 1; }   // static
+    bool DoMessage(cIGZMessage2* message) override {
+        cSC4LotDeveloper* developer = CityComponent<cSC4LotDeveloper>(sc4::CityComponent::LotDeveloper, kGZCLSID_cSC4LotDeveloper);
+        return developer ? developer->DoMessage(message) : true;
+    }
+} g_lotDeveloperTarget;
+
 }  // namespace
 
 cISC4LotConfigurationRef* NativeLotConfigurationRef(std::uint32_t id) {
@@ -244,6 +406,12 @@ void ReadLotDeveloperTunables(cSC4LotDeveloper* developer) {   // cSC4LotDevelop
     static cSC4LotDeveloper* tuned = nullptr;
     if (!developer || developer == tuned || !SL::spRM) return;
     tuned = developer;
+    developer->SetGateServices(&g_gates);
+    static bool subscribed = false;
+    if (!subscribed && SL::spMS2) {
+        subscribed = true;
+        for (std::uint32_t type : {0x99ef1142u, 0x99ef1143u, 0x26d31ec4u, 0x69247dc7u}) SL::spMS2->AddNotification(&g_lotDeveloperTarget, type);
+    }
     const cGZPersistResourceKey key{kLotDeveloperTunablesKeyType, kLotDeveloperTunablesKeyGroup, kLotDeveloperTunablesKeyInstance};
     void* raw = nullptr;
     if (!SL::spRM->GetResource(key, 0xa52160f5, &raw, 0, nullptr) || !raw) return;
@@ -260,6 +428,7 @@ void ReadLotDeveloperTunables(cSC4LotDeveloper* developer) {   // cSC4LotDevelop
 void InstallLotConstructionHosts() {
     gzcom::GetSimHosts().lotDeveloper = &g_host;
     cSC4LotDeveloper::SetConstructionServices(&g_services);
+    cSC4LotDeveloper::SetDailyServices(&g_daily);
     InstallConstructionOccupantHost();
 }
 

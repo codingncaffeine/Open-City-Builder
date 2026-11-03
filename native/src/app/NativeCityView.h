@@ -14,6 +14,7 @@ sc4::cSC43DRender* CityRenderer();
 // Its view utilities' eye position (+0x44, three floats; zeros without a view) and zoom (+0x14): NativeCityViewQueries.cpp.
 const float* CityViewEye();
 int CityViewZoom();
+int CityViewRotation();   // SC4ViewUtilities +0x18 (i386 +0x10): the view rotation 0..3
 // The vehicle or pedestrian automata layer is active (NativeCityQueries.cpp).
 bool CityAutomataLayersActive();
 // Builds the stack for the city that is loaded and attaches it to the view; true when the renderer came up.

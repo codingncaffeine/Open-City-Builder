@@ -27,6 +27,7 @@
 namespace sc4 {
 
 class cSC4Lot;
+class cISC4Occupant;
 struct BuildingProfile;
 constexpr std::uint32_t kGZCLSID_cSC4LotDeveloper = 0xa990bfe0;
 constexpr std::uint32_t kGZIID_cISC4LotDeveloper = 0x4818e5d2;
@@ -75,6 +76,41 @@ public:
     virtual const BuildingProfile* ProfileOfBuilding(std::uint32_t buildingType) = 0;     // vslot 0x138 (borrowed)
 };
 constexpr std::uint32_t kLotPropFailureCounter = 0xe999b11f;       // lot property: consecutive failed power tests
+constexpr std::uint32_t kLotPropDesirabilityCounter = 0xc999e206;  // ... failed desirability tests
+constexpr std::uint32_t kLotPropWaterCounter = 0x8999b20b;         // ... failed water tests
+constexpr std::uint32_t kLotPropTravelCounter = 0x8999b10b;        // ... failed road / commute tests
+constexpr std::uint32_t kLotPropZot = 0xc999c45e;                  // the zot the lot shows (4 power, 5 water, 6 road, 7 commute)
+constexpr std::uint32_t kPropPropZot = 0x48e95539;                 // on a zot prop: which zot it is
+
+// What the daily pass (lot-developer.md §4.2, §5.1-5.6) asks of the city: the building development simulator (+0x18), power
+// (+0x34), plumbing (+0x2c), traffic (+0x54), the city (+0x1c), the prop manager (+0x30) and the message server.
+class ILotDailyServices {
+public:
+    virtual ~ILotDailyServices() = default;
+    // BDS vslot 0x84 GetDeveloper(vslot 0x78 GetDeveloperType(purpose, wealth)): its purpose (vslot 0x1c) and desirability map
+    // cell (vslot 0x34, grid 0x1c); false when there is no developer.
+    virtual bool DeveloperDesirability(std::uint32_t purpose, std::uint32_t wealth, int x, int z, std::int32_t& developerPurpose,
+                                       std::int16_t& desirability) = 0;
+    // BDS vslot 0x80 GetDeveloper(purpose, wealth) -> vslot 0x50 GetWaterSupplyCap; false when there is no developer
+    virtual bool DeveloperWaterSupplyCap(std::uint32_t purpose, std::uint32_t wealth, std::uint8_t& cap) = 0;
+    // lot vslot 0x24 GetLotConfiguration -> vslot 0x2c GetGrowthStage; false without a configuration
+    virtual bool LotGrowthStage(const cSC4Lot& lot, std::uint8_t& stage) = 0;
+    virtual bool CheatIgnorePower() = 0;                    // BDS vslot 0xdc
+    virtual bool CheatIgnorePlumbing() = 0;                 // BDS vslot 0xd8
+    virtual bool IsPowered(int x, int z) = 0;               // power simulator vslot 0x94
+    virtual bool IsCellWatered(int x, int z) = 0;           // plumbing simulator vslot 0x2c
+    virtual std::uint8_t TripLengthAt(int x, int z) = 0;    // traffic vslot 0x34 GetTripLengthMap -> grid vslot 0x1c
+    virtual void CellWidths(float& x, float& z) = 0;        // city vslots 0x16c / 0x170
+    virtual std::int32_t SimDateNumber() = 0;               // simulator vslot 0x40
+    virtual bool CityHasJobs() = 0;                         // demand (0x2000, 0x20000) QueryDemandValue > 0 (0x69247dc7)
+    // the lot's building occupant (lot vslot 0xc0) and its bounding box (occupant vslot 0x28); false without one
+    virtual bool BuildingBounds(const cSC4Lot& lot, float lo[3], float hi[3]) = 0;
+    // prop manager vslot 0x64 AddLotProp(type, position, the view rotation SC4ViewUtilities +0x10); the manager keeps it
+    virtual cISC4Occupant* AddZotProp(std::uint32_t type, const float position[3]) = 0;
+    // RemoveLotProp (0x006C9780): every prop of the lot whose kPropPropZot is `zot`; true when one was removed
+    virtual bool RemoveLotPropsWithZot(cSC4Lot& lot, std::uint32_t zot) = 0;
+    virtual void PostLotNotification(cSC4Lot& lot, std::uint32_t data1) = 0;   // SC4PostMessage2(0x4c04de69, data1, 0, 0, 0, lot)
+};
 
 class IBaseLotDeveloperHost {
 public:
@@ -181,10 +217,20 @@ public:
     bool DoMessage(cIGZMessage2* message) override;   // the day agent (0x66956814) runs the daily pass; the rest: true
     // lot-developer.md §4.1 (0x006CD770): perDay = lots / 28 + 1 lots a day, in the lot manager's list order; false = not done today.
     bool DoDailySimulation();
-    // §4.2 (0x006CD3A0). PARTIAL: only step 5 (the business-unit step for a lot with no unit: its travel populations and job
-    // capacities from its own population). The network refresh, the state tests (desirability, power, water, commute) and the zots
-    // are not run natively yet (power and water are not simulated, so the tests would abandon every building).
+    // §4.2 (0x006CD3A0, Mac i386 0x000f4116): the network refresh, the state tests (desirability, power, water, travel), the
+    // condition and the zots, then the business-unit step. PARTIAL: lots in a unit keep their travel populations (PickUnitToJoin,
+    // UpdateTravelDesignates / UpdateTravelPopulations are not ported) and TestCoffeeBar (a cheat) is not.
     bool UpdateLot(cSC4Lot* lot);
+    static void SetDailyServices(ILotDailyServices* services);
+    // §5.1-5.4 (Mac i386 0x000ed514 / 0x000f0de8 / 0x000f0c2c / 0x000f0950); TestPower: 2 powered, 1 within grace, 0 failed
+    bool TestDesirability(cSC4Lot& lot, int x, int z);
+    int TestPower(cSC4Lot& lot, int x, int z);
+    bool TestWater(cSC4Lot& lot, int x, int z);
+    bool TestTravel(cSC4Lot& lot, const BuildingProfile& profile, int x, int z);
+    // §5.6 (Mac i386 0x000f0752 / 0x000f0684)
+    void AddBuildingZotProp(cSC4Lot& lot, std::uint32_t propType, std::uint32_t zot);
+    void RemoveBuildingZotProp(cSC4Lot& lot, std::uint32_t zot);
+    static bool IsEmptyLotSuitableForZot(const cSC4Lot& lot, int x, int z);
     // The lot manager's lot list (the zone developer's), for the daily pass.
     static void SetLotListProvider(const std::list<cSC4Lot*>* (*provider)());
     bool Write(cIGZOStream& stream) const override;   // @ 0x10014009a
@@ -283,6 +329,12 @@ private:
     int dailyState_ = 0;                                               // §4.1: 0 / 3 start a cycle, 1 working
     std::uint32_t visited_ = 0;
     cSC4Lot* nextLot_ = nullptr;                                       // the iterator: the next lot to visit (one reference)
+    // §2.2: the network / unit latches (set by network inserts and removals) and their cycle snapshots, the zot embargo after a
+    // city is established and the commute check the traffic map enables
+    bool netChanged_ = true, unitChanged_ = true;
+    bool netSnap_ = false, unitSnap_ = false, zotsAllowed_ = false;    // i386 +0xb8 / +0xb9 / +0xba
+    std::uint32_t noZotUntilDay_ = 0;
+    bool canCheckCommute_ = false;                                     // i386 +0x5f
 public:
     ~cSC4LotDeveloper() { for (cIGZUnknown* occupant : constructionQueue_) if (occupant) occupant->Release(); }
 private:

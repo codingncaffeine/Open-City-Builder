@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "gz/StreamOps.h"
+#include "rz/cRZRandom.h"
 #include "sc4/DBSegment.h"
 #include "sc4/BuildingOccupant.h"
 #include "sc4/Lot.h"
@@ -44,15 +45,35 @@ std::uint32_t cSC4LotDeveloper::Release() {
     return --refCount_;
 }
 
-// The original's DoMessage drives construction/demolition; that stage machine is unrecovered.
-bool cSC4LotDeveloper::DoMessage(cIGZMessage2* message) {
-    if (message && message->GetType() == 0x66956814) return DoDailySimulation();
-    return true;
-}
-
 namespace {
 const std::list<cSC4Lot*>* (*g_lotList)() = nullptr;
+ILotDailyServices* g_daily = nullptr;
+constexpr std::uint32_t kOccupantTypeNetwork = 0xc772bf98;
 }  // namespace
+
+void cSC4LotDeveloper::SetDailyServices(ILotDailyServices* services) { g_daily = services; }
+
+// §3.2 (0x006CD940). PARTIAL: the day pass, the network latches, the zot embargo and the commute switch; night lights (0x44778234,
+// the animation tick), the power-changed rectangle (0x8a07ae00, §9) and the building night deque are not ported.
+bool cSC4LotDeveloper::DoMessage(cIGZMessage2* message) {
+    if (!message) return true;
+    auto* standard = static_cast<cIGZMessage2Standard*>(message);
+    switch (message->GetType()) {
+    case 0x66956814: return DoDailySimulation();
+    case 0x99ef1142:                                     // an occupant inserted / removed: a network piece marks both latches
+    case 0x99ef1143:
+        if (static_cast<std::uint32_t>(standard->GetData3()) == kOccupantTypeNetwork) netChanged_ = unitChanged_ = true;
+        break;
+    case 0x26d31ec4:                                     // the city was established: no zots for a month
+        noZotUntilDay_ = g_daily ? static_cast<std::uint32_t>(g_daily->SimDateNumber()) + 31 : 0;
+        break;
+    case 0x69247dc7:                                     // the traffic maps changed: empty lots test the commute when there are jobs
+        canCheckCommute_ = g_daily && g_daily->CityHasJobs();
+        break;
+    default: break;
+    }
+    return true;
+}
 
 void cSC4LotDeveloper::SetLotListProvider(const std::list<cSC4Lot*>* (*provider)()) { g_lotList = provider; }
 
@@ -64,6 +85,10 @@ bool cSC4LotDeveloper::DoDailySimulation() {
         if (lots->empty()) return true;
         position = lots->begin();
         visited_ = 0;
+        netSnap_ = netChanged_;
+        unitSnap_ = unitChanged_;
+        netChanged_ = unitChanged_ = false;
+        zotsAllowed_ = g_daily && static_cast<std::uint32_t>(g_daily->SimDateNumber()) > noZotUntilDay_;
         dailyState_ = 1;
     } else if (dailyState_ == 1) {
         // the safe iterator: carry on at the remembered lot (a lot deleted meanwhile restarts the cycle at the first lot)
@@ -93,30 +118,71 @@ bool cSC4LotDeveloper::DoDailySimulation() {
 }
 
 
-// Step 5 for a lot with no business unit: its travel populations are its own population (and its jobs its own). PARTIAL: lots in a
-// unit keep the travel populations and capacities they were saved with - the unit's step (UpdateTravelDesignates, then
-// UpdateTravelPopulations onto the designates, §5.7) needs the units' member lists, which the port does not link to the lots yet -
-// and PickUnitToJoin is not ported.
+// §4.2 (Mac i386 0x000f4116). The facing fix after the network refresh is dead in the original (its static byte is only ever
+// cleared) and is not ported. A lot in a business unit keeps the travel populations it was saved with: the unit's step
+// (UpdateTravelDesignates, then UpdateTravelPopulations onto the designates, §5.7) and PickUnitToJoin are not ported yet.
 bool cSC4LotDeveloper::UpdateLot(cSC4Lot* lot) {
     static const bool trace = std::getenv("SC4_LOTDEBUG") != nullptr;
-    std::vector<std::uint32_t> before, after;
-    if (trace) cSCPropertyHelp::GetPropertyValue(&lot->Properties(), 0x8a0b4100, before);
-    if (lot->GetUnit()) return false;
-    lot->ResetTravelPopulation();
-    lot->AddTravelPopulation(*lot);
-    if (trace && lot->GetZoneType() >= 4) {
-        cSCPropertyHelp::GetPropertyValue(&lot->Properties(), 0x8a0b4100, after);
-        float jobs[4] = {};
-        lot->GetJobs(jobs);
-        int x = 0, z = 0;
-        lot->GetLocation(x, z);
-        std::fprintf(stderr, "lot pass: pop 4100 %u 4200 %u 3110 %u 3310 %u ", lot->GetPopulation(0x4100), lot->GetPopulation(0x4200), lot->GetPopulation(0x3110),
-                     lot->GetPopulation(0x3310));
-        std::fprintf(stderr, "(%d,%d) zone %u building %08x jobs %.1f/%.1f/%.1f capacity %u/%u/%u -> %u/%u/%u\n", x, z, lot->GetZoneType(),
-                     lot->GetBuildingType(true), jobs[1], jobs[2], jobs[3], before.size() > 2 ? before[0] : 0, before.size() > 2 ? before[1] : 0,
-                     before.size() > 2 ? before[2] : 0, after.size() > 2 ? after[0] : 0, after.size() > 2 ? after[1] : 0, after.size() > 2 ? after[2] : 0);
+    if (!lot) return false;
+    int x = 0, z = 0;
+    lot->GetLocation(x, z);                                          // lot vslot 0x54
+    if (netSnap_) lot->UpdateRoadAccess();                           // vslot 0x78
+    bool changed = false;
+    const std::uint32_t type = lot->GetBuildingType(false);          // vslot 0xb8
+    if (type == 0) {
+        if (zotsAllowed_) {
+            // an empty lot standing a month tests its commute (results ignored: only the zots show)
+            if (static_cast<std::uint32_t>(lot->GetDaysSinceLastStateChange()) > 30 && canCheckCommute_) {
+                const int zone = lot->GetZoneType();
+                BuildingProfile probe{};
+                probe.purpose = zone >= 1 && zone <= 3 ? 1 : 3;
+                if (zone >= 1 && zone <= 6) TestTravel(*lot, probe, x, z);
+            }
+            if (IsEmptyLotSuitableForZot(*lot, x, z)) TestPower(*lot, x, z);
+        }
+    } else {
+        const BuildingProfile* found = gates_ ? gates_->ProfileOfBuilding(type) : nullptr;   // BDS vslot 0x9c
+        const BuildingProfile none{};
+        const BuildingProfile& profile = found ? *found : none;
+        if (profile.purpose != 0) {
+            // a grown building: all four tests run, the last failing one names the reason
+            const int state = lot->GetState();                       // vslot 0x84
+            int next = state;
+            std::uint8_t reason = 0;
+            if (!TestDesirability(*lot, x, z)) { next = 4; reason = 1; }
+            if (TestPower(*lot, x, z) == 0) { next = 4; reason = 2; }
+            if (!TestWater(*lot, x, z)) { next = 4; reason = 3; }
+            if (!TestTravel(*lot, profile, x, z)) { next = 4; reason = 4; }
+            changed = next != state;
+            if (changed) {
+                lot->SetState(static_cast<std::uint32_t>(next), 0, reason);   // vslot 0x88
+                if (trace) std::fprintf(stderr, "lot pass: (%d,%d) building %08x state %d -> %d reason %u\n", x, z, type, state, next, reason);
+            }
+            lot->SetCondition(TestCondition(*lot));                  // vslot 0x90
+        } else {
+            // civic or plopped: only power and the condition it gives
+            const bool powered = TestPower(*lot, x, z) == 2;
+            const std::uint32_t condition = lot->GetCondition();     // vslot 0x8c
+            if (condition == 1) {
+                if (powered) {
+                    lot->SetCondition(0);
+                    TestTravel(*lot, profile, x, z);
+                }
+            } else if (condition == 0) {
+                if (powered) TestTravel(*lot, profile, x, z);
+                else lot->SetCondition(1);
+            } else {
+                if (condition - 5u < 2) lot->SetCondition(0);
+                if (powered) TestTravel(*lot, profile, x, z);
+            }
+        }
     }
-    return false;
+    // §4.2 step 5
+    if (!lot->GetUnit()) {                                           // vslot 0x64
+        lot->ResetTravelPopulation();                                // vslot 0xe4
+        lot->AddTravelPopulation(*lot);                              // vslot 0xe8
+    }
+    return changed;
 }
 
 // 0x10014009a: version 1, the vertices per row, the city extent, the construction queue (one serializable reference each), the
@@ -994,6 +1060,198 @@ void cSC4LotDeveloper::GetPositionForLotConfigurationObject(cSC4Lot* lot, cSC4Lo
         std::fprintf(stderr, "lot developer: object type %u at (%.1f,%.1f,%.1f) orientation %u, lot (%d,%d)-(%d,%d) facing %d -> (%.1f,%.1f,%.1f) rotation %d\n",
                      object->type, object->x, object->y, object->z, object->orientation, cells[0], cells[1], cells[2], cells[3], facing,
                      position[0], position[1], position[2], rotation);
+}
+
+}  // namespace sc4
+
+
+// ==================================================================================================== the daily tests and zots
+
+namespace sc4 {
+namespace {
+// A lot's failure counter (a uint32 property, created as 0 on first use).
+std::uint32_t Counter(cSC4Lot& lot, std::uint32_t id) {
+    std::uint32_t value = 0;
+    if (!lot.Properties().HasProperty(id)) cSCPropertyHelp::SetPropertyValue(&lot.Properties(), id, value);
+    else cSCPropertyHelp::GetPropertyValue(&lot.Properties(), id, value);
+    return value;
+}
+void SetCounter(cSC4Lot& lot, std::uint32_t id, std::uint32_t value) { cSCPropertyHelp::SetPropertyValue(&lot.Properties(), id, value); }
+}  // namespace
+
+// §5.1: a livable lot whose developer finds the cell below the abandon threshold is tolerated for 3..9 visits in a row, the
+// tolerance fixed per location by a generator seeded with it.
+bool cSC4LotDeveloper::TestDesirability(cSC4Lot& lot, int x, int z) {
+    const std::uint32_t count = Counter(lot, kLotPropDesirabilityCounter);
+    if (lot.IsInLivableState() && g_daily && gates_) {                                  // lot vslot 0x94
+        const BuildingProfile* profile = gates_->ProfileOfBuilding(lot.GetBuildingType(false));
+        std::int32_t developerPurpose = 0;
+        std::int16_t desirability = 0;
+        if (profile && g_daily->DeveloperDesirability(profile->purpose, lot.GetOccupantWealth(), x, z, developerPurpose, desirability)) {
+            if (developerPurpose == 5) return true;                                    // farms: the counter is left alone
+            if (static_cast<float>(desirability) / 100.0f < tunables_.ratioA) {
+                cRZRandom random(static_cast<std::uint32_t>(z + x * 0x10000));
+                const std::int32_t tolerance = random.RandomSint32RangeUniform(0, 7);
+                SetCounter(lot, kLotPropDesirabilityCounter, count + 1);
+                return count + 1 <= static_cast<std::uint32_t>(tolerance + 2);
+            }
+        }
+    }
+    SetCounter(lot, kLotPropDesirabilityCounter, 0);
+    return true;
+}
+
+// §5.2: tested at the building's centre cell (the lot's own cell without a building); two unpowered visits are tolerated.
+int cSC4LotDeveloper::TestPower(cSC4Lot& lot, int x, int z) {
+    const std::uint32_t count = Counter(lot, kLotPropFailureCounter);
+    float lo[3] = {}, hi[3] = {};
+    const bool hasBuilding = g_daily && g_daily->BuildingBounds(lot, lo, hi);           // lot vslot 0xc0
+    const bool needs = !hasBuilding || lot.GetNeedsPower();                            // vslot 0x104
+    bool powered = true;
+    if (g_daily && !g_daily->CheatIgnorePower() && needs) {
+        int cellX = x, cellZ = z;
+        if (hasBuilding) {
+            float widthX = 16.0f, widthZ = 16.0f;
+            g_daily->CellWidths(widthX, widthZ);
+            cellX = static_cast<int>((lo[0] + hi[0]) / (widthX + widthX));
+            cellZ = static_cast<int>((lo[2] + hi[2]) / (widthZ + widthZ));
+        }
+        powered = g_daily->IsPowered(cellX, cellZ);
+    }
+    if (powered != lot.GetHasPower()) {                                                  // vslot 0x108
+        lot.SetHasPower(powered);                                                        // vslot 0x10c
+        if (powered) {
+            if (lot.GetCondition() == 1) lot.SetCondition(0);
+        } else if (lot.GetCondition() == 0) {
+            lot.SetCondition(1);
+        }
+    }
+    if (!powered) {
+        SetCounter(lot, kLotPropFailureCounter, count + 1);
+        AddBuildingZotProp(lot, 0x0fd10000, 4);
+        return count + 1 < 3 ? 1 : 0;
+    }
+    SetCounter(lot, kLotPropFailureCounter, 0);
+    if (hasBuilding) RemoveBuildingZotProp(lot, 4);
+    return 2;
+}
+
+// §5.3: an occupied or abandoned lot needs water when it is civic or its growth stage is above its developer's water cap; tested at
+// the lot's own cell.
+bool cSC4LotDeveloper::TestWater(cSC4Lot& lot, int x, int z) {
+    const std::uint32_t count = Counter(lot, kLotPropWaterCounter);
+    bool needs = false;
+    if (static_cast<std::uint32_t>(lot.GetState()) - 2u < 3) {
+        const BuildingProfile* profile = gates_ ? gates_->ProfileOfBuilding(lot.GetBuildingType(false)) : nullptr;
+        if (!profile || profile->purpose == 0) {
+            needs = true;
+        } else {
+            std::uint8_t cap = 0, stage = 0;
+            if (g_daily && g_daily->DeveloperWaterSupplyCap(profile->purpose, profile->wealth, cap) && g_daily->LotGrowthStage(lot, stage))
+                needs = cap < stage;
+        }
+    }
+    if (needs && g_daily && !g_daily->CheatIgnorePlumbing() && !g_daily->IsCellWatered(x, z)) {
+        SetCounter(lot, kLotPropWaterCounter, count + 1);
+        AddBuildingZotProp(lot, 0x1c430000, 5);
+        return count + 1 < 3;
+    }
+    SetCounter(lot, kLotPropWaterCounter, 0);
+    RemoveBuildingZotProp(lot, 5);
+    return true;
+}
+
+// §5.4: road access (and, for residences, a job reachable and a trip length) for a lot under construction, occupied or abandoned.
+// Road and commute share one counter: no road is tolerated twice; an occupied residence without a commute shows the zot from the
+// third visit and fails on the seventh.
+bool cSC4LotDeveloper::TestTravel(cSC4Lot& lot, const BuildingProfile& profile, int x, int z) {
+    const int state = lot.GetState();
+    bool keepCounter = false;
+    if (static_cast<std::uint32_t>(state) - 3u < 2 || state == 1) {
+        const std::uint32_t purpose = profile.purpose;
+        bool road = false, tripOk = true, test = true;
+        if (purpose == 1) {
+            road = lot.HasRoadAccess() && lot.HasJobAccess();                           // vslots 0x70 / 0x6c
+            tripOk = g_daily && g_daily->TripLengthAt(x, z) != 0;
+        } else if (purpose - 5u <= 3) {
+            road = lot.HasOrganicRoadAccess(purpose);                                    // vslot 0x74
+        } else {
+            float jobs[4] = {};
+            lot.GetJobs(jobs);                                                           // vslot 0x100 (unused)
+            if (!(lot.GetTravelJobs(1) > 0) && !(lot.GetTravelJobs(2) > 0) && !(lot.GetTravelJobs(3) > 0)) test = false;
+            else road = lot.HasRoadAccess();
+        }
+        if (test && (!road || !tripOk)) {
+            const std::uint32_t count = Counter(lot, kLotPropTravelCounter) + 1;
+            static const bool trace = std::getenv("SC4_LOTDEBUG") != nullptr;
+            static int shown = 0;
+            if (trace && shown < 200 && ++shown)
+                std::fprintf(stderr, "lot travel: (%d,%d) purpose %u state %d road %d job %d trip %d count %u\n", x, z, purpose, state,
+                             int(lot.HasRoadAccess()), int(lot.HasJobAccess()), g_daily ? int(g_daily->TripLengthAt(x, z)) : -1, count);
+            SetCounter(lot, kLotPropTravelCounter, count);
+            if (!road) {
+                AddBuildingZotProp(lot, 0x107a0000, 6);
+                return count < 3;
+            }
+            if (state == 3) {
+                if (count > 6) { AddBuildingZotProp(lot, 0x1c440000, 7); return false; }
+                if (count > 2) { AddBuildingZotProp(lot, 0x1c440000, 7); return true; }
+            }
+            RemoveBuildingZotProp(lot, 6);
+            keepCounter = true;
+        }
+    }
+    if (!keepCounter) {
+        if (lot.Properties().HasProperty(kLotPropTravelCounter)) SetCounter(lot, kLotPropTravelCounter, 0);
+        RemoveBuildingZotProp(lot, 6);
+    }
+    RemoveBuildingZotProp(lot, 7);
+    return true;
+}
+
+// §5.6: lower zots win (power 4 < water 5 < road 6 < commute 7); the prop floats 3 m over the building (or the lot's centre).
+void cSC4LotDeveloper::AddBuildingZotProp(cSC4Lot& lot, std::uint32_t propType, std::uint32_t zot) {
+    if (!g_daily) return;
+    if (zot == 6) g_daily->PostLotNotification(lot, 1);                                // before the priority test (quirk)
+    const std::uint32_t current = Counter(lot, kLotPropZot);
+    if (current != 0) {
+        if (current <= zot) return;
+        g_daily->RemoveLotPropsWithZot(lot, current);
+    }
+    SetCounter(lot, kLotPropZot, zot);
+    float position[3] = {};
+    float lo[3] = {}, hi[3] = {};
+    cSC4LotConfiguration* configuration = g_construction ? g_construction->Configuration(lot.GetLotConfiguration()) : nullptr;
+    if (g_daily->BuildingBounds(lot, lo, hi) && configuration && configuration->GetPrimaryBuildingConfigurationObject()) {
+        std::int32_t rotation = 0;
+        GetPositionForBuilding(&lot, position, rotation);                               // vslot 0xa0
+        position[1] = hi[1];
+    } else {
+        lot.GetCenter(position);                                                         // vslot 0x3c
+    }
+    position[1] += 3.0f;
+    cISC4Occupant* prop = g_daily->AddZotProp(propType, position);                      // prop manager vslot 0x64
+    if (!prop) return;
+    prop->SetRemovalFlags(3);                                                            // occupant vslot 0x30
+    if (cISCPropertyHolder* holder = prop->AsPropertyHolder()) cSCPropertyHelp::SetPropertyValue(holder, kPropPropZot, zot);
+}
+
+void cSC4LotDeveloper::RemoveBuildingZotProp(cSC4Lot& lot, std::uint32_t zot) {
+    if (!lot.Properties().HasProperty(kLotPropZot)) return;
+    std::uint32_t current = 0;
+    cSCPropertyHelp::GetPropertyValue(&lot.Properties(), kLotPropZot, current);
+    if (zot == 6 && g_daily) g_daily->PostLotNotification(lot, 2);
+    if (zot != 0 && current != zot) return;
+    if (current != 0 && g_daily) g_daily->RemoveLotPropsWithZot(lot, current);
+    SetCounter(lot, kLotPropZot, 0);
+}
+
+// Empty lots show zots on a sparse pattern: a diagonal for residential and commercial, a grid for industry and farms.
+bool cSC4LotDeveloper::IsEmptyLotSuitableForZot(const cSC4Lot& lot, int x, int z) {
+    const int zone = lot.GetZoneType();
+    if (zone >= 1 && zone <= 6) return (x + z) % 4 == 0;
+    if (zone >= 7 && zone <= 9) return x % 4 == 0 && z % 4 == 0;
+    return false;
 }
 
 }  // namespace sc4

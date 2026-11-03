@@ -13,6 +13,7 @@
 #include "sc4/TrafficSimulator.h"
 #include "app/NativeZoneDeveloperHost.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <set>
 #include <cstdlib>
@@ -439,9 +440,20 @@ struct LotHost final : ILotHost {
     }
     bool ExemplarProperty(const cSC4Lot& lot, std::uint32_t id, std::int32_t& value) override { return {}; }
     bool PowerRequirementExceeded(const cSC4Lot& lot, const LotBuildingProfile& profile, bool& available) override { return {}; }
-    bool TrafficHasJobAccess(const cSC4Lot& lot, int kind) override { return {}; }
+    bool TrafficHasJobAccess(const cSC4Lot& lot, int kind) override {   // traffic vslot 0x130 (Mac i386 cSC4Lot::HasJobAccess)
+        return NativeTrafficConnectedDestinationCount(&const_cast<cSC4Lot&>(lot).Properties(), kind) != 0;
+    }
     void UnitLotShutdown(cIGZUnknown* unit, const cSC4Lot& lot) override {}
-    void NeighborLots(const cSC4Lot& lot, int direction, std::vector<cSC4Lot*>& out) override {}
+    // lot manager vslot 0x20 GetLotsSurroundingLot(lot, list, side flag), appending (Mac i386 cSC4Lot::CalculateOrganicRoadAccess);
+    // the pointers are borrowed (the zone developer keeps the lots)
+    void NeighborLots(const cSC4Lot& lot, int direction, std::vector<cSC4Lot*>& out) override {
+        cSC4ZoneDeveloper* developer = Developer();
+        if (!developer) return;
+        std::list<cRZAutoRefCount<cSC4Lot>> found;
+        developer->GetLotsSurroundingLot(&lot, found, direction);
+        for (const auto& neighbor : found)
+            if (neighbor && std::find(out.begin(), out.end(), neighbor.get()) == out.end()) out.push_back(neighbor.get());
+    }
     // Lot slot 49 (0x006bff70, lot-records.md §3.1): the occupant manager's occupants of any type over the lot's cells, through an
     // "inside the lot" filter (here: the position lies in the lot's rectangle). The pointers are borrowed (the manager holds them).
     void GetLotOccupants(const cSC4Lot& lot, std::vector<cIGZUnknown*>& out) override {
@@ -511,15 +523,20 @@ struct LotHost final : ILotHost {
 
 }  // namespace
 
+// Every network occupant of the cell counts (a pipe or power line can share the cell with the road; Mac i386
+// cSC4Lot::CalculateRoadAccess walks all of them).
 std::uint32_t NativeNetworkTypesAt(int x, int z) {
     cISC4OccupantManager* occupants = Occupants();
-    cISC4Occupant* occupant = nullptr;
-    if (!occupants || !occupants->GetFirstOccupantByStandardCityCell(occupant, x, z, 0xc772bf98) || !occupant) return 0;
+    if (!occupants) return 0;
+    const int a[2] = {x, z}, b[2] = {x, z};
+    OccupantList found;
+    if (!occupants->GetOccupantsByStandardCityCells(found, a, b, 0xc772bf98, 0xffffffffu)) return 0;
     std::uint32_t types = 0;
-    if (auto* network = dynamic_cast<cSC4NetworkOccupant*>(occupant))
-        for (std::uint32_t type = 0; type < 13; ++type)
-            if (network->IsOfType(type)) types |= 1u << type;
-    occupant->Release();
+    for (cISC4Occupant* occupant : found)
+        if (auto* network = dynamic_cast<cSC4NetworkOccupant*>(occupant))
+            for (std::uint32_t type = 0; type < 13; ++type)
+                if (network->IsOfType(type)) types |= 1u << type;
+    occupants->ReleaseOccupantList(found);
     return types;
 }
 
