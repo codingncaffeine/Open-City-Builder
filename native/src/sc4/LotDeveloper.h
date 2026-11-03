@@ -27,6 +27,7 @@
 namespace sc4 {
 
 class cSC4Lot;
+class cISC4BusinessUnit;
 class cISC4Occupant;
 struct BuildingProfile;
 constexpr std::uint32_t kGZCLSID_cSC4LotDeveloper = 0xa990bfe0;
@@ -218,9 +219,15 @@ public:
     // lot-developer.md §4.1 (0x006CD770): perDay = lots / 28 + 1 lots a day, in the lot manager's list order; false = not done today.
     bool DoDailySimulation();
     // §4.2 (0x006CD3A0, Mac i386 0x000f4116): the network refresh, the state tests (desirability, power, water, travel), the
-    // condition and the zots, then the business-unit step. PARTIAL: lots in a unit keep their travel populations (PickUnitToJoin,
-    // UpdateTravelDesignates / UpdateTravelPopulations are not ported) and TestCoffeeBar (a cheat) is not.
+    // condition and the zots, then the business-unit step. PARTIAL: TestCoffeeBar (a cheat) is not ported.
     bool UpdateLot(cSC4Lot* lot);
+    // Business units (Mac i386 0x000f3dbc, vslots 0x8c / 0x90 / 0x94 = 0x0064ff94 / 0x000f4dec / 0x000ee72e): an industrial lot
+    // joins an adjoining lot of its purpose that reaches a road (a farm field joins a lot with a building); the unit's travel
+    // populations gather on its designate, a member with road access.
+    void PickUnitToJoin(cSC4Lot* lot);
+    void RemoveLotFromItsBusinessUnit(cSC4Lot* lot);
+    void UpdateTravelDesignates(cISC4BusinessUnit*& unit);
+    void UpdateTravelPopulations(cISC4BusinessUnit* unit);
     static void SetDailyServices(ILotDailyServices* services);
     // §5.1-5.4 (Mac i386 0x000ed514 / 0x000f0de8 / 0x000f0c2c / 0x000f0950); TestPower: 2 powered, 1 within grace, 0 failed
     bool TestDesirability(cSC4Lot& lot, int x, int z);

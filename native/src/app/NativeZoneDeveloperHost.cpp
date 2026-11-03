@@ -188,7 +188,7 @@ struct LotDeveloperApi final : IZoneDeveloperLotDeveloperApi {
         texture->Release();
         return true;
     }
-    void ReleaseLotUnit(cSC4Lot*) override { SC4_UNWIRED("IZoneDeveloperLotDeveloperApi::ReleaseLotUnit (lot developer vslot 0x108, business units)"); }
+    void ReleaseLotUnit(cSC4Lot* lot) override { if (cSC4LotDeveloper* developer = LotDeveloper()) developer->RemoveLotFromItsBusinessUnit(lot); }
     void AttemptAreaLevelling(const SC4Rect<int>& rect, float altitude, bool a3, bool a4, float a5, cSC4Lot* lot) override {
         if (cSC4LotDeveloper* d = LotDeveloper()) d->AttemptAreaLevelling(LotCellRect{rect.x0, rect.z0, rect.x1, rect.z1}, altitude, a3, a4, a5, lot);
     }
@@ -443,7 +443,6 @@ struct LotHost final : ILotHost {
     bool TrafficHasJobAccess(const cSC4Lot& lot, int kind) override {   // traffic vslot 0x130 (Mac i386 cSC4Lot::HasJobAccess)
         return NativeTrafficConnectedDestinationCount(&const_cast<cSC4Lot&>(lot).Properties(), kind) != 0;
     }
-    void UnitLotShutdown(cIGZUnknown* unit, const cSC4Lot& lot) override {}
     // lot manager vslot 0x20 GetLotsSurroundingLot(lot, list, side flag), appending (Mac i386 cSC4Lot::CalculateOrganicRoadAccess);
     // the pointers are borrowed (the zone developer keeps the lots)
     void NeighborLots(const cSC4Lot& lot, int direction, std::vector<cSC4Lot*>& out) override {
@@ -519,6 +518,7 @@ struct LotHost final : ILotHost {
     }
     void WriteSerializable(cIGZOStream& stream, cIGZUnknown* object) override { SC4WriteGZSerializable(stream, object); }
     cIGZUnknown* ReadSerializable(cIGZIStream& stream, std::uint32_t clsid) override { void* out = nullptr; SC4ReadGZSerializable(stream, clsid, &out, false); return static_cast<cIGZUnknown*>(out); }
+    cIGZUnknown* LotSerializable(cSC4Lot* lot) override { return native::LotSerializable(lot); }
 } g_lotHost;
 
 }  // namespace

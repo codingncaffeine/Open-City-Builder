@@ -30,7 +30,6 @@ struct StubLot final : ILotHost {
     bool ExemplarProperty(const cSC4Lot& lot, std::uint32_t id, std::int32_t& value) override { return {}; }
     bool PowerRequirementExceeded(const cSC4Lot& lot, const LotBuildingProfile& profile, bool& available) override { return {}; }
     bool TrafficHasJobAccess(const cSC4Lot& lot, int kind) override { return {}; }
-    void UnitLotShutdown(cIGZUnknown* unit, const cSC4Lot& lot) override {}
     void NeighborLots(const cSC4Lot& lot, int direction, std::vector<cSC4Lot*>& out) override {}
     void GetLotOccupants(const cSC4Lot& lot, std::vector<cIGZUnknown*>& out) override {}
     bool RoadAccessCells(const cSC4Lot& lot, int rotation) override { return {}; }

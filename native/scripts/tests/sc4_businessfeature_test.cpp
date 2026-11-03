@@ -6,17 +6,6 @@ static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
 using namespace sc4;
 
-struct Lot final : IBusinessLot {
-    int refs = 1;
-    cSC4BusinessUnit* unit = nullptr;
-    int clears = 0;
-    bool QueryInterface(std::uint32_t, void**) override { return false; }
-    std::uint32_t AddRef() override { return ++refs; }
-    std::uint32_t Release() override { return --refs; }
-    void SetBusinessUnit(cSC4BusinessUnit* u) override { unit = u; }
-    void ClearOwnerLink() override { ++clears; }
-};
-
 struct Host final : IFeatureHost {
     bool LoadFeatureEntries(unsigned index, std::vector<std::pair<std::string, std::string>>& entries) override {
         if (index == 0) { entries = {{"10", "On"}, {"11", "on"}, {"12", "on"}}; return true; }
@@ -26,23 +15,7 @@ struct Host final : IFeatureHost {
 };
 
 int main() {
-    auto* unit = new cSC4BusinessUnit();
-    unit->AddRef();
-    Lot a, b;
-    unit->Add(&a);
-    unit->Add(&a);                     // adding twice keeps a single member
-    unit->Add(&b);
-    CHECK(unit->GetMembers().size() == 2 && a.refs == 2 && a.unit == unit && b.unit == unit);
-    unit->Remove(&a);
-    CHECK(unit->GetMembers().size() == 1 && a.refs == 1 && a.unit == nullptr && a.clears == 1);
-    CHECK(unit->GetGZCLSID() == 0x4a232da8);
     void* raw = nullptr;
-    CHECK(unit->QueryInterface(0x6a233069, &raw) && unit->QueryInterface(0xe4fda3d4, &raw) && !unit->QueryInterface(3, &raw));
-    unit->Release();
-    unit->Release();
-    unit->Release();
-    CHECK(b.refs == 1);                // the destructor released the member reference
-
     Host host;
     SetFeatureHost(&host);
     cSC4FeatureManager* features = new cSC4FeatureManager();

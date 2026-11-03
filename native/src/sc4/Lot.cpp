@@ -4,6 +4,9 @@
 #include <cmath>
 
 #include "gz/StreamOps.h"
+#include "sc4/BusinessFeature.h"
+#include "sc4/CommonIIDs.h"
+#include "sc4/DBSegment.h"
 
 namespace sc4 {
 
@@ -19,6 +22,23 @@ const typename Map::mapped_type* FindExact(const Map& map, const typename Map::k
 
 ILotHost* LotHost() { return g_lotHost; }
 void SetLotHost(ILotHost* host) { g_lotHost = host; }
+
+bool WriteLotReference(cIGZOStream& stream, const cSC4Lot* lot) {
+    cIGZUnknown* serializable = lot && g_lotHost ? g_lotHost->LotSerializable(const_cast<cSC4Lot*>(lot)) : nullptr;
+    return SC4WriteGZSerializable(stream, serializable);
+}
+
+cSC4Lot* ReadLotReference(cIGZIStream& stream) {
+    void* raw = nullptr;
+    SC4ReadGZSerializable(stream, kGZIID_cIGZSerializable, &raw, false);
+    auto* serializable = static_cast<cIGZSerializable*>(raw);
+    if (!serializable) return nullptr;
+    void* plain = nullptr;
+    cSC4Lot* lot = serializable->GetGZCLSID() == kGZCLSID_cSC4Lot && serializable->QueryInterface(kGZIID_PlainObject, &plain)
+                       ? static_cast<cSC4Lot*>(plain) : nullptr;
+    serializable->Release();   // the stream's object table keeps the lot's serializable while the city loads
+    return lot;
+}
 
 // ---------------------------------------------------------------------------------------------- trips
 
@@ -110,6 +130,7 @@ cSC4Lot::cSC4Lot(const cSC4Lot& o)
 
 cSC4Lot::~cSC4Lot() {
     if (unit_) unit_->Release();
+    if (travelDesignate_) travelDesignate_->Release();
     if (configuration_) configuration_->Release();
 }
 
@@ -158,10 +179,8 @@ bool cSC4Lot::Shutdown() {
         travelPopulations_.clear();
         if (configuration_) { configuration_->Release(); configuration_ = nullptr; }
         if (travelDesignate_) { travelDesignate_->Release(); travelDesignate_ = nullptr; }
-        if (unit_) {
-            if (g_lotHost) g_lotHost->UnitLotShutdown(unit_, *this);
-            unit_ = nullptr;
-        }
+        if (unit_) unit_->Remove(this);   // the unit clears the lot's unit
+
     }
     return true;
 }
@@ -242,15 +261,15 @@ void cSC4Lot::SetLotConfiguration(cISC4LotConfigurationRef* configuration) {
     if (old) old->Release();
 }
 
-void cSC4Lot::SetUnit(cIGZUnknown* unit) {
+void cSC4Lot::SetUnit(cISC4BusinessUnit* unit) {
     if (unit_ == unit) return;
     if (unit_) unit_->Release();
     unit_ = unit;
     if (unit) unit->AddRef();
 }
 
-void cSC4Lot::SetTravelDesignate(cIGZUnknown* designate) {
-    cIGZUnknown* old = travelDesignate_;
+void cSC4Lot::SetTravelDesignate(cSC4Lot* designate) {
+    cSC4Lot* old = travelDesignate_;
     if (old == designate) return;
     if (designate) designate->AddRef();
     travelDesignate_ = designate;
@@ -797,7 +816,7 @@ bool cSC4Lot::Write(cIGZOStream& s) const {
     s.SetUint8(vacateReason_);
     if (g_lotHost) {
         g_lotHost->WriteSerializable(s, unit_);
-        g_lotHost->WriteSerializable(s, travelDesignate_);
+        WriteLotReference(s, travelDesignate_);
     }
     s.SetUint8(static_cast<std::uint8_t>(populations_.size()));
     for (const auto& m : populations_) {
@@ -865,9 +884,9 @@ bool cSC4Lot::Read(cIGZIStream& s) {
     }
     s.GetUint8(vacateReason_);
     if (g_lotHost) {
-        unit_ = g_lotHost->ReadSerializable(s, kGZCLSID_cSC4BusinessUnit);
-        if (travelDesignate_) { travelDesignate_->Release(); travelDesignate_ = nullptr; }
-        travelDesignate_ = g_lotHost->ReadSerializable(s, kGZIID_cISC4Lot);
+        if (unit_) { unit_->Release(); unit_ = nullptr; }
+        unit_ = static_cast<cISC4BusinessUnit*>(g_lotHost->ReadSerializable(s, kGZIID_cISC4BusinessUnit));   // one reference
+        SetTravelDesignate(ReadLotReference(s));
     }
     std::uint8_t count = 0;
     s.GetUint8(count);

@@ -5,12 +5,14 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cmath>
+#include <map>
 #include <vector>
 
 #include "gz/StreamOps.h"
 #include "rz/cRZRandom.h"
 #include "sc4/DBSegment.h"
 #include "sc4/BuildingOccupant.h"
+#include "sc4/BusinessFeature.h"
 #include "sc4/Lot.h"
 #include "sc4/LotBaseTextureOccupant.h"
 #include "sc4/LotConfiguration.h"
@@ -85,6 +87,22 @@ bool cSC4LotDeveloper::DoDailySimulation() {
         if (lots->empty()) return true;
         position = lots->begin();
         visited_ = 0;
+        if (static const bool trace = std::getenv("SC4_UNITDEBUG") != nullptr; trace) {   // the business units at each cycle start
+            std::map<cISC4BusinessUnit*, int> claims;
+            std::size_t designated = 0;
+            for (const cSC4Lot* lot : *lots) {
+                if (!lot->GetUnit()) continue;
+                ++claims[lot->GetUnit()];
+                if (lot->GetTravelDesignate()) ++designated;
+            }
+            std::size_t members = 0, mismatched = 0;
+            for (const auto& [unit, n] : claims) {
+                members += n;
+                if (unit->GetMembers().size() != static_cast<std::size_t>(n)) ++mismatched;
+            }
+            std::fprintf(stderr, "units: %zu units (%zu with members not claiming them), %zu member lots, %zu with a designate, of %zu lots;"
+                         " changed %d\n", claims.size(), mismatched, members, designated, lots->size(), int(unitChanged_));
+        }
         netSnap_ = netChanged_;
         unitSnap_ = unitChanged_;
         netChanged_ = unitChanged_ = false;
@@ -119,8 +137,7 @@ bool cSC4LotDeveloper::DoDailySimulation() {
 
 
 // §4.2 (Mac i386 0x000f4116). The facing fix after the network refresh is dead in the original (its static byte is only ever
-// cleared) and is not ported. A lot in a business unit keeps the travel populations it was saved with: the unit's step
-// (UpdateTravelDesignates, then UpdateTravelPopulations onto the designates, §5.7) and PickUnitToJoin are not ported yet.
+// cleared) and is not ported.
 bool cSC4LotDeveloper::UpdateLot(cSC4Lot* lot) {
     static const bool trace = std::getenv("SC4_LOTDEBUG") != nullptr;
     if (!lot) return false;
@@ -177,10 +194,16 @@ bool cSC4LotDeveloper::UpdateLot(cSC4Lot* lot) {
             }
         }
     }
-    // §4.2 step 5
-    if (!lot->GetUnit()) {                                           // vslot 0x64
+    // §4.2 step 5: the unit's first member refreshes the designates (after a network or unit change) and gathers the populations
+    cISC4BusinessUnit* unit = lot->GetUnit();                        // vslot 0x64
+    if (unit && !unit->GetMembers().empty() && unit->GetMembers().front() == lot && unitSnap_) UpdateTravelDesignates(unit);   // 0x88
+    unit = lot->GetUnit();
+    if (!unit) {
         lot->ResetTravelPopulation();                                // vslot 0xe4
         lot->AddTravelPopulation(*lot);                              // vslot 0xe8
+        if (lot->IsInLivableState() && !lot->HasRoadAccess()) PickUnitToJoin(lot);   // vslots 0x94 / 0x70
+    } else if (!unit->GetMembers().empty() && unit->GetMembers().front() == lot) {
+        UpdateTravelPopulations(unit);                               // vslot 0x8c
     }
     return changed;
 }
@@ -619,6 +642,100 @@ ILotConstructionServices* g_construction = nullptr;
 
 void cSC4LotDeveloper::SetConstructionServices(ILotConstructionServices* services) { g_construction = services; }
 
+// @ i386 0x000f3dbc. Only an industrial lot (purposes 5-8) outside a unit joins one. The candidates are the lots along its four
+// edges with a building type of the same purpose that are under construction or later (or already in a unit): a farm (5) takes
+// one with its building, the others one that reaches a road itself or through its designate. A random candidate's unit (a new
+// one for a candidate without) takes the lot; a farm field sends its travel to the unit's first member, the others leave the
+// designate to the next unit refresh.
+void cSC4LotDeveloper::PickUnitToJoin(cSC4Lot* lot) {
+    ILotHost* lots = LotHost();
+    if (!lot || lot->GetUnit() || !g_construction || !lots) return;
+    const std::uint32_t type = lot->GetBuildingType(true);                          // vslot 0xb8
+    if (type == 0) return;
+    const std::int32_t purpose = g_construction->BuildingPurpose(type);             // +0x18 vslot 0x9c
+    if (static_cast<std::uint32_t>(purpose - 5) >= 4) return;
+    std::vector<cSC4Lot*> neighbours;                                               // the four edges in turn, as +0x24 vslot 0x20 fills one list
+    for (const int edge : {1, 2, 4, 8}) {
+        std::vector<cSC4Lot*> found;
+        lots->NeighborLots(*lot, edge, found);
+        neighbours.insert(neighbours.end(), found.begin(), found.end());
+    }
+    std::vector<cSC4Lot*> candidates;
+    for (cSC4Lot* neighbour : neighbours) {
+        const std::uint32_t neighbourType = neighbour->GetBuildingType(true);
+        if (neighbourType == 0 || (neighbour->GetState() <= 1 && !neighbour->GetUnit())) continue;   // vslots 0x84 / 0x64
+        if (g_construction->BuildingPurpose(neighbourType) != purpose) continue;
+        if (purpose == 5) {
+            if (neighbour->GetBuilding()) candidates.push_back(neighbour);                           // vslot 0xc0
+        } else {
+            const cSC4Lot* designate = neighbour->GetTravelDesignate();                              // vslot 0xec
+            if (neighbour->HasRoadAccess() || (designate && designate->HasRoadAccess())) candidates.push_back(neighbour);
+        }
+    }
+    if (candidates.empty()) return;
+    cSC4Lot* chosen = candidates[g_construction->RandomBelow(static_cast<std::uint32_t>(candidates.size()))];
+    cISC4BusinessUnit* unit = chosen->GetUnit();
+    if (!unit) {
+        unit = new cSC4BusinessUnit();
+        unit->Add(chosen);                                                          // the members hold the unit
+    }
+    unit->Add(lot);
+    if (purpose == 5) lot->SetTravelDesignate(unit->GetMembers().front());          // vslot 0xf0
+    else unitChanged_ = true;                                                       // +0x5e
+}
+
+// @ i386 0x0064ff94 (the zone developer calls it for a lot it removes).
+void cSC4LotDeveloper::RemoveLotFromItsBusinessUnit(cSC4Lot* lot) {
+    if (cISC4BusinessUnit* unit = lot ? lot->GetUnit() : nullptr) unit->Remove(lot);
+    unitChanged_ = true;
+}
+
+// @ i386 0x000f4dec. The designate is the first member that reaches a road and has its building; each other member without a
+// designate in the unit that reaches a road takes it. With no such member the unit dissolves: each member leaves and looks for
+// a unit again, and the first that finds one brings all the old members into it (the unit comes back null when none does).
+void cSC4LotDeveloper::UpdateTravelDesignates(cISC4BusinessUnit*& unit) {
+    std::list<cSC4Lot*>& members = unit->GetMembers();
+    cSC4Lot* designate = nullptr;
+    for (cSC4Lot* member : members)
+        if (member->HasRoadAccess() && member->GetBuilding()) { designate = member; break; }   // vslots 0x70 / 0xc0
+    if (designate) {
+        for (cSC4Lot* member : members) {
+            if (cSC4Lot* current = member->GetTravelDesignate()) {                               // vslot 0xec
+                if (std::find(members.begin(), members.end(), current) != members.end() && current->HasRoadAccess()) continue;
+                member->SetTravelDesignate(nullptr);                                             // vslot 0xf0
+            }
+            if (member != designate) member->SetTravelDesignate(designate);
+        }
+        return;
+    }
+    std::vector<cSC4Lot*> former(members.begin(), members.end());                  // the original copies the list (one reference each)
+    for (cSC4Lot* member : former) member->AddRef();
+    cISC4BusinessUnit* found = nullptr;
+    for (cSC4Lot* member : former) {
+        unit->Remove(member);                                                       // the last removal frees the old unit
+        PickUnitToJoin(member);
+        found = member->GetUnit();
+        if (!found) continue;
+        for (cSC4Lot* other : former) {
+            if (cISC4BusinessUnit* old = other->GetUnit()) old->Remove(other);
+            found->Add(other);
+        }
+        break;
+    }
+    unit = found;
+    for (cSC4Lot* member : former) member->Release();
+}
+
+// @ i386 0x000ee72e. Every member's travel populations go to its designate (to itself without one).
+void cSC4LotDeveloper::UpdateTravelPopulations(cISC4BusinessUnit* unit) {
+    std::list<cSC4Lot*>& members = unit->GetMembers();
+    for (cSC4Lot* member : members) member->ResetTravelPopulation();               // vslot 0xe4
+    for (cSC4Lot* member : members) {
+        cSC4Lot* designate = member->GetTravelDesignate();                          // vslot 0xec
+        (designate ? designate : member)->AddTravelPopulation(*member);             // vslot 0xe8
+    }
+}
+
 // ------------------------------------------------------------------------------------------------ demolition
 
 // Slot 38 (i386 0x000f12cc): the first building occupant on the lot's cells, not referenced for the caller.
@@ -723,7 +840,7 @@ bool cSC4LotDeveloper::ConstructDefaultLot(cSC4Lot* lot, cSC4LotConfiguration* c
 // the blocking flora is demolished and the building is placed through the building development simulator. With `construct` a
 // construction occupant takes the lot through its stages, else the lot is built at once (state 3). Returns false when the
 // building could not be placed.
-//   PARTIAL (each named where the original calls it): PickUnitToJoin (business units), RemoveBuildingZotProp, the lot and building
+//   PARTIAL (each named where the original calls it): RemoveBuildingZotProp, the lot and building
 //   foundations (AddLotFoundation vslot 0xdc, AddBuildingFoundation vslot 0xec: no foundation occupants yet, so a steep lot keeps
 //   the levelling it got).
 bool cSC4LotDeveloper::StartConstruction(cSC4Lot* lot, cSC4LotConfiguration* configuration, std::uint32_t buildingType,
@@ -734,7 +851,7 @@ bool cSC4LotDeveloper::StartConstruction(cSC4Lot* lot, cSC4LotConfiguration* con
     lot->SetBuildingType(buildingType);                                             // 0xbc
     lot->SetState(2, 0, 0);                                                         // 0x88
     lot->SetCondition(1);                                                           // 0x90
-    // PARTIAL: PickUnitToJoin(lot) (i386 0x000f3dbc) joins a commercial / industrial lot to a business unit; not ported.
+    PickUnitToJoin(lot);
     lot->SetFlags(lot->GetFlags() & ~7);                                            // 0x30 / 0x34
     lot->SetVerticesAreLocked(true);                                                // 0x114
     // PARTIAL: RemoveBuildingZotProp(lot, 6) (i386 0x000f0684): the lot's zot props are not ported.

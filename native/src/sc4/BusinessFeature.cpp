@@ -7,13 +7,14 @@
 #include "gz/cIGZOStream.h"
 #include "rz/RZConvert.h"
 #include "sc4/DBSegment.h"
+#include "sc4/Lot.h"
 
 namespace sc4 {
 
 // ---- business unit -------------------------------------------------------------------------------------
 
 cSC4BusinessUnit::~cSC4BusinessUnit() {
-    for (IBusinessLot* lot : members_) lot->Release();
+    for (cSC4Lot* lot : members_) lot->Release();
 }
 
 bool cSC4BusinessUnit::QueryInterface(std::uint32_t iid, void** out) {
@@ -32,11 +33,12 @@ std::uint32_t cSC4BusinessUnit::Release() {
 
 bool cSC4BusinessUnit::Write(cIGZOStream& stream) const {
     stream.SetUint16(1);
-    stream.SetUint32(counter_);
-    for (IBusinessLot* lot : members_) SC4WriteGZSerializable(stream, lot);
+    stream.SetUint32(static_cast<std::uint32_t>(members_.size()));
+    for (const cSC4Lot* lot : members_) WriteLotReference(stream, lot);
     return !stream.GetError();
 }
 
+// The original pushes a null member when a reference does not resolve (and then dereferences it); the port skips it.
 bool cSC4BusinessUnit::Read(cIGZIStream& stream) {
     std::uint16_t version = 0;
     stream.GetUint16(version);
@@ -44,26 +46,24 @@ bool cSC4BusinessUnit::Read(cIGZIStream& stream) {
     std::uint32_t count = 0;
     stream.GetUint32(count);
     for (std::uint32_t i = 0; i < count; ++i) {
-        void* raw = nullptr;
-        SC4ReadGZSerializable(stream, kGZIID_cISC4Lot, &raw, false);
-        auto* lot = static_cast<IBusinessLot*>(raw);
-        if (!lot) continue;               // (the original dereferences a failed read)
+        cSC4Lot* lot = ReadLotReference(stream);
+        if (!lot) continue;
         lot->AddRef();
-        members_.push_back(lot);          // the list keeps one reference
-        lot->Release();                   // balance the QueryInterface reference taken by the read
+        members_.push_back(lot);
     }
     return !stream.GetError();
 }
 
-void cSC4BusinessUnit::Add(IBusinessLot* lot) {
+void cSC4BusinessUnit::Add(cSC4Lot* lot) {
     if (std::find(members_.begin(), members_.end(), lot) == members_.end()) {
         lot->AddRef();
         members_.push_back(lot);
     }
-    lot->SetBusinessUnit(this);
+    lot->SetUnit(this);
 }
 
-void cSC4BusinessUnit::Remove(IBusinessLot* lot) {
+void cSC4BusinessUnit::Remove(cSC4Lot* lot) {
+    AddRef();                             // the lot may hold the last reference to the unit
     for (auto it = members_.begin(); it != members_.end();) {
         if (*it == lot) {
             it = members_.erase(it);
@@ -72,8 +72,9 @@ void cSC4BusinessUnit::Remove(IBusinessLot* lot) {
             ++it;
         }
     }
-    lot->SetBusinessUnit(nullptr);
-    lot->ClearOwnerLink();
+    lot->SetUnit(nullptr);
+    lot->SetTravelDesignate(nullptr);
+    Release();
 }
 
 // ---- feature manager -----------------------------------------------------------------------------------

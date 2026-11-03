@@ -223,7 +223,6 @@ struct FakeLotHost : ILotHost {
         return false;
     }
     bool TrafficHasJobAccess(const cSC4Lot&, int) override { return false; }
-    void UnitLotShutdown(cIGZUnknown*, const cSC4Lot&) override {}
     void NeighborLots(const cSC4Lot&, int, std::vector<cSC4Lot*>&) override {}
     void GetLotOccupants(const cSC4Lot&, std::vector<cIGZUnknown*>&) override {}
     bool RoadAccessCells(const cSC4Lot&, int) override { return false; }

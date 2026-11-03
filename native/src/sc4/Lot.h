@@ -26,7 +26,6 @@ namespace sc4 {
 constexpr std::uint32_t kGZCLSID_cSC4Lot = 0xc9bd5d4a;
 constexpr std::uint32_t kGZIID_cISC4Lot = 0xe818fced;
 constexpr std::uint32_t kGZIID_cISC4TrafficSource = 0xe4fda3d4;
-constexpr std::uint32_t kGZCLSID_cSC4BusinessUnit = 0x6a233069;
 constexpr std::uint32_t kMessageLotStateChanged = 0xe8bda2e7;
 constexpr std::uint32_t kMessageLotConditionChanged = 0xe99b3d4d;
 
@@ -66,6 +65,7 @@ public:
 using LotBuildingProfile = BuildingProfile;      // the simulator's per building-type record
 
 class cSC4Lot;
+class cISC4BusinessUnit;
 
 class ILotHost {
 public:
@@ -100,7 +100,6 @@ public:
     virtual bool PowerRequirementExceeded(const cSC4Lot& lot, const LotBuildingProfile& profile,
                                           bool& available) = 0;
     virtual bool TrafficHasJobAccess(const cSC4Lot& lot, int kind) = 0;     // traffic sim vslot 0x130
-    virtual void UnitLotShutdown(cIGZUnknown* unit, const cSC4Lot& lot) = 0;  // business unit vslot 0x20
     virtual void NeighborLots(const cSC4Lot& lot, int direction, std::vector<cSC4Lot*>& out) = 0;
     virtual void GetLotOccupants(const cSC4Lot& lot, std::vector<cIGZUnknown*>& out) = 0;
     // Road access scans of the lot manager / occupant manager.
@@ -110,9 +109,16 @@ public:
     virtual cIGZUnknown* FindBuildingOccupant(const cSC4Lot& lot) = 0;      // occupant manager, type 0x278128a0
     virtual void WriteSerializable(cIGZOStream& stream, cIGZUnknown* object) = 0;
     virtual cIGZUnknown* ReadSerializable(cIGZIStream& stream, std::uint32_t clsid) = 0;
+    // The serializable a city file knows the lot by (borrowed); null when the host keeps none.
+    virtual cIGZUnknown* LotSerializable(cSC4Lot* lot) { (void)lot; return nullptr; }
 };
 ILotHost* LotHost();
 void SetLotHost(ILotHost* host);
+
+// A lot reference in a city file, through the lot host's serializable for the lot. The read lot is borrowed (the city's lot
+// table keeps it); null when the reference is empty or does not name a lot.
+bool WriteLotReference(cIGZOStream& stream, const cSC4Lot* lot);
+cSC4Lot* ReadLotReference(cIGZIStream& stream);
 
 class cSC4Lot {
 public:
@@ -180,10 +186,10 @@ public:
     void GetLotOccupants(std::vector<cIGZUnknown*>& out) const;
     cISC4LotConfigurationRef* GetLotConfiguration() const { return configuration_; }
     void SetLotConfiguration(cISC4LotConfigurationRef* configuration);
-    cIGZUnknown* GetUnit() const { return unit_; }
-    void SetUnit(cIGZUnknown* unit);
-    cIGZUnknown* GetTravelDesignate() const { return travelDesignate_; }
-    void SetTravelDesignate(cIGZUnknown* designate);
+    cISC4BusinessUnit* GetUnit() const { return unit_; }
+    void SetUnit(cISC4BusinessUnit* unit);
+    cSC4Lot* GetTravelDesignate() const { return travelDesignate_; }
+    void SetTravelDesignate(cSC4Lot* designate);
     cSCPropertyHolder& Properties() { return properties_; }
 
     // populations
@@ -235,8 +241,8 @@ private:
     std::uint32_t lastStateChange_ = 0;         // +0x60
     std::uint32_t buildingType_ = 0;            // +0x64
     mutable std::map<std::int32_t, bool> roadAccess_;      // +0x68
-    cIGZUnknown* unit_ = nullptr;               // +0x80
-    cIGZUnknown* travelDesignate_ = nullptr;    // +0x88
+    cISC4BusinessUnit* unit_ = nullptr;         // +0x80
+    cSC4Lot* travelDesignate_ = nullptr;        // +0x88
     std::vector<std::map<std::uint32_t, std::uint16_t>> populations_;   // +0x90
     std::map<std::uint32_t, std::uint16_t> travelPopulations_;          // +0xa8
     float jobs_[3] = {};                        // +0xc0
