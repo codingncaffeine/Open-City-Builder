@@ -842,17 +842,24 @@ void TestLotCreationAndQueries() {
 
     // --- surrounding ring ----------------------------------------------------------------------
     cSC4Lot* big = CreateLotChecked(developer, 3, 5, 3, 1, 0);   // footprint 3..5 x 5
+    // a lot overlapping the rectangle is never its neighbour (Mac i386 GetLotsSurroundingRect): `big` contains this cell
     const SC4Rect<int> oneCell{4, 5, 4, 5};
-    CHECK(developer->GetLotsSurroundingRect(oneCell, lots, 0xf) == 1);
-    CHECK(lots.front().get() == big);
+    CHECK(developer->GetLotsSurroundingRect(oneCell, lots, 0xf) == 0);
     ClearLotList(lots);
-    CHECK(developer->GetLotsSurroundingRect(oneCell, lots, 0x7) == 1);   // east/north/south only
-    CHECK(lots.front().get() == big);
+    CHECK(developer->GetLotsSurroundingLot(big, lots, 0xf) == 0);   // nothing touches `big` yet
     ClearLotList(lots);
-    CHECK(developer->GetLotsSurroundingRect(oneCell, lots, 0x5) == 0);   // north/south only
+    cSC4Lot* south = CreateLotChecked(developer, 4, 6, 1, 1, 0);    // just south of `big`
+    CHECK(developer->GetLotsSurroundingLot(big, lots, 0xf) == 1);
+    CHECK(!lots.empty() && lots.front().get() == south);
     ClearLotList(lots);
-    CHECK(developer->GetLotsSurroundingLot(4, 5, lots, 0xf) == 0);   // the lot at (4,5) is `big`; its ring is empty
+    CHECK(developer->GetLotsSurroundingLot(big, lots, 0x4) == 1);     // the south side only
     ClearLotList(lots);
+    CHECK(developer->GetLotsSurroundingLot(big, lots, 0x3) == 0);     // north and east only
+    ClearLotList(lots);
+    CHECK(developer->GetLotsSurroundingLot(south, lots, 0xf) == 1);   // and back: `big` is north of it
+    CHECK(!lots.empty() && lots.front().get() == big);
+    ClearLotList(lots);
+    developer->DeleteLot(south);
     CHECK(developer->GetLotsSurroundingLot(big, lots, 0xf) == 0);
     ClearLotList(lots);
 

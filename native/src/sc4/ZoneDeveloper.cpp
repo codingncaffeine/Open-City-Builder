@@ -704,9 +704,10 @@ int cSC4ZoneDeveloper::GetLotsSurroundingRect(const SC4Rect<int>& rect,
         if (!lot) return;
         std::int32_t lotRect[4] = {0, 0, 0, 0};
         lot->GetBoundingRect(lotRect);
+        // the lot itself (or any lot overlapping the rectangle) is not a neighbour (Mac i386 GetLotsSurroundingRect)
         const bool overlaps = rect.x0 <= lotRect[2] && lotRect[0] <= rect.x1 &&
                               rect.z0 <= lotRect[3] && lotRect[1] <= rect.z1;
-        if (!overlaps) return;
+        if (overlaps) return;
         if (mask != 0xf) {
             if (z == top && (mask & 1) == 0) return;
             if (x == right && (mask & 2) == 0) return;

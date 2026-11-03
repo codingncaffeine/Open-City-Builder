@@ -746,7 +746,8 @@ bool cSC4Lot::CalculateOrganicRoadAccess(std::uint32_t purpose) const {
             if (found) continue;
             if (static_cast<unsigned>(neighbor->GetState() - 2) < 3) {
                 const LotBuildingProfile* profile = g_lotHost->BuildingProfile(neighbor->GetBuildingType(true));
-                if (profile && profile->purpose == purpose) found = neighbor->HasOrganicRoadAccess(0);
+                // the neighbour's own organic access: it chains field to field (this lot's entry is already false, so a loop ends)
+                if (profile && profile->purpose == purpose) found = neighbor->HasOrganicRoadAccess(purpose);
             }
         }
     }
