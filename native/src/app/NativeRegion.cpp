@@ -5,6 +5,7 @@
 #include <cstdlib>
 
 #include "gz/cIGZMessage2.h"
+#include "rz/cRZMessage2Standard.h"
 #include "rz/cRZRandom.h"
 #include "sc4/App.h"
 #include "sc4/DBSegment.h"
@@ -58,6 +59,14 @@ public:
     std::uint32_t DefaultDifficultyLevel() override { return 0; }
     void AddNotification(cIGZMessageTarget2* target, std::uint32_t type) override { if (SL::spMS2) SL::spMS2->AddNotification(target, type); }
     void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t type) override { if (SL::spMS2) SL::spMS2->RemoveNotification(target, type); }
+    void SendMessage(std::uint32_t type) override {
+        if (!SL::spMS2) return;
+        auto* message = new cRZMessage2Standard();
+        message->AddRef();
+        message->SetType(type);
+        SL::spMS2->MessageSend(message);
+        message->Release();
+    }
     cISC4RegionalCity* CurrentRegionalCity() override { return g_app ? g_app->GetRegionalCity() : nullptr; }
     cISC4City* CurrentCity() override { return g_app ? g_app->GetCity() : nullptr; }
     cISC4RegionalCity* RegionCityAt(int, int) override { return nullptr; }
@@ -275,9 +284,19 @@ public:
     }
     void CityAllConnections(const cISC4RegionalCity* city, sc4::ConnectionList& out) override { Concrete(city)->GetAllConnections(out); }
     void CityChangeSymmetricConnection(cISC4RegionalCity*, sc4::cISC4NeighborConnection*, bool) override {}
-    void CityUpdateLocalDeals(cISC4RegionalCity*) override {}
-    void CitySetLocalDeals(cISC4RegionalCity*, const sc4::DealList&) override {}
-    void CityGetLocalDeals(cISC4RegionalCity*, sc4::DealList&) override {}
+    // The region city's own deal list (cSC4RegionalCity vslots 0x220 / 0x228 / 0x230).
+    void CityUpdateLocalDeals(cISC4RegionalCity* city) override { if (city) Concrete(city)->UpdateLocalDeals(); }
+    void CitySetLocalDeals(cISC4RegionalCity* city, const sc4::DealList& deals) override {
+        if (!city) return;
+        NeighborDealList copy(deals.begin(), deals.end());
+        Concrete(city)->SetLocalDeals(copy);
+    }
+    void CityGetLocalDeals(cISC4RegionalCity* city, sc4::DealList& out) override {
+        if (!city) return;
+        NeighborDealList deals;
+        Concrete(city)->GetLocalDeals(deals);
+        out.assign(deals.begin(), deals.end());
+    }
     void CityUpdateImportExport(cISC4RegionalCity*) override {}
     double CityGetExported(const cISC4RegionalCity*, int) override { return 0.0; }
     void CitySetExported(cISC4RegionalCity*, int, double) override {}

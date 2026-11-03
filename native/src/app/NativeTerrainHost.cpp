@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <random>
 #include <vector>
+#include "app/NativeAnimationTicks.h"
+#include "sc4/AnimationTickManager.h"
 #include "app/NativeUi.h"
 #include "app/NativeLighting.h"
 #include "sc4/LightingManager.h"
@@ -200,8 +202,15 @@ struct NativeTerrainHost final : ITerrainHost {
     bool SurfaceWaterInit() override { cSTESurfaceWater* water = WaterOf(Component(CityComponent::SurfaceWater)); return water && water->Init(); }
     void RegisterWithSimulator(cSTETerrain* terrain) override {}
     void UnregisterFromSimulator(cSTETerrain* terrain) override {}
-    void AddToAutomataManager(cSTETerrain* terrain) override {}
-    void RemoveFromAutomataManager(cSTETerrain* terrain) override {}
+    // cSTETerrain::Init (i386 0x004e6f32 region): SL::ATM() vslot 0x14 AddTickableObject(the terrain's target, 0xc0); its second
+    // tick posts the city-changed message that leads the regional city to announce the established city (0x6ac284f3).
+    void AddToAutomataManager(cSTETerrain* terrain) override {
+        g_terrainTarget.terrain = terrain;
+        if (sc4::cSC4AnimationTickManager* atm = native::AnimationTickManager()) atm->AddTickableObject(&g_terrainTarget, 0xc0);
+    }
+    void RemoveFromAutomataManager(cSTETerrain*) override {
+        if (sc4::cSC4AnimationTickManager* atm = native::AnimationTickManager()) atm->RemoveTickableObject(&g_terrainTarget, 0xffffffffu);
+    }
     cIGZCommandServer* CommandServer() override { return {}; }
     // The terrain's message-server subscriptions (Init / Shutdown), through the target adapter. 0x26d31ec1 (city up ->
     // DoPostCityInit) stays out: the native city view does DoPostCityInit's hook-up itself (NativeTerrainView), and a

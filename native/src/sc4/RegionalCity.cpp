@@ -610,8 +610,8 @@ void MoveIncomingDeals(NeighborDealList& from, NeighborDealList& to) {
 
 }  // namespace
 
-// @ 0x1003b04f8. PARTIAL: the original ends this handler by calling CreateSymmetricConnections (0x1003b0ae0),
-// which is not recovered (see the header note); everything before that call is ported.
+// @ 0x1003b04f8. PARTIAL: the original ends this handler by calling CreateSymmetricConnections (0x1003b0ae0), of which only the
+// closing message is ported (see the header note); everything before that call is ported.
 bool cSC4RegionalCity::DoMessage(cIGZMessage2* message) {
     if (!message) return true;
     auto* standard = static_cast<cIGZMessage2Standard*>(message);
@@ -658,6 +658,9 @@ bool cSC4RegionalCity::DoMessage(cIGZMessage2* message) {
         MarkConnectionsForRemoval();
         if (connectionsChanged_) TreatAllIncomingConnectionsAsNew();
     }
+    // CreateSymmetricConnections (i386 0x002cc2d0): PARTIAL, the connections are not made (the changes stay queued); its last step is
+    // ported, the 0x6ac284f3 it sends once the city's connections stand (the power, plumbing and neighbours simulators start on it).
+    if (host_) host_->SendMessage(0x6ac284f3);
     return true;
 }
 

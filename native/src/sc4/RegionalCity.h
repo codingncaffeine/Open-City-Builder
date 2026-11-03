@@ -134,6 +134,8 @@ public:
     // SL::spMS2 vslot 0x28 (Init) and 0x30 (Shutdown).
     virtual void AddNotification(cIGZMessageTarget2* target, std::uint32_t messageType) = 0;
     virtual void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t messageType) = 0;
+    // SL::spMS2 vslot 0x10 MessageSend of a plain message of this type.
+    virtual void SendMessage(std::uint32_t type) { (void)type; }
     // SL::spSC4 (cISC4App) vslot 0x120: the regional city the application is currently in.
     virtual cISC4RegionalCity* CurrentRegionalCity() = 0;
     // SL::spCity: the city object being simulated (null outside the city).
