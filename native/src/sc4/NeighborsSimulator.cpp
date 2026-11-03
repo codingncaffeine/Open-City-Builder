@@ -1,5 +1,8 @@
 #include "sc4/NeighborsSimulator.h"
 
+#include <cstdio>
+#include <cstdlib>
+
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -178,7 +181,11 @@ bool cSC4NeighborsSimulator::Init() {
                 cISC4NeighborDeal* source = dealRef.get();
                 if (!source) continue;
                 cISC4NeighborDeal* deal = nullptr;
-                if (!source->Clone(&deal, false) || !deal) continue;
+                const bool cloned = source->Clone(&deal, false) && deal;
+                if (std::getenv("SC4_NEIGHBORDEBUG"))
+                    std::fprintf(stderr, "neighbors: local deal %08x of %p cloned %d other city %p\n", source->GetType(), static_cast<void*>(city),
+                                 cloned, cloned ? static_cast<void*>(OtherCity(deal)) : nullptr);
+                if (!cloned) continue;
                 if (OtherCity(deal)) {
                     deal->SetFlags(kDealFlagSilent, false);
                     deals_.push_back(cRZAutoRefCount<cISC4NeighborDeal>(deal));

@@ -13,6 +13,9 @@
 #include "sc4/cSC4City.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/NeighborConnection.h"
+#include "sc4/NeighborDeal.h"
+#include "sc4/BudgetSimulator.h"
+#include "app/NativeCity.h"
 #include "sc4/NeighborsSimulator.h"
 #include "sc4/Region.h"
 #include "sc4/RegionalCity.h"
@@ -337,6 +340,40 @@ public:
     }
 } g_connectionHost;
 
+// cSC4NeighborDeal's services: which city a region cell holds (a deal finds the city on each side of it this way; a clone whose cells
+// hold no city is cancelled), the current regional city and the city's funds.
+//   PARTIAL: the deal's monthly cost (budget vslot 0x118 in the 64-bit build) is not ported; a cost of 0 leaves the deal at 1.
+class DealHost final : public sc4::INeighborDealHost {
+public:
+    bool CityHasBudget() override { return Budget() != nullptr; }
+    double DealCost(double, std::uint32_t, void*) override { return 0.0; }
+    bool CityEntryAtCell(int x, int z, void*& city) override {
+        city = RegionCity(x, z);
+        return city != nullptr;
+    }
+    void* CurrentCity() override { return NativeCurrentRegionalCity(); }
+    double CurrentCityFunds() override { sc4::cSC4BudgetSimulator* b = Budget(); return b ? double(b->GetTotalFunds()) : 0.0; }
+    void ReportDealStatus(bool, sc4::cSC4NeighborDeal*) override {}
+    double CurrentRegionalCityBudget() override {
+        cISC4RegionalCity* city = NativeCurrentRegionalCity();
+        return city ? Concrete(city)->GetBudget() : 0.0;
+    }
+    bool HasSuitableConnection(std::uint32_t type, void* city) override {
+        sc4::cSC4NeighborsSimulator* neighbors = NeighborsSim();
+        return neighbors && neighbors->FindConnectionSuitableForDeal(type, static_cast<const cISC4RegionalCity*>(city)) != nullptr;
+    }
+private:
+    static sc4::cSC4BudgetSimulator* Budget() {
+        sc4::cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::BudgetSimulator) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(0xe4fda3d4, &raw) || !raw) return nullptr;
+        auto* serializable = static_cast<cIGZSerializable*>(raw);
+        serializable->Release();
+        return serializable->GetGZCLSID() == sc4::kGZCLSID_cSC4BudgetSimulator ? static_cast<sc4::cSC4BudgetSimulator*>(serializable) : nullptr;
+    }
+} g_dealHost;
+
 }  // namespace
 
 cISC4RegionalCity* NativeCurrentRegionalCity() { return g_app ? g_app->GetRegionalCity() : nullptr; }
@@ -344,6 +381,7 @@ cISC4RegionalCity* NativeCurrentRegionalCity() { return g_app ? g_app->GetRegion
 void InstallNeighborHosts() {
     sc4::SetNeighborsHost(&g_neighborsHost);
     sc4::SetNeighborConnectionHost(&g_connectionHost);
+    sc4::SetNeighborDealHost(&g_dealHost);
 }
 
 namespace {
