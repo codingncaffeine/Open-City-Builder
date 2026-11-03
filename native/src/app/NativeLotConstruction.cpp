@@ -18,6 +18,7 @@
 #include "app/NativeConstruction.h"
 #include "app/NativeFlora.h"
 #include "app/NativeLotConstruction.h"
+#include "app/NativePlumbing.h"
 #include "app/NativePower.h"
 #include "app/NativeTraffic.h"
 #include "app/NativeGrowthDevelopers.h"
@@ -287,10 +288,8 @@ public:
     }
     bool CheatIgnorePower() override { return NativeBuildingCheat(1); }
     bool CheatIgnorePlumbing() override { return NativeBuildingCheat(0); }
-    // PARTIAL: no plumbing simulator runs natively yet; every cell counts as watered, the same answer the tract developer's host
-    // gives (NativeTractDevelopment.cpp), so growth and abandonment agree until it is live.
     bool IsPowered(int x, int z) override { return NativeCellPowered(x, z); }
-    bool IsCellWatered(int, int) override { return true; }
+    bool IsCellWatered(int x, int z) override { return NativeCellWatered(x, z); }
     std::uint8_t TripLengthAt(int x, int z) override {
         cSC4SimGrid<std::uint8_t>* map = NativeTrafficTripLengthMap();
         if (!map) return 1;   // no traffic simulator: the commute is not judged
