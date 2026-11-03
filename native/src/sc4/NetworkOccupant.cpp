@@ -4,6 +4,7 @@
 #include <cfloat>
 #include <cmath>
 
+#include "sc4/PathInfo.h"
 #include "sc4/SCPropertyHelp.h"
 
 namespace sc4 {
@@ -183,6 +184,113 @@ void cSC4NetworkOccupant::ReleasePathInfo() {   // 0x10019f722
         persistRef_->Release();
         persistRef_ = nullptr;
     }
+}
+
+// ------------------------------------------------------------------------------------- path info
+
+namespace {
+INetworkOccupantPathHost* g_pathHost = nullptr;
+
+// The occupant the path info calls receive (the original passes `this`).
+class BasePathOccupant final : public IPathNetworkOccupant {
+public:
+    explicit BasePathOccupant(cSC4NetworkOccupant& occupant) : o_(occupant) {}
+    std::uint32_t PieceId() const override { return o_.PieceId(); }
+    std::uint8_t GetRotation() const override { return o_.GetRotation(); }
+    bool GetFlip() const override { return o_.GetFlip() != 0; }
+    void GetPosition(float* xyz) const override { static_cast<const cSC4NetworkOccupant&>(o_).GetPosition(xyz); }
+    void GetBoundingCityCells(SC4RectInt32& rect) const override {
+        SC4CellRect cells;
+        o_.GetBoundingCityCells(cells);
+        rect.x0 = cells.x0; rect.z0 = cells.z0; rect.x1 = cells.x1; rect.z1 = cells.z1;
+    }
+    void TransformNode(cS3DVector3&) override {}   // empty in cSC4NetworkOccupant
+    float GetAltitude(float x, float z) const override { return o_.GetAltitude(x, z); }
+    std::uint8_t GetOneWayDirections() const override { return o_.GetOneWayDirections(); }
+    std::uint8_t GetActiveEdgesForType(std::uint32_t t) const override {
+        return static_cast<std::uint8_t>(o_.GetActiveEdgesForType(static_cast<std::uint8_t>(t)));
+    }
+    std::uint8_t GetActiveEdgesForTypeNoGroup(std::uint32_t t) const override {
+        return static_cast<std::uint8_t>(o_.GetActiveEdgesForTypeNoGroup(static_cast<std::uint8_t>(t)));
+    }
+    void AddPathConnection(std::uint32_t pathType, std::uint8_t entry, std::uint8_t exit) override { o_.AddPathConnection(pathType, entry, exit); }
+    void GetOccupiedCell(std::uint32_t& x, std::uint32_t& z) const override { o_.GetOccupiedCell(x, z); }
+    const cSC4PathInfo* GetPathInfo() const override { return dynamic_cast<const cSC4PathInfo*>(o_.GetPathInfo()); }
+private:
+    cSC4NetworkOccupant& o_;
+};
+}  // namespace
+
+void SetNetworkOccupantPathHost(INetworkOccupantPathHost* host) { g_pathHost = host; }
+
+// i386 0x00132da0. Key {0x296678f7, 0x69668828, MapPath(piece id)}, or group 0xa966883f and the connection path id when one is
+// set; that path is made elevation-aware (a clone) and, after the transform to the occupant, offset by the path origin and cut to
+// the tile. Then wrong-way paths go, the edges are verified and the connection bitmap is rebuilt from the paths.
+cISC4PathInfo* cSC4NetworkOccupant::GetPathInfo() {
+    if (!persistRef_) {
+        if (!g_pathHost) return nullptr;
+        cGZPersistResourceKey key{0x296678f7, 0x69668828, PieceId()};
+        if (pathOverride_ != 0) {
+            key.group = 0xa966883f;
+            key.instance = pathOverride_;
+        }
+        key.instance = g_pathHost->MapPath(key.instance);
+        cISC4PathInfo* resource = g_pathHost->LoadPathInfo(key);
+        if (resource) {
+            if (pathOverride_ != 0 && !resource->UseElevation()) {
+                if (cISC4PathInfo* clone = resource->Clone()) {
+                    clone->SetUseElevationFlag(true);
+                    resource->Release();
+                    resource = clone;
+                }
+            }
+            BasePathOccupant self(*this);
+            cISC4PathInfo* transformed = resource->CreateTransformedCopy(&self);
+            resource->Release();
+            if (transformed) {
+                cISC4PathInfo* info = transformed;
+                if (pathOverride_ != 0) {
+                    SC4RectFloat32 rect;
+                    rect.x0 = corners_[0].x;
+                    rect.z0 = corners_[0].z;
+                    rect.x1 = corners_[2].x;
+                    rect.z1 = corners_[2].z;
+                    info = transformed->OffsetAndScissor(pathOffsetX_, 0.0f, pathOffsetZ_, rect);
+                    transformed->Release();
+                }
+                if (!info) return nullptr;
+                persistRef_ = info;
+                info->RemoveWrongWayPaths(&self);
+            }
+        }
+        if (!persistRef_) return nullptr;
+        auto* info = static_cast<cISC4PathInfo*>(persistRef_);
+        BasePathOccupant self(*this);
+        info->VerifyPathEdges(&self);
+        ClearPathConnections();
+        info->InitializeNetworkConnectionBitmap(&self);
+    }
+    return static_cast<cISC4PathInfo*>(persistRef_);
+}
+
+// i386 0x00132fc2. The row is the path type's four entry bytes; 0xff is a wildcard and the answer then a count.
+std::uint8_t cSC4NetworkOccupant::PathConnectionExists(std::uint32_t pathType, std::uint8_t entry, std::uint8_t exit) {
+    if (!(GetNetworkFlag() & 0x2000)) GetPathInfo();
+    const std::uint8_t* row = &pathConnections_[(pathType & 7) * 4];
+    std::uint8_t count = 0;
+    auto bits = [&](std::uint8_t byte) {
+        for (int x = 0; x < 4; ++x) count = static_cast<std::uint8_t>(count + ((byte >> x) & 1));
+    };
+    if (entry == 0xff) {
+        for (int e = 0; e < 4; ++e) {
+            if (exit == 0xff) bits(row[e]);
+            else count = static_cast<std::uint8_t>(count + ((row[e] >> (exit & 0x1f)) & 1));
+        }
+        return count;
+    }
+    if (exit != 0xff) return static_cast<std::uint8_t>((row[entry & 3] >> (exit & 0x1f)) & 1);
+    bits(row[entry & 3]);
+    return count;
 }
 
 void cSC4NetworkOccupant::AddPathConnection(std::uint32_t pathType, std::uint8_t entry, std::uint8_t exit) {

@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "gz/StreamOps.h"
+#include "gz/cGZPersistResourceKey.h"
 #include "sc4/Occupant.h"
 
 namespace sc4 {
@@ -92,6 +93,16 @@ public:
 INetworkOccupantHost* NetworkOccupantHost();
 void SetNetworkOccupantHost(INetworkOccupantHost* host);
 
+// What GetPathInfo asks the game for: the network manager's path id mapping and the path resource itself.
+class cISC4PathInfo;
+class INetworkOccupantPathHost {
+public:
+    virtual ~INetworkOccupantPathHost() = default;
+    virtual std::uint32_t MapPath(std::uint32_t pathId) = 0;                       // SL::NetworkManager() vslot 15
+    virtual cISC4PathInfo* LoadPathInfo(const cGZPersistResourceKey& key) = 0;   // spResMan slot 3, iid 0xa9667793 (a reference)
+};
+void SetNetworkOccupantPathHost(INetworkOccupantPathHost* host);
+
 // cISC4LightingManager as cSC4NetworkOccupant::UpdateLighting calls it (i386 vslots 0x30 and 0x60).
 class INetworkOccupantLighting {
 public:
@@ -144,6 +155,11 @@ public:
         return pathConnections_[pathType * 4 + entry];
     }
     void ClearPathConnections() { for (auto& word : pathConnections_) word = 0; }
+    // i386 0x00132fc2 (slot 53): builds the path info first unless flag 0x2000 is set; 0xff is a wildcard (then a count).
+    std::uint8_t PathConnectionExists(std::uint32_t pathType, std::uint8_t entry, std::uint8_t exit);
+    // i386 0x00132da0 (slot 49): the occupant's transformed copy of its piece's path file, built on the first call and
+    // cached (+0x190, which the record saves as a resource key); borrowed, never AddRef'd. Null without a path file.
+    virtual cISC4PathInfo* GetPathInfo();
     // +0x1bc / +0x1c0: the path-origin offset used when a piece has a connection path id override. No recovered
     // cSC4NetworkOccupant function writes them; the derived occupants that create the offset do (the network tool
     // calls the setter), so the port keeps them on the base where the original stores them.

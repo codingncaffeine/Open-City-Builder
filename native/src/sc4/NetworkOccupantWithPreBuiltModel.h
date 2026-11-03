@@ -250,7 +250,7 @@ public:
         cSC4NetworkOccupant::AddPathConnection(pathType, entry, exit);
     }
     void GetOccupiedCell(std::uint32_t& x, std::uint32_t& z) const override { cSC4NetworkOccupant::GetOccupiedCell(x, z); }
-    cISC4PathInfo* GetPathInfo();                                            // 0x1001bbbca (vslot 0x188)
+    cISC4PathInfo* GetPathInfo() override;                                   // 0x1001bbbca (vslot 0x188)
     const cSC4PathInfo* GetPathInfo() const override;
 
     // port wiring

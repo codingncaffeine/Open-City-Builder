@@ -3,9 +3,12 @@
 #include <cstdint>
 
 #include "app/NativeDemolition.h"
+#include "gz/cGZPersistResourceManager.h"
+#include "sc4/ServiceLocator.h"
 #include "sc4/NetworkManager.h"
 #include "sc4/NetworkOccupant.h"
 #include "sc4/NetworkTool.h"
+#include "sc4/PathInfoFactory.h"
 
 namespace native {
 namespace {
@@ -81,9 +84,35 @@ private:
     std::uint32_t refs_ = 0;
 };
 
+// GetPathInfo's two services: the manager's (UK) path id mapping and the path files (type 0x296678f7) from the resource manager,
+// whose factory reads the TEXT path format.
+class PathHost final : public sc4::INetworkOccupantPathHost {
+public:
+    std::uint32_t MapPath(std::uint32_t pathId) override {
+        sc4::cSC4NetworkManager* manager = CityNetworkManager();
+        return manager ? manager->MapPath(pathId) : pathId;
+    }
+    sc4::cISC4PathInfo* LoadPathInfo(const cGZPersistResourceKey& key) override {
+        void* out = nullptr;
+        if (!SL::spRM || !SL::spRM->GetResource(key, 0xa9667793u, &out, 0, 0)) return nullptr;
+        return static_cast<sc4::cISC4PathInfo*>(out);
+    }
+} g_pathHost;
+
+void RegisterPathInfoFactory() {
+    static bool registered = false;
+    if (registered || !SL::spRM) return;
+    registered = true;
+    static sc4::cSC4PathInfoFactory factory;
+    factory.AddRef();
+    SL::spRM->RegisterObjectFactory(0x496678feu, sc4::kPathInfoResourceType, &factory);
+    sc4::SetNetworkOccupantPathHost(&g_pathHost);
+}
+
 }  // namespace
 
 void InstallNetworkManagerTools() {
+    RegisterPathInfoFactory();
     // cSC4NetworkTool for types 0-3, 6, 8-12; the pipe, power line and subway tools are not recovered.
     sc4::SetNetworkOccupantViewProvider(&NetworkOccupantView);
     sc4::cSC4NetworkManager* manager = CityNetworkManager();
