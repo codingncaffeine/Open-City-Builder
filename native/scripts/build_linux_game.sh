@@ -2,6 +2,7 @@
 # Builds build/sc4_game_linux: the game on Linux (SDL3 window and audio, OpenGL 3.3 core through cGLGDriver).
 # Incremental: one object per source of scripts/linux_game_link_list.txt under build/linux_obj (debug: build/linux_obj_debug).
 #   scripts/build_linux_game.sh [debug]      debug: -O0 + AddressSanitizer
+#   JOBS=N scripts/build_linux_game.sh      N parallel compiles (default: a quarter of the cores, so the desktop stays usable)
 #   SC4_GAME_CONTENTS=<folder with GameData/> build/sc4_game_linux [--shot out.png [--frames N] | --script scenario.txt]
 # Needs clang, libc++, SDL3, libepoxy, FreeType, libpng and libmpg123 (the Mac-derived classes assert libc++'s layouts).
 set -e
@@ -27,7 +28,7 @@ for s in $(grep -v '^#' $LIST); do
   o=$OBJ/$(echo "$s" | tr '/' '_').o
   if [ -f "$o" ] && [ "$o" -nt "$s" ] && [ -z "$(find src -name '*.h' -newer "$o" | head -1)" ]; then continue; fi
   echo "$s $o"
-done | xargs -r -P "$(nproc)" -L 1 sh -c 'clang++ '"$CF"' -c "$0" -o "$1" 2>"$1.err" || echo "$0" >>'"$FAILED"
+done | xargs -r -P "${JOBS:-$(( $(nproc) > 4 ? $(nproc) / 4 : 1 ))}" -L 1 sh -c 'clang++ '"$CF"' -c "$0" -o "$1" 2>"$1.err" || echo "$0" >>'"$FAILED"
 if [ -s "$FAILED" ]; then
   echo "COMPILE ERRORS:"; for s in $(cat "$FAILED"); do echo "--- $s"; grep -m5 error "$OBJ/$(echo "$s" | tr '/' '_').o.err"; done
   rm -f "$FAILED"; exit 1
