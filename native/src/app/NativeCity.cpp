@@ -296,6 +296,11 @@ bool LoadCityFile(cSC4App& app, const std::string& path, cRZAutoRefCount<cISC4Re
         std::printf("roundtrip: save %s -> %s\n", saved ? "ok" : "FAILED", savedPath.ToChar());
         std::fflush(stdout);
         if (saved) {
+            // The region step between two cities: the old city closes and its queued messages (the occupant removals of the
+            // teardown) drain before the next city subscribes, as the region screen's frames drain them in play.
+            app.CloseCity();
+            if (SL::spMS2)
+                for (int i = 0; i < 16 && SL::spMS2->GetMessageQueueSize() != 0; ++i) SL::spMS2->OnTick(0);
             const bool reloaded = LoadCityFile(app, savedPath.ToChar(), holder);
             std::printf("roundtrip: reload %s\n", reloaded ? "ok" : "FAILED");
             return reloaded;
