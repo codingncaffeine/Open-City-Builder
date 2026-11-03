@@ -11,6 +11,7 @@
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/Budget.h"
 #include "sc4/BudgetSimulator.h"
+#include "sc4/BuildingOccupant.h"
 #include "sc4/CommonIIDs.h"
 #include "sc4/DBSegment.h"
 #include "sc4/HistoryWarehouse.h"
@@ -50,6 +51,7 @@ cSC4ZoneManager* Zones() { return Component<cSC4ZoneManager>(CityComponent::Zone
 
 constexpr std::uint32_t kPowerDepartment = 0x8910bc8a, kPowerDepartmentGroup = 0x4a357eaf;
 constexpr std::uint32_t kPowerConnectionType = 4;
+constexpr std::uint32_t kPlantExpenseProperty = 0x2a58d350;   // the plant's monthly expense (budget item cost)
 
 cISC4OccupantManager* CityOccupants() {
     cSC4City* city = HostCity();
@@ -150,6 +152,55 @@ public:
         cSC4DepartmentBudget* department = Department();
         cSC4LineItem* item = department ? department->GetLineItem(1) : nullptr;
         return item ? item->GetFullExpenses() : 0;   // PARTIAL: the generation line only (budget vslot 0x88 sums the department)
+    }
+    // @ i386 0x00183b7a (DoOccupantInserted's tail): the plant's budget item (0xca58e540) lives on a locally funded line item of its
+    // department named by the building type (created with display flag 2 when missing); the plant is one of the department's locally
+    // funded objects and the line counts it.
+    void AddPlantToBudget(cISC4Occupant* plant) override {
+        cSC4BudgetSimulator* budget = Budget();
+        sc4::cISCPropertyHolder* holder = plant ? plant->AsPropertyHolder() : nullptr;
+        BudgetItem item;
+        if (!budget || !holder || !budget->GetBudgetItemForPurpose(holder, kPowerPlantBudgetProperty, item)) return;
+        void* raw = nullptr;
+        if (!plant->QueryInterface(kGZIID_cISC4BuildingOccupant, &raw) || !raw) return;
+        auto* building = static_cast<cISC4BuildingOccupant*>(raw);
+        cSC4DepartmentBudget* department = budget->GetDepartmentBudget(std::uint32_t(item.departmentId));
+        if (item.lineItemId == 0) {
+            item.lineItemId = std::int32_t(building->GetBuildingType());
+            budget->ChangeBudgetItemLine(holder, int(item.purpose), std::uint32_t(item.lineItemId));
+        }
+        building->Release();
+        if (item.lineItemId == 0 || !department) return;
+        cSC4LineItem* line = department->GetLineItem(std::uint32_t(item.lineItemId));
+        if (!line && (line = department->CreateLineItemForBuildingType(std::uint32_t(item.lineItemId), true))) line->SetDisplayFlag(2, true);
+        department->AddLocallyFundedObject(holder, kPowerPlantBudgetProperty);
+        if (!line) return;
+        line->SetSecondaryInfoField(line->GetSecondaryInfoField() + 1);
+        cSCPropertyHelp::SetPropertyValue(holder, kPlantExpenseProperty, item.cost);
+    }
+    // @ i386 0x00185bba: the department lets the plant go and its line counts one less.
+    void RemovePlantFromBudget(cISC4Occupant* plant) override {
+        cSC4BudgetSimulator* budget = Budget();
+        sc4::cISCPropertyHolder* holder = plant ? plant->AsPropertyHolder() : nullptr;
+        BudgetItem item;
+        if (!budget || !holder || !budget->GetBudgetItemForPurpose(holder, kPowerPlantBudgetProperty, item)) return;
+        cSC4DepartmentBudget* department = budget->GetDepartmentBudget(std::uint32_t(item.departmentId));
+        cSC4LineItem* line = department ? department->GetLineItem(std::uint32_t(item.lineItemId)) : nullptr;
+        if (!line) return;
+        department->RemoveLocallyFundedObject(holder, kPowerPlantBudgetProperty);
+        line->SetSecondaryInfoField(line->GetSecondaryInfoField() - 1);
+    }
+    // The plant's monthly expense (0x2a58d350 by its wear curve) into its budget item when it changed.
+    void SetPlantExpense(cISC4Occupant* plant, std::int64_t expense) override {
+        cSC4BudgetSimulator* budget = Budget();
+        sc4::cISCPropertyHolder* holder = plant ? plant->AsPropertyHolder() : nullptr;
+        BudgetItem item;
+        if (!budget || !holder || !budget->GetBudgetItemForPurpose(holder, kPowerPlantBudgetProperty, item) || item.cost == expense) return;
+        cSC4DepartmentBudget* department = budget->GetDepartmentBudget(std::uint32_t(item.departmentId));
+        if (cSC4LineItem* line = department ? department->GetLineItem(std::uint32_t(item.lineItemId)) : nullptr) {
+            line->AddToFullExpenses(expense - item.cost);
+            budget->ChangeBudgetItemCost(holder, item.purpose, expense);
+        }
     }
     void SetOccupantLotPowered(cISC4Occupant* building) override { if (cSC4Lot* lot = LotUnder(building)) lot->SetHasPower(true); }
     void SetLotPoweredAt(int x, int z) override { if (cSC4Lot* lot = LotAtCell(x, z)) lot->SetHasPower(true); }
