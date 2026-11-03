@@ -315,6 +315,11 @@ cSC4SimGrid<std::uint8_t>* NativeTrafficCongestionMap() {
     return traffic && traffic->IsInitialized() ? traffic->GetCongestionMap() : nullptr;
 }
 
+cSC4SimGrid<std::uint8_t>* NativeTrafficCommercialMap() {
+    cSC4TrafficSimulator* traffic = Traffic();
+    return traffic && traffic->IsInitialized() ? traffic->GetCommercialTrafficMap() : nullptr;
+}
+
 cSC4SimGrid<std::uint8_t>* NativeTrafficTripLengthMap() {
     cSC4TrafficSimulator* traffic = Traffic();
     return traffic && traffic->IsInitialized() ? traffic->GetTripLengthMap() : nullptr;

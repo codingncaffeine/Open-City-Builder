@@ -11,5 +11,6 @@ float NativeTrafficFreightScaling();                          // traffic simulat
 void NativeTrafficStrategyPercentages(int wealth, float out[3]);   // slot 26 (wealth 0..3 = none, $, $$, $$$)
 sc4::cSC4SimGrid<std::uint8_t>* NativeTrafficCongestionMap();      // null until the simulator runs
 sc4::cSC4SimGrid<std::uint8_t>* NativeTrafficTripLengthMap();
+sc4::cSC4SimGrid<std::uint8_t>* NativeTrafficCommercialMap();
 
 }  // namespace native

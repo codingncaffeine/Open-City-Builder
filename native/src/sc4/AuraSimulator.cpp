@@ -737,6 +737,18 @@ void cSC4AuraSimulator::DoIdle(std::uint32_t budgetMilliseconds) {
             ProcessTwoGridsWithCallback<std::int16_t, std::int16_t>(*parkGrid_, *parkEffectGrid_, AssignWithFactor,
                                                                    &factor);
         }
+        if (static int shown = 0; shown < 3 && std::getenv("SC4_RESDEBUG")) {
+            ++shown;
+            long park = 0, effect = 0, landmark = 0;
+            if (parkGrid_) for (const auto& column : parkGrid_->GetGridData()) for (std::int16_t v : column) park += v;
+            if (parkEffectGrid_) for (const auto& column : parkEffectGrid_->GetGridData()) for (std::int16_t v : column) effect += v;
+            if (landmarkGrid_) for (const auto& column : landmarkGrid_->GetGridData()) for (std::int16_t v : column) landmark += v;
+            long aura = 0, smoothed = 0;
+            if (auraGrid_) for (const auto& column : auraGrid_->GetGridData()) for (auto v : column) aura += v != 0;
+            if (smoothedGrid_) for (const auto& column : smoothedGrid_->GetGridData()) for (auto v : column) smoothed += v != 0;
+            std::fprintf(stderr, "aura: park map sum %ld, park effect sum %ld, landmark sum %ld, landmark maps %zu, funding %.2f; non-zero aura %ld smoothed %ld\n", park,
+                         effect, landmark, landmarkMaps_.size(), factor, aura, smoothed);
+        }
         idleState_ = 3;
         break;
     }

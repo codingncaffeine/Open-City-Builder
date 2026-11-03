@@ -198,8 +198,8 @@ public:
 
 class IGrowthLandValueApi : public IGrowthDeveloperService {
 public:
-    virtual cSC4SimGrid<std::uint8_t>* TotalLandValueMap() = 0;       // vslot 0x38
-    virtual cSC4SimGrid<std::uint8_t>* IntrinsicLandValueMap() = 0;   // vslot 0x40
+    virtual cSC4SimGrid<std::uint8_t>* TotalLandValueMap() = 0;       // vslot 0x40 (GetTotalLandValueMap)
+    virtual cSC4SimGrid<std::uint8_t>* IntrinsicLandValueMap() = 0;   // vslot 0x38 (GetIntrinsicLandValueMap)
     virtual cSC4SimGrid<float>* SlopeMap() = 0;                       // vslot 0x48
 };
 
@@ -246,8 +246,8 @@ public:
 
 class IGrowthTrafficApi : public IGrowthDeveloperService {
 public:
-    virtual IGrowthTrafficDensityApi* Density() = 0;                  // vslot 0x68
-    virtual cSC4SimGrid<std::uint8_t>* CongestionMap() = 0;           // vslot 0x48
+    virtual IGrowthTrafficDensityApi* Density() = 0;                  // vslot 0x68 GetTripLengthMap (its cell getter)
+    virtual cSC4SimGrid<std::uint8_t>* CongestionMap() = 0;           // vslot 0x48 GetCommercialTrafficMap (Mac i386 DoIdle stage 13)
 };
 
 // One RCI demand channel (cSC4Demand, recovered; the demand simulator is not).
@@ -504,7 +504,7 @@ private:
     std::uint8_t tractSize_ = 0x40;                   // +0x74
     std::uint8_t constructionFlag10_ = 0;             // +0x75
     std::uint8_t constructionFlag11_ = 0;             // +0x76
-    bool useTotalLandValue_ = false;                  // +0x77
+    bool useIntrinsicLandValue_ = false;              // +0x77
     cSC4ResponseCurve* landValueCurve_ = nullptr;     // +0x78
     cSC4ResponseCurve* slopeCurve_ = nullptr;         // +0x80
     std::vector<cSC4ResponseCurve*> pollutionCurves_; // +0x88 (four entries)

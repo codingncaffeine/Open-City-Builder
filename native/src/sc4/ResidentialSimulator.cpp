@@ -1480,6 +1480,17 @@ bool cSC4ResidentialSimulator::DoDailySimulation(std::uint32_t milliseconds) {
         if (std::getenv("SC4_RESDEBUG") && shown++ < 3) std::fprintf(stderr, "residential: day before Init\n");
         return true;
     }
+    if (static bool first = true; first && std::getenv("SC4_RESDEBUG")) {   // the saved grids against the developers' maps
+        first = false;
+        long own[3] = {}, developer[3] = {};
+        for (int w = 0; w < 3; ++w) {
+            if (populationGrids_[w]) for (const auto& column : populationGrids_[w]->GetGridData()) for (std::uint16_t v : column) own[w] += v;
+            const cSC4SimGrid<std::int16_t>* map = host_ ? host_->DeveloperPopulationMap(w + 1) : nullptr;
+            if (map) for (const auto& column : map->GetGridData()) for (std::int16_t v : column) developer[w] += v;
+        }
+        std::fprintf(stderr, "residential: first day: saved grids %ld/%ld/%ld, developer maps %ld/%ld/%ld, population %d\n", own[0], own[1], own[2],
+                     developer[0], developer[1], developer[2], population_);
+    }
     const std::uint64_t slice = host_ ? host_->BeginSlice(milliseconds) : 0;
     const auto expired = [&]() { return host_ && host_->SliceExpired(slice); };
     const auto passes = [&]() {   // until a pass changes nothing; false when time ran out between passes

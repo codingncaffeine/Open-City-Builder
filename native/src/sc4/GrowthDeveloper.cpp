@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <utility>
 
@@ -31,7 +33,7 @@ constexpr std::uint32_t kPropertyTractSize = 0x87cd6310;      // -> +0x74
 constexpr std::uint32_t kPropertyWealth = 0x87cd6330;         // -> +0x6c
 constexpr std::uint32_t kPropertyPurpose = 0x87cd6332;        // -> +0x68
 constexpr std::uint32_t kPropertyProfileFlags = 0x87cd6333;   // -> +0x75/+0x76
-constexpr std::uint32_t kPropertyUseTotalLandValue = 0x87cd633f;   // -> +0x77
+constexpr std::uint32_t kPropertyUseIntrinsicLandValue = 0x87cd633f;   // -> +0x77
 constexpr std::uint32_t kPropertyLandValueCurve = 0x87cd6340;      // -> +0x78
 constexpr std::uint32_t kPropertySlopeCurve = 0x87cd6398;          // -> +0x80
 constexpr std::uint32_t kPropertyResidentialCurve1 = 0x87cd6343;   // -> +0xa8
@@ -487,8 +489,8 @@ void cSC4GrowthDeveloper::ReadSimulatorTunableValues() {
         constructionFlag10_ = flags[0];
         constructionFlag11_ = flags[1];
     }
-    useTotalLandValue_ = false;
-    cSCPropertyHelp::GetPropertyValue(exemplar_, kPropertyUseTotalLandValue, useTotalLandValue_);
+    useIntrinsicLandValue_ = false;
+    cSCPropertyHelp::GetPropertyValue(exemplar_, kPropertyUseIntrinsicLandValue, useIntrinsicLandValue_);
     ReadCurveProperty(kPropertyLandValueCurve, landValueCurve_);
     ReadCurveProperty(kPropertySlopeCurve, slopeCurve_);
     ReadCurveProperty(kPropertyResidentialCurve1, residentialCurve1_);
@@ -676,6 +678,95 @@ void cSC4GrowthDeveloper::UpdatePopulationCount(cSC4Lot* lot, std::uint32_t buil
 // a cRZTimer it never reads; that profiling leftover is not ported.
 void cSC4GrowthDeveloper::DoIdle(std::uint32_t budgetMilliseconds) {
     if (!g_host) return;
+    static const bool trace = std::getenv("SC4_RESDEBUG") != nullptr;
+    static std::uint32_t lastStage[0x40];
+    static bool traced[0x40];
+    const std::size_t slot = static_cast<std::size_t>(subType_ >> 4) & 0x3f;
+    static int updates[0x40];
+    static std::uint32_t prevStage[0x40];
+    const std::uint32_t before = prevStage[slot];
+    prevStage[slot] = static_cast<std::uint32_t>(mapUpdateStage_);
+    if (trace && subType_ >= 0x1000 && subType_ < 0x1100 && updates[slot] < 2 && capacityMap_ && traced[slot] &&
+        before != static_cast<std::uint32_t>(mapUpdateStage_)) {
+        // the capacity-weighted mean desirability (= the population fraction stage 18 applies) after each stage
+        const auto weighted = [&](const cSC4SimGrid<std::int16_t>* map, double& raw) {
+            double sum = 0, weight = 0;
+            raw = 0;
+            if (!map) return -1.0;
+            const auto& d = map->GetGridData();
+            const auto& c = capacityMap_->GetGridData();
+            for (std::size_t x = 0; x < c.size() && x < d.size(); ++x)
+                for (std::size_t z = 0; z < c[x].size() && z < d[x].size(); ++z) {
+                    if (!c[x][z]) continue;
+                    sum += c[x][z] * std::clamp(d[x][z] / 100.0, 0.0, 1.0);
+                    raw += c[x][z] * double(d[x][z]);
+                    weight += c[x][z];
+                }
+            if (weight > 0) raw /= weight;
+            return weight > 0 ? sum / weight : -1.0;
+        };
+        double rawWork = 0, rawSaved = 0;
+        const double work = weighted(desirabilityWorkMap_, rawWork), saved = weighted(desirabilityMap_, rawSaved);
+        std::fprintf(stderr, "growth %04x: after stage %u work fraction %.3f mean %.1f | snapshot fraction %.3f mean %.1f\n", subType_, before,
+                     work, rawWork, saved, rawSaved);
+        if (mapUpdateStage_ == 0) ++updates[slot];
+    }
+    if (trace && subType_ >= 0x1000 && subType_ < 0x1100 && !traced[slot]) {
+        const auto lv = landValue_ ? (useIntrinsicLandValue_ ? landValue_->IntrinsicLandValueMap() : landValue_->TotalLandValueMap()) : nullptr;
+        std::fprintf(stderr,
+                     "growth %04x: curves lv %d(map %d total %d) slope %d res %d%d%d com %d%d aura70 %d(map %d) poll %d%d%d%d res138 %d res140 %d crime %d(map %d) "
+                     "traffic %d(api %d) cong %d aura78 %d(map %d) aura68 %d(map %d)\n",
+                     subType_, !!landValueCurve_, !!lv, int(useIntrinsicLandValue_), !!slopeCurve_, !!residentialCurve1_, !!residentialCurve2_, !!residentialCurve3_,
+                     !!commercialCurve3320_, !!commercialCurve3330_, !!auraCurve70_, g_host->Aura() && g_host->Aura()->Int16MapA(), !!pollutionCurves_[0],
+                     !!pollutionCurves_[1], !!pollutionCurves_[2], !!pollutionCurves_[3], !!residentialMap138Curve_, !!residentialMap140Curve_, !!crimeCurve_,
+                     g_host->Crime() && g_host->Crime()->CrimeMap(), !!trafficCurve_, traffic_ && traffic_->Density(), !!trafficMap48Curve_, !!auraCurve78_,
+                     g_host->Aura() && g_host->Aura()->Int16MapB(), !!auraCurve68_, g_host->Aura() && g_host->Aura()->Int8Map());
+        const auto sample = [&](const char* name, cSC4ResponseCurve* curve, std::initializer_list<float> points) {
+            if (!curve) return;
+            std::fprintf(stderr, "growth %04x: curve %s", subType_, name);
+            for (float p : points) std::fprintf(stderr, " %g->%.1f", p, curve->GetOutputValue(p));
+            std::fprintf(stderr, "\n");
+        };
+        const auto mean = [&](const char* name, auto* map) {   // capacity-weighted input mean over this developer's tracts (cell 4x4 of the tract)
+            if (!map || !capacityMap_) { std::fprintf(stderr, "growth %04x: input %s null\n", subType_, name); return; }
+            const auto& c = capacityMap_->GetGridData();
+            const int ts = capacityMap_->GetTractSize();
+            double sum = 0, w = 0, mn = 1e9, mx = -1e9;
+            for (std::size_t x = 0; x < c.size(); ++x)
+                for (std::size_t z = 0; z < c[x].size(); ++z) {
+                    if (!c[x][z]) continue;
+                    const double v = double(map->GetCellValue(int(x) * ts, int(z) * ts));
+                    sum += v * c[x][z]; w += c[x][z]; mn = std::min(mn, v); mx = std::max(mx, v);
+                }
+            long nonzero = 0, cells = 0;
+            for (const auto& column : map->GetGridData()) for (auto v : column) { ++cells; nonzero += v != 0; }
+            std::fprintf(stderr, "growth %04x: input %s mean %.1f min %.0f max %.0f (map tract %d, %ld of %ld tracts non-zero)\n", subType_, name, w ? sum / w : 0.0, mn, mx,
+                         map->GetTractSize(), nonzero, cells);
+        };
+        mean("landvalue", lv);
+        if (landValue_) { mean("lv-total", landValue_->TotalLandValueMap()); mean("lv-intrinsic", landValue_->IntrinsicLandValueMap()); }
+        if (g_host->Aura()) { mean("aura70", g_host->Aura()->Int16MapA()); mean("aura78", g_host->Aura()->Int16MapB()); mean("aura68", g_host->Aura()->Int8Map()); }
+        if (traffic_) mean("congestion", traffic_->CongestionMap());
+        sample("landvalue", landValueCurve_, {0, 32, 64, 96, 128, 192, 255});
+        sample("aura70", auraCurve70_, {-500, -100, 0, 100, 500, 1000});
+        sample("aura78", auraCurve78_, {-500, -100, 0, 100, 500, 1000});
+        sample("aura68", auraCurve68_, {-100, -50, 0, 50, 100});
+        sample("crime", crimeCurve_, {0, 32, 64, 128, 255});
+        sample("traffic", trafficCurve_, {0, 32, 64, 128, 255});
+        sample("cong", trafficMap48Curve_, {0, 32, 64, 128, 255});
+    }
+    if (trace && subType_ >= 0x1000 && subType_ < 0x1100 && (mapUpdateStage_ == 18 || mapUpdateStage_ == 19 || !traced[slot])) {
+        std::uint32_t& last = lastStage[slot];
+        if (!traced[slot] || last != static_cast<std::uint32_t>(mapUpdateStage_)) {
+            long population = 0, capacity = 0;
+            if (populationMap_) for (const auto& column : populationMap_->GetGridData()) for (std::int16_t v : column) population += v;
+            if (capacityMap_) for (const auto& column : capacityMap_->GetGridData()) for (std::uint16_t v : column) capacity += v;
+            std::fprintf(stderr, "growth %04x/%d: stage %d population %ld capacity map %ld total capacity %d\n", subType_, type_, mapUpdateStage_, population, capacity,
+                         totalCapacity_);
+        }
+        last = static_cast<std::uint32_t>(mapUpdateStage_);
+        traced[slot] = true;
+    }
     switch (mapUpdateStage_) {
     case 1:
         if (initialized_) {
@@ -699,8 +790,9 @@ void cSC4GrowthDeveloper::DoIdle(std::uint32_t budgetMilliseconds) {
     }
     case 3:
         if (landValueCurve_ && landValue_) {
-            cSC4SimGrid<std::uint8_t>* map = useTotalLandValue_ ? landValue_->TotalLandValueMap()
-                                                                : landValue_->IntrinsicLandValueMap();
+            // the flag picks the intrinsic map; clear (the shipped exemplars) the total map (Mac i386 DoIdle stage 3)
+            cSC4SimGrid<std::uint8_t>* map = useIntrinsicLandValue_ ? landValue_->IntrinsicLandValueMap()
+                                                                : landValue_->TotalLandValueMap();
             if (map)
                 ProcessTwoGridsWithCallback<std::int16_t, std::uint8_t>(*desirabilityWorkMap_, *map,
                                                                         AddCurveToShort<std::uint8_t>,
@@ -851,6 +943,13 @@ void cSC4GrowthDeveloper::DoIdle(std::uint32_t budgetMilliseconds) {
             std::list<cRZAutoRefCount<cISC4Occupant>> buildings;
             buildingDevelopment_->GetSpecialBuildings(buildings);    // building development slot 0x160
             for (const auto& building : buildings) specialBuildings_.push_back(building);
+        }
+        if (static int shown = 0; shown < 3 && std::getenv("SC4_RESDEBUG")) {
+            ++shown;
+            int withTypes = 0;
+            for (const auto& building : specialBuildings_)
+                if (cISCPropertyHolder* holder = building ? building->AsPropertyHolder() : nullptr) withTypes += holder->GetProperty(kPropertyLandmarkTypes) != nullptr;
+            std::fprintf(stderr, "growth %04x: %zu special buildings, %d with landmark types\n", subType_, specialBuildings_.size(), withTypes);
         }
         specialCursor_ = specialBuildings_.begin();
         mapUpdateStage_ = 15;
@@ -1198,8 +1297,8 @@ std::int32_t cSC4GrowthDeveloper::EstimateDesirability(int x, int z) const {
         sum += static_cast<std::int32_t>(curve->GetOutputValue(map->GetCellValue(x, z)));
     };
     if (landValueCurve_ && landValue_) {
-        addByteCurve(landValueCurve_, useTotalLandValue_ ? landValue_->TotalLandValueMap()
-                                                        : landValue_->IntrinsicLandValueMap());
+        addByteCurve(landValueCurve_, useIntrinsicLandValue_ ? landValue_->IntrinsicLandValueMap()
+                                                        : landValue_->TotalLandValueMap());
     }
     if (slopeCurve_ && landValue_) addFloatCurve(slopeCurve_, landValue_->SlopeMap());
     if (g_host && g_host->Residential()) {

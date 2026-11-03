@@ -85,9 +85,11 @@ bool GrowthDeveloperMapUpdateFinished(void* developer) {
 
 #include "app/NativeBuildingDevelopment.h"
 #include "app/NativeCity.h"
+#include "app/NativeTraffic.h"
 #include "rz/cRZRandom.h"
 #include "sc4/AuraSimulator.h"
 #include "sc4/CommercialSimulator.h"
+#include "sc4/CrimeSimulator.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/PollutionSimulator.h"
 #include "sc4/Simulator.h"
@@ -130,7 +132,7 @@ struct BuildingDevelopmentApi final : IGrowthBuildingDevelopmentApi {
         const BuildingProfile* profile = NativeBuildingProfile(type);
         return profile ? *profile : none;
     }
-    void GetSpecialBuildings(std::list<cRZAutoRefCount<cISC4Occupant>>&) override {}   // the civic list (+0x88) is not exposed yet
+    void GetSpecialBuildings(std::list<cRZAutoRefCount<cISC4Occupant>>& out) override { NativeSpecialBuildings(out); }
     float GetMaxCapacity(int zoneType, int purpose, int wealth) override {
         return NativeMaxCapacity(zoneType, static_cast<std::uint32_t>(purpose), static_cast<std::uint32_t>(wealth));
     }
@@ -144,9 +146,16 @@ struct LandValueApi final : IGrowthLandValueApi {
     cSC4SimGrid<float>* SlopeMap() override { return NativeSlopeMap(); }
 } g_landValue;
 
-struct TrafficApi final : IGrowthTrafficApi {   // the port's traffic simulator exposes neither map: those stages are skipped
-    IGrowthTrafficDensityApi* Density() override { return nullptr; }
-    cSC4SimGrid<std::uint8_t>* CongestionMap() override { return nullptr; }
+struct TripLengthApi final : IGrowthTrafficDensityApi {   // the trip-length map's cell getter (i386 grid vslot 0x1c)
+    std::uint8_t GetValue(int x, int z) const override {
+        cSC4SimGrid<std::uint8_t>* map = NativeTrafficTripLengthMap();
+        return map ? map->GetCellValue(x, z) : 0;
+    }
+} g_tripLength;
+
+struct TrafficApi final : IGrowthTrafficApi {   // null until the traffic simulator is initialised: those stages are skipped
+    IGrowthTrafficDensityApi* Density() override { return NativeTrafficTripLengthMap() ? &g_tripLength : nullptr; }
+    cSC4SimGrid<std::uint8_t>* CongestionMap() override { return NativeTrafficCommercialMap(); }
 } g_traffic;
 
 struct ZoneManagerApi final : IGrowthZoneManagerApi {
@@ -186,8 +195,15 @@ struct AuraApi final : IGrowthAuraApi {
     cSC4SimGrid<std::int16_t>* Int16MapB() override { auto* s = Sim(); return s ? s->GetLandmarkMap() : nullptr; }       // 0x78
 } g_aura;
 
-struct CrimeApi final : IGrowthCrimeApi {   // the crime simulator's grid is const in the port; not handed out as writable
-    cSC4SimGrid<std::uint8_t>* CrimeMap() override { return nullptr; }
+struct CrimeApi final : IGrowthCrimeApi {   // crime simulator vslot 0x1c GetCrimeGrid; stage 11 only reads it
+    cSC4SimGrid<std::uint8_t>* CrimeMap() override {
+        cSC4City* city = HostCity();   // a plain class: only the adapter's plain view
+        cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::CrimeSimulator) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(kGZIID_PlainObject, &raw) || !raw) return nullptr;
+        auto* s = static_cast<cSC4CrimeSimulator*>(raw);   // borrowed, no reference
+        return s ? const_cast<cSC4SimGrid<std::uint8_t>*>(s->GetCrimeGrid()) : nullptr;
+    }
 } g_crime;
 
 // One demand channel: vslot 0x40 / 0x88 of cSC4Demand.

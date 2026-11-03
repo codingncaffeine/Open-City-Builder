@@ -252,6 +252,15 @@ bool cSC4HistoryWarehouse::Store(std::uint32_t series, int value) {
         static std::map<std::uint32_t, int> seen;
         const int n = ++seen[series];
         if (n <= 2 || n % 100 == 0) std::fprintf(stderr, "history: store %08x = %d (#%d)\n", series, value, n);
+        if (static bool dumped = false; !dumped) {   // the loaded series before the first new point: the last 24 values of each
+            dumped = true;
+            for (const auto& [id, loaded] : series_) {
+                std::fprintf(stderr, "history: loaded %08x (%zu points):", id, loaded.nodes.size());
+                int skip = static_cast<int>(loaded.nodes.size()) - 24;
+                for (const HistoryNode& node : loaded.nodes) if (skip-- <= 0) std::fprintf(stderr, " %d", node.value);
+                std::fprintf(stderr, "\n");
+            }
+        }
     }
     Series& s = GetKeyVector(series);
     IHistoryEnvironment* env = HistoryEnvironment();
