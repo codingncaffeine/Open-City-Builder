@@ -27,6 +27,7 @@
 #include <thread>
 #include <vector>
 
+#include "gz/CheatCodeManager.h"
 #include "platform/GameDataPath.h"
 #include "platform/PointerState.h"
 #include "sc4/RegionDialogs.h"
@@ -1043,6 +1044,12 @@ int RunScenario(const std::string& path) {
             } else {
                 std::printf("where %08x: not found\n", id);
             }
+        } else if (command == "cheat") {   // cheat TEXT: what the cheat box does with its text on Enter
+            std::string text; words >> text;
+            auto* cheats = dynamic_cast<cGZCheatCodeManager*>(SL::spCCM);
+            std::uint32_t id = 0;
+            const bool done = cheats && cheats->DoDefaultCheatCodeProcessing(cRZString(text.c_str()), id);
+            std::printf("cheat %s: %s (id %08x)\n", text.c_str(), done ? "accepted" : "not accepted", id);
         } else if (command == "quit") {
             return 0;
         } else {

@@ -12,11 +12,13 @@
 #include <array>
 #include <chrono>
 #include <map>
+#include <utility>
 
 #include "rz/cRZRandom.h"
 
 #include "app/NativeCity.h"
 #include "app/NativeGrowthDevelopers.h"
+#include "gz/CheatCodeManager.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "gz/cIGZPersistResourceKeyList.h"
 #include "platform/Unwired.h"
@@ -85,6 +87,9 @@ private:
 std::map<cSC4BuildingDevelopmentSimulator*, SimulatorTarget*> g_targets;
 constexpr std::uint32_t kMessages[] = {0xe8bda2e7, 0x278e6003, 0x99ef1142, 0x99ef1143, 0xb99ae81};
 constexpr int kAgentIntervals[] = {0, 4, 6, 10};
+// The three cheats Init registers with SL::spCCM and listens to (0x10014ce64): no plumbing needed, no power needed, the coffee bar.
+constexpr std::pair<std::uint32_t, const char*> kCheats[] = {{0x491865e1, "HowDryIAm"}, {0x08dad89a, "FightThePower"}, {0x6ab6a2d7, "Barstuck"}};
+cGZCheatCodeManager* CheatCodes() { return dynamic_cast<cGZCheatCodeManager*>(SL::spCCM); }
 
 // cSC4Demand as the construction resources (+0xe0): supply = the month's total, demand = what construction holds.
 class ConstructionResources final : public IConstructionResources {
@@ -283,12 +288,22 @@ public:
         int agents = 0;
         for (int interval : kAgentIntervals) agents += AddCitySimulatorAgent(target, interval, "cSC4BuildingDevelopmentSimulator", 2) ? 1 : 0;
         if (std::getenv("SC4_SIMDEBUG")) std::fprintf(stderr, "building development: %d agents registered\n", agents);
+        if (cGZCheatCodeManager* cheats = CheatCodes())
+            for (const auto& [id, text] : kCheats) {
+                cheats->RegisterCheatCode(id, cRZString(text));
+                cheats->AddNotification2(target, id);
+            }
     }
     void UnregisterMessageTarget(cSC4BuildingDevelopmentSimulator* simulator) override {
         auto it = g_targets.find(simulator);
         if (it == g_targets.end()) return;
         if (SL::spMS2) for (std::uint32_t type : kMessages) SL::spMS2->RemoveNotification(it->second, type);
         RemoveCitySimulatorAgent(it->second);
+        if (cGZCheatCodeManager* cheats = CheatCodes())
+            for (const auto& [id, text] : kCheats) {
+                cheats->RemoveNotification2(it->second, id);
+                cheats->UnregisterCheatCode(id);
+            }
         delete it->second;
         g_targets.erase(it);
     }

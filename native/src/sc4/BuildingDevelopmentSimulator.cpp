@@ -444,8 +444,8 @@ bool cSC4BuildingDevelopmentSimulator::QueryInterface(std::uint32_t iid, void** 
 
 // 0x10014ce64. PARTIAL: the services the original AddRefs (+0x28..+0x68: the resource manager, city, occupant manager, zone,
 // lot, land value and power simulators, terrain) are reached through the host and the injected interfaces; the building map grid
-// (+0x80) and the lot / tract developers (+0xd8 / +0xd0, layer 3) are not attached here; the cheat codes are not registered (no
-// cheat-code manager natively).
+// (+0x80) and the lot / tract developers (+0xd8 / +0xd0, layer 3) are not attached here; the host registers the three cheat codes
+// with the message target (RegisterMessageTarget).
 bool cSC4BuildingDevelopmentSimulator::Init() {
     if (initialized_) return true;
     initialized_ = true;
