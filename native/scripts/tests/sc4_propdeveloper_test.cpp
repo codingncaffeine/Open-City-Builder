@@ -42,29 +42,8 @@ using namespace sc4;
 
 }  // namespace
 
-// The two GZ serializable helpers need a DB-segment stream (the DB stack is not linked into this test), so the
-// test supplies the same fallback behaviour the real ones show on a plain memory stream: nothing is written and
-// a read returns no object. The stream test therefore covers the scalar layout and the counts only.
-namespace sc4 {
-namespace {
-constexpr std::uint32_t kTestDBSegmentIStreamId = 0x4999a8f5;    // kGZIID_cISC4DBSegmentIStream
-constexpr std::uint32_t kTestDBSegmentOStreamId = 0x6999a8fb;    // kGZIID_cISC4DBSegmentOStream
-}  // namespace
-
-bool SC4WriteGZSerializable(cIGZOStream& stream, const cIGZUnknown*) {
-    void* raw = nullptr;
-    if (!stream.QueryInterface(kTestDBSegmentOStreamId, &raw)) return false;
-    if (raw) static_cast<cIGZUnknown*>(raw)->Release();
-    return false;
-}
-bool SC4ReadGZSerializable(cIGZIStream& stream, std::uint32_t, void** out, bool) {
-    if (out) *out = nullptr;
-    void* raw = nullptr;
-    if (!stream.QueryInterface(kTestDBSegmentIStreamId, &raw)) return false;
-    if (raw) static_cast<cIGZUnknown*>(raw)->Release();
-    return false;
-}
-}  // namespace sc4
+// The serializable helpers need a DB-segment stream: on the test's memory stream nothing is written and a read returns no
+// object, so the stream test covers the scalar layout and the counts only.
 
 namespace {
 

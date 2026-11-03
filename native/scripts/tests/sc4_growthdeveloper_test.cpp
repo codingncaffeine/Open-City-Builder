@@ -608,7 +608,7 @@ void FillGrid(cSC4SimGrid<T>* grid, T value) {
 // 100), capacities 100/0/50/50 -> population 25/0/10/15, growth threshold 30, decline threshold 28.
 void SetUpMapUpdateScenario(Fixture& fixture) {
     fixture.UseMapUpdateTunables();
-    auto* landValue = fixture.landValue.intrinsic;
+    auto* landValue = fixture.landValue.total;      // the growth developers read the total map unless the exemplar asks for the intrinsic one
     landValue->SetTractValue(0, 0, 50);
     landValue->SetTractValue(1, 0, 150);
     landValue->SetTractValue(0, 1, 0);
