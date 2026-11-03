@@ -277,6 +277,7 @@ src/sc4/TextDecalOccupant.cpp
 src/sc4/TractDeveloper.cpp
 src/sc4/TrafficNetworkMap.cpp
 src/sc4/TrafficSimulator.cpp
+src/sc4/TrafficCycle.cpp
 src/sc4/TutorialSystem.cpp
 src/sc4/VehicleManager.cpp
 src/sc4/WinAuraAlert.cpp

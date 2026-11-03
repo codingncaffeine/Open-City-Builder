@@ -76,6 +76,12 @@ public:
         items_.push_back(std::move(item));
     }
 
+    // every object reference read, in record order (borrowed)
+    template <class F> void ForEachRef(F f) const {
+        for (const Item& item : items_)
+            if (item.kind == kRef) f(item.ref.get());
+    }
+
     bool Replay(cIGZOStream& s) const {
         for (const Item& item : items_) {
             const void* from = item.live ? item.live : &item.bits;

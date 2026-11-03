@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <limits>
 
 #include <memory>
@@ -95,11 +97,7 @@ std::uint32_t cSC4TrafficSimulator::Release() {
     return --refCount_;
 }
 
-// The original's DoMessage is the daily-simulation stage machine (still unrecovered); the port drives
-// the same work through ITrafficHost, so no message is handled here.
-bool cSC4TrafficSimulator::DoMessage(cIGZMessage2*) {
-    return false;
-}
+// DoMessage, the work cycle and the network model: TrafficCycle.cpp.
 
 // 0x10007a5f8 / 0x10007b550 — the stream format is not recovered yet; stubbed so the class can be a
 // cIGZSerializable. See notes/ledger_pending/cSC4TrafficSimulator.txt.
@@ -1194,6 +1192,9 @@ void cSC4TrafficSimulator::RecalculateNeighborConnectionCapacities() {
                                    host_->RegionDemandTotal(0x2030)};
     std::vector<void*> cities;
     host_->NeighborGetConnectedCities(cities);
+    if (std::getenv("SC4_TRAFFICDEBUG"))
+        std::fprintf(stderr, "traffic: neighbour capacities: regional jobs %d/%d/%d, %zu connected cities, %zu pools\n", total[0], total[1], total[2], cities.size(),
+                     neighborPools_.size());
     double population[3] = {0.0, 0.0, 0.0};
     for (void* city : cities) {
         population[0] += host_->NeighborCityExtrapolatedPopulation(city, 0x2010);
@@ -1218,6 +1219,9 @@ void cSC4TrafficSimulator::RecalculateNeighborConnectionCapacities() {
             const std::int64_t share = TruncateToInt64((double(cityPopulation) / population[kind]) * double(total[kind]));
             SetMaxTripCapacity(pool, kind, std::uint32_t(share));
             SetTripCapacity(pool, kind + 4u, 0);
+            if (std::getenv("SC4_TRAFFICDEBUG"))
+                std::fprintf(stderr, "traffic: pool at region (%d,%d) wealth %u: city population %d of %.0f, regional jobs %d -> capacity %lld\n", regionX, regionZ,
+                             kind, cityPopulation, population[kind], total[kind], static_cast<long long>(share));
         }
         SetMaxTripCapacity(pool, 3, 0xffffffffu);
         SetTripCapacity(pool, 7, 0);

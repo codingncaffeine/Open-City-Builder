@@ -15,6 +15,8 @@
 #include "app/NativeEffects.h"
 #include "app/NativeGrowthDevelopers.h"
 #include "app/NativeSimHosts.h"
+#include "app/NativeTraffic.h"
+#include "app/NativeRegion.h"
 #include "app/NativeZoneDeveloperHost.h"
 #include "gz/SimHostRegistry.h"
 #include "gz/cGZPersistResourceManager.h"
@@ -540,6 +542,10 @@ cSC4SimGrid<std::uint8_t>* NativeResidentialProximityMap(int wealth) {
     cSC4ResidentialSimulator* r = Residential();
     return r ? r->GetProximityMap(static_cast<std::uint32_t>(wealth)) : nullptr;
 }
+float NativeResidentialWorkforcePercent(int x, int z) {
+    cSC4ResidentialSimulator* r = Residential();
+    return r ? r->GetCellWorkforcePercent(SimulatorExemplar(0x69189c84), unsigned(x), unsigned(z)) : 1.0f;
+}
 cSC4SimGrid<float>* NativeResidentialGradeMap(bool school) {
     cSC4ResidentialSimulator* r = Residential();
     return r ? r->GetGradeMap(school) : nullptr;
@@ -553,6 +559,8 @@ void InstallNativeSimHosts() {
     hosts.police = &g_police;
     hosts.residential = &g_residential;
     hosts.demolition = NativeDemolitionHost();
+    InstallNativeTrafficHost();
+    InstallNeighborHosts();
 }
 
 }  // namespace native

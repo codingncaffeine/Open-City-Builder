@@ -540,6 +540,7 @@ public:
     cSC4Lot* GetOccupantLot(cISC4Occupant* occupant) override;
     IZoneDeveloperLotIterator* GetSafeLotIterator() override;
     int GetLotCount() override { return lotCount_; }
+    const std::list<cSC4Lot*>& Lots() const { return lots_; }   // the lot manager's list order
     float GetLotSavvyTerrainVertexAltitude(int x, int z, const cSC4Lot* lot, bool* lotFound) const override;
     float GetLotSavvyTerrainAltitude(float x, float z, bool* lotFound) const override;
     float GetLotSavvyCellAltitude(int x, int z, bool* lotFound) const override;

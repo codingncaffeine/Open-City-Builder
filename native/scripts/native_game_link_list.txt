@@ -172,6 +172,8 @@ src/s3d/Camera.cpp
 src/s3d/TriangleIterator.cpp
 src/sc4/Render3D.cpp
 src/sc4/PathFinder.cpp
+src/sc4/PathInfo.cpp
+src/sc4/PathInfoFactory.cpp
 src/sc4/cSTETerrainView3D.cpp
 src/sc4/ViewInputControl.cpp
 src/sc4/AutomataTuningParams.cpp
@@ -280,6 +282,7 @@ src/sc4/PollutionSimulator.cpp
 src/sc4/PowerSimulator.cpp
 src/sc4/ResidentialSimulator.cpp
 src/sc4/TrafficSimulator.cpp
+src/sc4/TrafficCycle.cpp
 src/sc4/WinAuraAlert.cpp
 src/sc4/cSC4ZoneManager.cpp
 src/sc4/LotDeveloper.cpp
@@ -704,6 +707,7 @@ src/app/citycomp/cSC4PedestrianManager.cpp
 src/app/citycomp/cSC4AircraftManager.cpp
 src/app/citycomp/cSC4WatercraftManager.cpp
 src/app/citycomp/cSC4TrafficNetworkMap.cpp
+src/app/citycomp/cSC4TrafficSimulator.cpp
 src/app/citycomp/cSC4AdvisorSystem.cpp
 src/app/citycomp/cSC4CitySituationManager.cpp
 src/app/citycomp/cSC4TutorialSystem.cpp

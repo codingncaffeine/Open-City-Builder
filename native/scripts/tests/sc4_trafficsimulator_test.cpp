@@ -89,6 +89,9 @@ struct FakePathFinder : cISC4PathFinder {
     float GetTripLengthScaledForDisplay() override { return 0.0f; }
     void GetEndCell(int& x, int& z) const override { x = 0; z = 0; }
     std::uint8_t GetLastTravelType() const override { return 0; }
+    int FindPath() override { return 0; }
+    bool WasTripReversible() override { return true; }
+    void GetCompressedRoute(std::vector<std::uint8_t>& out, std::uint32_t& types) override { out.clear(); types = 0; }
 };
 
 const FakePathFinder::Call* FindCall(const FakePathFinder& pf, const char* name) {

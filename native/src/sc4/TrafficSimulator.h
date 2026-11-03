@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <list>
 #include <map>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
@@ -35,7 +36,10 @@
 namespace sc4 {
 
 class cISC4PathFinder;
+class cSC4PathFinder;
+class cSC4NetworkOccupant;
 struct cSC4TripData;
+template <class T> class cSC4SimGrid;
 
 constexpr std::uint32_t kGZCLSID_cSC4TrafficSimulator = 0x6990c1aa;
 constexpr std::uint32_t kGZIID_cISC4TrafficSimulator = 0x68027f37;
@@ -50,12 +54,15 @@ constexpr std::uint32_t kTrafficMessageStrikeAverted = 0x69247dc3, kTrafficMessa
 constexpr std::uint32_t kTripCapacityProperty = 0x8a0b4100;
 
 // Per-cell, per-network-type traffic data (the original chains these per cell).
+// `networkType` is the record's key: the transit network n (0 pedestrian, 1 car, 2 train, 3 subway, 4 el-train, 5 monorail);
+// `pieceType` is the network type 0..12 of the piece that carries it (traffic-network.md §2.2).
 struct NetworkInfo {
     float inverseCapacity = 0.0f;   // +0: capacity = 1 / this
     std::uint8_t connectionCount = 0;  // +4
     std::uint8_t networkType = 0;   // +6
-    std::uint8_t flag7 = 0;         // +7
-    float potholePenalty = 0.0f;    // +8: set while the cell has a pothole
+    std::uint8_t flag7 = 0;         // +7: bit 0 = a piece here has network flag 0x40000 (the bridge statistics row)
+    float potholePenalty = 0.0f;    // +8: the extra step cost, set while the cell has a pothole
+    std::uint8_t pieceType = 0;
     std::array<std::uint16_t, 4> subnetwork{};   // +0xc: flood-fill subnetwork id per lane group (0 = unassigned)
 };
 
@@ -80,8 +87,13 @@ struct TrafficCellRegion {
     }
 };
 
-// Value part of an edge-density map entry; only the density word is read by the recovered code.
-struct TrafficEdgeDensity { std::uint16_t density = 0; };
+// Value part of an edge-density map entry (33 u16, traffic-simulator.md §4.8): last[4 * entry + exit], the usage (`density`, the
+// sum of last at the dump) and current[16], which the routes add to.
+struct TrafficEdgeDensity {
+    std::array<std::uint16_t, 16> last{};
+    std::uint16_t density = 0;
+    std::array<std::uint16_t, 16> current{};
+};
 
 // A set of packed cells ((x << 8) | z) with O(1) insert, erase and uniform random pick. The original uses an
 // unordered_set and walks to a random position; the distribution is the same.
@@ -110,9 +122,15 @@ struct TrafficNeighborConnection {
 // Per-cell record of the 0x2e-byte connection table at +0x98, one record per packed cell ((x << 8) | z) of the
 // fixed 0x10000-cell table. Only the nine masks are read by the recovered code; the rest of the record is unused.
 struct TrafficCellConnections {
-    // +0: per travel type, four bits per map side: bit (side + 4 * lane) with side 0 west, 1 north, 2 east, 3 south.
+    // conn[t]: bit (exit + 4 * entry) set = a type-t traveller that entered from side `entry` may leave through `exit`
+    // (sides 0 west, 1 north, 2 east, 3 south). traffic-network.md §2.1.
     std::array<std::uint16_t, 9> masks{};
-    std::array<std::uint8_t, 0x2e - 0x12> rest{};
+    // switch[t]: nibble `exit` = the travel type a type-t traveller becomes when it leaves through that side (0xf = none).
+    std::array<std::uint16_t, 9> switches{0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff};
+    // priorCar[entry]: bit (prev + 4 * exit) = a car that entered from `entry` may leave through `exit` when it entered the
+    // previous cell from `prev`.
+    std::array<std::uint16_t, 4> priorCar{0xffff, 0xffff, 0xffff, 0xffff};
+    std::uint8_t wormhole = 0;   // bit 1 subway station (never set), 2 tunnel portal, 4 ferry terminal
 };
 
 // One trip search in progress (the original's cSC4TrafficSimulator::StandardTripParams at +0xa70).
@@ -139,7 +157,14 @@ public:
     virtual void OccupiedRect(SC4RectInt32& rect) = 0;
     virtual void* TrafficSource() = 0;                              // lot vslot 0x20
     virtual std::list<cSC4TripData>* TripList(void* source) = 0;    // source vslot 0x18
-    virtual void RefreshTrafficSource(void* source) = 0;            // source vslot 0x20
+    virtual void RefreshTrafficSource(void* source) = 0;            // source vslot 0x20 (UpdateTrafficVolume)
+    // ---- what the work cycle reads (lot slots 21, 2, 28, 59, 12/13) ----
+    virtual void Location(int& x, int& z) { SC4RectInt32 r; OccupiedRect(r); x = r.x0; z = r.z0; }
+    virtual int ZoneType() { return 0; }
+    virtual bool HasRoadAccess() { return false; }
+    virtual ITrafficLot* LinkedLot() { return nullptr; }            // slot 59: the lot whose trips this one shares (none natively)
+    virtual void ClearTripFlag() {}                                 // flag 0x80 (FinishTripMap)
+    virtual bool IsSameLot(ITrafficLot* other) { return other == this; }
 };
 
 // One budget department (road or mass transit) line items by index.
@@ -170,6 +195,7 @@ public:
     virtual void NeighborGetConnectedCities(std::vector<void*>& out) = 0;            // simulator vslot 0xa8 (no filter)
     virtual cISCPropertyHolder* NeighborConnectionProperties(void* connection) = 0;  // connection vslot 0x18
     virtual void NeighborConnectionCell(void* connection, int& x, int& z) = 0;       // connection vslot 0x30
+    virtual int NeighborConnectionType(void* connection) { (void)connection; return -1; }   // connection vslot 0x18
     virtual void* NeighborConnectionCity(void* connection) = 0;                      // connection vslot 0x48
     virtual bool NeighborCityEstablished(void* city) = 0;                            // city vslot 0x158
     virtual void NeighborCityRegionCell(void* city, int& x, int& z) = 0;             // city vslot 0x28
@@ -192,6 +218,34 @@ public:
         (void)holder; (void)purpose; department = 0; cost = 0; return false;
     }
     virtual bool DepartmentFundingFraction(std::uint32_t department, float& fraction) { (void)department; fraction = 0.0f; return false; }
+
+    // ---- the live simulator: agents, the city, the lots and the network pieces (defaults answer "nothing") ----
+    virtual void CityCellCount(int& x, int& z) { x = z = 0; }                                     // city slots 93 / 94
+    virtual void AddAgent(cIGZMessageTarget2* target, int level, const char* name, std::uint32_t flags) { (void)target; (void)level; (void)name; (void)flags; }
+    virtual void RemoveAgent(cIGZMessageTarget2* target) { (void)target; }
+    virtual void AddNotification(cIGZMessageTarget2* target, std::uint32_t message) { (void)target; (void)message; }
+    virtual void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t message) { (void)target; (void)message; }
+    virtual const cISCPropertyHolder* SimulatorExemplar() { return nullptr; }                    // {0x6534284a, 0xe7e2c2db, 0xc9133286}
+    virtual int DayOfMonth() { return 0; }                                                         // simulator GetSimDate
+    virtual std::uint32_t SimDateNumber() { return 0; }
+    // Every lot in the lot manager's list order (slot 15), as views the simulator owns.
+    virtual void AllLots(std::vector<std::unique_ptr<ITrafficLot>>& out) { (void)out; }
+    // The real lot behind a lot-state message's object (a copy of the lot): the lot at its corner, or null.
+    virtual ITrafficLot* LotFromMessage(cIGZUnknown* object) { (void)object; return nullptr; }
+    // The network pieces (occupant type 0xc772bf98) over an inclusive cell rect, one reference each.
+    virtual void NetworkOccupantsInRect(int x0, int z0, int x1, int z1, std::vector<cSC4NetworkOccupant*>& out) {
+        (void)x0; (void)z0; (void)x1; (void)z1; (void)out;
+    }
+    virtual void PositionToCell(float x, float z, int& cellX, int& cellZ) { cellX = int(x / 16.0f); cellZ = int(z / 16.0f); }   // city slot 95
+    virtual float RoadFundingFraction() { return 1.0f; }                                           // roads department +0x50
+    virtual void SetBudgetIncome(bool massTransit, int line, std::int64_t amount) { (void)massTransit; (void)line; (void)amount; }
+    virtual void RecordHistory(std::uint32_t id, std::uint32_t value) { (void)id; (void)value; }   // history warehouse slot 12
+    virtual bool OrdinanceOn(std::uint32_t id) { (void)id; return false; }                         // carpool 0xa2bf1ddc
+    virtual float ResidentialWorkforcePercent(int x, int z) { (void)x; (void)z; return 1.0f; }    // residential slot 30
+    virtual void PostTrafficMapChanged() {}                                                         // 0x69247dc7
+    virtual void PostPotholeMessage3(int x, int z, std::uint32_t data3) { (void)x; (void)z; (void)data3; }   // 0x69247dc8 with data3
+    // The end of a day's work: adapters the host handed out (LotAt) may be dropped now.
+    virtual void EndOfWork() {}
 };
 
 // cISC4TrafficSimulator::TransitSwitchQueryData (0x14 bytes): what the query tool shows for a transit station.
@@ -254,7 +308,7 @@ public:
 class cSC4TrafficSimulator : public cISC4TrafficSimulator, public cIGZMessageTarget2, public cIGZSerializable {
 public:
     cSC4TrafficSimulator(ITrafficHost* host, cRZRandom* random);
-    ~cSC4TrafficSimulator() override = default;
+    ~cSC4TrafficSimulator() override;
 
     bool QueryInterface(std::uint32_t iid, void** out) override;
     std::uint32_t AddRef() override { return ++refCount_; }
@@ -388,6 +442,44 @@ public:
     bool SetupPathFinderForLot(cISC4PathFinder* pathFinder, ITrafficLot* lot);
     StandardTripParams& TripParams() { return tripParams_; }                     // +0xa70
 
+    // ---- the live simulator (traffic-simulator.md §1, §3, §4; traffic-network.md §1, §4.2) ----
+    bool Init();                                                   // 0x0071E7E0
+    bool Shutdown();                                               // 0x00719290
+    bool IsInitialized() const { return initialized_; }
+    void DoPostCityInit();                                         // 0x00720430
+    bool DoDailySimulation();                                      // 0x007215C0 (false: not done for today)
+    void DoMonthlySimulation();                                    // 0x00718AC0
+    // 0x00720F00 with a budget of work units instead of the 4 ms deadline (§3.4 [choice]); true when a phase finished.
+    bool WorkOnSimCycle();
+    void DoConnectionsChanged(int x1, int z1, int x2, int z2);     // 0x0071A860
+    void DoNetworkOccupantChanged(cSC4NetworkOccupant* occupant, bool inserted);   // DoMessage 0x99ef1142 / 0x99ef1143
+    void DoLotActivated(ITrafficLot* lot);                         // 0x00723AF0 (no transit switches or ferries yet)
+    void DoLotDeactivated(ITrafficLot* lot);                       // 0x0071E2F0
+    void UpdateIntersectionData();                                 // 0x0071B9A0
+    bool ConfirmRoute(const std::vector<std::uint8_t>& route) const;   // 0x0070E320
+    // 0x00719910: mode 0 outbound, 1 return leg, 2 both directions.
+    void ApplyRoute(const std::vector<std::uint8_t>& route, std::uint32_t count, const SC4RectInt32& sourceRect, int destX, int destZ,
+                    int mode, std::uint8_t type);
+    std::uint32_t CycleState() const { return cycleState_; }
+    void SetUnitsPerSlice(int units) { unitsPerSlice_ = units < 1 ? 1 : units; }
+
+    cSC4SimGrid<std::uint8_t>* GetCongestionMap() const { return congestionMap_; }          // slot 10
+    cSC4SimGrid<std::uint8_t>* GetAirPollutingTrafficMap() const { return airMap_; }        // slot 8
+    cSC4SimGrid<std::uint8_t>* GetCommercialTrafficMap() const { return commercialMap_; }   // slot 9
+    cSC4SimGrid<std::uint8_t>* GetTripLengthMap() const { return tripLengthMap_; }          // slot 13
+    cSC4SimGrid<float>* GetVolumeMap(int network) const { return unsigned(network) < 6 ? volume_[network] : nullptr; }
+    // One statistics row (§4.9): average volume/capacity, congested cells, the busiest cell and its ratio, records counted.
+    struct TrafficStatsRow { float average = 0; std::uint32_t congested = 0; int maxX = 0, maxZ = 0; float max = 0; std::uint16_t records = 0; };
+    const std::array<TrafficStatsRow, 14>& PublishedStats() const { return statsPublished_; }
+    float AverageCarCommute() const { return avgCarCommute_; }
+    std::uint32_t PassTotal() const { return passTotal_; }
+    const std::array<std::uint32_t, 3>& CommutersAttempted() const { return attempted_; }
+    const std::array<std::uint32_t, 3>& CommutersRouted() const { return routed_; }
+    const std::array<std::uint32_t, 9>& TravelTypeCounts() const { return typeCountsPublished_; }
+    std::uint32_t CellCount(int type) const { return unsigned(type) < 13 ? cellCounts_[type] : 0; }
+    std::uint8_t DestinationByte(int x, int z) const;
+    std::uint32_t FreeDestinations(int k) const { return unsigned(k) < 4 ? std::uint32_t(connectionCounts_[k]) : 0; }
+
     // ---- subnetworks (lots hold property 0x2a4f9c74 with the ids of the subnetworks they touch) ----
     void ClearSubnetworks();                                        // 0x100082bf4: next id back to 1, every cell id to 0
     // Output order is first-found; the original's hash-set order is unspecified.
@@ -478,6 +570,71 @@ private:
     std::vector<TrafficCellConnections> cellConnections_;                         // +0x98, fixed 0x10000 cells
     std::vector<std::vector<std::uint8_t>> cellTripFlags_;                        // +0x80, [x + 1][z + 1]
     StandardTripParams tripParams_;                                               // +0xa70
+
+    // ---- the live simulator ----
+    class PathGraph;
+    friend class PathGraph;
+    PathGraph* graph_ = nullptr;   // owned (TrafficCycle.cpp)
+    cSC4PathFinder* pf_ = nullptr;      // outbound
+    cSC4PathFinder* pf2_ = nullptr;     // return leg
+    bool initialized_ = false;
+    std::uint32_t cycleState_ = 0;
+    int unitsPerSlice_ = 64;
+    int cellsX_ = 0, cellsZ_ = 0;
+    cSC4SimGrid<std::uint8_t>* airMap_ = nullptr;           // 0x89d5c3a2
+    cSC4SimGrid<float>* peakVolume_ = nullptr;              // 0x69d5c3ac
+    cSC4SimGrid<std::uint8_t>* commercialMap_ = nullptr;    // 0xcabd2925 (tract 4)
+    cSC4SimGrid<std::uint8_t>* commercialWork_ = nullptr;   // 0xcabd2926
+    cSC4SimGrid<std::uint8_t>* tripLengthMap_ = nullptr;    // 0x69d5c3bf
+    std::array<cSC4SimGrid<float>*, 6> volume_{};           // 0x69d5c3e0 + n
+    cSC4SimGrid<std::uint8_t>* congestionMap_ = nullptr;    // 0x69d5c402
+    cSC4SimGrid<float>* peakRatio_ = nullptr;               // 0x69d5c40e
+    std::array<std::uint32_t, 13> cellCounts_{};            // per network type (§3.6)
+    double incomeAcc_ = 0, feeAcc_ = 0;
+    float transitIncome_ = 0, tollIncome_ = 0;
+    std::array<std::uint32_t, 3> attempted_{}, routed_{};
+    float carLenSum_ = 0, freightLenSum_ = 0;
+    std::uint32_t carLenCount_ = 0, freightCount_ = 0;
+    float avgCarCommute_ = 0;
+    std::uint8_t freightByte_ = 0;
+    std::array<std::uint32_t, 9> typeCountsBuilding_{}, typeCountsPublished_{};
+    std::uint32_t passTotal_ = 0, processed_ = 0, dayIndex_ = 0, total_ = 0, days_ = 0, toReRoute_ = 0, toSearch_ = 0;
+    std::array<std::uint32_t, 10> passCounters_{};
+    std::uint8_t rerouteBucket_ = 0;
+    int lastDayOfMonth_ = -1;
+    std::uint32_t strategyBucketCounter_ = 0, strategyBucket_ = 0;
+    std::multimap<std::uint32_t, std::pair<int, int>> strategyBuckets_;
+    std::vector<std::unique_ptr<ITrafficLot>> sources_;     // the traffic-source snapshot (lots; neighbour connections: none yet)
+    std::size_t sourceIndex_ = 0;
+    bool continueSearch_ = false;
+    std::array<TrafficStatsRow, 14> statsWork_{}, statsPublished_{};
+    std::array<float, 14> statsCompare_{};
+    std::vector<std::pair<std::uint16_t, float>> accidentList_, accidentCheck_;
+    bool networkChanged_ = false, subnetworksStale_ = false;
+
+    void EnterState(std::uint32_t state);
+    void ResetSources();
+    bool ConfirmTripsPhase(int& units);              // state 16
+    bool SearchPhase(bool reRoute, int& units);      // states 17 / 18
+    void ConfirmSourceTrips(ITrafficLot& source);    // 0x0071D920
+    int PerformPathSearch(ITrafficLot& source, cSC4TripData& trip);   // 0x0071C6C0: 1 found, 0 not found
+    void SetupTripFor(ITrafficLot& source, cSC4TripData& trip);       // 0x0070EC40
+    void CompleteTripSourceCalculations(ITrafficLot& source);         // 0x0070F0A0
+    void FinishTripMap();                            // state 15
+    void CreateMaps();                               // state 2
+    void CreateFinalMap();                           // state 4
+    void StartRecalc();                              // state 0
+    void FinalCalculations();                        // state 8
+    void DumpEdgeDensities();                        // state 7
+    void ReduceEdgeDensities();                      // state 6
+    void ReduceTransitSwitches();                    // state 3
+    void BumpCellCount(int type, bool inserted);
+    void NetworkBookkeeping(cSC4NetworkOccupant* occupant, bool inserted, bool budgets);   // §3.6
+    void SyncBudgetCounters();
+    template <class T> cSC4SimGrid<T>* MakeGrid(std::uint32_t id, int tract);
+    template <class T> void AdoptSavedGrid(cSC4SimGrid<T>*& member, std::uint32_t id);   // Init keeps what Read loaded
+    std::vector<std::uint8_t> savedCongestion_, savedTripLength_;   // the file's maps as loaded (SC4_TRAFFICDEBUG scoring)
+    void ScoreAgainstSaved();
 };
 
 }  // namespace sc4
