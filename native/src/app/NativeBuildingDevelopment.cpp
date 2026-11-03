@@ -352,6 +352,18 @@ float NativeMaxCapacity(int zoneType, std::uint32_t purpose, std::uint32_t wealt
     cSC4BuildingDevelopmentSimulator* simulator = CityBuildingDevelopment();
     return simulator ? simulator->GetMaxCapacity(zoneType, purpose, wealth) : 0.0f;
 }
+void NativeSpecialBuildings(std::list<cRZAutoRefCount<cISC4Occupant>>& out) {
+    out.clear();
+    cSC4BuildingDevelopmentSimulator* simulator = CityBuildingDevelopment();
+    if (!simulator) return;
+    for (cIGZUnknown* object : simulator->GetSpecialBuildings()) {
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(kGZIID_cISC4Occupant, &raw) || !raw) continue;
+        auto* occupant = static_cast<cISC4Occupant*>(raw);
+        out.emplace_back(occupant);   // the list's reference
+        occupant->Release();          // the query's
+    }
+}
 sc4::cSC4Demand* NativeDemandChannel(std::uint32_t type, std::uint32_t keyOffset) {
     cSC4DemandSimulator* demand = CityComponent<cSC4DemandSimulator>(sc4::CityComponent::DemandSimulator, kGZCLSID_cSC4DemandSimulator);
     return demand ? demand->GetDemand(type, keyOffset) : nullptr;

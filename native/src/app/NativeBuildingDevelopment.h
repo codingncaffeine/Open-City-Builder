@@ -2,9 +2,12 @@
 #pragma once
 #include <cstdint>
 
+#include <list>
 #include <vector>
 
-namespace sc4 { struct BuildingProfile; class cSC4Demand; struct DemandBuildingProfile; class cISC4BuildingOccupant; }
+#include "rz/cRZAutoRefCount.h"
+
+namespace sc4 { struct BuildingProfile; class cSC4Demand; struct DemandBuildingProfile; class cISC4BuildingOccupant; class cISC4Occupant; }
 struct cGZPersistResourceKey;
 
 namespace native {
@@ -17,6 +20,7 @@ void InstallBuildingDevelopmentHost();
 sc4::cISC4BuildingOccupant* NativeAddNewBuildingOccupant(std::uint32_t type, float position[3], int rotation);   // vslot 0x1c
 const sc4::BuildingProfile* NativeBuildingProfile(std::uint32_t buildingType);            // vslot 0x138
 float NativeMaxCapacity(int zoneType, std::uint32_t purpose, std::uint32_t wealth);      // vslot 0x168
+void NativeSpecialBuildings(std::list<cRZAutoRefCount<sc4::cISC4Occupant>>& out);              // vslot 0x160
 sc4::cSC4Demand* NativeDemandChannel(std::uint32_t type, std::uint32_t keyOffset);       // SL::spDemandSim vslot 0x30
 std::uint32_t NativeDeveloperType(std::uint32_t purpose, std::int32_t wealth);           // GetDeveloperType_Static
 void NativeAllBuildingTypes(std::vector<std::uint32_t>& out);

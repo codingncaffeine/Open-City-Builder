@@ -678,6 +678,9 @@ bool cSC4BuildingDevelopmentSimulator::Write(cIGZOStream& stream) const {
         // the city-file layout ReadCityRecord reads: the file's own tables around the port's growth marks and flags
         static_cast<cIGZUnknown*>(dbStream)->Release();
         fileHead_.Replay(stream);
+        stream.SetUint32(static_cast<std::uint32_t>(civicOccupants_.size()));
+        for (const cIGZUnknown* occupant : civicOccupants_) SC4WriteGZSerializable(stream, occupant);
+        fileMiddle_.Replay(stream);
         stream.SetUint32(static_cast<std::uint32_t>(growthMarks_.size()));
         for (const auto& mark : growthMarks_) {
             stream.SetUint32(mark.first);
@@ -733,6 +736,7 @@ bool cSC4BuildingDevelopmentSimulator::ReadCityRecord(cIGZIStream& stream) {
     std::uint8_t u8 = 0;
     cRecordTape& head = fileHead_;   // what the port does not model is kept as read (RecordTape.h) and saved back
     head.Clear();
+    fileMiddle_.Clear();
     fileTail_.Clear();
     head.Ref(stream);
     head.Ref(stream);
@@ -743,12 +747,20 @@ bool cSC4BuildingDevelopmentSimulator::ReadCityRecord(cIGZIStream& stream) {
         const std::uint32_t key = head.U32(stream);
         if (cIGZUnknown* developer = head.Ref(stream)) loadedDevelopers_.emplace_back(key, developer);
     }
-    count = head.U32(stream);                                  // occupants
+    stream.GetUint32(count);                                   // the civic occupants (+0x88), in list order
     if (count > kMaxCount) return false;
-    for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) head.Ref(stream);
-    count = head.U32(stream);                                  // developer type -> byte
+    for (cIGZUnknown* occupant : civicOccupants_) if (occupant) occupant->Release();
+    civicOccupants_.clear();
+    for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) {
+        void* raw = nullptr;
+        SC4ReadGZSerializable(stream, kGZIID_cISC4Occupant, &raw, false);   // one reference, kept by the list
+        if (raw) civicOccupants_.push_back(static_cast<cIGZUnknown*>(raw));
+    }
+    cRecordTape& middle = fileMiddle_;
+    middle.Clear();
+    count = middle.U32(stream);                                // developer type -> byte
     if (count > kMaxCount) return false;
-    for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) { head.U32(stream); head.U8(stream); }
+    for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) { middle.U32(stream); middle.U8(stream); }
     growthMarks_.clear();
     stream.GetUint32(count);                                   // growth marks: key -> set of cells
     if (count > kMaxCount) return false;

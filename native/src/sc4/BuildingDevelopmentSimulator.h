@@ -304,6 +304,8 @@ public:
     cRZString& GetBuildingName(std::uint32_t type) const;
     cRZString& GetExemplarName(std::uint32_t type) const;
     float GetMaxCapacity(int zoneType, std::uint32_t purpose, std::uint32_t wealth) const;   // @ 0x1001533ee: returns a float (the stored value truncated to int, then converted back)
+    // vslot 0x160 GetSpecialBuildings: the civic occupants (+0x88) the growth developers' landmark pass walks
+    const std::list<cIGZUnknown*>& GetSpecialBuildings() const { return civicOccupants_; }
 
     // placement
     void SetPlacementServices(IBuildingPlacementServices* services) { placement_ = services; }
@@ -391,7 +393,7 @@ private:
     std::map<std::uint32_t, std::set<std::pair<int, int>>> growthMarks_;       // mGrowthMarks
     // the city-file record's tables the port does not model (kept as read, saved back around the growth marks)
     bool fromCityFile_ = false;
-    cRecordTape fileHead_, fileTail_;
+    cRecordTape fileHead_, fileMiddle_, fileTail_;   // around the live civic list and growth marks
     bool cheatPlumbing_ = false, cheatPower_ = false, cheatCaps_ = false;       // +0x1c9..0x1cb
     bool cheatDebug_ = false, cheatCoffee_ = false;                             // +0x1cc, +0x1cd
     bool plannedGrowth_ = false;                                                // +0x1c8 (never set: Grow, not PlanGrowth)
