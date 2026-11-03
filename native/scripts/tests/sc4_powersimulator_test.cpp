@@ -1,282 +1,193 @@
-#include <cmath>
+// cSC4PowerSimulator (Mac i386 port): wiring from occupants, the grid flood from a plant, the powered cells and supply values, the
+// plant's share of the output, removal, the five-state pass and the version 6 stream.
 #include <cstdio>
 #include <map>
+#include <set>
+#include <vector>
 
+#include "rz/PortMemoryStreams.h"
+#include "rz/cRZMessage2Standard.h"
+#include "sc4/Occupant.h"
 #include "sc4/PowerSimulator.h"
 #include "sc4/SCProperty.h"
+#include "sc4/SCPropertyHelp.h"
 
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
-
 using namespace sc4;
 
 namespace {
+constexpr int kCells = 64;
 
-struct Occ : IPowerOccupant {
-    cSCPropertyHolder props;
-    std::uint32_t type = kPowerOccupantBuilding;
-    PowerRect bounds{};
-    bool hasAnchor = false;
-    int ax = 0, az = 0;
-    std::uint32_t OccupantType() override { return type; }
-    cISCPropertyHolder* PropertyHolder() override { return &props; }
-    void GetBounds(PowerRect& out) override { out = bounds; }
-    bool GetAnchorCell(int& x, int& z) override { x = ax; z = az; return hasAnchor; }
+// A building on a cell rectangle (its bounding box spans the cells, its position is the centre).
+struct Building final : cISC4Occupant {
+    SC4CellRect cells;
+    cSCPropertyHolder properties;
+    int refs = 1;
+    Building(int x0, int z0, int x1, int z1) { cells.x0 = x0; cells.z0 = z0; cells.x1 = x1; cells.z1 = z1; }
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return std::uint32_t(++refs); }
+    std::uint32_t Release() override { return std::uint32_t(--refs); }
+    bool Init() override { return true; }
+    bool Shutdown() override { return true; }
+    bool IsInitialized() const override { return true; }
+    cISCPropertyHolder* AsPropertyHolder() override { return &properties; }
+    std::uint32_t GetType() const override { return kPowerOccupantBuilding; }
+    void GetPosition(float* xyz) override {
+        xyz[0] = (float(cells.x0) + float(cells.x1 + 1)) * 8.0f;
+        xyz[1] = 0;
+        xyz[2] = (float(cells.z0) + float(cells.z1 + 1)) * 8.0f;
+    }
+    void SetPosition(const float*) override {}
+    void GetBoundingBox(float* lo, float* hi) override {
+        lo[0] = float(cells.x0) * 16.0f + 1.0f; lo[1] = 0; lo[2] = float(cells.z0) * 16.0f + 1.0f;
+        hi[0] = float(cells.x1 + 1) * 16.0f - 1.0f; hi[1] = 10; hi[2] = float(cells.z1 + 1) * 16.0f - 1.0f;
+    }
+    void GetBoundingCityCells(SC4CellRect& out) override { out = cells; }
+    void SetRemovalFlags(int) override {}
+    void UnsetRemovalFlags(int) override {}
+    bool CanRemove(int) override { return true; }
+    void PostOccupantMessage(std::uint32_t, std::uint32_t) override {}
+    std::uint32_t GetHighlight() const override { return 0; }
+    void SetHighlight(int, bool) override {}
+    void SetVisibility(bool, bool) override {}
+    cISC43DPlaceableObject* GetPlaceableObject() const override { return nullptr; }
+    cISC43DPlaceableObject* GetOrCreatePlaceableObject() override { return nullptr; }
+    void SetPlaceableObject(cISC43DPlaceableObject*) override {}
+    bool IsOccupantGroup(std::uint32_t) const override { return false; }
+    void AddOccupantGroup(std::uint32_t) override {}
+    bool GetOccupantGroups(std::set<std::uint32_t>&) const override { return false; }
+    bool GetOccupantManagerBBox(std::uint8_t*) const override { return false; }
+    void SetOccupantManagerBBox(const std::uint8_t*) override {}
+    bool GetLotTag(std::uint32_t&) const override { return false; }
+    void SetLotTag(std::uint32_t) override {}
+    void SetFlag(std::uint32_t) override {}
+    void SetAllFlags(std::uint32_t) override {}
+    void ClearFlag(std::uint32_t) override {}
+    bool IsFlagSet(std::uint32_t) override { return false; }
+    std::uint32_t GetFlags() override { return 0; }
 };
 
-struct Pole : IPowerPole {
-    bool enabled = false;
-    bool IsEnabled() override { return enabled; }
-    void SetEnabled(bool e) override { enabled = e; }
-};
-
-struct Host : IPowerHost {
-    int cx = 64, cz = 64;
-    std::vector<IPowerOccupant*> all;
-    std::map<std::pair<int, int>, bool> lines;
-    std::map<std::pair<int, int>, int> supply;
-    float ordinance = 1.0f;
-    std::map<IPowerOccupant*, PowerPlantBudgetEntry> budget;
-    float departmentFunding = 0.5f;
-    int CityCellsX() override { return cx; }
-    int CityCellsZ() override { return cz; }
+class Host final : public IPowerHost {
+public:
+    std::vector<cISC4Occupant*> occupants;
+    std::map<std::pair<int, int>, std::uint8_t> supply;
+    std::set<std::pair<int, int>> poweredLots;
+    std::vector<std::uint32_t> posted;
+    std::map<std::uint32_t, std::int64_t> history;
+    std::int64_t generationCost = -1;
+    int CityCellsX() override { return kCells; }
+    int CityCellsZ() override { return kCells; }
     float CellSizeX() override { return 16.0f; }
-    float CellSizeZ() override { return 8.0f; }
-    void OccupantsInRect(const PowerRect&, std::vector<IPowerOccupant*>& out) override { out = all; }
-    bool IsPowerLineCell(int x, int z) override { return lines.count({x, z}) != 0; }
-    void SetSupplyValue(int x, int z, std::uint8_t v) override { supply[{x, z}] = v; }
-    float OrdinancePowerFactor() override { return ordinance; }
-    PowerPlantBudgetEntry GetPlantBudgetEntry(IPowerOccupant* p) override { auto it = budget.find(p); return it == budget.end() ? PowerPlantBudgetEntry{} : it->second; }
-    float DepartmentFundingFraction() override { return departmentFunding; }
-    int CityDay() override { return 1; }
+    float CellSizeZ() override { return 16.0f; }
+    void OccupantsInRect(const PowerRect& rect, std::vector<cISC4Occupant*>& out) override {
+        for (cISC4Occupant* occupant : occupants) {
+            SC4CellRect c;
+            occupant->GetBoundingCityCells(c);
+            if (c.x1 >= rect.left && c.x0 <= rect.right && c.z1 >= rect.top && c.z0 <= rect.bottom) out.push_back(occupant);
+        }
+    }
+    bool WireCell(cISC4Occupant*, int&, int&) override { return false; }
+    bool IsZoned(int, int) override { return false; }
+    void SetSupplyValue(int x, int z, std::uint8_t value) override { supply[{x, z}] = value; }
+    float OrdinancePowerFactor() override { return 1.0f; }
+    PowerPlantBudgetEntry GetPlantBudgetEntry(cISC4Occupant*) override { PowerPlantBudgetEntry e; e.tracked = true; e.funding = 1.0f; return e; }
+    float DepartmentFundingFraction() override { return 1.0f; }
+    void SetGenerationCost(std::int64_t cost) override { generationCost = cost; }
+    void SetOccupantLotPowered(cISC4Occupant* building) override {
+        SC4CellRect c;
+        building->GetBoundingCityCells(c);
+        poweredLots.insert({c.x0, c.z0});
+    }
+    void PostMessage(std::uint32_t type, std::uint32_t, const PowerRect*) override { posted.push_back(type); }
+    void AddHistory(std::uint32_t id, std::int64_t value) override { history[id] = value; }
 };
 
+void MakeConsumer(Building& b, std::uint32_t draw) { cSCPropertyHelp::SetPropertyValue(&b.properties, kPowerConsumed, draw); }
+void MakePlant(Building& b, std::uint32_t output) {
+    cSCPropertyHelp::SetPropertyValue(&b.properties, kPowerPlantMaxProduced, output);
+    cSCPropertyHelp::SetPropertyValue(&b.properties, kPowerPlantPowerType, std::int32_t(1));
+    cSCPropertyHelp::SetPropertyValue(&b.properties, kPowerPlantConditionCurve, std::vector<float>{0.0f, 1.0f, 1.0f, 1.0f});
+    cSCPropertyHelp::SetPropertyValue(&b.properties, 0xc910b4ce, 2.0f);   // generation cost per unit
+}
+
+void RunPass(cSC4PowerSimulator& power) {
+    for (int i = 0; i < 6 && !(power.IdleState() == 4 && !power.RefreshRequested()); ++i) power.DoIdle();
+}
 }  // namespace
 
 int main() {
     Host host;
-    cRZRandom random(5);
-    cSC4PowerSimulator sim(&host, &random);
-    CHECK(kGZCLSID_cSC4PowerSimulator == 0x0990c005);
-    sim.ReadSimulatorTunableValues(nullptr);
-    CHECK(sim.NeighborhoodRadius() == 2 && sim.value318 == 1.1f && sim.conditionSafe == 0.6f && sim.value3f4 == 1.2f);
-    CHECK(sim.strikeEfficiency.value == 0.5f && sim.value3fc == 10 && sim.value400 == 0.9f && sim.ordinanceFactor == 1.0f);
-    CHECK(sim.fundingEfficiencyCurve.GetOutputValue(120.0f) == 110.0f && sim.poleFundingCurve.GetOutputValue(0.0f) == -0.02f);
-    CHECK(!sim.IsOnStrike() && sim.GetChanceOfStrike() == 0.0f);
+    cRZRandom random(7);
+    auto* power = new cSC4PowerSimulator(&host, &random);
+    power->AddRef();
+    CHECK(power->Init());
+    CHECK(power->IdleState() == 4 && !power->IsPowered(4, 4));
 
-    // ---- tunables from an exemplar
-    {
-        cSCPropertyHolder ex;
-        cSCPropertyHelp::SetPropertyValue(&ex, 0xa911e2f1, std::uint32_t(3));
-        cSCPropertyHelp::SetPropertyValue(&ex, 0xe911e2fc, 250.0f);
-        cSCPropertyHelp::SetPropertyValue(&ex, 0x29121e8b, 80.0f);
-        cSCPropertyHelp::SetPropertyValue(&ex, 0x2912202e, std::int32_t(4));
-        cSCPropertyHelp::SetPropertyValue(&ex, 0xaa713782, std::vector<float>{0.0f, 1.0f, 100.0f, 2.0f});
-        host.ordinance = 0.75f;
-        sim.ReadSimulatorTunableValues(&ex);
-        CHECK(sim.NeighborhoodRadius() == 3 && sim.value318 == 2.5f && std::fabs(sim.conditionSafe - 0.8f) < 1e-6f && sim.value3fc == 4);
-        CHECK(sim.poleFundingCurve.GetOutputValue(0.0f) == 1.0f && sim.ordinanceFactor == 0.75f);
-        host.ordinance = 1.0f;
-        sim.ReadSimulatorTunableValues(nullptr);
-        CHECK(sim.NeighborhoodRadius() == 2 && sim.ordinanceFactor == 1.0f);
-    }
+    Building plant(2, 2, 3, 3), near(4, 4, 4, 4), far(40, 40, 40, 40);
+    MakePlant(plant, 100);
+    MakeConsumer(near, 10);
+    MakeConsumer(far, 5);
+    host.occupants = {&plant, &near, &far};
+    for (cISC4Occupant* occupant : host.occupants) power->DoOccupantInserted(occupant);
+    CHECK(power->Plants().size() == 1 && power->GetPowerPlantCount() == 1 && power->GetPowerPlantCount(1) == 1);
+    CHECK(power->consumers == 2 && power->totalConsumption == 15);
+    CHECK(power->IsWired(0, 0) && power->IsWired(6, 6) && !power->IsWired(7, 7) && power->IsWired(38, 42));   // radius 2
 
-    // ---- coordinates and neighbourhoods
-    int cx, cz;
-    sim.PositionToCell(40.0f, 20.0f, cx, cz);
-    CHECK(cx == 2 && cz == 2);
-    float px, pz;
-    sim.CellToPosition(3, 5, px, pz);
-    CHECK(px == 48.0f && pz == 40.0f);
-    int sx, sz;
-    sim.CellToStandardCityCell(7, 9, sx, sz);
-    CHECK(sx == 7 && sz == 9);
-    PowerRect r;
-    sim.GetNeighborhoodOfPoint(10, 10, r);
-    CHECK(r.left == 8 && r.top == 8 && r.right == 12 && r.bottom == 12);
-    sim.GetNeighborhoodOfPoint(1, 63, r);
-    CHECK(r.left == 0 && r.top == 61 && r.right == 3 && r.bottom == 63);
-    sim.GetNeighborhoodOfPoint(2, 62, r);
-    CHECK(r.left == 0 && r.right == 4 && r.bottom == 63);
-    r = {5, 3, 20, 62};
-    sim.ExpandRectToIncludeNeighborhood(r);
-    CHECK(r.left == 3 && r.top == 1 && r.right == 22 && r.bottom == 63);
+    power->DoIdle();                                    // not established yet: nothing happens
+    CHECK(power->IdleState() == 4);
+    auto* established = new cRZMessage2Standard();
+    established->AddRef();
+    established->SetType(kMsgPowerCityEstablished);
+    power->DoMessage(established);
+    established->Release();
+    RunPass(*power);
+    CHECK(power->IdleState() == 4);
+    CHECK(power->IsPowered(4, 4) && power->IsPowered(0, 0) && !power->IsPowered(40, 40));
+    CHECK(power->GetPoweredConsumerCount() == 1 && power->GetUnpoweredConsumerCount() == 1);
+    // the plant supplies 100 * 1.1 units; the grid used 10 of them, and the plant reports its share of what was used
+    CHECK(power->GetMonthlyProduction() == 100 && power->GetMonthlyConsumption() == 10 && power->GetMonthlyDemand() == 10);
+    std::int32_t current = -1;
+    cSCPropertyHelp::GetPropertyValue(&plant.properties, kPowerPlantCurrentProduced, current);
+    CHECK(current == 10);
+    CHECK(power->MonthlyPower()[std::size_t(power->CurrentMonth())][1] == 10);
+    CHECK((host.supply[{4, 4}] == 2 && host.supply.count({40, 40}) == 0));   // only the cells that changed are written
+    CHECK(host.generationCost == 20);                   // booked after the flood: 10 units at 2.0 each
+    CHECK(host.history[0xaa11f7ce] == 100 && host.history[0xaa11fb59] == 50);   // produced; half the consumers unpowered
+    bool announced = false;
+    for (std::uint32_t type : host.posted) announced |= type == kMsgPowerGridChanged;
+    CHECK(announced);
 
-    // ---- bit maps
-    sim.InitMarkAndWireBits();
-    CHECK(!sim.IsWired(5, 5) && !sim.IsPowered(5, 5));
-    Occ building;
-    building.bounds = {10, 10, 11, 11};
-    Occ pole;
-    pole.type = kPowerOccupantPole; pole.hasAnchor = true; pole.ax = 30; pole.az = 30;
-    Occ pylon;
-    pylon.type = kPowerOccupantPylon; pylon.hasAnchor = true; pylon.ax = 40; pylon.az = 41;
-    Occ pylonOff;
-    pylonOff.type = kPowerOccupantPylon; pylonOff.hasAnchor = false;
-    Occ other;
-    other.type = 0x12345678; other.bounds = {50, 50, 50, 50};
-    Occ ignored;
-    ignored.bounds = {20, 20, 20, 20};
-    CHECK(cSC4PowerSimulator::SetsWireBits(&building) && cSC4PowerSimulator::SetsWireBits(&pole) && cSC4PowerSimulator::SetsWireBits(&pylon));
-    CHECK(!cSC4PowerSimulator::SetsWireBits(&other));
-    host.all = {&building, &pole, &pylon, &pylonOff, &other, &ignored};
-    host.lines[{5, 5}] = true;
-    PowerRect area{0, 0, 63, 63};
-    sim.UpdateWireBits(area, &ignored);
-    CHECK(sim.IsWired(10, 10) && sim.IsWired(8, 8) && sim.IsWired(13, 13) && !sim.IsWired(14, 14) && !sim.IsWired(7, 9));   // building 10..11 +-2
-    CHECK(sim.IsWired(30, 30) && sim.IsWired(32, 32) && !sim.IsWired(33, 33));       // pole point +-2
-    CHECK(sim.IsWired(40, 41) && !sim.IsWired(41, 41) && !sim.IsWired(40, 42));      // pylon: single cell, not expanded
-    CHECK(!sim.IsWired(50, 50) && !sim.IsWired(20, 20));                              // non wire types / ignored occupant
-    CHECK(sim.IsWired(5, 5) && sim.IsWired(3, 3) && sim.IsWired(7, 7) && !sim.IsWired(8, 5));   // power line cell: radius-2 square
-    CHECK((host.supply[{10, 10}] == 1) && (host.supply[{0, 0}] == 0));
-    // powered bits show up in the supply value
-    Bit1_PixelSet(sim.PoweredBits(), 64, 10, 10);   // slots (size, column, row), see TestBit in PowerSimulator.cpp
-    sim.UpdateWireBits({9, 9, 11, 11}, nullptr);
-    CHECK(sim.IsPowered(10, 10) && !sim.IsPowered(9, 9));
-    sim.ResetWireBits({0, 0, 63, 63});
-    CHECK(!sim.IsWired(10, 10));
-    // cell changes grow the pending rectangle
-    host.lines.clear();
-    CHECK(sim.CellChanged(10, 10, 11, 11));
-    CHECK(sim.HasPendingRect() && sim.DirtyFlag() && sim.PendingRect().left == 8 && sim.PendingRect().right == 13);
-    sim.CellChanged(30, 5, 31, 6);
-    CHECK(sim.PendingRect().left == 8 && sim.PendingRect().top == 3 && sim.PendingRect().right == 33 && sim.PendingRect().bottom == 13);
-    CHECK(!sim.IsWired(10, 10));      // not a power line cell: no wiring
-    host.lines[{40, 40}] = true;
-    sim.CellChanged(40, 40, 40, 40);
-    CHECK(sim.IsWired(38, 38) && sim.IsWired(42, 42));
-    sim.ShutdownMarkAndWireBits();
+    // a consumer placed on a powered cell has power at once
+    Building late(5, 5, 5, 5);
+    MakeConsumer(late, 1);
+    host.occupants.push_back(&late);
+    power->DoOccupantInserted(&late);
+    CHECK((host.poweredLots.count({5, 5}) == 1 && host.poweredLots.count({40, 40}) == 0));
 
-    // ---- plants
-    Occ plantA, plantB;
-    cSCPropertyHelp::SetPropertyValue(&plantA.props, kPowerPlantMaxProduced, std::uint32_t(1000));
-    cSCPropertyHelp::SetPropertyValue(&plantB.props, kPowerPlantMaxProduced, std::uint32_t(500));
-    cSCPropertyHelp::SetPropertyValue(&plantA.props, kPowerPlantPowerType, std::int32_t(2));
-    cSCPropertyHelp::SetPropertyValue(&plantB.props, kPowerPlantPowerType, std::int32_t(3));
-    CHECK(sim.GetCurrentPowerProduced(nullptr) == 0);
-    host.budget[&plantA] = {true, 1.0f, true, 1200};
-    host.budget[&plantB] = {true, 0.5f, true, 700};
-    // condition curve of a plant: wear -> percent
-    cSCPropertyHelp::SetPropertyValue(&plantA.props, kPowerPlantConditionCurve, std::vector<float>{0.0f, 1.0f, 1.0f, 0.5f});
-    cSCPropertyHelp::SetPropertyValue(&plantA.props, kPowerPlantWear, 0.0f);
-    cSCPropertyHelp::SetPropertyValue(&plantB.props, kPowerPlantConditionCurve, std::vector<float>{0.0f, 1.0f, 1.0f, 0.5f});
-    cSCPropertyHelp::SetPropertyValue(&plantB.props, kPowerPlantWear, 1.0f);
-    CHECK(sim.GetCurrentPlantConditionPercent(&plantA) == 1.0f && sim.GetCurrentPlantConditionPercent(&plantB) == 0.5f);
-    CHECK(sim.GetCurrentPlantConditionPercent(&building) == 0.0f && sim.GetCurrentPlantConditionPercent(nullptr) == 0.0f);
-    // efficiency = funded curve (0..110%) * condition; default curve at 100% funding -> 1.0
-    CHECK(std::fabs(sim.GetCurrentPlantEfficiencyPercent(&plantA) - 1.0f) < 1e-6f);
-    CHECK(std::fabs(sim.GetCurrentPlantEfficiencyPercent(&plantB) - 0.5f * 0.5f) < 1e-6f);     // 50% funding -> 0.5, condition 0.5
-    CHECK(sim.GetCurrentPowerProduced(&plantA) == 1000 && sim.GetCurrentPowerProduced(&plantB) == 125);
-    Occ untracked;
-    cSCPropertyHelp::SetPropertyValue(&untracked.props, kPowerPlantMaxProduced, std::uint32_t(100));
-    CHECK(sim.GetCurrentPowerProduced(&untracked) == 0);            // no condition curve -> zero
-    SC4Percentage fund;
-    CHECK(sim.GetPowerPlantFundingPercentage(&plantB, fund) && fund.value == 0.5f && !sim.GetPowerPlantFundingPercentage(&untracked, fund));
-    std::int64_t cost = 0;
-    CHECK(sim.GetMonthlyPowerGenerationCost(&plantB, cost) && cost == 700 && !sim.GetMonthlyPowerGenerationCost(&untracked, cost));
-    std::uint32_t produced = 0, current = 99;
-    CHECK(sim.GetOccupantPowerProduced(&plantB, produced, current) && produced == 125 && current == 0);
-    cSCPropertyHelp::SetPropertyValue(&plantB.props, kPowerPlantCurrentProduced, std::int32_t(77));
-    CHECK(sim.GetOccupantPowerProduced(&plantB, produced, current) && current == 77);
-    CHECK(!sim.GetOccupantPowerProduced(&building, produced, current));
-    std::uint32_t maxOut = 0;
-    CHECK(cSC4PowerSimulator::GetOccupantMaxPowerProduced(&plantA, maxOut) && maxOut == 1000);
-    // plant list
-    sim.Plants() = {{&plantA, 0}, {&plantB, 0}};
-    {
-        std::list<IPowerOccupant*> out;
-        sim.GetPowerPlants(out);
-        CHECK(out.size() == 2 && out.front() == &plantA);
-    }
-    cSCPropertyHelp::SetPropertyValue(&plantA.props, kPowerPlantWear, 0.4f);
-    cSCPropertyHelp::SetPropertyValue(&plantB.props, kPowerPlantWear, 0.8f);
-    IPowerOccupant *lowest = nullptr, *worn = nullptr;
-    SC4Percentage lowestFunding;
-    int wearPercent = 0;
-    sim.FindPowerPlants(&lowest, &lowestFunding, &worn, &wearPercent);
-    CHECK(lowest == &plantB && lowestFunding.value == 0.5f);
-    CHECK(worn == &plantB && wearPercent == int(0.8f / 99.0f * 100.0f));
-    cSCPropertyHelp::SetPropertyValue(&plantA.props, 0xea1cf221, 0.5f);       // plant A wears out at 0.5: ratio 0.8
-    cSCPropertyHelp::SetPropertyValue(&plantA.props, 0xea1cf222, 0.5f);
-    sim.FindPowerPlants(nullptr, nullptr, &worn, &wearPercent);
-    CHECK(worn == &plantA && wearPercent == int(0.8f * 100.0f));
-    // visiting plants: state 1 plants record their share of the produced power
-    sim.usedCapacity6c = 3;
-    sim.Plants() = {{&plantA, 1}, {&plantB, 2}};
-    sim.MarkPowerPlantsAsVisited(500, 1000);
-    CHECK(sim.Plants().front().state == 2 && sim.Plants().back().state == 2);
-    std::int32_t recorded = 0;
-    cSCPropertyHelp::GetPropertyValue(&plantA.props, kPowerPlantCurrentProduced, recorded);
-    CHECK(recorded == 400);                                                   // 1000 * condition 0.8 * 0.5
-    CHECK(sim.MonthlyPower()[0][2] == 400 && sim.MonthlyPower()[0][3] == 0);
-    sim.Plants() = {{&plantA, 1}};
-    sim.MarkPowerPlantsAsVisited(500, 0);                                      // capacity 0 divides by 1
-    cSCPropertyHelp::GetPropertyValue(&plantA.props, kPowerPlantCurrentProduced, recorded);
-    CHECK(recorded == 800 * 500);
-    sim.usedCapacity6c = 0;
-    sim.Plants() = {{&plantA, 1}};
-    sim.MarkPowerPlantsAsVisited(500, 1000);
-    cSCPropertyHelp::GetPropertyValue(&plantA.props, kPowerPlantCurrentProduced, recorded);
-    CHECK(recorded == 0);
+    // the stream keeps the grid
+    PortMemoryOStream out;
+    CHECK(power->Write(out));
+    auto* copy = new cSC4PowerSimulator(&host, &random);
+    copy->AddRef();
+    PortMemoryIStream in(out.bytes().data(), out.bytes().size());
+    CHECK(copy->Read(in));
+    CHECK(copy->IsPowered(4, 4) && !copy->IsPowered(40, 40) && copy->IsWired(38, 42));
+    CHECK(copy->GetMonthlyProduction() == 100 && copy->consumers == 3 && copy->CurrentMonth() == power->CurrentMonth());
+    CHECK(copy->Plants().size() == 1 && copy->IdleState() == power->IdleState());
+    copy->Release();
 
-    // ---- poles
-    std::vector<Pole> poles(10);
-    for (auto& p : poles) sim.Poles().push_back(&p);
-    sim.SetPoleCount(10);
-    auto enabledCount = [&] { int n = 0; for (auto& p : poles) n += p.enabled; return n; };
-    sim.poleFundingCurve.SetResponseCurveData(std::vector<SC4Point>{{0.0f, -0.5f}, {100.0f, 0.25f}});   // 0% funding: accumulate 0.5
-    sim.ApplyPoleFunding(SC4Percentage{0.0f});
-    CHECK(sim.EnabledPoleCount() == 5 && enabledCount() == 5);
-    sim.ApplyPoleFunding(SC4Percentage{1.0f});          // accumulator 0.5 - 0.25 -> 0.25 -> 2 poles
-    CHECK(sim.EnabledPoleCount() == 2 && enabledCount() == 2);
-    sim.ApplyPoleFunding(SC4Percentage{0.0f});
-    sim.ApplyPoleFunding(SC4Percentage{0.0f});          // clamps at 1.0 -> all poles
-    CHECK(sim.EnabledPoleCount() == 10 && enabledCount() == 10);
-    for (int i = 0; i < 6; ++i) sim.ApplyPoleFunding(SC4Percentage{1.0f});   // clamps at 0
-    CHECK(sim.EnabledPoleCount() == 0 && enabledCount() == 0);
-    CHECK(sim.RecomputeInfrastructureCosts({100, 250}) && sim.InfrastructureCost() == 350);
-    CHECK(!sim.RecomputeInfrastructureCosts({350}) && sim.RecomputeInfrastructureCosts({}) && sim.InfrastructureCost() == 0);
+    // the plant goes: its cells are rewired from what is left and the next pass powers nothing
+    host.occupants = {&near, &far, &late};
+    power->DoOccupantRemoved(&plant);
+    CHECK(power->Plants().empty() && power->GetPowerPlantCount() == 0 && power->RefreshRequested());
+    RunPass(*power);
+    CHECK(!power->IsPowered(4, 4) && power->GetPoweredConsumerCount() == 0);
+    CHECK((host.supply[{4, 4}] == 1));                    // still wired (the consumers wire their neighbourhood)
+    CHECK(plant.refs == 1);                             // the plant list released its reference
 
-    // ---- monthly statistics ring
-    {
-        cSC4PowerSimulator m(&host, &random);
-        m.AnnualPower()[0] = 100;
-        m.AnnualPower()[3] = 40;
-        m.MonthlyPower()[1][0] = 30;
-        m.MonthlyPower()[1][3] = 15;
-        m.MonthlyPower()[0][3] = 5;
-        m.usedCapacity6c = 4;
-        m.capacity70 = 10;
-        m.SetPoleCount(0);
-        host.departmentFunding = 1.0f;
-        m.DoMonthlySimulation();
-        CHECK(m.CurrentMonth() == 1);
-        CHECK(m.AnnualPower()[0] == 70 && m.AnnualPower()[3] == 25);       // the month leaving the ring is subtracted
-        CHECK(m.MonthlyPower()[1][0] == 0 && m.MonthlyPower()[1][3] == 0 && m.MonthlyPower()[0][3] == 5);
-        CHECK(m.ratio94 == float((4 - 10) / 4));                            // integer division, as in the original
-        CHECK(m.DirtyFlag() && m.SecondDirtyFlag());
-        m.usedCapacity6c = 12;
-        for (int i = 0; i < 12; ++i) m.DoMonthlySimulation();
-        CHECK(m.CurrentMonth() == 1 && m.ratio94 == 0.0f);
-        m.AnnualPower()[2] = 9;
-        CHECK(m.GetAnnualConsumptionByPowerType(2) == 9);
-    }
-
-    {   // statistics getters return the counters at their original offsets
-        cSC4PowerSimulator g(&host, &random);
-        g.monthlyProduction80 = 1; g.monthlyConsumption84 = 2; g.monthlyImport88 = 3; g.monthlyExport8c = 4;
-        g.monthlyDemand90 = 5; g.poweredConsumers9c = 6; g.unpoweredConsumersA0 = 7; g.monthlyRequirementA4 = 8;
-        g.plantCount = 9; g.overworkedPlants = 10; g.agedPlants = 11; g.distressedPlants = 12;
-        g.plantCountByType[2] = 13; g.plantCountTypeExtra = 14; g.SetPoleCount(15);
-        CHECK(g.GetMonthlyProduction() == 1 && g.GetMonthlyConsumption() == 2 && g.GetMonthlyImport() == 3 &&
-              g.GetMonthlyExport() == 4 && g.GetMonthlyDemand() == 5 && g.GetPoweredConsumerCount() == 6 &&
-              g.GetUnpoweredConsumerCount() == 7 && g.GetMonthlyRequirement() == 8);
-        CHECK(g.GetPowerPlantCount() == 9 && g.GetOverworkedPowerPlantCount() == 10 && g.GetAgedPowerPlantCount() == 11 &&
-              g.GetDistressedPowerPlantCount() == 12 && g.GetPowerPlantCount(2) == 13 && g.GetPowerPlantCount(9) == 14 &&
-              g.GetPowerPlantCount(7) == 0 && g.GetPowerPoleCount() == 15);
-    }
-
-    if (failures) return 1;
-    std::printf("sc4_powersimulator: all passed\n");
-    return 0;
+    CHECK(power->Shutdown());
+    power->Release();
+    std::printf(failures ? "FAILED\n" : "sc4_powersimulator: all passed\n");
+    return failures ? 1 : 0;
 }

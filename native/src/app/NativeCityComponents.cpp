@@ -40,7 +40,7 @@ bool Skipped(const char* name, bool init) {
 
 // Components whose recovered class has a no-argument Init (the list in citycomp/CityComponentInit.h, one TU per class). Not there
 // because their Init / Shutdown are not recovered (each is a to-do): cSC4LotDeveloper, cSC4FireProtectionSimulator, cSC4FloraSimulator,
-// cSC4PlumbingSimulator (Init), cSC4PoliceSimulator, cSC4PollutionSimulator, cSC4PowerSimulator, cSC4ResidentialSimulator,
+// cSC4PlumbingSimulator (Init), cSC4PoliceSimulator, cSC4PollutionSimulator, cSC4ResidentialSimulator,
 // cSC4TrafficSimulator, cSC4CrimeSimulator (Init takes the tunables: the slot-0x18 wrapper is not recovered), the effects manager,
 // the disaster layer and the demolition utility.
 bool Dispatch(cIGZUnknown* object, bool init) {

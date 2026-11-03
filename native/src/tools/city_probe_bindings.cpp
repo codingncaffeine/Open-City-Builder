@@ -81,36 +81,35 @@ public:
     int CityCellsZ() override { Seam("IPowerHost::CityCellsZ"); return {}; }
     float CellSizeX() override { Seam("IPowerHost::CellSizeX"); return 0; }
     float CellSizeZ() override { Seam("IPowerHost::CellSizeZ"); return 0; }
-    void OccupantsInRect(const PowerRect& rect, std::vector<IPowerOccupant*>& out) override { Seam("IPowerHost::OccupantsInRect");}
-    bool IsPowerLineCell(int x, int z) override { Seam("IPowerHost::IsPowerLineCell"); return false; }
-    void SetSupplyValue(int x, int z, std::uint8_t value) override { Seam("IPowerHost::SetSupplyValue");}
+    void OccupantsInRect(const PowerRect&, std::vector<cISC4Occupant*>&) override { Seam("IPowerHost::OccupantsInRect"); }
+    bool WireCell(cISC4Occupant*, int&, int&) override { Seam("IPowerHost::WireCell"); return false; }
+    bool IsZoned(int, int) override { Seam("IPowerHost::IsZoned"); return false; }
+    void SetSupplyValue(int, int, std::uint8_t) override { Seam("IPowerHost::SetSupplyValue"); }
     float OrdinancePowerFactor() override { Seam("IPowerHost::OrdinancePowerFactor"); return 0; }
-    PowerPlantBudgetEntry GetPlantBudgetEntry(IPowerOccupant* plant) override { Seam("IPowerHost::GetPlantBudgetEntry"); return {}; }
+    PowerPlantBudgetEntry GetPlantBudgetEntry(cISC4Occupant*) override { Seam("IPowerHost::GetPlantBudgetEntry"); return {}; }
     float DepartmentFundingFraction() override { Seam("IPowerHost::DepartmentFundingFraction"); return 0; }
-    int CityDay() override { Seam("IPowerHost::CityDay"); return {}; }
-    // The city file's grid, plant and pole references are not resolved by the port's power simulator: they are kept as read
-    // and written back in the same order (Write calls these in Read's order, with null plants and poles).
-    bool ReadPowerGrid(cIGZIStream& stream) override {
-        powerGrid_ = cRetainedReference();
-        plants_.clear();
-        poles_.clear();
-        return powerGrid_.Read(stream);
+    // The probe does not resolve the city file's department, grid, plant and pole references: they are kept as read and written
+    // back in the same order (Write calls these in Read's order).
+    bool ReadDepartment(cIGZIStream& stream) override {
+        department_ = cRetainedReference();
+        occupants_.clear();
+        return department_.Read(stream);
     }
     bool ReadSupplyGrid(cIGZIStream& stream) override { supplyGrid_ = cRetainedReference(); return supplyGrid_.Read(stream); }
-    bool ReadPlant(cIGZIStream& stream, IPowerOccupant** out) override { *out = nullptr; plants_.emplace_back(); return plants_.back().Read(stream); }
-    bool ReadPole(cIGZIStream& stream, IPowerPole** out) override { *out = nullptr; poles_.emplace_back(); return poles_.back().Read(stream); }
-    void WritePowerGrid(cIGZOStream& stream) override { plantAt_ = poleAt_ = 0; powerGrid_.Write(stream); }
-    void WriteSupplyGrid(cIGZOStream& stream) override { supplyGrid_.Write(stream); }
-    void WritePlant(cIGZOStream& stream, IPowerOccupant*) override {
-        if (plantAt_ < plants_.size()) plants_[plantAt_++].Write(stream); else SC4WriteGZSerializable(stream, nullptr);
+    bool ReadOccupant(cIGZIStream& stream, std::uint32_t, cISC4Occupant** out) override {
+        *out = nullptr;
+        occupants_.emplace_back();
+        return occupants_.back().Read(stream);
     }
-    void WritePole(cIGZOStream& stream, IPowerPole*) override {
-        if (poleAt_ < poles_.size()) poles_[poleAt_++].Write(stream); else SC4WriteGZSerializable(stream, nullptr);
+    void WriteDepartment(cIGZOStream& stream) override { occupantAt_ = 0; department_.Write(stream); }
+    void WriteSupplyGrid(cIGZOStream& stream) override { supplyGrid_.Write(stream); }
+    void WriteOccupant(cIGZOStream& stream, cISC4Occupant*) override {
+        if (occupantAt_ < occupants_.size()) occupants_[occupantAt_++].Write(stream); else SC4WriteGZSerializable(stream, nullptr);
     }
 private:
-    cRetainedReference powerGrid_, supplyGrid_;
-    std::vector<cRetainedReference> plants_, poles_;
-    std::size_t plantAt_ = 0, poleAt_ = 0;
+    cRetainedReference department_, supplyGrid_;
+    std::vector<cRetainedReference> occupants_;
+    std::size_t occupantAt_ = 0;
 };
 Probe1 g_IPowerHost;
 }

@@ -15,6 +15,7 @@
 #include "app/NativeEffects.h"
 #include "app/NativeGrowthDevelopers.h"
 #include "app/NativeSimHosts.h"
+#include "app/NativePower.h"
 #include "app/NativeTraffic.h"
 #include "app/NativeRegion.h"
 #include "app/NativeZoneDeveloperHost.h"
@@ -191,6 +192,7 @@ private:
 };
 
 LandValueHost g_landValue;
+
 
 // A city occupant as the pollution simulator's plant lists keep it.
 class PollutionOccupant final : public IPollutionOccupant {
@@ -551,10 +553,13 @@ cSC4SimGrid<float>* NativeResidentialGradeMap(bool school) {
     return r ? r->GetGradeMap(school) : nullptr;
 }
 
+const sc4::cISCPropertyHolder* NativeSimulatorExemplar(std::uint32_t instance) { return SimulatorExemplar(instance); }
+
 void InstallNativeSimHosts() {
     gzcom::SimHosts& hosts = gzcom::GetSimHosts();
     hosts.landValue = &g_landValue;
     hosts.pollution = &g_pollution;
+    hosts.power = NativePowerHost();
     hosts.fire = &g_fire;
     hosts.police = &g_police;
     hosts.residential = &g_residential;

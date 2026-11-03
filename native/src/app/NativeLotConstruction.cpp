@@ -288,6 +288,9 @@ public:
     bool CheatIgnorePlumbing() override { return NativeBuildingCheat(0); }
     // PARTIAL: no power or plumbing simulator runs natively yet; every cell counts as powered and watered, the same answer the
     // tract developer's host gives (NativeTractDevelopment.cpp), so growth and abandonment agree until both are live.
+    // PARTIAL: the power simulator runs (its passes power the same cells as the original's on plant-powered cities), but a city that
+    // buys its power gets no neighbour deals yet (the neighbours simulator's deal loading is not wired), so the lots keep answering
+    // powered until the deals are ported; NativeCellPowered(x, z) is the grid's answer.
     bool IsPowered(int, int) override { return true; }
     bool IsCellWatered(int, int) override { return true; }
     std::uint8_t TripLengthAt(int x, int z) override {
