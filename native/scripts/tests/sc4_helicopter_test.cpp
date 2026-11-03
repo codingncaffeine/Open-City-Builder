@@ -98,11 +98,11 @@ struct FakeModel final : IAutomatonModel {
     void SetPlayMode(s3d::PlayMode) override {}
 };
 
-struct FakeGroup final : IAutomataGroupTemplate {
+struct FakeGroup final : IAutomatonGroupTemplate {
     std::uint32_t id = 0x4200;
     FakeGroup* parent = nullptr;
     std::uint32_t GroupId() const override { return id; }
-    IAutomataGroupTemplate* Parent() const override { return parent; }
+    IAutomatonGroupTemplate* Parent() const override { return parent; }
     float SpeedMin() const override { return 1.0f; }
     float SpeedMax() const override { return 2.0f; }
     void GetGroupHierarchyDepth() override {}
@@ -133,7 +133,7 @@ struct FakeAutomatonHost final : IAutomatonHost {
     bool LotAt(int, int) override { return false; }
     void PlaceOnNetwork(const cS3DVector3&, const cS3DVector3&, std::uint32_t) override {}
     cSC4AutomataController* FindAttraction(cISC4Occupant*, cS3DVector3*, float*, float*) override { return nullptr; }
-    IAutomataGroupTemplate* FindAutomataGroup(std::uint32_t id) override { return id == group.id ? &group : nullptr; }
+    IAutomatonGroupTemplate* FindAutomataGroup(std::uint32_t id) override { return id == group.id ? &group : nullptr; }
     bool AnimationUpdateAllowed() override { return true; }
     float SimSpeedModifier() override { return 1.0f; }
     float MaxSpeedUnits() override { return 3600.0f; }
@@ -212,10 +212,10 @@ struct FakeAircraftHost final : IAircraftHost {
         (void)lo;
         return value;
     }
-    const float* FindDriveParameters(IAutomataGroupTemplate*) override {
+    const float* FindDriveParameters(IAutomatonGroupTemplate*) override {
         return driveParameters.size() == 13 ? driveParameters.data() : nullptr;
     }
-    const float* FindPlayerDriveParameters(IAutomataGroupTemplate*) override {
+    const float* FindPlayerDriveParameters(IAutomatonGroupTemplate*) override {
         return playerDriveParameters.size() == 0x28 ? playerDriveParameters.data() : nullptr;
     }
     IAirplaneEffect* CreateEffect(const cRZString& name) override {

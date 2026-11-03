@@ -216,17 +216,24 @@ public:
 
 // The occupant group template of the automata script system (cSC4OccupantGroupTemplate); only the fields
 // SetAutomataGroup / PostInit read.
-class IAutomataGroupTemplate {
+class IAutomatonGroupTemplate {
 public:
-    virtual ~IAutomataGroupTemplate() = default;
+    virtual ~IAutomatonGroupTemplate() = default;
     virtual std::uint32_t GroupId() const = 0;            // +0x20
-    virtual IAutomataGroupTemplate* Parent() const = 0;   // +0x18
+    virtual IAutomatonGroupTemplate* Parent() const = 0;   // +0x18
     virtual float SpeedMin() const = 0;                   // +0xd8
     virtual float SpeedMax() const = 0;                   // +0xdc
     virtual void GetGroupHierarchyDepth() = 0;            // cSC4OccupantGroupTemplate::GetGroupHierarchyDepth
 };
 
 class cSC4AutomataController;
+
+// Port seam: an object another layer attaches to an automaton (the automata managers' IAutomataAutomaton view,
+// app/NativeAutomataViews.cpp); the automaton owns it and deletes it with itself.
+class cSC4AutomatonExtension {
+public:
+    virtual ~cSC4AutomatonExtension() = default;
+};
 
 class IAutomatonHost {
 public:
@@ -255,7 +262,7 @@ public:
     // ---- automata controller manager (city slot 0x178)
     virtual cSC4AutomataController* FindAttraction(cISC4Occupant* occupant, cS3DVector3* attraction, float* radius,
                                                    float* distance) = 0;          // controller manager slot 0xb0
-    virtual IAutomataGroupTemplate* FindAutomataGroup(std::uint32_t id) = 0;      // script system slot 0x38
+    virtual IAutomatonGroupTemplate* FindAutomataGroup(std::uint32_t id) = 0;      // script system slot 0x38
     // ---- simulator / messages / sound / random
     virtual bool AnimationUpdateAllowed() = 0;   // spSimulator 0x88 || !spSimulator 0x78
     virtual float SimSpeedModifier() = 0;        // cSC4AutomataManager::sfSimSpeedModifier
@@ -353,7 +360,7 @@ public:
     void SetPriority(std::uint8_t priority) { priority_ = priority; }  // 0x200 @ 0x1000e2540
     virtual bool HandleCollision(cSC4Automaton* other, const cS3DVector3& point);   // 0x208 @ 0x10010d400
     void GetCollidePosition(cS3DVector3& out) const;                  // 0x210 @ 0x10010ba66
-    IAutomataGroupTemplate* GetAutomataGroup() const;                 // 0x218 @ 0x10010de86
+    IAutomatonGroupTemplate* GetAutomataGroup() const;                 // 0x218 @ 0x10010de86
     void RegisterInGameDataRegistry();                                // 0x220 @ 0x10010c00a
     void UnregisterInGameDataRegistry();                              // 0x228 @ 0x10010cc76
     void GetBoundingBox(float* minXyz, float* maxXyz) override;       // 0x258 @ 0x100107148
@@ -384,7 +391,7 @@ public:
     const char* GetDebugFlagsText() const;                            // 0x318 @ 0x10010d408
     virtual const char* GetDebugExtraText() const;                            // 0x320 @ 0x10010d8bc
     tAutomataState* CreateAutomataState(std::uint32_t state);         // 0x328 @ 0x10010d96a
-    void SetAutomataGroup(IAutomataGroupTemplate* group);             // 0x330 @ 0x10010dcac
+    void SetAutomataGroup(IAutomatonGroupTemplate* group);             // 0x330 @ 0x10010dcac
     cGZPersistResourceKey GetModelResourceKey(int index) const;       // 0x338 @ 0x1001071bc
     bool LoadModels();                                                // 0x340 @ 0x10010b4e6
     bool UnloadModels();                                              // 0x348 @ 0x10010b81a
@@ -459,6 +466,9 @@ public:
     void SetAnimationTimer(float t) { animTimer_ = t; }
     void SetActualSpeed(float speed) { actualSpeed_ = speed; }
     void SetDefaultSpeed(float speed) { defaultSpeed_ = speed; }
+    // Port seam: the object another layer attached (the automata managers' view); the automaton deletes it with itself.
+    cSC4AutomatonExtension* Extension() const { return extension_; }
+    void SetExtension(cSC4AutomatonExtension* extension) { extension_ = extension; }   // takes ownership
 
 protected:
     // The adapter the automaton hands to cSC4AutomataController (the original passes `this`).
@@ -510,6 +520,7 @@ protected:
     bool activeSoundEnabled_ = false;                            // +0x300
     std::uint32_t field304_ = 0;                                 // +0x304
     ControllerLink* controllerLink_ = nullptr;                    // port seam: the IControllerAutomaton adapter
+    cSC4AutomatonExtension* extension_ = nullptr;                 // port seam: the automata managers' view (owned)
 };
 
 }  // namespace sc4

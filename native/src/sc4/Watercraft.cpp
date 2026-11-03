@@ -166,7 +166,7 @@ bool cSC4Watercraft::Read(cIGZIStream& stream) {
 // ---- drive parameters ------------------------------------------------------------------------------------------------
 IWatercraftGroupTemplate* cSC4Watercraft::WatercraftGroup() const {
     // The original walks the group's parent chain; only nodes whose +0xe0 property is non-null are used.
-    for (IAutomataGroupTemplate* group = GetAutomataGroup(); group; group = group->Parent()) {
+    for (IAutomatonGroupTemplate* group = GetAutomataGroup(); group; group = group->Parent()) {
         if (auto* watercraftGroup = dynamic_cast<IWatercraftGroupTemplate*>(group)) {
             if (watercraftGroup->DriveParameters()) return watercraftGroup;
         }
@@ -178,7 +178,7 @@ IWatercraftGroupTemplate* cSC4Watercraft::WatercraftGroup() const {
 // original: each store is `value != 0 ? value : default`). f8/f17/f19 are derived from their neighbours when zero.
 void cSC4Watercraft::LoadDriveParameters() {
     const float* property = nullptr;
-    for (IAutomataGroupTemplate* group = GetAutomataGroup(); group; group = group->Parent()) {
+    for (IAutomatonGroupTemplate* group = GetAutomataGroup(); group; group = group->Parent()) {
         if (auto* watercraftGroup = dynamic_cast<IWatercraftGroupTemplate*>(group)) {
             property = watercraftGroup->DriveParameters();
             if (property) break;
@@ -851,8 +851,8 @@ bool cSC4Watercraft::HandleEnterState(tAutomataState* state) {
             drive->value40 = 0;
             drive->value3c = driveParameters_.maxPitch;
             drive->groupSpeed = 1.0f;
-            if (IAutomataGroupTemplate* group = GetAutomataGroup()) {
-                for (IAutomataGroupTemplate* node = group; node; node = node->Parent()) {
+            if (IAutomatonGroupTemplate* group = GetAutomataGroup()) {
+                for (IAutomatonGroupTemplate* node = group; node; node = node->Parent()) {
                     if (auto* watercraftNode = dynamic_cast<IWatercraftGroupTemplate*>(node)) {
                         drive->groupSpeed = watercraftNode->DriveSpeed();
                         break;
@@ -1794,10 +1794,10 @@ bool cSC4Watercraft::DoUndockingTick(float milliseconds) {
 // trigger integration (state +0xb0/+0xb4) and its effect-frame tables are only partly modelled.
 bool cSC4Watercraft::TranslatePlayerDriveCommands(tAutomataStatePlayerDrive* state, float milliseconds) {
     if (!state) return false;
-    IAutomataGroupTemplate* group = GetAutomataGroup();
+    IAutomatonGroupTemplate* group = GetAutomataGroup();
     if (!group) return false;
     bool hasProperty = false;
-    for (IAutomataGroupTemplate* node = group; node; node = node->Parent()) {
+    for (IAutomatonGroupTemplate* node = group; node; node = node->Parent()) {
         if (dynamic_cast<IWatercraftGroupTemplate*>(node)) {
             hasProperty = true;
             break;

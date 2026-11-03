@@ -111,13 +111,13 @@ struct FakeRouteReader final : IWatercraftRouteReader {
 
 struct FakeGroup final : IWatercraftGroupTemplate {
     std::uint32_t id = 0x1111;
-    IAutomataGroupTemplate* parent = nullptr;
+    IAutomatonGroupTemplate* parent = nullptr;
     float speedMin = 0.0f, speedMax = 0.0f;
     float driveSpeed = 1.0f;
     float parameters[40] = {};
     bool hasParameters = false;
     std::uint32_t GroupId() const override { return id; }
-    IAutomataGroupTemplate* Parent() const override { return parent; }
+    IAutomatonGroupTemplate* Parent() const override { return parent; }
     float SpeedMin() const override { return speedMin; }
     float SpeedMax() const override { return speedMax; }
     void GetGroupHierarchyDepth() override {}
@@ -222,7 +222,7 @@ struct FakeHost final : IWatercraftHost {
     bool LotAt(int cellX, int cellZ) override { return lotCells.count({cellX, cellZ}) != 0; }
     void PlaceOnNetwork(const cS3DVector3&, const cS3DVector3&, std::uint32_t) override {}
     cSC4AutomataController* FindAttraction(cISC4Occupant*, cS3DVector3*, float*, float*) override { return nullptr; }
-    IAutomataGroupTemplate* FindAutomataGroup(std::uint32_t id) override { return id == group.id ? &group : nullptr; }
+    IAutomatonGroupTemplate* FindAutomataGroup(std::uint32_t id) override { return id == group.id ? &group : nullptr; }
     bool AnimationUpdateAllowed() override { return animationAllowed; }
     float SimSpeedModifier() override { return simSpeed; }
     float MaxSpeedUnits() override { return maxSpeedUnits; }

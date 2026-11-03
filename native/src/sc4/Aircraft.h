@@ -109,9 +109,9 @@ public:
     virtual double RandomDoubleRange(double lo, double hi) = 0;
     // ---- automata script group template parameter blocks ------------------------------------------------------------
     // The group template's +0xe0 pointer: 18 floats (LoadDriveParameters). nullptr = keep the defaults.
-    virtual const float* FindDriveParameters(IAutomataGroupTemplate* group) = 0;
+    virtual const float* FindDriveParameters(IAutomatonGroupTemplate* group) = 0;
     // The group template's +0xe8 pointer (the player-drive block; LoadPlayerDriveParameters). nullptr = keep current.
-    virtual const float* FindPlayerDriveParameters(IAutomataGroupTemplate* group) = 0;
+    virtual const float* FindPlayerDriveParameters(IAutomatonGroupTemplate* group) = 0;
     // ---- effects (SL::spEffectsManager slot 0x30 = create a named effect; returns one reference) ---------------------
     virtual IAirplaneEffect* CreateEffect(const cRZString& name) = 0;
     // cS3DRegPoints look-up used to initialise the skywriting position (Init). False when the point is absent.

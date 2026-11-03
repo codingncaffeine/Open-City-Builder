@@ -34,7 +34,7 @@
 //   0x029244db "no automata" (the automaton DoMessage filter).
 //
 // The parent: the recovered cSC4AutomataManager cannot be inherited here because its header and the recovered
-// cSC4Watercraft / cSC4Automaton headers are mutually incompatible in the port (both define sc4::IAutomataGroupTemplate
+// cSC4Watercraft / cSC4Automaton headers are mutually incompatible in the port (both define sc4::IAutomatonGroupTemplate
 // and several iids). The inherited calls therefore go through IWatercraftManagerBase, one method per original call;
 // the object that owns the manager supplies it (hook-up item). The port also keeps its own boat list (see Boats())
 // because the recovered cSC4Watercraft does not implement IAutomataAutomaton, which the base registry stores.

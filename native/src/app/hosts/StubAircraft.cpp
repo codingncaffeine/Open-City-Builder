@@ -27,8 +27,8 @@ struct StubAircraft final : IAircraftHost {
     void WorldToCell(float x, float z, std::int32_t& cellX, std::int32_t& cellZ) override {}
     bool FindFireOccupant(const cS3DVector3& minCorner, const cS3DVector3& maxCorner, cISC4OccupantFilter* filter, cS3DVector3& position) override { return {}; }
     double RandomDoubleRange(double lo, double hi) override { return {}; }
-    const float* FindDriveParameters(IAutomataGroupTemplate* group) override { return {}; }
-    const float* FindPlayerDriveParameters(IAutomataGroupTemplate* group) override { return {}; }
+    const float* FindDriveParameters(IAutomatonGroupTemplate* group) override { return {}; }
+    const float* FindPlayerDriveParameters(IAutomatonGroupTemplate* group) override { return {}; }
     IAirplaneEffect* CreateEffect(const cRZString& name) override { return {}; }
     bool FindRegPointTransform(const cRZString& name, cS3DVector3& out) override { return {}; }
     float EffectsWaterHeight(float x, float z) override { return {}; }

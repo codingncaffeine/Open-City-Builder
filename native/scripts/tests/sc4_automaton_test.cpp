@@ -64,13 +64,13 @@ struct FakeEffects final : IAutomatonEffects {
     void Shutdown() override { ++shutdowns; }
 };
 
-struct FakeGroup final : IAutomataGroupTemplate {
+struct FakeGroup final : IAutomatonGroupTemplate {
     std::uint32_t id = 0;
     FakeGroup* parent = nullptr;
     float speedMin = 0.0f, speedMax = 0.0f;
     int depthCalls = 0;
     std::uint32_t GroupId() const override { return id; }
-    IAutomataGroupTemplate* Parent() const override { return parent; }
+    IAutomatonGroupTemplate* Parent() const override { return parent; }
     float SpeedMin() const override { return speedMin; }
     float SpeedMax() const override { return speedMax; }
     void GetGroupHierarchyDepth() override { ++depthCalls; }
@@ -139,7 +139,7 @@ struct FakeHost final : IAutomatonHost {
         *distance = 2.0f;
         return attraction;
     }
-    IAutomataGroupTemplate* FindAutomataGroup(std::uint32_t id) override {
+    IAutomatonGroupTemplate* FindAutomataGroup(std::uint32_t id) override {
         if (id == group.id) return &group;
         if (id == secondary.id) return &secondary;
         return nullptr;

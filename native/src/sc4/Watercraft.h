@@ -189,9 +189,9 @@ public:
 };
 
 // The automata group template as LoadDriveParameters / HandleEnterState read it: +0xe0 the 40-float drive array,
-// +0xe8 a node whose +8 is the group speed. Additive over the recovered IAutomataGroupTemplate (dynamic_cast, the
+// +0xe8 a node whose +8 is the group speed. Additive over the recovered IAutomatonGroupTemplate (dynamic_cast, the
 // original reads the raw fields).
-class IWatercraftGroupTemplate : public IAutomataGroupTemplate {
+class IWatercraftGroupTemplate : public IAutomatonGroupTemplate {
 public:
     virtual const float* DriveParameters() const = 0;   // +0xe0 (40 floats, may be null)
     virtual float DriveSpeed() const = 0;               // +0xe8 -> +0x8

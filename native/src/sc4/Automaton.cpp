@@ -198,6 +198,7 @@ cSC4Automaton::~cSC4Automaton() {
     }
     effects_ = nullptr;
     delete controllerLink_;
+    delete extension_;
     controllerLink_ = nullptr;
 }
 
@@ -1162,12 +1163,12 @@ void cSC4Automaton::SetSpeedFromBehaviorTemplate(const tBehaviorTemplate* behavi
     SetSpeed(speed, behavior->acceleration);
 }
 
-void cSC4Automaton::SetAutomataGroup(IAutomataGroupTemplate* group) {
+void cSC4Automaton::SetAutomataGroup(IAutomatonGroupTemplate* group) {
     if (!group) return;
     automataGroupId_ = group->GroupId();
     if (group->SpeedMin() > 0.0f) {
         float high = group->SpeedMax();
-        IAutomataGroupTemplate* current = group;
+        IAutomatonGroupTemplate* current = group;
         while (high <= 0.0f) {
             current = current->Parent();
             if (!current) {
@@ -1186,7 +1187,7 @@ void cSC4Automaton::SetAutomataGroup(IAutomataGroupTemplate* group) {
     InitKeyEffects();
 }
 
-IAutomataGroupTemplate* cSC4Automaton::GetAutomataGroup() const {
+IAutomatonGroupTemplate* cSC4Automaton::GetAutomataGroup() const {
     if (automataGroupId_ == 0 || !Host()) return nullptr;
     return Host()->FindAutomataGroup(automataGroupId_);
 }
@@ -1202,7 +1203,7 @@ bool cSC4Automaton::PostInit() {
         const bool hadPrevious = groupId != 0;
         groupId = id;
         if (hadPrevious) {
-            if (IAutomataGroupTemplate* group = Host()->FindAutomataGroup(groupId)) group->GetGroupHierarchyDepth();
+            if (IAutomatonGroupTemplate* group = Host()->FindAutomataGroup(groupId)) group->GetGroupHierarchyDepth();
         }
         automataGroupId_ = groupId;
     }

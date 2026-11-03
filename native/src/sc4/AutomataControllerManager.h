@@ -39,7 +39,10 @@ namespace sc4 {
 constexpr std::uint32_t kGZCLSID_cSC4AutomataControllerManager = 0xca14ca03;
 constexpr std::uint32_t kGZIID_cISC4AutomataControllerManager = 0xca14c9fc;
 constexpr std::uint32_t kAutomataCheatControllers = 0xaba2b5bb;      // cheat code "Controllers"
+#ifndef SC4_MESSAGE_CHEAT_CODE_DEFINED   // defined by both automata halves (AutomataControllerManager.h, AutomataManager.h)
+#define SC4_MESSAGE_CHEAT_CODE_DEFINED
 constexpr std::uint32_t kMessageCheatCode = 0x230e27ac;
+#endif
 constexpr std::uint32_t kPropertyNoControllers = 0x29244db;           // an occupant with this property gets no automatic controllers
 constexpr std::uint32_t kPropertyControllerGroups = 0xaa1dd396;       // occupant property: occupant group ids that name controller groups
 constexpr std::uint32_t kMessageControllerRemoved = 0xea298d50;       // posted after a controller is removed (void1 = the controller)

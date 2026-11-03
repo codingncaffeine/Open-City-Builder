@@ -200,10 +200,10 @@ struct FakeExemplar final : cISCResExemplar {
 };
 
 // ---- group template --------------------------------------------------------------------------------------------------
-struct FakeGroup final : IAutomataGroupTemplate {
+struct FakeGroup final : IAutomatonGroupTemplate {
     std::uint32_t id = 0;
     std::uint32_t GroupId() const override { return id; }
-    IAutomataGroupTemplate* Parent() const override { return nullptr; }
+    IAutomatonGroupTemplate* Parent() const override { return nullptr; }
     float SpeedMin() const override { return 0.0f; }
     float SpeedMax() const override { return 1.0f; }
     void GetGroupHierarchyDepth() override {}

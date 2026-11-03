@@ -107,7 +107,10 @@ constexpr std::uint32_t kCheatHideAutomataPaths = 0xe97fcbc9;
 constexpr std::uint32_t kCheatPlayerDrive = 0x0b70c96d;
 constexpr std::uint32_t kCheatNoCsi = 0x6bb354c7;
 constexpr std::uint32_t kCheatGhostModels = 0xcc478b79;
+#ifndef SC4_MESSAGE_CHEAT_CODE_DEFINED   // defined by both automata halves (AutomataControllerManager.h, AutomataManager.h)
+#define SC4_MESSAGE_CHEAT_CODE_DEFINED
 constexpr std::uint32_t kMessageCheatCode = 0x230e27ac;
+#endif
 
 // Messages (the first 14 are registered by Init).
 constexpr std::uint32_t kMsgCameraMoved = 0xa6b79602, kMsgCameraTargetDone = 0xa6b79612, kMsgViewFilterChanged = 0x06cdb65a,
@@ -125,7 +128,10 @@ constexpr std::uint32_t kPropertyNoAutomata = 0x029244db;
 #define SC4_kPropertyOccupantGroups_DEFINED
 constexpr std::uint32_t kPropertyOccupantGroups = 0xaa1dd396;
 #endif
+#ifndef SC4_BUILDING_OCCUPANT_TYPE_DEFINED   // defined by both automata halves (AutomataGenerator.h, AutomataManager.h)
+#define SC4_BUILDING_OCCUPANT_TYPE_DEFINED
 constexpr std::uint32_t kBuildingOccupantType = 0x278128a0;
+#endif
 constexpr std::uint32_t kNetworkOccupantType = 0xc772bf98;
 
 // The tuning resource: an exemplar with the automata tuning properties (StaticInit -> ReadTuningParameters).

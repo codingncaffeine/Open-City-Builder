@@ -37,7 +37,10 @@ constexpr std::uint32_t kAutoFlagTickable = 0x1, kAutoFlagVisible = 0x4, kAutoFl
 constexpr std::uint32_t kAutomataNetworkMaskAll = 0xc49;      // GetNetworksInRadius mask when flag 0x80 is set
 constexpr std::uint32_t kAutomataNetworkMaskLocal = 0x2;      // mask when flag 0x800 is set
 constexpr std::uint32_t kAutomataSpawnFlags = 0x2000002;
+#ifndef SC4_BUILDING_OCCUPANT_TYPE_DEFINED   // defined by both automata halves (AutomataGenerator.h, AutomataManager.h)
+#define SC4_BUILDING_OCCUPANT_TYPE_DEFINED
 constexpr std::uint32_t kBuildingOccupantType = 0x278128a0;
+#endif
 
 // tControllerTime: hours in a float plus a signed day count; operator+= folds the delta into the 0..24 range by day.
 struct ControllerTime {
