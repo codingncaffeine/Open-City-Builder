@@ -1,5 +1,8 @@
 #include "sc4/Demolition.h"
 
+#include <cstdio>
+#include <cstdlib>
+
 #include <algorithm>
 #include <cmath>
 
@@ -176,6 +179,9 @@ bool cSC4Demolition::DemolishRegion(bool commit, const DemolitionRegion& region,
                 } else {
                     if (lot->IsPlopped()) vetted = host_->OccupantAllowedByFilter(building, filter_);
                     if (!vetted && privilege == 1 && !lot->BuildingRemovable(2)) success = false;
+                    if (std::getenv("SC4_DEMOLISHDEBUG"))
+                        std::fprintf(stderr, "demolish lot (%d,%d): state %d plopped %d vetted %d removable %d\n", x, z, lot->TypeCode(),
+                                     lot->IsPlopped(), vetted, lot->BuildingRemovable(2));
                 }
                 if (vetted) {
                     std::vector<IDemolishable*> all = lot->Occupants();
@@ -184,6 +190,7 @@ bool cSC4Demolition::DemolishRegion(bool commit, const DemolitionRegion& region,
                     for (IDemolishable* o : all) {
                         std::uint32_t t = o->Type();
                         if ((t == kDemolishTypeBuilding || t == kDemolishTypeProp) && !host_->OccupantAllowedByFilter(o, filter_)) {
+                            if (std::getenv("SC4_DEMOLISHDEBUG")) std::fprintf(stderr, "demolish lot (%d,%d): occupant %08x refused\n", x, z, t);
                             allowed = false;
                             break;
                         }
@@ -429,11 +436,17 @@ void cSC4Demolition::DoDemolishOccupantEffect(IDemolishable* occupant, std::uint
     }
     // One effect: the size's own, or (only when that one is absent) the next smaller index (i386 0x000ae090 loop).
     IDemolitionEffect* effect = nullptr;
+    static const bool trace = std::getenv("SC4_DEMOLISHDEBUG") != nullptr;
+    const std::uint32_t wanted = index;
     while (!(effect = host_->CreateEffect(kEffectSetDemolish, index))) {
         const std::uint32_t low = index & 0xf;
         --index;
-        if (low == 0) return;
+        if (low == 0) {
+            if (trace) std::fprintf(stderr, "demolish effect: type %08x index %04x none\n", occupant->Type(), wanted);
+            return;
+        }
     }
+    if (trace) std::fprintf(stderr, "demolish effect: type %08x index %04x -> %04x extent %.1f\n", occupant->Type(), wanted, index, extent);
     if (effect->Attach(occupant)) {
         if (primary) effect->SetViewpoint(viewX, viewY);
         if (lot && lot->ZoneClass() != 0 && lot->ZoneClass() != 1) effect->SetGrayTint();

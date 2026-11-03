@@ -6,6 +6,7 @@
 // animation tick manager (AddTickableObject(manager, 0xc0)) and the message server; here the city view attaches it once
 // its renderer exists (AttachEffects) and detaches it when the renderer shuts down (DetachEffects).
 #include "app/NativeEffects.h"
+#include "sc4/NetworkOccupant.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -388,6 +389,10 @@ bool BindManager() {
         if (count == 0 || !models[0]) return false;
         auto* instance = reinterpret_cast<s3d::cIS3DModelInstance*>(models[0]);
         instance->GetTransform(transform);
+        // A network piece is its own model instance in the original: GetModelInstances (i386 0x001335fa) sets the transform's
+        // translation from the piece's position first. Without it the piece's transform is the identity and its demolition debris
+        // and smoke start at the map origin.
+        if (auto* network = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant)) network->GetModelInstanceTransform(transform);
         model = instance;
         return true;
     };
