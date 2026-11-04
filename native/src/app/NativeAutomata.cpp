@@ -10,6 +10,7 @@
 #include "rz/cRZMessage2Standard.h"
 #include "s3d/ModelInstance.h"
 #include "sc4/Automaton.h"
+#include "sc4/TrafficAutomaton.h"
 #include "sc4/Render3D.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/cSC4City.h"
@@ -155,9 +156,9 @@ void SetAutomataRenderer(sc4::cSC43DRender* render, sc4::cSC4City* city) {
     }
 }
 
-// The city posts message 0x26d31ec1 once it is up and every automata manager then starts the automata it restored. The manager's own
-// registry cannot do that yet (its IAutomataAutomaton view is not implemented by the recovered automata), so the restored objects are
-// started here with the same calls HandlePostCityInit makes: Init, the current zoom and rotation, then into the renderer.
+// The city posts message 0x26d31ec1 once it is up and every automata manager Inits the automata it restored (HandlePostCityInit);
+// the managers then tick them. What is left here: the restored automata go into the renderer at the current zoom and rotation.
+// PARTIAL: where the original places a restored automaton in the renderer is not traced; this is the port's stand-in.
 void PostCityInitToAutomataManagers(sc4::cSC4City* city) {
     if (!city) return;
     if (const char* zoom = std::getenv("SC4_ZOOM")) g_zoom = std::atoi(zoom);
@@ -170,13 +171,22 @@ void PostCityInitToAutomataManagers(sc4::cSC4City* city) {
             if (automaton->CheckAutomataFlag(0x8000)) { ++skipped; continue; }
             if (!automaton->Init()) { ++skipped; continue; }
             automaton->SetZoomAndRotation(g_zoom, g_rotation);
-            automaton->PlaceInRenderer(true);
+            automaton->SetVisible(true);   // occupant visibility (the managers tick visible automata) and into the renderer
             automaton->AddRef();
             g_automata.push_back(automaton);
             ++started;
         }
     }
     std::fprintf(stderr, "automata: %d started, %d skipped\n", started, skipped);
+    // The managers keep their view rectangle from the camera's messages; none has come since they subscribed, so one camera move is
+    // announced now (their HandleViewChanged reads the current view). Without it every automaton counts as offscreen.
+    if (SL::spMS2) {
+        auto* message = new cRZMessage2Standard();
+        message->AddRef();
+        message->SetType(0xa6b79602);
+        SL::spMS2->MessagePost(message, false);
+        message->Release();
+    }
 }
 
 void TickAutomata() {
@@ -185,7 +195,36 @@ void TickAutomata() {
     float ms = std::chrono::duration<float, std::milli>(now - g_lastTick).count();
     g_lastTick = now;
     if (ms > 100.0f) ms = 100.0f;
-    for (sc4::cSC4Automaton* automaton : g_automata) automaton->DoAnimationTick(0, ms);
+    (void)ms;   // the automata managers tick their automata (cSC4AutomataManager::DoAnimationTick through the animation ticks)
+    static int ticks = 0;
+    if (std::getenv("SC4_AUTOMATADEBUG") && ticks++ % 60 == 0 && !g_automata.empty()) {
+        int alive = 0, moved = 0;
+        sc4::cSC4Automaton* sample = nullptr;
+        for (sc4::cSC4Automaton* a : g_automata)
+            if (!a->Models().empty() && a->GetOpacity() > 0.0f) {
+                ++alive;
+                if (a->GetActualSpeed() > 0.0f) ++moved;
+                if (!sample || a == g_automata.front()) sample = a;
+            }
+        std::fprintf(stderr, "automata: tick %d visible %d moving %d\n", ticks, alive, moved);
+        if (sample) {
+            float p[3] = {};
+            sample->GetPosition(p);
+            auto* traffic = dynamic_cast<sc4::cSC4TrafficAutomaton*>(sample);
+            std::fprintf(stderr, "automata: sample type %08x pos %.1f %.1f %.1f speed %.2f self %d reached %d ignorepaths %d occupant %p pathkey %08x state %u\n",
+                         sample->GetType(), p[0], p[1], p[2], sample->GetActualSpeed(), sample->GetSelfControlling() ? 1 : 0,
+                         sample->GetReachedDestination() ? 1 : 0, sample->CheckAutomataFlag(0x2000) ? 1 : 0,
+                         traffic ? static_cast<void*>(traffic->GetNetworkOccupant()) : nullptr, traffic ? traffic->GetPathKey() : 0u,
+                         sample->GetState() ? sample->GetState()->stateId : 0u);
+        }
+        for (std::size_t i = 0; i < g_automata.size() && i < 0; ++i) {
+            float p[3] = {};
+            g_automata[i]->GetPosition(p);
+            std::fprintf(stderr, "automata: tick %d #%zu type %08x pos %.1f %.1f %.1f speed %.2f models %zu opacity %.2f state %u\n", ticks, i,
+                         g_automata[i]->GetType(), p[0], p[1], p[2], g_automata[i]->GetActualSpeed(), g_automata[i]->Models().size(),
+                         g_automata[i]->GetOpacity(), g_automata[i]->GetState() ? g_automata[i]->GetState()->stateId : 0u);
+        }
+    }
 }
 
 }  // namespace native

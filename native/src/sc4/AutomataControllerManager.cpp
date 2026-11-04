@@ -1,5 +1,7 @@
 #include "sc4/AutomataControllerManager.h"
 
+#include <bit>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -590,7 +592,8 @@ bool cSC4AutomataControllerManager::DoMessage(cIGZMessage2* base) {
     auto* message = static_cast<cIGZMessage2Standard*>(base);   // payload accessors live on the standard message
     switch (message->GetType()) {
         case kCtrlMsgTick:
-            DoAnimationTick(static_cast<std::uint32_t>(message->GetData2()), static_cast<float>(message->GetData3()));
+            // data3 is the elapsed milliseconds as float bits (cSC4AnimationTickManager)
+            DoAnimationTick(static_cast<std::uint32_t>(message->GetData2()), std::bit_cast<float>(static_cast<std::uint32_t>(message->GetData3())));
             return true;
         case kCtrlMsgQueueReset:
             if (message->GetIGZUnknown() == nullptr || message->GetData1() == 0) return true;

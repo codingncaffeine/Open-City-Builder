@@ -4,7 +4,7 @@
 //   * the default path/network types (2/0), the three populate layers (1, 7, 8) and a crime-layer multiplier of 1.0;
 //   * the crowd-reaction event (message 0xa9e3b6e2 -> HandleCrowdReactionEvent, which fans the event out to every nearby
 //     pedestrian and posts message 0xa9e3b6e3);
-//   * the pedestrian exemplar/group defaults (exemplar group 0x01000017, default group 0x4001, fallback group
+//   * the pedestrian exemplar/group defaults (exemplar group 0x17, default group 0x4001, fallback group
 //     0x896e75af) and the two per-layer tuning overrides (GetEdgeDensityCurve / GetMaxAutosPerSecond for layers 1/7);
 //   * the commotion multiplier that adds the clock percent when the automata are loaded;
 //   * the concrete automaton factory (AddAutomaton creates a cSC4Pedestrian).
@@ -42,7 +42,7 @@ constexpr std::uint32_t kGZIID_cISC4PedestrianManager = 0xc98f9d17;   // QueryIn
 constexpr std::uint32_t kPedestrianMessageCrowdReaction = 0xa9e3b6e2;   // registered in Init
 constexpr std::uint32_t kPedestrianMessageCrowdReactionResult = 0xa9e3b6e3;   // posted by HandleCrowdReactionEvent
 
-constexpr std::uint32_t kPedestrianExemplarGroup = 0x01000017;
+constexpr std::uint32_t kPedestrianExemplarGroup = 0x17;   // i386 constructor: +0xa50 = 0x17 (the 64-bit store also writes the next word)
 constexpr std::uint32_t kPedestrianDefaultGroup = 0x4001;
 constexpr std::uint32_t kPedestrianFallbackGroup = 0x896e75af;   // the cSC4Pedestrian class id
 

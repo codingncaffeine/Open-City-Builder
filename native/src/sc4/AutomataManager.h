@@ -358,6 +358,8 @@ public:
     virtual void ProjectPointToViewCoordinates(float point[3]) = 0;             // 0x10017383c
     virtual void ProjectPointFromViewCoordinatesToViewportCoordinates(float point[3]) = 0;   // 0x1001738e0
     virtual void UnProjectPointFromViewportCoordinatesToWorldCoordinates(float point[3]) = 0;   // 0x100173b1a
+    // SL::spView3D's GetCurrentViewLevel (i386 vslot 0x58): 1 above ground, 2 underground.
+    virtual int ViewLevel() { return 1; }
 };
 
 // cSC4CameraControl as the camera follow uses it (SL::spRenderer vslot 0x80).
@@ -547,6 +549,14 @@ public:
     virtual void DebugViewSetEnabled(bool enabled) = 0;                                // the object at spDebugView vslot 0x110
     virtual void DebugViewShutdown() = 0;                                              // spDebugView 0x20 / 0x10
     virtual void Report(const std::string& message) { (void)message; }                 // Sprintf'd error text
+    // Port seam: the manager's view of an automaton read from a city file (the object SC4ReadGZSerializable gave for
+    // cISC4Automaton; the original stores it as it is). Null drops it.
+    virtual IAutomataAutomaton* LoadedAutomaton(void* object) { (void)object; return nullptr; }
+    // Port seams: this manager's views of the city's own objects that messages and queries hand it (the original uses the
+    // objects themselves). The defaults take the object as the view (the tests' fakes implement the views directly).
+    virtual IAutomataOccupant* OccupantView(void* cityOccupant) { return static_cast<IAutomataOccupant*>(cityOccupant); }   // cISC4Occupant*
+    virtual IAutomataBuildingOccupant* BuildingView(void* building) { return static_cast<IAutomataBuildingOccupant*>(building); }   // QI 0x87dda3a9 answer
+    virtual IAutomataAutomaton* AutomatonView(void* automaton) { return static_cast<IAutomataAutomaton*>(automaton); }   // QI 0xa9b40f05 answer
 };
 IAutomataManagerHost* AutomataManagerHost();
 void SetAutomataManagerHost(IAutomataManagerHost* host);

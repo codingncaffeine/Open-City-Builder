@@ -313,4 +313,7 @@ bool LoadCityFile(cSC4App& app, const std::string& path, cRZAutoRefCount<cISC4Re
 // The city being loaded or played (the one cSC4City::Init runs on, before the application publishes it).
 sc4::cSC4City* HostCity() { return dynamic_cast<sc4::cSC4City*>(g_hostCity); }
 
+// A new object of a city class (the serializer's factory: GZCOM creators plus the wrappers of the plain classes); one reference.
+cIGZSerializable* NativeCreateSerializable(std::uint32_t classId) { return g_serFactory && classId ? g_serFactory->CreateSerializable(classId) : nullptr; }
+
 }  // namespace native

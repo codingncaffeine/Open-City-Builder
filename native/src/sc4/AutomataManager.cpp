@@ -689,7 +689,7 @@ IAutomataAutomaton* cSC4AutomataManager::CreateAutomatonInternal(std::uint32_t g
     IAutomataAutomaton* automaton = g_host ? g_host->CreateAutomatonByClassId(classId) : nullptr;
     if (!automaton) return nullptr;
     automaton->SetPriority(spawn);
-    automaton->SetOpacity(static_cast<float>(flags), 1.0f);
+    automaton->SetAutomataFlag(flags, true);   // i386 0x000c1842: vslot 0x78 (2 = self-controlling for spawned traffic)
     auto applyExemplar = [&]() {
         if (!exemplar) return;
         automaton->SetExemplar(exemplar->exemplar);
@@ -959,14 +959,24 @@ void cSC4AutomataManager::DoAnimationTick(std::uint32_t data, float deltaMillise
             automaton->SetAutomataFlag(0x4000000, true);
             if (!automaton->PostInit()) RemoveAutomaton(automaton, false);
         }
-        if (occupant && occupant->IsInitialized() && !automaton->DoAnimationTick(data, deltaMilliseconds))
+        static const bool trace = std::getenv("SC4_AUTOMATADEBUG") != nullptr;
+        static int reasons[4] = {};
+        if (occupant && occupant->IsInitialized() && !automaton->DoAnimationTick(data, deltaMilliseconds)) {
+            ++reasons[0];
             RemoveAutomaton(automaton, false);
+        }
         if (!automaton->GetMarkedForRemove() || automaton->GetOpacity() >= 0.1f) {
-            if (!automaton->CheckAutomataFlag(0x10000) && !IsAutomatonOnscreen(automaton))
+            if (!automaton->CheckAutomataFlag(0x10000) && !IsAutomatonOnscreen(automaton)) {
+                ++reasons[1];
                 RemoveAutomaton(automaton, false);
+            }
         } else {
+            ++reasons[2];
             RemoveAutomaton(automaton, true);
         }
+        if (trace && ++reasons[3] % 2000 == 0)
+            std::fprintf(stderr, "automata manager %p: removals tick-false %d offscreen %d faded %d (of %d visits); view rect %.0f %.0f %.0f %.0f\n",
+                         static_cast<void*>(this), reasons[0], reasons[1], reasons[2], reasons[3], viewRect_[0], viewRect_[1], viewRect_[2], viewRect_[3]);
     }
 }
 
@@ -1216,8 +1226,8 @@ bool cSC4AutomataManager::HandleInsertOccupant(IAutomataOccupant* occupant) {
     if (!occupant || occupant->GetType() != kBuildingOccupantType) return true;
     void* raw = nullptr;
     if (!occupant->QueryInterface(kGZIID_cISC4BuildingOccupant, &raw) || !raw) return true;
-    auto* building = static_cast<IAutomataBuildingOccupant*>(raw);
-    if (building->GetCompletionPercent() >= 100.0f) HandleNewBuilding(building);
+    auto* building = g_host ? g_host->BuildingView(raw) : static_cast<IAutomataBuildingOccupant*>(raw);
+    if (building && building->GetCompletionPercent() >= 100.0f) HandleNewBuilding(building);
     if (g_host) g_host->ReleaseObject(static_cast<cIGZUnknown*>(raw));
     return true;
 }
@@ -1449,11 +1459,17 @@ bool cSC4AutomataManager::DoMessage(cIGZMessage2* message) {
     auto* standard = static_cast<cIGZMessage2Standard*>(standardRaw);
     switch (type) {
         case kMsgTick:
-            DoAnimationTick(static_cast<std::uint32_t>(standard->GetData2()), static_cast<float>(standard->GetData3()));
+        {   // data3 is the elapsed milliseconds as float bits (cSC4AnimationTickManager)
+            const std::uint32_t bits = static_cast<std::uint32_t>(standard->GetData3());
+            float milliseconds = 0.0f;
+            std::memcpy(&milliseconds, &bits, sizeof(milliseconds));
+            DoAnimationTick(static_cast<std::uint32_t>(standard->GetData2()), milliseconds);
+        }
             break;
         case kMsgOccupantInserted:
         case kMsgOccupantRemoved: {
-            auto* occupant = static_cast<IAutomataOccupant*>(standard->GetVoid1());
+            void* city = standard->GetVoid1();
+            auto* occupant = city && g_host ? g_host->OccupantView(city) : static_cast<IAutomataOccupant*>(city);
             if (occupant) {
                 cISCPropertyHolder* holder = occupant->AsPropertyHolder();
                 if (!holder || !holder->HasProperty(kPropertyNoAutomata)) {
@@ -1464,7 +1480,8 @@ bool cSC4AutomataManager::DoMessage(cIGZMessage2* message) {
             break;
         }
         case kMsgBuildingCompleted: {
-            auto* building = static_cast<IAutomataBuildingOccupant*>(standard->GetVoid1());
+            void* city = standard->GetVoid1();
+            auto* building = city && g_host ? g_host->BuildingView(city) : static_cast<IAutomataBuildingOccupant*>(city);
             if (building && building->GetCompletionPercent() >= 100.0f) HandleNewBuilding(building);
             break;
         }
@@ -1477,7 +1494,8 @@ bool cSC4AutomataManager::DoMessage(cIGZMessage2* message) {
                 void* automatonRaw = nullptr;
                 auto* unknown = static_cast<cIGZUnknown*>(raw);
                 if (unknown->QueryInterface(kGZIID_cISC4Automaton, &automatonRaw) && automatonRaw) {
-                    HandleOccupantGroupChanged(static_cast<IAutomataAutomaton*>(automatonRaw));
+                    IAutomataAutomaton* view = g_host ? g_host->AutomatonView(automatonRaw) : static_cast<IAutomataAutomaton*>(automatonRaw);
+                    if (view) HandleOccupantGroupChanged(view);
                     static_cast<cIGZUnknown*>(automatonRaw)->Release();
                 }
             }
@@ -1739,14 +1757,16 @@ bool cSC4AutomataManager::ReadInternal(cIGZIStream& stream, std::uint16_t versio
         void* raw = nullptr;
         SC4ReadGZSerializable(stream, kGZIID_cISC4Automaton, &raw, false);
         if (!raw) continue;
-        // PORT GAP: the object answers 0xa9b40f05 as the recovered cSC4Automaton, which does not implement this manager's
-        // IAutomataAutomaton (the two halves were ported apart). Kept in the list, every call through it hit the wrong
-        // vtable (leaving a city crashed in DestroyAutomata). The saved automata are dropped until an adapter exists:
-        // they are the cars and pedestrians on screen, and the simulation spawns new ones.
+        // The object answers 0xa9b40f05 as the recovered cSC4Automaton; the host gives this manager's view of it (the two
+        // halves were ported apart). Without a view the automaton is dropped (the stub host).
+        if (IAutomataAutomaton* view = g_host ? g_host->LoadedAutomaton(raw) : nullptr) {
+            automata_.push_back(view);   // the read reference becomes the list's
+            continue;
+        }
         static_cast<cIGZUnknown*>(raw)->Release();
         ++droppedOnLoad;
     }
-    if (droppedOnLoad != 0) std::fprintf(stderr, "automata: %u saved automata dropped (no IAutomataAutomaton adapter yet)\n", droppedOnLoad);
+    if (droppedOnLoad != 0) std::fprintf(stderr, "automata: %u saved automata dropped (no view)\n", droppedOnLoad);
     if (version < 5) {
         recountBuildings_ = true;
     } else {

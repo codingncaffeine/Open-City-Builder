@@ -10,6 +10,7 @@
 #include "rz/cRZVariant.h"
 #include "sc4/AutomataManager.h"
 #include "sc4/Automaton.h"
+#include "sc4/BuildingOccupant.h"
 #include "sc4/Exemplar.h"
 #include "sc4/OccupantGroupTemplate.h"
 #include "sc4/TrafficAutomataManager.h"
@@ -69,10 +70,10 @@ GroupPair* PairFor(cSC4OccupantGroupTemplate* group) {
 IAutomataGroupTemplate* ManagerGroupView::Parent() const { GroupPair* p = PairFor(group_->parent); return p ? &p->manager : nullptr; }
 IAutomatonGroupTemplate* AutomatonGroupView::Parent() const { GroupPair* p = PairFor(group_->parent); return p ? &p->automaton : nullptr; }
 
-// ---- the automaton's occupant view ---------------------------------------------------------------------------------------
+// ---- occupant views (any city occupant; an automaton's own is a member of its view) ---------------------------------------
 class OccupantView final : public IAutomataOccupant {
 public:
-    explicit OccupantView(cSC4Automaton& automaton) : a_(automaton) {}
+    explicit OccupantView(cISC4Occupant& occupant) : a_(occupant) {}
     bool QueryInterface(std::uint32_t iid, void** out) override { return a_.QueryInterface(iid, out); }
     std::uint32_t AddRef() override { return a_.AddRef(); }
     std::uint32_t Release() override { return a_.Release(); }
@@ -96,8 +97,22 @@ public:
     std::uint32_t GetFlags() override { return a_.GetFlags(); }
 
 private:
-    cSC4Automaton& a_;
+    cISC4Occupant& a_;
 };
+std::map<cISC4Occupant*, std::unique_ptr<OccupantView>> g_occupants;   // stateless pass-throughs, per address
+
+class BuildingView final : public IAutomataBuildingOccupant {
+public:
+    explicit BuildingView(cISC4BuildingOccupant* building) : b_(building) {}
+    bool QueryInterface(std::uint32_t iid, void** out) override { return b_->QueryInterface(iid, out); }
+    std::uint32_t AddRef() override { return b_->AddRef(); }
+    std::uint32_t Release() override { return b_->Release(); }
+    IAutomataOccupant* AsOccupant() const override { return CityOccupantView(b_->AsOccupant()); }
+    const float& GetCompletionPercent() override { return b_->GetCompletionPercent(); }
+private:
+    cISC4BuildingOccupant* b_;
+};
+std::map<cISC4BuildingOccupant*, std::unique_ptr<BuildingView>> g_buildings;
 
 // ---- the automaton view --------------------------------------------------------------------------------------------------
 class AutomatonViewImpl final : public ITrafficAutomataAutomaton, public cSC4AutomatonExtension {
@@ -238,6 +253,27 @@ cSC4Automaton* AutomatonOf(IAutomataAutomaton* view) {
 ITrafficAutomataAutomaton* TrafficAutomatonView(IAutomataAutomaton* view) {
     auto* impl = dynamic_cast<AutomatonViewImpl*>(view);
     return impl && impl->Traffic() ? impl : nullptr;
+}
+
+IAutomataOccupant* CityOccupantView(cISC4Occupant* occupant) {
+    if (!occupant) return nullptr;
+    if (auto* automaton = dynamic_cast<cSC4Automaton*>(occupant)) {
+        auto* view = static_cast<AutomatonViewImpl*>(AutomatonView(automaton));
+        return view ? view->Occupant() : nullptr;
+    }
+    auto& slot = g_occupants[occupant];
+    if (!slot) slot = std::make_unique<OccupantView>(*occupant);
+    return slot.get();
+}
+
+IAutomataBuildingOccupant* CityBuildingView(cIGZUnknown* object) {
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(kGZIID_cISC4BuildingOccupant, &raw) || !raw) return nullptr;
+    auto* building = static_cast<cISC4BuildingOccupant*>(raw);
+    building->Release();   // the caller's object keeps it
+    auto& slot = g_buildings[building];
+    if (!slot) slot = std::make_unique<BuildingView>(building);
+    return slot.get();
 }
 
 IAutomataGroupTemplate* GroupTemplateView(cSC4OccupantGroupTemplate* group) {

@@ -661,6 +661,9 @@ src/tools/watercraft_neutral.cpp
 src/tools/automata_base_handle.cpp
 src/app/NativeAutomata.cpp
 src/app/NativeAutomataViews.cpp
+src/app/NativeTrafficNetworkMap.cpp
+src/app/NativeTrafficAutomata.cpp
+src/app/NativeAutomataManagerHost.cpp
 src/app/NativeAutomataList.cpp
 src/tools/city_probe_creators8.cpp
 src/sc4/EmergencyVehicle.cpp

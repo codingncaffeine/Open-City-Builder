@@ -101,8 +101,18 @@ struct FakeBaseOccupant final : cISC4Occupant {
     std::uint32_t GetFlags() override { return flags; }
 };
 
+// The tunnel face a tunnel piece answers 0x8a4bd52b with (the map asks it for the far end; the fake has none).
+struct FakeTunnel final : ITrafficNetworkMapTunnel {
+    int refs = 1;
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return static_cast<std::uint32_t>(++refs); }
+    std::uint32_t Release() override { return static_cast<std::uint32_t>(--refs); }
+    ITrafficNetworkMapOccupant* GetOtherEndOccupant() override { return nullptr; }
+};
+
 struct FakeOccupant final : ITrafficAutomatonOccupant {
     FakeBaseOccupant base;
+    FakeTunnel tunnelFace;
     cISC4PathInfo* pathInfo = nullptr;   // borrowed; the test owns the reference
     int refs = 1;
     std::uint32_t networkFlags = 0x10000001u;
@@ -112,8 +122,8 @@ struct FakeOccupant final : ITrafficAutomatonOccupant {
     bool QueryInterface(std::uint32_t iid, void** out) override {
         if (iid == 1 || iid == kNetworkOccupantIid) { *out = this; AddRef(); return true; }
         if (iid == 0x8a4bd52b && (networkFlags & kVehicleNetworkFlagTunnelInterface)) {
-            *out = this;
-            AddRef();
+            *out = &tunnelFace;
+            tunnelFace.AddRef();
             return true;
         }
         return false;

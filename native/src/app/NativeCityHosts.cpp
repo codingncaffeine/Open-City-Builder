@@ -16,6 +16,7 @@ void InstallAutomataAttractorStub();
 void InstallAutomataControllerStub();
 void InstallControllerManagerStub();
 void InstallAutomataManagerStub();
+void InstallAutomataManagerHost();   // app/NativeAutomataManagerHost.cpp
 void InstallAutomataHost();
 void InstallBudgetStub();
 void InstallBudgetDialogStub();
@@ -123,6 +124,7 @@ void InstallStubHosts() {
     InstallAutomataControllerStub();
     InstallControllerManagerStub();
     InstallAutomataManagerStub();
+    InstallAutomataManagerHost();   // the native host replaces the stub
     InstallAutomataHost();   // NativeAutomata.cpp: the models, the city sizes, the terrain
     InstallBudgetStub();
     InstallBudgetDialogStub();

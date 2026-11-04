@@ -124,6 +124,7 @@ public:
 
 sc4::cSC4View3DWin* g_cityView3DWin = nullptr;
 sc4::cSC4View3DWin* CityView3DWin() { return g_cityView3DWin; }
+int CityViewLevel() { return g_cityView3DWin ? static_cast<int>(g_cityView3DWin->GetCurrentViewLevel()) : 1; }
 
 void BindView3DServices(sc4::cSC4View3DWin* view, sc4::cSC43DRender* render) {
     static View3DSystems systems;

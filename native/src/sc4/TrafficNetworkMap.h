@@ -229,7 +229,14 @@ public:
     // cISC4PathInfo::MakeTunnelPaths (slot 0x100)
     virtual void MakeTunnelPaths(ITrafficNetworkMapPathInfo* pathInfo, ITrafficNetworkMapOccupant* from,
                                  ITrafficNetworkMapOccupant* to) = 0;
+    // Port seam: the map's view of a network occupant. The default is the original's QueryInterface 0xa821ef94; the game's
+    // host overrides it because the port's network occupants do not answer that iid (NetworkManager.h). One reference, as
+    // the QueryInterface gives; null for anything that is not a network piece.
+    virtual ITrafficNetworkMapOccupant* AsMapOccupant(cISC4Occupant* occupant);
 };
+// The host a map made without one uses (the GZCOM creator passes none).
+ITrafficNetworkMapHost* DefaultTrafficNetworkMapHost();
+void SetDefaultTrafficNetworkMapHost(ITrafficNetworkMapHost* host);
 
 // ---- data -----------------------------------------------------------------------------------------
 struct TrafficLaneTick {

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 namespace sc4 {
@@ -316,15 +317,14 @@ std::uint32_t cSC4TrafficAutomataManager::GetAutomataGroupForLayer(PopulateLayer
 }
 
 bool cSC4TrafficAutomataManager::IsLayerVisible(std::uint32_t layer) {
-    // 0x100113438
+    // i386 0x000ca21a: the view level (above ground for every layer but the subway's 6, underground for 6)
     ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
     IAutomataViewUtilities* view = host ? host->ViewUtilities() : nullptr;
     if (!view) return false;
-    int zoom = 0, rotation = 0;
-    view->GetZoomAndRotation(zoom, rotation);
+    const int level = view->ViewLevel();
     if (layer >= 11) return false;
-    if (((0x7beu >> (layer & 31)) & 1) != 0) return zoom == 1;
-    if (layer == 6) return zoom == 2;
+    if (((0x7beu >> (layer & 31)) & 1) != 0) return level == 1;
+    if (layer == 6) return level == 2;
     return false;
 }
 
@@ -511,8 +511,6 @@ void cSC4TrafficAutomataManager::PopulateVisibleArea(float deltaMilliseconds) {
         currentCellZ_ = std::max(currentCellZ_, rect[1]);
     }
     const std::uint32_t layer = currentLayer_->layer;
-    int zoom = 0, rotation = 0;
-    if (IAutomataViewUtilities* view = host->ViewUtilities()) view->GetZoomAndRotation(zoom, rotation);
     if (layer > 10 || !IsLayerVisible(layer)) {
         currentCellX_ = -1;
         currentCellZ_ = -1;
@@ -601,42 +599,151 @@ void cSC4TrafficAutomataManager::PopulateNetworkOccupant(ITrafficNetworkMapOccup
     }
 }
 
+// @ i386 0x000cd290: the car layers (1, 2, 3, 7). For path types 1 and 2 (travel types 1 and 0): the occupant's smoothed automata
+// count, the summed edge densities of the layers on that path type, and the spawn-and-recall entry of the occupant's network type:
+// below the curve's target (total density / the cell's capacity) an automaton is spawned on a layer and edge picked by weight, far
+// above it one is recalled.
+//   PARTIAL: the layer-2 clock factor (tuning +0x178), the player-drive path (vslot 0x34 and tuning +0x170) and the map's
+//   "occupied" test (0x88) are not ported.
 void cSC4TrafficAutomataManager::PopulateNetworkOccupant(ITrafficNetworkMapOccupant* occupant, TrafficTileInfo* tile,
                                                          int cellX, int cellZ, float elapsedMilliseconds) {
-    // 0x10011347e PARTIAL: only the populate-flag gate is ported; the body needs the network manager's per-layer
-    // density accumulators (vslots 0xa8/0xc0), the occupant gate (0x110) and the spawn-recall response curves
-    // (0x100b21ab0), plus the traffic simulator's per-network edge density (vslot 0xb8).
-    (void)occupant;
-    (void)tile;
-    (void)elapsedMilliseconds;
-    if (effectManager_.GetPopulateFlags(cellX, cellZ) == 3) return;
+    static constexpr int kTravelTypeForPathType[3] = {-1, 1, 0};   // kTrafficSimNetworkType, path types 1 and 2
+    if (!occupant || !tile) return;
+    const std::uint32_t flags = effectManager_.GetPopulateFlags(cellX, cellZ);
+    if (flags == 3) return;
+    ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
+    ITrafficNetworkManagerApi* network = host ? host->TrafficNetworkManager() : nullptr;
+    if (!network) return;
+    const float w = elapsedMilliseconds * 0.001f;
+    for (std::uint32_t pathType = 1; pathType < 3; ++pathType) {
+        const int travelType = kTravelTypeForPathType[pathType];
+        const int networkType = ChooseNetworkTypeForPathType(occupant, pathType);
+        if (travelType < 0 || networkType == -1) continue;
+        float& smoothed = network->OccupantPathDensity(occupant, 0, pathType);
+        smoothed = (static_cast<float>(network->OccupantAutomataCount(occupant, pathType)) * w + smoothed) / (w + 1.0f);
+        struct LayerWeights { PopulateLayer layer; float weights[4][4]; float sum; };
+        std::vector<LayerWeights> layers;
+        float total = 0.0f;
+        for (const tTrafficLayerUpdate& update : layerUpdates_) {
+            if (update.layer == 8) continue;
+            const auto layer = static_cast<PopulateLayer>(update.layer);
+            if (static_cast<std::uint32_t>(GetPathTypeForLayer(layer)) != pathType) continue;
+            LayerWeights entry{layer, {}, 0.0f};
+            GetEdgeDensity(occupant, tile, layer, GetClockMultiplier(layer), entry.weights);
+            for (auto& row : entry.weights)
+                for (float v : row) entry.sum += v;
+            total += entry.sum;
+            layers.push_back(entry);
+        }
+        if (layers.empty() || !trafficSimulator_) continue;
+        const float capacity = trafficSimulator_->GetCapacity(travelType, cellX, cellZ);
+        if (capacity == 0.0f) continue;
+        auto& params = AutomataTuning().spawnRecall[networkType];
+        const float desired = params.curve.GetOutputValue(total / capacity);
+        if (smoothed <= desired || (flags & 2) != 0) {
+            if (!(desired > 0.0f && total > 0.01f && (flags & 1) == 0 && smoothed / desired < params.f4 &&
+                  static_cast<float>(Random().RandomDoubleUniform()) < params.f0))
+                continue;
+            float pick = static_cast<float>(Random().RandomDoubleRangeUniform(0.009999999776482582, static_cast<double>(total)));
+            for (const LayerWeights& entry : layers) {
+                pick -= entry.sum;
+                if (pick > 0.0f) continue;
+                float edge = static_cast<float>(Random().RandomDoubleRangeUniform(0.0, static_cast<double>(entry.sum)));
+                bool spawned = false;
+                for (std::uint8_t from = 0; from < 4 && !spawned; ++from)
+                    for (std::uint8_t to = 0; to < 4 && !spawned; ++to) {
+                        edge -= entry.weights[from][to];
+                        if (edge <= 0.0f) {
+                            SpawnAutomaton(occupant, tile, entry.layer, from, to, entry.weights[from][to]);
+                            spawned = true;
+                        }
+                    }
+                break;
+            }
+        } else if ((desired == 0.0f || params.fc + 1.0f < smoothed / desired) &&
+                   static_cast<float>(Random().RandomDoubleUniform()) < params.f8) {
+            RecallAutomatonFromNetwork(tile, pathType);
+        }
+    }
+}
+
+// i386 0x000cfa2a / 0x000d0b70's shared body. The entry falls back to the opposite edge, then to any connected entry, then to the
+// wildcard path; a random lane of the edge gives the path key. Gated (MaybeSpawnAutomaton) adds the elapsed time to the edge's
+// accumulator and spawns only once it reaches the spawn interval (1 / density) and the lane is empty. The automaton starts at
+// the path's first point, faded in, on a trip along it.
+//   PARTIAL: the "no train within two cells" test of layers 4/5/6/9/10, the camera-follow distance test of SpawnAutomaton, the
+//   random priority of layers 7/8 and the cell lifespan of the special groups are not ported; the accumulator is never reset
+//   (as in the original's code).
+bool cSC4TrafficAutomataManager::SpawnOnEdge(ITrafficNetworkMapOccupant* occupant, PopulateLayer layer, std::uint8_t entry,
+                                             std::uint8_t exit, bool gated, float elapsedSeconds, double density) {
+    ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
+    ITrafficNetworkManagerApi* network = host ? host->TrafficNetworkManager() : nullptr;
+    if (!occupant || !network) return false;
+    const std::uint32_t pathType = static_cast<std::uint32_t>(GetPathTypeForLayer(layer));
+    const std::uint32_t group = GetAutomataGroupForLayer(layer);
+    std::uint8_t from = entry;
+    if (!occupant->PathConnectionExists(pathType, from, exit)) {
+        from = static_cast<std::uint8_t>((exit + 2) & 3);
+        if (!occupant->PathConnectionExists(pathType, from, exit)) {
+            int found = -1;
+            for (std::uint8_t e = 0; e < 4; ++e)
+                if (e != exit && occupant->PathConnectionExists(pathType, e, exit)) {
+                    found = e;
+                    break;
+                }
+            if (found < 0) {
+                cS3DVector3 unused;
+                if (!network->PathStart(occupant, (pathType << 24) | 0xff00u | exit, unused)) return false;
+                from = 0xff;
+            } else {
+                from = static_cast<std::uint8_t>(found);
+            }
+        }
+    }
+    const int lanes = network->LaneCount(occupant, pathType, from, exit);
+    if (lanes <= 0) return false;
+    const std::uint32_t lane = lanes >= 2 ? (Random().RandomUint32Uniform(static_cast<std::uint32_t>(lanes)) & 0xffu) : 0u;
+    const std::uint32_t key = (pathType << 24) | (lane << 16) | (static_cast<std::uint32_t>(from) << 8) | exit;
+    if (gated) {
+        if (density <= 0.0) return false;
+        float& accumulated = network->SpawnAccumulator(occupant, static_cast<std::uint32_t>(layer), pathType, from, exit);
+        accumulated += elapsedSeconds;
+        if (network->LaneAutomataCount(occupant, static_cast<std::uint32_t>(layer), key) != 0) return false;
+        if (static_cast<double>(accumulated) < 1.0 / density) return false;
+    }
+    cS3DVector3 start{};
+    network->PathStart(occupant, key, start);
+    cGZPersistResourceKey model;
+    ChooseRandomModel(group, occupant, layer, model);
+    if (model.instance == 0) return false;
+    IAutomataAutomaton* automaton = CreateAutomaton(group, start, 2, model, nullptr, 0, nullptr);
+    ITrafficAutomataAutomaton* traffic = automaton && host ? host->AsTrafficAutomaton(automaton) : nullptr;
+    if (!traffic) return false;
+    traffic->SetPopulateLayer(static_cast<std::uint32_t>(layer));
+    if (!traffic->StartTrip(occupant, key, false)) {
+        RemoveAutomaton(automaton, true);
+        return false;
+    }
+    automaton->SetOpacity(0.0f, 0.0f);
+    automaton->SetOpacity(1.0f, AutomataTuning().f219b4);
+    return true;
 }
 
 bool cSC4TrafficAutomataManager::MaybeSpawnAutomaton(ITrafficNetworkMapOccupant* occupant, TrafficTileInfo* tile,
-                                                     PopulateLayer layer, float elapsedMilliseconds, double density,
+                                                     PopulateLayer layer, float elapsedSeconds, double density,
                                                      std::uint8_t entry, std::uint8_t exit) {
-    // 0x100114214 PARTIAL: needs the path-info wildcard path (ITrafficNetworkMapPathInfo slots 0x20/0x60), the network
-    // manager's spawn accumulator (vslot 0x98) and edge counter (0xb8), and the automaton trip API.
-    (void)occupant;
+    // @ i386 0x000cfa2a
     (void)tile;
-    (void)layer;
-    (void)elapsedMilliseconds;
-    (void)density;
-    (void)entry;
-    (void)exit;
-    return false;
+    return SpawnOnEdge(occupant, layer, entry, exit, true, elapsedSeconds, density);
 }
 
 void cSC4TrafficAutomataManager::SpawnAutomaton(ITrafficNetworkMapOccupant* occupant, TrafficTileInfo* tile,
                                                 PopulateLayer layer, std::uint8_t entry, std::uint8_t exit,
-                                                float elapsedMilliseconds) {
-    // 0x100114840 PARTIAL: same neighbours as MaybeSpawnAutomaton, plus CreateAutomaton and StartTrip.
-    (void)occupant;
+                                                float weight) {
+    // @ i386 0x000d0b70
     (void)tile;
-    (void)layer;
-    (void)entry;
-    (void)exit;
-    (void)elapsedMilliseconds;
+    (void)weight;
+    SpawnOnEdge(occupant, layer, entry, exit, false, 0.0f, 0.0);
 }
 
 ITrafficAutomataAutomaton* cSC4TrafficAutomataManager::SpawnOccupantAutomaton(ITrafficNetworkMapOccupant* occupant,
@@ -750,6 +857,8 @@ bool cSC4TrafficAutomataManager::RemoveAutomaton(IAutomataAutomaton* automaton, 
 bool cSC4TrafficAutomataManager::IsAutomatonOnscreen(IAutomataAutomaton* automaton) {
     // 0x1001159fc: the base's +0x24 view rect expanded by 48. The original compares x and z only.
     if (!automaton) return false;
+    static const bool keepAll = std::getenv("SC4_AUTOMATANOCULL") != nullptr;   // debug: keep every automaton
+    if (keepAll) return true;
     const float minX = ViewRect(0), minZ = ViewRect(1), maxX = ViewRect(2), maxZ = ViewRect(3);
     float position[3] = {0.0f, 0.0f, 0.0f};
     automaton->GetPosition(position);

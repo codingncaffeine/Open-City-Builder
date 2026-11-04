@@ -37,6 +37,7 @@
 #include "app/NativeAnimationTicks.h"
 #include "platform/PerfLog.h"
 #include "sc4/CameraControl.h"
+#include "sc4/Render3D.h"
 #include "app/NativeCityView.h"
 #include "app/NativeModelMaker.h"
 #include "app/NativeFonts.h"
@@ -993,6 +994,18 @@ int RunScenario(const std::string& path) {
                 native::ProbeBuildingsAt(hit[0], hit[2], 24.0f);
             } else {
                 std::printf("probe %d,%d: no ground\n", px, py);
+            }
+        } else if (command == "look") {   // look X Z: the camera's target to a world position (on the ground)
+            float x = 0.0f, z = 0.0f;
+            words >> x >> z;
+            sc4::cSC43DRender* render = native::CityRenderer();
+            if (sc4::cSC4CameraControl* camera = render ? render->GetCameraControl() : nullptr) {
+                cS3DVector3 target;
+                target.x = x;
+                target.y = 270.0f;
+                target.z = z;
+                camera->SetViewTargetPosition(target);
+                std::printf("look %.0f,%.0f\n", x, z);
             }
         } else if (command == "tap") {   // a single click (toolbar buttons toggle: a double click turns them on and off again)
             int x = 0, y = 0; words >> x >> y;

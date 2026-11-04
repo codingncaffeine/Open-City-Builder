@@ -4,6 +4,8 @@
 #include "gz/StreamOps.h"
 #include "sc4/DBSegment.h"
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 #include <algorithm>
 #include <cmath>
@@ -52,8 +54,20 @@ std::uint16_t SaturateUShort(float value) {
 // ---------------------------------------------------------------------------------------------------
 
 // 0x100298a0e
+namespace {
+ITrafficNetworkMapHost* g_defaultHost = nullptr;
+}  // namespace
+ITrafficNetworkMapOccupant* ITrafficNetworkMapHost::AsMapOccupant(cISC4Occupant* occupant) {
+    void* raw = nullptr;
+    if (!occupant || !occupant->QueryInterface(0xa821ef94, &raw) || !raw) return nullptr;
+    return static_cast<ITrafficNetworkMapOccupant*>(raw);
+}
+
+ITrafficNetworkMapHost* DefaultTrafficNetworkMapHost() { return g_defaultHost; }
+void SetDefaultTrafficNetworkMapHost(ITrafficNetworkMapHost* host) { g_defaultHost = host; }
+
 cSC4TrafficNetworkMap::cSC4TrafficNetworkMap(ITrafficNetworkMapHost* host, const TrafficNetworkMapTuning* tuning)
-    : host_(host), tuning_(tuning ? tuning : &ownedTuning_) {}
+    : host_(host ? host : g_defaultHost), tuning_(tuning ? tuning : &ownedTuning_) {}
 
 // 0x100298b9c
 cSC4TrafficNetworkMap::~cSC4TrafficNetworkMap() {
@@ -180,10 +194,45 @@ bool cSC4TrafficNetworkMap::DoMessage(::cGZMessage&) {
     return false;
 }
 
-// 0x100299312 (message target 2 slot) — the recovered logic lives in DoMessage2; this interface slot is
-// unrecovered and handles nothing.
-bool cSC4TrafficNetworkMap::DoMessage(cIGZMessage2*) {
-    return false;
+// @ i386 0x001ecbd6. Network pieces inserted / removed reach the tiles (a subway or tunnel piece as usable-changed), the
+// city's post-init builds the intersections, 0x69247dc7 marks the tile occupancy dirty and the camera's move refreshes the
+// intersections in view.
+//   PARTIAL: 0x86ad10ee (vslot 0xe4), 0x89d3e9f3 (usable-changed through the network filter), a removed train leaving the
+//   intersections' train lists and the stoplight props' update on a prop insert are not ported; the scroll granularity test
+//   is reduced to "not while scrolling".
+bool cSC4TrafficNetworkMap::DoMessage(cIGZMessage2* message) {
+    if (!message) return true;
+    auto* standard = static_cast<cIGZMessage2Standard*>(message);
+    const std::uint32_t type = message->GetType();
+    switch (type) {
+    case kTrafficMessageIntersectionsChanged: HandlePostCityInit(); break;
+    case kTrafficMessageTileOccupancyDirty: tileOccupancyDirty_ = true; break;
+    case kTrafficMessageOccupantInserted:
+    case kTrafficMessageOccupantRemoved: {
+        auto* occupant = static_cast<cISC4Occupant*>(standard->GetVoid1());
+        ITrafficNetworkMapOccupant* network = occupant && host_ ? host_->AsMapOccupant(occupant) : nullptr;
+        if (!network) break;
+        if (type == kTrafficMessageOccupantInserted) {
+            bool special = network->IsOfType(7);   // subway
+            if (!special) {
+                void* raw = nullptr;
+                special = network->QueryInterface(0x8a4bd52b, &raw) && raw;   // a tunnel piece
+                if (raw) static_cast<cIGZUnknown*>(raw)->Release();
+            }
+            if (special) HandleNetworkOccupantUsable(network, true);
+            else HandleInsertNetworkOccupant(network);
+        } else {
+            HandleRemoveNetworkOccupant(network);
+        }
+        network->Release();
+        break;
+    }
+    case kTrafficMessageScrollEnd:
+        if (!scrollActive_) HandleViewChanged();
+        break;
+    default: return DoMessage2(type, 0, 0.0f);
+    }
+    return true;
 }
 
 // 0x1002a034c — four sub-objects: the map (0xca0f81b9) at +0, the message target (iid 1) at +8, the
@@ -1382,9 +1431,8 @@ bool cSC4TrafficNetworkMap::GetSurroundingRoads(std::vector<ITrafficNetworkMapOc
     std::vector<cISC4Occupant*> candidates = host_->NetworkOccupantsInBox(boxMin, boxMax);
     for (cISC4Occupant* candidate : candidates) {
         if (!candidate) continue;
-        void* raw = nullptr;
-        if (!candidate->QueryInterface(0xa821ef94, &raw)) continue;
-        ITrafficNetworkMapOccupant* occupant = static_cast<ITrafficNetworkMapOccupant*>(raw);
+        ITrafficNetworkMapOccupant* occupant = host_->AsMapOccupant(candidate);   // the original: QI 0xa821ef94 (see the host)
+        if (!occupant) continue;
         bool outskirts = true;
         if (flag >= 1) {
             SC4CellRect cells{};
@@ -1514,6 +1562,16 @@ bool cSC4TrafficNetworkMap::HandleViewChanged() {
 
 // 0x10029b464
 bool cSC4TrafficNetworkMap::HandlePostCityInit() {
+    if (std::getenv("SC4_TRAFFICMAPDEBUG")) {
+        int tiles = 0, withOccupant = 0;
+        for (TrafficTileInfo* head : grid_)
+            for (TrafficTileInfo* tile = head; tile != nullptr; tile = tile->next) {
+                ++tiles;
+                withOccupant += tile->occupant != nullptr;
+            }
+        std::fprintf(stderr, "traffic map: post city init, %d tiles, %d with a network piece, %zu unusable roads\n", tiles, withOccupant,
+                     unusableRoads_.size());
+    }
     if (!tunnelPaths_) return true;
     for (auto& entry : unusableRoads_) {
         std::vector<ITrafficNetworkMapOccupant*> list = entry.second;
@@ -1592,18 +1650,8 @@ bool cSC4TrafficNetworkMap::Write(cIGZOStream& stream) const {
         for (std::uint32_t cell = 0; cell < cellCount; ++cell) {
             for (TrafficTileInfo* tile = grid_[cell]; tile != nullptr; tile = tile->next) {
                 stream.SetUint32(cell);
-                // SC4WriteGZSerializable(stream, tile->occupant)
-                if (tile->occupant) {
-                    tile->occupant->AddRef();
-                    cIGZSerializable* serializable = nullptr;
-                    void* raw = nullptr;
-                    if (tile->occupant->QueryInterface(0xe4fda3d4, &raw)) {
-                        serializable = static_cast<cIGZSerializable*>(raw);
-                        stream.SetGZSerializable(*serializable);
-                        serializable->Release();
-                    }
-                    tile->occupant->Release();
-                }
+                // SC4WriteGZSerializable(stream, tile->occupant): a reference (null when the tile has no piece), as Read takes it
+                SC4WriteGZSerializable(stream, tile->occupant ? static_cast<const cIGZUnknown*>(tile->occupant->AsOccupant()) : nullptr);
                 stream.SetUint32(static_cast<std::uint32_t>(tile->laneTicks.size()));
                 for (std::uint32_t type = 0; type < tile->laneTicks.size(); ++type) {
                     stream.SetUint32(type);
@@ -1614,10 +1662,9 @@ bool cSC4TrafficNetworkMap::Write(cIGZOStream& stream) const {
                         stream.SetFloat32(static_cast<float>(entry.laneTick));
                     }
                 }
-                stream.SetUint32(static_cast<std::uint32_t>(tile->automata.size()));
-                for (ITrafficNetworkMapAutomaton* automaton : tile->automata) {
-                    (void)automaton;   // the automata are GZ serializable objects as well
-                }
+                // PARTIAL: the original writes a reference per automaton on the tile; the port writes none (the cars re-enter the
+                // tiles as they drive), so the count says none.
+                stream.SetUint32(0);
                 stream.SetUint8(0);
                 stream.SetUint32(tile->roadMask);
                 stream.SetUint32(tile->occupancyMask);
@@ -1705,7 +1752,19 @@ bool cSC4TrafficNetworkMap::Read(cIGZIStream& stream) {
             while (*link) link = &(*link)->next;
             *link = tile;
         }
-        skipReference();   // the network occupant of the tile
+        {   // the network occupant of the tile (the original reads it as 0xa821ef94; the port converts it through the host)
+            void* raw = nullptr;
+            SC4ReadGZSerializable(stream, kGZIID_cIGZSerializable, &raw, false);
+            if (raw) {
+                auto* object = static_cast<cIGZUnknown*>(raw);
+                void* occupant = nullptr;
+                if (host_ && object->QueryInterface(0x26bb767e, &occupant) && occupant) {   // cISC4Occupant
+                    tile->occupant = host_->AsMapOccupant(static_cast<cISC4Occupant*>(occupant));   // one reference, the tile's
+                    static_cast<cISC4Occupant*>(occupant)->Release();
+                }
+                object->Release();
+            }
+        }
         std::uint32_t lanes = 0;
         stream.GetUint32(lanes);
         if (lanes > kMaxStreamedList) return false;

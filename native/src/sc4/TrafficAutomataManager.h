@@ -134,6 +134,8 @@ public:
     // negative density multiplier, 0x100115288).
     virtual const std::uint16_t* GetEdgeCountTable(ITrafficNetworkMapOccupant* occupant, unsigned cellX,
                                                    unsigned cellZ, unsigned networkType, bool mirrored) = 0;
+    // cISC4TrafficSimulator GetCapacity (i386 vslot 0x5c): the simulator network's capacity at the cell (0 when none).
+    virtual float GetCapacity(int simNetworkType, int cellX, int cellZ) { (void)simNetworkType; (void)cellX; (void)cellZ; return 0.0f; }
 };
 
 // cISC4NetworkManager (city vslot 0x140) beyond the base's IAutomataNetworkManager: the visible-rect, tile iteration
@@ -155,6 +157,19 @@ public:
                                        std::uint32_t pathType) = 0;
     virtual std::uint16_t& OccupantPathEdgeCount(ITrafficNetworkMapOccupant* occupant, std::uint32_t layer,
                                                  std::uint32_t pathType, std::uint8_t entry, std::uint8_t exit) = 0;
+    // MaybeSpawnAutomaton's neighbors: 0x4c the spawn accumulator (seconds) of one layer / path type / entry / exit of the
+    // occupant, 0x5c the automata on one lane key; and the occupant's path info (cISC4PathInfo 0x30 lane count, 0x10 the path of
+    // a key: its first point is where the automaton starts). Port seams with neutral defaults.
+    virtual float& SpawnAccumulator(ITrafficNetworkMapOccupant*, std::uint32_t, std::uint32_t, std::uint8_t, std::uint8_t) {
+        static float none = 0.0f;
+        none = 0.0f;
+        return none;
+    }
+    virtual std::uint32_t LaneAutomataCount(ITrafficNetworkMapOccupant*, std::uint32_t, std::uint32_t) { return 0; }
+    virtual int LaneCount(ITrafficNetworkMapOccupant*, std::uint32_t, std::uint8_t, std::uint8_t) { return 0; }
+    virtual bool PathStart(ITrafficNetworkMapOccupant*, std::uint32_t, cS3DVector3&) { return false; }
+    // the map's automata of a path type on the occupant (0x60 in the car layers' pass)
+    virtual std::uint32_t OccupantAutomataCount(ITrafficNetworkMapOccupant*, std::uint32_t) { return 0; }
 };
 
 class ITrafficAutomataManagerHost : public IAutomataManagerHost {
@@ -225,6 +240,9 @@ public:
                                          int cellX, int cellZ, float clockMultiplier, double densityMultiplier);   // 0x298
     virtual void PopulateNetworkOccupant(ITrafficNetworkMapOccupant* occupant, TrafficTileInfo* tile, int cellX,
                                          int cellZ, float elapsedMilliseconds);        // 0x2a0 @ 0x10011347e (PARTIAL)
+    // MaybeSpawnAutomaton's and SpawnAutomaton's common part: the edge's lane key, the automaton made there on its trip.
+    bool SpawnOnEdge(ITrafficNetworkMapOccupant* occupant, PopulateLayer layer, std::uint8_t entry, std::uint8_t exit,
+                     bool gated, float elapsedSeconds, double density);
     virtual bool MaybeSpawnAutomaton(ITrafficNetworkMapOccupant* occupant, TrafficTileInfo* tile, PopulateLayer layer,
                                      float elapsedMilliseconds, double density, std::uint8_t entry,
                                      std::uint8_t exit);                              // 0x2a8 @ 0x100114214 (PARTIAL)

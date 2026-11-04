@@ -36,6 +36,16 @@
 #include "sc4/FireProtectionSimulator.h"
 #include "app/NativeDemolition.h"
 #include "app/NativePlumbing.h"
+namespace native { void InstallTrafficNetworkMapHost(); }   // app/NativeTrafficNetworkMap.cpp
+namespace sc4 { class ITrafficAutomatonHost; extern ITrafficAutomatonHost* g_loadTrafficHost; }   // tools/city_probe_hostglobals.cpp
+namespace sc4 {
+class IVehicleHost;
+extern IVehicleHost* g_loadVehicleHost;   // tools/city_probe_hostglobals.cpp
+}
+namespace native {
+sc4::ITrafficAutomatonHost* NativeVehicleTrafficHost();   // app/NativeTrafficAutomata.cpp
+sc4::IVehicleHost* NativeVehicleHost();
+}
 #include "sc4/PoliceSimulator.h"
 #include "sc4/ResidentialSimulator.h"
 #include "sc4/Simulator.h"
@@ -562,6 +572,9 @@ void InstallNativeSimHosts() {
     hosts.pollution = &g_pollution;
     hosts.power = NativePowerHost();
     hosts.plumbing = NativePlumbingHost();
+    InstallTrafficNetworkMapHost();
+    sc4::g_loadTrafficHost = NativeVehicleTrafficHost();   // the loaded and created vehicles drive on the native map
+    sc4::g_loadVehicleHost = NativeVehicleHost();
     hosts.fire = &g_fire;
     hosts.police = &g_police;
     hosts.residential = &g_residential;

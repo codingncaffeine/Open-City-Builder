@@ -7,7 +7,7 @@
 //   * the headlights sweep (day/night and the two headlight messages 0xc9da96e8/0xc9da96e9);
 //   * the tuning reload (message 0xc53d10aa, data1 0xa9918d0b) and the funds-changed sweep
 //     (message 0x0772fad4 -> HandleFundsChanged);
-//   * the vehicle exemplar/group defaults (exemplar group 0x02000016, default group 0x4000, fallback group
+//   * the vehicle exemplar/group defaults (exemplar group 0x16, default group 0x4000, fallback group
 //     0x896e714a) and the two per-layer tuning overrides (GetEdgeDensityCurve / GetMaxAutosPerSecond for layers 1/7);
 //   * the concrete automaton factory (AddAutomaton creates a cSC4Vehicle);
 //   * the automata-frequency marked-cell view (the +0xb98 pointer, created elsewhere, freed by Shutdown).
@@ -57,7 +57,7 @@ constexpr std::uint32_t kVehicleMessageFundsChanged = 0x0772fad4;
 constexpr std::uint32_t kVehicleTuningChangedToken = 0xa9918d0b;
 
 // The default exemplar/group ids the constructor writes (0x1000d9ca4 / 0x1000d9cb5).
-constexpr std::uint32_t kVehicleExemplarGroup = 0x02000016;
+constexpr std::uint32_t kVehicleExemplarGroup = 0x16;   // i386 constructor: +0xa50 = 0x16 (the 64-bit store also writes the next word)
 constexpr std::uint32_t kVehicleDefaultGroup = 0x4000;
 constexpr std::uint32_t kVehicleFallbackGroup = 0x896e714a;      // the cISC4Vehicle class id
 

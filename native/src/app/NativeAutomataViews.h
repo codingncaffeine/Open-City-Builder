@@ -12,6 +12,7 @@ namespace sc4 {
 class IAutomataAutomaton;
 class ITrafficAutomataAutomaton;
 class IAutomataOccupant;
+class IAutomataBuildingOccupant;
 class IAutomataGroupTemplate;
 class cSC4Automaton;
 class cSC4OccupantGroupTemplate;
@@ -28,6 +29,9 @@ sc4::IAutomataAutomaton* AutomatonView(sc4::cSC4Automaton* automaton);
 sc4::cSC4Automaton* AutomatonOf(sc4::IAutomataAutomaton* view);
 // The traffic view (null unless the automaton is a cSC4TrafficAutomaton).
 sc4::ITrafficAutomataAutomaton* TrafficAutomatonView(sc4::IAutomataAutomaton* view);
+// The managers' views of a city occupant / of a building (QI 0x87dda3a9 on the object); stateless, kept per address.
+sc4::IAutomataOccupant* CityOccupantView(sc4::cISC4Occupant* occupant);
+sc4::IAutomataBuildingOccupant* CityBuildingView(cIGZUnknown* object);
 // The manager's view of a script group template (one per template, kept for the process).
 sc4::IAutomataGroupTemplate* GroupTemplateView(sc4::cSC4OccupantGroupTemplate* group);
 

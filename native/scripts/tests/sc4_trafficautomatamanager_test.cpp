@@ -291,7 +291,7 @@ struct FakeGroupBudget final : IAutomataGroupBudget {
 
 // ---- views / camera / misc -------------------------------------------------------------------------------------------------
 struct FakeView final : IAutomataViewUtilities {
-    int zoom = 3, rotation = 1;
+    int zoom = 3, rotation = 1, level = 1;
     float position[3] = {10, 5, 20};
     float rect[4] = {1, 2, 3, 4};
     bool onscreen = true;
@@ -303,6 +303,7 @@ struct FakeView final : IAutomataViewUtilities {
     void ProjectPointToViewCoordinates(float*) override { ++projections; }
     void ProjectPointFromViewCoordinatesToViewportCoordinates(float*) override { ++projections; }
     void UnProjectPointFromViewportCoordinatesToWorldCoordinates(float*) override { ++projections; }
+    int ViewLevel() override { return level; }
 };
 
 struct FakeCamera final : IAutomataCameraControl {
@@ -859,19 +860,19 @@ int main() {
         const std::uint32_t nonTrainGroups[] = {0x4200, 0x4202, 0x4204, 0x4205, 0x4234, 0x4004, 0};
         for (std::uint32_t group : nonTrainGroups) CHECK(!manager->IsTrainGroup(group));
 
-        // ---- IsLayerVisible (0x100113438): zoom 1 for the 0x7be layers, zoom 2 for layer 6
-        host.view.zoom = 1;
+        // ---- IsLayerVisible (i386 0x000ca21a): view level 1 for the 0x7be layers, level 2 (underground) for layer 6
+        host.view.level = 1;
         for (std::uint32_t layer : {1u, 2u, 3u, 4u, 5u, 7u, 8u, 9u, 10u})
             CHECK(manager->IsLayerVisible(layer));
         CHECK(!manager->IsLayerVisible(6));
         CHECK(!manager->IsLayerVisible(0));
         CHECK(!manager->IsLayerVisible(11));
-        host.view.zoom = 2;
+        host.view.level = 2;
         CHECK(manager->IsLayerVisible(6));
         CHECK(!manager->IsLayerVisible(1));
-        host.view.zoom = 3;
+        host.view.level = 3;
         for (std::uint32_t layer = 0; layer <= 11; ++layer) CHECK(!manager->IsLayerVisible(layer));
-        host.view.zoom = 1;
+        host.view.level = 1;
 
         // ---- the effect manager (+0xb60): CreateAccident and DoAnimationTick's update
         FakeCityOccupant* accidentOccupant = new FakeCityOccupant();

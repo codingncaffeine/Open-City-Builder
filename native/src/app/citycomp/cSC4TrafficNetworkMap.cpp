@@ -3,5 +3,13 @@
 #include "sc4/TrafficNetworkMap.h"
 
 namespace native {
-bool CityComponentInit_cSC4TrafficNetworkMap(cIGZUnknown* object, bool init) { return TryCityComponentInit<sc4::cSC4TrafficNetworkMap>(object, init); }
+void BindTrafficNetworkMap(sc4::cSC4TrafficNetworkMap* map);   // app/NativeTrafficNetworkMap.cpp
+
+bool CityComponentInit_cSC4TrafficNetworkMap(cIGZUnknown* object, bool init) {
+    auto* map = dynamic_cast<sc4::cSC4TrafficNetworkMap*>(object);
+    if (map && init) BindTrafficNetworkMap(map);   // its Init subscribes the messages through the host
+    const bool done = TryCityComponentInit<sc4::cSC4TrafficNetworkMap>(object, init);
+    if (map && !init) BindTrafficNetworkMap(nullptr);
+    return done;
+}
 }  // namespace native
