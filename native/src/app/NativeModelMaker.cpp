@@ -593,6 +593,8 @@ namespace {
 sc4::cSC4ModelMaker* g_maker = nullptr;
 }  // namespace
 
+sc4::cSC4ModelMaker* CityModelMaker() { return g_maker; }
+
 void DetachModelMaker() {
     DetachDecalOverlays();   // after DetachEffects stopped the decal effects
     if (!g_maker) return;

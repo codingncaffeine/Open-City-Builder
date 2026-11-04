@@ -11,6 +11,8 @@ namespace native {
 
 // The city view's renderer (null before the city view exists).
 sc4::cSC43DRender* CityRenderer();
+// Listen for the next city load's saved camera (the view state record) and open the city there; call before LoadCity.
+void ListenForSavedView();
 // Its view utilities' eye position (+0x44, three floats; zeros without a view) and zoom (+0x14): NativeCityViewQueries.cpp.
 const float* CityViewEye();
 int CityViewZoom();

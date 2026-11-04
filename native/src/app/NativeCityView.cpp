@@ -38,6 +38,8 @@
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/DBSegment.h"
+#include "sc4/AutoHelpers.h"
+#include "sc4/ModelMaker.h"
 #include "sc4/ViewInputControlCityScroll.h"
 #if defined(__APPLE__)
 #include <CoreGraphics/CoreGraphics.h>
@@ -247,6 +249,109 @@ void ProbeBuildingsAt(float x, float z, float radius) {
 sc4::cSC43DRender* g_cityRender = nullptr;
 sc4::cSC43DRender* CityRenderer() { return g_cityRender; }
 
+// The saved camera. cSC4View3DWin::DoLoad (i386 0x0052272c) reads record (0xa9c8647c, 0xe9c8647e, 1), versions below 5: the
+// camera control, the 3D render, the model maker and the simulator as serializables, then the view filter map, into the view's
+// own pointers. The native city view is built during the load before the "city was read" message (0x26c63341) and its view is
+// not subscribed yet, so a native target reads the saved camera control and applies its target, zoom and rotation to the live
+// camera (the city opens where it was saved, as in the original); a camera that does not exist yet gets it when it is set up.
+//   PARTIAL: the 3D render's / model maker's state and the view filter map are not applied.
+namespace {
+struct SavedView {
+    bool pending = false;
+    cS3DVector3 target{};
+    int zoom = 0, rotation = 0;
+} g_savedView;
+
+void ApplySavedView() {
+    if (!g_savedView.pending) return;
+    sc4::cSC4CameraControl* camera = g_cityRender ? g_cityRender->GetCameraControl() : nullptr;
+    if (!camera) return;
+    g_savedView.pending = false;
+    if (std::getenv("SC4_ZOOM") || std::getenv("SC4_FOCUS")) return;   // the dev switches win
+    camera->SetZoomAndRotation(g_savedView.zoom, g_savedView.rotation);
+    camera->SetViewTargetPosition(g_savedView.target);
+    camera->SendViewChangeMessage();
+    if (std::getenv("SC4_DEBUG"))
+        std::fprintf(stderr, "view state: camera target %.0f,%.0f zoom %d rotation %d\n", g_savedView.target.x, g_savedView.target.z,
+                     g_savedView.zoom, g_savedView.rotation);
+}
+
+class SavedViewTarget final : public cIGZMessageTarget2 {
+public:
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid != sc4::kGZIID_cIGZMessageTarget2 && iid != 1) return false;
+        *out = static_cast<cIGZMessageTarget2*>(this);
+        return true;
+    }
+    std::uint32_t AddRef() override { return 1; }
+    std::uint32_t Release() override { return 1; }   // static
+    bool DoMessage(cIGZMessage2* message) override {
+        void* raw = nullptr;
+        if (!message || !message->QueryInterface(kGZIID_cIGZMessage2Standard, &raw) || !raw) return true;
+        auto* standard = static_cast<cIGZMessage2Standard*>(raw);
+        if (message->GetType() == 0x26c63344) {
+            Save(static_cast<cIGZPersistDBSegment*>(standard->GetVoid1()));
+            standard->Release();
+            return true;
+        }
+        if (message->GetType() != 0x26c63341) {
+            standard->Release();
+            return true;
+        }
+        auto* segment = static_cast<cIGZPersistDBSegment*>(standard->GetVoid1());
+        auto* version = static_cast<cIGZVariant*>(standard->GetVoid3());
+        standard->Release();
+        g_savedView.pending = false;
+        sc4::cSC4AutoLoadStream load(segment, 0xa9c8647c, 0xe9c8647e, 1);
+        if (!load.IsOpen() || load.GetVersion() >= 5) return true;
+        void* object = nullptr;
+        // The save's version (narrow 32-bit object ids before the wide format), as a counted copy: the stream releases its user
+        // data, and the message's variant lives on LoadCity's stack.
+        cRZAutoRefCount<cRZVariant> versionValue(new cRZVariant(version ? version->AsUint32() : 0u));
+        load.GetStream()->SetUserData(versionValue.get());
+        if (!sc4::SC4ReadGZSerializable(*load.GetStream(), sc4::kGZCLSID_cSC4CameraControl, &object, true) || !object) return true;
+        auto* saved = static_cast<sc4::cSC4CameraControl*>(static_cast<cIGZSerializable*>(object));
+        g_savedView = SavedView{true, saved->ViewTarget(), saved->Zoom(), saved->Rotation()};
+        static_cast<cIGZSerializable*>(object)->Release();
+        ApplySavedView();
+        return true;
+    }
+private:
+    // cSC4View3DWin::DoSave (i386 0x00520f5a): record (0xa9c8647c, 0xe9c8647e, 1) version 4 with the camera control, the 3D
+    // render, the model maker and the simulator, then the view filter map (count + pairs; the native view keeps none, so 0).
+    // Written only when all four objects exist: the original reads them straight into its view's pointers.
+    static void Save(cIGZPersistDBSegment* segment) {
+        sc4::cSC4CameraControl* camera = g_cityRender ? g_cityRender->GetCameraControl() : nullptr;
+        sc4::cSC4ModelMaker* maker = CityModelMaker();
+        cIGZUnknown* simulator = nullptr;
+        if (sc4::cSC4City* city = HostCity()) {
+            cIGZUnknown* component = city->GetComponent(sc4::CityComponent::Simulator);
+            void* iface = nullptr;
+            if (component && component->QueryInterface(0x8695664e, &iface) && iface) simulator = static_cast<cIGZUnknown*>(iface);
+        }
+        if (camera && maker && simulator) {
+            sc4::cSC4AutoSaveStream save(segment, 0xa9c8647c, 0xe9c8647e, 1, 4);
+            if (sc4::cISC4DBSegmentOStream* stream = save.IsOpen() ? save.GetStream() : nullptr) {
+                sc4::SC4WriteGZSerializable(stream, static_cast<cIGZSerializable*>(camera));
+                sc4::SC4WriteGZSerializable(stream, static_cast<cIGZSerializable*>(g_cityRender));
+                sc4::SC4WriteGZSerializable(stream, static_cast<cIGZSerializable*>(maker));
+                sc4::SC4WriteGZSerializable(stream, simulator);
+                stream->SetUint32(0);
+            }
+        }
+        if (simulator) simulator->Release();
+    }
+} g_savedViewTarget;
+}  // namespace
+
+void ListenForSavedView() {
+    static bool subscribed = false;
+    if (subscribed || !SL::spMS2) return;
+    subscribed = true;
+    SL::spMS2->AddNotification(&g_savedViewTarget, 0x26c63341);
+    SL::spMS2->AddNotification(&g_savedViewTarget, 0x26c63344);
+}
+
 bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* cityInterface, gd::cIGZGDriver* driver, gz::cIGZDrawContext* screen, int width, int height) {
     sc4::cSTETerrain* terrain = nullptr;
     if (auto* city = dynamic_cast<sc4::cSC4City*>(cityInterface)) {
@@ -302,6 +407,7 @@ bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* cityInterface, g
     cameraHost.render = render;
     g_cityRender = render;
     const bool ok = render->Init();
+    ApplySavedView();   // a saved camera read before the view existed
     render->SetBackingStoreEnabled(false);   // the Metal driver keeps no backing store yet: a restore would replay whatever the screen held
     std::printf("city view: renderer %s\n", ok ? "up" : "FAILED");
     // the lighting manager first: the model maker's shadows project through it as the models load

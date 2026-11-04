@@ -5,7 +5,7 @@
 #include <string>
 
 namespace gd { class cIGZGDriver; }
-namespace sc4 { class cSC43DRender; class cSC4City; class cISC4Occupant; }
+namespace sc4 { class cSC43DRender; class cSC4City; class cISC4Occupant; class cSC4ModelMaker; }
 
 namespace native {
 
@@ -22,6 +22,8 @@ void DeleteDriverTexture(unsigned int id);
 std::string DescribeOccupantModels(sc4::cISC4Occupant* occupant);
 // Debug: building models in the renderer made for another zoom, and whether their owners still hold them (scenario `audit`).
 void AuditRendererModels();
+// The city view's model maker (null without a city view).
+sc4::cSC4ModelMaker* CityModelMaker();
 // Builds and initialises the model maker for the loaded city; its models go into `render`.
 bool AttachModelMaker(sc4::cSC43DRender& render, sc4::cSC4City& city);
 // Shuts the model maker of the city being left down (before its renderer goes): the original keeps one model maker for the

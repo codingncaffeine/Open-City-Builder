@@ -281,6 +281,7 @@ bool LoadCityFile(cSC4App& app, const std::string& path, cRZAutoRefCount<cISC4Re
         InstallMiniMapHost();               // the corner minimap's terrain, zones, networks and camera
     }
     ForgetLotSerializables();
+    ListenForSavedView();
     const bool loaded = app.LoadCity(cRZString(path.c_str()), holder);
     // The city-started message 0x26d31ec1 is not posted natively: the weather simulator's catch-up (DoPostCityInit) runs here,
     // after cSC4City::Init has initialised the components (the city view attached during the load, before them).
