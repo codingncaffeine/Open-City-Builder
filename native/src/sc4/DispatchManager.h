@@ -62,8 +62,8 @@ constexpr std::uint32_t kGZIID_cISC4DispatchManager = 0x694028ec;
 constexpr std::uint32_t kDispatchRecordVersion = 2;
 
 // The dispatch interface of the other neighbours (ids used by the serialized DispatchInfo record).
-constexpr std::uint32_t kGZIID_cISC4Automaton = 0xa9b40f05;
-constexpr std::uint32_t kGZIID_cISC4PylonOccupant = 0xc9b6d7d6;
+constexpr std::uint32_t kDispatchAutomatonIid = 0xa9b40f05;
+constexpr std::uint32_t kDispatchPylonIid = 0xc9b6d7d6;
 
 // 0 = police, 1 = fire (cSC4PoliceSimulator / cSC4FireProtectionSimulator::CanHandleDispatchType),
 // 5 = fire plane (cSC4FirePlaneDispatchSource +0x20), 6 = police helicopter
@@ -92,6 +92,7 @@ enum tDispatchState : std::uint32_t {
 struct tDispatchLocation {
     std::uint32_t type = 0;      // +0x00
     std::uint32_t reserved = 0;  // +0x04
+    cISC4Occupant* occupant = nullptr;   // kind 0: the occupant (shares +0x08 with x in the original)
     float x = 0.0f;              // +0x08
     float y = 0.0f;              // +0x0c
     float z = 0.0f;              // +0x10
@@ -133,6 +134,9 @@ public:
     virtual std::uint16_t GetCallNumber() const = 0;                      // [14] 0x70
     virtual void SetSourceOccupant(cISC4Occupant* occupant) = 0;          // [17] 0x88
     virtual cISC4Occupant* GetSourceOccupant() const = 0;                 // [18] 0x90
+    // The two slots only the dispatch tool reads (defaults for the manager's tests).
+    virtual std::uint32_t GetUIState() const { return 1; }                // [7] 0x38
+    virtual tDispatchState GetDispatchState() const { return kDispatchStateIdle; }   // [12] 0x60
 };
 
 // cISC4Automaton (iid 0xa9b40f05; vtable of cSC4Automaton 0x100a73b30) as the dispatch manager uses it. Only the slots called
@@ -230,6 +234,9 @@ public:
     virtual bool WriteSerializable(cIGZOStream& stream, const cIGZUnknown* object) = 0;
     // SC4ReadGZSerializable(stream, iid, &out, false) @ 0x100043267; *out receives a counted reference (or null).
     virtual bool ReadSerializable(cIGZIStream& stream, std::uint32_t iid, void** out) = 0;
+    // Port seam: the automaton an automaton event (0x09d92fc3, Void1) names, as this manager holds it (the original compares the
+    // object itself). The default takes the object as the view (the tests' fakes implement the view directly).
+    virtual IDispatchAutomaton* AutomatonFromMessage(void* object) { return static_cast<IDispatchAutomaton*>(object); }
 };
 IDispatchHost* DispatchHost();
 void SetDispatchHost(IDispatchHost* host);
@@ -298,6 +305,12 @@ public:
     std::size_t DispatchCount() const { return dispatchCount_; }
     tDispatchType ToolType() const { return toolType_; }
     std::size_t AvailablePylonCount() const { return availablePylons_.size(); }
+    // Every call box the manager holds (the free ones, then the ones of the dispatches): the native pick walks them.
+    std::vector<IPylonOccupant*> AllPylons() const {
+        std::vector<IPylonOccupant*> out(availablePylons_.begin(), availablePylons_.end());
+        for (const DispatchInfo& info : dispatches_) if (info.pylon) out.push_back(info.pylon);
+        return out;
+    }
 
 private:
     using DispatchList = std::list<DispatchInfo>;

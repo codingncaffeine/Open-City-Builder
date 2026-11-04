@@ -2,6 +2,7 @@
 // Every function follows the decompilation at the address in its comment; the ones that still depend on an unrecovered
 // neighbour are listed under PARTIAL in notes/ledger_pending/cSC4TrafficAutomataManager.txt.
 #include "sc4/TrafficAutomataManager.h"
+#include "sc4/PathFinder.h"
 
 #include <algorithm>
 #include <cmath>
@@ -220,16 +221,15 @@ IAutomataAutomaton* cSC4TrafficAutomataManager::Dispatch(std::uint32_t group, co
                                                          const tAutomataLocation& to, std::uint32_t flags,
                                                          std::uint8_t type, const cGZPersistResourceKey& key,
                                                          std::uint8_t argument) {
-    // 0x100112842 PARTIAL: the exemplar lookup + creation + cleanup path is ported; the success path is the PARTIAL
-    // Dispatch(automaton) (the traffic simulator's trip object, cISC4TrafficSimulator vslot 0x30).
+    // 0x100112842 (i386 0x000cb9ae): pick the model, create the automaton, then route it (Dispatch(automaton) below).
     cGZPersistResourceKey modelKey = key;
     tExemplarData* exemplar = nullptr;
     if (modelKey.instance == 0) {
         tCellRect rect{};
-        if (!TranslateDispatchLocation(from, rect)) return nullptr;
-        exemplar = ChooseRandomExemplar(group, PopulateLayer::kLayerNone, rect.x0, rect.z0);
-        if (!exemplar) return nullptr;
-        modelKey = exemplar->modelKey;
+        if (TranslateDispatchLocation(from, rect)) {   // no rect or no exemplar: create from the given key anyway
+            exemplar = ChooseRandomExemplar(group, PopulateLayer::kLayerNone, rect.x0, rect.z0);
+            if (exemplar) modelKey = exemplar->modelKey;
+        }
     }
     IAutomataAutomaton* automaton = CreateAutomatonInternal(group, flags, modelKey, exemplar, argument);
     if (!automaton) return nullptr;
@@ -249,14 +249,60 @@ IAutomataAutomaton* cSC4TrafficAutomataManager::Dispatch(std::uint32_t group, co
 
 bool cSC4TrafficAutomataManager::Dispatch(IAutomataAutomaton* automaton, const tAutomataLocation& from,
                                           const tAutomataLocation& to, std::uint32_t flags, std::uint8_t type) {
-    // 0x10011298e PARTIAL: needs the traffic simulator's trip object (cISC4TrafficSimulator vslot 0x30, then slots
-    // 0x98/0x68/0x90/0x28/0x48/0x40/0xa0/0xb8), which is not recovered.
-    (void)automaton;
-    (void)from;
-    (void)to;
-    (void)flags;
-    (void)type;
-    return false;
+    // i386 0x000ce2f6 (dispatch.md 4.2.1): route the automaton from `from` (or, when that does not convert, from its own
+    // cell) to `to` with a fresh path finder of the traffic simulator, then place it on the first road of the route.
+    // `type` is the route's minimum length (0 for a new automaton, 2 for a re-target).
+    if (!automaton) return false;
+    tCellRect start{};
+    if (!TranslateDispatchLocation(from, start)) {
+        float position[3] = {0.0f, 0.0f, 0.0f};
+        automaton->GetPosition(position);
+        const int cellX = FloorIdiomImpl(position[0] * 0.0625f);
+        const int cellZ = FloorIdiomImpl(position[2] * 0.0625f);
+        IAutomataManagerHost* host = AutomataManagerHost();
+        if (!host || cellX < 0) return false;
+        const int cells = host->CityCellCount();   // the original asks the city's width (0x174) and depth (0x178): square
+        if (cells <= cellX || cellZ < 0 || cells <= cellZ) return false;
+        start.x0 = start.x1 = cellX;
+        start.z0 = start.z1 = cellZ;
+    }
+    tCellRect end{};
+    if (!TranslateDispatchLocation(to, end)) return false;
+    ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
+    ITrafficSimulatorApi* simulator = trafficSimulator_ ? trafficSimulator_ : (host ? host->TrafficSimulator() : nullptr);
+    cISC4PathFinder* finder = simulator ? simulator->CreatePathFinder() : nullptr;
+    if (!finder) return false;
+    ITrafficAutomataAutomaton* traffic = host ? host->AsTrafficAutomaton(automaton) : nullptr;
+    if (!IsTrafficAutomaton(automaton) || !traffic) return false;   // quirk: the path finder is not released here
+    automaton->SetAutomataFlag(flags, true);
+    finder->SetStartRect({start.x0, start.z0, start.x1, start.z1});
+    finder->SetTravelTypeFlag(static_cast<std::uint16_t>(1u << (defaultPathType_ & 31)), true);
+    finder->SetTrafficDensity(0);
+    finder->SetFlag(1);
+    finder->SetFlag(2);
+    finder->SetFlag(0x10);
+    finder->SetTripDestinationFilter(3);
+    std::deque<RouteData>* route = traffic->RouteDeque();
+    finder->SetRouteInfo(route);
+    finder->SetEndRect({end.x0, end.z0, end.x1, end.z1});
+    automaton->SetAutomataFlag(4, false);
+    bool placed = false;
+    if (finder->FindPath() == 1 && route && type <= route->size() && traffic->BeginRoute(false)) {
+        automaton->SetAutomataFlag(0x40, true);
+        automaton->SetAutomataFlag(0x2000, false);
+        automaton->SetAutomataFlag(0x100, false);
+        automaton->SetAutomataFlag(0x200, false);
+        automaton->SetAutomataFlag(0x20, false);
+        traffic->ReturnToDefaultSpeed();
+        cS3DVector3 target{};
+        if (TranslateDispatchLocation(to, target)) {
+            cISC4Occupant* source = from.kind == kLocationOccupant && from.occupant && host ? host->AsCityOccupant(from.occupant) : nullptr;
+            traffic->HandleDispatched(target, source);
+        }
+        placed = true;
+    }
+    finder->Release();
+    return placed;
 }
 
 bool cSC4TrafficAutomataManager::GetRandomCreationPoint(std::uint32_t group, const cS3DVector3& origin,

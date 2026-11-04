@@ -115,6 +115,9 @@ public:
     void UpdateUnadjustedProtectionGrid();
     void CalculateAndWriteAdjustedGridDataByCell(int tx, int tz, int radius);
     void UpdateBothGridsByPosition(float x, float z, float radiusFraction);
+    // DoDispatchActivated (0x006F61F0, protection.md 5): a dispatch became active or inactive: the grids are rebuilt around its
+    // position with its dispatch effect's radius (nothing when the record is gone already: the messages are queued).
+    void DoDispatchActivated(std::uint32_t dispatchId);
 
     // stations
     void DoOccupantInserted(IProtectionStation* station);
@@ -125,6 +128,19 @@ public:
     bool CanDispatch(float x, float z, bool* enough);
     IProtectionStation* DispatchFromNearestStation(float x, float z, std::uint32_t* dispatchId);
     const std::list<IProtectionStation*>& Stations() const { return stations_; }
+    // The stations a city file listed become the live list (the original's Read fills +0xb8 with the occupants themselves; the
+    // port reads them as references): `convert` gives the subclass's station view of an occupant object, null to skip it.
+    std::size_t FileStationCount() const { return fileStations_.size(); }
+    template <class F>
+    void AdoptFileStations(F convert) {
+        for (const cRetainedReference& reference : fileStations_) {
+            IProtectionStation* station = convert(reference.get());
+            if (!station) continue;
+            bool known = false;
+            for (IProtectionStation* other : stations_) known = known || other == station;
+            if (!known) stations_.push_back(station);
+        }
+    }
     // @ 0x1000aadce: replaces `out` with a copy of `source` (the original also takes a reference on each entry; the
     // port's occupants are borrowed) and returns the number copied.
     template <class T>

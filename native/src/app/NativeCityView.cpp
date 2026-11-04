@@ -450,6 +450,7 @@ bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* cityInterface, g
     native::InstallNetworkTool(view, cityInterface);
     native::InstallPlaceLotHost(view);
     native::InstallDemolishTool(view);
+    native::InstallDispatchTool(view);
     native::InstallCatalogUi(view.GetWindowManager());
     native::SetBudgetViewWindow(view.AsIGZWin());
     view.AddGUI();   // DoPostCityInit's city UI (the view's engine DoMessage that sends it there is not ported)

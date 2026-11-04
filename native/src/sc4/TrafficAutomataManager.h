@@ -49,6 +49,7 @@
 // traffic-specific view is a documented cast the caller (the GZCOM automata adapter) guarantees.
 #pragma once
 #include <cstdint>
+#include <deque>
 #include <list>
 #include <vector>
 
@@ -61,6 +62,8 @@
 namespace sc4 {
 
 class ITrafficAutomataAutomaton;
+class cISC4PathFinder;
+struct RouteData;   // sc4/PathFinder.h
 struct tTrafficNetworkOccupant;
 
 // A response request (cSC4TrafficAutomataManager::tResponseAutomataInfo, 0x28 bytes): the occupant to send an
@@ -102,7 +105,11 @@ public:
     virtual IAutomataAutomaton* FindLeader() = 0;                                 // 0x4d8
     virtual IAutomataAutomaton* Leader() const = 0;                               // +0xf0
     virtual void SetLeader(IAutomataAutomaton* leader) = 0;                       // +0xf0 (counted)
-    virtual void SetTargetDirection(const float* xyz) = 0;                        // 0x2b8 (Dispatch)
+    // The dispatch route slots (Dispatch(automaton, ...) i386 0x000ce2f6).
+    virtual void HandleDispatched(const cS3DVector3& position, cISC4Occupant* source) = 0;   // 0x2b8 (i386 0x15c)
+    virtual std::deque<RouteData>* RouteDeque() = 0;                              // +0x368 (i386 +0x23c)
+    virtual bool BeginRoute(bool onlyStart) = 0;                                  // 0x4a8 (i386 0x254)
+    virtual void ReturnToDefaultSpeed() = 0;                                      // 0x538 (i386 0x29c)
 };
 
 // The occupant view the manager's network handlers use (cISC4NetworkOccupant slots 0x180 / 0x40): the base's
@@ -136,6 +143,9 @@ public:
                                                    unsigned cellZ, unsigned networkType, bool mirrored) = 0;
     // cISC4TrafficSimulator GetCapacity (i386 vslot 0x5c): the simulator network's capacity at the cell (0 when none).
     virtual float GetCapacity(int simNetworkType, int cellX, int cellZ) { (void)simNetworkType; (void)cellX; (void)cellZ; return 0.0f; }
+    // cISC4TrafficSimulator CreatePathFinder (i386 vslot 0x18 = slot 6, 0x00052662): a new, initialised path finder over the
+    // simulator's network; the caller owns the one reference. Null when there is none.
+    virtual cISC4PathFinder* CreatePathFinder() { return nullptr; }
 };
 
 // cISC4NetworkManager (city vslot 0x140) beyond the base's IAutomataNetworkManager: the visible-rect, tile iteration

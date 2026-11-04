@@ -152,6 +152,14 @@ void cSC4ProtectionSimulator::UpdateBothGridsByPosition(float x, float z, float 
     CalculateAndWriteAdjustedGridDataByCell(tx, tz, static_cast<int>(tractRadius));
 }
 
+void cSC4ProtectionSimulator::DoDispatchActivated(std::uint32_t dispatchId) {
+    ProtectionDispatchInfo info;
+    if (!adjusted_ || !host_->GetDispatch(dispatchId, info)) return;
+    ProtectionEffect effect;
+    host_->GetDispatchEffect(info, effect);
+    UpdateBothGridsByPosition(info.targetX, info.targetZ, effect.radius);
+}
+
 void cSC4ProtectionSimulator::DoOccupantInserted(IProtectionStation* station) {
     if (station->OccupantType() != kProtectionBuildingOccupantType) return;
     ProtectionEffect effect;

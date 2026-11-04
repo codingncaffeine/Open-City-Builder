@@ -862,7 +862,8 @@ void RunInputScript(const std::string& all) {
         static const std::map<std::string, std::pair<std::uint32_t, std::uint32_t>> kCommands = {
             {"left", {0x6a935cd8, 0x2a94826b}}, {"right", {0x6a935ce0, 0x2a94826e}}, {"up", {0x6a935cdd, 0x2a948272}},
             {"down", {0x6a935ce2, 0x2a948275}}, {"zin", {0x6a935cb7, 0}}, {"zout", {0x6a935cba, 0}},
-            {"rl", {0x6a935cc9, 0}}, {"rr", {0x6a935ccc, 0}}, {"bulldoze", {0x6a935d36, 0}}};
+            {"rl", {0x6a935cc9, 0}}, {"rr", {0x6a935ccc, 0}}, {"bulldoze", {0x6a935d36, 0}},
+            {"firetool", {0x6a935d39, 0}}, {"policetool", {0xca935dbd, 0}}};
         if (name.rfind("panel@", 0) == 0 && v) {   // panel@HEX: ShowPanel(index)
             v->ShowMayorSubPanel(static_cast<std::uint32_t>(std::strtoul(name.c_str() + 6, nullptr, 16)));
         } else if (name.rfind("zone", 0) == 0 && name.size() > 4 && v) {   // zoneN: the zoning tool for zone type N
@@ -995,6 +996,23 @@ int RunScenario(const std::string& path) {
             } else {
                 std::printf("probe %d,%d: no ground\n", px, py);
             }
+        } else if (command == "dispatches") {   // dispatches: the records, their vehicles and states
+            native::NativeDispatchReport();
+        } else if (command == "dispatchat") {   // dispatchat TYPE PX PY: the same, to the ground under a screen point
+            std::uint32_t type = 0;
+            int px = 0, py = 0;
+            words >> type >> px >> py;
+            float hit[3] = {};
+            sc4::cSC4View3DWin* view = gAppWindow ? gAppWindow->View3D() : nullptr;
+            if (view && view->PickTerrain(px, py, hit, true))
+                std::printf("dispatchat %u %d,%d = %.0f,%.0f: id %u\n", type, px, py, hit[0], hit[2], native::NativeDispatchAt(type, hit[0], hit[2]));
+            else
+                std::printf("dispatchat %u %d,%d: no ground\n", type, px, py);
+        } else if (command == "dispatch") {   // dispatch TYPE X Z: send a unit (0 police car, 1 fire engine) to a world position
+            std::uint32_t type = 0;
+            float x = 0.0f, z = 0.0f;
+            words >> type >> x >> z;
+            std::printf("dispatch %u %.0f,%.0f: id %u\n", type, x, z, native::NativeDispatchAt(type, x, z));
         } else if (command == "look") {   // look X Z: the camera's target to a world position (on the ground)
             float x = 0.0f, z = 0.0f;
             words >> x >> z;

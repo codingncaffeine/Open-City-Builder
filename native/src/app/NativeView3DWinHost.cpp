@@ -256,7 +256,7 @@ struct StubView3DWin final : IView3DWinHost {
         if (auto* m = SituationManager()) m->SetVisible(visible);   // SetCSIVisible (vslot 0xe8)
     }
     void GoToNextDisaster() override { SC4_UNWIRED("IView3DWinHost::GoToNextDisaster (cSC4DisasterLayer not recovered)"); }
-    cSC4ViewInputControl* CreateDispatchTool(int) override { SC4_UNWIRED("IView3DWinHost::CreateDispatchTool (cSC4ViewInputControlDispatch not recovered)"); return nullptr; }
+    cSC4ViewInputControl* CreateDispatchTool(int type) override { return native::CreateDispatchTool(type); }
     cSC4ViewInputControl* CreateNetworkTool(int type) override { return native::CreateNetworkTool(type); }
     void ShowMyStreetSim() override { SC4_UNWIRED("IView3DWinHost::ShowMyStreetSim"); }
     void PostCityInit() override {}

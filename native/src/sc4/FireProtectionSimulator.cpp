@@ -46,8 +46,8 @@ constexpr std::uint32_t kFireTuningInstance = 0x68f5524a;
 }  // namespace
 
 // @ 0x00237e72. ProtectionInit: the coverage grids (fire's instance ids), the sweep, the daily and monthly agents, the notifications.
-// PARTIAL: the dispatch manager registration, the fire department's budget line, the flammability simulator reference and the fire
-// plane dispatch source are not set up (the dispatch layer is not native yet).
+// The simulator registers as the fire engines' dispatch source through the host. PARTIAL: the fire department's budget line,
+// the flammability simulator reference and the fire plane dispatch source are not set up.
 bool cSC4FireProtectionSimulator::Init() {
     if (running_) return true;
     running_ = true;
@@ -59,6 +59,7 @@ bool cSC4FireProtectionSimulator::Init() {
     host_->AddAgent(this, 4, kName, 2);
     host_->AddAgent(this, 6, kName, 2);
     for (std::uint32_t message : kProtectionNotifications) host_->AddNotification(this, message);
+    host_->RegisterDispatchSource(true);
     return true;
 }
 
@@ -67,11 +68,11 @@ bool cSC4FireProtectionSimulator::Shutdown() {
     running_ = false;
     host_->RemoveAgent(this);
     for (std::uint32_t message : kProtectionNotifications) host_->RemoveNotification(this, message);
+    host_->RegisterDispatchSource(false);
     return true;
 }
 
-// @ 0x00237e0a over cSC4ProtectionSimulator::DoMessage @ 0x0007cace. PARTIAL: the dispatch messages (0xe94671eb..ed, 0x894671f6)
-// are not routed: no dispatches exist natively.
+// @ 0x00237e0a over cSC4ProtectionSimulator::DoMessage @ 0x0007cace.
 bool cSC4FireProtectionSimulator::DoMessage(cIGZMessage2* message) {
     auto* standard = static_cast<cIGZMessage2Standard*>(message);
     const std::uint32_t type = message->GetType();
@@ -84,6 +85,9 @@ bool cSC4FireProtectionSimulator::DoMessage(cIGZMessage2* message) {
     case 0x99ef1142: if (IFireOccupant* o = station()) DoOccupantInserted(o); break;
     case 0x99ef1143: if (IFireOccupant* o = station()) DoOccupantRemoved(o); break;
     case 0xc8dac052: if (IFireOccupant* o = station()) DoOccupantChanged(o); break;
+    case 0xe94671ec: case 0xe94671ed:   // a dispatch became active / inactive (the end message's revoke always finds the unit home)
+        if (static_cast<std::uint32_t>(standard->GetData1()) == 1u) protection_.DoDispatchActivated(static_cast<std::uint32_t>(standard->GetData2()));
+        break;
     case 0x66956814: DoDailySimulation(); break;
     case 0x66956816: DoMonthlySimulation(); break;
     case 0x08dac3e7:   // DoFundingChanged: the department's funding moved
@@ -141,6 +145,12 @@ bool cSC4FireProtectionSimulator::Read(cIGZIStream& stream) {
     stream.GetUint16(version);
     if (version > 3) return false;
     if (!protection_.Read(stream)) return false;
+    protection_.AdoptFileStations([this](cIGZUnknown* object) -> IProtectionStation* {   // QI cISC4Occupant (the host's station key)
+        void* occupant = nullptr;
+        if (!object || !object->QueryInterface(0x26bb767e, &occupant) || !occupant) return nullptr;
+        static_cast<cIGZUnknown*>(occupant)->Release();   // the file reference keeps the occupant
+        return host_->FireOccupant(occupant);
+    });
     fileDispatch_ = cRetainedReference();
     if (version >= 3) fileDispatch_.Read(stream);                         // +0x120
     return !stream.GetError();

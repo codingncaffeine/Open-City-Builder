@@ -72,7 +72,7 @@ public:
         if (!face) face = std::make_unique<ManagerFace>(manager);
         return face.get();
     }
-    cISC4PathFinder* PathFinder() override { return nullptr; }   // PARTIAL: the traffic simulator's path finder (dispatch routes only)
+    cISC4PathFinder* PathFinder() override { return nullptr; }   // PARTIAL: MySim dispatch routes (the vehicles use the manager's)
     void NeighborConnectionCells(std::vector<std::int32_t>&) override {}   // PARTIAL: neighbor connections as exits
     void StartAudioEvent(std::uint32_t) override {}
     void StopAudioEvent(std::uint32_t) override {}
@@ -121,6 +121,10 @@ public:
     float GetCapacity(int simNetworkType, int cellX, int cellZ) override {
         auto* simulator = Component<cSC4TrafficSimulator>(CityComponent::TrafficSimulator);
         return simulator ? simulator->GetCapacity(simNetworkType, cellX, cellZ) : 0.0f;
+    }
+    cISC4PathFinder* CreatePathFinder() override {
+        auto* simulator = Component<cSC4TrafficSimulator>(CityComponent::TrafficSimulator);
+        return simulator ? simulator->CreatePathFinder() : nullptr;
     }
 } g_simulatorApi;
 

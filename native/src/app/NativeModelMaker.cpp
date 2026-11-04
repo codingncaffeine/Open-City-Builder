@@ -579,6 +579,12 @@ private:
 
 }  // namespace
 
+// An FSH texture {0x7ab50e44, group, instance} as a driver texture (frame 0, cached for the process); 0 when it is missing.
+std::uint32_t NativeFshTexture(std::uint32_t group, std::uint32_t instance) {
+    const TextureBinding* binding = TextureRecord(group, instance);
+    return binding ? binding->id : 0;
+}
+
 void InstallModelResources(gd::cIGZGDriver* driver) {
     g_driver = driver;
     static bool registered = false;

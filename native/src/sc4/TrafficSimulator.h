@@ -336,6 +336,9 @@ public:
     const NetworkInfo* GetNetworkInfo(int networkType, int x, int z) const;
     void RemoveNetworkInfo(int networkType, int x, int z);
     float GetCapacity(int networkType, int x, int z) const;
+    // i386 0x00052662: a new path finder over this simulator's network, initialised; the caller owns its one reference.
+    // Null before Init built the network graph.
+    cISC4PathFinder* CreatePathFinder();
     std::uint8_t GetConnectionCount(int networkType, int x, int z) const;
     float GetTravelTimeRatio(int x, int z, int travelType) const;
     float GetBackgroundTraffic(int x, int z) const;

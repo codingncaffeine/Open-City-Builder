@@ -186,6 +186,8 @@ public:
     const cS3DVector3& UpVector() const { return up_; }         // +0x74
     int Rotation() const { return rotation_; }
     float RotationAngle() const { return rotationAngle_; }                              // +0x24
+    float PitchAngle() const { return pitch_; }                                         // +0x20
+    const cS3DVector3& ViewDirection() const { return viewDir_; }                       // +0x5c (unit)
     bool DrawFrustumReduced() const { return drawReduced_; }
     const FrustumBounds& ViewFrustumBounds() const { return view_; }
     const FrustumBounds& DrawFrustumBounds() const { return draw_; }

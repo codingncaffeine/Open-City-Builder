@@ -1,6 +1,7 @@
 // The city view's render stack on the native Metal application: what cSC4View3DWin::DoPreCityInit / DoPostCityInit build when a
 // city comes up (the camera, the camera control and the 3D renderer) and the window attaches them.
 #pragma once
+#include <cstdint>
 
 namespace gd { class cIGZGDriver; }
 namespace gz { class cIGZDrawContext; }
@@ -24,6 +25,9 @@ bool CityAutomataLayersActive();
 void PrintOccupantCensus(cISC4City* city, const char* label);
 // The buildings near a ground point with their models and texture sizes (scenario `probe`).
 void ProbeBuildingsAt(float x, float z, float radius);
+// app/NativeDispatch.cpp: the dispatch tool's drop without a call box (police 0, fire 1) at a world position; the dispatch id or 0.
+std::uint32_t NativeDispatchAt(std::uint32_t type, float x, float z);
+void NativeDispatchReport();   // every dispatch record, its vehicle and state
 bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* city, gd::cIGZGDriver* driver, gz::cIGZDrawContext* screen, int viewportWidth, int viewportHeight);
 
 }  // namespace native

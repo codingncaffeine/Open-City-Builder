@@ -265,7 +265,7 @@ struct FakeSource final : IDispatchSource {
     int refs = 0;
     std::vector<std::uint32_t> handledTypes;
     bool canDispatchResult = true;
-    bool alreadyDispatched = false;
+    bool allBusy = true;   // every unit out (i386 0x0018829c refuses a dispatch without a call box then)
     bool dispatchesAtStationResult = true;
     cISC4Occupant* nearestStation = nullptr;
     std::uint32_t nearestCallNumber = 0;
@@ -289,7 +289,7 @@ struct FakeSource final : IDispatchSource {
     }
     bool CanDispatch(float, float, bool* flag) override {
         ++canDispatchCalls;
-        *flag = alreadyDispatched;
+        *flag = allBusy;
         return canDispatchResult;
     }
     bool GetStations(std::list<cISC4Occupant*>& out) override {
@@ -728,7 +728,7 @@ int main() {
         manager.AddRef();   // held for the whole block: posted messages AddRef/Release the manager
         CHECK(manager.Init());
         manager.RegisterDispatchSource(&fixture.source);
-        fixture.source.alreadyDispatched = true;   // allow dispatching without an active call box
+        fixture.source.allBusy = false;   // a free unit: dispatching works without an active call box
         CHECK(manager.Dispatch(kDispatchTypeFire, 1.0f, 2.0f) == 1);
 
         PostStandard(manager, kMsgCameraMoved, nullptr);
@@ -798,13 +798,13 @@ int main() {
 
         // read it back twice: the record is additive and the old active pylon is not released (quirks)
         fixture.host.readEntries = {{kGZIID_cISC4Occupant, &fixture.station},
-                                    {kGZIID_cISC4Automaton, &fixture.automatonA},
-                                    {kGZIID_cISC4PylonOccupant, pylon},
-                                    {kGZIID_cISC4PylonOccupant, pylon},
+                                    {kDispatchAutomatonIid, &fixture.automatonA},
+                                    {kDispatchPylonIid, pylon},
+                                    {kDispatchPylonIid, pylon},
                                     {kGZIID_cISC4Occupant, &fixture.station},
-                                    {kGZIID_cISC4Automaton, &fixture.automatonA},
-                                    {kGZIID_cISC4PylonOccupant, pylon},
-                                    {kGZIID_cISC4PylonOccupant, nullptr}};
+                                    {kDispatchAutomatonIid, &fixture.automatonA},
+                                    {kDispatchPylonIid, pylon},
+                                    {kDispatchPylonIid, nullptr}};
         cSC4DispatchManager reader;
         reader.AddRef();
         FakeIStream firstRead;
@@ -846,7 +846,7 @@ int main() {
         manager.AddRef();
         CHECK(manager.Init());
         manager.RegisterDispatchSource(&fixture.source);
-        fixture.source.alreadyDispatched = true;
+        fixture.source.allBusy = false;
         CHECK(manager.Dispatch(kDispatchTypeFire, 1.0f, 1.0f) == 1);
         CHECK(fixture.automatonA.refs == 1 && fixture.station.refs == 1);
         manager.UnregisterDispatchSource(&fixture.source);
@@ -864,7 +864,7 @@ int main() {
         manager.AddRef();   // held for the whole block: posted messages AddRef/Release the manager
         CHECK(manager.Init());
         manager.RegisterDispatchSource(&fixture.source);
-        fixture.source.alreadyDispatched = true;
+        fixture.source.allBusy = false;
 
         CHECK(manager.Dispatch(kDispatchTypeFire, 0.0f, 0.0f) == 1);
         CHECK(manager.Dispatch(kDispatchTypeFire, 1.0f, 1.0f) == 2);
@@ -875,8 +875,8 @@ int main() {
         CHECK(CountPosted(fixture.server, kMsgEnd) == 2);
         CHECK(fixture.source.revokeCalls == 2);
 
-        // no active pylon, source refuses to dispatch -> nothing happens
-        fixture.source.alreadyDispatched = false;
+        // no active pylon and every unit out -> nothing happens
+        fixture.source.allBusy = true;
         CHECK(manager.Dispatch(kDispatchTypeFire, 0.0f, 0.0f) == 0);
         fixture.source.canDispatchResult = false;
         CHECK(manager.Dispatch(kDispatchTypeFire, 0.0f, 0.0f) == 0);
@@ -884,7 +884,7 @@ int main() {
         CHECK(manager.GetAvailablePylonCount(kDispatchTypeFirePlane) == 0);
         CHECK(manager.BeginDispatchTool(kDispatchTypeFirePlane) == false);
         fixture.source.canDispatchResult = true;
-        fixture.source.alreadyDispatched = true;
+        fixture.source.allBusy = false;
 
         // a failing BeginDispatch (no automata manager) revokes the new dispatch again
         fixture.automataManager.createCalls = 0;

@@ -90,6 +90,8 @@ public:
     virtual void RemoveAgent(cIGZMessageTarget2*) {}
     virtual void AddNotification(cIGZMessageTarget2*, std::uint32_t) {}
     virtual void RemoveNotification(cIGZMessageTarget2*, std::uint32_t) {}
+    // Init / Shutdown: the simulator as a dispatch source of the city's dispatch manager (cISC4DispatchManager slot 13 / 14).
+    virtual void RegisterDispatchSource(bool add) { (void)add; }
     virtual const cISCPropertyHolder* SimulatorExemplar() { return nullptr; }   // {0x6534284a, 0xe7e2c2db, 0x28dfcf89}
     virtual IPoliceOccupant* PoliceOccupant(void*) { return nullptr; }
     virtual void WriteOccupant(cIGZOStream&, IPoliceOccupant*) {}        // SC4WriteGZSerializable(stream, occupant)

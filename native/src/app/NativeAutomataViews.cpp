@@ -218,8 +218,10 @@ public:
         return leader ? AutomatonView(leader) : nullptr;
     }
     void SetLeader(IAutomataAutomaton* leader) override { a_.SetLeader(AutomatonOf(leader)); }
-    // 0x2b8 HandleDispatched: PARTIAL, the dispatch path is not live natively yet.
-    void SetTargetDirection(const float*) override {}
+    void HandleDispatched(const cS3DVector3& position, cISC4Occupant* source) override { a_.HandleDispatched(position, source); }   // 0x2b8
+    std::deque<RouteData>* RouteDeque() override { return traffic_ ? &traffic_->Route() : nullptr; }                          // +0x368
+    bool BeginRoute(bool onlyStart) override { return traffic_ && traffic_->BeginRoute(onlyStart); }                         // 0x4a8
+    void ReturnToDefaultSpeed() override { if (traffic_) traffic_->ReturnToDefaultSpeed(); }                                  // 0x538
 
 private:
     cSC4Automaton& a_;

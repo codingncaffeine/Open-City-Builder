@@ -282,6 +282,14 @@ bool cSC4TrafficSimulator::Init() {
     return true;
 }
 
+cISC4PathFinder* cSC4TrafficSimulator::CreatePathFinder() {
+    if (!graph_) return nullptr;
+    auto* finder = new cSC4PathFinder(graph_);
+    finder->AddRef();
+    finder->Init();
+    return finder;
+}
+
 cSC4TrafficSimulator::~cSC4TrafficSimulator() {
     Shutdown();
     delete graph_;

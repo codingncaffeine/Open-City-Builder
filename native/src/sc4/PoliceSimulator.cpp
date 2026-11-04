@@ -51,8 +51,8 @@ constexpr std::uint32_t kPoliceTuningInstance = 0x28dfcf89;
 }  // namespace
 
 // ProtectionInit: the coverage grids (police's instance ids), the sweep, the daily and monthly agents, the notifications.
-// PARTIAL: the dispatch manager registration, the police department's budget lines, the crime simulator reference and the
-// helicopter dispatch source are not set up (the dispatch layer is not native yet).
+// The simulator registers as the police cars' dispatch source through the host. PARTIAL: the police department's budget lines,
+// the crime simulator reference and the helicopter dispatch source are not set up.
 bool cSC4PoliceSimulator::Init() {
     if (running_) return true;
     running_ = true;
@@ -64,6 +64,7 @@ bool cSC4PoliceSimulator::Init() {
     host_->AddAgent(this, 4, kName, 2);
     host_->AddAgent(this, 6, kName, 2);
     for (std::uint32_t message : kPoliceNotifications) host_->AddNotification(this, message);
+    host_->RegisterDispatchSource(true);
     return true;
 }
 
@@ -72,11 +73,12 @@ bool cSC4PoliceSimulator::Shutdown() {
     running_ = false;
     host_->RemoveAgent(this);
     for (std::uint32_t message : kPoliceNotifications) host_->RemoveNotification(this, message);
+    host_->RegisterDispatchSource(false);
     return true;
 }
 
-// cSC4ProtectionSimulator::DoMessage @ 0x0007cace, then the police simulator's own messages. PARTIAL: the dispatch messages and
-// 0x0a159d95 (jails) are not routed: no dispatches or jails natively.
+// cSC4ProtectionSimulator::DoMessage @ 0x0007cace, then the police simulator's own messages. PARTIAL: 0x0a159d95 (jails) is not
+// routed: no jails natively.
 bool cSC4PoliceSimulator::DoMessage(cIGZMessage2* message) {
     auto* standard = static_cast<cIGZMessage2Standard*>(message);
     const auto station = [&]() -> IPoliceOccupant* {
@@ -88,6 +90,9 @@ bool cSC4PoliceSimulator::DoMessage(cIGZMessage2* message) {
     case 0x99ef1142: if (IPoliceOccupant* o = station()) DoOccupantInserted(o); break;
     case 0x99ef1143: if (IPoliceOccupant* o = station()) DoOccupantRemoved(o); break;
     case 0xc8dac052: if (IPoliceOccupant* o = station()) DoOccupantChanged(o); break;
+    case 0xe94671ec: case 0xe94671ed:   // a dispatch became active / inactive (the end message's revoke always finds the unit home)
+        if (static_cast<std::uint32_t>(standard->GetData1()) == 0u) protection_.DoDispatchActivated(static_cast<std::uint32_t>(standard->GetData2()));
+        break;
     case 0x66956814: DoDailySimulation(); break;
     case 0x66956816: DoMonthlySimulation(); break;
     case 0x08dac3e7:
@@ -161,6 +166,12 @@ bool cSC4PoliceSimulator::Read(cIGZIStream& stream) {
     stream.GetUint16(version);
     if (version > 8) return false;
     if (!protection_.Read(stream)) return false;
+    protection_.AdoptFileStations([this](cIGZUnknown* object) -> IProtectionStation* {   // QI cISC4Occupant (the host's station key)
+        void* occupant = nullptr;
+        if (!object || !object->QueryInterface(0x26bb767e, &occupant) || !occupant) return nullptr;
+        static_cast<cIGZUnknown*>(occupant)->Release();   // the file reference keeps the occupant
+        return host_->PoliceOccupant(occupant);
+    });
     filePowerGrid_ = cRetainedReference();
     filePowerGrid_.Read(stream);                                          // +0x128 police power grid
     // In a city file the jails are object references the host does not resolve yet: they are consumed so the record stays in step.

@@ -1,5 +1,8 @@
 #include "sc4/DispatchManager.h"
 
+#include <cstdio>
+#include <cstdlib>
+
 #include <algorithm>
 #include <cmath>
 
@@ -361,11 +364,12 @@ bool cSC4DispatchManager::CanDispatch(tDispatchType type, float x, float z) {
 std::uint32_t cSC4DispatchManager::Dispatch(tDispatchType type, float x, float z) {
     IDispatchSource* source = GetDispatchSource(static_cast<std::uint32_t>(type));
     if (!source) return 0;
-    bool alreadyDispatched = false;
-    if (!source->CanDispatch(x, z, &alreadyDispatched)) return 0;
+    bool allBusy = false;   // the source's "every unit is out" flag (protection.md 8.2)
+    if (!source->CanDispatch(x, z, &allBusy)) return 0;
 
+    // i386 0x0018829c: without a call box in the player's hand, a dispatch needs a free unit.
     IPylonOccupant* active = GetActivePylon();
-    if (!active && !alreadyDispatched) return 0;
+    if (!active && allBusy) return 0;
 
     if (active) {
         // Re-use the dispatch that already belongs to the active pylon (the id and type stay).
@@ -462,8 +466,10 @@ bool cSC4DispatchManager::BeginDispatch(DispatchInfo& info) {
     float position[3] = {info.x, info.y, info.z};
     if (city_) position[1] = city_->CellHeight(position[0], position[2]);
 
-    // The original passes a zeroed first location and the clicked world position as the second one.
+    // i386 0x00187eae BeginDispatch: a new vehicle leaves from the station (kind 0, the station occupant); a re-target passes a zeroed
+    // first location (the vehicle keeps its return source). The second location is the clicked world position.
     tDispatchLocation from;
+    if (!info.automaton) from.occupant = info.station;
     tDispatchLocation to;
     to.type = 1;   // tDispatchLocation::kWorldPosition
     to.x = position[0];
@@ -621,9 +627,13 @@ bool cSC4DispatchManager::UpdateDispatchState(DispatchInfo& info, tDispatchState
 
 bool cSC4DispatchManager::HandleAutomataEventMessage(cIGZMessage2Standard* message) {
     if (!message) return false;
-    auto* automaton = static_cast<IDispatchAutomaton*>(message->GetVoid1());
+    IDispatchHost* host = DispatchHost();
+    void* object = message->GetVoid1();
+    IDispatchAutomaton* automaton = object && host ? host->AutomatonFromMessage(object) : static_cast<IDispatchAutomaton*>(object);
     if (!automaton) return false;
     const std::uint32_t event = static_cast<std::uint32_t>(message->GetData2());
+    static const bool trace = std::getenv("SC4_DISPATCHDEBUG") != nullptr;
+    if (trace) std::fprintf(stderr, "dispatch: automaton event %u data %u\n", event, static_cast<std::uint32_t>(message->GetData3()));
     if ((event | 4u) != 7u) return false;   // only 3 (removed) and 7 (reached its destination)
     for (auto& info : dispatches_) {
         if (info.automaton != automaton) continue;
@@ -732,10 +742,10 @@ void cSC4DispatchManager::ReadDispatchInfo(cIGZIStream& stream, DispatchInfo& in
     host->ReadSerializable(stream, kGZIID_cISC4Occupant, &raw);
     info.station = static_cast<cISC4Occupant*>(raw);
     raw = nullptr;
-    host->ReadSerializable(stream, kGZIID_cISC4Automaton, &raw);
+    host->ReadSerializable(stream, kDispatchAutomatonIid, &raw);
     info.automaton = static_cast<IDispatchAutomaton*>(raw);
     raw = nullptr;
-    host->ReadSerializable(stream, kGZIID_cISC4PylonOccupant, &raw);
+    host->ReadSerializable(stream, kDispatchPylonIid, &raw);
     info.pylon = static_cast<IPylonOccupant*>(raw);
 }
 
@@ -772,13 +782,13 @@ bool cSC4DispatchManager::Read(cIGZIStream& stream) {
     nextDispatchID_ = static_cast<std::uint32_t>(nextID);
     IDispatchHost* host = DispatchHost();
     void* raw = nullptr;
-    host->ReadSerializable(stream, kGZIID_cISC4PylonOccupant, &raw);
+    host->ReadSerializable(stream, kDispatchPylonIid, &raw);
     activePylon_ = static_cast<IPylonOccupant*>(raw);   // Quirk kept: the previous pylon is not released.
     std::int32_t pylonCount = 0;
     stream.GetSint32(pylonCount);
     for (std::int32_t i = 0; i < pylonCount; ++i) {
         raw = nullptr;
-        host->ReadSerializable(stream, kGZIID_cISC4PylonOccupant, &raw);
+        host->ReadSerializable(stream, kDispatchPylonIid, &raw);
         availablePylons_.push_back(static_cast<IPylonOccupant*>(raw));
     }
     std::int32_t tool = 0;

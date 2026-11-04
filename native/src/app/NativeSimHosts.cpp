@@ -45,6 +45,12 @@ extern IVehicleHost* g_loadVehicleHost;   // tools/city_probe_hostglobals.cpp
 namespace native {
 sc4::ITrafficAutomatonHost* NativeVehicleTrafficHost();   // app/NativeTrafficAutomata.cpp
 sc4::IVehicleHost* NativeVehicleHost();
+// app/NativeDispatch.cpp: the dispatch manager as the protection simulators see it, and its host.
+int NativeDispatchCount(std::uint32_t type);
+std::vector<std::uint32_t> NativeDispatchIds(std::uint32_t type);
+bool NativeDispatchRecord(std::uint32_t id, sc4::ProtectionDispatchInfo& info);
+void NativeRegisterDispatchSource(std::uint32_t type, bool add);
+void InstallNativeDispatchHost();
 }
 #include "sc4/PoliceSimulator.h"
 #include "sc4/ResidentialSimulator.h"
@@ -301,6 +307,7 @@ bool StationFundingFraction(cISCPropertyHolder* holder, std::uint32_t purpose, f
 class FireOccupant final : public IFireOccupant {
 public:
     explicit FireOccupant(cISC4Occupant* occupant) : occupant_(occupant) {}
+    cISC4Occupant* Occupant() const { return occupant_; }
     std::uint32_t OccupantType() override { return occupant_->GetType(); }
     void Position(float xyz[3]) override { occupant_->GetPosition(xyz); }
     cISCPropertyHolder* PropertyHolder() override { return occupant_->AsPropertyHolder(); }
@@ -336,10 +343,11 @@ public:
         auto* police = Component<cSC4PoliceSimulator>(CityComponent::PoliceSimulator, kGZCLSID_cSC4PoliceSimulator);
         return police ? police->GetPercentCoverage() : 0.0f;
     }
-    // PARTIAL: no dispatch layer natively (no fire trucks yet).
-    int AvailableDispatchCount(std::uint32_t) override { return 0; }
-    std::vector<std::uint32_t> ActiveDispatches(std::uint32_t) override { return {}; }
-    bool GetDispatch(std::uint32_t, ProtectionDispatchInfo&) override { return false; }
+    // The dispatch manager's records of fire engines (app/NativeDispatch.cpp).
+    int AvailableDispatchCount(std::uint32_t purpose) override { return NativeDispatchCount(purpose); }
+    std::vector<std::uint32_t> ActiveDispatches(std::uint32_t purpose) override { return NativeDispatchIds(purpose); }
+    bool GetDispatch(std::uint32_t id, ProtectionDispatchInfo& info) override { return NativeDispatchRecord(id, info); }
+    void RegisterDispatchSource(bool add) override { NativeRegisterDispatchSource(1, add); }
     bool LotAllowsDispatch(IProtectionStation*) override { return true; }
     bool IsAboveWater(float x, float z) override { cSTETerrain* t = Terrain(); return !t || t->GetAltitude(x, z) > t->GetSeaLevel(); }
     bool IsZonedAt(int x, int z) override { cSC4ZoneManager* m = Zones(); return m && m->GetZoneType(x, z) != 0; }
@@ -366,6 +374,7 @@ FireHost g_fire;
 class PoliceOccupant final : public IPoliceOccupant {
 public:
     explicit PoliceOccupant(cISC4Occupant* occupant) : occupant_(occupant) {}
+    cISC4Occupant* Occupant() const { return occupant_; }
     std::uint32_t OccupantType() override { return occupant_->GetType(); }
     void Position(float xyz[3]) override { occupant_->GetPosition(xyz); }
     cISCPropertyHolder* PropertyHolder() override { return occupant_->AsPropertyHolder(); }
@@ -396,10 +405,11 @@ public:
     void SetStrikerGroup(IPoliceOccupant*, bool) override {}
     void SetJailbreakGroup(IPoliceOccupant*, bool) override {}
     void RegisterFundedStation(IPoliceOccupant*, std::uint32_t, bool) override {}
-    // PARTIAL: no dispatch layer natively (no police cars yet).
-    int AvailableDispatchCount(std::uint32_t) override { return 0; }
-    std::vector<std::uint32_t> ActiveDispatches(std::uint32_t) override { return {}; }
-    bool GetDispatch(std::uint32_t, ProtectionDispatchInfo&) override { return false; }
+    // The dispatch manager's records of police cars (app/NativeDispatch.cpp).
+    int AvailableDispatchCount(std::uint32_t purpose) override { return NativeDispatchCount(purpose); }
+    std::vector<std::uint32_t> ActiveDispatches(std::uint32_t purpose) override { return NativeDispatchIds(purpose); }
+    bool GetDispatch(std::uint32_t id, ProtectionDispatchInfo& info) override { return NativeDispatchRecord(id, info); }
+    void RegisterDispatchSource(bool add) override { NativeRegisterDispatchSource(0, add); }
     bool LotAllowsDispatch(IProtectionStation*) override { return true; }
     bool IsAboveWater(float x, float z) override { cSTETerrain* t = Terrain(); return !t || t->GetAltitude(x, z) > t->GetSeaLevel(); }
     bool IsZonedAt(int x, int z) override { cSC4ZoneManager* m = Zones(); return m && m->GetZoneType(x, z) != 0; }
@@ -421,6 +431,18 @@ private:
 };
 
 PoliceHost g_police;
+
+}  // namespace
+
+sc4::IFireOccupant* NativeFireStation(sc4::cISC4Occupant* occupant) { return g_fire.FireOccupant(occupant); }
+sc4::IPoliceOccupant* NativePoliceStation(sc4::cISC4Occupant* occupant) { return g_police.PoliceOccupant(occupant); }
+sc4::cISC4Occupant* NativeStationOccupant(sc4::IProtectionStation* station) {
+    if (auto* fire = dynamic_cast<native::FireOccupant*>(station)) return fire->Occupant();
+    if (auto* police = dynamic_cast<native::PoliceOccupant*>(station)) return police->Occupant();
+    return nullptr;
+}
+
+namespace {
 
 // The buzzards over a sick tract (residential.md 5.5 step 2).
 class ResidentialEffect final : public IResidentialEffect {
@@ -581,6 +603,7 @@ void InstallNativeSimHosts() {
     hosts.demolition = NativeDemolitionHost();
     InstallNativeTrafficHost();
     InstallNeighborHosts();
+    InstallNativeDispatchHost();
 }
 
 }  // namespace native

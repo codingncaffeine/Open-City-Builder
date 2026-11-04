@@ -207,7 +207,14 @@ struct FakeTrafficAutomaton final : ITrafficAutomataAutomaton {
         leader = value;
         if (old) old->Release();
     }
-    void SetTargetDirection(const float* xyz) override { std::memcpy(targetDirection, xyz, sizeof targetDirection); }
+    void HandleDispatched(const cS3DVector3& position, cISC4Occupant*) override {
+        targetDirection[0] = position.x;
+        targetDirection[1] = position.y;
+        targetDirection[2] = position.z;
+    }
+    std::deque<RouteData>* RouteDeque() override { return nullptr; }
+    bool BeginRoute(bool) override { return false; }
+    void ReturnToDefaultSpeed() override {}
 };
 
 // ---- group / script --------------------------------------------------------------------------------------------------------
@@ -1147,7 +1154,7 @@ int main() {
         to.x = 6.0f;
         to.y = 8.0f;
         CHECK(manager->Dispatch(0x4200, from, to, 0, 3, cGZPersistResourceKey{}, 0) == nullptr);
-        CHECK(created->shutdowns >= 1);   // the failed trip removes the new automaton
+        CHECK(created->shutdowns >= 1);   // no path finder: the failed route removes the new automaton
         delete created;
 
         // ---- UpdateResponseList (0x10011220c): retire after six failed lookups, refresh on success
