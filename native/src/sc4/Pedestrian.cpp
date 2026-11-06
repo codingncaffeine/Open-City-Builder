@@ -409,7 +409,7 @@ bool cSC4Pedestrian::VerifyNetworkOccupant() {
 bool cSC4Pedestrian::ChooseNewDestination() {
     if (!cSC4TrafficAutomaton::ChooseNewDestination()) return false;
     bool result = true;
-    if (attractionController_ && networkOccupant_ && !(std::fabs(attractionDistance_) < kPedestrianRedirectDistance)) {
+    if (attractionController_ && networkOccupant_ && !(std::fabs(attractionStrength_) < kPedestrianRedirectDistance)) {
         // normalised in place (no zero check, as compiled)
         const float inverse = 1.0f / std::sqrt((attraction_.z * attraction_.z + attraction_.y * attraction_.y) + attraction_.x * attraction_.x);
         attraction_ = MakeVector(attraction_.x * inverse, attraction_.y * inverse, attraction_.z * inverse);

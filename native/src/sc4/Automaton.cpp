@@ -171,8 +171,8 @@ cSC4Automaton::cSC4Automaton(IAutomatonHost* host, const cGZPersistResourceKey& 
     soundInstanceId_ = 0;
     priority_ = 0;
     actualSpeed_ = 0.0f;
-    attractionRadius_ = 0.0f;
     attractionDistance_ = 0.0f;
+    attractionStrength_ = 0.0f;
     speedTween_ = AutomatonTween{kAutomatonInitialSpeed, kAutomatonInitialSpeed, 0.0f, 0.0f};
     opacityTween_ = AutomatonTween{1.0f, 1.0f, 0.0f, 0.0f};
     if (modelKey.instance != 0) AddModelResourceKey(modelKey);
@@ -347,11 +347,25 @@ bool cSC4Automaton::UnloadModels() {
     return true;
 }
 
+// i386 0x000c1720: the automaton's exemplar names its extra models by resource key: the headlights (1), the emergency
+// lights (2) and the trailer (3). The model joins the automaton's instances and the caller gets a counted reference.
+// (Specifier 0 leaves the property id unset in the original; it answers nothing here.)
 bool cSC4Automaton::LoadAuxiliaryModel(std::uint32_t specifier, IAutomatonModel** out) {
-    (void)specifier;
     if (out) *out = nullptr;
-    // The ghost model depends on the renderer's model creation (unrecovered): no auxiliary model is produced.
-    return false;
+    std::uint32_t property = 0;
+    switch (specifier) {
+        case 1: property = kAutomatonPropertyHeadlightModel; break;
+        case 2: property = kAutomatonPropertyEmergencyLightModel; break;
+        case 3: property = kAutomatonPropertyTrailerModel; break;
+        default: return false;
+    }
+    cGZPersistResourceKey key;
+    if (!cSCPropertyHelp::GetPropertyValue(AsPropertyHolder(), property, key)) return false;
+    IAutomatonModel* model = AddModelInstance(key);
+    if (out) *out = model;
+    if (!model) return false;
+    model->AddRef();
+    return true;
 }
 
 cGZPersistResourceKey cSC4Automaton::GetModelResourceKey(int index) const {
@@ -407,8 +421,8 @@ bool cSC4Automaton::Write(cIGZOStream& stream) const {
     if (attractionController_ && !attractionController_->CheckFlag(kControllerFlagTransient))
         controller = static_cast<const cIGZSerializable*>(attractionController_);
     SC4WriteGZSerializable(stream, controller);
-    stream.SetFloat32(attractionRadius_);
     stream.SetFloat32(attractionDistance_);
+    stream.SetFloat32(attractionStrength_);
     stream << attraction_;
     SC4WriteGZSerializable(stream, static_cast<const cIGZSerializable*>(leader_));
     stream.SetUint32(static_cast<std::uint32_t>(states_.size()));
@@ -453,8 +467,8 @@ bool cSC4Automaton::Read(cIGZIStream& stream) {
     SC4ReadGZSerializable(stream, kControllerIid, &rawController, false);
     if (attractionController_) attractionController_->Release();
     attractionController_ = static_cast<cSC4AutomataController*>(rawController);
-    stream.GetFloat32(attractionRadius_);
     stream.GetFloat32(attractionDistance_);
+    stream.GetFloat32(attractionStrength_);
     stream >> attraction_;
     void* rawLeader = nullptr;
     SC4ReadGZSerializable(stream, kAutomatonIid, &rawLeader, false);
@@ -898,7 +912,7 @@ void cSC4Automaton::UpdateLighting() {}
 
 void cSC4Automaton::UpdateAttraction() {
     if (CheckAutomataFlag(kAutomataFlagIgnoreAttractors) || !Host()) return;
-    cSC4AutomataController* controller = Host()->FindAttraction(this, &attraction_, &attractionRadius_, &attractionDistance_);
+    cSC4AutomataController* controller = Host()->FindAttraction(this, &attraction_, &attractionDistance_, &attractionStrength_);   // i386 0x000c65d2: +0xa4, +0x9c, +0xa0
     if (controller) controller->AddRef();
     if (controller != attractionController_) {
         if (attractionController_) {
@@ -1317,14 +1331,22 @@ void cSC4Automaton::UnregisterInGameDataRegistry() {}
 bool cSC4Automaton::PlayAnim(const cGZPersistResourceKey& key) {
     if (key.instance == 0 || models_.empty() || !Host()) return true;
     // PARTIAL: cSC4Automaton::ReplaceModelInstance (0x10010ab5e) builds a new animated instance from the key, transfers
-    // the zoom / rotation, the effects model and the bounding box. The model layer is a seam here, so this only swaps
-    // the first model instance and repositions it.
+    // the zoom / rotation, the effects model and the bounding box. The model layer is a seam here, so this swaps the
+    // first model instance, repositions it and, for an automaton that is in the renderer, takes the old instance out and
+    // puts the new one in (without that the old instance stayed where it was inserted and the new one was never drawn).
     IAutomatonModel* model = Host()->CreateModel(key);
     if (!model) return true;
     IAutomatonModel* old = models_.front();
+    const bool inRenderer = IsFlagSet(kAutomatonOccupantInRenderer);
+    if (inRenderer && old) Host()->RemoveModelFromRenderer(old);
     if (effects_) effects_->SetModel(model);
     models_.front() = model;
     PositionModelInstance(model);
+    if (inRenderer) {
+        const float opacity = TweenValue(opacityTween_);
+        model->SetOpacity(opacity <= 1.0f ? opacity : 1.0f, opacity < 1.0f);
+        Host()->AddModelToRenderer(model);
+    }
     Host()->DestroyModel(old);
     return true;
 }

@@ -437,22 +437,22 @@ struct AutomataTuningGlobals {
     std::uint32_t f21894 = 0;                  // 0x4998c904
     std::uint32_t f21898 = 0, f2189c = 0;      // 0x4998c905 (u32 array, first two)
     std::uint8_t f218a0 = 0, f218a4 = 0;       // 0x4998c909 (byte array, first two)
-    float f218a8 = 0.0f;                       // 0x4998c90b
+    std::uint32_t f218a8 = 0;                  // 0x4998c90b (uint32 in the tuning exemplar: the watercraft maximum)
     float f219a4 = 0.0f, f219a8 = 0.0f, f219ac = 0.0f, f219b0 = 0.0f;   // 0x4998c912..0x4998c915
     float f219b4 = 0.0f;                       // 0x4998c916 (the opacity/duration argument the manager passes to automata)
     float f219b8 = 0.0f;                       // 0x2a511cbc
     float f219bc = 0.0f;                       // 0xca5545ea (u32 count / 3600)
     std::uint32_t f219c0 = 0, f219c4 = 0;      // 0x4998c90a (u32 array, first two)
-    std::uint32_t f219c8 = 0;                  // 0x4998c91d
+    std::uint32_t f219c8 = 0;                  // 0x4998c91d (uint8 in the tuning exemplar)
     std::int32_t f219cc = 0, f219d0 = 0;       // 0xa9af1e54 / 0xa9af1e55 (byte list -> bit mask, 0xffffffff when missing)
     std::uint8_t f219d4 = 0, f219d5 = 0;       // 0x4998c918 / 0x4998c919 minus one
     std::vector<float> f219d8;                 // 0x4bae8fe0
     float f219e0 = 0.0f;                       // written from f219d8 (the vector's first element, see the .cpp note)
     float f219f0 = 0.0f;                       // 0x89aec88b
-    std::uint32_t f219f4 = 0;                  // 0x89aec88c
+    std::uint8_t f219f4 = 0;                   // 0x89aec88c (uint8: the emergency "close enough" distance in cells)
     std::uint8_t f219f5 = 0;                   // 0x89aec88d
-    float f219f8 = 0.0f;                       // 0x89aec88e
-    std::uint32_t f219fc = 0;                  // 0xc9ee640d
+    std::uint32_t f219f8 = 0;                  // 0x89aec88e (uint32: the emergency speed in km/h)
+    std::uint8_t f219fc = 0;                   // 0xc9ee640d (uint8)
     bool f219fd = false;                       // 0x49be9565
     float f21a00 = 0.0f;                       // 0xc9c18eae
     float f21a04 = 0.0f, f21a08 = 0.0f;        // 0xa9d6cc17 (float array, first two)
@@ -469,11 +469,11 @@ struct AutomataTuningGlobals {
     std::uint32_t f21a48 = 0, f21a4c = 0;      // 0x6a440d40 (u32 array, first two)
     std::uint32_t f21a50 = 20;                 // 0xa53fd32
     float f21a54 = 0.0f, f21a58 = 0.0f, f21a5c = 0.0f, f21a60 = 0.0f;   // 0x6b42922c (the four simulator speed modifiers)
-    std::uint32_t f21a64 = 0;                  // 0x6bac0b3e
+    std::uint32_t f21a64 = 0;                  // 0x6bac0b3e (uint8 in the tuning exemplar)
     float f21a68 = 0.0f, f21a6c = 0.0f;        // 0x4bae8fe1 / 0x4bae8fe2
-    float f21a70 = 0.0f;                       // 0xebfb4a0a
+    std::uint8_t f21a70 = 0;                   // 0xebfb4a0a (uint8)
     float f21a74 = 0.0f;                       // 0xcc101142
-    float f21a78 = 0.0f;                       // 0x6c200139 (the speed the player drive unlocks with)
+    std::uint32_t f21a78 = 0;                  // 0x6c200139 (uint32: the speed the player drive unlocks with)
     float f21a7c = 0.0f;                       // 0x8c3e8185 (1 / count)
     float f21974 = 0.0f, f21978 = 0.0f;        // 0xec0700c0 / 0x6c0700c4
     bool f21aa8 = false;                       // 0x4998c91c "clock multipliers enabled"

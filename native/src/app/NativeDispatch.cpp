@@ -37,6 +37,11 @@ extern IPatrolCarHost* g_loadPatrolCarHost;
 }  // namespace sc4
 
 namespace native {
+// app/NativeAutomataControllerHost.cpp: the controller manager's add (by template name, riding on the occupant) and remove
+cIGZUnknown* NativeAddController(sc4::cISC4Occupant* occupant, const char* templateName);
+void NativeRemoveController(cIGZUnknown* controller);
+bool NativePointInViewFrustum(const float* xyz);   // app/NativeAutomataManagerHost.cpp
+bool NativeProjectToViewport(const float* xyz, float out[3]);
 sc4::IFireOccupant* NativeFireStation(sc4::cISC4Occupant* occupant);       // app/NativeSimHosts.cpp
 sc4::IPoliceOccupant* NativePoliceStation(sc4::cISC4Occupant* occupant);
 sc4::cISC4Occupant* NativeStationOccupant(sc4::IProtectionStation* station);
@@ -337,15 +342,40 @@ public:
     // PARTIAL: sirens (the sound system's 0x6a451908 / 0xca45190f / 0xea451903 events) and the emergency light model + effect.
     void SirenStopped(const cSC4EmergencyVehicle&) override {}
     void SirenMoved(const cSC4EmergencyVehicle&, int, int, int) override {}
-    void SetEmergencyLights(cSC4EmergencyVehicle&, bool) override {}
+    // cSC4EmergencyVehicle::ShowEmergencyLights (Mac i386 0x00235862): lights on = an "automata_pullover" attractor riding on the
+    // vehicle (the cars around it pull over) and the flashing light model its exemplar names; lights off drops both.
+    // PARTIAL: the player-drive audio event (AEMS event 0xb) is not posted.
+    void SetEmergencyLights(cSC4EmergencyVehicle& vehicle, bool on) override {
+        if (cIGZUnknown* old = vehicle.LightController()) {
+            NativeRemoveController(old);
+            vehicle.SetLightController(nullptr);
+        }
+        IAutomatonModel* model = vehicle.LightModel();
+        if (on) {
+            vehicle.SetLightController(NativeAddController(static_cast<cISC4Occupant*>(&vehicle), "automata_pullover"));
+            if (model) {
+                vehicle.SetLightModel(nullptr);
+                model->Release();
+            }
+            model = nullptr;
+            vehicle.LoadAuxiliaryModel(2, &model);
+            vehicle.SetLightModel(model);
+            if (std::getenv("SC4_DISPATCHDEBUG"))
+                std::fprintf(stderr, "dispatch: lights on: pull-over controller %d, light model %d\n", vehicle.LightController() ? 1 : 0, model ? 1 : 0);
+        } else if (model) {
+            vehicle.RemoveModelInstance(model);
+            vehicle.SetLightModel(nullptr);
+            model->Release();
+        }
+    }
     void SirenStarted(const cSC4EmergencyVehicle&, std::uint32_t) override {}
     // sTuningParams +0x170..+0x17c (AutomataTuning(): 0x89aec88b..0xc9ee640d).
     const EmergencyVehicleTuning& Tuning() override {
         const AutomataTuningGlobals& t = AutomataTuning();
         tuning_.retrySeconds = t.f219f0;
-        tuning_.teleportCells = static_cast<std::uint8_t>(t.f219f4 & 0xff);
+        tuning_.teleportCells = t.f219f4;
         tuning_.maxRepaths = t.f219f5;
-        tuning_.speedKmh = static_cast<std::uint32_t>(t.f219f8);
+        tuning_.speedKmh = t.f219f8;
         tuning_.surroundingDepth = static_cast<std::int32_t>(t.f219fc);
         return tuning_;
     }
@@ -568,12 +598,23 @@ void NativeDispatchReport() {
             if (!manager->GetDispatchInfo(id, info)) continue;
             float p[3] = {0, 0, 0};
             std::uint32_t state = 0;
+            float opacity = -1.0f;
+            int models = 0, inView = 0;
             if (cSC4Automaton* a = info.automaton ? AutomatonOfDispatchView(info.automaton) : nullptr) {
                 a->GetPosition(p);
                 state = a->GetDispatchState();
+                opacity = a->GetOpacity();
+                models = a->GetModelInstance() ? 1 : 0;
+                inView = NativePointInViewFrustum(p) ? 1 : 0;
+                cS3DTransform t;
+                float screen[3] = {0, 0, 0};
+                NativeProjectToViewport(p, screen);
+                if (a->GetTransform(t))
+                    std::printf("dispatches: vehicle flags 0x%x, model %p at (%.0f, %.1f, %.0f), on screen (%.0f, %.0f)\n", static_cast<unsigned>(a->GetFlags()),
+                                static_cast<void*>(a->GetModelInstance()), t.translation[0], t.translation[1], t.translation[2], screen[0], screen[1]);
             }
-            std::printf("dispatches: type %u id %u call %u active %d target (%.0f, %.0f) vehicle %d at (%.0f, %.0f) state %u\n", type, id,
-                        info.callNumber, info.active ? 1 : 0, info.x, info.z, info.automaton ? 1 : 0, p[0], p[2], state);
+            std::printf("dispatches: type %u id %u call %u active %d target (%.0f, %.0f) vehicle %d at (%.0f, %.1f, %.0f) state %u opacity %.2f model %d in view %d\n",
+                        type, id, info.callNumber, info.active ? 1 : 0, info.x, info.z, info.automaton ? 1 : 0, p[0], p[1], p[2], state, opacity, models, inView);
         }
     }
     std::printf("dispatches: %d fire, %d police\n", NativeDispatchCount(1), NativeDispatchCount(0));

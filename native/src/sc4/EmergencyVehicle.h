@@ -6,7 +6,7 @@
 //   +0x424 cS3DVector3 dispatch destination      +0x430 counted object (class 0x26bb767e, the dispatch source occupant)
 //   +0x438 u8 repath counter                      +0x43a u16 call number
 //   +0x43c u32 dispatch state (3 = driving to the call, 1 = blocked / at the call, 6 = finished)
-//   +0x440 counted emergency-light model          +0x448 counted light effect
+//   +0x440 counted emergency-light model          +0x448 counted "pull over" attractor (automata_pullover)
 // Behaviour states: 100 en route, 0x65 repathing, 0x66 handling the event, 0x67 teleporting back; 0x34 is the pursuit state
 // the base class already knows. Automaton flag 0x80 marks "emergency mode" (speed modifier ignored).
 //
@@ -113,6 +113,15 @@ public:
     void SetRepathCount(std::uint8_t count) { repathCount_ = count; }
     IAutomatonModel* LightModel() const { return lightModel_; }
     void SetLightModel(IAutomatonModel* model) { lightModel_ = model; }
+    // +0x448: the "pull over" attractor that rides on the vehicle while its lights are on (counted)
+    cIGZUnknown* LightController() const { return lightEffect_; }
+    void SetLightController(cIGZUnknown* controller) {
+        if (controller == lightEffect_) return;
+        if (controller) controller->AddRef();
+        cIGZUnknown* old = lightEffect_;
+        lightEffect_ = controller;
+        if (old) old->Release();
+    }
     IEmergencyVehicleHost* EmergencyHost() const { return emergencyHost_; }
 
 protected:

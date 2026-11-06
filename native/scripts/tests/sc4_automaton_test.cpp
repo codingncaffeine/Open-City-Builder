@@ -581,6 +581,35 @@ int main() {
         CHECK(automaton->Release() == 0);
     }
 
+    // ---- PlayAnim swaps the first model, and swaps it in the renderer when the automaton is placed there ----------------
+    {
+        FakeHost host;
+        cSC4Automaton* automaton = MakeAutomaton(host);
+        FakeModel* first = new FakeModel();
+        host.nextModel = first;
+        automaton->AddModelInstance(cGZPersistResourceKey{1, 2, 3});
+        // not in the renderer: the model is swapped and nothing reaches the renderer
+        FakeModel* second = new FakeModel();
+        host.nextModel = second;
+        CHECK(automaton->PlayAnim(cGZPersistResourceKey{1, 2, 4}));
+        CHECK(automaton->GetModelInstance() == second);
+        CHECK(host.rendererAdded == 0);
+        CHECK(host.rendererRemoved == 0);
+        CHECK(host.destroyedModels == 1);
+        // in the renderer: the old instance leaves it and the new one enters
+        automaton->SetRadius(1.0f);
+        automaton->PlaceInRenderer(true);
+        CHECK(host.rendererAdded == 1);
+        FakeModel* third = new FakeModel();
+        host.nextModel = third;
+        CHECK(automaton->PlayAnim(cGZPersistResourceKey{1, 2, 5}));
+        CHECK(automaton->GetModelInstance() == third);
+        CHECK(host.rendererRemoved == 1);
+        CHECK(host.rendererAdded == 2);
+        CHECK(host.destroyedModels == 2);
+        CHECK(automaton->Release() == 0);
+    }
+
     // ---- callbacks and sound ---------------------------------------------------------------------------------------
     {
         FakeHost host;

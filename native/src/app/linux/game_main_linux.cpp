@@ -919,6 +919,9 @@ void DoubleClick(int cx, int cy) {
     }
 }
 
+}  // namespace
+namespace native { std::uint32_t NativeSimDayNumber(); }   // app/NativeCityPanel.cpp
+namespace {
 bool OnRegionScreen() { return gAppWindow && gAppWindow->CurrentScreen() && gAppWindow->CurrentScreen()->GetID() == 0xea659793; }
 
 // A scenario (scenarios/*.txt): one command per line, `#` starts a comment. The run is repeatable and needs no visible window.
@@ -1039,6 +1042,14 @@ int RunScenario(const std::string& path) {
             int ms = 0; words >> ms;
             const double end = NowMs() + ms;
             while (NowMs() < end) { Frame(); Nap(); }
+        } else if (command == "wait-days") {   // run frames until the simulator is DAYS days further (or LIMIT ms passed): a wait in game time
+            int days = 0, limit = 120000; words >> days >> limit;
+            const std::uint32_t start = native::NativeSimDayNumber();
+            const double began = NowMs(), end = began + limit;
+            while (native::NativeSimDayNumber() - start < static_cast<std::uint32_t>(days) && NowMs() < end) { Frame(); Nap(); }
+            const std::uint32_t passed = native::NativeSimDayNumber() - start;
+            std::printf("scenario %d: %u days in %.0f ms\n", number, passed, NowMs() - began);
+            if (passed < static_cast<std::uint32_t>(days)) { std::printf("scenario %d: wait-days gave up\n", number); return 5; }
         } else if (command == "wait-region" || command == "wait-city") {
             int limit = 3000; words >> limit;
             const bool region = command == "wait-region";

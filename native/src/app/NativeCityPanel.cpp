@@ -260,4 +260,10 @@ void ConfigureCityPanels(sc4::cSC4View3DWin& view) {
     if (debug) std::fprintf(stderr, "city panel: %d RCI bars, %d opinion polls configured\n", rci, trends);
 }
 
+// The simulator's day number (0 without a city): what the scenario runner's `wait-days` counts.
+std::uint32_t NativeSimDayNumber() {
+    auto* simulator = Component<sc4::cSC4Simulator>(CityComponent::Simulator, sc4::kGZCLSID_cSC4Simulator);
+    return simulator ? simulator->GetSimDateNumber() : 0;
+}
+
 }  // namespace native

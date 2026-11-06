@@ -109,6 +109,9 @@ constexpr std::uint32_t kStateIdle = 1, kStateRemoving = 2, kStateQueue = 4, kSt
                         kStatePullOver = 0x15, kStatePursuit = 0x34;
 
 constexpr std::uint32_t kAuxiliaryModelGhost = 0;   // cSC4Automaton::AuxiliaryModelSpecifier (LoadAuxiliaryModel)
+// The exemplar properties (resource keys) LoadAuxiliaryModel reads for specifiers 1, 2 and 3.
+constexpr std::uint32_t kAutomatonPropertyHeadlightModel = 0x09c80417, kAutomatonPropertyEmergencyLightModel = 0xc9e69af6,
+                        kAutomatonPropertyTrailerModel = 0xec214180;
 
 // The events SendCallbackMessage posts (cISC4Automaton::tAutomataEvent).
 enum tAutomataEvent : std::uint32_t {
@@ -498,8 +501,8 @@ protected:
     std::uint8_t priority_ = 0;                                  // +0xc4
     float actualSpeed_ = 0.0f;                                   // +0xc8
     cSC4AutomataController* attractionController_ = nullptr;     // +0xd0
-    float attractionRadius_ = 0.0f;                              // +0xd8
-    float attractionDistance_ = 0.0f;                            // +0xdc
+    float attractionDistance_ = 0.0f;                              // +0xd8 (how far the strongest attractor is)
+    float attractionStrength_ = 0.0f;                            // +0xdc (its pull; negative repels)
     cS3DVector3 attraction_{0.0f, 0.0f, 0.0f};                   // +0xe0
     cSC4Automaton* leader_ = nullptr;                            // +0xf0
     std::vector<tAutomataState*> states_;                        // +0xf8

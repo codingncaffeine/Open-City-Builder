@@ -92,22 +92,32 @@ public:
         const bool ok = res->CreateModelInstance(0, &instance);
         res->Release();
         if (std::getenv("SC4_DEBUG")) { static int shown = 0; if (shown++ < 4) std::fprintf(stderr, "automata: model %08x/%08x/%08x -> %s\n", key.type, key.group, key.instance, ok && instance ? "ok" : "none"); }
-        return ok && instance ? new AutomatonModel(instance) : nullptr;
+        IAutomatonModel* model = ok && instance ? new AutomatonModel(instance) : nullptr;
+        if (ModelTrace()) std::fprintf(stderr, "automata: model %p created from %08x\n", static_cast<void*>(model), key.instance);
+        return model;
     }
-    void DestroyModel(IAutomatonModel* model) override { if (model) model->Release(); }
+    void DestroyModel(IAutomatonModel* model) override {
+        if (ModelTrace()) std::fprintf(stderr, "automata: model %p destroyed\n", static_cast<void*>(model));
+        if (model) model->Release();
+    }
     IAutomatonEffects* CreateEffects() override { return new NullEffects(); }
     void DestroyEffects(IAutomatonEffects* effects) override { delete effects; }
     bool AddModelToRenderer(IAutomatonModel* model) override {
         auto* instance = static_cast<AutomatonModel*>(model)->Instance();
         if (std::getenv("SC4_DEBUG")) { static int n = 0; if (n++ < 3) { cS3DTransform t; instance->GetTransform(t); std::fprintf(stderr, "automata: insert model %p render %p pos %.1f %.1f %.1f\n", static_cast<void*>(instance), static_cast<void*>(g_render), t.translation[0], t.translation[1], t.translation[2]); } }
         if (!g_render) { g_pending.push_back(instance); return true; }
-        return g_render->InsertModel(instance);
+        const bool inserted = g_render->InsertModel(instance);
+        if (ModelTrace()) { cS3DTransform t; instance->GetTransform(t); std::fprintf(stderr, "automata: model %p insert %d at (%.0f, %.1f, %.0f)\n", static_cast<void*>(model), inserted ? 1 : 0, t.translation[0], t.translation[1], t.translation[2]); }
+        return inserted;
     }
     bool RemoveModelFromRenderer(IAutomatonModel* model) override {
         auto* instance = static_cast<AutomatonModel*>(model)->Instance();
         for (auto it = g_pending.begin(); it != g_pending.end(); ++it) if (*it == instance) { g_pending.erase(it); return true; }
-        return g_render && g_render->RemoveModel(instance);
+        const bool removed = g_render && g_render->RemoveModel(instance);
+        if (ModelTrace()) std::fprintf(stderr, "automata: model %p remove %d\n", static_cast<void*>(model), removed ? 1 : 0);
+        return removed;
     }
+    static bool ModelTrace() { static const bool on = std::getenv("SC4_MODELDEBUG") != nullptr; return on; }   // every renderer insert / remove
     void FadeModelIn(IAutomatonModel*) override {}
     void FadeModelOut(IAutomatonModel*, int) override {}
     bool InsertOccupant(cISC4Occupant*) override { return true; }

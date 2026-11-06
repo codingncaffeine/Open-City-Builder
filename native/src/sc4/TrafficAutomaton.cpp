@@ -1240,7 +1240,7 @@ std::uint8_t cSC4TrafficAutomaton::ChooseExitEdge(ITrafficAutomatonOccupant* occ
 bool cSC4TrafficAutomaton::ApplyAttractionWeight(ITrafficAutomatonOccupant* occupant, float* weights) {
     if (!occupant) return false;
     if (GetChaseVector(attraction_)) {
-        attractionDistance_ = 100.0f;
+        attractionStrength_ = 100.0f;
     } else {
         if (!attractionController_) return false;
         if (CheckAutomataFlag(kAutomataFlagIgnoreAttractors)) return false;
@@ -1251,7 +1251,7 @@ bool cSC4TrafficAutomaton::ApplyAttractionWeight(ITrafficAutomatonOccupant* occu
     std::uint8_t entry = kPathEdgeWildcard;
     GetEdgeFromVector(occupant, attraction_, entry, true);
     if (entry == kPathEdgeWildcard) return true;
-    const float distance = attractionDistance_;
+    const float distance = attractionStrength_;
     const std::uint8_t opposite = static_cast<std::uint8_t>((entry + 2) & 3);
     float* row = weights;
     for (std::uint32_t i = 0; i < 4; ++i, row += 4) {

@@ -119,6 +119,8 @@ void ReadTuningParametersImpl() {
     auto f = [&](std::uint32_t id, float& value) { cSCPropertyHelp::GetPropertyValue(holder, id, value); };
     auto u = [&](std::uint32_t id, std::uint32_t& value) { cSCPropertyHelp::GetPropertyValue(holder, id, value); };
     auto b = [&](std::uint32_t id, std::uint8_t& value) { cSCPropertyHelp::GetPropertyValue(holder, id, value); };
+    // a uint8 property kept in a 32-bit field (the read only succeeds with the property's own type)
+    auto b32 = [&](std::uint32_t id, std::uint32_t& value) { std::uint8_t byte = 0; if (cSCPropertyHelp::GetPropertyValue(holder, id, byte)) value = byte; };
     auto curve = [&](std::uint32_t id, cSC4ResponseCurve& value) { ReadCurve(holder, id, value); };
 
     // 0x100b218b0 .. 0x100b219c4: the curves and the values that are not part of cSC4AutomataTuningParams.
@@ -136,7 +138,7 @@ void ReadTuningParametersImpl() {
     f(0xca511df2, sTuning.f21970);
     // 0x4998c89f reads into the first field of the tuning params (the original passes &sTuningParams; inferred).
     u(0x4998c89f, reinterpret_cast<std::uint32_t&>(sTuning.params.f000));
-    f(0x4998c90b, sTuning.f218a8);
+    u(0x4998c90b, sTuning.f218a8);
     ReadUints(holder, 0x4998c900, &sTuning.f21884, 2);
     ReadBytes(holder, 0x4998c902, &sTuning.f2188c, 2);
     u(0x4998c904, sTuning.f21894);
@@ -150,7 +152,7 @@ void ReadTuningParametersImpl() {
     f(0x4998c915, sTuning.f219b0);
     f(0x4998c916, sTuning.f219b4);
     ReadUints(holder, 0x4998c90a, &sTuning.f219c0, 2);
-    u(0x4998c91d, sTuning.f219c8);
+    b32(0x4998c91d, sTuning.f219c8);
     ReadByteMask(holder, 0xa9af1e54, reinterpret_cast<std::uint32_t&>(sTuning.f219cc), false);
     ReadByteMask(holder, 0xa9af1e55, reinterpret_cast<std::uint32_t&>(sTuning.f219d0), false);
     b(0x4998c918, sTuning.f219d4);
@@ -174,10 +176,10 @@ void ReadTuningParametersImpl() {
     cSCPropertyHelp::GetPropertyValue(holder, 0x4998c91c, sTuning.f21aa8);
     ReadByteMask(holder, 0x4998c89d, reinterpret_cast<std::uint32_t&>(sTuning.f21aac), true);
     f(0x89aec88b, sTuning.f219f0);
-    f(0x89aec88c, reinterpret_cast<float&>(sTuning.f219f4));
+    b(0x89aec88c, sTuning.f219f4);
     b(0x89aec88d, sTuning.f219f5);
-    f(0x89aec88e, sTuning.f219f8);
-    f(0xc9ee640d, reinterpret_cast<float&>(sTuning.f219fc));
+    u(0x89aec88e, sTuning.f219f8);
+    b(0xc9ee640d, sTuning.f219fc);
     cSCPropertyHelp::GetPropertyValue(holder, 0x49be9565, sTuning.f219fd);
     f(0xc9c18eae, sTuning.f21a00);
     ReadFloats(holder, 0xa9d6cc17, &sTuning.f21a04, 2);
@@ -219,7 +221,7 @@ void ReadTuningParametersImpl() {
         sTuning.f219bc = static_cast<float>(count) * 0.0002777778f;
     }
     ReadFloats(holder, 0x6b42922c, &sTuning.f21a54, 4);
-    u(0x6bac0b3e, sTuning.f21a64);
+    b32(0x6bac0b3e, sTuning.f21a64);
     sTuning.f219e0 = sTuning.f219d8.empty() ? 0.0f : sTuning.f219d8[0];
     {
         std::vector<float> values;
@@ -248,9 +250,9 @@ void ReadTuningParametersImpl() {
         u(0x8c3e8185, count);
         sTuning.f21a7c = count ? 1.0f / static_cast<float>(count) : 0.0f;
     }
-    f(0xebfb4a0a, sTuning.f21a70);
+    b(0xebfb4a0a, sTuning.f21a70);
     f(0xcc101142, sTuning.f21a74);
-    f(0x6c200139, sTuning.f21a78);
+    u(0x6c200139, sTuning.f21a78);
     holder->Release();
 }
 
@@ -1313,7 +1315,7 @@ void cSC4AutomataManager::EnterPlayerDriveView(IAutomataAutomaton* automaton, cI
         control->EnterChoosingMode();
     } else {
         automaton->SetPriority(0xff);
-        g_host->SetVehicleManagerSpeed(sTuning.f21a78);
+        g_host->SetVehicleManagerSpeed(static_cast<float>(sTuning.f21a78));
         control->EnterDrivingMode(automaton, true);   // the second argument is not recovered (inferred true)
     }
     if (callback) control->AddCallbackTarget(callback);
