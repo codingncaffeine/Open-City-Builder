@@ -280,6 +280,11 @@ Host g_host;
 void InstallAutomataManagerHost() { sc4::SetAutomataManagerHost(&g_host); }
 
 // The view utilities for hosts that cannot include the renderer's header next to their own.
+// IAutomatonHost::FindAutomataGroup: the script system's automata group (its slot 0x38), as the automaton sees it.
+sc4::IAutomatonGroupTemplate* NativeFindAutomatonGroup(std::uint32_t id) {
+    return AutomatonGroupTemplateView(g_scriptGroups.GetAutomataGroup(id));
+}
+
 bool NativeViewAvailable() { return CityRenderer() && CityRenderer()->GetViewUtilities(); }
 // Where a world point lands in the view (viewport pixels); false without a view.
 bool NativeProjectToViewport(const float* xyz, float out[3]) {

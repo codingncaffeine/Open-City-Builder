@@ -922,8 +922,11 @@ void cSC4Automaton::UpdateAttraction() {
                 PopState();
             }
         }
+        // +0x98 is a cRZAutoRefCount: the member holds its own reference (every other site releases one). Without it the first
+        // automaton to leave an attractor's reach freed the controller under the manager and its grid.
         if (attractionController_) attractionController_->Release();
         attractionController_ = controller;
+        if (attractionController_) attractionController_->AddRef();
     }
     if (attractionController_) {
         const tBehaviorTemplate* behavior = attractionController_->GetBehaviorTemplate(attractionDistance_, &position_.x);

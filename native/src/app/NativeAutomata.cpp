@@ -17,6 +17,8 @@
 #include "sc4/cSTETerrain.h"
 
 namespace native {
+sc4::cSC4AutomataController* NativeFindAttraction(sc4::cISC4Occupant* occupant, cS3DVector3* direction, float* distance, float* strength);   // app/NativeAutomataControllerHost.cpp
+sc4::IAutomatonGroupTemplate* NativeFindAutomatonGroup(std::uint32_t id);                                                                  // app/NativeAutomataManagerHost.cpp
 namespace {
 using namespace sc4;
 
@@ -130,8 +132,11 @@ public:
     bool NetworkAt(int, int) override { return false; }
     bool LotAt(int, int) override { return false; }
     void PlaceOnNetwork(const cS3DVector3&, const cS3DVector3&, std::uint32_t) override {}
-    cSC4AutomataController* FindAttraction(cISC4Occupant*, cS3DVector3*, float*, float*) override { return nullptr; }
-    IAutomatonGroupTemplate* FindAutomataGroup(std::uint32_t) override { return nullptr; }
+    cSC4AutomataController* FindAttraction(cISC4Occupant* occupant, cS3DVector3* direction, float* distance, float* strength) override {
+        static const bool off = std::getenv("SC4_NOATTRACTION") != nullptr;   // A/B switch
+        return off ? nullptr : NativeFindAttraction(occupant, direction, distance, strength);
+    }
+    IAutomatonGroupTemplate* FindAutomataGroup(std::uint32_t id) override { return NativeFindAutomatonGroup(id); }
     bool AnimationUpdateAllowed() override { return true; }
     float SimSpeedModifier() override { return 1.0f; }
     float MaxSpeedUnits() override { return 3600.0f; }   // the tests of the recovered classes use the same value

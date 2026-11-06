@@ -1011,6 +1011,9 @@ bool cSC4Vehicle::DoPullOverTick(float milliseconds) {
     auto* state = static_cast<tAutomataStatePullOver*>(GetState());
     if (!state) return true;
     const float timer = state->value38;
+    static const bool trace = std::getenv("SC4_ATTRACTDEBUG") != nullptr;
+    if (trace && ((timer == 0.0f) || (timer < 1000.0f && timer + milliseconds >= 1000.0f)))
+        std::fprintf(stderr, "pull over: vehicle %p at (%.1f, %.1f) %s\n", static_cast<void*>(this), position_.x, position_.z, timer == 0.0f ? "starts" : "stands at the side");
     if (timer == 0.0f && !std::isnan(timer)) {
         SetSpeed(GetDefaultSpeed(), 0.0f);
         state->orientation3c = SafeNormalize(orientation_, MakeVector(0.0f, 0.0f, 1.0f));

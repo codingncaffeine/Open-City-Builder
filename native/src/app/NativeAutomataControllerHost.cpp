@@ -4,6 +4,8 @@
 // manager's queues and tract grid, the network cells and the city renderer's view utilities.
 //   PARTIAL: effect triggers (the 3D view's active-effect query) answer "no effect"; controller loop sounds are not posted.
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 
 #include "app/NativeCity.h"
 #include "app/NativeCityView.h"
@@ -112,6 +114,26 @@ cIGZUnknown* NativeAddController(sc4::cISC4Occupant* occupant, const char* templ
 void NativeRemoveController(cIGZUnknown* controller) {
     auto* manager = CityComponentAs<cSC4AutomataControllerManager>(CityComponent::AutomataControllerManager);
     if (manager && controller) manager->RemoveController(static_cast<cSC4AutomataController*>(controller));
+}
+
+// IAutomatonHost::FindAttraction (cSC4Automaton::UpdateAttraction, i386 0x000c65d2: spCity vslot 0xbc, the controller manager,
+// then its vslot 0x58 GetCompositeAttractionEffect). The strongest attractor in reach, not referenced; the sum of the pulls
+// goes into `direction`.
+sc4::cSC4AutomataController* NativeFindAttraction(sc4::cISC4Occupant* occupant, cS3DVector3* direction, float* distance, float* strength) {
+    auto* manager = CityComponentAs<cSC4AutomataControllerManager>(CityComponent::AutomataControllerManager);
+    if (!manager || !occupant || !direction || !distance || !strength) return nullptr;
+    cSC4AutomataController* found = manager->GetCompositeAttractionEffect(occupant, *direction, *distance, *strength);
+    static const bool trace = std::getenv("SC4_ATTRACTDEBUG") != nullptr;
+    if (trace && found) {
+        static int lines = 0;
+        if (lines++ < 200) {
+            float at[3] = {};
+            occupant->GetPosition(at);
+            std::fprintf(stderr, "attraction: occupant %p at (%.0f, %.0f) controller %p distance %.1f strength %.1f\n", static_cast<void*>(occupant),
+                         at[0], at[2], static_cast<void*>(found), *distance, *strength);
+        }
+    }
+    return found;
 }
 
 void InstallAutomataControllerHost() { static NativeAutomataControllerHost s; sc4::SetAutomataControllerHost(&s); }

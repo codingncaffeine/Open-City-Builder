@@ -442,6 +442,26 @@ int main() {
         CHECK(automaton->Release() == 0);
     }
 
+    // ---- the attraction controller is a counted member ----------------------------------------------------------------
+    {
+        FakeHost host;
+        cSC4Automaton* automaton = MakeAutomaton(host);
+        FakeController attractor;
+        host.attraction = &attractor;
+        automaton->UpdateAttraction();
+        CHECK(attractor.refs == 2);            // the automaton keeps its own reference while it is attracted
+        automaton->UpdateAttraction();
+        CHECK(attractor.refs == 2);            // the same controller again: nothing changes
+        host.attraction = nullptr;
+        automaton->UpdateAttraction();         // out of reach: only the automaton's reference goes
+        CHECK(attractor.refs == 1);
+        host.attraction = &attractor;
+        automaton->UpdateAttraction();
+        CHECK(attractor.refs == 2);
+        CHECK(automaton->Release() == 0);      // the destructor gives it back
+        CHECK(attractor.refs == 1);
+    }
+
     // ---- the state machine tick ------------------------------------------------------------------------------------
     {
         FakeHost host;

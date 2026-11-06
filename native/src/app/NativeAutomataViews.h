@@ -14,6 +14,7 @@ class ITrafficAutomataAutomaton;
 class IAutomataOccupant;
 class IAutomataBuildingOccupant;
 class IAutomataGroupTemplate;
+class IAutomatonGroupTemplate;
 class cSC4Automaton;
 class cSC4OccupantGroupTemplate;
 class cISC4Occupant;
@@ -34,5 +35,7 @@ sc4::IAutomataOccupant* CityOccupantView(sc4::cISC4Occupant* occupant);
 sc4::IAutomataBuildingOccupant* CityBuildingView(cIGZUnknown* object);
 // The manager's view of a script group template (one per template, kept for the process).
 sc4::IAutomataGroupTemplate* GroupTemplateView(sc4::cSC4OccupantGroupTemplate* group);
+// The automaton's view of the same template (null for a view GroupTemplateView did not make).
+sc4::IAutomatonGroupTemplate* AutomatonGroupTemplateView(const sc4::IAutomataGroupTemplate* managerView);
 
 }  // namespace native

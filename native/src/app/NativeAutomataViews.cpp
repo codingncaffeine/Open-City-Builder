@@ -283,4 +283,9 @@ IAutomataGroupTemplate* GroupTemplateView(cSC4OccupantGroupTemplate* group) {
     return pair ? &pair->manager : nullptr;
 }
 
+IAutomatonGroupTemplate* AutomatonGroupTemplateView(const IAutomataGroupTemplate* managerView) {
+    auto it = g_byManagerView.find(managerView);
+    return it != g_byManagerView.end() ? &it->second->automaton : nullptr;
+}
+
 }  // namespace native
