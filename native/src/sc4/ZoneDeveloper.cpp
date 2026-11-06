@@ -1011,7 +1011,9 @@ int cSC4ZoneDeveloper::CanCreateLotOnCell(int x, int z, bool skipZoneCheck, bool
         if (((currentRegion_->rows[dx][dz >> 5] >> (dz & 0x1f)) & 1u) == 0) return 0;
     }
     if (!allowWater && IsCellWater(x, z)) return 1;
-    if (!lotChangesEnabled_ && !skipZoneCheck) {
+    // i386 0x000e1d66: the zone test runs while lot changes are ENABLED (+0xad != 0), i.e. on every real creation; the deferred
+    // (highlight) mode skips it. A de-zoned cell therefore takes no remnant lot.
+    if (lotChangesEnabled_ && !skipZoneCheck) {
         const int zoneType = zoneManager_ ? zoneManager_->ZoneTypeAt(x, z) : 0;
         if (currentZoneType_ == 0) {
             if (!zoneManager_ || !zoneManager_->IsZoneTypeValid(zoneType)) return 2;
@@ -1204,7 +1206,16 @@ bool cSC4ZoneDeveloper::CreateLotIfPossible(int x, int z, int sizeX, int sizeZ, 
                                             cSC4Lot*& out, bool param7, bool param8,
                                             cSC4LotConfiguration* configuration) {
     out = nullptr;
-    if (CanCreateLot(x, z, sizeX, sizeZ, param7, param8, configuration) != 8) return false;
+    if (CanCreateLot(x, z, sizeX, sizeZ, param7, param8, configuration) != 8) {
+        if (std::getenv("SC4_PLOPDEBUG")) {
+            const bool allowWater = param8 || (configuration && configuration->IsCompatibleWithWater());
+            for (int cx = x; cx < x + sizeX; ++cx)
+                for (int cz = z; cz < z + sizeZ; ++cz)
+                    if (const int code = CanCreateLotOnCell(cx, cz, param7, allowWater); code != 8)
+                        std::fprintf(stderr, "create lot: cell %d,%d code %d\n", cx, cz, code);
+        }
+        return false;
+    }
     if (!lotChangesEnabled_) {
         for (int cx = x; cx < x + sizeX; ++cx) {
             for (int cz = z; cz < z + sizeZ; ++cz) {

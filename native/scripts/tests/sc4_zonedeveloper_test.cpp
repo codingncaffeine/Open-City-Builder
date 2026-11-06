@@ -80,12 +80,13 @@ struct FakeTerrain : IZoneDeveloperTerrainApi {
 struct FakeZoneManager : IZoneDeveloperZoneManagerApi {
     FAKE_SERVICE_BOILERPLATE
     std::map<std::pair<int, int>, int> zones;
+    int defaultZone = 0;   // the zone of every cell `zones` does not name (the real zone manager writes its grid before the developer runs)
     int placeZoneCalls = 0;
     SC4CellRegion<int> lastPlaced;
     std::vector<int> placedZoneTypes;
     int ZoneTypeAt(int x, int z) override {
         auto it = zones.find({x, z});
-        return it != zones.end() ? it->second : 0;
+        return it != zones.end() ? it->second : defaultZone;
     }
     bool IsZoneTypeValid(int zoneType) override { return zoneType >= 1 && zoneType <= 9; }
     std::uint32_t ZoneDragColor(int zoneType) override {
@@ -1055,7 +1056,10 @@ void TestNetworkAndOccupantSeams() {
     developer->ExamineCell(6, 6, boundary, cost);
     CHECK(boundary == kBoundaryNone && cost == 1);
 
-    // CanCreateLotOnCell: out of bounds, water, network, existing lot, free.
+    // CanCreateLotOnCell: out of bounds, water, unzoned, network, existing lot, free.
+    CHECK(developer->CanCreateLotOnCell(3, 3, false, true) == 2);    // an unzoned cell takes no lot...
+    CHECK(developer->CanCreateLotOnCell(3, 3, true, true) == 8);     // ...unless the caller skips the zone test (the plop tool)
+    host.zoneManager.defaultZone = 1;
     CHECK(developer->CanCreateLotOnCell(-1, 0, false, false) == 0);
     CHECK(developer->CanCreateLotOnCell(16, 0, false, false) == 0);
     CHECK(developer->CanCreateLotOnCell(2, 8, false, false) == 1);
@@ -1071,6 +1075,7 @@ void TestNetworkAndOccupantSeams() {
     CHECK(developer->CanCreateLotOnCell(1, 1, false, true) == 7);
     CHECK(developer->CanCreateLotOnCell(3, 3, false, true) == 8);
     CHECK(developer->CanCreateLot(1, 1, 1, 1, true, true, nullptr) == 7);
+    host.zoneManager.defaultZone = 0;
 
     // Attach the network sub-managers (as the city-init message does) before checking highlight clears.
     cRZMessage2Standard cityInit;
@@ -1280,6 +1285,7 @@ void TestParcellizableRegionAndCompression() {
     // CreateLotIfPossible with facing -1 delegates to CreateLotToFaceRoad with an empty list, so the
     // facing comes from the random start (the host returns 2 modulo 4).
     host.randomValues = {2};
+    host.zoneManager.zones[{6, 6}] = 1;
     cSC4Lot* randomFacing = nullptr;
     CHECK(developer->CreateLotIfPossible(6, 6, 1, 1, -1, randomFacing, false, false, nullptr));
     CHECK(randomFacing != nullptr);
@@ -1524,6 +1530,7 @@ void TestExamineBoundariesAndOnZone() {
     CHECK(developer->DoMessage(&cityInit));
     developer->SetOptions(false, true, true);   // extend as streets, examine boundaries first
     SC4CellRegion<int> first = SC4CellRegion<int>::Make({1, 1, 4, 4}, true);
+    host.zoneManager.defaultZone = 7;
     developer->DoParcellization(first, 7, false);
     // Industrial zone: the normal orientation branch (strongest side 0, alternate 3).
     CHECK(developer->LotOrientation() == 3);
@@ -1552,6 +1559,7 @@ void TestExamineBoundariesAndOnZone() {
     industrialInit.SetType(0x26d31ec1);
     CHECK(industrial->DoMessage(&industrialInit));
     SC4CellRegion<int> second = SC4CellRegion<int>::Make({0, 0, 9, 9}, true);
+    industrialHost.zoneManager.defaultZone = 8;
     industrial->DoParcellization(second, 8, false);
     CHECK(industrial->GetLotCount() == 100);
     CHECK(industrial->GetLot(0, 0, false) != nullptr);
@@ -1579,6 +1587,7 @@ void TestExamineBoundariesOrientations() {
     // and its alternate, so the first facing tried is the alternate (3, west).
     developer->SetOptions(false, true, true);
     SC4CellRegion<int> region = SC4CellRegion<int>::Make({1, 1, 4, 4}, true);
+    host.zoneManager.defaultZone = 2;
     developer->DoParcellization(region, 2, false);
     CHECK(developer->LotOrientation() == 0);
     CHECK(developer->LotOrientationAlt() == 3);
@@ -1672,6 +1681,7 @@ void TestParcellizeLayout() {
     // Residential zoning with no developers and no streets: Parcellize lays the 2x2 default footprint
     // out over the region, levels each footprint through the lot developer and locks the lot vertices.
     SC4CellRegion<int> region = SC4CellRegion<int>::Make({0, 0, 8, 8}, true);
+    host.zoneManager.defaultZone = 1;
     developer->DoParcellization(region, 1, false);
     CHECK(developer->GetLotCount() > 0);
     // Every lot is inside the region and at most the 2x2..3x2 footprints the layout chooses.
@@ -1707,6 +1717,29 @@ void TestOnDezoneAndRemnants() {
 
     FakeLotHost lotHost;
     SetLotHost(&lotHost);
+    // The zone manager clears its grid before the developer hears of a de-zone: no remnant lot may come back on a cleared cell
+    // (a plopped building's footprint stayed blocked by them), and the cells of the lot that keep their zone get the remnants.
+    {
+        cSC4Lot* cleared = nullptr;
+        CHECK(developer->CreateLot(2, 2, 2, 2, 0, cleared));
+        cleared->UpdateZoneType();   // zone type 2 from the lot host
+        SC4CellRegion<int> all = SC4CellRegion<int>::Make({2, 2, 3, 3}, true);
+        developer->OnDezone(&all, false);
+        CHECK(developer->GetLotCount() == 0);
+        CHECK(developer->GetLot(2, 2, false) == nullptr && developer->GetLot(3, 3, false) == nullptr);
+        CHECK(developer->CreateLot(2, 2, 2, 2, 0, cleared));
+        cleared->UpdateZoneType();
+        host.zoneManager.zones[{2, 2}] = 2;   // the west column keeps its zone
+        host.zoneManager.zones[{2, 3}] = 2;
+        SC4CellRegion<int> east = SC4CellRegion<int>::Make({3, 2, 3, 3}, true);
+        developer->OnDezone(&east, false);
+        CHECK(developer->GetLotCount() == 1);
+        CHECK(developer->GetLot(2, 2, false) != nullptr && developer->GetLot(2, 2, false) == developer->GetLot(2, 3, false));
+        CHECK(developer->GetLot(3, 2, false) == nullptr && developer->GetLot(3, 3, false) == nullptr);
+        developer->DeleteLots(0, 0, 15, 15);
+        host.zoneManager.zones.clear();
+    }
+    host.zoneManager.defaultZone = 2;
     cSC4Lot* lot = nullptr;
     CHECK(developer->CreateLot(2, 2, 2, 2, 0, lot));
     lot->UpdateZoneType();   // zone type 2 from the lot host
