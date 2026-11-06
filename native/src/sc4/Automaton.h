@@ -111,7 +111,8 @@ constexpr std::uint32_t kStateIdle = 1, kStateRemoving = 2, kStateQueue = 4, kSt
 constexpr std::uint32_t kAuxiliaryModelGhost = 0;   // cSC4Automaton::AuxiliaryModelSpecifier (LoadAuxiliaryModel)
 // The exemplar properties (resource keys) LoadAuxiliaryModel reads for specifiers 1, 2 and 3.
 constexpr std::uint32_t kAutomatonPropertyHeadlightModel = 0x09c80417, kAutomatonPropertyEmergencyLightModel = 0xc9e69af6,
-                        kAutomatonPropertyTrailerModel = 0xec214180;
+                        kAutomatonPropertyTrailerModel = 0xec214180,
+                        kAutomatonPropertyAuxiliaryModels = 0xcc21420d;   // u32 list: which of the three to load with the models
 
 // The events SendCallbackMessage posts (cISC4Automaton::tAutomataEvent).
 enum tAutomataEvent : std::uint32_t {

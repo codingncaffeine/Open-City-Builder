@@ -11,6 +11,7 @@
 #include "rz/PortMemoryStreams.h"
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/Automaton.h"
+#include "sc4/SCPropertyHelp.h"
 
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
@@ -94,6 +95,8 @@ struct FakeMessageTarget final : cIGZMessageTarget2 {
 
 struct FakeHost final : IAutomatonHost {
     FakeModel* nextModel = nullptr;
+    FakeModel* queuedModel = nullptr;
+    std::vector<std::uint32_t> createdInstances;
     FakeEffects effects;
     int createdModels = 0, destroyedModels = 0;
     int inserted = 0, removed = 0, refreshed = 0, rendererAdded = 0, rendererRemoved = 0, fadesIn = 0, fadesOut = 0;
@@ -120,7 +123,17 @@ struct FakeHost final : IAutomatonHost {
     std::uint32_t constrainFlags = 0;
     float constrainX = 55.0f, roadY = 7.25f;
 
-    IAutomatonModel* CreateModel(const cGZPersistResourceKey&) override { ++createdModels; return nextModel; }
+    // answers nextModel; a queued model takes its place for the calls after
+    IAutomatonModel* CreateModel(const cGZPersistResourceKey& key) override {
+        ++createdModels;
+        createdInstances.push_back(key.instance);
+        IAutomatonModel* model = nextModel;
+        if (queuedModel) {
+            nextModel = queuedModel;
+            queuedModel = nullptr;
+        }
+        return model;
+    }
     void DestroyModel(IAutomatonModel* model) override { ++destroyedModels; if (model) model->Release(); }
     IAutomatonEffects* CreateEffects() override { return &effects; }
     void DestroyEffects(IAutomatonEffects*) override {}
@@ -978,6 +991,24 @@ int main() {
         host.nextModel = longModel;
         CHECK(automaton->LoadModels());
         CHECK_NEAR(automaton->GetRadius(), 32.0f);
+        automaton->UnloadModels();
+        CHECK(automaton->Release() == 0);
+    }
+    {   // LoadModels: the auxiliary models the exemplar lists (here 3, the trailer part) join the instances
+        FakeHost host;
+        cSC4Automaton* automaton = MakeAutomaton(host);
+        cSCPropertyHelp::SetPropertyValue(automaton->AsPropertyHolder(), 0xcc21420d, std::vector<std::uint32_t>{3, 7});   // 7 is no specifier
+        cSCPropertyHelp::SetPropertyValue(automaton->AsPropertyHolder(), kAutomatonPropertyTrailerModel,
+                                          std::vector<std::uint32_t>{0x5ad0e817, 0xbadb57f1, 0x11490000});
+        CHECK(automaton->AddModelResourceKey(cGZPersistResourceKey{1, 2, 3}));
+        FakeModel* body = new FakeModel();
+        FakeModel* part = new FakeModel();
+        host.nextModel = body;
+        host.queuedModel = part;
+        CHECK(automaton->LoadModels());
+        CHECK(host.createdModels == 2);                 // the body and the listed part
+        CHECK(host.createdInstances.size() == 2 && host.createdInstances[0] == 3 && host.createdInstances[1] == 0x11490000);
+        CHECK(automaton->GetModelInstance() == body);
         automaton->UnloadModels();
         CHECK(automaton->Release() == 0);
     }

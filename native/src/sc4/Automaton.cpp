@@ -331,8 +331,7 @@ bool cSC4Automaton::RemoveModelInstance(IAutomatonModel* model) {
 bool cSC4Automaton::LoadModels() {
     // The model system (cS3DModelProcessor and the animated-instance loader) is unrecovered: the host turns each stored
     // key into a model instance and the bounding box comes from the first one (what the original does in-process).
-    // PARTIAL: the original (i386 0x000c1a5c) then loads the auxiliary models its exemplar lists (property 0xcc21420d:
-    // 1 headlights, 2 emergency lights, 3 trailer) and drops the references; they are loaded on demand here.
+    // i386 0x000c1a5c for the radius and the auxiliary models.
     for (const cGZPersistResourceKey& key : modelKeys_) AddModelInstance(key);
     if (!models_.empty()) {
         float bounds[6] = {1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f};
@@ -342,6 +341,17 @@ bool cSC4Automaton::LoadModels() {
         radius_ = (bounds[5] - bounds[2]) * 0.5f;
         if (32.0f < radius_) radius_ = 32.0f;
         PositionModelInstance(models_.front());
+    }
+    // the auxiliary models the exemplar lists (property 0xcc21420d: 1 headlights, 2 emergency lights, 3 trailer part) join
+    // the instances; the references LoadAuxiliaryModel hands out are dropped
+    std::vector<std::uint32_t> auxiliary;
+    if (cSCPropertyHelp::GetPropertyValue(AsPropertyHolder(), kAutomatonPropertyAuxiliaryModels, auxiliary)) {
+        for (std::uint32_t specifier : auxiliary) {
+            if (specifier - 1u >= 3u) continue;
+            IAutomatonModel* model = nullptr;
+            LoadAuxiliaryModel(specifier, &model);
+            if (model) model->Release();
+        }
     }
     return true;
 }
