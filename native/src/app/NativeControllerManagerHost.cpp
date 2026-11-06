@@ -7,6 +7,7 @@
 #include "app/NativeAnimationTicks.h"
 #include "app/NativeCity.h"
 #include "app/NativeCityView.h"
+#include "app/NativeZoneDeveloperHost.h"
 #include "platform/Unwired.h"
 #include "rz/cRZRandom.h"
 #include "sc4/AutomataAttractor.h"
@@ -86,8 +87,14 @@ struct NativeControllerManagerHost final : IControllerManagerHost {
         SC4_UNWIRED("IControllerManagerHost::CreateController (an unknown controller class)");
         return nullptr;
     }
-    // the city's lot manager (city vslot 0x108 -> vslot 0x70): not reachable natively; the answer is only compared for identity
-    const void* LotOf(cISC4Occupant*) override { SC4_UNWIRED("IControllerManagerHost::LotOf (lot manager)"); return nullptr; }
+    // the city's lot manager (city vslot 0x108 -> vslot 0x70): the lot the occupant stands on; the answer is only compared
+    // for identity (never two controllers of one template on one lot)
+    const void* LotOf(cISC4Occupant* occupant) override {
+        if (!occupant) return nullptr;
+        float p[3] = {0.0f, 0.0f, 0.0f};
+        occupant->GetPosition(p);
+        return NativeLotAtCell(static_cast<int>(p[0] / 16.0f), static_cast<int>(p[2] / 16.0f), false);
+    }
     double RandomDouble() override { cRZRandom random(0xffffffffu); return random.RandomDoubleUniform(); }   // a fresh clock-seeded generator per call
 };
 
