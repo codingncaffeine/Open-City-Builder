@@ -9,6 +9,7 @@
 #include "gz/cGZPersistResourceManager.h"
 #include "rz/cRZMessage2Standard.h"
 #include "s3d/ModelInstance.h"
+#include "s3d/ModelInstanceAnimatedSprite.h"
 #include "sc4/Automaton.h"
 #include "sc4/TrafficAutomaton.h"
 #include "sc4/Render3D.h"
@@ -20,6 +21,7 @@ namespace native {
 sc4::cSC4AutomataController* NativeFindAttraction(sc4::cISC4Occupant* occupant, cS3DVector3* direction, float* distance, float* strength);   // app/NativeAutomataControllerHost.cpp
 sc4::IAutomatonGroupTemplate* NativeFindAutomatonGroup(std::uint32_t id);                                                                  // app/NativeAutomataManagerHost.cpp
 namespace {
+s3d::cS3DModelInstanceAnimatedSprite* NativeCreateSpriteInstance(const cGZPersistResourceKey& key);   // app/NativeSprites.cpp
 using namespace sc4;
 
 constexpr std::uint32_t kGZIID_cIS3DResModel = 0x9ad0e7e3;
@@ -34,7 +36,9 @@ std::vector<s3d::cIS3DModelInstance*> g_pending;   // models made before the ren
 // One model instance of an automaton (the interface the recovered class drives).
 class AutomatonModel final : public IAutomatonModel {
 public:
-    explicit AutomatonModel(s3d::cIS3DModelInstance* instance) : instance_(instance) {}
+    // `animated` is the same instance's animated interface when it has one (the sprites: frames, opacity, view).
+    explicit AutomatonModel(s3d::cIS3DModelInstance* instance, s3d::cIS3DModelInstanceAnimated* animated = nullptr)
+        : instance_(instance), animated_(animated) {}
     s3d::cIS3DModelInstance* Instance() const { return instance_; }
     void AddRef() override { ++refs_; }
     void Release() override { if (--refs_ <= 0) { instance_->Release(); delete this; } }
@@ -45,16 +49,18 @@ public:
     }
     void GetTransform(cS3DTransform& out) override { instance_->GetTransform(out); }
     void SetTransform(const cS3DTransform& transform) override { instance_->SetTransform(transform); }
-    void SetOpacity(float, bool) override {}
-    void UpdateAnimation(float) override {}
-    int GetFrame() const override { return 0; }
-    int GetFrameCount() const override { return 1; }
-    void SetZoomAndRotation(int, int) override {}
-    void SetPlayMode(s3d::PlayMode) override {}
+    void SetOpacity(float opacity, bool translucent) override { if (animated_) animated_->SetOpacity(translucent, opacity); }
+    void SetAutoFrameRate(float rate) override { if (animated_) animated_->SetAutoFrameRate(rate); }
+    void UpdateAnimation(float elapsed) override { if (animated_) animated_->DoAutoFrameUpdate(elapsed); }
+    int GetFrame() const override { return animated_ ? animated_->GetFrame() : 0; }
+    int GetFrameCount() const override { return animated_ ? animated_->GetFrameCount() : 1; }
+    void SetZoomAndRotation(int zoom, int rotation) override { if (animated_) animated_->SetZoomAndRotation(zoom, rotation); }
+    void SetPlayMode(s3d::PlayMode mode) override { if (animated_) animated_->SetPlayMode(mode); }
 
 private:
     s3d::cIS3DModelInstance* instance_;
     int refs_ = 1;
+    s3d::cIS3DModelInstanceAnimated* animated_;
 };
 
 class NullEffects final : public IAutomatonEffects {
@@ -93,6 +99,12 @@ public:
         s3d::cIS3DModelInstance* instance = nullptr;
         const bool ok = res->CreateModelInstance(0, &instance);
         res->Release();
+        if (key.type == s3d::kGZIID_cIS3DResSpriteAnim) {   // a sprite animation (GetAnimatedModelFromResourceKey's first branch)
+            s3d::cS3DModelInstanceAnimatedSprite* sprite = NativeCreateSpriteInstance(key);
+            IAutomatonModel* model = sprite ? new AutomatonModel(sprite->AsModelInstance(), sprite) : nullptr;
+            if (ModelTrace()) std::fprintf(stderr, "automata: model %p created from sprite %08x\n", static_cast<void*>(model), key.instance);
+            return model;
+        }
         if (std::getenv("SC4_DEBUG")) { static int shown = 0; if (shown++ < 4) std::fprintf(stderr, "automata: model %08x/%08x/%08x -> %s\n", key.type, key.group, key.instance, ok && instance ? "ok" : "none"); }
         IAutomatonModel* model = ok && instance ? new AutomatonModel(instance) : nullptr;
         if (ModelTrace()) std::fprintf(stderr, "automata: model %p created from %08x\n", static_cast<void*>(model), key.instance);

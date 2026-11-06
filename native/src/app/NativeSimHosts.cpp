@@ -41,10 +41,13 @@ namespace sc4 { class ITrafficAutomatonHost; extern ITrafficAutomatonHost* g_loa
 namespace sc4 {
 class IVehicleHost;
 extern IVehicleHost* g_loadVehicleHost;   // tools/city_probe_hostglobals.cpp
+class IPedestrianHost;
+extern IPedestrianHost* g_loadPedestrianHost;
 }
 namespace native {
 sc4::ITrafficAutomatonHost* NativeVehicleTrafficHost();   // app/NativeTrafficAutomata.cpp
 sc4::IVehicleHost* NativeVehicleHost();
+sc4::IPedestrianHost* NativePedestrianHost();
 // app/NativeDispatch.cpp: the dispatch manager as the protection simulators see it, and its host.
 int NativeDispatchCount(std::uint32_t type);
 std::vector<std::uint32_t> NativeDispatchIds(std::uint32_t type);
@@ -613,6 +616,7 @@ void InstallNativeSimHosts() {
     InstallTrafficNetworkMapHost();
     sc4::g_loadTrafficHost = NativeVehicleTrafficHost();   // the loaded and created vehicles drive on the native map
     sc4::g_loadVehicleHost = NativeVehicleHost();
+    sc4::g_loadPedestrianHost = NativePedestrianHost();   // and the pedestrians walk on it
     hosts.fire = &g_fire;
     hosts.police = &g_police;
     hosts.residential = &g_residential;

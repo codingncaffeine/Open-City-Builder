@@ -778,3 +778,8 @@ src/lua/SCLuaInstance.cpp
 src/lua/SCLuaScripts.cpp
 src/app/NativeAutomataScripts.cpp
 src/app/NativeAutomataControllerHost.cpp
+src/s3d/AnimatedInstance.cpp
+src/s3d/ModelInstanceAnimatedSprite.cpp
+src/s3d/ResSpriteAnim.cpp
+src/sc4/MiscTypes.cpp
+src/app/NativeSprites.cpp

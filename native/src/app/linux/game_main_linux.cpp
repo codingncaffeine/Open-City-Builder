@@ -1003,6 +1003,10 @@ int RunScenario(const std::string& path) {
             native::NativeDispatchReport();
         } else if (command == "generators") {   // generators: the automata the generators made, where they are on screen
             native::NativeGeneratorReport();
+        } else if (command == "pedestrians") {   // pedestrians [N]: the pedestrian manager's count and the first N on screen
+            int limit = 8;
+            words >> limit;
+            native::NativePedestrianReport(limit);
         } else if (command == "dispatchat") {   // dispatchat TYPE PX PY: the same, to the ground under a screen point
             std::uint32_t type = 0;
             int px = 0, py = 0;

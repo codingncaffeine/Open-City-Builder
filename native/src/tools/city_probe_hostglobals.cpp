@@ -3,12 +3,14 @@
 #include "sc4/EmergencyVehicle.h"
 #include "sc4/FireTruck.h"
 #include "sc4/PatrolCar.h"
+#include "sc4/Pedestrian.h"
 #include "sc4/TrafficAutomaton.h"
 #include "sc4/Vehicle.h"
 
 namespace sc4 {
 ITrafficAutomatonHost* g_loadTrafficHost = nullptr;
 IVehicleHost* g_loadVehicleHost = nullptr;
+IPedestrianHost* g_loadPedestrianHost = nullptr;      // app/NativeSimHosts.cpp sets the native pedestrian host
 IEmergencyVehicleHost* g_loadEmergencyHost = nullptr;   // app/NativeDispatch.cpp sets the emergency vehicles' three hosts
 IFireTruckHost* g_loadFireTruckHost = nullptr;
 IPatrolCarHost* g_loadPatrolCarHost = nullptr;

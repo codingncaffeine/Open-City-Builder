@@ -26,6 +26,8 @@ extern cIGZSerializable* (*g_createLoadedGenerator)();   // tools/city_probe_hos
 
 namespace native {
 sc4::cSC4AutomataManager* NativeAutomataManagerForGroup(std::uint32_t group);   // app/NativeAutomataManagerHost.cpp
+bool NativeViewportHolds(const float* viewport);                                   // app/NativeAutomataManagerHost.cpp
+long NativeSpritesDrawn();                                                         // app/NativeSprites.cpp
 bool NativeAutomataLayerVisible(std::uint32_t layer);
 cIGZMessageTarget2* NativeControllerManagerTarget();                           // app/NativeAutomataControllerHost.cpp
 bool NativeControllerManagerNow(float& time, std::int32_t& day);
@@ -54,9 +56,10 @@ public:
             a->GetPosition(p);
             const bool projected = NativeProjectToViewport(p, s);
             const tAutomataState* state = a->GetState();
-            std::printf("generators: %s group 0x%x class 0x%08x at (%.0f, %.1f, %.0f) on screen (%.0f, %.0f)%s state %d speed %.1f\n", GetTemplateName().ToChar(),
-                        generator_.Group(), a->GetGZCLSID(), p[0], p[1], p[2], s[0], s[1], projected ? "" : " (no view)",
-                        state ? static_cast<int>(state->stateType) : -1, a->GetCurrentSpeed());
+            std::printf("generators: %s group 0x%x class 0x%08x at (%.0f, %.1f, %.0f) on screen (%.0f, %.0f)%s state %d speed %.4f flags 0x%x model %p opacity %.2f\n",
+                        GetTemplateName().ToChar(), generator_.Group(), a->GetGZCLSID(), p[0], p[1], p[2], s[0], s[1], projected ? "" : " (no view)",
+                        state ? static_cast<int>(state->stateType) : -1, a->GetCurrentSpeed(), static_cast<unsigned>(a->GetFlags()),
+                        static_cast<void*>(a->GetModelInstance()), a->GetOpacity());
         }
     }
 
@@ -66,9 +69,10 @@ public:
     bool Init() override {
         const bool ok = generator_.Init();
         if (Trace())
-            std::fprintf(stderr, "generator %s: %s, init %d at (%.0f, %.0f) flags 0x%x radius %.0f..%.0f groups %zu mode %d rate %.2f unit %d max %u\n",
+            std::fprintf(stderr, "generator %s: %s, init %d at (%.0f, %.0f) flags 0x%x radius %.0f..%.0f groups %zu mode %d rate %.2f unit %d max %u; holds %zu (count %u) spawned %u group 0x%x (%u of it) age %.0f of %.0f\n",
                          GetTemplateName().ToChar(), loaded_ ? "from the save" : "new", ok ? 1 : 0, Where(0), Where(2), flags_, mirror_.minRadius, mirror_.radius, mirror_.groups.size(),
-                         mirror_.countMode, mirror_.rate, mirror_.periodUnit, mirror_.maxAutomata);
+                         mirror_.countMode, mirror_.rate, mirror_.periodUnit, mirror_.maxAutomata, automata_.size(), automataCount_, generator_.SpawnedCount(), generator_.Group(),
+                         generator_.GroupSpawned(), age_, lifetime_);
         return ok;
     }
     bool Shutdown() override { return generator_.Shutdown(); }
@@ -281,6 +285,33 @@ sc4::cSC4AutomataController* NativeCreateAutomataGenerator() {
 }
 
 void InstallAutomataGenerator() { sc4::g_createLoadedGenerator = &CreateLoaded; }
+
+// The kit's `pedestrians`: how many the pedestrian manager holds, how many have a model, and the first `limit` that are on
+// screen (city position, viewport position, state, model, its animation frame).
+void NativePedestrianReport(int limit) {
+    cSC4AutomataManager* manager = NativeAutomataManagerForGroup(0x4001);   // the pedestrians' base group
+    if (!manager) { std::printf("pedestrians: no manager\n"); return; }
+    int total = 0, withModel = 0, onScreen = 0, shown = 0;
+    for (IAutomataAutomaton* view : manager->Automata()) {
+        cSC4Automaton* a = view ? AutomatonOf(view) : nullptr;
+        if (!a) continue;
+        ++total;
+        IAutomatonModel* model = a->GetModelInstance();
+        if (model) ++withModel;
+        float p[3] = {0, 0, 0}, s[3] = {0, 0, 0};
+        a->GetPosition(p);
+        if (!NativeProjectToViewport(p, s)) continue;
+        if (!NativeViewportHolds(s)) continue;
+        ++onScreen;
+        if (shown >= limit) continue;
+        ++shown;
+        const tAutomataState* state = a->GetState();
+        std::printf("pedestrians: at (%.0f, %.1f, %.0f) on screen (%.0f, %.0f) state %d speed %.4f flags 0x%x model %p frame %d/%d opacity %.2f\n", p[0], p[1],
+                    p[2], s[0], s[1], state ? static_cast<int>(state->stateType) : -1, a->GetCurrentSpeed(), static_cast<unsigned>(a->GetFlags()),
+                    static_cast<void*>(model), model ? model->GetFrame() : -1, model ? model->GetFrameCount() : -1, a->GetOpacity());
+    }
+    std::printf("pedestrians: %d held, %d with a model, %d on screen, %ld sprite quads drawn so far\n", total, withModel, onScreen, NativeSpritesDrawn());
+}
 
 void NativeGeneratorReport() {
     std::size_t automata = 0;

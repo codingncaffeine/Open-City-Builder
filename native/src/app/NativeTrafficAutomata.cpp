@@ -8,6 +8,7 @@
 #include "app/NativeCity.h"
 #include "sc4/AutomataManager.h"
 #include "sc4/DBSegment.h"
+#include "sc4/Pedestrian.h"
 #include "sc4/PedestrianManager.h"
 #include "sc4/TrafficAutomataManager.h"
 #include "sc4/TrafficAutomaton.h"
@@ -22,6 +23,8 @@ namespace sc4 { IVehicleHost* NewStubIVehicleHost(); }   // app/hosts/IfaceIVehi
 
 namespace native {
 sc4::ITrafficAutomatonOccupant* NativeTrafficPiece(sc4::cISC4Occupant* occupant);   // app/NativeTrafficNetworkMap.cpp
+sc4::ITrafficNetworkMapLot* NativeTrafficLotAt(int cellX, int cellZ);                 // app/NativeTrafficNetworkMap.cpp
+void NativeOccupantsInBox(const float* lo, const float* hi, std::uint32_t type, int count, std::vector<sc4::cISC4Occupant*>& out);
 
 namespace {
 using namespace sc4;
@@ -53,9 +56,10 @@ template <class T> T* Component(CityComponent c) {
     return object ? dynamic_cast<T*>(object) : nullptr;
 }
 
-class TrafficHost final : public ITrafficAutomatonHost {
+// One host per automata manager kind; Base is the automaton class's host interface (the pedestrian's adds four services).
+template <class Base> class TrafficHostOf : public Base {
 public:
-    explicit TrafficHost(CityComponent manager) : manager_(manager) {}
+    explicit TrafficHostOf(CityComponent manager) : manager_(manager) {}
     cSC4TrafficNetworkMap* TrafficNetworkMap() override { return Component<cSC4TrafficNetworkMap>(CityComponent::TrafficNetwork); }
     float CitySizeX() override { cSC4City* c = HostCity(); return c ? float(c->CellCountX()) * 16.0f : 0.0f; }
     float CitySizeZ() override { cSC4City* c = HostCity(); return c ? float(c->CellCountZ()) * 16.0f : 0.0f; }
@@ -238,9 +242,32 @@ private:
     VehicleTuning tuning_;
 };
 
-TrafficHost g_vehicles(CityComponent::VehicleManager);
+// The pedestrians' host: the traffic services on the pedestrian manager plus the four the pedestrian reaches itself.
+class PedestrianHost final : public TrafficHostOf<IPedestrianHost> {
+public:
+    PedestrianHost() : TrafficHostOf<IPedestrianHost>(CityComponent::PedestrianManager) {}
+    // The occupant manager's box query (slot 0x120); the references go to the caller.
+    // PARTIAL: the native automata are not in the occupant manager yet, so a pedestrian finds no other pedestrian here.
+    void OccupantsInBox(const float* lo, const float* hi, std::uint32_t type, int count, std::vector<cISC4Occupant*>& out) override {
+        NativeOccupantsInBox(lo, hi, type, count, out);
+    }
+    void IgniteOccupant(cISC4Occupant*) override {}   // PARTIAL: the fire disaster manager (arsonists)
+    ITrafficNetworkMapLot* LotAt(int cellX, int cellZ) override { return NativeTrafficLotAt(cellX, cellZ); }
+    const PedestrianTuning* PedestrianTuningTable() override {
+        const AutomataTuningGlobals& t = AutomataTuning();
+        pedestrianTuning_.speedMin = static_cast<std::int32_t>(t.f21898);   // 0x100b21898
+        pedestrianTuning_.speedMax = static_cast<std::int32_t>(t.f2189c);
+        pedestrianTuning_.pathOffsetMin = t.f21a24;                         // 0x100b21a24
+        pedestrianTuning_.pathOffsetMax = t.f21a28;
+        return &pedestrianTuning_;
+    }
+private:
+    PedestrianTuning pedestrianTuning_;
+};
+
+TrafficHostOf<ITrafficAutomatonHost> g_vehicles(CityComponent::VehicleManager);
 VehicleHost g_vehicleHost;
-TrafficHost g_pedestrians(CityComponent::PedestrianManager);
+PedestrianHost g_pedestrians;
 
 }  // namespace
 
@@ -250,6 +277,6 @@ sc4::ITrafficSimulatorApi* NativeTrafficSimulatorApi() { return &g_simulatorApi;
 sc4::ITrafficNetworkManagerApi* NativeTrafficNetworkApi() { return &g_networkApi; }
 void NativeSetTrafficVisibleCells(int x0, int z0, int x1, int z1) { g_networkApi.SetVisibleCells(x0, z0, x1, z1); }
 void NativeClearTrafficNetworkApi() { g_networkApi.Clear(); }
-sc4::ITrafficAutomatonHost* NativePedestrianTrafficHost() { return &g_pedestrians; }
+sc4::IPedestrianHost* NativePedestrianHost() { return &g_pedestrians; }
 
 }  // namespace native

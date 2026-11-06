@@ -194,6 +194,17 @@ void InstallTrafficNetworkMapHost() { sc4::SetDefaultTrafficNetworkMapHost(&g_ho
 // The city's map, once it exists: messages are delivered to it through the host's subscriptions.
 void BindTrafficNetworkMap(sc4::cSC4TrafficNetworkMap* map) { g_host.SetMap(map ? static_cast<cIGZMessageTarget2*>(map) : nullptr); }
 
+// The lot at a city cell as the traffic classes see it (the lot manager's slot 0x28, flag 0), or null.
+sc4::ITrafficNetworkMapLot* NativeTrafficLotAt(int cellX, int cellZ) { return LotViewOf(NativeLotAtCell(cellX, cellZ, false)); }
+
+// The occupant manager's box query by type (slot 0x120), at most `count`; the references go to the caller.
+void NativeOccupantsInBox(const float* lo, const float* hi, std::uint32_t type, int count, std::vector<sc4::cISC4Occupant*>& out) {
+    cISC4OccupantManager* occupants = Occupants();
+    OccupantList found;
+    if (occupants && occupants->GetOccupantsByBBox(found, lo, hi, type, std::uint32_t(count)))
+        for (cISC4Occupant* occupant : found) out.push_back(occupant);
+}
+
 sc4::ITrafficAutomatonOccupant* NativeTrafficPiece(sc4::cISC4Occupant* occupant) {
     return static_cast<sc4::ITrafficAutomatonOccupant*>(g_host.AsMapOccupant(occupant));
 }

@@ -689,9 +689,11 @@ IAutomataAutomaton* cSC4AutomataManager::CreateAutomatonInternal(std::uint32_t g
         }
     }
     static const bool trace = std::getenv("SC4_DISPATCHDEBUG") != nullptr;
-    if (trace && group >= 0x4200 && group < 0x4400)
-        std::fprintf(stderr, "automata: create group 0x%x exemplar %d default group 0x%x template %d class 0x%08x\n", group, exemplar ? 1 : 0,
-                     groupId, groupTemplate ? 1 : 0, classId);
+    static const bool traceAll = std::getenv("SC4_CREATEDEBUG") != nullptr;   // every group, with the exemplar's name and model
+    if (traceAll || (trace && group >= 0x4200 && group < 0x4400))
+        std::fprintf(stderr, "automata: create group 0x%x exemplar %d (%s, model %08x) default group 0x%x template %d class 0x%08x\n", group,
+                     exemplar ? 1 : 0, exemplar ? exemplar->name.ToChar() : "-", exemplar ? exemplar->modelKey.instance : 0, groupId,
+                     groupTemplate ? 1 : 0, classId);
     IAutomataAutomaton* automaton = g_host ? g_host->CreateAutomatonByClassId(classId) : nullptr;
     if (!automaton) return nullptr;
     automaton->SetPriority(spawn);

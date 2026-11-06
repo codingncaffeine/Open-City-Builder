@@ -585,6 +585,30 @@ std::uint32_t NativeFshTexture(std::uint32_t group, std::uint32_t instance) {
     return binding ? binding->id : 0;
 }
 
+// Every frame of an FSH {0x7ab50e44, group, instance} as a driver texture, in frame order (what a texture binding holds;
+// cached for the process); null when the resource is missing or no frame decodes. A sprite sheet's pages are these.
+const std::vector<std::uint32_t>* NativeFshFrameTextures(std::uint32_t group, std::uint32_t instance) {
+    static std::map<std::pair<std::uint32_t, std::uint32_t>, std::unique_ptr<std::vector<std::uint32_t>>> cache;
+    auto& slot = cache[{group, instance}];
+    if (!slot) {
+        slot = std::make_unique<std::vector<std::uint32_t>>();
+        std::vector<std::uint8_t> bytes;
+        s3d::FshFile file;
+        if (g_driver && LoadResourceBytes(kFshType, group, instance, bytes) && file.Open(bytes.data(), bytes.size())) {
+            for (std::uint32_t i = 0; i < file.FrameCount(); ++i) {
+                std::vector<std::uint8_t> rgba;
+                int w = 0, h = 0;
+                if (!file.DecodeRgba8(i, rgba, w, h)) { slot->clear(); break; }   // a page index must stay its frame index
+                for (std::size_t p = 0; p + 3 < rgba.size(); p += 4) std::swap(rgba[p], rgba[p + 2]);   // RGBA -> BGRA
+                const std::uint32_t id = g_driver->CreateTexture(4, static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h), 1, 1);
+                g_driver->LoadTextureLevel(id, 0, 0, 0, static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h), 3, 1, static_cast<std::uint32_t>(w), rgba.data());
+                slot->push_back(id);
+            }
+        }
+    }
+    return slot->empty() ? nullptr : slot.get();
+}
+
 void InstallModelResources(gd::cIGZGDriver* driver) {
     g_driver = driver;
     static bool registered = false;

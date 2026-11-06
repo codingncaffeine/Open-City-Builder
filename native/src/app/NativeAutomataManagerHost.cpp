@@ -335,6 +335,11 @@ bool NativeAutomataLayerVisible(std::uint32_t layer) {
     return manager && manager->IsLayerVisible(layer);
 }
 
+// Whether a viewport position (NativeProjectToViewport's) lies inside the view's rectangle.
+bool NativeViewportHolds(const float* viewport) {
+    const std::int32_t* rect = CityRenderer() && CityRenderer()->GetViewUtilities() ? CityRenderer()->GetViewUtilities()->ViewportRect() : nullptr;
+    return rect && viewport[0] >= float(rect[0]) && viewport[0] < float(rect[2]) && viewport[1] >= float(rect[1]) && viewport[1] < float(rect[3]);
+}
 bool NativeViewAvailable() { return CityRenderer() && CityRenderer()->GetViewUtilities(); }
 // Where a world point lands in the view (viewport pixels); false without a view.
 bool NativeProjectToViewport(const float* xyz, float out[3]) {
