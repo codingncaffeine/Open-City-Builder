@@ -959,6 +959,28 @@ int main() {
         CHECK(host.removed == 1);
         CHECK(automaton->Release() == 0);
     }
+    {   // LoadModels: the radius is half the first model's length; a model longer than 64 gets 32
+        FakeHost host;
+        cSC4Automaton* automaton = MakeAutomaton(host);
+        FakeModel* model = new FakeModel();
+        model->minXyz[2] = -2.0f;
+        model->maxXyz[2] = 4.0f;
+        host.nextModel = model;
+        CHECK(automaton->AddModelResourceKey(cGZPersistResourceKey{1, 2, 3}));   // not initialized yet: only the key is kept
+        CHECK(automaton->GetModelInstance() == nullptr);
+        CHECK(automaton->LoadModels());
+        CHECK(automaton->GetModelInstance() == model);
+        CHECK_NEAR(automaton->GetRadius(), 3.0f);
+        automaton->UnloadModels();
+        FakeModel* longModel = new FakeModel();
+        longModel->minXyz[2] = -40.0f;
+        longModel->maxXyz[2] = 40.0f;
+        host.nextModel = longModel;
+        CHECK(automaton->LoadModels());
+        CHECK_NEAR(automaton->GetRadius(), 32.0f);
+        automaton->UnloadModels();
+        CHECK(automaton->Release() == 0);
+    }
 
     // ---- debug text / ghost (seam placeholders) --------------------------------------------------------------------
     {
