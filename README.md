@@ -33,7 +33,8 @@ that copy may ever be added to this repository.
 
 ## Licence
 
-GNU General Public License v3.0 (see `LICENSE`), as `native/` is GPLv3.
+GNU General Public License v3.0 (see `LICENSE`), as `native/` is GPLv3. `third_party/` holds the open-source libraries the
+original was built with (STLport 4.6, Lua 5.0.2), each under its own licence in its folder.
 
 ## Roadmap
 
