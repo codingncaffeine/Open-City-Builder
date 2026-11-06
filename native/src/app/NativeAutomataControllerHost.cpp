@@ -15,6 +15,7 @@
 #include "sc4/AutomataControllerGrid.h"
 #include "sc4/AutomataControllerManager.h"
 #include "sc4/AutomataScriptSystem.h"
+#include "sc4/Automaton.h"
 #include "sc4/Lot.h"
 #include "sc4/ZoneDeveloper.h"
 #include "sc4/cSC4City.h"
@@ -102,6 +103,11 @@ struct NativeAutomataControllerHost final : IAutomataControllerHost {
     bool HasNetworkAt(int cellX, int cellZ) override {
         return cellX >= 0 && cellZ >= 0 && cellX < Cells(false) && cellZ < Cells(true) && NativeNetworkTypesAt(cellX, cellZ) != 0;
     }
+    // An automaton answers interface 0xa9b40f05 with itself, and its callback message carries itself.
+    IControllerAutomaton* AutomatonLink(void* object) override { return static_cast<cSC4Automaton*>(object)->ControllerLinkFor(); }
+    const cIGZSerializable* AutomatonObject(IControllerAutomaton* link) override {
+        return static_cast<const cIGZSerializable*>(cSC4Automaton::OfControllerLink(link));
+    }
 };
 
 }  // namespace
@@ -134,6 +140,21 @@ sc4::cSC4AutomataController* NativeFindAttraction(sc4::cISC4Occupant* occupant, 
         }
     }
     return found;
+}
+
+// The automata generators' view of the controller manager (SL::spCity vslot 0x178): its message target, which every spawned
+// automaton gets as a callback (so the manager hears of its removal), and its clock (vslot 0xc0 GetControllerTime).
+cIGZMessageTarget2* NativeControllerManagerTarget() {
+    auto* manager = CityComponentAs<cSC4AutomataControllerManager>(CityComponent::AutomataControllerManager);
+    return manager ? static_cast<cIGZMessageTarget2*>(manager) : nullptr;
+}
+bool NativeControllerManagerNow(float& time, std::int32_t& day) {
+    auto* manager = CityComponentAs<cSC4AutomataControllerManager>(CityComponent::AutomataControllerManager);
+    if (!manager) return false;
+    const ControllerTime& now = manager->GetControllerTime();
+    time = now.time;
+    day = now.days;
+    return true;
 }
 
 void InstallAutomataControllerHost() { static NativeAutomataControllerHost s; sc4::SetAutomataControllerHost(&s); }

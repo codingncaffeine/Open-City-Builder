@@ -228,6 +228,10 @@ IControllerAutomaton* cSC4Automaton::ControllerLinkFor() {
     return controllerLink_;
 }
 
+cSC4Automaton* cSC4Automaton::OfControllerLink(IControllerAutomaton* link) {
+    return link ? &static_cast<ControllerLink*>(link)->owner() : nullptr;
+}
+
 IAutomatonEffects* cSC4Automaton::EnsureEffects() {
     if (!effects_ && Host()) effects_ = Host()->CreateEffects();
     return effects_;
@@ -1155,10 +1159,7 @@ bool cSC4Automaton::PushBehavior(const tBehaviorTemplate* behavior, cSC4Automata
     if (!behavior->sfx.empty() && Host()) sfx = behavior->sfx[Host()->RandomBelow(static_cast<std::uint32_t>(behavior->sfx.size()))];
     if (!behavior->anims.empty() && Host())
         animOffset = GetAnimOffsetByName(behavior->anims[Host()->RandomBelow(static_cast<std::uint32_t>(behavior->anims.size()))]);
-    // GetTimeoutMilliseconds answers the float bits of -1.0 for "no timeout"; they are handed on as the timer.
-    const std::uint32_t timeoutBits = behavior->GetTimeoutMilliseconds();
-    float timer = 0.0f;
-    std::memcpy(&timer, &timeoutBits, sizeof(timer));
+    const float timer = behavior->GetTimeoutMilliseconds();   // -1.0f = no timeout
     return PushState(behavior->state, controller, timer, behavior->final, animOffset, sfx, behavior);
 }
 

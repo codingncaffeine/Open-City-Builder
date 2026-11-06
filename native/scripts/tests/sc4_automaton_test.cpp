@@ -477,6 +477,23 @@ int main() {
         CHECK(automaton->StateStack().size() == 1);
         CHECK(automaton->DoStateTick(2000.0f));
         CHECK(automaton->StateStack().empty());
+        // a behavior's timeout (seconds) becomes the state's timer in milliseconds; none is -1
+        {
+            tBehaviorTemplate timed;
+            timed.state = kStateScripted;
+            timed.timeout = 60.0f;
+            CHECK(automaton->PushBehavior(&timed, nullptr));
+            CHECK(automaton->GetState() && automaton->GetState()->timer == 60000.0f);
+            CHECK(automaton->DoStateTick(500.0f));
+            CHECK(automaton->StateStack().size() == 1);   // a minute does not end on the first tick
+            automaton->ClearStateStack();
+            tBehaviorTemplate untimed;
+            untimed.state = kStateScripted;
+            CHECK(untimed.GetTimeoutMilliseconds() == -1.0f);
+            CHECK(automaton->PushBehavior(&untimed, nullptr));
+            CHECK(automaton->GetState() && automaton->GetState()->timer == -1.0f);
+            automaton->ClearStateStack();
+        }
         // the controller gets HandleStateTick first and can consume the tick
         CHECK(automaton->PushState(kStateQueue, &controller, 0.0f, false, 0, 0, nullptr));
         controller.consumeTick = true;

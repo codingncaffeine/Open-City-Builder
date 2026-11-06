@@ -480,7 +480,10 @@ protected:
 
     // What the recovered cSC4AutomataController calls on the automaton (its IControllerAutomaton seam):
     // 0x68 Remove(false), 0x50 SetDestination, 0x180 GetLeader, 0x188 SetLeader.
+public:
     IControllerAutomaton* ControllerLinkFor();
+    static cSC4Automaton* OfControllerLink(IControllerAutomaton* link);   // the automaton behind a link ControllerLinkFor made
+protected:
     IAutomatonEffects* EnsureEffects();
     bool StateIsFinished(const tAutomataState* state) const;
 

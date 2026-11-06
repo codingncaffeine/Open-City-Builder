@@ -967,16 +967,25 @@ void cSC4AutomataManager::DoAnimationTick(std::uint32_t data, float deltaMillise
         }
         static const bool trace = std::getenv("SC4_AUTOMATADEBUG") != nullptr;
         static int reasons[4] = {};
+        // SC4_AUTOMATADEBUG names why a controller-made automaton (creation flag 0x2000000) leaves
+        const bool traced = trace && automaton->CheckAutomataFlag(0x2000000);
         if (occupant && occupant->IsInitialized() && !automaton->DoAnimationTick(data, deltaMilliseconds)) {
+            if (traced) std::fprintf(stderr, "automata manager: %p leaves: its tick answered false\n", static_cast<void*>(automaton));
             ++reasons[0];
             RemoveAutomaton(automaton, false);
         }
         if (!automaton->GetMarkedForRemove() || automaton->GetOpacity() >= 0.1f) {
             if (!automaton->CheckAutomataFlag(0x10000) && !IsAutomatonOnscreen(automaton)) {
+                if (traced) {
+                    float p[3] = {0.0f, 0.0f, 0.0f};
+                    automaton->GetPosition(p);
+                    std::fprintf(stderr, "automata manager: %p leaves: off screen at (%.0f, %.1f, %.0f)\n", static_cast<void*>(automaton), p[0], p[1], p[2]);
+                }
                 ++reasons[1];
                 RemoveAutomaton(automaton, false);
             }
         } else {
+            if (traced) std::fprintf(stderr, "automata manager: %p leaves: marked for removal and faded out\n", static_cast<void*>(automaton));
             ++reasons[2];
             RemoveAutomaton(automaton, true);
         }

@@ -10,6 +10,9 @@
 #include <vector>
 
 #include "app/NativeAnimationTicks.h"
+#include <algorithm>
+#include <cmath>
+
 #include "app/NativeAutomataViews.h"
 #include "app/NativeCity.h"
 #include "app/NativeCitySystems.h"
@@ -108,17 +111,48 @@ public:
         SC4ViewUtilities* v = View();
         for (int i = 0; i < 3; ++i) out[i] = v ? (&v->EyePosition().x)[i] : 0.0f;
     }
-    // +0x3f4: the visible ground area (the midpoint rectangle), x / z
+    // +0x3f4: the visible terrain area, x / z. cSC43DRender::UpdateVisibleTerrainMetrics (i386 0x00504d28) keeps it in the view
+    // utilities: the view's centre on the terrain is the mean of the terrain picks at the viewport's centre and 100 pixels to
+    // each side of it (the picks that found terrain above 0), its reach is the larger of the x and z distances from there to
+    // the terrain under the viewport's bottom right corner, and the area is the square of that reach around the centre. The
+    // automata managers keep an automaton while it stands in this area (+48), so it has to cover the whole window: the
+    // midpoint rectangle used here before covered a strip down the middle, and on a wide window every automaton made
+    // toward the sides left at once.
+    //   PARTIAL: when no pick finds terrain (the view is off the map) the original walks the city's boundary; here the
+    //   ground plane's block rectangle answers.
     void ViewRect(float out[4]) override {
         out[0] = out[1] = out[2] = out[3] = 0.0f;
+        cSC43DRender* render = CityRenderer();
         SC4ViewUtilities* v = View();
-        if (!v) return;
-        float midMin[3] = {}, midMax[3] = {}, blockMin[3] = {}, blockMax[3] = {};
-        v->GetGroundPlaneVisibleAreaRectangle(midMin, midMax, blockMin, blockMax);
-        out[0] = midMin[0];
-        out[1] = midMin[2];
-        out[2] = midMax[0];
-        out[3] = midMax[2];
+        if (!render || !v) return;
+        std::uint32_t width = 0, height = 0;
+        render->GetViewportSize(width, height);
+        const int centreX = static_cast<int>(width) / 2, centreY = static_cast<int>(height) / 2;
+        static constexpr int kOffsets[5][2] = {{0, 0}, {100, 0}, {0, 100}, {-100, 0}, {0, -100}};
+        float sum[3] = {0.0f, 0.0f, 0.0f};
+        int hits = 0;
+        for (const auto& offset : kOffsets) {
+            float point[3] = {0.0f, 0.0f, 0.0f};
+            if (!render->PickTerrain(centreX + offset[0], centreY + offset[1], point, true, false) || !(point[1] > 0.0f)) continue;
+            for (int i = 0; i < 3; ++i) sum[i] += point[i];
+            ++hits;
+        }
+        float corner[3] = {0.0f, 0.0f, 0.0f};
+        if (hits == 0 || !render->PickTerrain(static_cast<int>(width), static_cast<int>(height), corner, true, false)) {
+            float midMin[3] = {}, midMax[3] = {}, blockMin[3] = {}, blockMax[3] = {};
+            v->GetGroundPlaneVisibleAreaRectangle(midMin, midMax, blockMin, blockMax);
+            out[0] = blockMin[0];
+            out[1] = blockMin[2];
+            out[2] = blockMax[0];
+            out[3] = blockMax[2];
+            return;
+        }
+        const float x = sum[0] / static_cast<float>(hits), z = sum[2] / static_cast<float>(hits);
+        const float reach = std::max(std::fabs(corner[2] - z), std::fabs(corner[0] - x));
+        out[0] = x - reach;
+        out[1] = z - reach;
+        out[2] = x + reach;
+        out[3] = z + reach;
     }
     bool IsPointInViewFrustum(const float point[3]) override { SC4ViewUtilities* v = View(); return v && v->IsPointInViewFrustum(point); }
     void ProjectPointToViewCoordinates(float point[3]) override { if (SC4ViewUtilities* v = View()) v->ProjectPointToViewCoordinates(point); }
@@ -283,6 +317,22 @@ void InstallAutomataManagerHost() { sc4::SetAutomataManagerHost(&g_host); }
 // IAutomatonHost::FindAutomataGroup: the script system's automata group (its slot 0x38), as the automaton sees it.
 sc4::IAutomatonGroupTemplate* NativeFindAutomatonGroup(std::uint32_t id) {
     return AutomatonGroupTemplateView(g_scriptGroups.GetAutomataGroup(id));
+}
+
+// cSC4AutomataManager::GetAutomataManagerForGroup (0x100104c7e): the first of the city's automata managers (vehicles,
+// pedestrians, aircraft; city vslots 0x158 / 0x160 / 0x168) whose vslot 0xf0 takes the group.
+//   PARTIAL: the watercraft manager (0x170) is a class of its own here and is not asked.
+sc4::cSC4AutomataManager* NativeAutomataManagerForGroup(std::uint32_t group) {
+    for (CityComponent component : {CityComponent::VehicleManager, CityComponent::PedestrianManager, CityComponent::AircraftManager}) {
+        cSC4AutomataManager* manager = Concrete<cSC4AutomataManager>(component);
+        if (manager && manager->CanCreateGroup(group)) return manager;
+    }
+    return nullptr;
+}
+// cSC4TrafficAutomataManager::IsLayerVisible (i386 0x000ca21a) on the vehicle manager: the view level shows that layer.
+bool NativeAutomataLayerVisible(std::uint32_t layer) {
+    cSC4TrafficAutomataManager* manager = Concrete<cSC4TrafficAutomataManager>(CityComponent::VehicleManager);
+    return manager && manager->IsLayerVisible(layer);
 }
 
 bool NativeViewAvailable() { return CityRenderer() && CityRenderer()->GetViewUtilities(); }

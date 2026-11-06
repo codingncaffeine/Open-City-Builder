@@ -433,6 +433,7 @@ src/app/hosts/StubCatalogView.cpp
 src/app/hosts/StubCitySituationAdvice.cpp
 src/app/hosts/StubCivicBuilding.cpp
 src/app/NativeControllerManagerHost.cpp
+src/app/NativeAutomataGenerator.cpp
 src/app/hosts/StubDemandSimulator.cpp
 src/app/hosts/StubDisaster.cpp
 src/app/hosts/StubEffectTool.cpp

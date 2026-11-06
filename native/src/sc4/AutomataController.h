@@ -86,7 +86,7 @@ struct tBehaviorTemplate {
     float idleTime[2] = {5.0f, 10.0f};          // +0x88
     float deceleration = 0.5f;                  // +0x90
 
-    std::uint32_t GetTimeoutMilliseconds() const;   // @ 0x1000f3ed0 (a timeout of 0 or less answers the bits of -1.0f, 0xbf800000 - kept)
+    float GetTimeoutMilliseconds() const;   // i386 0x000b4162: the timeout in ms as a float, -1.0f for a timeout of 0 or less
     // The comparison the script importer sorts with (the inlined std::__less): nearer first, then the higher priority.
     friend bool operator<(const tBehaviorTemplate& a, const tBehaviorTemplate& b) { return a.radius < b.radius || a.priority > b.priority; }
 };
@@ -189,6 +189,11 @@ public:
     virtual int CityCellsX() { return 0; }                       // SL::spCity vslot 0x2e8
     virtual int CityCellsZ() { return 0; }                       // SL::spCity vslot 0x2f0
     virtual bool HasNetworkAt(int cellX, int cellZ) { (void)cellX; (void)cellZ; return false; }   // SL::spCity vslot 0x140 -> vslot 0x70(x, z) != 0
+    // ---- automaton identity (port seam). The original keeps the automaton object itself; the port's controllers keep the
+    // automaton's IControllerAutomaton link. An automaton read from a save (interface 0xa9b40f05, the reference carries over)
+    // or carried by a message becomes its link, and a link becomes the serializable object again for writing.
+    virtual IControllerAutomaton* AutomatonLink(void* object) { return static_cast<IControllerAutomaton*>(object); }
+    virtual const cIGZSerializable* AutomatonObject(IControllerAutomaton* link) { return reinterpret_cast<const cIGZSerializable*>(link); }
 };
 IAutomataControllerHost* AutomataControllerHost();
 void SetAutomataControllerHost(IAutomataControllerHost* host);

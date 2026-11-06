@@ -581,6 +581,22 @@ float NativeResidentialWorkforcePercent(int x, int z) {
     cSC4ResidentialSimulator* r = Residential();
     return r ? r->GetCellWorkforcePercent(SimulatorExemplar(0x69189c84), unsigned(x), unsigned(z)) : 1.0f;
 }
+// The automata generators' inputs (cSC4AutomataGenerator::TriggerGenerator, i386 0x000b8dd2): the city's population, and the
+// pupils / patients a school or hospital serves (GetSchoolQueryData / GetHospitalQueryData).
+int NativeResidentialPopulation() {
+    cSC4ResidentialSimulator* r = Residential();
+    return r ? r->GetPopulation() : 0;
+}
+bool NativeResidentialServed(cIGZUnknown* building, bool school, std::uint32_t& served) {
+    cSC4ResidentialSimulator* r = Residential();
+    IResidentialOccupant* occupant = r ? g_residential.Occupant(building) : nullptr;
+    ResidentialQueryData data;
+    served = 0;
+    if (!occupant) return false;
+    const bool ok = school ? r->GetSchoolQueryData(occupant, data) : r->GetHospitalQueryData(occupant, data);
+    served = data.served;   // the original reads the record whether or not the query succeeded
+    return ok;
+}
 cSC4SimGrid<float>* NativeResidentialGradeMap(bool school) {
     cSC4ResidentialSimulator* r = Residential();
     return r ? r->GetGradeMap(school) : nullptr;

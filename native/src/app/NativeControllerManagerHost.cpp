@@ -17,6 +17,8 @@
 #include "sc4/cSC4City.h"
 
 namespace native {
+sc4::cSC4AutomataController* NativeCreateAutomataGenerator();   // app/NativeAutomataGenerator.cpp
+void InstallAutomataGenerator();
 namespace {
 using namespace sc4;
 
@@ -74,14 +76,14 @@ struct NativeControllerManagerHost final : IControllerManagerHost {
     const float* ViewPosition() override { return CityViewEye(); }   // SL::spViewUtilities + 0x44
     int ViewZoom() override { return CityViewZoom(); }               // SL::spViewUtilities + 0x14
     // GZCOM()->CreateInstance(classKey, 0x6a1857f8)
-    // PARTIAL: generators (0x4a1628c5) still run on the load-only host, so no new generator is made.
     cSC4AutomataController* CreateController(std::uint32_t classKey) override {
         if (classKey == kControllerTypeAttractor) {
             auto* attractor = new cSC4AutomataAttractor();
             attractor->AddRef();
             return attractor;
         }
-        SC4_UNWIRED("IControllerManagerHost::CreateController (generator controllers)");
+        if (classKey == kControllerTypeGenerator) return NativeCreateAutomataGenerator();   // app/NativeAutomataGenerator.cpp
+        SC4_UNWIRED("IControllerManagerHost::CreateController (an unknown controller class)");
         return nullptr;
     }
     // the city's lot manager (city vslot 0x108 -> vslot 0x70): not reachable natively; the answer is only compared for identity
@@ -91,6 +93,10 @@ struct NativeControllerManagerHost final : IControllerManagerHost {
 
 }  // namespace
 
-void InstallControllerManagerStub() { static NativeControllerManagerHost s; sc4::SetControllerManagerHost(&s); }
+void InstallControllerManagerStub() {
+    static NativeControllerManagerHost s;
+    sc4::SetControllerManagerHost(&s);
+    InstallAutomataGenerator();   // saved generators load as real controllers
+}
 
 }  // namespace native

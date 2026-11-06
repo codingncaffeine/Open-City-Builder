@@ -82,14 +82,8 @@ bool cSC4AutomataGenerator::Shutdown() {   // @ 0x1000fa504
 // @ 0x1000fa518: deactivating a generator that is not asked to keep its automata releases them all.
 void cSC4AutomataGenerator::Activate(bool active) {
     if (initialized && !active && tmpl_ && tmpl_->type == kAutomataGeneratorTemplateType) {
-        if (host_->CheckFlag(kAutoFlagReleaseOnDeactivate)) {
-            for (IAutomaton* automaton : automata_) {
-                automaton->DetachController(nullptr);
-                automaton->Release();
-            }
-            automata_.clear();
-        }
-        liveCount_ = static_cast<std::uint32_t>(automata_.size());
+        if (host_->CheckFlag(kAutoFlagReleaseOnDeactivate)) host_->BaseReleaseAutomata();
+        host_->BaseSyncLiveCount();
     }
     host_->BaseActivate(active);
 }
@@ -102,9 +96,7 @@ void cSC4AutomataGenerator::SetAutomataGroups(const std::vector<std::uint32_t>& 
 void cSC4AutomataGenerator::SetTemplate(GeneratorTemplate* tmpl) {   // @ 0x1000fa5f2
     tmpl_ = tmpl;
     if (!tmpl) return;
-    name_.clear();
-    lifetime_ = tmpl->lifetime;
-    baseValue6c_ = tmpl->field_bc;
+    host_->BaseSetTemplate();
     if (tmpl->type == kAutomataGeneratorTemplateType) {
         lifetimeLimit_ = tmpl->lifetimeAutomataLimit;
         groupLimit_ = static_cast<std::uint32_t>(random_.RandomSint32RangeUniform(tmpl->groupSizeMin, tmpl->groupSizeMax));
@@ -119,7 +111,8 @@ void cSC4AutomataGenerator::CheckTimeOfDay(const ControllerTime&, const Controll
 
 // @ 0x1000fbb40
 bool cSC4AutomataGenerator::IsExpired() const {
-    if (lifetime_ <= 0.0f || lifetimeElapsed_ < lifetime_) {
+    const float lifetime = host_->BaseLifetime();
+    if (lifetime <= 0.0f || host_->BaseAge() < lifetime) {
         if (lifetimeLimit_ == 0) return false;
         return lifetimeLimit_ <= spawned_;
     }
@@ -144,7 +137,7 @@ void cSC4AutomataGenerator::DoAnimationTick(float dt, std::uint32_t arg, const C
     std::uint32_t limit = 0xffffffffu;
     limit = groupLimit_;
     if (limit < 2) limit = tmpl->maxAutomata == 0 ? 0xffffffffu : tmpl->maxAutomata;
-    if (liveCount_ < limit) {
+    if (host_->BaseLiveCount() < limit) {
         float now = 0;
         std::int32_t day = 0;
         host_->ClockNow(now, day);
@@ -268,7 +261,7 @@ void cSC4AutomataGenerator::TriggerGenerator(float curveValue) {
     const float zeroVector[3] = {0, 0, 0};
 
     for (std::uint32_t attempt = 0; attempt < attempts; ++attempt) {
-        if (maxLive < liveCount_) break;
+        if (maxLive < host_->BaseLiveCount()) break;
         float distance = 0.0f;
         bool place = false;
         if (cells.empty()) {
@@ -290,7 +283,7 @@ void cSC4AutomataGenerator::TriggerGenerator(float curveValue) {
             const float sy = inv * 0.0f * dist + origin[1];
             pos[0] = ux * dist + baseX;
             pos[2] = sz;
-            pos[1] = host_->TerrainHeightEnabled() ? host_->TerrainHeight(pos[0], pos[2]) : sy;
+            pos[1] = host_->TerrainHeightEnabled(pos[0], pos[2]) ? host_->TerrainHeight(pos[0], pos[2]) : sy;
             distance = dist;
             place = true;
         } else {
@@ -336,11 +329,9 @@ void cSC4AutomataGenerator::TriggerGenerator(float curveValue) {
         if (!manager) break;
         IAutomaton* automaton = manager->CreateAutomaton(group_, pos, kAutomataSpawnFlags, zeroVector, 0, tmpl->spawnArgument);
         if (!automaton) continue;
-        automata_.push_back(automaton);
-        automaton->AddRef();
-        ++liveCount_;
+        host_->BaseAddAutomaton(automaton);
         ++groupSpawned_;
-        automaton->SetStartTime(static_cast<const char*>(clock) + 0x10);
+        automaton->AddCallback(clock);
         if (const void* behavior = host_->GetBehaviorTemplate(distance, pos)) automaton->StartBehavior(behavior, this);
         else automaton->StartDefault(-1.0f, this);
         if (lifetimeLimit_ != 0) {

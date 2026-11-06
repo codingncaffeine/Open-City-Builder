@@ -43,6 +43,7 @@
 #include "tools/city_probe_plain.h"
 
 namespace sc4 {
+extern cIGZSerializable* (*g_createLoadedGenerator)();   // set by app/NativeAutomataGenerator.cpp; null in the load-only probe
 namespace {
 
 // cSC4AutomataGenerator reaches the rest of the engine through IAutomataGeneratorHost; the probe answers
@@ -76,6 +77,13 @@ public:
         for (std::uint32_t i = 0; i < count && count < 1000000u && !stream.GetError(); ++i) skipReference();
         return !stream.GetError();
     }
+    void BaseSetTemplate() override {}
+    std::uint32_t BaseLiveCount() override { return 0; }
+    void BaseAddAutomaton(IAutomaton*) override {}
+    void BaseReleaseAutomata() override {}
+    void BaseSyncLiveCount() override {}
+    float BaseAge() override { return 0; }
+    float BaseLifetime() override { return 0; }
     bool CheckFlag(std::uint32_t) override { return false; }
     void GetPosition(float out[3]) override { out[0] = out[1] = out[2] = 0; }
     void GetLotFacingPoint(float out[3]) override { out[0] = out[1] = out[2] = 0; }
@@ -101,7 +109,7 @@ public:
     bool NetworkCellHasType(int, int, std::uint32_t) override { return false; }
     bool NetworkPositionAccepts(const float[3], std::uint32_t) override { return false; }
     float NetworkHeight(float, float) override { return 0; }
-    bool TerrainHeightEnabled() override { return false; }
+    bool TerrainHeightEnabled(float, float) override { return false; }
     float TerrainHeight(float, float) override { return 0; }
     IAutomatonManager* ManagerForGroup(std::uint32_t) override { return nullptr; }
 };
@@ -223,7 +231,8 @@ cIGZSerializable* CreateCityProbeSerializable(std::uint32_t classId) {
             return WrapPlain(new cSC4Demand(CityProbeDemandHost()));
         case 0xa7e7f929:   // cSC424HourClock(IClockHost*)
             return WrapPlain(new cSC424HourClock(CityProbeClockHost()));
-        case 0x4a1628c5:   // cSC4AutomataGenerator(IAutomataGeneratorHost*)
+        case 0x4a1628c5:   // cSC4AutomataGenerator: the application's controller class when it installed one, else load-only
+            if (sc4::g_createLoadedGenerator) return sc4::g_createLoadedGenerator();
             return WrapPlain(new cSC4AutomataGenerator(&g_automataGeneratorHost));
 
         default:

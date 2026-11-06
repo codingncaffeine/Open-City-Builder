@@ -647,8 +647,9 @@ bool cSC4AutomataControllerManager::DoMessage(cIGZMessage2* base) {
             HandlePostCityInit();
             return true;
         case kCtrlMsgAutomatonRemoved: {
-            auto* automaton = static_cast<IControllerAutomaton*>(message->GetVoid1());
             if (message->GetData2() != 3) return true;
+            IControllerAutomaton* automaton = message->GetVoid1() ? AutomataControllerHost()->AutomatonLink(message->GetVoid1()) : nullptr;
+            if (!automaton) return true;
             for (auto& node : controllers_) for (cSC4AutomataController* controller : node.second.controllers) controller->HandleRemoveAutomaton(automaton);
             return true;
         }
@@ -704,7 +705,7 @@ bool cSC4AutomataControllerManager::Write(cIGZOStream& stream) const {
     for (const auto& node : queues_) {
         SC4WriteGZSerializable(stream, node.second.occupant);
         stream.SetUint32(static_cast<std::uint32_t>(node.second.info.queue.size()));
-        for (IControllerAutomaton* automaton : node.second.info.queue) SC4WriteGZSerializable(stream, reinterpret_cast<const cIGZUnknown*>(automaton));
+        for (IControllerAutomaton* automaton : node.second.info.queue) SC4WriteGZSerializable(stream, AutomataControllerHost()->AutomatonObject(automaton));
         stream << cS3DVector3{node.second.info.point[0], node.second.info.point[1], node.second.info.point[2]};
         stream << cS3DVector3{node.second.info.direction[0], node.second.info.direction[1], node.second.info.direction[2]};
         stream << node.second.info.valid;
@@ -756,7 +757,7 @@ bool cSC4AutomataControllerManager::Read(cIGZIStream& stream) {
         for (std::uint32_t j = 0; j < queued; ++j) {
             void* automaton = nullptr;
             SC4ReadGZSerializable(stream, kAutomatonIid, &automaton, false);
-            if (isNew) entry.info.queue.push_back(static_cast<IControllerAutomaton*>(automaton));
+            if (isNew && automaton) entry.info.queue.push_back(AutomataControllerHost()->AutomatonLink(automaton));
         }
         cS3DVector3 vector;
         stream >> vector;

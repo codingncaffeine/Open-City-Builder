@@ -28,6 +28,7 @@ void ProbeBuildingsAt(float x, float z, float radius);
 // app/NativeDispatch.cpp: the dispatch tool's drop without a call box (police 0, fire 1) at a world position; the dispatch id or 0.
 std::uint32_t NativeDispatchAt(std::uint32_t type, float x, float z);
 void NativeDispatchReport();   // every dispatch record, its vehicle and state
+void NativeGeneratorReport();  // every automaton an automata generator made and still holds (app/NativeAutomataGenerator.cpp)
 bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* city, gd::cIGZGDriver* driver, gz::cIGZDrawContext* screen, int viewportWidth, int viewportHeight);
 
 }  // namespace native

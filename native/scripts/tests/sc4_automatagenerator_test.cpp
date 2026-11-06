@@ -2,6 +2,7 @@
 // Expected values are derived by hand from the decompiled formulas (0x1000fa3e0..0x1000fbbe0).
 #include <cmath>
 #include <cstdio>
+#include <list>
 #include <set>
 
 #include "rz/PortMemoryStreams.h"
@@ -18,11 +19,11 @@ namespace {
 struct FakeAutomaton : IAutomaton {
     int refs = 1, detached = 0, released = 0, startBehavior = 0, startDefault = 0;
     float pos[3] = {0, 0, 0};
-    bool clockSet = false;
+    bool callbackSet = false;
     void AddRef() override { ++refs; }
     void Release() override { --refs; ++released; }
     void DetachController(void*) override { ++detached; }
-    void SetStartTime(const void*) override { clockSet = true; }
+    void AddCallback(const void* target) override { callbackSet = target != nullptr; }
     void StartBehavior(const void*, cSC4AutomataGenerator*) override { ++startBehavior; }
     void StartDefault(float speed, cSC4AutomataGenerator*) override { ++startDefault; CHECKF(speed, -1.0f); }
 };
@@ -78,6 +79,22 @@ struct Host : IAutomataGeneratorHost {
     void BaseDoAnimationTick(float, std::uint32_t, const ControllerTime&) override { ++baseTicks; }
     bool BaseWrite(cIGZOStream& s) override { s.SetUint32(0x77); return true; }
     bool BaseRead(cIGZIStream& s) override { std::uint32_t v = 0; s.GetUint32(v); CHECK(v == 0x77); return true; }
+    // the base controller's own state (one list, one count, the age and lifetime, the template's part of SetTemplate)
+    std::list<IAutomaton*> automata;
+    std::uint32_t liveCount = 0;
+    float age = 0.0f, lifetime = 0.0f;
+    int baseSetTemplate = 0;
+    const GeneratorTemplate* pendingTemplate = nullptr;
+    void BaseSetTemplate() override { ++baseSetTemplate; if (pendingTemplate) lifetime = pendingTemplate->lifetime; }
+    std::uint32_t BaseLiveCount() override { return liveCount; }
+    void BaseAddAutomaton(IAutomaton* a) override { automata.push_back(a); a->AddRef(); ++liveCount; }
+    void BaseReleaseAutomata() override {
+        for (IAutomaton* a : automata) { a->DetachController(nullptr); a->Release(); }
+        automata.clear();
+    }
+    void BaseSyncLiveCount() override { liveCount = static_cast<std::uint32_t>(automata.size()); }
+    float BaseAge() override { return age; }
+    float BaseLifetime() override { return lifetime; }
     bool CheckFlag(std::uint32_t f) override { return flags.count(f) != 0; }
     void GetPosition(float out[3]) override { for (int i = 0; i < 3; ++i) out[i] = position[i]; }
     void GetLotFacingPoint(float out[3]) override { for (int i = 0; i < 3; ++i) out[i] = facing[i]; }
@@ -102,7 +119,7 @@ struct Host : IAutomataGeneratorHost {
     bool NetworkCellHasType(int x, int z, std::uint32_t mask) override { lastMask = mask; networkQueries.push_back({x, z}); return true; }
     bool NetworkPositionAccepts(const float[3], std::uint32_t) override { return networkOk; }
     float NetworkHeight(float, float) override { return height; }
-    bool TerrainHeightEnabled() override { return terrain; }
+    bool TerrainHeightEnabled(float, float) override { return terrain; }
     float TerrainHeight(float, float) override { return terrainHeight; }
     IAutomatonManager* ManagerForGroup(std::uint32_t) override { return managerPresent ? &manager : nullptr; }
 };
@@ -155,7 +172,7 @@ void TestBasics() {
     Host host;
     auto* g = new cSC4AutomataGenerator(&host);
     CHECK(g->GetGZCLSID() == 0x4a1628c5 && g->GetControllerType() == 0x4a1628c5);
-    CHECK(g->BaseValue6c() == 2 && g->ReadyToExpire());
+    CHECK(g->ReadyToExpire());
     CHECKF(g->GetRadius(), 0.0f);
     CHECK(g->Init() && host.baseInit == 1);   // not initialised: forwards to the base Init
     g->initialized = true;
@@ -163,28 +180,27 @@ void TestBasics() {
     CHECK(g->Shutdown() && host.baseShutdown == 1);
 
     GeneratorTemplate t = MakeTemplate();
-    g->Name() = "x";
+    host.pendingTemplate = &t;
     g->SetTemplate(&t);
-    CHECK(g->Name().empty());
-    CHECKF(g->Lifetime(), 8.0f);
-    CHECK(g->BaseValue6c() == 0x1234);
+    CHECK(host.baseSetTemplate == 1);       // the base's part (name, lifetime, flags) is the base's
+    CHECKF(host.lifetime, 8.0f);
     CHECK(g->GroupLimit() == 3 && g->LifetimeLimit() == 0);
     CHECKF(g->GetRadius(), 30.0f);
     t.lifetimeAutomataLimit = 2;
     g->SetTemplate(&t);
     CHECK(g->LifetimeLimit() == 2);
     g->SetTemplate(nullptr);
-    CHECK(g->Template() == nullptr);
+    CHECK(g->Template() == nullptr && host.baseSetTemplate == 2);   // a null template never reaches the base's part
     g->SetTemplate(&t);
     g->SetLifetimeAutomataCount(0);
 
     // IsExpired
-    g->SetLifetimeElapsed(1.0f);
+    host.age = 1.0f;
     CHECK(!g->IsExpired());                 // elapsed < lifetime, no limit
-    g->SetLifetimeElapsed(8.0f);
+    host.age = 8.0f;
     CHECK(g->IsExpired());                  // lifetime reached
     g->SetLifetimeAutomataCount(0);
-    g->SetLifetimeElapsed(0.0f);
+    host.age = 0.0f;
     g->SetLifetimeAutomataCount(1);
     CHECK(!g->IsExpired());                 // limit 1, none spawned
     g->SetAutomataGroups({1, 2, 3});
@@ -270,12 +286,12 @@ void TestPolarSpawn() {
     // mode 0: round(5 * 1.0) = 5 attempts; group limit 3 -> maxLive 3: spawn while live <= 3, i.e. four automata (quirk)
     g->TriggerGenerator(5.0f);
     CHECK(host.manager.made.size() == 4);
-    CHECK(g->LiveCount() == 4 && g->Automata().size() == 4);
+    CHECK(g->LiveCount() == 4 && host.automata.size() == 4);
     CHECK(host.manager.lastArg == 9);
     CHECK(g->Group() == 5 || g->Group() == 6);
     for (std::size_t i = 0; i < host.manager.made.size(); ++i) {
         FakeAutomaton* a = host.manager.made[i];
-        CHECK(a->refs == 2 && a->clockSet && a->startDefault == 1 && a->startBehavior == 0);
+        CHECK(a->refs == 2 && a->callbackSet && a->startDefault == 1 && a->startBehavior == 0);
         // the hit point is (100, 200); the spawn point lies minRadius..radius away from it in the xz plane, y = origin y
         const float dx = a->pos[0] - 100.0f, dz = a->pos[2] - 200.0f;
         const float dist = std::sqrt(dx * dx + dz * dz);
@@ -467,12 +483,13 @@ void TestTick() {
     CHECKF(g->Elapsed().time, 0.0f);
     host.flags.insert(kAutoFlagVisible);
     // expired generators do nothing past the base tick
-    g->SetLifetimeElapsed(100.0f);
+    host.lifetime = 8.0f;
+    host.age = 100.0f;
     const int ticks = host.baseTicks;
     g->DoAnimationTick(1.0f, 0, dt);
     CHECK(host.baseTicks == ticks + 1 && g->Elapsed().time == 0.0f);
     // period unit out of range gives a zero period
-    g->SetLifetimeElapsed(0.0f);
+    host.age = 0.0f;
     t.periodUnit = 9;
     t.dayMask = 0xffffffff;
     for (int i = 0; i < 2; ++i) g->DoAnimationTick(1.0f, 0, dt);
@@ -501,12 +518,18 @@ void TestActivateAndStreams() {
     CHECK(g->LiveCount() == 2 && host.baseActivate == 1);
     // deactivate without flag 0x100: live count mirrors the list size, automata kept
     g->Activate(false);
-    CHECK(g->LiveCount() == 2 && g->Automata().size() == 2);
+    CHECK(g->LiveCount() == 2 && host.automata.size() == 2);
+    // an automaton the base took off its list (it was removed from the city) frees a place: the count is the base's
+    host.automata.pop_back();
+    host.liveCount = 1;
+    CHECK(g->LiveCount() == 1);
+    host.automata.push_back(host.manager.made.back());
+    host.liveCount = 2;
     // with flag 0x100 the automata are detached and released
     host.flags.insert(kAutoFlagReleaseOnDeactivate);
     auto made = host.manager.made;
     g->Activate(false);
-    CHECK(g->LiveCount() == 0 && g->Automata().empty());
+    CHECK(g->LiveCount() == 0 && host.automata.empty());
     for (auto* a : made) CHECK(a->detached == 1 && a->released == 1);
 
     // streams

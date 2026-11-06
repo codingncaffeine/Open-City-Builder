@@ -9,9 +9,9 @@
 
 namespace sc4 {
 
-std::uint32_t tBehaviorTemplate::GetTimeoutMilliseconds() const {
-    return timeout > 0.0f ? static_cast<std::uint32_t>(timeout * 1000.0f) : 0xbf800000u;
-}
+// The answer is a float (it goes straight into the state timer). The port once answered an integer whose bits were then
+// read as a float: 60 s became a denormal, and every timed behavior ended on its first tick.
+float tBehaviorTemplate::GetTimeoutMilliseconds() const { return timeout > 0.0f ? timeout * 1000.0f : -1.0f; }
 
 namespace {
 IAutomataControllerHost* g_host = nullptr;
@@ -454,7 +454,7 @@ bool cSC4AutomataController::Write(cIGZOStream& stream) const {
     stream.SetUint32(soundHandle_);
     stream.SetUint32(flags_);
     stream.SetUint32(automataCount_);
-    for (IControllerAutomaton* automaton : automata_) SC4WriteGZSerializable(stream, reinterpret_cast<const cIGZUnknown*>(automaton));
+    for (IControllerAutomaton* automaton : automata_) SC4WriteGZSerializable(stream, g_host->AutomatonObject(automaton));
     return !stream.GetError();
 }
 
@@ -481,7 +481,8 @@ bool cSC4AutomataController::Read(cIGZIStream& stream) {
     for (std::uint32_t i = 0; i < automataCount_; ++i) {
         void* automaton = nullptr;
         SC4ReadGZSerializable(stream, kAutomatonIid, &automaton, false);
-        automata_.push_back(static_cast<IControllerAutomaton*>(automaton));
+        // A null (an automaton class that could not be made) is dropped: every later walk of the list calls through it.
+        if (IControllerAutomaton* link = automaton ? g_host->AutomatonLink(automaton) : nullptr) automata_.push_back(link);
     }
     return !stream.GetError();
 }

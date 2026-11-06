@@ -10,7 +10,10 @@
 //   +0xd0 automata spawned so far   +0xd4 lifetime automata limit   +0xd8 current group   +0xdc spawned from the group
 //   +0xe0 group size limit
 // Everything the base class and the city provide (flags, positions, bounding boxes, networks, clock, automata managers)
-// is reached through IAutomataGeneratorHost; the original uses vslots of itself and the SL::sp* globals.
+// is reached through IAutomataGeneratorHost; the original uses vslots of itself and the SL::sp* globals. The base class's
+// own state (the automata list and its count, the age and lifetime, the name and flags) lives in the base object only:
+// the generator asks the host for it, so a controller built on cSC4AutomataController (app/NativeAutomataGenerator.cpp)
+// and the generator see one list and one count.
 //
 // Quirks kept: SetAutomataGroups overwrites the (shared) template's group list; the spawn loop breaks when the live
 // count EXCEEDS the limit while the tick only spawns when it is below it; the list-spawn branch keeps the y of the
@@ -80,10 +83,11 @@ public:
     virtual ~IAutomaton() = default;
     virtual void AddRef() = 0;                                       // vslot 0x08
     virtual void Release() = 0;                                      // vslot 0x10
-    virtual void DetachController(void* controller) = 0;             // vslot 0x68 (called with 0)
-    virtual void SetStartTime(const void* clock) = 0;                // vslot 0x138 (city clock object + 0x10)
-    virtual void StartBehavior(const void* behavior, cSC4AutomataGenerator* controller) = 0;   // vslot 0x1b8
-    virtual void StartDefault(float speed, cSC4AutomataGenerator* controller) = 0;             // vslot 0x1a0 (-1.0f)
+    virtual void DetachController(void* controller) = 0;             // vslot 0x68 Remove(bool) (called with 0)
+    virtual void AddCallback(const void* target) = 0;                // vslot 0x138 AddCallback (the controller manager's message target)
+    virtual void StartBehavior(const void* behavior, cSC4AutomataGenerator* controller) = 0;   // vslot 0x1b8 PushBehavior
+    // vslot 0x1a0 PushState(state 0, the controller, timer -1.0f, false, 0, 0, null)
+    virtual void StartDefault(float timer, cSC4AutomataGenerator* controller) = 0;
 };
 class IAutomatonManager {
 public:
@@ -103,6 +107,13 @@ public:
     virtual void BaseDoAnimationTick(float dt, std::uint32_t arg, const ControllerTime& time) = 0;
     virtual bool BaseWrite(cIGZOStream& stream) = 0;
     virtual bool BaseRead(cIGZIStream& stream) = 0;
+    virtual void BaseSetTemplate() = 0;                                       // cSC4AutomataController::SetTemplate's part: name cleared, lifetime and flags from the template
+    virtual std::uint32_t BaseLiveCount() = 0;                                // +0x88
+    virtual void BaseAddAutomaton(IAutomaton* automaton) = 0;                 // +0x70 push_back, AddRef, ++(+0x88)
+    virtual void BaseReleaseAutomata() = 0;                                   // every automaton: vslot 0x68(0), Release; the list is cleared
+    virtual void BaseSyncLiveCount() = 0;                                     // +0x88 = the list's size
+    virtual float BaseAge() = 0;                                              // +0x98
+    virtual float BaseLifetime() = 0;                                         // +0x9c
     virtual bool CheckFlag(std::uint32_t flags) = 0;                          // vslot 0x70
     virtual void GetPosition(float out[3]) = 0;                               // vslot 0x68
     virtual void GetLotFacingPoint(float out[3]) = 0;                         // vslot 0xc0
@@ -112,22 +123,25 @@ public:
     virtual const void* GetBehaviorTemplate(float distance, const float position[3]) = 0;   // vslot 0x110
     // ---- occupant (+0x18)
     virtual bool HasOccupant() = 0;
-    virtual std::uint32_t OccupantType() = 0;                                 // occupant vslot 0x38
-    virtual bool OccupantHasFlag(std::uint32_t flag) = 0;                     // occupant vslot 0xb0
-    virtual void OccupantLotCell(int& x, int& z) = 0;                         // occupant vslot 0x58
+    virtual std::uint32_t OccupantType() = 0;                                 // occupant vslot 0x38 GetType
+    virtual bool OccupantHasFlag(std::uint32_t flag) = 0;                     // occupant vslot 0xb0 IsOccupantGroup
+    virtual void OccupantLotCell(int& x, int& z) = 0;                         // occupant vslot 0x58 GetBoundingCityCells: x0, z0
     virtual int OccupantFacing() = 0;                                         // city vslot 0x108 -> object(occupant) vslot 0xb8; -1 when none
-    // ---- city
-    virtual const void* Clock() = 0;                                          // city vslot 0x178 (null = unavailable)
-    virtual void ClockNow(float& time, std::int32_t& day) = 0;                // clock vslot 0xc0
+    // ---- city (the names are settled against the Mac i386 build, TriggerGenerator 0x000b8dd2)
+    // City vslot 0x178: the automata controller manager, null = unavailable. The original adds 0x10 to reach its message
+    // target and gives that to each new automaton as a callback; the host answers that target itself.
+    virtual const void* Clock() = 0;
+    virtual void ClockNow(float& time, std::int32_t& day) = 0;                // the controller manager's time (vslot 0xc0)
     virtual bool IsAutomataLayerVisible() = 0;                                // cSC4TrafficAutomataManager::IsLayerVisible(7)
-    virtual int CityCount() = 0;                                              // city vslot 0x220 -> vslot 0x80 (mode 2)
-    virtual float OccupantMeasureA() = 0;                                     // vslot 0x220 -> 0xd0(occupant) (flags 0x1503/0x1504)
-    virtual float OccupantMeasureB() = 0;                                     // vslot 0x220 -> 0xd8(occupant) (flag 0x1507)
-    virtual bool LotMeasure(int cellX, int cellZ, float& out) = 0;            // lot manager vslot 0x28 -> lot vslot 0x1e8; false when no lot
+    virtual int CityCount() = 0;                                              // residential simulator GetPopulation (mode 2)
+    virtual float OccupantMeasureA() = 0;                                     // GetSchoolQueryData(occupant).served (occupant groups 0x1503 / 0x1504)
+    virtual float OccupantMeasureB() = 0;                                     // GetHospitalQueryData(occupant).served (occupant group 0x1507)
+    // The occupant's first city cell (GetBoundingCityCells) -> the lot there (GetLot(x, z, false)) -> cSC4Lot::GetOccupancy; false when no lot
+    virtual bool LotMeasure(int cellX, int cellZ, float& out) = 0;
     virtual bool NetworkCellHasType(int x, int z, std::uint32_t mask) = 0;    // city vslot 0x140 -> 0x70(x,z) -> 0x48(mask)
     virtual bool NetworkPositionAccepts(const float position[3], std::uint32_t mask) = 0;   // network manager vslot 0x158
     virtual float NetworkHeight(float x, float z) = 0;                        // network manager vslot 0x90
-    virtual bool TerrainHeightEnabled() = 0;                                  // city vslot 0x310
+    virtual bool TerrainHeightEnabled(float x, float z) = 0;                  // city vslot 0x310 with the point: it lies in the city
     virtual float TerrainHeight(float x, float z) = 0;                        // spTerrain vslot 0x60
     virtual IAutomatonManager* ManagerForGroup(std::uint32_t group) = 0;      // cSC4AutomataManager::GetAutomataManagerForGroup
 };
@@ -171,15 +185,10 @@ public:
     bool Write(cIGZOStream& stream) const;
     bool Read(cIGZIStream& stream);
 
-    // state access (base-class fields the base services update)
+    // state access
     cRZRandom& Random() { return random_; }
     GeneratorTemplate* Template() { return tmpl_; }
-    void SetLifetimeElapsed(float seconds) { lifetimeElapsed_ = seconds; }   // +0x98, advanced by the base tick
-    float Lifetime() const { return lifetime_; }
-    std::uint32_t BaseValue6c() const { return baseValue6c_; }
-    std::string& Name() { return name_; }
-    const std::list<IAutomaton*>& Automata() const { return automata_; }
-    std::uint32_t LiveCount() const { return liveCount_; }
+    std::uint32_t LiveCount() const { return host_->BaseLiveCount(); }
     std::uint32_t SpawnedCount() const { return spawned_; }
     std::uint32_t LifetimeLimit() const { return lifetimeLimit_; }
     std::uint32_t Group() const { return group_; }
@@ -195,11 +204,6 @@ private:
     IAutomataGeneratorHost* host_;
     GeneratorTemplate* tmpl_ = nullptr;   // +0x20
     std::uint32_t refCount_ = 0;          // +0x34
-    std::string name_;                    // +0x48
-    std::uint32_t baseValue6c_ = 2;       // +0x6c (ctor stores 2)
-    std::list<IAutomaton*> automata_;     // +0x70
-    std::uint32_t liveCount_ = 0;         // +0x88
-    float lifetimeElapsed_ = 0, lifetime_ = 0;   // +0x98, +0x9c
     cRZRandom random_;                    // +0xa8
     ControllerTime elapsed_, period_;     // +0xc0, +0xc8
     std::uint32_t spawned_ = 0, lifetimeLimit_ = 0, group_ = 0, groupSpawned_ = 0, groupLimit_ = 0;   // +0xd0..+0xe0

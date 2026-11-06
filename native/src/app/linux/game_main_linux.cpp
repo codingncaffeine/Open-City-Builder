@@ -1001,6 +1001,8 @@ int RunScenario(const std::string& path) {
             }
         } else if (command == "dispatches") {   // dispatches: the records, their vehicles and states
             native::NativeDispatchReport();
+        } else if (command == "generators") {   // generators: the automata the generators made, where they are on screen
+            native::NativeGeneratorReport();
         } else if (command == "dispatchat") {   // dispatchat TYPE PX PY: the same, to the ground under a screen point
             std::uint32_t type = 0;
             int px = 0, py = 0;
