@@ -14,9 +14,11 @@ void InstallSoundBankStub();
 void InstallAuraStub();
 void InstallAutomataAttractorStub();
 void InstallAutomataControllerStub();
+void InstallAutomataControllerHost();   // app/NativeAutomataControllerHost.cpp
 void InstallControllerManagerStub();
 void InstallAutomataManagerStub();
 void InstallAutomataManagerHost();   // app/NativeAutomataManagerHost.cpp
+void InstallAutomataScriptHost();    // app/NativeAutomataScripts.cpp
 void InstallAutomataHost();
 void InstallBudgetStub();
 void InstallBudgetDialogStub();
@@ -122,9 +124,11 @@ void InstallStubHosts() {
     InstallAuraStub();
     InstallAutomataAttractorStub();
     InstallAutomataControllerStub();
+    InstallAutomataControllerHost();   // the native host replaces the stub
     InstallControllerManagerStub();
     InstallAutomataManagerStub();
     InstallAutomataManagerHost();   // the native host replaces the stub
+    InstallAutomataScriptHost();    // the automata scripts run on the real Lua host
     InstallAutomataHost();   // NativeAutomata.cpp: the models, the city sizes, the terrain
     InstallBudgetStub();
     InstallBudgetDialogStub();

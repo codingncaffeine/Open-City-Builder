@@ -523,6 +523,9 @@ bool cSC4AutomataScriptSystem::ExecuteScripts() {
     } else {
         Reportf("Error code %d executing automata _config.lua script!", error);
     }
+    if (std::getenv("SC4_DEBUG"))
+        std::fprintf(stderr, "automata scripts: status %d, %zu occupant groups (%zu with an id), %zu automata groups, %zu controller templates, %zu track building groups\n",
+                     error, occupantGroups_.size(), groupsById_.size(), automataGroups_.size(), templates_.size(), trackBuildings_.size());
     scripting_ = false;
     if (lua_) {
         lua_->Close();

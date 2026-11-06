@@ -279,4 +279,20 @@ Host g_host;
 
 void InstallAutomataManagerHost() { sc4::SetAutomataManagerHost(&g_host); }
 
+// The view utilities for hosts that cannot include the renderer's header next to their own.
+bool NativeViewAvailable() { return CityRenderer() && CityRenderer()->GetViewUtilities(); }
+// Where a world point lands in the view (viewport pixels); false without a view.
+bool NativeProjectToViewport(const float* xyz, float out[3]) {
+    SC4ViewUtilities* view = CityRenderer() ? CityRenderer()->GetViewUtilities() : nullptr;
+    if (!view) return false;
+    out[0] = xyz[0]; out[1] = xyz[1]; out[2] = xyz[2];
+    view->ProjectPointToViewCoordinates(out);
+    view->ProjectPointFromViewCoordinatesToViewportCoordinates(out);
+    return true;
+}
+bool NativePointInViewFrustum(const float* xyz) {
+    SC4ViewUtilities* view = CityRenderer() ? CityRenderer()->GetViewUtilities() : nullptr;
+    return view && view->IsPointInViewFrustum(xyz);
+}
+
 }  // namespace native

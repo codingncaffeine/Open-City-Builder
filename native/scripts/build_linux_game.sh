@@ -4,7 +4,7 @@
 #   scripts/build_linux_game.sh [debug]      debug: -O0 + AddressSanitizer
 #   JOBS=N scripts/build_linux_game.sh      N parallel compiles (default: a quarter of the cores, so the desktop stays usable)
 #   SC4_GAME_CONTENTS=<folder with GameData/> build/sc4_game_linux [--shot out.png [--frames N] | --script scenario.txt]
-# Needs clang, libc++, SDL3, libepoxy, FreeType, libpng and libmpg123 (the Mac-derived classes assert libc++'s layouts).
+# Needs clang, ar, xxd, libc++, SDL3, libepoxy, FreeType, libpng and libmpg123 (the Mac-derived classes assert libc++'s layouts).
 set -e
 cd "$(dirname "$0")/.."
 MODE=${1:-fast}
@@ -20,6 +20,11 @@ if [ ! -f build/generated/app_icon.inc ] || [ ../art/logo-256.png -nt build/gene
   rm -f $OBJ/src_app_linux_game_main_linux.cpp.o
 fi
 CF="$CF -Ibuild/generated"
+# The scripting language: Lua 5.0.2 as a static library, and its Lua 4 compatibility script compiled into the host.
+LUA=../third_party/lua-5.0.2
+CF="$CF -I$LUA/include -I$LUA/src"
+[ $LUA/etc/compat.lua -nt build/generated/lua_compat.inc ] && rm -f $OBJ/src_lua_SCLuaInstance.cpp.o
+LUA_OPT="$OPT" bash scripts/build_lua50.sh $OBJ/lua50
 LIST=scripts/linux_game_link_list.txt
 OBJS=""
 for s in $(grep -v '^#' $LIST); do OBJS="$OBJS $OBJ/$(echo "$s" | tr '/' '_').o"; done
@@ -34,5 +39,5 @@ if [ -s "$FAILED" ]; then
   rm -f "$FAILED"; exit 1
 fi
 rm -f "$FAILED"
-clang++ -stdlib=libc++ $LD $OBJS $(pkg-config --libs sdl3 epoxy freetype2 libpng libmpg123) -o $OUT
+clang++ -stdlib=libc++ $LD $OBJS $OBJ/lua50/liblua50.a $(pkg-config --libs sdl3 epoxy freetype2 libpng libmpg123) -o $OUT
 echo "built $OUT"

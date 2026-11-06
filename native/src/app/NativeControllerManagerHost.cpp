@@ -9,6 +9,7 @@
 #include "app/NativeCityView.h"
 #include "platform/Unwired.h"
 #include "rz/cRZRandom.h"
+#include "sc4/AutomataAttractor.h"
 #include "sc4/AutomataControllerManager.h"
 #include "sc4/AutomataScriptSystem.h"
 #include "sc4/ServiceLocator.h"
@@ -72,8 +73,17 @@ struct NativeControllerManagerHost final : IControllerManagerHost {
     bool AutomataLayersRunning() override { return CityAutomataLayersActive(); }
     const float* ViewPosition() override { return CityViewEye(); }   // SL::spViewUtilities + 0x44
     int ViewZoom() override { return CityViewZoom(); }               // SL::spViewUtilities + 0x14
-    // GZCOM()->CreateInstance(classKey, 0x6a1857f8): the controller classes' creators are not wired, so no controller is made.
-    cSC4AutomataController* CreateController(std::uint32_t) override { SC4_UNWIRED("IControllerManagerHost::CreateController (controller creators)"); return nullptr; }
+    // GZCOM()->CreateInstance(classKey, 0x6a1857f8)
+    // PARTIAL: generators (0x4a1628c5) still run on the load-only host, so no new generator is made.
+    cSC4AutomataController* CreateController(std::uint32_t classKey) override {
+        if (classKey == kControllerTypeAttractor) {
+            auto* attractor = new cSC4AutomataAttractor();
+            attractor->AddRef();
+            return attractor;
+        }
+        SC4_UNWIRED("IControllerManagerHost::CreateController (generator controllers)");
+        return nullptr;
+    }
     // the city's lot manager (city vslot 0x108 -> vslot 0x70): not reachable natively; the answer is only compared for identity
     const void* LotOf(cISC4Occupant*) override { SC4_UNWIRED("IControllerManagerHost::LotOf (lot manager)"); return nullptr; }
     double RandomDouble() override { cRZRandom random(0xffffffffu); return random.RandomDoubleUniform(); }   // a fresh clock-seeded generator per call
