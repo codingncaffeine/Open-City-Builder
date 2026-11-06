@@ -250,10 +250,25 @@ private:
 class PedestrianHost final : public TrafficHostOf<IPedestrianHost> {
 public:
     PedestrianHost() : TrafficHostOf<IPedestrianHost>(CityComponent::PedestrianManager) {}
-    // The occupant manager's box query (slot 0x120); the references go to the caller.
-    // PARTIAL: the native automata are not in the occupant manager yet, so a pedestrian finds no other pedestrian here.
+    // The occupant manager's box query (slot 0x120); the references go to the caller. The native automata are not in the
+    // occupant manager, so the pedestrians of a box (the only type the pedestrian asks for) come from their manager's list.
     void OccupantsInBox(const float* lo, const float* hi, std::uint32_t type, int count, std::vector<cISC4Occupant*>& out) override {
-        NativeOccupantsInBox(lo, hi, type, count, out);
+        if (type != kPedestrianOccupantType) {
+            NativeOccupantsInBox(lo, hi, type, count, out);
+            return;
+        }
+        auto* manager = Component<cSC4AutomataManager>(CityComponent::PedestrianManager);
+        if (!manager) return;
+        for (IAutomataAutomaton* view : manager->Automata()) {
+            if (static_cast<int>(out.size()) >= count) break;
+            auto* pedestrian = view ? dynamic_cast<cSC4Pedestrian*>(AutomatonOf(view)) : nullptr;
+            if (!pedestrian) continue;
+            float p[3] = {0.0f, 0.0f, 0.0f};
+            pedestrian->GetPosition(p);
+            if (p[0] < lo[0] || p[0] > hi[0] || p[1] < lo[1] || p[1] > hi[1] || p[2] < lo[2] || p[2] > hi[2]) continue;
+            pedestrian->AddRef();
+            out.push_back(pedestrian->AsOccupant());
+        }
     }
     void IgniteOccupant(cISC4Occupant*) override {}   // PARTIAL: the fire disaster manager (arsonists)
     ITrafficNetworkMapLot* LotAt(int cellX, int cellZ) override { return NativeTrafficLotAt(cellX, cellZ); }
