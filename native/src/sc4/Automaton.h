@@ -227,6 +227,8 @@ public:
     virtual float SpeedMin() const = 0;                   // +0xd8
     virtual float SpeedMax() const = 0;                   // +0xdc
     virtual void GetGroupHierarchyDepth() = 0;            // cSC4OccupantGroupTemplate::GetGroupHierarchyDepth
+    // +0x58 (i386): the groups of the cars a vehicle of this group pulls ("trailers"), in order; null without a list.
+    virtual const std::list<std::uint32_t>* TrailerGroupIds() const { return nullptr; }
 };
 
 class cSC4AutomataController;
@@ -398,7 +400,7 @@ public:
     const char* GetDebugFlagsText() const;                            // 0x318 @ 0x10010d408
     virtual const char* GetDebugExtraText() const;                            // 0x320 @ 0x10010d8bc
     tAutomataState* CreateAutomataState(std::uint32_t state);         // 0x328 @ 0x10010d96a
-    void SetAutomataGroup(IAutomatonGroupTemplate* group);             // 0x330 @ 0x10010dcac
+    virtual void SetAutomataGroup(IAutomatonGroupTemplate* group);     // 0x330 @ 0x10010dcac
     cGZPersistResourceKey GetModelResourceKey(int index) const;       // 0x338 @ 0x1001071bc
     bool LoadModels();                                                // 0x340 @ 0x10010b4e6
     bool UnloadModels();                                              // 0x348 @ 0x10010b81a

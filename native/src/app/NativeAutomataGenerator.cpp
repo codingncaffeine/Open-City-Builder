@@ -13,6 +13,7 @@
 #include <set>
 
 #include "app/NativeAutomataViews.h"
+#include "sc4/TrailerVehicle.h"
 #include "app/NativeZoneDeveloperHost.h"
 #include "sc4/AutomataController.h"
 #include "sc4/AutomataGenerator.h"
@@ -311,6 +312,35 @@ void NativePedestrianReport(int limit) {
                     static_cast<void*>(model), model ? model->GetFrame() : -1, model ? model->GetFrameCount() : -1, a->GetOpacity());
     }
     std::printf("pedestrians: %d held, %d with a model, %d on screen, %ld sprite quads drawn so far\n", total, withModel, onScreen, NativeSpritesDrawn());
+}
+
+// The kit's `trailers`: every trailer vehicle the vehicle manager holds that is on screen, with the cars it pulls.
+void NativeTrailerReport(int limit) {
+    cSC4AutomataManager* manager = NativeAutomataManagerForGroup(0x4000);   // the vehicles' base group
+    if (!manager) { std::printf("trailers: no manager\n"); return; }
+    int leads = 0, withCars = 0, cars = 0, shown = 0;
+    for (IAutomataAutomaton* view : manager->Automata()) {
+        auto* lead = view ? dynamic_cast<cSC4TrailerVehicle*>(AutomatonOf(view)) : nullptr;
+        if (!lead) continue;
+        ++leads;
+        if (lead->GetNumCars() != 0) ++withCars;
+        cars += static_cast<int>(lead->GetNumCars());
+        float p[3] = {0, 0, 0}, s[3] = {0, 0, 0};
+        lead->GetPosition(p);
+        if (!NativeProjectToViewport(p, s) || !NativeViewportHolds(s) || shown >= limit) continue;
+        ++shown;
+        std::printf("trailers: lead at (%.0f, %.1f, %.0f) on screen (%.0f, %.0f) radius %.1f opacity %.2f pulls %u of %u", p[0], p[1], p[2], s[0], s[1],
+                    lead->GetRadius(), lead->GetOpacity(), lead->GetNumCars(), lead->GetDesiredNumCars());
+        for (cSC4Vehicle* car : lead->Cars()) {
+            float c[3] = {0, 0, 0}, cs[3] = {0, 0, 0};
+            car->GetPosition(c);
+            NativeProjectToViewport(c, cs);
+            std::printf("; car at (%.0f, %.1f, %.0f) on screen (%.0f, %.0f) model %p opacity %.2f", c[0], c[1], c[2], cs[0], cs[1],
+                        static_cast<void*>(car->GetModelInstance()), car->GetOpacity());
+        }
+        std::printf("\n");
+    }
+    std::printf("trailers: %d leads, %d with cars, %d cars\n", leads, withCars, cars);
 }
 
 void NativeGeneratorReport() {

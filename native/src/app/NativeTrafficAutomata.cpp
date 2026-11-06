@@ -45,6 +45,10 @@ public:
     }
     double GetLayerDensity(std::uint32_t layer) override { return manager_->GetEdgeDensityMultiplier(static_cast<PopulateLayer>(layer)); }
     cSC4TrafficEffectManager* EffectManager() override { return &manager_->EffectManager(); }
+    cSC4Automaton* CreateAutomaton(std::uint32_t group, const cS3DVector3& position, std::uint32_t flags, std::uint8_t priority) override {
+        IAutomataAutomaton* made = manager_->CreateAutomaton(group, position, flags, cGZPersistResourceKey{}, nullptr, priority, nullptr);
+        return made ? AutomatonOf(made) : nullptr;
+    }
 private:
     cSC4TrafficAutomataManager* manager_;
     std::uint32_t layer_ = 0;

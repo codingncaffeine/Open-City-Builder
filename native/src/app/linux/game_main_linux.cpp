@@ -1003,6 +1003,10 @@ int RunScenario(const std::string& path) {
             native::NativeDispatchReport();
         } else if (command == "generators") {   // generators: the automata the generators made, where they are on screen
             native::NativeGeneratorReport();
+        } else if (command == "trailers") {   // trailers [N]: the trailer vehicles (first N on screen) and their cars
+            int limit = 8;
+            words >> limit;
+            native::NativeTrailerReport(limit);
         } else if (command == "pedestrians") {   // pedestrians [N]: the pedestrian manager's count and the first N on screen
             int limit = 8;
             words >> limit;

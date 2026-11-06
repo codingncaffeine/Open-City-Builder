@@ -162,6 +162,12 @@ public:
     virtual std::uint32_t GetTravelType(cSC4Automaton* automaton) = 0;        // vslot 0x250
     virtual double GetLayerDensity(std::uint32_t layer) = 0;                 // vslot 0x288 (returns a double)
     virtual cSC4TrafficEffectManager* EffectManager() = 0;                   // +0xb60
+    // vslot 0x3c CreateAutomaton(group, position, flags, no model key, no listener, priority, no velocity): a new automaton
+    // of the group, held by the manager (the answer is borrowed); null when it makes none.
+    virtual cSC4Automaton* CreateAutomaton(std::uint32_t group, const cS3DVector3& position, std::uint32_t flags, std::uint8_t priority) {
+        (void)group; (void)position; (void)flags; (void)priority;
+        return nullptr;
+    }
 };
 
 // The tuning values the original reads from cSC4AutomataManager::sTuningParams (0x100b21880) and the loose globals.

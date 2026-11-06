@@ -30,6 +30,7 @@ std::uint32_t NativeDispatchAt(std::uint32_t type, float x, float z);
 void NativeDispatchReport();   // every dispatch record, its vehicle and state
 void NativeGeneratorReport();  // every automaton an automata generator made and still holds (app/NativeAutomataGenerator.cpp)
 void NativePedestrianReport(int limit);  // the pedestrian manager's count and the first `limit` on screen (app/NativeAutomataManagerHost.cpp)
+void NativeTrailerReport(int limit);  // the trailer vehicles on screen and the cars they pull (app/NativeAutomataGenerator.cpp)
 bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* city, gd::cIGZGDriver* driver, gz::cIGZDrawContext* screen, int viewportWidth, int viewportHeight);
 
 }  // namespace native

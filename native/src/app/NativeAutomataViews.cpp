@@ -46,6 +46,7 @@ public:
     float SpeedMin() const override { return group_->kphMin; }
     float SpeedMax() const override { return group_->kphMax; }
     void GetGroupHierarchyDepth() override { (void)group_->GetGroupHierarchyDepth(); }
+    const std::list<std::uint32_t>* TrailerGroupIds() const override { return &group_->trailerGroupIds; }
     cSC4OccupantGroupTemplate* group_;
 };
 

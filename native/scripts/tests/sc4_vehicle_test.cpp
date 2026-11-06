@@ -11,6 +11,7 @@
 #include <deque>
 #include <functional>
 #include <set>
+#include <list>
 #include <vector>
 
 #include "rz/PortMemoryStreams.h"
@@ -23,6 +24,7 @@
 #include "sc4/FireTruck.h"
 #include "sc4/Pedestrian.h"
 #include "sc4/SpecialVehicles.h"
+#include "sc4/TrailerVehicle.h"
 #include "sc4/Vehicle.h"
 
 static int failures = 0;
@@ -278,6 +280,22 @@ struct FakeManager final : ITrafficAutomataManager {
     std::uint32_t GetTravelType(cSC4Automaton*) override { return 1; }
     double GetLayerDensity(std::uint32_t) override { return 1.0; }
     cSC4TrafficEffectManager* EffectManager() override { return nullptr; }
+    // the trailer tests: what was asked for, and the automaton to hand out
+    cSC4Automaton* nextCreated = nullptr;
+    int created = 0;
+    std::uint32_t createdGroup = 0, createdFlags = 0;
+    std::uint8_t createdPriority = 0;
+    cS3DVector3 createdAt{0, 0, 0};
+    cSC4Automaton* CreateAutomaton(std::uint32_t group, const cS3DVector3& position, std::uint32_t flags, std::uint8_t priority) override {
+        ++created;
+        createdGroup = group;
+        createdAt = position;
+        createdFlags = flags;
+        createdPriority = priority;
+        cSC4Automaton* made = nextCreated;
+        nextCreated = nullptr;
+        return made;
+    }
 };
 
 struct FakeTrafficHost final : ITrafficAutomatonHost {
@@ -439,6 +457,153 @@ cSC4Vehicle* MakeVehicle(World& world) {
     auto* vehicle = new cSC4Vehicle(&world.host, &world.automatonHost);
     vehicle->AddRef();
     return vehicle;
+}
+
+// ---- the trailer vehicle (i386 0x00391d80 .. 0x003929ca) -------------------------------------------------------------
+struct TrailerGroup final : IAutomatonGroupTemplate {
+    std::list<std::uint32_t> trailers;
+    std::uint32_t GroupId() const override { return 0x4222; }
+    IAutomatonGroupTemplate* Parent() const override { return nullptr; }
+    float SpeedMin() const override { return 0.0f; }
+    float SpeedMax() const override { return 0.0f; }
+    void GetGroupHierarchyDepth() override {}
+    const std::list<std::uint32_t>* TrailerGroupIds() const override { return &trailers; }
+};
+struct TestTrailer final : cSC4TrailerVehicle {
+    using cSC4TrailerVehicle::cSC4TrailerVehicle;
+    void SetRadiusForTest(float radius) { radius_ = radius; }
+};
+struct TestCar final : cSC4Vehicle {
+    using cSC4Vehicle::cSC4Vehicle;
+    void SetRadiusForTest(float radius) { radius_ = radius; }
+};
+
+void TestTrailerVehicle() {
+    World world;
+    auto* lead = new TestTrailer(&world.host, &world.automatonHost);
+    lead->AddRef();
+    lead->SetRadiusForTest(4.0f);
+
+    // the point of a segment on the perpendicular through a point; the height goes by the SQUARED length ratio
+    cS3DVector3 out{9, 9, 9};
+    CHECK(lead->FindPointOnPathSegment(Vec(4, 0, 3), Vec(0, 0, 0), Vec(10, 2, 0), out));
+    CHECK_NEAR(out.x, 4.0f);
+    CHECK_NEAR(out.z, 0.0f);
+    CHECK_NEAR(out.y, 0.32f);   // 16 / 100 of the rise of 2 (a plain ratio would give 0.8)
+    CHECK(!lead->FindPointOnPathSegment(Vec(12, 0, 3), Vec(0, 0, 0), Vec(10, 2, 0), out));   // past the end
+    CHECK(!lead->FindPointOnPathSegment(Vec(4, 0, 3), Vec(5, 1, 5), Vec(5, 1, 5), out));     // no segment
+
+    // the group's trailer list names the cars to pull
+    TrailerGroup group;
+    group.trailers = {0x4223, 0x4224};
+    lead->SetAutomataGroup(&group);
+    CHECK(lead->GetDesiredNumCars() == 2 && lead->DesiredCars()[0] == 0x4223 && lead->DesiredCars()[1] == 0x4224);
+    CHECK(lead->GetNumCars() == 0);
+
+    // a road along x; the lead stands at x = 60 heading +x
+    cSC4PathInfo* info = MakePathInfo();
+    const std::uint32_t key = AddPath(info, 1, 0, 2, {Vec(0, 0, 50), Vec(100, 0, 50)});
+    FakeOccupant* road = MakeOccupant(info);
+    const tPath* stored = info->GetPath(key, nullptr);
+    CHECK(stored != nullptr);
+    if (stored) {
+        const float heading[3] = {1.0f, 0.0f, 0.0f};
+        lead->SetPath(road, key, &stored->points, true);
+        lead->SetPathIndex(1);
+        lead->SetPathPos(Vec(60, 0, 50));
+        const float at60[3] = {60.0f, 0.0f, 50.0f};
+        lead->MoveTo(at60, heading);
+        lead->DoAnimationTick(0, 0.0f);   // remembers the tail: position, occupant, path key
+        CHECK_NEAR(lead->TailPosition().x, 60.0f);
+        CHECK(lead->TailOccupant() == road && lead->TailPathKey() == key);
+        CHECK(lead->GetNumCars() == 0 && world.manager.created == 0);   // the tail has not moved two radii yet
+
+        // 10 further on (two radii = 8): the first car is made at the remembered tail position
+        auto* car = new TestCar(&world.host, &world.automatonHost);
+        car->AddRef();
+        car->SetRadiusForTest(3.0f);
+        car->SetAutomataFlag(2, true);
+        world.manager.nextCreated = car;
+        lead->SetPathPos(Vec(70, 0, 50));
+        const float at70[3] = {70.0f, 0.0f, 50.0f};
+        lead->MoveTo(at70, heading);
+        lead->SetPathIndex(1);
+        CHECK(lead->AddCarAtEnd());
+        CHECK(lead->GetNumCars() == 1 && world.manager.created == 1 && world.manager.createdGroup == 0x4223);
+        CHECK_NEAR(world.manager.createdAt.x, 60.0f);
+        CHECK(!car->CheckAutomataFlag(2));
+        CHECK(car->GetNetworkOccupant() == road && car->GetPathKey() == key);
+        float p[3] = {0, 0, 0};
+        car->GetPosition(p);
+        CHECK_NEAR(p[0], 60.0f);
+        CHECK_NEAR(p[2], 50.0f);
+        CHECK(!lead->AddCarAtEnd() && world.manager.created == 1);   // the new tail stands on the remembered position
+
+        // following on the road: the car's path position is the lead's rear (70 - 4) on the path, the car half the
+        // lead's radius behind it; a car without a previous heading takes the segment's
+        lead->TickFollowingCars(16.0f);
+        CHECK_NEAR(car->GetPathPos().x, 66.0f);
+        CHECK_NEAR(car->GetPathPos().z, 50.0f);
+        car->GetPosition(p);
+        CHECK_NEAR(p[0], 64.0f);
+        CHECK_NEAR(p[2], 50.0f);
+        CHECK_NEAR(car->GetPrevOrient().x, 1.0f);
+        CHECK(car->CurrentPath() == &stored->points);
+        // the heading turns halfway from the previous one
+        car->SetPrevOrient(Vec(0, 0, 1));
+        lead->TickFollowingCars(16.0f);
+        CHECK_NEAR(car->GetPrevOrient().x, 0.5f);
+        CHECK_NEAR(car->GetPrevOrient().z, 0.5f);
+        car->GetPosition(p);
+        CHECK_NEAR(p[0], 65.0f);   // 66 - 2 * 0.5
+        CHECK_NEAR(p[2], 49.0f);   // 50 - 2 * 0.5
+
+        // the lead on the next road, its rear still over the first: the search goes back through the path history
+        cSC4PathInfo* nextInfo = MakePathInfo();
+        const std::uint32_t nextKey = AddPath(nextInfo, 1, 2, 0, {Vec(100, 0, 50), Vec(200, 0, 50)});
+        CHECK(nextKey != key);
+        FakeOccupant* nextRoad = MakeOccupant(nextInfo);
+        const tPath* nextStored = nextInfo->GetPath(nextKey, nullptr);
+        CHECK(nextStored != nullptr);
+        if (nextStored) {
+            lead->SetPath(nextRoad, nextKey, &nextStored->points, true);
+            lead->PathHistory().clear();
+            tLookaheadNode node;
+            node.occupant = road;
+            node.key = key;
+            lead->PathHistory().push_back(node);
+            lead->SetPathIndex(1);
+            lead->SetPathPos(Vec(103, 0, 50));
+            const float at103[3] = {103.0f, 0.0f, 50.0f};
+            lead->MoveTo(at103, heading);
+            car->SetPrevOrient(Vec(1, 0, 0));
+            lead->TickFollowingCars(16.0f);
+            CHECK_NEAR(car->GetPathPos().x, 99.0f);
+            CHECK(car->GetNetworkOccupant() == road && car->GetPathKey() == key && car->CurrentPath() == &stored->points);
+            car->GetPosition(p);
+            CHECK_NEAR(p[0], 97.0f);
+        }
+
+        // off the road the car is set one of its radii behind the lead's rear, facing it
+        const float off[3] = {110.0f, 0.0f, 60.0f};
+        const float diagonal[3] = {0.0f, 0.0f, 1.0f};
+        lead->MoveTo(off, diagonal);
+        lead->TickFollowingCarsOffRoad(16.0f);
+        CHECK_NEAR(car->GetPathPos().x, 110.0f);   // the hitch: the lead's rear
+        CHECK_NEAR(car->GetPathPos().z, 56.0f);
+        car->GetPosition(p);
+        const float dx = 110.0f - p[0], dz = 56.0f - p[2];
+        CHECK_NEAR(std::sqrt(dx * dx + dz * dz), 3.0f);
+
+        lead->Shutdown();
+        car->Shutdown();
+        car->Release();
+        nextRoad->Release();
+        nextInfo->Release();
+    }
+    lead->Release();
+    road->Release();
+    info->Release();
 }
 
 void TestConstructionAndQueries() {
@@ -1663,6 +1828,7 @@ int main() {
     TestPatrolCar();
     TestFireTruck();
     TestPedestrian();
+    TestTrailerVehicle();
     if (failures == 0) {
         std::printf("sc4_vehicle: ok\n");
         return 0;
