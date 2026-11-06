@@ -167,8 +167,7 @@ extern const std::uint32_t kSignpostBoardColors[2];
 // ---- the occupant -------------------------------------------------------------------------------------------
 class cSC4SignpostOccupant : public cSC4PropOccupant,
                              public s3d::cS3DModelInstanceBasic,
-                             public cIGZMessageTarget2,
-                             public cISC4SignpostOccupant {
+                             public cISC4SignpostOccupant {   // the cIGZMessageTarget2 (+0x10) is the prop base's
 public:
     cSC4SignpostOccupant();                        // @ 0x10070e6ae
     ~cSC4SignpostOccupant() override;              // @ 0x1007110ca (+ 0x100710d00, 0x100710d12)

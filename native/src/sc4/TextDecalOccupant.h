@@ -85,7 +85,7 @@ public:
     virtual void SetAlpha(float alpha) = 0;                                    // [10]
 };
 
-class cSC4TextDecalOccupant : public cSC4PropOccupant, public cIGZMessageTarget2, public cISC4TextDecalOccupant {
+class cSC4TextDecalOccupant : public cSC4PropOccupant, public cISC4TextDecalOccupant {   // the message target is the prop's
 public:
     cSC4TextDecalOccupant();
     ~cSC4TextDecalOccupant() override;

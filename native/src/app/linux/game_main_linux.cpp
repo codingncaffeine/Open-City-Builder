@@ -32,6 +32,7 @@
 #include "platform/PointerState.h"
 #include "sc4/RegionDialogs.h"
 #include "app/NativeBudgetUi.h"
+#include "app/NativeAnimationCoordinator.h"
 #include "app/NativeBoot.h"
 #include "app/NativeCity.h"
 #include "app/NativeAnimationTicks.h"
@@ -1007,6 +1008,10 @@ int RunScenario(const std::string& path) {
             int limit = 8;
             words >> limit;
             native::NativeTrailerReport(limit);
+        } else if (command == "animated") {   // animated [N]: the animation coordinator and the first N ticking props' frames
+            int limit = 8;
+            words >> limit;
+            native::NativeAnimationReport(limit);
         } else if (command == "pedestrians") {   // pedestrians [N]: the pedestrian manager's count and the first N on screen
             int limit = 8;
             words >> limit;

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "sc4/Render3D.h"
+#include "app/NativeAnimationCoordinator.h"
 #include "app/NativeDecalOverlay.h"
 #include "app/NativeShadowOverlay.h"
 #include "app/NativeUi.h"
@@ -562,7 +563,8 @@ public:
         return true;
     }
     sc4::IModelBackgroundLoader* CreateBackgroundLoader() override { return nullptr; }
-    sc4::IModelAnimationCoordinator* CreateAnimationCoordinator() override { return nullptr; }
+    sc4::IModelAnimationCoordinator* CreateAnimationCoordinator() override { return NativeCreateAnimationCoordinator(); }
+    s3d::cIS3DModelInstanceAnimated* CreateAnimatedModel(const cGZPersistResourceKey& key) override { return NativeCreateAnimatedModel(key); }
     sc4::cISC4OccupantFilter* CreateZoomRotationModelChangeOccupantFilter() override { return nullptr; }
     void SetZoomRotationFilter(sc4::cISC4OccupantFilter*, int, int) override {}
     std::uint32_t GetModelInstanceID(sc4::cISC4Occupant* occupant, int zoom, int rotation, int state, bool lit, std::uint32_t* outA, std::uint32_t* outB) override {

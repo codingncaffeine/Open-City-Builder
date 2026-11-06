@@ -1864,28 +1864,46 @@ s3d::cIS3DModelInstance* cSC4ModelMaker::CreatePlaceHolderModelInstance(cISC4Occ
 s3d::cIS3DModelInstance* cSC4ModelMaker::AddModel(cISC4Occupant* occupant, const cGZPersistResourceKey& key,
                                                   int rotation, int state, bool lit, const float* position,
                                                   const float* offset) {
-    // PARTIAL: the animated-model branch (model class 0xea123be1 / 0xaa123bf9 -> GetAnimatedModelFromResourceKey,
-    // then the animated object's vslot 0x98 / 0xd8 / 0x108 / 0x118) is not recovered here; every model goes through
-    // the S3D resource path. The resource lookup, the size cull, the placeholder fallback, the transform and the
-    // placeable-object insert are the original's.
+    // i386 0x00248ce4. Model class 0xea123be1 / 0xaa123bf9 (0xaa123bf9 also turns with the occupant like a lit model)
+    // asks for an ANIMATED model first (GetAnimatedModelFromResourceKey): the instance plays at the view's zoom and
+    // rotation, auto frame rate 0.01 (frames per millisecond of the prop's tick = 10 per second), play mode from property
+    // 0x6a9edd07 when the exemplar has it. Without an animation the key falls back to the standard model group
+    // {0x5ad0e817, 0xbadb57f1} and the S3D path below, like any other model.
     if (!occupant) return nullptr;
     (void)rotation;
     cISCPropertyHolder* holder = occupant->AsPropertyHolder();
-    // The model class picks the animated path (0xea123be1 / 0xaa123bf9, not ported); class 0xaa123bf9 models turn
-    // with the occupant like the lit ones (0x1003143b6).
     const int modelClass = g_utility ? g_utility->GetOccupantModelClass(occupant) : 0;
-    const bool objectRotation = lit || modelClass == static_cast<int>(0xaa123bf9u);
+    bool objectRotation = lit;
     cGZPersistResourceKey modelKey = key;
-    void* raw = nullptr;
-    if (resourceManager_ && resourceManager_->GetResource(modelKey, 0x9ad0e7e3, &raw, 0, nullptr) && raw) {
-        // the resource answered
-    } else if (resourceManager_ && (modelKey.type != 0x5ad0e817 || modelKey.group != 0xbadb57f1)) {
-        // then the same instance as an S3D model of the standard model group {0x5ad0e817, 0xbadb57f1}
-        modelKey.type = 0x5ad0e817;
-        modelKey.group = 0xbadb57f1;
-        if (!resourceManager_->GetResource(modelKey, 0x9ad0e7e3, &raw, 0, nullptr)) raw = nullptr;
-    }
     s3d::cIS3DModelInstance* instance = nullptr;
+    if (modelClass == static_cast<int>(0xea123be1u) || modelClass == static_cast<int>(0xaa123bf9u)) {
+        if (modelClass == static_cast<int>(0xaa123bf9u)) objectRotation = true;
+        if (s3d::cIS3DModelInstanceAnimated* animated = g_host ? g_host->CreateAnimatedModel(modelKey) : nullptr) {
+            instance = animated->AsModelInstance();
+            if (instance) instance->AddRef();
+            animated->SetZoomAndRotation(currentZoom_, currentRotation_);
+            animated->SetAutoFrameRate(0.01f);
+            std::uint8_t playMode = 0;
+            if (holder && holder->HasProperty(0x6a9edd07) && cSCPropertyHelp::GetPropertyValue(holder, 0x6a9edd07, playMode))
+                animated->SetPlayMode(playMode);
+            animated->Release();
+        }
+        if (!instance) {
+            modelKey.type = 0x5ad0e817;
+            modelKey.group = 0xbadb57f1;
+        }
+    }
+    void* raw = nullptr;
+    if (!instance) {
+        if (resourceManager_ && resourceManager_->GetResource(modelKey, 0x9ad0e7e3, &raw, 0, nullptr) && raw) {
+            // the resource answered
+        } else if (resourceManager_ && (modelKey.type != 0x5ad0e817 || modelKey.group != 0xbadb57f1)) {
+            // then the same instance as an S3D model of the standard model group {0x5ad0e817, 0xbadb57f1}
+            modelKey.type = 0x5ad0e817;
+            modelKey.group = 0xbadb57f1;
+            if (!resourceManager_->GetResource(modelKey, 0x9ad0e7e3, &raw, 0, nullptr)) raw = nullptr;
+        }
+    }
     if (raw) {
         auto* resource = static_cast<s3d::cIS3DResModel*>(static_cast<cIGZUnknown*>(raw));
         cS3DBoundingBox bounds;
@@ -1902,11 +1920,7 @@ s3d::cIS3DModelInstance* cSC4ModelMaker::AddModel(cISC4Occupant* occupant, const
         resource->CreateModelInstance(0, &instance);
         static_cast<cIGZUnknown*>(raw)->Release();
     }
-    // Port: the animated models (model class 0xea123be1 / 0xaa123bf9, or an animation key 0x29a5d1ec) have no
-    // animated-model path here, so they are left out instead of being shown as the placeholder box.
-    const bool animated = modelClass == static_cast<int>(0xea123be1u) || modelClass == static_cast<int>(0xaa123bf9u) ||
-                          key.type == 0x29a5d1ec;
-    if (!instance && !animated && (!ignoreMissingModels_ || (holder && holder->HasProperty(0x6a871b82)))) {
+    if (!instance && (!ignoreMissingModels_ || (holder && holder->HasProperty(0x6a871b82)))) {
         instance = CreatePlaceHolderModelInstance(occupant, currentZoom_, currentRotation_, state, objectRotation);
     }
     if (!instance) return nullptr;

@@ -4,12 +4,17 @@
 #include <mutex>
 #include <vector>
 
+#include <bit>
+
 #include "gz/StreamOps.h"
 #include "rz/cRZMessage2Standard.h"
+#include "s3d/ModelInstanceAnimatedSprite.h"
 
 namespace sc4 {
 
 namespace {
+constexpr std::uint32_t kGZIID_cIGZMessageTarget2Prop = 0x452294aa;
+constexpr std::uint32_t kMessagePropAnimationTick = 0x86ad10ee;   // the animation tick manager's message
 std::vector<std::uint32_t>& TypeList() {
     static std::vector<std::uint32_t> list;
     return list;
@@ -34,7 +39,38 @@ std::uint32_t GetPropTypeFromIndex(std::uint16_t index) {
 }
 
 bool cSC4PropOccupant::QueryInterface(std::uint32_t iid, void** out) {
-    return cSC4Occupant::QueryInterface(iid, out);   // (the original also answers 0x2977aa47 / 0xe9793a65 / the message target)
+    if (iid == kGZIID_cIGZMessageTarget2Prop) {
+        *out = static_cast<cIGZMessageTarget2*>(this);
+        AddRef();
+        return true;
+    }
+    return cSC4Occupant::QueryInterface(iid, out);   // (the original also answers 0x2977aa47 / 0xe9793a65)
+}
+
+bool cSC4PropOccupant::DoMessage(cIGZMessage2* message) {
+    if (!message || message->GetType() != kMessagePropAnimationTick) return true;
+    cISC43DPlaceableObject* placeable = GetPlaceableObject();
+    if (!placeable) return true;
+    placeable->AddRef();
+    std::uint32_t count = static_cast<std::uint32_t>(placeable->GetModelCount());
+    if (count != 0) {
+        auto* standard = static_cast<cIGZMessage2Standard*>(message);
+        const float milliseconds = std::bit_cast<float>(static_cast<std::uint32_t>(standard->GetData3()));
+        const float dilation = g_host ? g_host->AnimationTimeDilation() : 1.0f;
+        std::vector<cIS3DModelInstance*> models(count, nullptr);
+        placeable->GetModels(models.data(), count);
+        for (std::uint32_t i = 0; i < count; ++i) {
+            if (!models[i]) continue;
+            void* raw = nullptr;
+            if (models[i]->QueryInterface(s3d::kGZIID_cIS3DModelInstanceAnimated, &raw) && raw) {
+                auto* animated = static_cast<s3d::cIS3DModelInstanceAnimated*>(raw);
+                animated->DoAutoFrameUpdate(milliseconds * dilation);
+                animated->Release();
+            }
+        }
+    }
+    placeable->Release();
+    return true;
 }
 
 bool cSC4PropOccupant::Init() {

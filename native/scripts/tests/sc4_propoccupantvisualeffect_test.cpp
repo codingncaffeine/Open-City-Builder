@@ -108,11 +108,14 @@ int main() {
 
     // --- layout and construction -------------------------------------------------------------
     auto* object = NewObject();
-    CHECK(sizeof(cSC4PropOccupantVisualEffect) == 0xe8);
+    // The original object is 0xe8 bytes with the effect name at +0xb0; the port's prop base carries the original's
+    // cIGZMessageTarget2 view as a C++ base, whose vptr the port's layout had left out: 8 more bytes ahead of the members.
+    constexpr std::size_t kTargetView = 8;
+    CHECK(sizeof(cSC4PropOccupantVisualEffect) == 0xe8 + kTargetView);
     CHECK(object->GetGZCLSID() == 0x2977aa49);
     CHECK(object->AsOccupant() == static_cast<cISC4Occupant*>(object->AsPropOccupant()));
     CHECK(reinterpret_cast<const char*>(object->AsPropOccupant()) - reinterpret_cast<const char*>(object) == 0x08);
-    CHECK(reinterpret_cast<const char*>(&object->EffectName()) - reinterpret_cast<const char*>(object) == 0xb0);
+    CHECK(reinterpret_cast<const char*>(&object->EffectName()) - reinterpret_cast<const char*>(object) == 0xb0 + kTargetView);
     CHECK(object->Effect() == nullptr && !object->EffectActive() && object->DefaultTransition());
     CHECK(object->EffectName().Strlen() == 0 && object->EffectType() == 0);
     CHECK(object->NameVariantCount() == 0 && object->TypeVariantCount() == 0);

@@ -275,6 +275,9 @@ public:
     // Factories for the three helper objects (all unrecovered owners, one reference each).
     virtual IModelBackgroundLoader* CreateBackgroundLoader() = 0;                     // new(0x280) + Init(this)
     virtual IModelAnimationCoordinator* CreateAnimationCoordinator() = 0;              // new(0x88) + Init()
+    // GetAnimatedModelFromResourceKey (i386 0x00139f80): key type 0x29a5d1ec -> GetSpriteAnimFromResourceKey, 0x5ad0e817 ->
+    // GetMeshAnimFromResourceKey, else nothing. One reference; null when there is no animation.
+    virtual s3d::cIS3DModelInstanceAnimated* CreateAnimatedModel(const cGZPersistResourceKey& key) { (void)key; return nullptr; }
     virtual cISC4OccupantFilter* CreateZoomRotationModelChangeOccupantFilter() = 0;    // 0x1002c119a
     virtual void SetZoomRotationFilter(cISC4OccupantFilter* filter, int zoom, int rotation) = 0;   // 0x1002c11d6
     // cSC4ModelMakerUtility::GetModelInstanceID(occupant, zoom, rotation, rotationAndFlip, flag, &a, &b) @ 0x1002c03da

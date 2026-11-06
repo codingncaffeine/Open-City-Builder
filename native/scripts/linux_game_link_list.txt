@@ -783,3 +783,5 @@ src/s3d/ModelInstanceAnimatedSprite.cpp
 src/s3d/ResSpriteAnim.cpp
 src/sc4/MiscTypes.cpp
 src/app/NativeSprites.cpp
+src/app/NativeAnimationCoordinator.cpp
+src/sc4/AnimationCoordinator.cpp

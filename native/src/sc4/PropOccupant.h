@@ -32,15 +32,23 @@ public:
     virtual void SimulatorDate(cGZDate& out) = 0;   // spSimulator vslot 0x30
     virtual std::uint32_t RandomPercent() = 0;      // uniform 0..99
     virtual cISC4OccupantManager* OccupantManager() = 0;
+    virtual float AnimationTimeDilation() { return 1.0f; }   // spSimulator vslot 0x80 (GetAnimationTimeDilation)
 };
 IPropHost* PropHost();
 void SetPropHost(IPropHost* host);
 
-class cSC4PropOccupant : public cSC4Occupant {
+// The original's views: the prop interface, cIGZMessageTarget2 at +8 (the animation coordinator registers a prop with the
+// animation tick manager through it), the occupant base.
+class cSC4PropOccupant : public cSC4Occupant, public cIGZMessageTarget2 {
 public:
     cSC4PropOccupant() { type_ = kOccupantTypeProp; }
 
     bool QueryInterface(std::uint32_t iid, void** out) override;
+    std::uint32_t AddRef() override { return cSC4Occupant::AddRef(); }
+    std::uint32_t Release() override { return cSC4Occupant::Release(); }
+    // i386 0x001057e0: on the animation tick (0x86ad10ee) every animated model of the placeable object advances by the
+    // tick's milliseconds (data3, float bits) x the simulator's animation time dilation.
+    bool DoMessage(cIGZMessage2* message) override;
 
     // cSC4Occupant overrides
     bool Init() override;

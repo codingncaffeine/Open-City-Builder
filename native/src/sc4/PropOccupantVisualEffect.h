@@ -169,7 +169,9 @@ private:
     bool defaultTransition_ = true;        // +0xe5
 };
 
-static_assert(sizeof(cSC4PropOccupantVisualEffect) == 0xe8,
-              "cSC4PropOccupantVisualEffect layout must match the 0xe8-byte original object");
+// The original object is 0xe8 bytes; the port's is 8 more since the prop base carries the original's cIGZMessageTarget2
+// view as a C++ base (its vptr), which the port's layout had left out. The member offsets above stay the original's.
+static_assert(sizeof(cSC4PropOccupantVisualEffect) == 0xe8 + 8,
+              "cSC4PropOccupantVisualEffect layout: the 0xe8-byte original object + the prop's message-target vptr");
 
 }  // namespace sc4

@@ -114,6 +114,16 @@ public:
         if (serializable->GetGZCLSID() == kGZCLSID_cSC4Simulator) out = static_cast<cSC4Simulator*>(serializable)->GetSimDate();
         serializable->Release();
     }
+    float AnimationTimeDilation() override {
+        cIGZUnknown* object = Component(CityComponent::Simulator);
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(0xe4fda3d4, &raw) || !raw) return 1.0f;
+        auto* serializable = static_cast<cIGZSerializable*>(raw);
+        float dilation = 1.0f;
+        if (serializable->GetGZCLSID() == kGZCLSID_cSC4Simulator) dilation = static_cast<cSC4Simulator*>(serializable)->GetAnimationTimeDilation();
+        serializable->Release();
+        return dilation;
+    }
     std::uint32_t RandomPercent() override { static cRZRandom random(0x9a0u); return random.RandomUint32Uniform(100); }
     cISC4OccupantManager* OccupantManager() override {
         cIGZUnknown* object = Component(CityComponent::OccupantManager);

@@ -341,6 +341,9 @@ bool NativeViewportHolds(const float* viewport) {
     return rect && viewport[0] >= float(rect[0]) && viewport[0] < float(rect[2]) && viewport[1] >= float(rect[1]) && viewport[1] < float(rect[3]);
 }
 bool NativeViewAvailable() { return CityRenderer() && CityRenderer()->GetViewUtilities(); }
+// The view utilities' visible terrain area (+0x3ec..+0x3f8, world units x0, z0, x1, z1) and zoom (+0xc); zeros without a view.
+void NativeVisibleTerrainRect(float out[4]) { g_viewUtilities.ViewRect(out); }
+int NativeViewZoom() { int zoom = 0, rotation = 0; g_viewUtilities.GetZoomAndRotation(zoom, rotation); return zoom; }
 // Where a world point lands in the view (viewport pixels); false without a view.
 bool NativeProjectToViewport(const float* xyz, float out[3]) {
     SC4ViewUtilities* view = CityRenderer() ? CityRenderer()->GetViewUtilities() : nullptr;
