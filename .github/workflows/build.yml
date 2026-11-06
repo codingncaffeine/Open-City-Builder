@@ -17,7 +17,14 @@ jobs:
         run: tools/check-content.sh
       - name: Sources compile with modern compilers
         run: tools/check-portable.sh g++ clang++
+      # The runner image has cmake and ninja; only what is missing is fetched, and a stalled mirror connection is
+      # dropped and retried instead of using up the job's time.
       - name: Install the tools' dependencies
-        run: sudo apt-get update -q && sudo apt-get install -y -q cmake ninja-build libzydis-dev
+        run: |
+          need=libzydis-dev
+          command -v cmake >/dev/null || need="$need cmake"
+          command -v ninja >/dev/null || need="$need ninja-build"
+          apt="sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20"
+          $apt update -q && $apt install -y -q --no-install-recommends $need
       - name: Build obcmp and obsig
         run: cmake -S tools/obcmp -B build/obcmp -G Ninja && cmake --build build/obcmp
