@@ -31,6 +31,7 @@ struct SC4DrawAttributes {   // 0x14 bytes
 };
 
 class cIS3DModelInstance;
+class cIS3DModelInstanceAnimated;
 
 // The model resource as the instance uses it: slot 4 creates a model instance from it, slot 7 computes its bounding
 // box. (cSC4ModelMaker::AddModel 0x100314328 calls slot 7 then slot 4 with a zero flag word.)
@@ -47,7 +48,9 @@ class cIS3DResModel : public cIGZUnknown {
 public:
     virtual void Slot3() {}
     virtual bool CreateModelInstance(std::uint32_t flags, cIS3DModelInstance** out) = 0;   // [4] +0x20
-    virtual void Slot5() {}
+    // [5] cS3DResModel::GetModelInstance(id, cIS3DModelInstanceAnimated**) (i386 0x0034df5e): the frame-animated instance;
+    // one reference. A resource without frames answers false.
+    virtual bool CreateAnimatedModelInstance(std::uint32_t flags, cIS3DModelInstanceAnimated** out) { (void)flags; *out = nullptr; return false; }
     virtual void Slot6() {}
     virtual void ComputeBounds(cS3DBoundingBox& out) = 0;   // [7]
     // The shadow code's view of the model: false when the model has no mesh list for level 0.

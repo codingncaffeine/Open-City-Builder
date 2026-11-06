@@ -1,7 +1,5 @@
 // The animation coordinator's city services (sc4::IAnimationCoordinatorHost) and the model maker's animated models
 // (GetAnimatedModelFromResourceKey): sprite animations come from NativeSprites.cpp.
-//   PARTIAL: mesh animations (key type 0x5ad0e817, GetMeshAnimFromResourceKey) are not recovered; the model maker then
-//   falls back to the static S3D model of the standard group, as the original does when no animation loads.
 #include "app/NativeAnimationCoordinator.h"
 
 #include <cstdio>
@@ -169,7 +167,18 @@ s3d::cIS3DModelInstanceAnimated* NativeCreateAnimatedModel(const cGZPersistResou
         if (Trace()) std::fprintf(stderr, "anim: sprite %08x/%08x/%08x -> %p\n", key.type, key.group, key.instance, static_cast<void*>(sprite));
         return sprite;   // one reference (null when a resource is missing)
     }
-    return nullptr;   // PARTIAL: GetMeshAnimFromResourceKey (key type 0x5ad0e817)
+    if (key.type == 0x5ad0e817) {   // GetMeshAnimFromResourceKey (i386 0x00138656): the S3D resource's slot 5
+        void* raw = nullptr;
+        if (!SL::spRM || !SL::spRM->GetResource(key, 0x9ad0e7e3, &raw, 0, nullptr) || !raw) return nullptr;
+        auto* resource = static_cast<s3d::cIS3DResModel*>(static_cast<cIGZUnknown*>(raw));
+        s3d::cIS3DModelInstanceAnimated* animated = nullptr;
+        if (!resource->CreateAnimatedModelInstance(0, &animated)) animated = nullptr;
+        static_cast<cIGZUnknown*>(raw)->Release();
+        if (Trace()) std::fprintf(stderr, "anim: mesh %08x/%08x/%08x -> %p frames %d\n", key.type, key.group, key.instance,
+                                  static_cast<void*>(animated), animated ? animated->GetFrameCount() : 0);
+        return animated;
+    }
+    return nullptr;
 }
 
 }  // namespace native

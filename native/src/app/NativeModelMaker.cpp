@@ -22,6 +22,7 @@
 #include <set>
 #include "s3d/MaterialManager.h"
 #include "s3d/ModelInstance.h"
+#include "s3d/ModelInstanceAnimatedMesh.h"
 #include "s3d/S3DModel.h"
 #include "sc4/CellTextureModel.h"
 #include "sc4/DrawContext.h"
@@ -135,6 +136,22 @@ public:
         *out = nullptr;
         if (meshes_.empty()) return false;
         auto* instance = new s3d::cS3DModelInstance();
+        Fill(instance);
+        instance->AddRef();
+        *out = instance;
+        return true;
+    }
+    // The same fill in a cS3DModelInstanceAnimated (GetModelInstance 0x0034df5e: GetMeshAndMaterial into it, then the resource).
+    bool CreateAnimatedModelInstance(std::uint32_t, s3d::cIS3DModelInstanceAnimated** out) override {
+        *out = nullptr;
+        if (meshes_.empty()) return false;
+        auto* instance = new s3d::cS3DModelInstanceAnimated();
+        Fill(instance);
+        instance->AddRef();
+        *out = instance;
+        return true;
+    }
+    void Fill(s3d::cS3DModelInstance* instance) {
         for (std::size_t i = 0; i < meshes_.size(); ++i) {
             s3d::MeshRecord mesh{};
             std::memcpy(mesh.data(), &meshes_[i], sizeof(SC4Mesh));
@@ -145,9 +162,6 @@ public:
         }
         instance->SetModelResource(this);
         ++g_instances;
-        instance->AddRef();
-        *out = instance;
-        return true;
     }
     void ComputeBounds(cS3DBoundingBox& out) override { out = bounds_; }
     int FrameCount() const override { return static_cast<int>(frameMeshes_.size()); }

@@ -785,3 +785,4 @@ src/sc4/MiscTypes.cpp
 src/app/NativeSprites.cpp
 src/app/NativeAnimationCoordinator.cpp
 src/sc4/AnimationCoordinator.cpp
+src/s3d/ModelInstanceAnimatedMesh.cpp
