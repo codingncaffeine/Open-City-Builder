@@ -1240,9 +1240,9 @@ bool cSC4Automaton::HandleEnterState(tAutomataState* state) {
     switch (state->stateType) {
         case kStateRandomWalk: {
             auto* walk = static_cast<tAutomataStateRandomWalk*>(state);
-            walk->speed = 0.0f;
-            walk->turnRate = -0.01f;   // 0xbc23d70a
-            walk->target = orientation_;
+            walk->turnTimer = 0.0f;
+            walk->walkTimer = -0.01f;   // 0xbc23d70a: stands for an instant, then the first walk starts
+            walk->direction = orientation_;
             break;
         }
         case kStatePlummet: {
@@ -1479,30 +1479,84 @@ bool cSC4Automaton::DoIdleTick(float milliseconds) {
     return !GetMarkedForRemove();
 }
 
-// PARTIAL: the original turns by a random amount drawn from the behaviour template's delay/turn ranges (with the
-// atan2/sincos pair), picks a new speed through SetSpeedFromBehaviorTemplate and can drop back to a "bumped" state.
-// The port keeps the per-state timer bookkeeping and the forward step through MoveTo.
+// i386 0x000c4b58. The walk alternates between walking (walk timer >= 0) and standing (walk timer < 0). While walking,
+// every `delay` seconds the heading turns by a random part of a circle (up to +-turn[0], plus turn[1] the same way); the
+// automaton steers toward that heading (and its attraction) and steps at its current speed, kept on its network tile or on
+// the road / ground height. After `idle_delay` seconds it slows to a stop for `idle_time` seconds, with the idle
+// animation once it is slow enough; an idle delay of 0 never stands.
 bool cSC4Automaton::DoRandomWalkTick(float milliseconds) {
     tAutomataState* generic = GetState();
     if (!generic) return true;
     auto* state = static_cast<tAutomataStateRandomWalk*>(generic);
-    const float seconds = milliseconds / 1000.0f;
+    static const tBehaviorTemplate sDefaultBehaviorTemplate;
     const auto* behavior = reinterpret_cast<const tBehaviorTemplate*>(state->runtime30);
-    if (state->turnRate >= 0.0f) {
-        state->turnRate -= seconds;
-        state->speed -= seconds;
-        if (state->speed <= 0.0f) {
-            if (Host() && behavior) state->speed += static_cast<float>(Host()->RandomDouble(behavior->delay[0], behavior->delay[1]));
-            SetSpeedFromBehaviorTemplate(behavior);
-            PlayAnim(static_cast<std::uint32_t>(0));
+    if (!behavior) behavior = &sDefaultBehaviorTemplate;
+    const auto random = [this](float lo, float hi) { return Host() ? Host()->RandomDouble(lo, hi) : static_cast<double>(lo); };
+    const float seconds = milliseconds / 1000.0f;
+    const float walkTimer = state->walkTimer;
+    if (0.0f <= walkTimer) {
+        bool walking = std::fabs(behavior->idleDelay[0] - 1e-05f) < 0.0001f;   // no idle delay: the timer is left alone
+        if (!walking) {
+            state->walkTimer = walkTimer - seconds;
+            walking = 0.0f < state->walkTimer;
         }
-        const float speed = GetCurrentSpeed();
-        cS3DVector3 next = position_ + orientation_ * (speed * GetSpeedModifier() * milliseconds);
-        if (!CheckAutomataFlag(kAutomataFlagIgnoreTerrain) && Host()) next.y = Host()->TerrainHeight(next.x, next.z);
-        MoveTo(&next.x, &orientation_.x);
+        if (walking) {
+            float turnTimer = state->turnTimer - seconds;
+            state->turnTimer = turnTimer;
+            while (turnTimer <= 0.0f) {
+                const float wait = static_cast<float>(random(behavior->delay[0], behavior->delay[1]));
+                state->turnTimer = turnTimer + wait;
+                const float heading = static_cast<float>(std::atan2(static_cast<double>(state->direction.z), static_cast<double>(state->direction.x)));
+                const float turn = Host() ? static_cast<float>(Host()->RandomDouble(static_cast<double>(-behavior->turn[0]) - 1e-05,
+                                                                                    static_cast<double>(behavior->turn[0]) + 1e-05))
+                                          : 0.0f;
+                float angle = turn * 6.2831855f + heading;
+                if (0.0f <= turn) angle = behavior->turn[1] * 6.2831855f + angle;
+                else angle = angle - behavior->turn[1] * 6.2831855f;
+                const float sine = std::sin(angle);
+                state->direction.x = std::cos(angle);
+                state->direction.y = 0.0f;
+                state->direction.z = sine;
+                turnTimer = state->turnTimer;
+                if (!(0.0f < wait)) break;   // port guard: the original spins here on a delay range of 0
+            }
+            cS3DVector3 heading = state->direction;
+            if (!CheckAutomataFlag(kAutomataFlagIgnoreAttractors)) heading = heading + attraction_;
+            const float blend = milliseconds / 500.0f;
+            heading.z = blend * heading.z + orientation_.z;
+            heading.y = blend * heading.y + orientation_.y;
+            heading.x = blend * heading.x + orientation_.x;
+            nS3D::Normalize(heading);
+            cS3DVector3 next = position_;
+            const float modifier = GetSpeedModifier();
+            const float speed = GetCurrentSpeed();
+            next.x = speed * heading.x * modifier * milliseconds + next.x;
+            next.y = speed * heading.y * modifier * milliseconds + next.y;
+            next.z = speed * heading.z * modifier * milliseconds + next.z;
+            if (!CheckAutomataFlag(kAutomataFlagIgnoreRoads)) {
+                if (Host()) Host()->ConstrainVectorToNetworkTile(position_, next, 0xc49);
+            } else if (!CheckAutomataFlag(kAutomataFlagIgnoreTerrain)) {
+                if (Host()) next.y = Host()->RoadAltitude(next.x, next.z);
+            }
+            MoveTo(&next.x, &heading.x);
+            if (!CheckAutomataFlag(kAutomataFlagIgnoreAttractors)) UpdateAttraction();
+        } else {
+            state->walkTimer = -static_cast<float>(random(behavior->idleTime[0], behavior->idleTime[1]));
+            SetSpeed(0.0f, behavior->deceleration);
+        }
     } else {
-        if (Host() && behavior) state->turnRate = -static_cast<float>(Host()->RandomDouble(behavior->idleDelay[0], behavior->idleDelay[1]));
-        UpdateAttraction();
+        state->walkTimer = walkTimer + seconds;
+        if (state->walkTimer < 0.0f) {
+            if (!state->idleAnimStarted && GetCurrentSpeed() < 0.01f) {
+                state->idleAnimStarted = true;
+                PlayAnimByName(cRZString("idle"));   // kszIdleAnimName
+            }
+        } else {
+            state->walkTimer = static_cast<float>(random(behavior->idleDelay[0], behavior->idleDelay[1]));
+            SetSpeedFromBehaviorTemplate(behavior);
+            state->idleAnimStarted = false;
+            PlayAnim(state->value28);
+        }
     }
     return true;
 }

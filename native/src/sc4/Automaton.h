@@ -259,6 +259,10 @@ public:
     virtual float CitySizeX() = 0;                                                // city slot 0x2c8
     virtual float CitySizeZ() = 0;                                                // city slot 0x2d0
     virtual float TerrainHeight(float x, float z) = 0;                            // network manager slot 0x90
+    // The traffic network map (city slot 0xa0) as the random walk uses it: slot 0xb0 ConstrainVectorToNetworkTile keeps a
+    // step from `from` to `point` on its network tile, slot 0x48 GetRoadAltitude is the road (or ground) height at a point.
+    virtual bool ConstrainVectorToNetworkTile(const cS3DVector3& from, cS3DVector3& point, std::uint32_t flags) { (void)from; (void)point; (void)flags; return false; }
+    virtual float RoadAltitude(float x, float z) { return TerrainHeight(x, z); }
     virtual bool NetworkAt(int cellX, int cellZ) = 0;                             // network manager slot 0x70
     virtual bool LotAt(int cellX, int cellZ) = 0;                                 // lot manager slot 0x28
     virtual void PlaceOnNetwork(const cS3DVector3& from, const cS3DVector3& to, std::uint32_t mask) = 0;   // slot 0x160

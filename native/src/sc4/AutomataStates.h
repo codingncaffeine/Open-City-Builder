@@ -58,9 +58,10 @@ class tAutomataStateRandomWalk : public tAutomataState {   // @ Write 0x10010e2e
 public:
     bool Write(cIGZOStream& stream) const override;
     bool Read(cIGZIStream& stream) override;
-    cS3DVector3 target;        // +0x38
-    float speed = 0.0f;        // +0x44
-    float turnRate = 0.0f;     // +0x48
+    cS3DVector3 direction;     // +0x38 the heading the walk steers toward
+    float turnTimer = 0.0f;    // +0x44 seconds until the next turn
+    float walkTimer = 0.0f;    // +0x48 seconds left to walk (>= 0) or, negative, to stand
+    bool idleAnimStarted = false;   // +0x4c the stand's idle animation plays (not saved)
 };
 class tAutomataStateRiotLeader : public tAutomataState {   // @ Write 0x10010e390, Read 0x10010e3e6
 public:

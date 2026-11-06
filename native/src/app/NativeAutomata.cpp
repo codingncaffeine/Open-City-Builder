@@ -12,6 +12,7 @@
 #include "s3d/ModelInstanceAnimatedSprite.h"
 #include "sc4/Automaton.h"
 #include "sc4/TrafficAutomaton.h"
+#include "sc4/TrafficNetworkMap.h"
 #include "sc4/Render3D.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/cSC4City.h"
@@ -20,8 +21,8 @@
 namespace native {
 sc4::cSC4AutomataController* NativeFindAttraction(sc4::cISC4Occupant* occupant, cS3DVector3* direction, float* distance, float* strength);   // app/NativeAutomataControllerHost.cpp
 sc4::IAutomatonGroupTemplate* NativeFindAutomatonGroup(std::uint32_t id);                                                                  // app/NativeAutomataManagerHost.cpp
-namespace {
 s3d::cS3DModelInstanceAnimatedSprite* NativeCreateSpriteInstance(const cGZPersistResourceKey& key);   // app/NativeSprites.cpp
+namespace {
 using namespace sc4;
 
 constexpr std::uint32_t kGZIID_cIS3DResModel = 0x9ad0e7e3;
@@ -59,8 +60,8 @@ public:
 
 private:
     s3d::cIS3DModelInstance* instance_;
-    int refs_ = 1;
     s3d::cIS3DModelInstanceAnimated* animated_;
+    int refs_ = 1;
 };
 
 class NullEffects final : public IAutomatonEffects {
@@ -90,21 +91,26 @@ sc4::cSTETerrain* Terrain() {
     return terrain;
 }
 
+cSC4TrafficNetworkMap* NetworkMap() {
+    cIGZUnknown* object = g_city ? g_city->GetComponent(CityComponent::TrafficNetwork) : nullptr;
+    return object ? dynamic_cast<cSC4TrafficNetworkMap*>(object) : nullptr;
+}
+
 class AutomataHost final : public IAutomatonHost {
 public:
     IAutomatonModel* CreateModel(const cGZPersistResourceKey& key) override {
-        void* resource = nullptr;
-        if (!SL::spRM || !SL::spRM->GetResource(key, kGZIID_cIS3DResModel, &resource, 0, nullptr) || !resource) return nullptr;
-        auto* res = static_cast<s3d::cIS3DResModel*>(resource);
-        s3d::cIS3DModelInstance* instance = nullptr;
-        const bool ok = res->CreateModelInstance(0, &instance);
-        res->Release();
         if (key.type == s3d::kGZIID_cIS3DResSpriteAnim) {   // a sprite animation (GetAnimatedModelFromResourceKey's first branch)
             s3d::cS3DModelInstanceAnimatedSprite* sprite = NativeCreateSpriteInstance(key);
             IAutomatonModel* model = sprite ? new AutomatonModel(sprite->AsModelInstance(), sprite) : nullptr;
             if (ModelTrace()) std::fprintf(stderr, "automata: model %p created from sprite %08x\n", static_cast<void*>(model), key.instance);
             return model;
         }
+        void* resource = nullptr;
+        if (!SL::spRM || !SL::spRM->GetResource(key, kGZIID_cIS3DResModel, &resource, 0, nullptr) || !resource) return nullptr;
+        auto* res = static_cast<s3d::cIS3DResModel*>(resource);
+        s3d::cIS3DModelInstance* instance = nullptr;
+        const bool ok = res->CreateModelInstance(0, &instance);
+        res->Release();
         if (std::getenv("SC4_DEBUG")) { static int shown = 0; if (shown++ < 4) std::fprintf(stderr, "automata: model %08x/%08x/%08x -> %s\n", key.type, key.group, key.instance, ok && instance ? "ok" : "none"); }
         IAutomatonModel* model = ok && instance ? new AutomatonModel(instance) : nullptr;
         if (ModelTrace()) std::fprintf(stderr, "automata: model %p created from %08x\n", static_cast<void*>(model), key.instance);
@@ -141,6 +147,14 @@ public:
     float CitySizeX() override { auto* t = Terrain(); return t ? static_cast<float>(t->CellCountX()) * 16.0f : 0.0f; }
     float CitySizeZ() override { auto* t = Terrain(); return t ? static_cast<float>(t->CellCountZ()) * 16.0f : 0.0f; }
     float TerrainHeight(float x, float z) override { auto* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
+    bool ConstrainVectorToNetworkTile(const cS3DVector3& from, cS3DVector3& point, std::uint32_t flags) override {
+        cSC4TrafficNetworkMap* map = NetworkMap();
+        return map && map->ConstrainVectorToNetworkTile(from, point, flags);
+    }
+    float RoadAltitude(float x, float z) override {
+        cSC4TrafficNetworkMap* map = NetworkMap();
+        return map ? map->GetRoadAltitude(x, z) : TerrainHeight(x, z);
+    }
     bool NetworkAt(int, int) override { return false; }
     bool LotAt(int, int) override { return false; }
     void PlaceOnNetwork(const cS3DVector3&, const cS3DVector3&, std::uint32_t) override {}

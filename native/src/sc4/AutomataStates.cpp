@@ -58,16 +58,16 @@ bool tAutomataState::Read(cIGZIStream& stream) {
 // ---- subclasses -------------------------------------------------------------------------------------------------------
 bool tAutomataStateRandomWalk::Write(cIGZOStream& stream) const {
     if (!tAutomataState::Write(stream)) return false;
-    stream << target;
-    stream.SetFloat32(speed);
-    stream.SetFloat32(turnRate);
+    stream << direction;
+    stream.SetFloat32(turnTimer);
+    stream.SetFloat32(walkTimer);
     return !stream.GetError();
 }
 bool tAutomataStateRandomWalk::Read(cIGZIStream& stream) {
     if (!tAutomataState::Read(stream)) return false;
-    stream >> target;
-    stream.GetFloat32(speed);
-    stream.GetFloat32(turnRate);
+    stream >> direction;
+    stream.GetFloat32(turnTimer);
+    stream.GetFloat32(walkTimer);
     return !stream.GetError();
 }
 

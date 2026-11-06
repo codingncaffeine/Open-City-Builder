@@ -68,9 +68,9 @@ int main() {
     {
         tAutomataStateRandomWalk s;
         FillBase(s);
-        s.target = {1, 2, 3}; s.speed = 4; s.turnRate = 5;
+        s.direction = {1, 2, 3}; s.turnTimer = 4; s.walkTimer = 5;
         tAutomataStateRandomWalk r = RoundTrip(s, ok);
-        CHECK(ok && BaseOk(r) && r.target.x == 1 && r.target.y == 2 && r.target.z == 3 && r.speed == 4 && r.turnRate == 5);
+        CHECK(ok && BaseOk(r) && r.direction.x == 1 && r.direction.y == 2 && r.direction.z == 3 && r.turnTimer == 4 && r.walkTimer == 5);
     }
     {
         tAutomataStateRiotLeader s;

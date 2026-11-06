@@ -114,6 +114,11 @@ struct FakeHost final : IAutomatonHost {
     std::uint32_t soundIds = 100;
     std::uint32_t stoppedLoops = 0;
     std::vector<cS3DVector3> networkMoves;
+    double randomFraction = 0.0;   // RandomDouble answers lo + (hi - lo) * this
+    int constrainCalls = 0, roadAltitudeCalls = 0;
+    cS3DVector3 constrainFrom{0, 0, 0};
+    std::uint32_t constrainFlags = 0;
+    float constrainX = 55.0f, roadY = 7.25f;
 
     IAutomatonModel* CreateModel(const cGZPersistResourceKey&) override { ++createdModels; return nextModel; }
     void DestroyModel(IAutomatonModel* model) override { ++destroyedModels; if (model) model->Release(); }
@@ -154,7 +159,15 @@ struct FakeHost final : IAutomatonHost {
     void PostAudioEvent(std::uint32_t) override {}
     std::uint32_t RandomBelow(std::uint32_t range) override { return range ? 0 : 0; }
     std::int32_t RandomInt(std::int32_t lo, std::int32_t) override { return lo; }
-    double RandomDouble(double lo, double) override { return lo; }
+    double RandomDouble(double lo, double hi) override { return lo + (hi - lo) * randomFraction; }
+    bool ConstrainVectorToNetworkTile(const cS3DVector3& from, cS3DVector3& point, std::uint32_t flags) override {
+        ++constrainCalls;
+        constrainFrom = from;
+        constrainFlags = flags;
+        point.x = constrainX;
+        return true;
+    }
+    float RoadAltitude(float, float) override { ++roadAltitudeCalls; return roadY; }
     double RandomUnit() override { return randomUnit; }
 };
 
@@ -460,6 +473,109 @@ int main() {
         CHECK(attractor.refs == 2);
         CHECK(automaton->Release() == 0);      // the destructor gives it back
         CHECK(attractor.refs == 1);
+    }
+
+    // ---- the random walk (i386 0x000c4b58) ----------------------------------------------------------------------
+    {   // walking without an idle delay: the turn, the steering blend, the step and the road height
+        FakeHost host;
+        cSC4Automaton* automaton = MakeAutomaton(host);
+        tBehaviorTemplate walk;
+        walk.delay[0] = walk.delay[1] = 2.0f;
+        walk.turn[0] = 0.25f;
+        walk.turn[1] = 0.0f;
+        walk.idleDelay[0] = walk.idleDelay[1] = 0.0f;
+        walk.ignoreRoads = true;
+        walk.ignoreAttractors = true;
+        const float start[3] = {100.0f, 0.0f, 100.0f};
+        automaton->SetPosition(start);
+        CHECK(automaton->PushState(kStateRandomWalk, nullptr, -1.0f, false, 0, 0, &walk));
+        auto* state = dynamic_cast<tAutomataStateRandomWalk*>(automaton->GetState());
+        CHECK(state != nullptr);
+        if (state) {
+            CHECK_NEAR(state->walkTimer, -0.01f);
+            CHECK_NEAR(state->turnTimer, 0.0f);
+            CHECK_NEAR(state->direction.x, 1.0f);
+            CHECK(!state->idleAnimStarted);
+            CHECK(automaton->DoStateTick(16.0f));      // the instant of standing ends: the walk begins, nothing moves yet
+            CHECK_NEAR(state->walkTimer, 0.0f);
+            float p[3];
+            automaton->GetPosition(p);
+            CHECK_NEAR(p[0], 100.0f);
+            automaton->SetSpeed(0.01f, 0.0f);
+            const float speed = automaton->GetCurrentSpeed() * automaton->GetSpeedModifier();
+            CHECK(speed > 0.0f);
+            host.randomFraction = 1.0;                  // the longest wait, the widest turn to the positive side
+            CHECK(automaton->DoStateTick(100.0f));
+            CHECK_NEAR(state->walkTimer, 0.0f);         // no idle delay: the walk timer is left alone
+            CHECK_NEAR(state->turnTimer, 1.9f);
+            CHECK(std::fabs(state->direction.x) < 1e-3f && std::fabs(state->direction.z - 1.0f) < 1e-3f && state->direction.y == 0.0f);
+            const float length = std::sqrt(1.0f + 0.2f * 0.2f);   // (1, 0, 0) + 100 / 500 * (0, 0, 1)
+            float o[3];
+            automaton->GetOrientation(o);
+            CHECK(std::fabs(o[0] - 1.0f / length) < 1e-3f && std::fabs(o[2] - 0.2f / length) < 1e-3f);
+            automaton->GetPosition(p);
+            CHECK(std::fabs(p[0] - (100.0f + speed * 100.0f / length)) < 1e-3f);
+            CHECK(std::fabs(p[2] - (100.0f + speed * 100.0f * 0.2f / length)) < 1e-3f);
+            CHECK_NEAR(p[1], 7.25f);                    // ignoring roads: the road (or ground) height
+            CHECK(host.roadAltitudeCalls == 1 && host.constrainCalls == 0);
+            // a turn to the negative side also takes the least turn (turn[1]) that way: -(0.25 + 0.125) of a circle
+            walk.turn[1] = 0.125f;
+            host.randomFraction = 0.0;
+            state->direction = {1.0f, 0.0f, 0.0f};
+            state->turnTimer = 0.05f;
+            CHECK(automaton->DoStateTick(100.0f));
+            CHECK_NEAR(state->turnTimer, 1.95f);
+            CHECK(std::fabs(state->direction.x - std::cos(-0.375f * 6.2831855f)) < 1e-3f);
+            CHECK(std::fabs(state->direction.z - std::sin(-0.375f * 6.2831855f)) < 1e-3f);
+            // not ignoring roads: the step is kept on the network tile (flags 0xc49), from the old position
+            automaton->SetAutomataFlag(kAutomataFlagIgnoreRoads, false);
+            automaton->GetPosition(p);
+            const float beforeX = p[0];
+            CHECK(automaton->DoStateTick(100.0f));
+            CHECK(host.constrainCalls == 1 && host.constrainFlags == 0xc49 && host.roadAltitudeCalls == 2);
+            CHECK_NEAR(host.constrainFrom.x, beforeX);
+            automaton->GetPosition(p);
+            CHECK_NEAR(p[0], 55.0f);
+        }
+        automaton->Shutdown();
+        automaton->Release();
+    }
+    {   // the walk / stand cycle: idle_delay seconds of walking, then idle_time seconds standing with the idle animation
+        FakeHost host;
+        cSC4Automaton* automaton = MakeAutomaton(host);
+        tBehaviorTemplate walk;
+        walk.idleDelay[0] = walk.idleDelay[1] = 3.0f;
+        walk.idleTime[0] = walk.idleTime[1] = 1.0f;
+        walk.kph[0] = walk.kph[1] = 36;
+        walk.acceleration = 0.0f;
+        walk.deceleration = 0.0f;
+        walk.ignoreRoads = true;
+        CHECK(automaton->PushState(kStateRandomWalk, nullptr, -1.0f, false, 0, 0, &walk));
+        auto* state = dynamic_cast<tAutomataStateRandomWalk*>(automaton->GetState());
+        CHECK(state != nullptr);
+        if (state) {
+            CHECK(automaton->DoStateTick(16.0f));
+            CHECK_NEAR(state->walkTimer, 3.0f);         // the walk's length, and the behavior's speed
+            CHECK_NEAR(automaton->GetCurrentSpeed(), 36.0f / 3600.0f);
+            CHECK(automaton->DoStateTick(1000.0f));
+            CHECK_NEAR(state->walkTimer, 2.0f);
+            CHECK(automaton->DoStateTick(2500.0f));     // the walk is over: stand for idle_time, slowing to a stop
+            CHECK_NEAR(state->walkTimer, -1.0f);
+            CHECK_NEAR(automaton->GetCurrentSpeed(), 0.0f);
+            float before[3], after[3];
+            automaton->GetPosition(before);
+            CHECK(automaton->DoStateTick(100.0f));
+            CHECK_NEAR(state->walkTimer, -0.9f);
+            CHECK(state->idleAnimStarted);              // slower than 0.01: the idle animation starts once
+            automaton->GetPosition(after);
+            CHECK(before[0] == after[0] && before[2] == after[2]);
+            CHECK(automaton->DoStateTick(1000.0f));     // the stand is over: the next walk
+            CHECK_NEAR(state->walkTimer, 3.0f);
+            CHECK(!state->idleAnimStarted);
+            CHECK_NEAR(automaton->GetCurrentSpeed(), 36.0f / 3600.0f);
+        }
+        automaton->Shutdown();
+        automaton->Release();
     }
 
     // ---- the state machine tick ------------------------------------------------------------------------------------
