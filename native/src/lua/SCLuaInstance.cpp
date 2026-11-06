@@ -4,8 +4,12 @@
 #include <cstdlib>
 #include <string>
 
+#include "gz/CommandParameterSet.h"
 #include "lua/RealLuaApi.h"
 #include "lua/SCLua.h"
+#include "rz/cRZString.h"
+#include "rz/cRZVariant.h"
+#include "sc4/GameDataRegistry.h"
 
 namespace lua5 {
 namespace {
@@ -43,6 +47,82 @@ LuaCompat& Compat() {
     return compat;
 }
 
+// ---- the game-data registry bridge (cSCLua, i386 0x0040b392..0x0040c22a) ----------------------------------------------
+// Every registry NODE is a Lua table: the root is the global `sc4game`, the others sit in their parent's table under the entry's
+// name (the entry pointer as light userdata when it has none) and carry their entry in field "_e"; Lua's registry maps each
+// node entry (light userdata) to its table. Every VALUE / COMMAND entry is a C closure over (registry, entry, cSCLua): a
+// command (entry flag 1) calls DoValueCall with the arguments as variants and returns the results; a value exchanges one
+// variant (read with no argument, write with one).
+using GDRegistry = sc4::cISC4GameDataRegistry;
+using sc4::EntryId;
+constexpr char kGameDataRootNS[] = "sc4game";   // _kGameDataRootNS (0x005e09fc)
+constexpr char kGameDataEntryLink[] = "_e";     // _kGameDataEntryLink (0x005e09f8)
+constexpr int kTypeNil = 0, kTypeBoolean = 1, kTypeNumber = 3, kTypeString = 4, kTypeTable = 5;
+constexpr std::uint32_t kStatusParameterId = 0x2b999d2b;   // the call's status parameter, not returned to Lua
+GDRegistry* g_gameDataRegistry = nullptr;
+
+inline int UpvalueIndex(int i) { return kGlobalsIndex - i; }
+inline void* LightUserData(EntryId id) { return reinterpret_cast<void*>(id); }
+
+// A Lua argument as a variant (GDRCallExtention's argument switch; a table is the node its "_e" names).
+void ArgumentToVariant(ILuaApi& api, lua_State* L, int index, GDRegistry* registry, cRZVariant& out) {
+    switch (api.type(L, index)) {
+    case kTypeNil: out.SetValUnknown(nullptr); break;
+    case kTypeBoolean: out.SetValBool(api.toboolean(L, index) != 0); break;
+    case kTypeNumber: out.SetValFloat64(api.tonumber(L, index)); break;
+    case kTypeString: { cRZString text(api.tostring(L, index)); out.SetValString(text); break; }
+    case kTypeTable: {
+        api.pushstring(L, kGameDataEntryLink);
+        api.rawget(L, index < 0 ? index - 1 : index);
+        const auto id = reinterpret_cast<EntryId>(api.touserdata(L, -1));
+        cIGZUnknown* node = id && registry->IsValidEntry(id) && registry->IsNodeEntry(id) ? registry->GetNode(id) : nullptr;
+        out.SetValUnknown(node);
+        api.settop(L, -2);
+        break;
+    }
+    default: out.SetValFloat64(0.0); break;
+    }
+}
+
+// A result variant pushed for Lua: bool, numbers, a node as its table, anything else as its string.
+void PushVariant(ILuaApi& api, lua_State* L, cIGZVariant& value, GDRegistry* registry) {
+    const std::uint16_t type = value.GetType();
+    if (type == cIGZVariant::kTypeBool) {
+        api.pushboolean(L, value.GetValBool() ? 1 : 0);
+    } else if (type >= 2 && type < 0xf) {
+        api.pushnumber(L, value.GetValFloat64());
+    } else if (type == cIGZVariant::kTypeUnknown) {
+        const EntryId id = registry->GetEntryID(value.GetValUnknown());
+        if (id == 0) {
+            api.pushnil(L);
+        } else {
+            api.pushlightuserdata(L, LightUserData(id));
+            api.rawget(L, kRegistryIndex);
+        }
+    } else {
+        cRZString text;
+        value.GetValString(text);
+        api.pushstring(L, text.ToChar());
+    }
+}
+
+struct Machine;
+int GDRCallExtention(lua_State* L);
+int GDRExchangeExtention(lua_State* L);
+
+// cSCLua's registry-notification view (+0x80).
+class RegistryBridge final : public sc4::cISC4GameDataRegistryNotificationTarget {
+public:
+    explicit RegistryBridge(Machine* owner) : owner_(owner) {}
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return 1; }    // owned by the cSCLua
+    std::uint32_t Release() override { return 1; }
+    void OnRegistryEvent(GDRegistry* registry, int event, EntryId entry) override;   // 0x0040b54e
+
+private:
+    Machine* owner_;
+};
+
 struct ThreadFactory final : IThreadFactory {
     cGZLua5Thread* CreateThreadObject(unsigned) override {
         auto* thread = new cGZLua5Thread(*RealLuaApi(), Compat());
@@ -59,17 +139,155 @@ struct ParameterSet final : ICommandParameterSet {
 
 struct Host final : ISCLuaHost {
     ICommandParameterSet* NewParameterSet() override { return new ParameterSet; }
-    void RegisterRegistryListener(cSCLua*) override {}     // PARTIAL: the game-data registry mirror is not recovered
-    void UnregisterRegistryListener(cSCLua*) override {}
+    void RegisterRegistryListener(cSCLua* lua) override;
+    void UnregisterRegistryListener(cSCLua* lua) override;
 };
 
 class Instance;
-// The recovered host, tied back to the cISCLua object that owns it.
+// The recovered host, tied back to the cISCLua object that owns it; it carries the bridge's two parameter sets (+0x98 / +0xa0).
 struct Machine final : cSCLua {
     Machine(Instance* outer, IThreadFactory* factory, ISCLuaHost& host)
-        : cSCLua(*RealLuaApi(), Compat(), factory, reinterpret_cast<const char*>(kCompatScript), host), outer(outer) {}
+        : cSCLua(*RealLuaApi(), Compat(), factory, reinterpret_cast<const char*>(kCompatScript), host), outer(outer), bridge(this) {
+        callIn.AddRef();
+        callOut.AddRef();
+    }
     Instance* outer;
+    RegistryBridge bridge;
+    GDRegistry* registry = nullptr;   // the registry the bridge listens to
+    cGZCommandParameterSet callIn, callOut;
 };
+
+void Host::RegisterRegistryListener(cSCLua* lua) {
+    auto* machine = static_cast<Machine*>(lua);
+    if (!g_gameDataRegistry || machine->registry) return;
+    machine->registry = g_gameDataRegistry;
+    machine->registry->AddRef();
+    machine->registry->AddNotificationTarget(&machine->bridge);   // replays every entry as "added"
+}
+
+void Host::UnregisterRegistryListener(cSCLua* lua) {
+    auto* machine = static_cast<Machine*>(lua);
+    if (!machine->registry) return;
+    machine->registry->RemoveNotificationTarget(&machine->bridge);
+    machine->registry->Release();
+    machine->registry = nullptr;
+}
+
+// GDRUnregisterNodeVisitor (0x0040b392): a node's registry slot goes.
+struct UnregisterContext { ILuaApi* api; lua_State* L; GDRegistry* registry; };
+bool UnregisterNodeVisitor(EntryId entry, void* context) {
+    auto* c = static_cast<UnregisterContext*>(context);
+    if (c->registry->IsNodeEntry(entry)) {
+        c->api->pushlightuserdata(c->L, LightUserData(entry));
+        c->api->pushnil(c->L);
+        c->api->rawset(c->L, kRegistryIndex);
+    }
+    return true;
+}
+
+// The entry's key in its parent's table: its name, or the entry itself when it has none.
+void PushEntryKey(ILuaApi& api, lua_State* L, GDRegistry* registry, EntryId entry) {
+    const cRZString* name = registry->GetEntryName(entry);
+    const char* text = name ? name->ToChar() : nullptr;
+    if (!text || !*text) api.pushlightuserdata(L, LightUserData(entry));
+    else api.pushstring(L, text);
+}
+
+void RegistryBridge::OnRegistryEvent(GDRegistry* registry, int event, EntryId entry) {
+    ILuaApi& api = *RealLuaApi();
+    lua_State* L = owner_->GetContext();
+    if (!L || !registry) return;
+    const int top = api.gettop(L);
+    const EntryId root = registry->GetRootNodeEntry();
+    const bool shutdown = event == sc4::kRegistryShutdown || (event == sc4::kRegistryEntryRemoved && entry == root);
+    if (shutdown) {
+        api.pushstring(L, kGameDataRootNS);
+        api.pushnil(L);
+        api.rawset(L, kGlobalsIndex);
+        UnregisterContext context{&api, L, registry};
+        registry->VisitBreadthFirst(root, &UnregisterNodeVisitor, &context);
+        api.setgcthreshold(L, 0);
+    } else if (event == sc4::kRegistryEntryAdded && entry == root) {
+        api.newtable(L);
+        api.pushstring(L, kGameDataRootNS);
+        api.pushvalue(L, -2);
+        api.rawset(L, kGlobalsIndex);
+        api.pushlightuserdata(L, LightUserData(entry));
+        api.pushvalue(L, -2);
+        api.rawset(L, kRegistryIndex);
+    } else if (event == sc4::kRegistryEntryAdded || event == sc4::kRegistryEntryRemoved) {
+        api.pushlightuserdata(L, LightUserData(registry->GetParentNodeEntry(entry)));
+        api.rawget(L, kRegistryIndex);
+        if (api.type(L, -1) == kTypeTable) {
+            PushEntryKey(api, L, registry, entry);
+            if (event == sc4::kRegistryEntryRemoved) {
+                api.pushnil(L);
+                api.rawset(L, -3);
+                if (registry->IsNodeEntry(entry)) {
+                    UnregisterContext context{&api, L, registry};
+                    registry->VisitBreadthFirst(entry, &UnregisterNodeVisitor, &context);
+                }
+            } else if (registry->IsNodeEntry(entry)) {
+                api.newtable(L);
+                api.pushstring(L, kGameDataEntryLink);
+                api.pushlightuserdata(L, LightUserData(entry));
+                api.rawset(L, -3);
+                api.pushlightuserdata(L, LightUserData(entry));
+                api.pushvalue(L, -2);
+                api.rawset(L, kRegistryIndex);
+                api.rawset(L, -3);
+            } else {
+                api.pushlightuserdata(L, registry);
+                api.pushlightuserdata(L, LightUserData(entry));
+                api.pushlightuserdata(L, owner_);
+                api.pushcclosure(L, registry->CheckEntryFlags(entry, 1) ? &GDRCallExtention : &GDRExchangeExtention, 3);
+                api.rawset(L, -3);
+            }
+        }
+    }
+    api.settop(L, top);
+}
+
+// 0x0040b9fa: a registry command called from Lua.
+int GDRCallExtention(lua_State* L) {
+    ILuaApi& api = *RealLuaApi();
+    auto* registry = static_cast<GDRegistry*>(api.touserdata(L, UpvalueIndex(1)));
+    const auto entry = reinterpret_cast<EntryId>(api.touserdata(L, UpvalueIndex(2)));
+    auto* machine = static_cast<Machine*>(api.touserdata(L, UpvalueIndex(3)));
+    if (!registry || !machine || !registry->IsValidEntry(entry)) return 0;
+    machine->callIn.SetParameterCount(0);
+    machine->callOut.SetParameterCount(0);
+    const int count = api.gettop(L);
+    for (int i = 1; i <= count; ++i) {
+        cRZVariant value;
+        ArgumentToVariant(api, L, i, registry, value);
+        machine->callIn.SetParameter(static_cast<std::uint32_t>(i - 1), value);
+    }
+    registry->DoValueCall(entry, &machine->callIn, &machine->callOut);
+    int pushed = 0;
+    for (std::uint32_t id = machine->callOut.GetFirstParameterID(); id != 0xffffffffu; id = machine->callOut.GetNextParameterID(id)) {
+        if (id == kStatusParameterId) continue;
+        cIGZVariant* value = machine->callOut.GetParameter(id);
+        if (!value) api.pushnil(L);
+        else PushVariant(api, L, *value, registry);
+        ++pushed;
+    }
+    return pushed;
+}
+
+// 0x0040be78: a registry value read (no argument) or written (one argument) from Lua.
+int GDRExchangeExtention(lua_State* L) {
+    ILuaApi& api = *RealLuaApi();
+    auto* registry = static_cast<GDRegistry*>(api.touserdata(L, UpvalueIndex(1)));
+    const auto entry = reinterpret_cast<EntryId>(api.touserdata(L, UpvalueIndex(2)));
+    if (!registry || !registry->IsValidEntry(entry)) return 1;
+    const bool write = api.gettop(L) > 0;
+    cRZVariant value;
+    if (write) ArgumentToVariant(api, L, 1, registry, value);
+    registry->DoValueExchange(entry, value, write);
+    if (!write) PushVariant(api, L, value, registry);
+    return 1;
+}
 
 class Instance final : public cISCLua {
 public:
@@ -165,9 +383,9 @@ public:
     bool IsTable(int index) override { return lua_->IsTable(index); }
     bool IsUserData(int index) override { return lua_->IsUserData(index); }
     bool IsNil(int index) override { return lua_->IsNil(index); }
-    bool ToDataRegistryEntryID(cISC4GameDataRegistry*, int) override { return false; }
-    bool ToDataRegistryNode(cISC4GameDataRegistry*, int) override { return false; }
-    bool ToDataRegistryValue(cISC4GameDataRegistry*, int) override { return false; }
+    bool ToDataRegistryEntryID(::cISC4GameDataRegistry*, int) override { return false; }
+    bool ToDataRegistryNode(::cISC4GameDataRegistry*, int) override { return false; }
+    bool ToDataRegistryValue(::cISC4GameDataRegistry*, int) override { return false; }
 
 private:
     ~Instance() {
@@ -182,6 +400,8 @@ private:
 };
 
 }  // namespace
+
+void SetGameDataRegistry(sc4::cISC4GameDataRegistry* registry) { g_gameDataRegistry = registry; }
 
 cISCLua* CreateSCLua() {
     SetLuaApi(RealLuaApi());

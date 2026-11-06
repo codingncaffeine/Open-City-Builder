@@ -33,6 +33,7 @@
 #include "sc4/RegionDialogs.h"
 #include "app/NativeBudgetUi.h"
 #include "app/NativeAnimationCoordinator.h"
+#include "app/NativeGameData.h"
 #include "app/NativeBoot.h"
 #include "app/NativeCity.h"
 #include "app/NativeAnimationTicks.h"
@@ -1008,6 +1009,12 @@ int RunScenario(const std::string& path) {
             int limit = 8;
             words >> limit;
             native::NativeTrailerReport(limit);
+        } else if (command == "lua") {   // lua CODE: run CODE in the city's automata script VM and print what it returns
+            std::string code;
+            std::getline(words, code);
+            native::NativeRunCityLua(code.c_str());
+        } else if (command == "registry") {   // registry: the game-data registry's entry tree
+            native::NativeRegistryReport();
         } else if (command == "animated") {   // animated [N]: the animation coordinator and the first N ticking props' frames
             int limit = 8;
             words >> limit;

@@ -784,5 +784,8 @@ src/s3d/ResSpriteAnim.cpp
 src/sc4/MiscTypes.cpp
 src/app/NativeSprites.cpp
 src/app/NativeAnimationCoordinator.cpp
+src/app/NativeGameData.cpp
+src/sc4/GameDataRegistry.cpp
+src/gz/CommandParameterSet.cpp
 src/sc4/AnimationCoordinator.cpp
 src/s3d/ModelInstanceAnimatedMesh.cpp

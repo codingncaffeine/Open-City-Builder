@@ -10,16 +10,19 @@
 #include <vector>
 
 #include "app/NativeAnimationTicks.h"
+#include "app/NativeGameData.h"
 #include "app/NativeUi.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "gz/cIGZPersistDBSegment.h"
 #include "gz/cIGZPersistResourceKeyList.h"
 #include "lua/SCLuaInstance.h"
 #include "lua/SCLuaScripts.h"
+#include "sc4/AutomataManager.h"
 #include "sc4/AutomataScriptSystem.h"
 #include "sc4/ServiceLocator.h"
 
 namespace native {
+sc4::cSC4AutomataManager* NativeAutomataManagerAt(int index);   // NativeAutomataManagerHost.cpp
 namespace {
 using namespace sc4;
 
@@ -56,7 +59,10 @@ public:
 
 class ScriptHost final : public IAutomataScriptHost {
 public:
-    cISCLua* CreateLua() override { return lua5::CreateSCLua(); }
+    cISCLua* CreateLua() override {
+        NativeGameDataRegistry();   // the mirror needs the registry before the VM opens
+        return lua5::CreateSCLua();
+    }
     void RegisterLuaExtensions(cISCLua* lua) override {
         lua->Register(SCLuaHelp::LUAExtension_print, "print");
         lua->Register(SCLuaHelp::LUAExtension_dofile_from_resource, "_dofile_from_resource");
@@ -64,7 +70,7 @@ public:
     int LoadPackageScripts(cISCLua* lua, std::uint32_t package, int flags) override {
         return SCLuaHelp::LoadPackageScripts(lua, package, static_cast<std::uint32_t>(flags));
     }
-    sc4::cISC4GameDataRegistry* Registry() override { return nullptr; }
+    sc4::cISC4GameDataRegistry* Registry() override { return NativeGameDataRegistry(); }
     void AddTickNotification(cIGZMessageTarget2* target, int channel) override {
         AnimationTickServerView()->AddNotification(target, static_cast<std::uint32_t>(channel));
     }
@@ -77,8 +83,11 @@ public:
     bool RemoveControllersFromOccupantGroup(const cIGZString&, cISC4Occupant*) override { return false; }
     cIGZUnknown* CreateAutomaton(std::uint32_t, const float[3], std::uint32_t, const std::uint32_t[3], std::uint8_t) override { return nullptr; }
     void StartScriptedAutomaton(cIGZUnknown*) override {}
-    bool SourceManagerPresent(int) override { return false; }
-    std::uint32_t SourceBuildingCount(int, std::uint32_t) override { return 0; }
+    bool SourceManagerPresent(int index) override { return NativeAutomataManagerAt(index) != nullptr; }
+    std::uint32_t SourceBuildingCount(int index, std::uint32_t group) override {   // manager vslot 0x120
+        sc4::cSC4AutomataManager* manager = NativeAutomataManagerAt(index);
+        return manager ? manager->GetSourceBuildingCount(group) : 0;
+    }
     bool DriveKeyMapAvailable() override { return false; }
     void GetDriveKeyCodes(int, std::uint32_t[8], std::uint32_t& count) override { count = 0; }
     void Report(const std::string& text) override {

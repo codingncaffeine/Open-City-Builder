@@ -1,5 +1,6 @@
 #include "app/NativeCityUi.h"
 
+#include "app/NativeGameData.h"
 #include "app/NativeUi.h"
 #include "gz/WinInterfaces.h"
 #include "sc4/GraphsViewWinProc.h"
@@ -15,7 +16,7 @@ namespace {
 class MySimHost final : public sc4::IMySimWinProcHost {
 public:
     cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
-    sc4::cISC4GameDataRegistry* GameDataRegistry() override { return nullptr; }
+    sc4::cISC4GameDataRegistry* GameDataRegistry() override { return NativeGameDataRegistry(); }
     sc4::IMySimAgentSimulator* MySimAgentSimulator() override { return nullptr; }
     sc4::IModelManager* VehicleManager() override { return nullptr; }
     sc4::IModelManager* PedestrianManager() override { return nullptr; }
