@@ -31,10 +31,10 @@ that copy may ever be added to this repository.
   later Mac release (GPLv3), with our Linux build and loading fixes on top. Its own README and notes are kept as they
   were upstream.
 
-## Licence
+## License
 
 GNU General Public License v3.0 (see `LICENSE`), as `native/` is GPLv3. `third_party/` holds the open-source libraries the
-original was built with (STLport 4.6, Lua 5.0.2), each under its own licence in its folder.
+original was built with (STLport 4.6, Lua 5.0.2), each under its own license in its folder.
 
 ## Roadmap
 
