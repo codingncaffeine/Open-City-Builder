@@ -9,6 +9,13 @@
 #include "sc4/View3DWin.h"
 #include "sc4/StringDetokenizer.h"
 #include "sc4/AdvisorPopupTracker.h"
+#include "sc4/AdvisorUIImageWinProc.h"
+#include "sc4/Advisor.h"
+#include "sc4/AnimationTickManager.h"
+#include "sc4/DrawContext.h"
+#include "sc4/Render3D.h"
+#include "app/NativeAnimationCoordinator.h"
+#include "app/NativeAnimationTicks.h"
 #include "sc4/AdvisorSystem.h"
 #include "gz/Font.h"
 #include "gz/WinFont.h"
@@ -64,6 +71,7 @@ namespace native {
 sc4::INewsTickerWindow* CreateNewsTickerWindow();     // app/NativeWinHtml.cpp
 void ShutdownNewsTickerWindow(cIGZUnknown* proc);
 sc4::IAdvisorPopupQueue* CreateAdvisorPopupQueue();
+bool NativeLlamaCheatActive();   // app/NativeAdvisors.cpp
 namespace {
 using namespace sc4;
 
@@ -545,9 +553,8 @@ public:
 };
 
 // The advisor popups (cSC4AdvisorPopupTracker): an activated advice of high enough priority opens the advisor's modal
-// page while the game pauses. PARTIAL: the advisor's animated head (cSC4AdvisorUIImageWinProc) is not recovered, so the
-// image window keeps its script picture; the tutorial and the window-location saver are not up natively; links are not
-// followed (cSC4HTMLLinkHandler not recovered).
+// page while the game pauses, with the advisor's animated head. PARTIAL: the tutorial and the window-location saver are
+// not up natively; links are not followed (cSC4HTMLLinkHandler not recovered).
 class AdvisorPopupHost final : public sc4::IAdvisorPopupTrackerHost {
     static bool Debug() { static const bool on = std::getenv("SC4_POPUPDEBUG") != nullptr; return on; }
 public:
@@ -598,7 +605,8 @@ public:
     cSLWinLocationSaver* WindowLocationSaver() override { return nullptr; }
     cIGZWinMgr* WindowManager() override { return ActiveWinMgr(); }
     void FocusView3D() override {}
-    sc4::IAdvisorUIImageWinProc* CreateImageWinProc(int) override { return nullptr; }
+    // operator new + the constructor: a count of 0, the tracker takes the reference.
+    sc4::IAdvisorUIImageWinProc* CreateImageWinProc(int advisorId) override { return new sc4::cSC4AdvisorUIImageWinProc(advisorId); }
     bool SystemFont(std::uint32_t fontId, sc4::AdvisorPopupFont& out) override {
         gz::IWinFontSource* fonts = gz::WinFontSource();
         gz::IWinFont* style = fonts ? fonts->Font(fontId) : nullptr;
@@ -614,6 +622,44 @@ public:
     bool DoURL(cIGZString* link) override {
         if (link) std::printf("advisor popup: link %.*s not followed (cSC4HTMLLinkHandler not recovered)\n", int(link->Strlen()), link->ToChar());
         return false;
+    }
+};
+
+// The advisor's animated head (cSC4AdvisorUIImageWinProc): the city's advisor, the S3D head animations, the animation
+// tick manager, the main window's size, and the city renderer with its driver for the draw.
+class AdvisorHeadHost final : public sc4::IAdvisorUIImageHost {
+public:
+    sc4::cISC4Advisor* Advisor(int advisorId) override {
+        cSC4City* city = LoadedCity();
+        cIGZUnknown* object = city ? city->GetComponent(CityComponent::AdvisorSystem) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(sc4::kGZIID_cISC4AdvisorSystem, &raw) || !raw) return nullptr;
+        auto* system = static_cast<sc4::cISC4AdvisorSystem*>(raw);
+        sc4::cISC4Advisor* advisor = system->GetAdvisor(advisorId);   // borrowed: the system keeps it
+        system->Release();
+        return advisor;
+    }
+    bool LlamaCheatActive() override { return NativeLlamaCheatActive(); }
+    s3d::cIS3DModelInstanceAnimated* CreateModel(const cGZPersistResourceKey& key) override { return NativeCreateAnimatedModel(key); }
+    void AddTickable(cIGZMessageTarget2* target, std::uint32_t priority) override {
+        if (auto* ticks = AnimationTickManager()) ticks->AddTickableObject(target, priority);
+    }
+    void RemoveTickable(cIGZMessageTarget2* target, std::uint32_t priority) override {
+        if (auto* ticks = AnimationTickManager()) ticks->RemoveTickableObject(target, priority);
+    }
+    bool MainWindowSize(std::uint16_t& width, std::uint16_t& height) override {
+        WinMgr* manager = ActiveWinMgr();
+        cIGZWin* main = manager ? manager->GetMainWindow() : nullptr;
+        if (!main) return false;
+        width = static_cast<std::uint16_t>(main->GetW());
+        height = static_cast<std::uint16_t>(main->GetH());
+        return true;
+    }
+    cISC43DRender* Renderer() override { return SL::spRenderer ? static_cast<cISC43DRender*>(SL::spRenderer) : nullptr; }
+    gd::cIGZGDriver* Driver() override {
+        cISC43DRender* renderer = Renderer();
+        SC4DrawContext* context = renderer ? renderer->GetDrawContext() : nullptr;
+        return context ? context->Driver() : nullptr;
     }
 };
 
@@ -649,6 +695,8 @@ void InstallView3DWinStub() {
     sc4::SetDetokenizerHost(&detokenizer);
     static AdvisorPopupHost popups;
     sc4::SetAdvisorPopupTrackerHost(&popups);
+    static AdvisorHeadHost heads;
+    sc4::SetAdvisorUIImageHost(&heads);
 }
 
 }  // namespace native

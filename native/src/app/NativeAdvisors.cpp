@@ -515,6 +515,8 @@ const IAdvisorSystemHost::LuaExtension kExtensions[] = {
 };
 
 // ---- the hosts
+bool g_llama = false;   // the llama cheat: every advisor head is a llama
+
 class SystemHost final : public IAdvisorSystemHost {
 public:
     cISCLua* Lua() override { return AppLua(); }
@@ -554,7 +556,8 @@ public:
     }
     void SimStartDate(cIGZDate& out) override { cSC4Simulator::GetSimStartDateStatic(out); }
     bool SimulatorAnyPaused() override { cSC4Simulator* sim = Simulator(); return sim && sim->IsAnyPaused(); }
-    void ToggleLlamaCheat() override { llama_ = !llama_; }
+    // cSC4AdvisorUIImageWinProc::mbLlamaCheatActive ^= 1 (the heads read it through NativeLlamaCheatActive)
+    void ToggleLlamaCheat() override { llama_ = !llama_; g_llama = llama_; }
     cISCLua* LuaFromState(lua_State* state) override {
         cISCLua* lua = lua5::SCLuaFromState(reinterpret_cast<::lua_State*>(state));
         if (lua) lua->AddRef();
@@ -713,6 +716,8 @@ public:
 };
 
 }  // namespace
+
+bool NativeLlamaCheatActive() { return g_llama; }
 
 void InstallAdvisorHosts() {
     static SystemHost system;

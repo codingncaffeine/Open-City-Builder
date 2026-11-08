@@ -1254,6 +1254,9 @@ int main(int argc, char** argv) {
         const bool regionScreen = gAppWindow && gAppWindow->CurrentScreen() && gAppWindow->CurrentScreen()->GetID() == 0xea659793;
         if (regionScreen && native::DrawRegionLayers()) InvalidateTree(gMgr->GetMainWindow());
         if (gAppWindow && gAppWindow->View3D()) InvalidateTree(gMgr->GetMainWindow());
+        // A dialog pauses the simulation but not the animation (cSC4AutoGamePause(false, false, true, true)): the advisor
+        // heads keep talking and the props keep moving under it.
+        if (gAppWindow && gAppWindow->View3D() && native::StartAnimationTicks()) native::TickAnimation();
         gMgr->Pump();
         gMgr->Plot();
         gGraphics->Services().Tick();
