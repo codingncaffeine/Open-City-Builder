@@ -8,6 +8,10 @@
 #include <vector>
 #include "sc4/View3DWin.h"
 #include "sc4/StringDetokenizer.h"
+#include "sc4/AdvisorPopupTracker.h"
+#include "sc4/AdvisorSystem.h"
+#include "gz/Font.h"
+#include "gz/WinFont.h"
 #include "rz/cRZMessage2Standard.h"
 #include "app/NativeDemolishTool.h"
 #include "app/NativeCity.h"
@@ -59,6 +63,7 @@
 namespace native {
 sc4::INewsTickerWindow* CreateNewsTickerWindow();     // app/NativeWinHtml.cpp
 void ShutdownNewsTickerWindow(cIGZUnknown* proc);
+sc4::IAdvisorPopupQueue* CreateAdvisorPopupQueue();
 namespace {
 using namespace sc4;
 
@@ -228,7 +233,7 @@ struct StubView3DWin final : IView3DWinHost {
     IBudgetUIWindow* CreateBudgetUIWinProc() override { return native::CreateBudgetUiWindow(); }
     IGraphsViewWindow* CreateGraphsViewWinProc(cIGZWin* window) override { return native::CreateGraphsViewWindow(window); }
     IBuildingSelectWindow* CreateBuildingSelectWinProc(cIGZWin* window) override { return {}; }
-    IAdvisorPopupQueue* CreateAdvisorPopupTracker() override { return {}; }
+    IAdvisorPopupQueue* CreateAdvisorPopupTracker() override { return CreateAdvisorPopupQueue(); }
     void AttachCompassWinProc(gz::cIGZWinGen* window) override {}
     cISC4WinCalloutBox* CreateCalloutBox() override { return native::CreateCalloutBox(); }
     gz::cIGZWinBMP* CreateWinBMP() override { return {}; }
@@ -539,11 +544,111 @@ public:
     bool GetRegionName(cIGZString&) override { return false; }
 };
 
+// The advisor popups (cSC4AdvisorPopupTracker): an activated advice of high enough priority opens the advisor's modal
+// page while the game pauses. PARTIAL: the advisor's animated head (cSC4AdvisorUIImageWinProc) is not recovered, so the
+// image window keeps its script picture; the tutorial and the window-location saver are not up natively; links are not
+// followed (cSC4HTMLLinkHandler not recovered).
+class AdvisorPopupHost final : public sc4::IAdvisorPopupTrackerHost {
+    static bool Debug() { static const bool on = std::getenv("SC4_POPUPDEBUG") != nullptr; return on; }
+public:
+    cIGZMessageServer2* Messages() override { return SL::spMS2; }
+    bool PopupModalDialogsSafe() override { return ActiveWinMgr() && ActiveWinMgr()->modalDialogs; }
+    bool PopupModalDialogsEnabled() override { return ActiveWinMgr() && ActiveWinMgr()->modalDialogs; }
+    bool AdvisorPopupsPreferenceEnabled() override {
+        cSC4App* app = BootApplication();
+        const std::uint8_t* prefs = app ? app->GetPreferences() : nullptr;
+        return prefs && prefs[0xf0b] != 0;   // Game Preferences checkbox 0x4a7f19f5
+    }
+    bool AdvicePopupPriorityThreshold(int& threshold) override {
+        cSC4City* city = LoadedCity();
+        cIGZUnknown* object = city ? city->GetComponent(CityComponent::AdvisorSystem) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(sc4::kGZIID_cISC4AdvisorSystem, &raw) || !raw) return false;
+        auto* system = static_cast<sc4::cISC4AdvisorSystem*>(raw);
+        threshold = system->GetAdvicePopupPriorityThreshold();
+        system->Release();
+        if (const char* forced = std::getenv("SC4_POPUPTHRESHOLD")) threshold = std::atoi(forced);   // debug: test the dialog on any city
+        if (Debug()) std::printf("popup: show tick, threshold %d, paused %d, safe %d, enabled %d, preference %d\n", threshold, SimulatorPaused(),
+                                 PopupModalDialogsSafe(), PopupModalDialogsEnabled(), AdvisorPopupsPreferenceEnabled());
+        return true;
+    }
+    bool TutorialRunning() override { return false; }
+    bool VehicleManagerPaused() override { return false; }
+    bool SimulatorPaused() override {
+        auto* simulator = CityComponentAs<cSC4Simulator>(CityComponent::Simulator, kGZCLSID_cSC4Simulator);
+        return simulator && simulator->IsPaused();
+    }
+    bool CreateWindowFromScript(const cGZPersistResourceKey& key, std::uint32_t windowId, std::uint32_t iid, void** out) override {
+        *out = nullptr;
+        WinMgr* manager = ActiveWinMgr();
+        cIGZWin* window = native::CreateWindowFromScript(key, manager ? manager->GetMainWindow() : nullptr, windowId);
+        if (Debug()) std::printf("popup: dialog script %08x/%08x -> %s\n", key.group, key.instance, window ? "created" : "FAILED");
+        if (!window) return false;
+        const bool ok = window->QueryInterface(iid, out) && *out;
+        window->Release();
+        return ok;
+    }
+    // cSC4AutoGamePause(false, false, true, true): the simulator's hidden pause (the view needs nothing natively).
+    void BeginGamePause() override {
+        if (auto* simulator = CityComponentAs<cSC4Simulator>(CityComponent::Simulator, kGZCLSID_cSC4Simulator)) simulator->HiddenPause();
+    }
+    void EndGamePause() override {
+        if (auto* simulator = CityComponentAs<cSC4Simulator>(CityComponent::Simulator, kGZCLSID_cSC4Simulator)) simulator->HiddenResume();
+    }
+    cSLWinLocationSaver* WindowLocationSaver() override { return nullptr; }
+    cIGZWinMgr* WindowManager() override { return ActiveWinMgr(); }
+    void FocusView3D() override {}
+    sc4::IAdvisorUIImageWinProc* CreateImageWinProc(int) override { return nullptr; }
+    bool SystemFont(std::uint32_t fontId, sc4::AdvisorPopupFont& out) override {
+        gz::IWinFontSource* fonts = gz::WinFontSource();
+        gz::IWinFont* style = fonts ? fonts->Font(fontId) : nullptr;
+        cIGZFont* font = style ? style->AsFont() : nullptr;
+        if (!font) return false;
+        cRZString name;
+        font->GetName(name);
+        if (name.Strlen() > 0) out.name = name;
+        out.bold = font->GetStyle(1);
+        out.size = font->GetSize();
+        return true;
+    }
+    bool DoURL(cIGZString* link) override {
+        if (link) std::printf("advisor popup: link %.*s not followed (cSC4HTMLLinkHandler not recovered)\n", int(link->Strlen()), link->ToChar());
+        return false;
+    }
+};
+
+// cSC4View3DWin's +0x4d0 slot: the recovered tracker behind the view's Init / Shutdown interface.
+class AdvisorPopupQueue final : public sc4::IAdvisorPopupQueue {
+public:
+    AdvisorPopupQueue() : tracker_(new sc4::cSC4AdvisorPopupTracker()) { tracker_->AddRef(); }
+    ~AdvisorPopupQueue() { tracker_->Release(); }
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override {
+        if (--refs_ == 0) { delete this; return 0; }
+        return refs_;
+    }
+    bool Init() override { return tracker_->Init(); }
+    bool Shutdown() override { return tracker_->Shutdown(); }
+
+private:
+    std::uint32_t refs_ = 0;
+    sc4::cSC4AdvisorPopupTracker* tracker_;
+};
+
+sc4::IAdvisorPopupQueue* CreateAdvisorPopupQueue() {
+    auto* queue = new AdvisorPopupQueue();
+    queue->AddRef();   // the view's reference (it Releases after Shutdown)
+    return queue;
+}
+
 void InstallView3DWinStub() {
     static StubView3DWin s;
     sc4::SetView3DWinHost(&s);
     static DetokenizerHost detokenizer;
     sc4::SetDetokenizerHost(&detokenizer);
+    static AdvisorPopupHost popups;
+    sc4::SetAdvisorPopupTrackerHost(&popups);
 }
 
 }  // namespace native
