@@ -710,11 +710,16 @@ bool cSC4AdvisorSystem::Shutdown() {
 // The Lua "gc" tag method of the two tags created in Init: release the object stored in the userdata. The thread
 // object sits in the Lua state slot immediately before the lua_State (ILuaApi::get_thread_slot); it is queried for
 // the cISCLua view (iid 0xea10c4a2) before the tags and the stack are inspected.
-int cSC4AdvisorSystem::gc_tag_method(lua_State* state) {
+cISCLua* IAdvisorSystemHost::LuaFromState(lua_State* state) {
     cISCLua* lua = nullptr;
     cIGZUnknown* threadView =
         *reinterpret_cast<cIGZUnknown**>(reinterpret_cast<char*>(state) - sizeof(void*));
     if (threadView) threadView->QueryInterface(kIIDLua, reinterpret_cast<void**>(&lua));
+    return lua;
+}
+
+int cSC4AdvisorSystem::gc_tag_method(lua_State* state) {
+    cISCLua* lua = g_host ? g_host->LuaFromState(state) : nullptr;
     cSC4AdvisorSystem* self = instance_;
     if (self && lua && self->GetScriptingContext() == lua && lua->Type(-1) == kLuaUserData) {
         const int tag = lua->Tag(-1);

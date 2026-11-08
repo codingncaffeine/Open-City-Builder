@@ -6,6 +6,7 @@
 #pragma once
 #include "lua/ISCLua.h"
 
+class cIGZUnknown;
 namespace sc4 { class cISC4GameDataRegistry; }
 
 namespace lua5 {
@@ -14,6 +15,9 @@ namespace lua5 {
 void SetGameDataRegistry(sc4::cISC4GameDataRegistry* registry);
 // A new, unopened scripting host with one reference for the caller.
 cISCLua* CreateSCLua();
+// The same host as a GZCOM class object with NO reference yet (cRZCOMDllGenericClassFactoryT: the factory's
+// QueryInterface takes the first). Its cIGZUnknown view; QueryInterface(0xea10c4a2) gives the cISCLua view.
+cIGZUnknown* MakeSCLuaObject();
 // The host that owns `state` (any of its threads), or null: how a Lua C function finds its cISCLua (lua-host.md 1.3). Borrowed.
 cISCLua* SCLuaFromState(::lua_State* state);
 

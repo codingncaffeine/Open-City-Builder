@@ -5,6 +5,7 @@
 #include <string>
 
 #include "gz/CommandParameterSet.h"
+#include "gz/cIGZUnknown.h"
 #include "lua/RealLuaApi.h"
 #include "lua/SCLua.h"
 #include "rz/cRZString.h"
@@ -289,16 +290,20 @@ int GDRExchangeExtention(lua_State* L) {
     return 1;
 }
 
-class Instance final : public cISCLua {
+// The original's cSCLua is one object whose single vtable starts with QueryInterface / AddRef / Release, so its cISCLua
+// pointer also serves as its cIGZUnknown. Here the two are separate C++ bases sharing those three methods: GZCOM callers
+// get the cIGZUnknown view (iid 1) and reach the scripting interface with QueryInterface(0xea10c4a2).
+class Instance final : public cISCLua, public cIGZUnknown {
 public:
-    Instance() : lua_(new Machine(this, &factory_, host_)) {
+    explicit Instance(std::uint32_t refs = 1) : lua_(new Machine(this, &factory_, host_)), refs_(refs) {
         lua_->AddRef();
         lua_->SetErrorReporter(ReportError, false);
     }
 
     bool QueryInterface(std::uint32_t iid, void** out) override {
         if (!out || (iid != 1 && iid != kIID_GameDataRegistryListener)) return false;
-        *out = static_cast<cISCLua*>(this);
+        if (iid == 1) *out = static_cast<cIGZUnknown*>(this);
+        else *out = static_cast<cISCLua*>(this);
         AddRef();
         return true;
     }
@@ -396,7 +401,7 @@ private:
     ThreadFactory factory_;
     Host host_;
     Machine* lua_;
-    std::uint32_t refs_ = 1;
+    std::uint32_t refs_;
 };
 
 }  // namespace
@@ -406,6 +411,11 @@ void SetGameDataRegistry(sc4::cISC4GameDataRegistry* registry) { g_gameDataRegis
 cISCLua* CreateSCLua() {
     SetLuaApi(RealLuaApi());
     return new Instance();
+}
+
+cIGZUnknown* MakeSCLuaObject() {
+    SetLuaApi(RealLuaApi());
+    return static_cast<cIGZUnknown*>(new Instance(0));
 }
 
 cISCLua* SCLuaFromState(::lua_State* state) {

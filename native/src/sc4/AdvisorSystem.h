@@ -161,6 +161,10 @@ public:
     virtual void SimStartDate(cIGZDate& out) = 0;                      // simulator vslot 0x28
     virtual bool SimulatorAnyPaused() = 0;                             // simulator vslot 0x90
     virtual void ToggleLlamaCheat() = 0;                               // cSC4AdvisorUIImageWinProc::mbLlamaCheatActive ^= 1
+    // The scripting host that owns `state` with one reference (the gc tag method). The original reads the object stored in
+    // the pointer before the state and asks it for 0xea10c4a2; the default does that, a host whose Lua keeps something else
+    // there (the vendored Lua 5.0 keeps its thread object) answers through its own lookup.
+    virtual cISCLua* LuaFromState(lua_State* state);
 };
 IAdvisorSystemHost* AdvisorSystemHost();
 void SetAdvisorSystemHost(IAdvisorSystemHost* host);

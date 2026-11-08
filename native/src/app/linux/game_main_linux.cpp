@@ -653,6 +653,9 @@ bool Boot() {
         } messageFramework;
         SetMessageServerFramework(&messageFramework);
         auto* messages2 = new cGZMessageServer2();
+        // As cSC4App::AddSystemServices sets it: a tick delivers only what was queued when it began, so a message that posts
+        // itself again (the advisor ticker) waits for the next tick instead of keeping one tick going for ever.
+        messages2->SetAlwaysClearQueueOnTick(false);
         framework.AddSystemService(messages2);
         messages2->Init();
         gMessages2 = messages2;
@@ -1013,6 +1016,12 @@ int RunScenario(const std::string& path) {
             std::string code;
             std::getline(words, code);
             native::NativeRunCityLua(code.c_str());
+        } else if (command == "alua") {   // alua CODE: run CODE in the app's Lua (the advisors' VM) and print what it returns
+            std::string code;
+            std::getline(words, code);
+            native::NativeRunAppLua(code.c_str());
+        } else if (command == "advisors") {   // advisors: every advisor and its active advices
+            native::NativePrintAdvisors();
         } else if (command == "registry") {   // registry: the game-data registry's entry tree
             native::NativeRegistryReport();
         } else if (command == "animated") {   // animated [N]: the animation coordinator and the first N ticking props' frames

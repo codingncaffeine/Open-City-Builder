@@ -45,6 +45,7 @@
 #include "gz/cIGZIStream.h"
 #include "gz/cIGZOStream.h"
 #include "sc4/Advisor.h"
+#include "sc4/RewardAdvice.h"   // kGZCLSID_cSC4RewardAdvice
 
 namespace sc4 {
 
@@ -81,7 +82,6 @@ constexpr std::uint32_t kAdvisorTrafficMessageCarZot = 0x4c04de69;
 constexpr std::uint32_t kAdvisorPropertyHolderClassId = 0x278128a0;
 constexpr std::uint32_t kAdvisorUtilityPropertyHolderClassId = 0xc772bf98;
 // The reward advice class id matched in the 0xea8ae29a re-evaluation walk.
-constexpr std::uint32_t kGZCLSID_cSC4RewardAdvice = 0xaa371c32;
 
 class cSC4AdvisorBase;
 class cSC4AdvisorCityPlanning;

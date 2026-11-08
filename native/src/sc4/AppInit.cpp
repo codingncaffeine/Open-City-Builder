@@ -5,6 +5,7 @@
 #include "gz/GZCOMDirector.h"
 #include "gz/RZServices.h"
 #include "gz/cIGZFrameWork.h"
+#include "lua/ISCLua.h"
 #include "render/gd/VideoModes.h"
 #include "rz/Threading.h"
 #include "rz/cRZMessage2Standard.h"
@@ -166,7 +167,14 @@ bool cSC4App::Init() {
     initialize("cSCStringDetokenizer", stringDetokenizer_);
     if (!luaInterpreter_) {
         cRZAutoRefCount<cIGZUnknown> lua;
-        if (com->CreateInstance(0xea10c4a2, 0xea10c4a2, lua.AsOutParam())) { luaInterpreter_ = lua.get(); if (luaInterpreter_) luaInterpreter_->AddRef(); }
+        // The original asks for iid 0xea10c4a2 and keeps that pointer as its cIGZUnknown (one vtable); the port keeps the
+        // cIGZUnknown view (iid 1) and opens the scripting view, as the original does at 0x0044C925 (lua-host.md 1.4).
+        if (com->CreateInstance(0xea10c4a2, 1, lua.AsOutParam())) { luaInterpreter_ = lua.get(); if (luaInterpreter_) luaInterpreter_->AddRef(); }
+        cISCLua* scripting = nullptr;
+        if (luaInterpreter_ && luaInterpreter_->QueryInterface(0xea10c4a2, reinterpret_cast<void**>(&scripting)) && scripting) {
+            scripting->Open(0x7e);
+            scripting->Release();
+        }
     }
     initialize("cSCLua", luaInterpreter_);
     if (!winLocationSaver_) {

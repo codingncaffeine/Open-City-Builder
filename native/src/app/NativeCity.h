@@ -20,6 +20,9 @@ namespace native {
 
 // Installs a neutral stub for every host interface the recovered classes reach (the real hosts replace them as they are written).
 void InstallStubHosts();
+void InstallAdvisorHosts();   // NativeAdvisors.cpp
+void NativeRunAppLua(const char* code);
+void NativePrintAdvisors();
 
 // The window changes LoadCity asks for once the file is read (the application window's DestroyCurrentScreen / CreateCityScreen).
 struct CityScreenCallbacks {

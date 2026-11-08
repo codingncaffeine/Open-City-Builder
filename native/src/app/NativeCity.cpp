@@ -269,6 +269,7 @@ bool LoadCityFile(cSC4App& app, const std::string& path, cRZAutoRefCount<cISC4Re
         if (!subscribed && SL::spMS2) subscribed = SL::spMS2->AddNotification(&g_citySave, kMessageSaveStarted);
         RegisterExemplarFactories();
         InstallStubHosts();
+        InstallAdvisorHosts();              // the advisor system, advisors, advices and the scripts' advice API
         InstallCityProbeBindings();
         InstallNativeSimHosts();            // land value (more simulators move off the probe bindings here)
         InstallLotConstructionHosts();      // the lot developer's terrain host and construction services

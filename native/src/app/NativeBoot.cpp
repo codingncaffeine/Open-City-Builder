@@ -12,6 +12,8 @@
 #include "platform/GameDataPath.h"
 #include "app/NativeBoot.h"
 #include "gz/GZFramework.h"
+#include "lua/SCLuaInstance.h"
+#include "rz/COMDirectors.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "sc4/ServiceLocator.h"
 #include "rz/LanguageManager.h"
@@ -130,6 +132,8 @@ bool RunBoot(bool verbose, bool keepAlive, gd::cIGZGDriver* driver, const std::f
     cRZCmdLine line("sc4");
     framework->SetCommandLine(line);
 
+    // GZCOM class cSCLua (0xea10c4a2 / 0x4b2811aa): the scripting host on the vendored Lua 5.0 (the app's Lua, advisors, tutorial).
+    gz::RegisterDirectorMaker("cSCLua", +[]() -> cIGZUnknown* { return lua5::MakeSCLuaObject(); });
     if (beforeInit) beforeInit(*framework, *app);
     Step("PreFrameWorkInit", app->PreFrameWorkInit());
     Step("Init", app->Init());
