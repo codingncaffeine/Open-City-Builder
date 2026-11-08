@@ -200,11 +200,24 @@ const tFirstSets& FirstSets();
 // token id of an upper-case tag name ("/P" for end tags), 0 when unknown
 int LookupTag(const std::string& upperName);
 
+struct tDownloadedJob;
+
+// Who a download reports back to. The original hands the WWW system a cIGZMessageTarget2 that receives
+// kMessageDownloaded (data2 = succeeded, void3 = the job); the port's facade names that target with this interface.
+class IHtmlDownloadTarget {
+public:
+    virtual ~IHtmlDownloadTarget() = default;
+    virtual void Downloaded(bool succeeded, const tDownloadedJob& job) = 0;
+};
+
 class IHtmlWebSystem {
 public:
     virtual ~IHtmlWebSystem() = default;
-    // starts a download of `url`; the finished job comes back to the document (kMessageDownloaded)
+    // starts a download of `url`; 0 when it could not start
     virtual std::uint32_t StartJob(const std::string& url) = 0;           // vslot 0x80
+    // the same, reporting the finished job to `target` (the original's message target argument) on a later message
+    // pump; a cancelled job is never reported
+    virtual std::uint32_t StartJob(const std::string& url, IHtmlDownloadTarget* target) { (void)target; return StartJob(url); }
     virtual void CancelJob(std::uint32_t jobId) = 0;                      // vslot 0xb0
     virtual bool IsVisited(const std::string& absoluteUrl) = 0;          // vslot 0xc0
 };
@@ -232,7 +245,7 @@ struct tDownloadedJob {
     std::string data;
 };
 
-class cHTMLDocument : public IHtmlDocumentServices {
+class cHTMLDocument : public IHtmlDocumentServices, public IHtmlDownloadTarget {
 public:
     enum tBulletStyle { kBulletDisc = 0, kBulletSquare = 1 };
     static constexpr std::uint32_t kInterfaceId = 0xe0eca23a;
@@ -278,6 +291,9 @@ public:
     void RequestImage(IHtmlBitmapReceiver* requester, const cRZString& url);
     void ResourceHasBeenDownloaded(const tDownloadedJob& job);
     bool DoMessage(std::uint32_t type, const tDownloadedJob* job);
+    // IHtmlDownloadTarget (port): the facade's delivery of kMessageDownloaded. A picture can change the layout, so the
+    // page is laid out and painted again (the original's message pump repaints the window after the message).
+    void Downloaded(bool succeeded, const tDownloadedJob& job) override;
     bool LoadFromImageFile(const std::string& path, IHtmlBitmap*& bitmap);
     cHTMLIMG* CreateBullet(tBulletStyle style);
 

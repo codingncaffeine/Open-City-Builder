@@ -780,6 +780,8 @@ src/app/NativeAutomataScripts.cpp
 src/app/NativeAdvisors.cpp
 src/app/NativeAdvisorStatistics.cpp
 src/app/NativeAdvisorFlammability.cpp
+src/app/NativeWinHtml.cpp
+src/sc4/NewsTickerWinProc.cpp
 src/app/NativeAutomataControllerHost.cpp
 src/s3d/AnimatedInstance.cpp
 src/s3d/ModelInstanceAnimatedSprite.cpp

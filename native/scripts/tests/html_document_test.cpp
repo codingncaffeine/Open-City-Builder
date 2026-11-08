@@ -65,6 +65,12 @@ struct FakeWeb : IHtmlWebSystem {
     std::vector<std::string> started;
     std::vector<std::uint32_t> cancelled;
     std::uint32_t StartJob(const std::string& url) override { started.push_back(url); return 100 + static_cast<std::uint32_t>(started.size()); }
+    // the facade's reporting overload: who each job reports back to
+    std::vector<std::pair<std::string, IHtmlDownloadTarget*>> targets;
+    std::uint32_t StartJob(const std::string& url, IHtmlDownloadTarget* target) override {
+        targets.push_back({url, target});
+        return StartJob(url);
+    }
     void CancelJob(std::uint32_t id) override { cancelled.push_back(id); }
     bool IsVisited(const std::string& url) override { return url == "http://x/visited.html"; }
 };
@@ -178,7 +184,17 @@ int main() {
         job.url = "http://x/other/pic.gif";
         job.isFile = true;
         job.data = "/tmp/whatever.gif";
-        CHECK(doc.DoMessage(cHTMLDocument::kMessageDownloaded, &job));
+        // the document asked to be told itself; the facade's delivery marks the layout stale and repaints the window
+        IHtmlDownloadTarget* target = nullptr;
+        for (auto& t : setup.web.targets) if (t.first == job.url) target = t.second;
+        CHECK(target == static_cast<IHtmlDownloadTarget*>(&doc));
+        doc.MarkPageLayoutStatus(true);
+        const int paintsBefore = setup.window.invalidated;
+        if (target) target->Downloaded(true, job);
+        CHECK(setup.images.loads == 1);
+        CHECK(!doc.IsPageLayoutDone());
+        CHECK(setup.window.invalidated == paintsBefore + 1);
+        if (target) target->Downloaded(false, job);   // a failed job changes nothing
         CHECK(setup.images.loads == 1);
         cHTMLIMG* firstImg = nullptr;
         std::function<void(cHTMLContainerElement&)> find = [&](cHTMLContainerElement& c) {
@@ -212,9 +228,9 @@ int main() {
                 // (a table inherits the cursor column of the preceding list: it starts at x = 44 and spans the 300 available pixels)
         CHECK(body->drawRect().bottom > 60 && body->drawRect().right == 344);
         body->Draw(ctx);
-        // clicking a link recolours its text and repaints
+        // clicking a link recolours its text and repaints (one repaint more than the picture's delivery above)
         anchors[0]->OnMouseDownL(ctx);
-        CHECK(setup.window.invalidated == 1);
+        CHECK(setup.window.invalidated == 2);
     }
     std::printf(failures ? "FAILED\n" : "html_document: all passed\n");
     return failures ? 1 : 0;

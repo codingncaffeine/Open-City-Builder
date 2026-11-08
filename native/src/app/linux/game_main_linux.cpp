@@ -925,7 +925,25 @@ void DoubleClick(int cx, int cy) {
 }
 
 }  // namespace
-namespace native { std::uint32_t NativeSimDayNumber(); }   // app/NativeCityPanel.cpp
+namespace native {
+std::uint32_t NativeSimDayNumber();   // app/NativeCityPanel.cpp
+
+// The HTML windows' fonts (app/NativeWinHtml.cpp, cIGZFontSys::CreateFont): the game font file of the first listed face
+// that exists, bold / italic preferred, one shared cGZFont per (file, pixel size). Null when no listed face exists.
+cGZFont* HtmlFont(const std::string& faces, std::uint32_t size, bool bold, bool italic) {
+    if (!gFontHost || size == 0) return nullptr;
+    const std::string path = FindFontFile(faces, bold, italic);
+    if (path.empty()) return nullptr;
+    // never destroyed: documents still hold their fonts while the process exits
+    static auto& cache = *new std::map<std::pair<std::string, std::uint32_t>, cGZFont*>();
+    cGZFont*& font = cache[{path, size}];
+    if (!font) {
+        font = MakeFont(path, size);
+        if (!font->Init()) std::printf("font: html face %s size %u did not load\n", path.c_str(), size);
+    }
+    return font;
+}
+}  // namespace native
 namespace {
 bool OnRegionScreen() { return gAppWindow && gAppWindow->CurrentScreen() && gAppWindow->CurrentScreen()->GetID() == 0xea659793; }
 
@@ -1022,6 +1040,8 @@ int RunScenario(const std::string& path) {
             native::NativeRunAppLua(code.c_str());
         } else if (command == "advisors") {   // advisors: every advisor and its active advices
             native::NativePrintAdvisors();
+        } else if (command == "ticker") {   // ticker: the news ticker's queue, flipper ring and scroll
+            native::NativeTickerReport();
         } else if (command == "registry") {   // registry: the game-data registry's entry tree
             native::NativeRegistryReport();
         } else if (command == "animated") {   // animated [N]: the animation coordinator and the first N ticking props' frames

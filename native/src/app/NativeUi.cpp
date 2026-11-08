@@ -277,6 +277,9 @@ private:
     std::map<std::uint32_t, cIGZBuffer*> images_;
 };
 
+void InstallWinHtmlHosts();   // app/NativeWinHtml.cpp
+void RegisterWinHtmlMakers(cIGZWinMgr* mgr);
+
 bool InitUiScripts(WinMgr* mgr) {
     g_mgr = mgr;
     static CtrlFactory ctrlFactory;
@@ -284,7 +287,7 @@ bool InitUiScripts(WinMgr* mgr) {
     // cSLString: the strings come straight from the packages (the resource manager has no string factory natively)
     static struct : sc4::ISLStringHost {
         int LanguageOffset() override { return 0; }
-        sc4::cSCStringDetokenizer* Detokenizer() override { return nullptr; }
+        sc4::cSCStringDetokenizer* Detokenizer() override { return NativeDetokenizer(); }
         bool LoadText(const cGZPersistResourceKey& key, cIGZString& out) override { return LoadLocalizedString(key.group, key.instance, out); }
     } stringHost;
     sc4::SetSLStringHost(&stringHost);
@@ -325,6 +328,10 @@ bool InitUiScripts(WinMgr* mgr) {
     });
     // The edit box (clsid 0x231a1c58): the establish-city dialog's city and mayor names.
     gz::RegisterDirectorMaker("cGZWinTextEdit", +[]() -> cIGZUnknown* { return MakeWin<gz::cGZWinTextEdit>(); });
+    // The HTML viewer (clsid 0xaa12e5f5) and the news ticker's advice lists (0xca1492a2 view): without makers the ticker
+    // script built bare windows and the advice lists never got their page.
+    RegisterWinHtmlMakers(g_mgr);
+    InstallWinHtmlHosts();
     gz::RegisterDirectorMaker("cGZWinGrid", +[]() -> cIGZUnknown* {   // the director's default flags (Mac i386 CreateGZWinGrid 0x0073c2ee)
         return static_cast<cIGZUnknown*>(static_cast<cIGZWin*>(new gz::cGZWinGrid(g_mgr, 0x19bff)));
     });

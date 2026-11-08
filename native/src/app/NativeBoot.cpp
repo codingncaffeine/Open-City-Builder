@@ -16,6 +16,7 @@
 #include "rz/COMDirectors.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "sc4/ServiceLocator.h"
+#include "sc4/StringDetokenizer.h"
 #include "rz/LanguageManager.h"
 #include "rz/cRZCmdLine.h"
 #include "sc4/App.h"
@@ -29,6 +30,7 @@ void SetGameResolution(int width, int height, int screenWidth, int screenHeight)
 }
 }  // namespace native
 namespace {
+sc4::cSCStringDetokenizer* g_detokenizer = nullptr;
 struct Object final : cIGZUnknown {
     bool QueryInterface(std::uint32_t, void** out) override { *out = this; return true; }
     std::uint32_t AddRef() override { return ++refs; }
@@ -127,8 +129,18 @@ bool RunBoot(bool verbose, bool keepAlive, gd::cIGZGDriver* driver, const std::f
         return true;
     };
     app->StartupHooks().bundleGameDataDirectory = [&] { return bundle + "/GameData"; };
-    for (const char* name : {"cSC4GlyphTextureManager", "cSCStringDetokenizer", "cSLWinLocationSaver", "cSC4FeatureManager", "cSC4ToolTipManager", "cSC4MissingPluginDataReporter"})   // the nation is created by the application (NativeRegion)
+    for (const char* name : {"cSC4GlyphTextureManager", "cSLWinLocationSaver", "cSC4FeatureManager", "cSC4ToolTipManager", "cSC4MissingPluginDataReporter"})   // the nation is created by the application (NativeRegion)
         app->SetServiceFactory(name, []() -> cIGZUnknown* { return new Object(); });
+    // The string detokenizer (GZCOM 0xaa2c8c2a): the recovered default one, with #City# #Mayor# #Year# #Population# #Region#
+    // answered by the IDetokenizerHost (NativeView3DWinHost.cpp). A placeholder here left every token in the game's text.
+    app->SetServiceFactory("cSCStringDetokenizer", []() -> cIGZUnknown* {
+        if (!g_detokenizer) {
+            g_detokenizer = new sc4::cSCStringDetokenizerDefault();
+            g_detokenizer->AddRef();   // this module's own reference: the service lives as long as the process
+            g_detokenizer->Init();
+        }
+        return g_detokenizer;
+    });
     cRZCmdLine line("sc4");
     framework->SetCommandLine(line);
 
@@ -145,4 +157,6 @@ bool RunBoot(bool verbose, bool keepAlive, gd::cIGZGDriver* driver, const std::f
     }
     return failures == 0;
 }
+sc4::cSCStringDetokenizer* NativeDetokenizer() { return g_detokenizer; }
+
 }  // namespace native

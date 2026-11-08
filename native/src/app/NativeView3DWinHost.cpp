@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include "sc4/View3DWin.h"
+#include "sc4/StringDetokenizer.h"
 #include "rz/cRZMessage2Standard.h"
 #include "app/NativeDemolishTool.h"
 #include "app/NativeCity.h"
@@ -56,6 +57,8 @@
 #include "app/NativeWinMgr.h"
 
 namespace native {
+sc4::INewsTickerWindow* CreateNewsTickerWindow();     // app/NativeWinHtml.cpp
+void ShutdownNewsTickerWindow(cIGZUnknown* proc);
 namespace {
 using namespace sc4;
 
@@ -220,7 +223,7 @@ struct StubView3DWin final : IView3DWinHost {
         proc->AddRef();
         return proc;
     }
-    INewsTickerWindow* CreateNewsTickerWinProc() override { return {}; }
+    INewsTickerWindow* CreateNewsTickerWinProc() override { return native::CreateNewsTickerWindow(); }
     IMySimWindow* CreateMySimWinProc(gz::cIGZWinGen* panel) override { return native::CreateMySimWindow(panel); }
     IBudgetUIWindow* CreateBudgetUIWinProc() override { return native::CreateBudgetUiWindow(); }
     IGraphsViewWindow* CreateGraphsViewWinProc(cIGZWin* window) override { return native::CreateGraphsViewWindow(window); }
@@ -383,7 +386,7 @@ struct StubView3DWin final : IView3DWinHost {
     std::uint32_t MakeNativeColor(std::uint8_t r, std::uint8_t g, std::uint8_t b) override { return 0xff000000u | (std::uint32_t(r) << 16) | (std::uint32_t(g) << 8) | b; }
     bool BudgetDialogOpen(cIGZUnknown* dialog) override { return native::BudgetUiOpen(dialog); }
     void RefreshBudgetDialog(cIGZUnknown* dialog) override { native::BudgetUiRefresh(dialog); }
-    void ShutdownNewsTickerWinProc(cIGZUnknown* proc) override {}
+    void ShutdownNewsTickerWinProc(cIGZUnknown* proc) override { native::ShutdownNewsTickerWindow(proc); }
     void ShutdownMySimWinProc(cIGZUnknown* proc) override {}
     void ShutdownBudgetUIWinProc(cIGZUnknown* proc) override {}
     void ShutdownGraphsViewWinProc(cIGZUnknown* proc) override {}
@@ -502,6 +505,45 @@ void RunGraphicOptionsDialog(std::function<std::uint8_t*()> preferences) {
     if (blob && chosen != height && chosen >= 480) SaveDisplayHeight(static_cast<int>(chosen));
 }
 
-void InstallView3DWinStub() { static StubView3DWin s; sc4::SetView3DWinHost(&s); }
+// #City# #Mayor# #Year# #Population# for the string detokenizer (cSCStringDetokenizerDefault): the loaded city, its simulator
+// date and its residential population, numbers grouped as the English locale does. PARTIAL: #Region# (the region's name is
+// not reachable from the city natively) answers "unknown".
+class DetokenizerHost final : public sc4::IDetokenizerHost {
+public:
+    bool CityName(cIGZString& out) override {
+        cSC4City* city = LoadedCity();
+        if (!city) return false;
+        city->GetCityName(out);
+        return true;
+    }
+    bool MayorName(cIGZString& out) override {
+        cSC4City* city = LoadedCity();
+        if (!city) return false;
+        city->GetMayorName(out);
+        return true;
+    }
+    bool GetYear(int& year) override {
+        auto* simulator = CityComponentAs<cSC4Simulator>(CityComponent::Simulator, kGZCLSID_cSC4Simulator);
+        if (!simulator) return false;
+        int month = 0, day = 0;
+        simulator->GetSimDate(&year, &month, &day, nullptr, nullptr);
+        return true;
+    }
+    bool GetPopulation(int& population) override {
+        auto* residential = CityComponentAs<cSC4ResidentialSimulator>(CityComponent::ResidentialSimulator, kGZCLSID_cSC4ResidentialSimulator);
+        if (!residential) return false;
+        population = static_cast<int>(residential->GetPopulation());
+        return true;
+    }
+    void FormatNumber(long value, cIGZString& out) override { out.AssignFromCString(GroupDigits(value).c_str()); }
+    bool GetRegionName(cIGZString&) override { return false; }
+};
+
+void InstallView3DWinStub() {
+    static StubView3DWin s;
+    sc4::SetView3DWinHost(&s);
+    static DetokenizerHost detokenizer;
+    sc4::SetDetokenizerHost(&detokenizer);
+}
 
 }  // namespace native

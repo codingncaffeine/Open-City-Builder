@@ -6,6 +6,7 @@
 class cGZFramework;
 namespace gd { class cIGZGDriver; }
 class cSC4App;
+namespace sc4 { class cSCStringDetokenizer; }
 namespace native {
 // The game's (logical) resolution and the display's, before RunBoot (the application reads them as its metrics).
 void SetGameResolution(int width, int height, int screenWidth, int screenHeight);
@@ -19,6 +20,8 @@ bool RunBoot(bool verbose, bool keepAlive = false, gd::cIGZGDriver* driver = nul
              const std::function<void(cGZFramework&, cSC4App&)>& beforeInit = {});
 // The application object RunBoot built (null before it ran).
 cSC4App* BootApplication();
+// The string detokenizer service (null before the boot).
+sc4::cSCStringDetokenizer* NativeDetokenizer();
 // The framework RunBoot built (null before it ran); with keepAlive it stays up so GZCOM() and the services work.
 cGZFramework* BootFramework();
 }

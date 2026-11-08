@@ -99,6 +99,7 @@ void InstallSignToolStub();
 void InstallWeatherStub();
 void InstallNativeWeather();
 void InstallWinAdviceListStub();
+void InstallWinHtmlHosts();   // app/NativeWinHtml.cpp
 void InstallWinAnimationRecorderStub();
 void InstallWinBMPViewStub();
 void InstallCatalogViewStub();
@@ -209,6 +210,7 @@ void InstallStubHosts() {
     InstallWeatherStub();
     InstallNativeWeather();               // the real weather host replaces the stub above
     InstallWinAdviceListStub();
+    InstallWinHtmlHosts();                // the real advice-list host replaces the stub above
     InstallWinAnimationRecorderStub();
     InstallWinBMPViewStub();
     InstallCatalogViewStub();

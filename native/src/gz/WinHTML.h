@@ -45,7 +45,7 @@
 //    decoder, WWW system, bullet factory). The embedded WWW system (cGZWWWSystem) is out of the macOS scope
 //    (scripts/macos_scope.py), so the download protocol is represented by html::IHtmlWebSystem. The engine side
 //    (cGZBuffer as IWinHtmlCanvas, cIGZFontSys as html::IHtmlFontSystem, cGZGimexFactory as html::IHtmlImageDecoder,
-//    cGZWWWSystem as html::IHtmlWebSystem) still has to implement the host; the defaults are null.
+//    cGZWWWSystem as html::IHtmlWebSystem) is app/NativeWinHtml.cpp in the native game; the defaults here are null.
 #pragma once
 #include <cstdint>
 #include <string>
@@ -155,7 +155,7 @@ public:
 };
 
 class cGZWinHTML : public cGZWin, public cIGZWinHTML, public cIGZMessageTarget2,
-                   public html::IHtmlWindow, public html::IHtmlGraphics {
+                   public html::IHtmlWindow, public html::IHtmlGraphics, public html::IHtmlDownloadTarget {
 public:
     explicit cGZWinHTML(cIGZWinMgr* mgr);                                         // @ 0x100566a34
     ~cGZWinHTML() override;                                                       // @ 0x100566ccc / e64 / e6e
@@ -184,6 +184,8 @@ public:
 
     // ---- cIGZMessageTarget2 / cIGZWinHTML
     bool DoMessage(cIGZMessage2* message) override;                               // @ 0x10056783a
+    // html::IHtmlDownloadTarget (port): the facade's delivery of the page download, the body of DoMessage.
+    void Downloaded(bool succeeded, const html::tDownloadedJob& job) override;
     cIGZWin* AsIGZWin() override { return this; }                                 // @ 0x100569c20
     bool SetWWWSystem(html::IHtmlWebSystem* web) override;                        // @ 0x1005689d6
     std::int32_t GetLoadStatus() override { return loadStatus_; }                 // @ 0x100569c2a
@@ -272,4 +274,6 @@ private:
     html::IHtmlWebSystem* webSystem_ = nullptr;                 // +0x798 (borrowed)
     std::int32_t loadStatus_ = kHtmlLoadIdle;                   // +0x7a0
     IWinHtmlCanvas* canvas_ = nullptr;                          // port-only: bound by Canvas()
+    std::uint32_t pageJob_ = 0;                                 // port-only: the page download StartJob answered
+    bool OnDownloaded(bool succeeded, const html::tDownloadedJob* job);   // DoMessage's body
 };

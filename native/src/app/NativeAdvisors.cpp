@@ -42,6 +42,7 @@
 #include "sc4/ServiceLocator.h"
 #include "sc4/Simulator.h"
 #include "sc4/StringDetokenizer.h"
+#include "app/NativeBoot.h"
 #include "sc4/View3DWin.h"
 #include "sc4/cSC4City.h"
 
@@ -519,7 +520,7 @@ public:
     cISCLua* Lua() override { return AppLua(); }
     cIGZMessageServer2* Messages() override { return SL::spMS2; }
     cGZCheatCodeManager* CheatCodeManager() override { return dynamic_cast<cGZCheatCodeManager*>(SL::spCCM); }
-    cSCStringDetokenizer* Detokenizer() override { return dynamic_cast<cSCStringDetokenizer*>(SL::spStringDetokenizer); }
+    cSCStringDetokenizer* Detokenizer() override { return NativeDetokenizer(); }
     IAdvisorWinProc* CreateAdvisorWinProc() override { return nullptr; }
     cIGZUnknown* City() override { return HostCity() ? static_cast<cIGZUnknown*>(SL::spCity) : nullptr; }
     bool CityEstablished(cIGZUnknown*) override { cSC4City* c = HostCity(); return c && c->GetEstablished(); }
@@ -533,7 +534,11 @@ public:
         if (kTrace) std::fprintf(stderr, "advisors: create advisor class 0x%08x -> %s\n", classId, ok ? "ok" : "FAILED");
         return ok;
     }
-    DetokenizeMethod AdviceDetokenizerFunction() override { return nullptr; }   // PARTIAL
+    // PARTIAL: the advice's own tokens (its subject's words) are not recovered; the method answers "unknown" so the
+    // detokenizer leaves them, instead of calling a null method for every token it does not know.
+    DetokenizeMethod AdviceDetokenizerFunction() override {
+        return +[](const cIGZString&, cIGZString&, void*) { return false; };
+    }
     const LuaExtension* LuaExtensions(std::size_t& count) override {
         count = sizeof(kExtensions) / sizeof(kExtensions[0]);
         return kExtensions;

@@ -1738,7 +1738,7 @@ void cHTMLDocument::RequestImage(IHtmlBitmapReceiver* requester, const cRZString
     auto it = images_.find(url.str());
     if (it == images_.end()) {
         images_[url.str()].pending.push_back(requester);
-        if (web_) images_[url.str()].jobId = web_->StartJob(url.str());
+        if (web_) images_[url.str()].jobId = web_->StartJob(url.str(), this);
         return;
     }
     if (it->second.bitmap == nullptr) {
@@ -1774,6 +1774,13 @@ void cHTMLDocument::ResourceHasBeenDownloaded(const tDownloadedJob& job) {
         for (IHtmlBitmapReceiver* receiver : it->second.pending) receiver->SetBitmap(it->second.bitmap);
         it->second.pending.clear();
     }
+}
+
+void cHTMLDocument::Downloaded(bool succeeded, const tDownloadedJob& job) {
+    if (!succeeded) return;
+    DoMessage(kMessageDownloaded, &job);
+    MarkPageLayoutStatus(false);
+    InvalidateVisual();
 }
 
 bool cHTMLDocument::DoMessage(std::uint32_t type, const tDownloadedJob* job) {

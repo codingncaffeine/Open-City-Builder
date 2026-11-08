@@ -20,8 +20,7 @@
 // area (left, top, right, bottom), +0xbc how many ring entries are set, +0xc0 "a line already scrolled" flag,
 // +0xc4 the flipper list needs a rebuild, +0xc8 the font's line height.
 //
-// cSC4WinAdviceList is not recovered (its 22 functions are registered as NEWS-ADVISELIST-1), so both lists are
-// reached through IC4WinAdviceList, one virtual per original call (vslot in the comment).
+// Both lists are cSC4WinAdviceList windows the ticker's window script creates, reached through cIGZWinAdviceList.
 #pragma once
 #include <cstdint>
 #include <list>
@@ -33,6 +32,7 @@
 #include "rz/cRZAutoRefCount.h"
 #include "rz/cRZCallbackTimer.h"
 #include "sc4/Advice.h"
+#include "sc4/WinAdviceList.h"
 
 namespace sc4 {
 
@@ -64,21 +64,8 @@ constexpr std::uint32_t kNewsTickerAdviceNewsOnly = 0x2000;    // cISC4Advice fl
 constexpr std::uint32_t kNewsTickerLineDelayMs = 3000;   // between two flipper lines
 constexpr std::uint32_t kNewsTickerScrollMs = 0x28;      // per scrolled pixel
 
-// cSC4WinAdviceList as the ticker uses it (one reference on every entry; the caller Releases).
-class IC4WinAdviceList : public cIGZUnknown {
-public:
-    virtual cIGZWin* AsIGZWin() = 0;                                                     // [3]  0x18
-    // (title, ?, ?, ?, ?, advice, text, ?, background image id) — see the AddEntry call sites.
-    virtual void AddEntry(const cIGZString& first, const cIGZString& second, const cIGZString& third,
-                          const cIGZString& fourth, bool flag5, cISC4Advice* advice, const cIGZString& text,
-                          bool flag8, std::uint32_t imageId) = 0;                        // [4]  0x20
-    virtual void RebuildHTML(bool) = 0;                                                  // [5]  0x28
-    virtual void SetBackgroundImage(std::uint32_t imageId) = 0;                          // [6]  0x30
-    virtual void ClearList() = 0;                                                        // [7]  0x38
-    virtual void SetGutters(int left, int top, int right, int bottom) = 0;               // [8]  0x40
-    virtual void ScrollToAnchor(const cIGZString& anchor) = 0;                           // [9]  0x48
-    virtual void DisableVerticalScrollbar() = 0;                                         // [10] 0x50
-};
+// cSC4WinAdviceList as the ticker uses it: the recovered list's own interface (iid 0xca1492a2, the same ten slots).
+using IC4WinAdviceList = cIGZWinAdviceList;
 
 class cSC4NewsTickerWinProc : public cIGZMessageTarget2, public gz::cIGZWinProc {
 public:

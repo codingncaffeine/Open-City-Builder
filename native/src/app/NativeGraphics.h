@@ -92,7 +92,8 @@ public:
     void NativeToRGB(std::uint32_t n, std::uint8_t& r, std::uint8_t& g, std::uint8_t& b) override { primary_->NativeToRGB(n, r, g, b); }
     IWinBuffer* PrimaryBuffer() override { return primary_.get(); }
     bool DrawSystemActive() override { return true; }
-    IWinBuffer* DrawSystemCreateBuffer(int width, int height) override { return new Buffer(width, height, false); }
+    // An empty window has no private buffer (cGZBuffer::Init refuses a zero size; the native buffer crashed on one).
+    IWinBuffer* DrawSystemCreateBuffer(int width, int height) override { return width > 0 && height > 0 ? new Buffer(width, height, false) : nullptr; }
     IWinBuffer* GraphicsCreateBuffer() override { return nullptr; }
     bool GetPrivateBufferKeyColor(std::uint32_t& nativeColor) override { nativeColor = primary_->MakeNativeColor(0xff, 0x00, 0xff); return true; }
 

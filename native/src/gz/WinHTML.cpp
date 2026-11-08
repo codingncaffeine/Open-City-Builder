@@ -175,6 +175,9 @@ bool cGZWinHTML::SetHTMLPaintArea() {   // @ 0x10056718e
 bool cGZWinHTML::CancelCurrentLoadRequest() {   // @ 0x100567406
     const std::int32_t previous = loadStatus_;
     if (previous == kHtmlLoadLoading) {
+        // Port: the facade's job is cancelled too, so it never reports to a window that moved on or shut down.
+        if (webSystem_ != nullptr && pageJob_ != 0) webSystem_->CancelJob(pageJob_);
+        pageJob_ = 0;
         loadStatus_ = kHtmlLoadIdle;
         cGZMessage message{kWinHtmlMsgLoadStatus, reinterpret_cast<std::uint64_t>(this), 0, 1};
         SendMsg(notify_, message);
@@ -240,6 +243,15 @@ bool cGZWinHTML::DoMessage(cIGZMessage2* message) {   // @ 0x10056783a
     // The original reads the finished job from GetVoid3: a cIGZWWWSystem::Job whose +0x40 is the "is a file" flag and
     // whose +0x48 body text is the page. The port uses the recovered document's download record for that pair.
     auto* job = static_cast<const html::tDownloadedJob*>(standard->GetVoid3());
+    return OnDownloaded(succeeded, job);
+}
+
+void cGZWinHTML::Downloaded(bool succeeded, const html::tDownloadedJob& job) {
+    pageJob_ = 0;
+    OnDownloaded(succeeded, &job);
+}
+
+bool cGZWinHTML::OnDownloaded(bool succeeded, const html::tDownloadedJob* job) {
     if (!succeeded) {
         if (loadStatus_ != kHtmlLoadLoading) return true;
         loadStatus_ = document_ != nullptr ? kHtmlLoadLoaded : kHtmlLoadIdle;
@@ -722,8 +734,9 @@ bool cGZWinHTML::SetURL(cRZURL& url, bool reload) {   // @ 0x100568dca
     cGZMessage started{kWinHtmlMsgLoadStatus, reinterpret_cast<std::uint64_t>(this), 1, 1};
     SendMsg(notify_, started);
     // The original passes the URL, the +0x158 message target, two zeros and "resolve against the base URL" to the WWW
-    // system's vslot 0x88; the recovered facade only takes the absolute URL (see the header's seam note).
-    if (webSystem_->StartJob(newUrl_.GetFullURL().str()) == 0) {
+    // system's vslot 0x88; the facade takes the absolute URL and this window as the job's html::IHtmlDownloadTarget.
+    pageJob_ = webSystem_->StartJob(newUrl_.GetFullURL().str(), this);
+    if (pageJob_ == 0) {
         loadStatus_ = kHtmlLoadIdle;
         cGZMessage failed{kWinHtmlMsgLoadStatus, reinterpret_cast<std::uint64_t>(this), 0, 1};
         SendMsg(notify_, failed);

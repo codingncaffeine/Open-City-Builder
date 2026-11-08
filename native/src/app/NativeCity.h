@@ -23,6 +23,7 @@ void InstallStubHosts();
 void InstallAdvisorHosts();   // NativeAdvisors.cpp
 void NativeRunAppLua(const char* code);
 void NativePrintAdvisors();
+void NativeTickerReport();       // app/NativeWinHtml.cpp: the news ticker (kit command `ticker`)
 
 // The window changes LoadCity asks for once the file is read (the application window's DestroyCurrentScreen / CreateCityScreen).
 struct CityScreenCallbacks {

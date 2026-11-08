@@ -229,7 +229,7 @@ struct FakeAdviceList final : cGZWin, sc4::IC4WinAdviceList {
                            std::string(text.ToChar(), text.Strlen()), advice, flag5, flag8, imageId});
     }
     void RebuildHTML(bool rebuild) override { ++rebuilds; lastRebuild = rebuild; }
-    void SetBackgroundImage(std::uint32_t imageId) override { ++backgrounds; lastBackground = imageId; }
+    void SetbgImage(std::uint32_t imageId) override { ++backgrounds; lastBackground = imageId; }
     void ClearList() override { ++clears; entries.clear(); }
     void SetGutters(int, int, int, int) override { ++gutterSets; }
     void ScrollToAnchor(const cIGZString&) override {}
@@ -594,8 +594,8 @@ struct TickerTree {
         flipper = new FakeAdviceList(&mgr);
         mgr.valid.insert(flipper);
         flipper->SetID(sc4::kNewsTickerAdviceListFlipper);
-        flipper->SetArea(0, 100, 400, 120);
-        host->ChildAdd(flipper);
+        flipper->SetArea(0, 0, 400, 20);
+        gen->ChildAdd(flipper);   // the flipper line lives in the ticker's own window (Mac i386 Init), not in the host
     }
 };
 
@@ -621,15 +621,15 @@ static void TestTicker() {
     CHECK_EQ(tree.flipper->gutterSets, 1);
     CHECK_EQ(proc->LineHeight(), 0);   // no window colour manager in the harness
 
-    // HideTicker is called by Init; the ticker child is disabled.
-    CHECK(!tree.tickerWindow->GetFlag(kWinEnabled));
+    // HideTicker is called by Init; the ticker child is hidden (flag 1, Mac i386 Show/HideTicker).
+    CHECK(!tree.tickerWindow->GetFlag(kWinVisible));
     proc->ShowTicker();
-    CHECK(tree.tickerWindow->GetFlag(kWinEnabled));
+    CHECK(tree.tickerWindow->GetFlag(kWinVisible));
     // The control only turns visible once the ticker is enabled (the proc's +0x81 flag, still false here).
-    CHECK(!tree.host->GetFlag(kWinEnabled));
+    CHECK(!tree.host->GetFlag(kWinVisible));
     proc->HideTicker();
-    CHECK(!tree.tickerWindow->GetFlag(kWinEnabled));
-    CHECK(!tree.host->GetFlag(kWinEnabled));
+    CHECK(!tree.tickerWindow->GetFlag(kWinVisible));
+    CHECK(!tree.host->GetFlag(kWinVisible));
 
     // The ranked list: high priority first, duplicates ignored.
     FakeAdvice low, high, middle;

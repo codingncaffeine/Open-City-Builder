@@ -145,7 +145,10 @@ bool cSC4NewsTickerWinProc::Init(gz::cIGZWinGen* window) {
         if (list) static_cast<cIGZUnknown*>(list)->Release();   // GetChildAsRecursive handed over a reference
     }
     list = nullptr;
-    if (host->GetChildAsRecursive(kNewsTickerAdviceListFlipper, kGZIID_cISC4WinAdviceList, &list)) {
+    // The flipper line lives in the ticker's own script window, not in the control host (Mac i386 Init: parent's child
+    // 0xca2aedc0, then its child 0xaa12f33c).
+    cIGZWin* flipperParent = parent->GetChildWindowFromIDRecursive(kNewsTickerWindowId);
+    if (flipperParent && flipperParent->GetChildAsRecursive(kNewsTickerAdviceListFlipper, kGZIID_cISC4WinAdviceList, &list)) {
         flipperList_ = static_cast<IC4WinAdviceList*>(list);
         if (list) static_cast<cIGZUnknown*>(list)->Release();
     }
@@ -163,11 +166,13 @@ bool cSC4NewsTickerWinProc::Init(gz::cIGZWinGen* window) {
     }
 
     timer_.SetCallbackFunction(&cSC4NewsTickerWinProc::NewsTickCallback, this);
+    gz::IWinFont* font = nullptr;
     if (gz::cIGZWinCtrlMgr* controls = RZ::WCM()) {
-        if (gz::IWinFont* font = controls->SystemFont(kNewsTickerFontId)) {
-            lineHeight_ = font->GlyphHeight();   // IWinFont vslot 0x118 (the cIGZFont line height)
-        }
+        font = controls->SystemFont(kNewsTickerFontId);
+    } else if (gz::IWinFontSource* fonts = gz::WinFontSource()) {
+        font = fonts->Font(kNewsTickerFontId);   // port: the native build has no control manager; its font seam
     }
+    if (font) lineHeight_ = font->GlyphHeight();   // IWinFont vslot 0x118 (the cIGZFont line height)
     flipperArea_.bottom = lineHeight_ * 3 + flipperArea_.top;
 
     if (cIGZWin* label = parent->GetChildWindowFromIDRecursive(kNewsTickerResizeLabel)) {
@@ -236,15 +241,15 @@ bool cSC4NewsTickerWinProc::DoWinProcMessage(cIGZWin* window, cGZMessage& messag
         const std::uint64_t id = message.param2;
         if (id - kNewsTickerButtonToggle < 2) {   // 0xca2aedcc / 0xca2aedcd: show / hide
             if (!tickerVisible_) {
-                control->SetFlag(kWinEnabled, true);
+                control->SetFlag(kWinVisible, true);
                 ShowTicker();
                 updateBodyTextCtrl();
             } else {
-                control->SetFlag(kWinEnabled, false);
+                control->SetFlag(kWinVisible, false);
             }
             tickerVisible_ = !tickerVisible_;
         } else if (id == kNewsTickerButtonStop) {
-            control->SetFlag(kWinEnabled, false);
+            control->SetFlag(kWinVisible, false);
             tickerVisible_ = false;
         }
         return false;
@@ -358,7 +363,7 @@ void cSC4NewsTickerWinProc::ShowTicker() {
         ticker->SetFlag(0x800, true);
         ticker->PullToFront();
         ticker->SetFlag(0x800, false);
-        ticker->SetFlag(kWinEnabled, true);
+        ticker->SetFlag(kWinVisible, true);
     }
     cIGZWin* control = TickerChild(window_, kNewsTickerControlHost);
     if (!control) return;
@@ -366,7 +371,7 @@ void cSC4NewsTickerWinProc::ShowTicker() {
     control->PullToFront();
     control->SetFlag(0x800, false);
     if (tickerVisible_) {
-        control->SetFlag(kWinEnabled, true);
+        control->SetFlag(kWinVisible, true);
         updateBodyTextCtrl();
     }
     if (!timer_.IsRunning()) timer_.StartPeriodic(kNewsTickerLineDelayMs, static_cast<gz::cIGZWinProc*>(this));
@@ -374,8 +379,8 @@ void cSC4NewsTickerWinProc::ShowTicker() {
 
 // @ 0x10031c760.
 void cSC4NewsTickerWinProc::HideTicker() {
-    if (cIGZWin* control = TickerChild(window_, kNewsTickerControlHost)) control->SetFlag(kWinEnabled, false);
-    if (cIGZWin* ticker = TickerChild(window_, kNewsTickerWindowId)) ticker->SetFlag(kWinEnabled, false);
+    if (cIGZWin* control = TickerChild(window_, kNewsTickerControlHost)) control->SetFlag(kWinVisible, false);
+    if (cIGZWin* ticker = TickerChild(window_, kNewsTickerWindowId)) ticker->SetFlag(kWinVisible, false);
     if (timer_.IsRunning()) timer_.Stop();
 }
 
@@ -423,7 +428,7 @@ void cSC4NewsTickerWinProc::RemoveInactive() {
 void cSC4NewsTickerWinProc::updateBodyTextCtrl() {
     if (!adviceList_) return;
     adviceList_->ClearList();
-    adviceList_->SetBackgroundImage(kNewsTickerImageBody);
+    adviceList_->SetbgImage(kNewsTickerImageBody);
 
     for (const auto& entry : messages_) {
         cISC4Advice* advice = entry.get();
@@ -537,7 +542,7 @@ void cSC4NewsTickerWinProc::DoFlipperMessage() {
     ringCount_ = 0;
     if (!flipperList_) return;
     flipperList_->ClearList();
-    flipperList_->SetBackgroundImage(kNewsTickerImageFlipper);
+    flipperList_->SetbgImage(kNewsTickerImageFlipper);
 
     // 1. the last non-null ring entry (counted) and the highest ring priority.
     cRZAutoRefCount<cISC4Advice> current;
