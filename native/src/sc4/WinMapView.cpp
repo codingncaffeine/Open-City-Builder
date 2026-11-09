@@ -441,9 +441,13 @@ bool cSC4WinMapView::MergeNewHighlights() {
 // ---------------------------------------------------------------------------------------------------------------
 // Update (0x10034a848; i386 0x0027db2e): draw the current data view's simulator grid into a new map buffer and hand
 // it to the panel's minimap (child 0x4203, cISC4WinMiniMap) as its overlay; data view 0 clears the overlay.
-//   PARTIAL: views 0x1d (weather) and 0x4c (traffic routes) draw nothing; crime incident icons, the lot shading (+0x9c0 colour) and the
-//   highlight circles (+0x9c4 colour) are not drawn; the custom view (vslot 0x14) is not created.
+//   PARTIAL: views 0x1d (weather) and 0x4c (traffic routes) draw nothing; crime incident icons are not drawn; the custom view (vslot 0x14) is not created.
 // ---------------------------------------------------------------------------------------------------------------
+namespace {
+void DrawShadedRect(cIGZBuffer* buffer, const cRZRect& rect, std::uint32_t color);
+void DrawAntialiasedCircle(cIGZBuffer* buffer, float cx, float cy, float radius, std::uint32_t color);
+}  // namespace
+
 void cSC4WinMapView::Update() {
     if (!viewActive_) return;
     dirty_ = false;
@@ -562,6 +566,27 @@ void cSC4WinMapView::Update() {
                         }
                     }
                     break;
+                }
+            }
+            // The highlighted occupants' lots, shaded in the view's lot colour, then the coverage circles.
+            const int cityX = g_host->CitySizeXInCells(), cityZ = g_host->CitySizeZInCells();
+            const auto lock = static_cast<cIGZBuffer::eLockFlags>(0x8040);
+            if (lotShadeColor_ != 0 && cityX > 0 && cityZ > 0 && buffer->Lock(lock)) {
+                for (const WinMapHighlightInfo& info : activeHighlights_) {
+                    if (!info.occupant) continue;
+                    SC4CellRect cells;
+                    info.occupant->GetBoundingCityCells(cells);   // vslot 0x2c
+                    const int l = width * cells.x0 / cityX, t = height * cells.z0 / cityZ;
+                    const int r = width * (cells.x1 + 1) / cityX, b = (cells.z1 + 1) * height / cityZ;
+                    DrawShadedRect(buffer, cRZRect{l, t, r + 1, b + 1}, lotShadeColor_);
+                }
+                buffer->Unlock(lock);
+            }
+            if (circleColor_ != 0 && cityX > 0) {
+                const float pixelsPerMeter = static_cast<float>(width) / (static_cast<float>(cityX) * 16.0f);   // spCity 0x164 (size in m)
+                for (const WinMapHighlightInfo& info : activeHighlights_) {
+                    if (info.scale > 0.0f)
+                        DrawAntialiasedCircle(buffer, pixelsPerMeter * info.x, pixelsPerMeter * info.z, info.scale * pixelsPerMeter, circleColor_);
                 }
             }
             map->SetOverlay(buffer);
@@ -972,6 +997,65 @@ void BlockMapByLot(ByteGrid& out, const std::vector<std::vector<T>>& source, int
     }
 }
 
+// PutAntialiasedPixel (i386 0x00279778): blend `color` over the pixel with weight `alpha` (/256); the stored alpha is
+// raised to cover. Callers have the buffer locked.
+void PutAntialiasedPixel(cIGZBuffer* buffer, int x, int y, std::uint32_t color, std::uint32_t alpha) {
+    auto* bits = static_cast<std::uint8_t*>(buffer->GetColorSurfaceBits());
+    if (!bits) return;
+    auto* pixel = reinterpret_cast<std::uint32_t*>(bits + static_cast<std::size_t>(y) * buffer->GetColorSurfaceStride()) + x;
+    const std::uint32_t p = *pixel;
+    const std::uint32_t keep = 0x100 - alpha;
+    *pixel = ((0xff - (((0xff - (p >> 24)) * keep + 0x80) >> 8)) << 24) +
+             (((((p >> 16) & 0xff) * keep + 0x80 + ((color >> 16) & 0xff) * alpha) >> 8 & 0xff) << 16) +
+             ((((p >> 8) & 0xff) * keep + 0x80 + ((color >> 8) & 0xff) * alpha) & 0xff00) +
+             (((keep * (p & 0xff) + 0x80 + (color & 0xff) * alpha) >> 8) & 0xff);
+}
+
+// DrawShadedRect (i386 0x0027a744): the rectangle clipped to the buffer, every pixel blended with the colour's own alpha.
+void DrawShadedRect(cIGZBuffer* buffer, const cRZRect& rect, std::uint32_t color) {
+    cRZRect area;
+    buffer->GetBufferArea(area);
+    int l = 0, t = 0, r = 0, b = 0;
+    if (area.left < rect.right && rect.left < area.right && area.top < rect.bottom && rect.top < area.bottom) {
+        l = std::max(rect.left, area.left);
+        t = std::max(rect.top, area.top);
+        r = std::min(rect.right, area.right);
+        b = std::min(rect.bottom, area.bottom);
+    }
+    for (int y = t; y < b; ++y)
+        for (int x = l; x < r; ++x) PutAntialiasedPixel(buffer, x, y, color, color >> 24);
+}
+
+// DrawAntialiasedCircle (i386 0x0027a464): a ring of half-width 2 px around radius `radius`, its alpha falling by 128 per
+// pixel of distance. The original's float-to-int steps (the 12582912 trick) are floor for the lower and ceil for the upper
+// bounds here.
+void DrawAntialiasedCircle(cIGZBuffer* buffer, float cx, float cy, float radius, std::uint32_t color) {
+    const auto lock = static_cast<cIGZBuffer::eLockFlags>(0x8040);
+    if (!buffer->Lock(lock)) return;
+    cRZRect area;
+    buffer->GetBufferArea(area);
+    const float outer = radius + 1.0f;
+    const int y0 = std::max(static_cast<int>(std::floor(cy - radius - 0.5f)), area.top);
+    const int y1 = std::min(static_cast<int>(std::ceil(radius + cy + 0.5f)), area.bottom - 1);
+    const float mx = cx + 0.5f, my = cy + 0.5f;
+    for (int y = y0; y <= y1; ++y) {
+        const float dy2 = (static_cast<float>(y) - my) * (static_cast<float>(y) - my);
+        const float span2 = outer * outer - dy2;
+        if (span2 < 0.0f) continue;
+        const float span = std::sqrt(span2);
+        const int x0 = std::max(static_cast<int>(std::floor(mx - span)), area.left);
+        const int x1 = std::min(static_cast<int>(std::ceil(mx + span)), area.right - 1);
+        for (int x = x0; x <= x1; ++x) {
+            const float off = std::fabs(std::sqrt((static_cast<float>(x) - mx) * (static_cast<float>(x) - mx) + dy2) - radius);
+            if (off < 2.0f) {
+                const int fade = static_cast<int>(std::floor(off * 128.0f));
+                PutAntialiasedPixel(buffer, x, y, color, static_cast<std::uint32_t>(0xff - fade));
+            }
+        }
+    }
+    buffer->Unlock(lock);
+}
+
 ByteGrid SizedGrid(int x, int z) { return ByteGrid(static_cast<std::size_t>(std::max(x, 0)), std::vector<std::uint8_t>(static_cast<std::size_t>(std::max(z, 0)), 0)); }
 constexpr float kCityCellMeters = 16.0f;   // spCity vslots 0x16c / 0x170 (only the marked-cell size reads them)
 }  // namespace
@@ -1018,7 +1102,7 @@ void cSC4WinMapView::DisplayStandardUint8Grid(const std::vector<std::vector<std:
                 }
             }
         }
-        markedCells_->AddMarkedCells(cells);
+        markedCells_->SetMarkedCells(cells);
         markedCells_->SetCellColors(colors);
         markedCells_->SetCellSize(cellSizeX, cellSizeZ);
     }
@@ -1059,7 +1143,7 @@ void cSC4WinMapView::DisplayStandardSint8Grid(const std::vector<std::vector<std:
                 }
             }
         }
-        markedCells_->AddMarkedCells(cells);
+        markedCells_->SetMarkedCells(cells);
         markedCells_->SetCellColors(colors);
         markedCells_->SetCellSize(cellSizeX, cellSizeZ);
     }

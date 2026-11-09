@@ -1,8 +1,8 @@
 // The data-view map window's services on the native application (sc4::IWinMapViewHost). The generated stub this replaces
 // answered every call neutrally: no message server (so cSC4WinMapView::Init failed) and FilterUICommand false (so every
 // button of the Data Views panel was vetoed before the view saw it).
-//   PARTIAL: CollectHighlights (the nine per-view simulator queries), the marked-cell view (SC4MarkedCellView is not
-//   recovered), the highlight effects and the pothole decal answer "nothing"; the tutorial
+//   PARTIAL: CollectHighlights views 6 and 9 (see there), the highlight effects and the pothole decal answer
+//   "nothing"; the tutorial
 //   command filter always passes (no tutorial runs natively).
 #include <chrono>
 #include <set>
@@ -14,6 +14,7 @@
 #include "app/NativeCity.h"
 #include "app/NativeCitySystems.h"
 #include "app/NativeCityView.h"
+#include "app/NativePower.h"
 #include "app/NativeZoneDeveloperHost.h"
 #include "gz/WinFont.h"
 #include "gz/Buffer.h"
@@ -40,12 +41,18 @@
 #include "sc4/View3DWin.h"
 #include "sc4/WinMapView.h"
 #include "sc4/WinMiniMap.h"
+#include "sc4/PowerSimulator.h"
 #include "sc4/cSC4City.h"
+#include "sc4/cSTETerrain.h"
 
 namespace native {
 const sc4::cSC4SimGrid<std::uint8_t>* NativeFlammabilityGrid();   // app/NativeAdvisorFlammability.cpp
 const sc4::cSC4SimGrid<std::uint8_t>* NativePoweredGrid();        // app/NativePower.cpp
 const sc4::cISC4GrowthDeveloper* GrowthDeveloperInterfaceOfType(std::uint32_t type);   // app/NativeGrowthDevelopers.cpp
+sc4::IWinMapViewMarkedCells* NativeCreateMarkedCells();          // app/NativeMarkedCells.cpp
+bool NativeAddMarkedCells(sc4::IWinMapViewMarkedCells* cells);
+bool NativeRemoveMarkedCells(sc4::IWinMapViewMarkedCells* cells);
+sc4::cISC4Occupant* NativeStationOccupant(sc4::IProtectionStation* station);   // app/NativeSimHosts.cpp
 namespace {
 using namespace sc4;
 
@@ -84,6 +91,14 @@ template <class T> T* CityAs(CityComponent component) {
     cSC4City* city = HostCity();
     return city ? dynamic_cast<T*>(city->GetComponent(component)) : nullptr;
 }
+cSTETerrain* CityTerrainOf(cSC4City* city) {
+    cIGZUnknown* object = city ? city->GetComponent(CityComponent::Terrain) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(0xab953253, &raw) || !raw) return nullptr;
+    auto* terrain = static_cast<cSTETerrain*>(static_cast<cIGZSerializable*>(raw));
+    static_cast<cIGZSerializable*>(raw)->Release();
+    return terrain;
+}
 template <class T> bool Fill(const cSC4SimGrid<T>* grid, const std::vector<std::vector<T>>*& out, WinMapGrid& g) {
     if (!grid) return false;
     out = &grid->GetGridData();
@@ -109,10 +124,94 @@ public:
     void SetAnimationNotifications(cIGZMessageTarget2* target, std::uint32_t flags) override {
         if (cSC4AnimationTickManager* atm = AnimationTickManager()) atm->SetNewPriority(target, flags);
     }
-    void CollectHighlights(std::uint32_t, std::vector<WinMapHighlight>&) override {}
-    IWinMapViewMarkedCells* CreateMarkedCells() override { return nullptr; }
-    bool AddMarkedCells(IWinMapViewMarkedCells*) override { return false; }
-    bool RemoveMarkedCells(IWinMapViewMarkedCells*) override { return false; }
+    // UpdateHighlights' simulator switch (i386 0x0027bb0a). Coverage radii come from each simulator's GetOccupantCoverage at level
+    // 0.5 (its second output). PARTIAL: view 6 (garbage buildings + landfill-zone occupants) and view 9 (the traffic simulator's
+    // transit switches, not recovered) collect nothing.
+    void CollectHighlights(std::uint32_t view, std::vector<WinMapHighlight>& out) override {
+        switch (view) {
+            case 1:
+            case 2:
+                if (auto* res = CityAs<cSC4ResidentialSimulator>(CityComponent::ResidentialSimulator)) {
+                    cSC4ResidentialSimulator::OccupantList list;
+                    if (view == 1) res->GetSchoolBuildings(list, nullptr);
+                    else res->GetHospitalBuildings(list, nullptr);
+                    for (IResidentialOccupant* building : list) {
+                        float distance = 0.0f, radius = 0.0f;
+                        res->GetOccupantCoverage(building, 0.5f, distance, radius);
+                        void* raw = nullptr;
+                        cIGZUnknown* object = building->Object();
+                        if (object && object->QueryInterface(kGZIID_cISC4Occupant, &raw) && raw) {
+                            out.push_back({static_cast<sc4::cISC4Occupant*>(raw), radius});
+                            static_cast<sc4::cISC4Occupant*>(raw)->Release();   // the city keeps the occupant
+                        }
+                        building->Release();   // the list's reference
+                    }
+                }
+                break;
+            case 3:
+                if (auto* fire = CityAs<cSC4FireProtectionSimulator>(CityComponent::FireProtectionSimulator)) {
+                    std::list<IFireOccupant*> stations;
+                    fire->GetFireStations(stations);
+                    for (IFireOccupant* station : stations) {
+                        float covered = 0.0f, radius = 0.0f;
+                        fire->GetOccupantCoverage(station, SC4Percentage(0.5f), covered, radius);
+                        if (sc4::cISC4Occupant* occupant = NativeStationOccupant(station)) out.push_back({occupant, radius});
+                    }
+                }
+                break;
+            case 4:
+                if (auto* police = CityAs<cSC4PoliceSimulator>(CityComponent::PoliceSimulator)) {
+                    std::list<IProtectionStation*> stations;
+                    police->GetPoliceStations(stations);
+                    for (IProtectionStation* station : stations) {
+                        auto* officer = dynamic_cast<IPoliceOccupant*>(station);
+                        if (!officer) continue;
+                        float covered = 0.0f, radius = 0.0f;
+                        police->GetOccupantCoverage(officer, SC4Percentage(0.5f), covered, radius);
+                        if (sc4::cISC4Occupant* occupant = NativeStationOccupant(station)) out.push_back({occupant, radius});
+                    }
+                }
+                break;
+            case 5: {   // the crime hot spot: a cell, 100 m
+                cSC4City* city = HostCity();
+                cIGZUnknown* object = city ? city->GetComponent(CityComponent::CrimeSimulator) : nullptr;
+                void* raw = nullptr;
+                std::uint8_t value = 0;
+                int x = 0, z = 0;
+                if (object && object->QueryInterface(kGZIID_PlainObject, &raw) && raw && static_cast<cSC4CrimeSimulator*>(raw)->GetCrimeHotspot(&value, &x, &z)) {
+                    WinMapHighlight spot;
+                    spot.scale = 100.0f;
+                    spot.x = static_cast<float>((x + 0.5) * 16.0);
+                    spot.z = static_cast<float>((z + 0.5) * 16.0);
+                    if (cSTETerrain* terrain = CityTerrainOf(city)) spot.y = terrain->GetAltitude(spot.x, spot.z);
+                    out.push_back(spot);
+                }
+                break;
+            }
+            case 7:
+                if (cSC4PowerSimulator* power = NativePowerSimulator()) {
+                    std::list<sc4::cISC4Occupant*> plants;
+                    power->GetPowerPlants(plants);   // borrowed
+                    for (sc4::cISC4Occupant* plant : plants) out.push_back({plant, 0.0f});
+                }
+                break;
+            case 8:
+                if (auto* plumbing = CityAs<cSC4PlumbingSimulator>(CityComponent::PlumbingSimulator)) {
+                    std::list<sc4::cISC4Occupant*> producers;
+                    plumbing->GetWaterProducers(producers);   // one reference each
+                    for (sc4::cISC4Occupant* producer : producers) {
+                        out.push_back({producer, 0.0f});
+                        producer->Release();
+                    }
+                }
+                break;
+            default: break;
+        }
+        if (Trace() && !out.empty()) std::fprintf(stderr, "map view: highlight view %u: %zu highlights\n", view, out.size());
+    }
+    IWinMapViewMarkedCells* CreateMarkedCells() override { return NativeCreateMarkedCells(); }
+    bool AddMarkedCells(IWinMapViewMarkedCells* cells) override { return NativeAddMarkedCells(cells); }
+    bool RemoveMarkedCells(IWinMapViewMarkedCells* cells) override { return NativeRemoveMarkedCells(cells); }
     bool CreateEffect(const cRZString&, IWinMapViewEffect**) override { return false; }
     bool LoadLegendData(std::uint32_t view, std::vector<std::uint32_t>& colors, std::vector<std::uint32_t>& labelStrings,
                         std::uint32_t& titleString) override {

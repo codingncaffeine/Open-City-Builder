@@ -218,6 +218,7 @@ LandValueHost g_landValue;
 class PollutionOccupant final : public IPollutionOccupant {
 public:
     explicit PollutionOccupant(cISC4Occupant* occupant) : occupant_(occupant) {}
+    cISC4Occupant* Occupant() const { return occupant_; }
     cISCPropertyHolder* PropertyHolder() override { return occupant_->AsPropertyHolder(); }
     void Position(float xyz[3]) override { occupant_->GetPosition(xyz); }
 private:
@@ -640,5 +641,10 @@ int NativeWaterPollutionAt(int x, int z) {
     int value = 0;
     if (x >= 0 && z >= 0) static_cast<sc4::cSC4PollutionSimulator*>(serializable)->GetWaterValue(unsigned(x), unsigned(z), value);
     return value;
+}
+// The city occupant behind a polluter as the pollution simulator lists it (the data views' highlights).
+sc4::cISC4Occupant* NativePollutionOccupant(sc4::IPollutionOccupant* polluter) {
+    auto* adapter = dynamic_cast<PollutionOccupant*>(polluter);
+    return adapter ? adapter->Occupant() : nullptr;
 }
 }  // namespace native

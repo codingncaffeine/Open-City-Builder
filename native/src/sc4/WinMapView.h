@@ -174,6 +174,8 @@ public:
     virtual void SetShouldUseNetworkAltitude(bool on) = 0;                      // 0x10077c2c8
     virtual void ClearMarkedCells() = 0;                                        // 0x10077c496
     virtual void AddMarkedCells(const std::vector<WinMapCell>& cells) = 0;      // 0x1003537f0
+    // SetMarkedCells<SC4Point<int>> (i386 0x0069108c): clear, then add.
+    virtual void SetMarkedCells(const std::vector<WinMapCell>& cells) { ClearMarkedCells(); AddMarkedCells(cells); }
     virtual void SetCellColors(const std::vector<std::uint32_t>& colors) = 0;   // 0x10077c40e
     virtual void SetCellSize(float x, float z) = 0;                             // 0x10077c42e
 };

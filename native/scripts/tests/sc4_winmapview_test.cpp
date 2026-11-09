@@ -94,9 +94,12 @@ struct FakeMarkedCells final : IWinMapViewMarkedCells {
     void SetShouldIgnoreDepthBuffer(bool on) override { ignoreDepth = on; }
     void SetShouldUseWaterAltitude(bool on) override { water = on; }
     void SetShouldUseNetworkAltitude(bool on) override { network = on; }
-    void ClearMarkedCells() override { ++clears; }
-    void AddMarkedCells(const std::vector<WinMapCell>&) override { ++added; }
-    void SetCellColors(const std::vector<std::uint32_t>&) override {}
+    void ClearMarkedCells() override { ++clears; cells.clear(); }
+    std::vector<WinMapCell> cells;
+    std::vector<std::uint32_t> colors;
+    void ClearCells() { cells.clear(); }
+    void AddMarkedCells(const std::vector<WinMapCell>& more) override { ++added; cells.insert(cells.end(), more.begin(), more.end()); }
+    void SetCellColors(const std::vector<std::uint32_t>& c) override { colors = c; }
     void SetCellSize(float x, float z) override { cellX = x; cellZ = z; }
 };
 
@@ -236,7 +239,8 @@ struct FakeOccupant final : cISC4Occupant {
     void GetPosition(float* xyz) override { xyz[0] = position[0]; xyz[1] = position[1]; xyz[2] = position[2]; }
     void SetPosition(const float*) override {}
     void GetBoundingBox(float*, float*) override {}
-    void GetBoundingCityCells(SC4CellRect&) override {}
+    SC4CellRect cells;
+    void GetBoundingCityCells(SC4CellRect& out) override { out = cells; }
     void SetRemovalFlags(int) override {}
     void UnsetRemovalFlags(int) override {}
     bool CanRemove(int) override { return true; }
@@ -944,6 +948,16 @@ void TestDataViewImage() {
         CHECK(wrong == 0);
         overlay->Unlock(static_cast<cIGZBuffer::eLockFlags>(0x8040));
     }
+    // once the marked-cell view is registered, every cell whose paletteA colour has alpha is marked in that colour, and a
+    // redraw REPLACES the cells (SetMarkedCells), it does not add to them
+    FakeMarkedCells* marked = f.host.marked;
+    CHECK(marked != nullptr && f.view->markedCellsRegistered());
+    if (marked) {
+        CHECK(marked->cells.size() == 16);
+        CHECK(marked->colors.size() == 16 && marked->colors[5] == f.view->paletteA()[5]);
+        f.view->Update();
+        CHECK(marked->cells.size() == 16);
+    }
     // the same view again is cached; view 0 clears the overlay
     const int overlays = f.host.sink.overlays;
     CHECK(f.view->SetDataView(7));
@@ -951,6 +965,47 @@ void TestDataViewImage() {
     CHECK(f.view->SetDataView(0));
     CHECK(f.host.sink.overlay == nullptr);
     CHECK(f.view->dataView() == 0);
+}
+
+// Update's lot shading and coverage circles over the active highlights: the occupant's cells scaled to the map, blended in the
+// lot colour; a 2 px ring at the coverage radius in the circle colour, nothing at the centre.
+void TestHighlightOverlay() {
+    Fixture f;
+    f.view->Init();
+    auto* activate = new cRZMessage2Standard();
+    activate->SetType(kWinMapMsgViewActivate);
+    f.view->DoMessage(static_cast<cIGZMessage2*>(activate));
+    f.host.cityX = f.host.cityZ = 4;   // 64 m city on a 64 px map: one pixel per metre
+    f.host.sink.width = f.host.sink.height = 64;
+    f.host.hasExemplar = true;
+    f.host.exemplar.hasDataView = true;
+    f.host.exemplar.dataView = 7;
+    f.host.exemplar.hasHighlightView = true;
+    f.host.exemplar.highlightView = 7;
+    f.host.exemplar.hasLotShadeColor = true;
+    f.host.exemplar.lotShadeColor = 0xff0000ffu;   // opaque blue
+    f.host.exemplar.hasCircleColor = true;
+    f.host.exemplar.circleColor = 0xffff0000u;     // opaque red
+    f.host.grid8.assign(4, std::vector<std::uint8_t>(4, 0));
+    FakeOccupant occupant;
+    occupant.cells = SC4CellRect{0, 0, 0, 0};       // cell (0, 0) -> pixels 0..16
+    occupant.position[0] = 32.0f;                   // the ring's centre (x, z) = (32, 32)
+    occupant.position[2] = 32.0f;
+    f.host.highlights = {WinMapHighlight{&occupant, 10.0f}};
+    CHECK(f.view->SetDataView(7));
+    cIGZBuffer* overlay = f.host.sink.overlay;
+    CHECK(overlay != nullptr);
+    if (overlay && overlay->Lock(static_cast<cIGZBuffer::eLockFlags>(0x8040))) {
+        const auto* bits = static_cast<const std::uint8_t*>(overlay->GetColorSurfaceBits());
+        const std::uint32_t stride = overlay->GetColorSurfaceStride();
+        auto at = [&](int x, int y) { return reinterpret_cast<const std::uint32_t*>(bits + y * stride)[x]; };
+        CHECK((at(8, 8) & 0xff) > 0xf0);             // inside the lot: blue
+        CHECK((at(20, 20) & 0xff) == 0);             // outside it: not
+        CHECK(((at(42, 32) >> 16) & 0xff) > 0x80);   // on the ring (radius 10 around 32.5): red, faded by its distance
+        CHECK(((at(32, 32) >> 16) & 0xff) == 0);     // the centre: not
+        overlay->Unlock(static_cast<cIGZBuffer::eLockFlags>(0x8040));
+    }
+    f.view->SetDataView(0);
 }
 
 int main() {
@@ -968,6 +1023,7 @@ int main() {
     TestInitWindow();
     TestPotholeDecals();
     TestDataViewImage();
+    TestHighlightOverlay();
     if (g_failures == 0) std::printf("sc4_winmapview_test: all checks passed\n");
     return g_failures == 0 ? 0 : 1;
 }

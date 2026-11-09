@@ -232,6 +232,7 @@ public:
     void SetRenderStateHighlight(const s3d::cS3DMaterial& material, const s3d::SC4DrawAttributes* attributes);   // @ 0x1007740a4
     void SetRenderStateHighlight(std::uint32_t type);  // @ 0x100774130
     void SetDepthOffset(int offset);                   // @ 0x1007741b8
+    int GetDepthOffset() const { return depthOffset_; }   // the field (+0x114) callers read directly
     void SetEmulatedSecondStageRenderState();          // @ 0x10077428a
 
     // geometry
