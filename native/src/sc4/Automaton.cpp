@@ -2,12 +2,15 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
 #include "rz/cRZMessage2Standard.h"
 #include "s3d/S3DMath.h"
 #include "sc4/AutomataGenerator.h"   // AutomataFloorIdiom
+#include "gz/CommandParameterSet.h"
+#include "sc4/GameDataRegistryHelpers.h"
 #include "sc4/DBSegment.h"
 #include "sc4/SCPropertyHelp.h"
 
@@ -51,6 +54,12 @@ int CellOfWorldCoordinate(float world) { return AutomataFloorIdiom(world * 0.062
 
 IAutomatonHost* AutomatonHost() { return g_host; }
 void SetAutomatonHost(IAutomatonHost* host) { g_host = host; }
+
+namespace {
+AutomatonRegistrySource g_registrySource;
+cISC4GameDataRegistry* RegistryOfSource() { return g_registrySource.registry ? g_registrySource.registry() : nullptr; }
+}  // namespace
+void SetAutomatonRegistrySource(const AutomatonRegistrySource& source) { g_registrySource = source; }
 
 // ---- TweenStruct -----------------------------------------------------------------------------------------------------
 void AutomatonTween::SetDesired(float value, float seconds) {
@@ -1341,10 +1350,122 @@ bool cSC4Automaton::HandleExitState(const tAutomataState* state) {
     return true;
 }
 
-// 0x10010c00a / 0x10010cc76: the game data registry entries (one value per behaviour, the four s* callbacks and the
-// script-system node). The registry bridge is unrecovered, so both are no-ops that keep the lifecycle balance.
-void cSC4Automaton::RegisterInGameDataRegistry() {}
-void cSC4Automaton::UnregisterInGameDataRegistry() {}
+// 0x10010c00a (i386 0x000c29a2): once per automaton, a nameless node (the automaton's cIGZUnknown) under the automata script
+// system's node, with the position as three float values ("x", "y", "z", flags 2) and six commands registered with a null
+// handle (the registry then uses the entry itself), each carrying the automaton's cIGZUnknown as its context.
+void cSC4Automaton::RegisterInGameDataRegistry() {
+    cISC4GameDataRegistry* registry = RegistryOfSource();
+    cIGZUnknown* system = g_registrySource.scriptSystem ? g_registrySource.scriptSystem() : nullptr;
+    if (!registry) return;
+    cIGZUnknown* self = static_cast<cISC4Occupant*>(this);
+    if (registry->GetEntryID(self) != 0) return;
+    nsISC4GameDataRegistry::AddNode<cIGZUnknown, cIGZUnknown>(self, "", system, 0, nullptr, registry);
+    nsISC4GameDataRegistry::AddValue<cSC4Automaton>(&position_.x, "x", nsISC4GameDataRegistry::GenericValueExchnageFuncFloat32, this, 2, nullptr, registry);
+    nsISC4GameDataRegistry::AddValue<cSC4Automaton>(&position_.y, "y", nsISC4GameDataRegistry::GenericValueExchnageFuncFloat32, this, 2, nullptr, registry);
+    nsISC4GameDataRegistry::AddValue<cSC4Automaton>(&position_.z, "z", nsISC4GameDataRegistry::GenericValueExchnageFuncFloat32, this, 2, nullptr, registry);
+    const struct { const char* name; GameDataCommandFn fn; } commands[] = {
+        {"fade_out", sFadeOut}, {"remove", sRemove}, {"attach_anim", sAttachAnim},
+        {"play_anim", sPlayAnim}, {"play_sfx", sPlaySfx}, {"push_state", sPushState},
+    };
+    for (const auto& command : commands)
+        nsISC4GameDataRegistry::AddValue<cIGZUnknown>(nullptr, command.name, command.fn, self, 0, self, registry);
+}
+
+// 0x10010cc76 (i386 0x000bb9de): the node goes with its whole subtree.
+void cSC4Automaton::UnregisterInGameDataRegistry() {
+    if (cISC4GameDataRegistry* registry = RegistryOfSource()) registry->RemoveChildEntry(static_cast<cIGZUnknown*>(static_cast<cISC4Occupant*>(this)));
+}
+
+namespace {
+// The commands' common head: entry context (vslot 0x48 of GetEntryID(handle)) asked for the automaton interface; counted.
+cSC4Automaton* CommandAutomaton(void* handle, cISC4GameDataRegistry* registry) {
+    if (!registry) return nullptr;
+    auto* context = static_cast<cIGZUnknown*>(registry->GetEntryContext(registry->GetEntryID(handle)));
+    void* automaton = nullptr;
+    if (!context || !context->QueryInterface(kAutomatonIid, &automaton)) return nullptr;
+    return static_cast<cSC4Automaton*>(automaton);
+}
+// = cSC4AutomataScriptSystem::GetHexFromVariant (the commands call it there; a copy keeps the script system out of every link
+// that has the automaton): a Lua string (0x800e) is read as hex, anything else has to convert to uint32, else 0.
+std::uint32_t HexFromVariant(cIGZVariant& value) {
+    if (value.GetType() == 0x800e) {
+        cRZString text;
+        value.GetValString(text);
+        return static_cast<std::uint32_t>(std::strtoul(text.ToChar(), nullptr, 16));
+    }
+    std::uint32_t result = 0;
+    return value.GetValUint32(result) ? result : 0;
+}
+cGZPersistResourceKey CommandKey(cIGZCommandParameterSet* in) {   // type, group, instance as hex variants
+    cGZPersistResourceKey key{};
+    key.type = HexFromVariant((*in)[0]);
+    key.group = HexFromVariant((*in)[1]);
+    key.instance = HexFromVariant((*in)[2]);
+    return key;
+}
+}  // namespace
+
+// i386 0x000c8ab4: push_state(state [, seconds]); no seconds = no timeout (-1, tAutomataStatePlayerDrive::kDriveCommand_INACTIVE).
+bool cSC4Automaton::sPushState(void* handle, cIGZCommandParameterSet* in, cIGZCommandParameterSet*, cISC4GameDataRegistry* registry) {
+    if (cSC4Automaton* automaton = CommandAutomaton(handle, registry)) {
+        const std::uint32_t state = (*in)[0].GetValUint32();
+        float timer = -1.0f;
+        if (in->GetParameterCount() > 1) timer = (*in)[1].GetValFloat32() * 1000.0f;
+        automaton->PushState(state, nullptr, timer, false, 0, 0, nullptr);
+        automaton->Release();
+    }
+    return true;
+}
+
+// i386 0x000c91e0 / 0x000c9276: Remove(false) fades the automaton out, Remove(true) takes it away at once.
+bool cSC4Automaton::sFadeOut(void* handle, cIGZCommandParameterSet*, cIGZCommandParameterSet*, cISC4GameDataRegistry* registry) {
+    if (cSC4Automaton* automaton = CommandAutomaton(handle, registry)) {
+        automaton->Remove(false);
+        automaton->Release();
+    }
+    return true;
+}
+bool cSC4Automaton::sRemove(void* handle, cIGZCommandParameterSet*, cIGZCommandParameterSet*, cISC4GameDataRegistry* registry) {
+    if (cSC4Automaton* automaton = CommandAutomaton(handle, registry)) {
+        automaton->Remove(true);
+        automaton->Release();
+    }
+    return true;
+}
+
+// i386 0x000c930c: attach_anim(type, group, instance) -> AttachAnim(key, mode 1, true, -1).
+bool cSC4Automaton::sAttachAnim(void* handle, cIGZCommandParameterSet* in, cIGZCommandParameterSet*, cISC4GameDataRegistry* registry) {
+    if (cSC4Automaton* automaton = CommandAutomaton(handle, registry)) {
+        automaton->AttachAnim(CommandKey(in), static_cast<s3d::PlayMode>(1), true, -1.0f);
+        automaton->Release();
+    }
+    return true;
+}
+
+// i386 0x000c942c: play_anim(type, group, instance) plays a key; play_anim(name) plays by name. Quirk kept: the one-argument
+// form reads parameter 1 (the parameter set's null variant), so the name is always empty.
+bool cSC4Automaton::sPlayAnim(void* handle, cIGZCommandParameterSet* in, cIGZCommandParameterSet*, cISC4GameDataRegistry* registry) {
+    if (cSC4Automaton* automaton = CommandAutomaton(handle, registry)) {
+        if (in->GetParameterCount() == 3) {
+            automaton->PlayAnim(CommandKey(in));
+        } else if (in->GetParameterCount() == 1) {
+            cRZString name;
+            (*in)[1].GetValString(name);
+            automaton->PlayAnimByName(name);
+        }
+        automaton->Release();
+    }
+    return true;
+}
+
+// i386 0x000c95a0: play_sfx(id), nonzero ids only.
+bool cSC4Automaton::sPlaySfx(void* handle, cIGZCommandParameterSet* in, cIGZCommandParameterSet*, cISC4GameDataRegistry* registry) {
+    if (cSC4Automaton* automaton = CommandAutomaton(handle, registry)) {
+        if (const std::uint32_t sfx = HexFromVariant((*in)[0])) automaton->StartSFX(sfx);
+        automaton->Release();
+    }
+    return true;
+}
 
 // ---- animation -------------------------------------------------------------------------------------------------------
 bool cSC4Automaton::PlayAnim(const cGZPersistResourceKey& key) {

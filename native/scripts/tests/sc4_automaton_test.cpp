@@ -8,9 +8,12 @@
 #include <set>
 #include <vector>
 
+#include "gz/CommandParameterSet.h"
 #include "rz/PortMemoryStreams.h"
+#include "rz/cRZVariant.h"
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/Automaton.h"
+#include "sc4/GameDataRegistry.h"
 #include "sc4/SCPropertyHelp.h"
 
 static int failures = 0;
@@ -1024,6 +1027,82 @@ int main() {
         CHECK(!automaton->UpdateGhostModel());
         CHECK(!automaton->AttachAnim(cGZPersistResourceKey{}, s3d::kPlayLoop, true, 1.0f));
         CHECK(automaton->Release() == 0);
+    }
+
+    // ---- the game-data registry node (RegisterInGameDataRegistry, i386 0x000c29a2, and its commands) --------------------
+    {
+        struct SystemNode final : cIGZUnknown {   // stands in for the automata script system's node
+            bool QueryInterface(std::uint32_t iid, void** out) override {
+                if (iid != 1 || !out) return false;
+                *out = this;
+                return true;
+            }
+            std::uint32_t AddRef() override { return 2; }
+            std::uint32_t Release() override { return 1; }
+        };
+        static cSC4GameDataRegistry* s_registry = nullptr;
+        static SystemNode s_system;
+        auto* registry = new cSC4GameDataRegistry();
+        registry->AddRef();
+        s_registry = registry;
+        const EntryId systemId = registry->AddChildEntry(&s_system, "automata", registry->GetRootNodeEntry(), 0, nullptr);
+        AutomatonRegistrySource source;
+        source.registry = [] { return static_cast<cISC4GameDataRegistry*>(s_registry); };
+        source.scriptSystem = []() -> cIGZUnknown* { return &s_system; };
+        SetAutomatonRegistrySource(source);
+
+        FakeHost host;
+        cSC4Automaton* automaton = MakeAutomaton(host);
+        const float where[3] = {12.0f, 34.0f, 56.0f};
+        automaton->SetPosition(where);
+        automaton->RegisterInGameDataRegistry();
+        cIGZUnknown* self = static_cast<cISC4Occupant*>(automaton);
+        const EntryId node = registry->GetEntryID(self);
+        CHECK(node != 0);
+        CHECK(registry->GetParentNodeEntry(node) == systemId);
+        CHECK(registry->GetEntryName(node) && registry->GetEntryName(node)->Strlen() == 0);
+        automaton->RegisterInGameDataRegistry();   // once only
+        struct Children { std::vector<EntryId> ids; } children;
+        registry->VisitImmediateChildren(node, [](EntryId e, void* c) { static_cast<Children*>(c)->ids.push_back(e); return true; }, &children);
+        CHECK(children.ids.size() == 9);
+        auto find = [&](const char* name) -> EntryId {
+            for (EntryId e : children.ids)
+                if (const cRZString* n = registry->GetEntryName(e); n && std::strcmp(n->ToChar(), name) == 0) return e;
+            return 0;
+        };
+        // the position as values
+        cRZVariant value;
+        CHECK(registry->DoValueExchange(find("z"), value, false));
+        CHECK_NEAR(value.GetValFloat32(), 56.0f);
+        CHECK(registry->CheckEntryFlags(find("x"), 2) && !registry->CheckEntryFlags(find("x"), 1));
+        // push_state(state, seconds): seconds become milliseconds; without them no timeout (-1)
+        cGZCommandParameterSet in, out;
+        in.AppendParameter(cRZVariant(static_cast<std::uint32_t>(kStateIdleTick)));
+        in.AppendParameter(cRZVariant(2.5f));
+        CHECK(registry->CheckEntryFlags(find("push_state"), 1));
+        CHECK(registry->DoValueCall(find("push_state"), &in, &out));
+        CHECK(automaton->GetState() && automaton->GetState()->stateType == kStateIdleTick);
+        CHECK(automaton->GetState() && automaton->GetState()->controller == nullptr);
+        CHECK_NEAR(automaton->GetState() ? automaton->GetState()->timer : 0.0f, 2500.0f);
+        cGZCommandParameterSet one;
+        one.AppendParameter(cRZVariant(static_cast<std::uint32_t>(kStateScripted)));
+        CHECK(registry->DoValueCall(find("push_state"), &one, &out));
+        CHECK_NEAR(automaton->GetState() ? automaton->GetState()->timer : 0.0f, -1.0f);
+        // fade_out marks the automaton removed and fades it; remove takes the opacity to 0 at once
+        CHECK(!automaton->CheckAutomataFlag(kAutomataFlagRemoved));
+        cGZCommandParameterSet none;
+        CHECK(registry->DoValueCall(find("remove"), &none, &out));
+        CHECK(automaton->CheckAutomataFlag(kAutomataFlagRemoved));
+        CHECK_NEAR(automaton->GetOpacity(), 0.0f);
+        // the node goes with its subtree
+        automaton->UnregisterInGameDataRegistry();
+        CHECK(registry->GetEntryID(self) == 0);
+        Children left;
+        registry->VisitImmediateChildren(systemId, [](EntryId e, void* c) { static_cast<Children*>(c)->ids.push_back(e); return true; }, &left);
+        CHECK(left.ids.empty());
+        CHECK(automaton->Release() == 0);
+        SetAutomatonRegistrySource({});
+        registry->Release();
     }
 
     if (failures == 0) std::printf("PASS sc4_automaton\n");

@@ -65,6 +65,8 @@
 #include "sc4/AutomataStates.h"
 #include "sc4/Occupant.h"
 
+class cIGZCommandParameterSet;   // global scope (gz/CommandParameterSet.h)
+
 namespace sc4 {
 
 // ---- ids -------------------------------------------------------------------------------------------------------------
@@ -293,6 +295,16 @@ public:
 IAutomatonHost* AutomatonHost();
 void SetAutomatonHost(IAutomatonHost* host);
 
+// RegisterInGameDataRegistry's two globals: the game-data registry (system service 0xebe0e860 / 0xe898ed03) and the
+// automata script system (SL::spCity vslot 0xc0), whose node the automaton's node goes under. Either answering null leaves
+// the automaton unregistered.
+class cISC4GameDataRegistry;
+struct AutomatonRegistrySource {
+    cISC4GameDataRegistry* (*registry)() = nullptr;
+    cIGZUnknown* (*scriptSystem)() = nullptr;
+};
+void SetAutomatonRegistrySource(const AutomatonRegistrySource& source);
+
 class cSC4Automaton : public cSC4Occupant, public cIGZMessageTarget2, public IStateAutomaton {
 public:
     explicit cSC4Automaton(IAutomatonHost* host = nullptr, const cGZPersistResourceKey& modelKey = {});
@@ -371,8 +383,16 @@ public:
     virtual bool HandleCollision(cSC4Automaton* other, const cS3DVector3& point);   // 0x208 @ 0x10010d400
     void GetCollidePosition(cS3DVector3& out) const;                  // 0x210 @ 0x10010ba66
     IAutomatonGroupTemplate* GetAutomataGroup() const;                 // 0x218 @ 0x10010de86
-    void RegisterInGameDataRegistry();                                // 0x220 @ 0x10010c00a
-    void UnregisterInGameDataRegistry();                              // 0x228 @ 0x10010cc76
+    void RegisterInGameDataRegistry();                                // 0x220 @ 0x10010c00a (i386 0x000c29a2)
+    void UnregisterInGameDataRegistry();                              // 0x228 @ 0x10010cc76 (i386 0x000bb9de)
+    // The registry commands of an automaton's node (i386 0x000c8ab4..0x000c95a0). Each finds the automaton through the
+    // entry's context (the automaton's cIGZUnknown, asked for 0xa9b40f05) and answers true.
+    static bool sPushState(void* handle, cIGZCommandParameterSet* in, cIGZCommandParameterSet* out, cISC4GameDataRegistry* registry);
+    static bool sFadeOut(void* handle, cIGZCommandParameterSet* in, cIGZCommandParameterSet* out, cISC4GameDataRegistry* registry);
+    static bool sRemove(void* handle, cIGZCommandParameterSet* in, cIGZCommandParameterSet* out, cISC4GameDataRegistry* registry);
+    static bool sAttachAnim(void* handle, cIGZCommandParameterSet* in, cIGZCommandParameterSet* out, cISC4GameDataRegistry* registry);
+    static bool sPlayAnim(void* handle, cIGZCommandParameterSet* in, cIGZCommandParameterSet* out, cISC4GameDataRegistry* registry);
+    static bool sPlaySfx(void* handle, cIGZCommandParameterSet* in, cIGZCommandParameterSet* out, cISC4GameDataRegistry* registry);
     void GetBoundingBox(float* minXyz, float* maxXyz) override;       // 0x258 @ 0x100107148
     void StopSound(std::uint32_t handle) override { StopSFX(handle); }   // IStateAutomaton (tAutomataState::Shutdown)
     bool DoMessage(cIGZMessage2* message) override;                   // 0x260 @ 0x100106ae4

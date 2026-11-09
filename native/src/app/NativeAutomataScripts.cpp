@@ -2,14 +2,16 @@
 // every Lua host loads from (SCLuaHelp::IScriptResources on the game's resource manager). Without this host
 // cSC4AutomataScriptSystem::Init stopped before running the automata scripts, so the city had no automata groups, no
 // controller templates and no group classes: every automaton was created as a plain vehicle.
-//   PARTIAL: the game-data registry is not part of the native game yet, so the "automata" node and its seven script
-//   commands (create_automaton, attach_controller, ...) are not published and the command seams answer neutrally; the
-//   player-drive key map is not read.
+// The seven "automata" registry commands reach the city's controller manager (SL::spCity vslot 0x178) and the automata manager
+// that takes the group (cSC4AutomataManager::StaticCreateAutomaton); a scripted automaton then registers its own node.
+//   PARTIAL: the player-drive key map is not read; the watercraft manager is not asked for a group.
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
 
 #include "app/NativeAnimationTicks.h"
+#include "app/NativeAutomataViews.h"
+#include "app/NativeCity.h"
 #include "app/NativeGameData.h"
 #include "app/NativeUi.h"
 #include "gz/cGZPersistResourceManager.h"
@@ -17,14 +19,31 @@
 #include "gz/cIGZPersistResourceKeyList.h"
 #include "lua/SCLuaInstance.h"
 #include "lua/SCLuaScripts.h"
+#include "sc4/AutomataControllerManager.h"
 #include "sc4/AutomataManager.h"
 #include "sc4/AutomataScriptSystem.h"
+#include "sc4/Automaton.h"
 #include "sc4/ServiceLocator.h"
+#include "sc4/cSC4City.h"
 
 namespace native {
 sc4::cSC4AutomataManager* NativeAutomataManagerAt(int index);   // NativeAutomataManagerHost.cpp
+sc4::cSC4AutomataManager* NativeAutomataManagerForGroup(std::uint32_t group);
 namespace {
 using namespace sc4;
+
+bool Trace() {
+    static const bool on = std::getenv("SC4_SCRIPTCMDDEBUG") != nullptr;
+    return on;
+}
+cSC4AutomataControllerManager* ControllerManager() {
+    cSC4City* city = HostCity();
+    return city ? dynamic_cast<cSC4AutomataControllerManager*>(city->GetComponent(CityComponent::AutomataControllerManager)) : nullptr;
+}
+cSC4AutomataScriptSystem* ScriptSystem() {
+    cSC4City* city = HostCity();
+    return city ? dynamic_cast<cSC4AutomataScriptSystem*>(city->GetComponent(CityComponent::AutomataScriptSystem)) : nullptr;
+}
 
 class ScriptResources final : public SCLuaHelp::IScriptResources {
 public:
@@ -77,12 +96,45 @@ public:
     void RemoveTickNotification(cIGZMessageTarget2* target, int channel) override {
         AnimationTickServerView()->RemoveNotification(target, static_cast<std::uint32_t>(channel));
     }
-    cIGZUnknown* AddControllerFromTemplateName(cISC4Occupant*, const cIGZString&, const float*) override { return nullptr; }
-    bool AddControllersFromOccupantGroup(const cIGZString&, cISC4Occupant*, const float*) override { return false; }
-    bool RemoveController(cISC4Occupant*, const cIGZString&) override { return false; }
-    bool RemoveControllersFromOccupantGroup(const cIGZString&, cISC4Occupant*) override { return false; }
-    cIGZUnknown* CreateAutomaton(std::uint32_t, const float[3], std::uint32_t, const std::uint32_t[3], std::uint8_t) override { return nullptr; }
-    void StartScriptedAutomaton(cIGZUnknown*) override {}
+    cIGZUnknown* AddControllerFromTemplateName(cISC4Occupant* occupant, const cIGZString& name, const float* position) override {
+        cSC4AutomataControllerManager* manager = ControllerManager();
+        cSC4AutomataController* made = manager ? manager->AddControllerFromTemplateName(occupant, name, position) : nullptr;
+        if (Trace()) std::fprintf(stderr, "script commands: controller \"%s\" on %p -> %p\n", name.ToChar(), static_cast<void*>(occupant), static_cast<void*>(made));
+        return made;
+    }
+    bool AddControllersFromOccupantGroup(const cIGZString& group, cISC4Occupant* occupant, const float* position) override {
+        cSC4AutomataControllerManager* manager = ControllerManager();
+        const bool added = manager && manager->AddControllersFromOccupantGroup(group, occupant, position);
+        if (Trace()) std::fprintf(stderr, "script commands: controller group \"%s\" on %p -> %d\n", group.ToChar(), static_cast<void*>(occupant), added ? 1 : 0);
+        return added;
+    }
+    bool RemoveController(cISC4Occupant* occupant, const cIGZString& name) override {
+        cSC4AutomataControllerManager* manager = ControllerManager();
+        if (Trace()) std::fprintf(stderr, "script commands: detach controller \"%s\" from %p\n", name.ToChar(), static_cast<void*>(occupant));
+        return manager && manager->RemoveController(occupant, name);
+    }
+    bool RemoveControllersFromOccupantGroup(const cIGZString& group, cISC4Occupant* occupant) override {
+        cSC4AutomataControllerManager* manager = ControllerManager();
+        const bool removed = manager && manager->RemoveControllersFromOccupantGroup(group, occupant);
+        if (Trace()) std::fprintf(stderr, "script commands: detach controller group \"%s\" from %p -> %d\n", group.ToChar(), static_cast<void*>(occupant), removed ? 1 : 0);
+        return removed;
+    }
+    cIGZUnknown* CreateAutomaton(std::uint32_t group, const float position[3], std::uint32_t flags, const std::uint32_t key[3], std::uint8_t extra) override {
+        cSC4AutomataManager* manager = NativeAutomataManagerForGroup(group);
+        const cS3DVector3 where{position[0], position[1], position[2]};
+        const cGZPersistResourceKey modelKey{key[0], key[1], key[2]};
+        IAutomataAutomaton* view = manager ? manager->CreateAutomaton(group, where, flags, modelKey, nullptr, extra, nullptr) : nullptr;
+        cSC4Automaton* automaton = view ? AutomatonOf(view) : nullptr;
+        if (Trace()) std::fprintf(stderr, "script commands: automaton group 0x%x at (%.1f, %.1f, %.1f) flags 0x%x -> %p\n", group, position[0], position[1],
+                                  position[2], flags, static_cast<void*>(automaton));
+        return automaton ? static_cast<cISC4Occupant*>(automaton) : nullptr;
+    }
+    void StartScriptedAutomaton(cIGZUnknown* made) override {   // automaton vslot 0x220
+        void* automaton = nullptr;
+        if (!made || !made->QueryInterface(kAutomatonIid, &automaton)) return;
+        static_cast<cSC4Automaton*>(automaton)->RegisterInGameDataRegistry();
+        static_cast<cSC4Automaton*>(automaton)->Release();
+    }
     bool SourceManagerPresent(int index) override { return NativeAutomataManagerAt(index) != nullptr; }
     std::uint32_t SourceBuildingCount(int index, std::uint32_t group) override {   // manager vslot 0x120
         sc4::cSC4AutomataManager* manager = NativeAutomataManagerAt(index);
@@ -108,6 +160,13 @@ void InstallScriptResources() {
 void InstallAutomataScriptHost() {
     static ScriptHost host;
     InstallScriptResources();
+    sc4::AutomatonRegistrySource source;
+    source.registry = [] { return NativeGameDataRegistry(); };
+    source.scriptSystem = []() -> cIGZUnknown* {
+        sc4::cSC4AutomataScriptSystem* system = ScriptSystem();
+        return system ? static_cast<cIGZSerializable*>(system) : nullptr;
+    };
+    sc4::SetAutomatonRegistrySource(source);
     if (std::getenv("SC4_NOAUTOMATASCRIPTS")) return;
     sc4::SetAutomataScriptHost(&host);
 }
