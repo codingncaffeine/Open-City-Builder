@@ -783,6 +783,7 @@ src/app/NativeAdvisorFlammability.cpp
 src/app/NativeWinHtml.cpp
 src/sc4/NewsTickerWinProc.cpp
 src/sc4/AdvisorUIImageWinProc.cpp
+src/sc4/AdvisorUIAdvisorWinProc.cpp
 src/app/NativeAutomataControllerHost.cpp
 src/s3d/AnimatedInstance.cpp
 src/s3d/ModelInstanceAnimatedSprite.cpp

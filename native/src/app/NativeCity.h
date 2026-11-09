@@ -14,13 +14,17 @@ class cIGZSerializable;
 class cSC4App;
 class cIGZUnknown;
 class cIGZMessageTarget2;
-namespace sc4 { enum class CityComponent : std::uint8_t; class cSC4City; }
+namespace sc4 { enum class CityComponent : std::uint8_t; class cSC4City; class IAdvisorWindow; class cSC4AdvisorUIAdvisorWinProc; }
 
 namespace native {
 
 // Installs a neutral stub for every host interface the recovered classes reach (the real hosts replace them as they are written).
 void InstallStubHosts();
 void InstallAdvisorHosts();   // NativeAdvisors.cpp
+// The city view's way to the advisor window (one reference; null without a city) and the window's procedure (borrowed).
+sc4::IAdvisorWindow* NativeAdvisorWindow();
+sc4::cSC4AdvisorUIAdvisorWinProc* NativeAdvisorWinProc();
+void NativeAdvisorWindowReport();   // kit command `advwin`
 void NativeRunAppLua(const char* code);
 void NativePrintAdvisors();
 void NativeTickerReport();       // app/NativeWinHtml.cpp: the news ticker (kit command `ticker`)

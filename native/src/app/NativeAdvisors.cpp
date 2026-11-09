@@ -3,9 +3,11 @@
 // `game.*` functions, OpenSC4 advisors.md 8 and lua-game-extensions.md). Before this every one of those hosts was a
 // generated stub: the system had no Lua, so no advisor was ever created and no advice evaluated.
 //
-// PARTIAL: the advisor window (CreateAdvisorWinProc answers null), the advice text detokenizer, loose advisor scripts
-// from the plugin folders (UpdateResourcesFromDirectory), the tutorial registry's Lua, the MySim functions, is_tutorial,
-// and the building words of a reward subject.
+// The advisor window (cSC4AdvisorUIAdvisorWinProc) is created here too, over the city view, with its own host.
+//
+// PARTIAL: the advice text detokenizer's advice tokens, loose advisor scripts from the plugin folders
+// (UpdateResourcesFromDirectory), the tutorial registry's Lua, the MySim functions, is_tutorial, and the building words of
+// a reward subject.
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
@@ -25,6 +27,7 @@
 #include "sc4/AdviceSubject.h"
 #include "sc4/Advisor.h"
 #include "sc4/AdvisorConcrete.h"
+#include "sc4/AdvisorUIAdvisorWinProc.h"
 #include "sc4/AdvisorSystem.h"
 #include "sc4/BudgetSimulator.h"
 #include "sc4/Budget.h"
@@ -43,6 +46,9 @@
 #include "sc4/Simulator.h"
 #include "sc4/StringDetokenizer.h"
 #include "app/NativeBoot.h"
+#include "app/NativeCitySystems.h"
+#include "app/NativeUi.h"
+#include "gz/Win.h"
 #include "sc4/View3DWin.h"
 #include "sc4/cSC4City.h"
 
@@ -514,6 +520,76 @@ const IAdvisorSystemHost::LuaExtension kExtensions[] = {
     {"window_graph", &L_window_graph, false},
 };
 
+// ---- the advisor window
+const bool kWindowTrace = std::getenv("SC4_ADVWINDEBUG") != nullptr;
+
+// What cSC4AdvisorUIAdvisorWinProc reaches: the city view, the city's advisors, the UI scripts and the message server.
+class AdvisorWindowHost final : public IAdvisorUIAdvisorHost {
+public:
+    cIGZWin* View3DWindow() override {
+        cSC4View3DWin* view = CityView3DWin();
+        return view ? static_cast<cIGZWin*>(static_cast<cGZWin*>(view)) : nullptr;
+    }
+    bool CityPresent() override { return HostCity() != nullptr; }
+    cISC4Advisor* Advisor(int advisorId) override {
+        cSC4AdvisorSystem* system = HostCity() ? System() : nullptr;
+        return system ? system->GetAdvisor(advisorId) : nullptr;   // borrowed: the system keeps it
+    }
+    bool CreateWindowFromScript(const cGZPersistResourceKey& key, cIGZWin* parent, std::uint32_t id, std::uint32_t iid,
+                                void** out) override {
+        *out = nullptr;
+        cIGZWin* window = native::CreateWindowFromScript(key, parent, id);
+        if (kWindowTrace) std::printf("advisor window: script %08x/%08x window %08x -> %s\n", key.group, key.instance, id, window ? "created" : "FAILED");
+        if (!window) return false;
+        const bool ok = window->QueryInterface(iid, out) && *out;
+        window->Release();
+        return ok;
+    }
+    cIGZMessageServer2* Messages() override { return SL::spMS2; }
+    void FilterUICommandMessage(cGZMessage&) override {}   // PARTIAL: the tutorial system is not recovered
+};
+
+// The advisor system's view of the window (IAdvisorWinProc) over the recovered procedure.
+class AdvisorWinProcAdapter final : public IAdvisorWinProc {
+public:
+    AdvisorWinProcAdapter() : proc_(new cSC4AdvisorUIAdvisorWinProc()) { proc_->AddRef(); }
+    ~AdvisorWinProcAdapter() override { proc_->Release(); }
+    void AddRef() override { ++refs_; }
+    void Release() override {
+        if (--refs_ == 0) delete this;
+    }
+    void Init() override {
+        proc_->Init();
+        if (kWindowTrace) std::printf("advisor window: init -> %s\n", proc_->Window() ? "window" : "NO WINDOW");
+    }
+    void Shutdown() override { proc_->Shutdown(); }
+    void ShowWindow() override { proc_->ShowWindow(); }
+    void HideWindow() override { proc_->HideWindow(); }
+    bool IsVisible() override { return proc_->IsVisible(); }
+    cSC4AdvisorUIAdvisorWinProc* Proc() const { return proc_; }
+
+private:
+    int refs_ = 0;
+    cSC4AdvisorUIAdvisorWinProc* proc_;
+};
+
+// The city view's mayor panel reaches the window through the city's advisor system (IAdvisorWindow, one reference).
+class AdvisorWindowView final : public IAdvisorWindow {
+public:
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override {
+        if (--refs_ == 0) { delete this; return 0; }
+        return refs_;
+    }
+    void ShowAdvisorWindow() override { if (cSC4AdvisorSystem* s = System()) s->ShowAdvisorWindow(); }
+    void HideAdvisorWindow() override { if (cSC4AdvisorSystem* s = System()) s->HideAdvisorWindow(); }
+    bool IsAdvisorWindowVisible() override { cSC4AdvisorSystem* s = System(); return s && s->IsAdvisorWindowVisible(); }
+
+private:
+    std::uint32_t refs_ = 0;
+};
+
 // ---- the hosts
 bool g_llama = false;   // the llama cheat: every advisor head is a llama
 
@@ -523,7 +599,7 @@ public:
     cIGZMessageServer2* Messages() override { return SL::spMS2; }
     cGZCheatCodeManager* CheatCodeManager() override { return dynamic_cast<cGZCheatCodeManager*>(SL::spCCM); }
     cSCStringDetokenizer* Detokenizer() override { return NativeDetokenizer(); }
-    IAdvisorWinProc* CreateAdvisorWinProc() override { return nullptr; }
+    IAdvisorWinProc* CreateAdvisorWinProc() override { return new AdvisorWinProcAdapter(); }
     cIGZUnknown* City() override { return HostCity() ? static_cast<cIGZUnknown*>(SL::spCity) : nullptr; }
     bool CityEstablished(cIGZUnknown*) override { cSC4City* c = HostCity(); return c && c->GetEstablished(); }
     int CityDifficultyLevel() override { cSC4City* c = HostCity(); return c ? static_cast<int>(c->GetDifficultyLevel()) : 0; }
@@ -719,6 +795,19 @@ public:
 
 bool NativeLlamaCheatActive() { return g_llama; }
 
+sc4::IAdvisorWindow* NativeAdvisorWindow() {
+    if (!HostCity() || !System()) return nullptr;
+    auto* view = new AdvisorWindowView();
+    view->AddRef();   // the caller's reference
+    return view;
+}
+
+sc4::cSC4AdvisorUIAdvisorWinProc* NativeAdvisorWinProc() {
+    cSC4AdvisorSystem* system = System();
+    auto* adapter = system ? dynamic_cast<AdvisorWinProcAdapter*>(system->GetAdvisorWinProc()) : nullptr;
+    return adapter ? adapter->Proc() : nullptr;
+}
+
 void InstallAdvisorHosts() {
     static SystemHost system;
     static AdvisorHost advisor;
@@ -732,6 +821,8 @@ void InstallAdvisorHosts() {
     SetAdviceSubjectHost(&subject);
     SetRewardAdviceHost(&reward);
     SetAdvisorConcreteHost(&concrete);
+    static AdvisorWindowHost window;
+    SetAdvisorUIAdvisorHost(&window);
 }
 
 // Runs `code` in the app's Lua (the advisors' VM) and prints its results: the scenario runner's `alua CODE`.
@@ -749,6 +840,31 @@ void NativeRunAppLua(const char* code) {
     }
     std::printf("\n");
     lua->SetTop(top);
+}
+
+// The advisor window's state (the scenario runner's `advwin`): layout, advisor, list entries, each head's mood and
+// whether its procedure is attached, and the visibility of the three pages.
+void NativeAdvisorWindowReport() {
+    cSC4AdvisorUIAdvisorWinProc* proc = NativeAdvisorWinProc();
+    if (!proc) { std::printf("advwin: no advisor window\n"); return; }
+    std::printf("advwin: window %s visible %d layout %d large %d advisor %d index %d listed %zu list %s notifications %d\n",
+                proc->Window() ? "yes" : "NO", proc->IsVisible(), proc->Layout(), proc->Large(), proc->AdvisorId(),
+                proc->AdvisorIndex(), proc->Messages().size(), proc->AdviceList() ? "yes" : "no", proc->NotificationsRegistered());
+    for (int i = 0; i < kAdvisorWindowAdvisorCount; ++i) {
+        cSC4AdvisorUIImageWinProc* head = proc->Head(i);
+        if (!head) continue;
+        std::printf("  head %d advisor 0x%x mood %d enabled %d model %08x\n", i, kAdvisorWindowAdvisorIds[i], head->Mood(),
+                    head->Enabled(), head->ModelIdA());
+    }
+    cIGZWin* window = proc->Window() ? proc->Window()->AsIGZWin() : nullptr;
+    cIGZWin* parent = window ? window->GetParentWin() : nullptr;
+    for (std::uint32_t id : {kAdvisorWindowAll, kAdvisorWindowSmall, kAdvisorWindowLarge}) {
+        cIGZWin* page = parent ? parent->GetChildWindowFromIDRecursive(id) : nullptr;
+        std::printf("  page %08x %s\n", id, page ? (page->IsVisible() ? "visible" : "hidden") : "missing");
+    }
+    for (const auto& entry : proc->Messages()) {
+        if (cISC4Advice* a = entry.get()) std::printf("  listed mood %d current %d \"%s\"\n", a->GetMood(), a->CheckFlags(2), a->GetTextTitle().ToChar());
+    }
 }
 
 // The advisors and their active advices (the scenario runner's `advisors`).

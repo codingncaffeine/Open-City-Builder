@@ -115,7 +115,7 @@ constexpr std::uint16_t kAdvisorStreamVersion = 1;
 using AdvisorMap = std::map<int, cRZAutoRefCount<cISC4Advisor>>;
 using AdvisorEventMap = std::map<int, std::set<cISC4Advisor*>>;
 
-// The advisor window (cSC4AdvisorUIAdvisorWinProc, not recovered): the system only owns it, shows / hides it and asks
+// The advisor window (cSC4AdvisorUIAdvisorWinProc, sc4/AdvisorUIAdvisorWinProc.h): the system only owns it, shows / hides it and asks
 // whether it is visible. Original calls: Init @ 0x1002b5502, Shutdown @ 0x1002b581c, ShowWindow @ 0x1002b9634,
 // HideWindow @ 0x1002b6dd0, IsVisible @ 0x1002b9712.
 class IAdvisorWinProc {

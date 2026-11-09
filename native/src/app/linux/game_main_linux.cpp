@@ -1164,7 +1164,9 @@ int RunScenario(const std::string& path) {
             if (!OnRegionScreen()) { std::printf("scenario %d: expected the region screen\n", number); return 5; }
         } else if (command == "expect-city") {
             if (!(gAppWindow && gAppWindow->View3D())) { std::printf("scenario %d: expected a city view\n", number); return 5; }
-        } else if (command == "where") {   // where HEXID: the screen rectangle of the first window with that id (finding a button to tap)
+        } else if (command == "where" || command == "tapid") {
+            // where HEXID: the screen rectangle of the first window with that id (finding a button to tap);
+            // tapid HEXID: the same, then a single click at its center.
             std::string hex;
             words >> hex;
             const std::uint32_t id = std::uint32_t(std::strtoul(hex.c_str(), nullptr, 16));
@@ -1172,11 +1174,29 @@ int RunScenario(const std::string& path) {
                 cRZRect a = w->GetArea();
                 int x = a.left, y = a.top;
                 for (cIGZWin* p = w->GetParentWin(); p; p = p->GetParentWin()) { const cRZRect pa = p->GetArea(); x += pa.left; y += pa.top; }
-                std::printf("where %08x: %d,%d %dx%d visible=%d centre %d,%d\n", id, x, y, a.right - a.left, a.bottom - a.top, w->IsVisible(),
-                            x + (a.right - a.left) / 2, y + (a.bottom - a.top) / 2);
+                const int cx = x + (a.right - a.left) / 2, cy = y + (a.bottom - a.top) / 2;
+                std::printf("%s %08x: %d,%d %dx%d visible=%d center %d,%d\n", command.c_str(), id, x, y, a.right - a.left,
+                            a.bottom - a.top, w->IsVisible(), cx, cy);
+                if (command == "tapid") {   // a real SDL click (as sdlclick) at the center, in window points
+                    int ww = 0, wh = 0;
+                    SDL_GetWindowSize(gWindow, &ww, &wh);
+                    const float x = float(cx) * float(ww) / float(gW), y = float(cy) * float(wh) / float(gH);
+                    SDL_Event e{};
+                    e.type = SDL_EVENT_MOUSE_MOTION; e.motion.windowID = SDL_GetWindowID(gWindow); e.motion.x = x; e.motion.y = y;
+                    SDL_PushEvent(&e); PumpEvents(); Frame(); Nap();
+                    for (const SDL_EventType type : {SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_EVENT_MOUSE_BUTTON_UP}) {
+                        SDL_Event b{};
+                        b.type = type; b.button.windowID = SDL_GetWindowID(gWindow); b.button.button = SDL_BUTTON_LEFT;
+                        b.button.down = type == SDL_EVENT_MOUSE_BUTTON_DOWN; b.button.clicks = 1; b.button.x = x; b.button.y = y;
+                        SDL_PushEvent(&b); PumpEvents(); Frame(); Nap();
+                    }
+                    for (int i = 0; i < 5; ++i) { PumpEvents(); Frame(); Nap(); }
+                }
             } else {
-                std::printf("where %08x: not found\n", id);
+                std::printf("%s %08x: not found\n", command.c_str(), id);
             }
+        } else if (command == "advwin") {   // the advisor window's state
+            native::NativeAdvisorWindowReport();
         } else if (command == "cheat") {   // cheat TEXT: what the cheat box does with its text on Enter
             std::string text; words >> text;
             auto* cheats = dynamic_cast<cGZCheatCodeManager*>(SL::spCCM);

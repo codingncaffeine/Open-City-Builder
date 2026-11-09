@@ -337,7 +337,7 @@ struct StubView3DWin final : IView3DWinHost {
     bool SituationAlertActive() override { return {}; }
     bool SimulatorBusy() override { return {}; }
     cIGZBuffer* CreateImageBuffer() override { return {}; }
-    IAdvisorWindow* AdvisorWindow() override { return {}; }
+    IAdvisorWindow* AdvisorWindow() override { return native::NativeAdvisorWindow(); }
     cSC4ViewInputControl* CreateZoningTool(std::uint32_t type) override { return native::CreateZoneTool(static_cast<int>(type)); }
     cSC4ViewInputControl* CreateTerrainScrubberTool(std::uint32_t type, bool flag) override { return native::CreateTerrainScrubberTool(type, flag); }
     cSC4ViewInputControl* CreateLevelTerrainTool() override { return {}; }

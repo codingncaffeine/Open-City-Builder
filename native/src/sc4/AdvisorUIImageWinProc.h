@@ -103,6 +103,7 @@ public:
     int LoopCount() const { return loopCount_; }
     int LoopTarget() const { return loopTarget_; }
     s3d::cS3DCamera* Camera() const { return camera_; }
+    int Offset() const { return offset_; }
 
 private:
     void DropCamera();
