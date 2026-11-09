@@ -354,7 +354,7 @@ struct StubView3DWin final : IView3DWinHost {
     bool PopupModalDialogsEnabled() override { return ActiveWinMgr() && ActiveWinMgr()->modalDialogs; }
     std::uint32_t SimulationFrameCounter() override { return {}; }
     bool FilterUiCommandMessage(cGZMessage&) override { return true; }   // no tutorial running: every message is kept
-    bool HandleUrl(cIGZString* link) override { return {}; }
+    bool HandleUrl(cIGZString* link) override { return link && native::NativeHtmlLinkDoURL(*link); }
     void HandleAdviceLink(cGZMessage& message) override {}
     // Only the reward cheat so far (it sets the view's +0x456 byte, ProcessCheatCode 0x10078526a); the other cheats are not ported.
     void ProcessCheatCode(std::uint32_t id, const char* cmdLine) override {
@@ -555,7 +555,7 @@ public:
 
 // The advisor popups (cSC4AdvisorPopupTracker): an activated advice of high enough priority opens the advisor's modal
 // page while the game pauses, with the advisor's animated head. PARTIAL: the tutorial and the window-location saver are
-// not up natively; links are not followed (cSC4HTMLLinkHandler not recovered).
+// not up natively.
 class AdvisorPopupHost final : public sc4::IAdvisorPopupTrackerHost {
     static bool Debug() { static const bool on = std::getenv("SC4_POPUPDEBUG") != nullptr; return on; }
 public:
@@ -622,8 +622,7 @@ public:
         return true;
     }
     bool DoURL(cIGZString* link) override {
-        if (link) std::printf("advisor popup: link %.*s not followed (cSC4HTMLLinkHandler not recovered)\n", int(link->Strlen()), link->ToChar());
-        return false;
+        return link && native::NativeHtmlLinkDoURL(*link);
     }
 };
 

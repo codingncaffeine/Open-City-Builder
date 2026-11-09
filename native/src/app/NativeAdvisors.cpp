@@ -795,6 +795,20 @@ public:
 
 bool NativeLlamaCheatActive() { return g_llama; }
 
+// cSC4HTMLLinkHandler::DoURL (Mac i386 0x0016982c; 64-bit 0x1001f22b6). "sc4://advice/REST" goes to the city's advisor
+// system (DoLink(REST), its answer is the result). "sc4://action/..." is split at '?' and dropped: the original does
+// nothing with it and answers false. Any other link answers false.
+bool NativeHtmlLinkDoURL(const cIGZString& link) {
+    std::string text(link.ToChar(), link.Strlen());
+    const bool action = text.find("action") == 6 && text.size() > 11 && text[12] == '/';
+    if (kTrace || kWindowTrace) std::printf("html link: %s\n", text.c_str());
+    if (action) return false;
+    if (text.find("advice") != 6 || text.size() <= 11 || text[12] != '/') return false;
+    text.erase(0, 13);
+    cSC4AdvisorSystem* system = HostCity() ? System() : nullptr;
+    return system && system->DoLink(cRZString(text.c_str()));
+}
+
 sc4::IAdvisorWindow* NativeAdvisorWindow() {
     if (!HostCity() || !System()) return nullptr;
     auto* view = new AdvisorWindowView();
@@ -865,6 +879,20 @@ void NativeAdvisorWindowReport() {
     for (const auto& entry : proc->Messages()) {
         if (cISC4Advice* a = entry.get()) std::printf("  listed mood %d current %d \"%s\"\n", a->GetMood(), a->CheckFlags(2), a->GetTextTitle().ToChar());
     }
+}
+
+// The scenario runner's `adlink ADVISOR CODE`: follows "sc4://advice/<advisor><guid>CODE" for the advisor's first
+// active advice through NativeHtmlLinkDoURL (the link an advice page's anchor carries).
+void NativeAdviceLinkProbe(int advisorId, const char* code) {
+    cSC4AdvisorSystem* system = System();
+    cISC4Advisor* advisor = system ? system->GetAdvisor(advisorId) : nullptr;
+    if (!advisor || advisor->GetCurrentAdvices().empty()) { std::printf("adlink: advisor %d has no active advice\n", advisorId); return; }
+    cISC4Advice* advice = advisor->GetCurrentAdvices().begin()->first.get();
+    char head[64];
+    std::snprintf(head, sizeof head, "sc4://advice/%08x%08x", static_cast<unsigned>(advisorId), static_cast<unsigned>(advice->GetGUID()));
+    const std::string url = std::string(head) + code;
+    const bool followed = NativeHtmlLinkDoURL(cRZString(url.c_str()));
+    std::printf("adlink: %s -> %s\n", url.c_str(), followed ? "followed" : "NOT followed");
 }
 
 // The advisors and their active advices (the scenario runner's `advisors`).

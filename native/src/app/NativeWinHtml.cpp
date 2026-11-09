@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 
+#include "app/NativeCity.h"
 #include "app/NativeAudio.h"
 #include "app/NativeGraphics.h"
 #include "app/NativeUi.h"
@@ -425,11 +426,7 @@ public:
     }
     cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
     void PlaySound(std::uint32_t id) override { PlayGameSound(id); }
-    // cSC4HTMLLinkHandler::DoURL is not recovered: the link is logged and not followed.
-    bool HandleUrl(const cIGZString& link) override {
-        std::printf("html: link %.*s not followed (cSC4HTMLLinkHandler not recovered)\n", int(link.Strlen()), link.ToChar());
-        return false;
-    }
+    bool HandleUrl(const cIGZString& link) override { return native::NativeHtmlLinkDoURL(link); }   // cSC4HTMLLinkHandler::DoURL
 };
 
 // ---- the news ticker ---------------------------------------------------------------------------------------------------------

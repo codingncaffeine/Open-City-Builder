@@ -1195,6 +1195,12 @@ int RunScenario(const std::string& path) {
             } else {
                 std::printf("%s %08x: not found\n", command.c_str(), id);
             }
+        } else if (command == "adlink") {   // adlink ADVISORID CODE: follow an advice link to CODE for that advisor
+            int advisor = 0;
+            words >> advisor;
+            std::string code;
+            std::getline(words, code);
+            native::NativeAdviceLinkProbe(advisor, code.c_str() + (code.empty() ? 0 : 1));
         } else if (command == "advwin") {   // the advisor window's state
             native::NativeAdvisorWindowReport();
         } else if (command == "cheat") {   // cheat TEXT: what the cheat box does with its text on Enter

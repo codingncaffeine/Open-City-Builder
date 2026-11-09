@@ -12,6 +12,7 @@
 class cIGZSerializable;
 
 class cSC4App;
+class cIGZString;
 class cIGZUnknown;
 class cIGZMessageTarget2;
 namespace sc4 { enum class CityComponent : std::uint8_t; class cSC4City; class IAdvisorWindow; class cSC4AdvisorUIAdvisorWinProc; }
@@ -25,6 +26,9 @@ void InstallAdvisorHosts();   // NativeAdvisors.cpp
 sc4::IAdvisorWindow* NativeAdvisorWindow();
 sc4::cSC4AdvisorUIAdvisorWinProc* NativeAdvisorWinProc();
 void NativeAdvisorWindowReport();   // kit command `advwin`
+// cSC4HTMLLinkHandler::DoURL: follows an "sc4://advice/..." link; true when it was followed.
+bool NativeHtmlLinkDoURL(const cIGZString& link);
+void NativeAdviceLinkProbe(int advisorId, const char* code);   // kit command `adlink`
 void NativeRunAppLua(const char* code);
 void NativePrintAdvisors();
 void NativeTickerReport();       // app/NativeWinHtml.cpp: the news ticker (kit command `ticker`)
