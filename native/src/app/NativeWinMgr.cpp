@@ -16,9 +16,14 @@ WinMgr::~WinMgr() = default;
 void WinMgr::PostWinMessage(std::uint32_t type, std::uint64_t p1, std::uint64_t p2, std::uint64_t p3) {
     cGZMessage message;
     message.type = type;
-    if (type == gz::kWinMgrMsgEndModal) {
-        modalResult_ = p2;   // EndModal(window, result): the posted words are (window, result, result)
-        modalDone_ = true;
+    if (type == gz::kWinMgrMsgEndModal) {   // EndModal(window, result): the posted words are (window, result, result)
+        auto* target = reinterpret_cast<cIGZWin*>(static_cast<std::uintptr_t>(p1));
+        for (auto it = modalStack_.rbegin(); it != modalStack_.rend(); ++it) {
+            if (target && (*it)->window != target) continue;
+            (*it)->done = true;
+            (*it)->result = p2;
+            break;
+        }
         return;
     }
     if (type >= kGZMsgMouseDownL && type <= kGZMsgMouseWheel) {
@@ -38,14 +43,15 @@ void WinMgr::PostWinMessage(std::uint32_t type, std::uint64_t p1, std::uint64_t 
     PostMessageToTarget(GetMainWindow(), message);
 }
 
-std::uint64_t WinMgr::RunModalLoop(cIGZWin*, cIGZFrameWork*, std::uint32_t noResult, std::uint32_t abortCode) {
-    modalDone_ = false;
-    modalResult_ = noResult;
-    while (!modalDone_) {
-        if (!modalPump) return abortCode;   // nothing can end the dialog
-        modalPump();
-    }
-    return modalResult_;
+std::uint64_t WinMgr::RunModalLoop(cIGZWin* window, cIGZFrameWork*, std::uint32_t noResult, std::uint32_t abortCode) {
+    if (!modalPump) return abortCode;   // nothing can end the dialog
+    ModalFrame frame;
+    frame.window = window;
+    frame.result = noResult;
+    modalStack_.push_back(&frame);
+    while (!frame.done) modalPump();
+    modalStack_.pop_back();
+    return frame.result;
 }
 
 }  // namespace native

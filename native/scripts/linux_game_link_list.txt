@@ -764,6 +764,7 @@ src/gz/LegacyControlListBox.cpp
 src/sc4/RegionDialogs.cpp
 src/gz/WinListBox.cpp
 src/gz/WinLineInput.cpp
+src/gz/WinCombo.cpp
 src/gz/WinScrollbar2.cpp
 src/gz/WinSpinner.cpp
 src/app/NativeLotSerial.cpp

@@ -6,9 +6,10 @@
 // restores the funding the dialog opened with.
 //
 // It is a cIGZWinProc on the dialog window (DoWinMsg: init 0xa2bf8ad0, shutdown 0xa2bf8ad1, key 5, command 3).
-//   PARTIAL (see the notes): the department and ordinance dialogs; the neighbor deal (purpose 2) and individual building
-//   (+0x24) dialogs, row scrolling (0x451..0x454), the ordinance info popups (500+n) and the department buttons'
-//   individual budget windows are not ported yet (those dialogs open empty with OK and Cancel).
+// The neighbor deal dialog (purpose 2) lists every deal the neighbors simulator proposes or runs, sales as income and
+// purchases as expenses, each with a combo box of amounts (none / cancel first); OK keeps the deals, Cancel restores them.
+//   PARTIAL (see the notes): the individual building (+0x24) dialogs, the department path's row scrolling, the ordinance
+//   info popups (500+n) and the department buttons' individual budget windows are not ported yet.
 #pragma once
 #include <cstdint>
 #include <string>
@@ -16,6 +17,7 @@
 #include <vector>
 
 #include "gz/WinProc.h"
+#include "rz/cRZAutoRefCount.h"
 #include "rz/cRZString.h"
 #include "sc4/BudgetUIWinProc.h"
 
@@ -27,6 +29,7 @@ class cIGZWinGen;
 class cIGZWinText;
 class cIGZWinSlider;
 class cIGZWinBtn;
+class cIGZWinCombo;
 }  // namespace gz
 
 namespace sc4 {
@@ -34,6 +37,9 @@ namespace sc4 {
 class cSC4BudgetSimulator;
 class cSC4DepartmentBudget;
 class cSC4OrdinanceSimulator;
+class cSC4NeighborsSimulator;
+class cISC4NeighborDeal;
+class cISCPropertyHolder;
 
 // What the original reached through globals: spCity vslot 0xd0 (the budget simulator), RZ::WCM() (controls and fonts),
 // RZ::GS() (colours), cSLBuffer (UI art) and the window manager.
@@ -57,6 +63,12 @@ public:
     virtual gz::cIGZWinBtn* CreateButton(std::uint32_t style, std::uint32_t id, const cIGZString& caption, cIGZBuffer* image) = 0;
     // A cGZWinBMP showing `image` at (x, y) in its natural size (one reference).
     virtual cIGZWin* CreateBitmap(cIGZBuffer* image, int x, int y) = 0;
+    // spCity vslot 0xf8 / SL::spNeighborsSim: the neighbors simulator (borrowed), or null.
+    virtual cSC4NeighborsSimulator* NeighborsSimulator() { return nullptr; }
+    // GZCOM()->CreateInstance(0x59b, 0x412ce496): a new cGZWinCombo (one reference), or null.
+    virtual gz::cIGZWinCombo* CreateComboBox() { return nullptr; }
+    // SL::spRM GetResource({0x6534284a, group, instance}, 0xa52160f5): the exemplar's properties (borrowed), or null.
+    virtual cISCPropertyHolder* Exemplar(std::uint32_t group, std::uint32_t instance) { (void)group; (void)instance; return nullptr; }
 };
 ISubBudgetWindowHost* SubBudgetWindowHost();
 void SetSubBudgetWindowHost(ISubBudgetWindowHost* host);
@@ -113,6 +125,17 @@ private:
     void AddImageButton(cIGZWin* parent, std::uint32_t id, int x, int y, std::uint32_t image, bool framed);   // add_image_button2 0x002620f8
     void AddBitmap(std::uint32_t image, int x, int y, cIGZWin* parent, std::uint32_t id);              // add_Bitmap 0x002625d2
     void ReleaseDepartments(std::vector<cSC4DepartmentBudget*>& departments);
+    // ---- neighbor deals (purpose 2)
+    void InitNeighborBudget(cIGZWin* window);                           // initNeighborBudget 0x0026a2e2
+    void UpdateNeighborBudget(cIGZWin* window);                         // updateNeighborBudget 0x0027385e
+    void LayoutNeighborRows(cIGZWin* window, bool create);              // the row walk both share
+    void AddComboBox(cIGZWin* parent, std::uint32_t id, int x, int y);  // add_comboBox 0x002691ee
+    // set_comboBox 0x002639be: the amounts the deal can take; `mode` 0 power, 1 water, 2 garbage; `state` 0 not running,
+    // 1 running, 2 the opposite deal with the same city is running (unavailable).
+    void SetComboBox(cIGZWin* window, std::uint32_t id, std::uint32_t type, cISC4NeighborDeal* deal, int mode, int state);
+    bool OnComboChanged(cIGZWin* window, std::uint32_t id);             // DoWinMsg's 0xe8711255 branch
+    void RestoreDeals();                                                // 0x0026a0da
+    void ReleaseDeals();                                                // DestroySubBudgetWindow's deal part 0x0026961a
     void Departments(std::vector<cSC4DepartmentBudget*>& out);          // the purpose's group (GetAllGroups + GetDepartmentBudgetsInGroup)
 
     std::uint32_t refs_ = 0;
@@ -145,6 +168,17 @@ private:
     struct OrdinanceRow { std::uint32_t moneyText = 0; std::uint32_t index = 0; bool income = false; };
     std::vector<OrdinanceRow> ordinanceMoney_;   // port: the rows' money texts (UpdateOrdinanceBudget)
     std::uint32_t incomeTotalText_ = 0;
+    // neighbor deals: +0x50 the combo boxes (id, deal), +0x5c the running deals' (city serial, type), +0x68 every listed
+    // deal (type, deal), +0x100 the list the simulator's queries fill
+    struct ComboInfo { std::uint32_t id = 0; cRZAutoRefCount<cISC4NeighborDeal> deal; };
+    struct NDList { std::uint32_t type = 0; cRZAutoRefCount<cISC4NeighborDeal> deal; };
+    struct NDCityList { std::uint32_t city = 0; std::uint32_t type = 0; };
+    std::vector<ComboInfo> combos_;
+    std::vector<NDCityList> dealCities_;
+    std::vector<NDList> dealList_;
+    // port: the visible slots' control ids per side (text id of slot 0, bitmap / combo id of slot 0, slots made)
+    struct DealSlots { std::uint32_t text = 0, bitmap = 0, combo = 0, total = 0; int count = 0, top = 0; };
+    DealSlots incomeSlots_, expenseSlots_;
 };
 
 }  // namespace sc4

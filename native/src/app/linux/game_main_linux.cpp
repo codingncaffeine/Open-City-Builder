@@ -22,6 +22,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -1336,27 +1337,34 @@ int main(int argc, char** argv) {
         Present();
         // debug: SC4_MODALINPUT="FRAME:X:Y,..." clicks inside the dialog at those frames of it (FRAME:type:TEXT, FRAME:key:VK type); SC4_MODALFRAMES its length (30)
         if (!interactive) {
+            // each item fires once: a dialog's own popup (a combo's list) runs a nested modal loop that re-enters this pump at
+            // the same frame, and a re-posted click would land outside the popup
+            static std::set<std::string> fired;
             if (const char* input = std::getenv("SC4_MODALINPUT")) {
                 std::stringstream list(input);
                 std::string item;
                 while (std::getline(list, item, ',')) {
+                    if (fired.count(item)) continue;
                     int at = -1, x = 0, y = 0;
                     char text[128] = {};
                     // "FRAME:type:TEXT" types the characters, "FRAME:key:VK" presses and releases one virtual key
                     if (std::sscanf(item.c_str(), "%d:type:%127[^,]", &at, text) == 2) {
                         if (at != frame + 1) continue;
+                        fired.insert(item);
                         for (const char* c = text; *c; ++c) gMgr->GZWinMsgPost_Keyboard(kGZMsgCharacter, std::uint32_t(*c), 0);
                         std::printf("modal input: type \"%s\" at frame %d\n", text, at);
                         continue;
                     }
                     if (std::sscanf(item.c_str(), "%d:key:%d", &at, &x) == 2) {
                         if (at != frame + 1) continue;
+                        fired.insert(item);
                         gMgr->GZWinMsgPost_Keyboard(kGZMsgKeyDown, std::uint32_t(x), 0);
                         gMgr->GZWinMsgPost_Keyboard(kGZMsgKeyUp, std::uint32_t(x), 0);
                         std::printf("modal input: key %d at frame %d\n", x, at);
                         continue;
                     }
                     if (std::sscanf(item.c_str(), "%d:%d:%d", &at, &x, &y) == 3 && at == frame + 1) {
+                        fired.insert(item);
                         gMgr->GZWinMsgPost_Mouse(kGZMsgMouseMove, x, y, 0);
                         gMgr->GZWinMsgPost_Mouse(kGZMsgMouseDownL, x, y, 0);
                         gMgr->GZWinMsgPost_Mouse(kGZMsgMouseUpL, x, y, 0);

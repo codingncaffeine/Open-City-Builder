@@ -3,6 +3,7 @@
 // Not game code: there is no recovered counterpart on macOS.
 #pragma once
 #include <cstdint>
+#include <vector>
 #include <functional>
 
 #include "gz/WinMgrBase.h"
@@ -34,8 +35,10 @@ private:
 
     cGZMessageServer messages_;
     bool plotting_ = false;
-    bool modalDone_ = false;
-    std::uint64_t modalResult_ = 0;
+    // One frame per running modal loop, innermost last: EndModal ends the loop of its window (null = the innermost), so a
+    // dialog's own popup (a combo's list) ending does not end the dialog under it.
+    struct ModalFrame { cIGZWin* window = nullptr; bool done = false; std::uint64_t result = 0; };
+    std::vector<ModalFrame*> modalStack_;
 };
 
 // The game's window manager (RZ::WM()): set once by the host at boot, for the services that reach it outside the window tree.

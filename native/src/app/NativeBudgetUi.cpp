@@ -16,6 +16,10 @@
 #include "gz/Buffer.h"
 #include "gz/WinBMP.h"
 #include "gz/WinBtn.h"
+#include "gz/WinCombo.h"
+#include "gz/cGZPersistResourceManager.h"
+#include "sc4/Exemplar.h"
+#include "sc4/NeighborsSimulator.h"
 #include "gz/WinFont.h"
 #include "gz/WinGen.h"
 #include "gz/WinSlider.h"
@@ -254,9 +258,32 @@ public:
         static_cast<gz::cIGZWinBMP*>(bitmap)->SetBMP(image);
         return win;
     }
+    sc4::cSC4NeighborsSimulator* NeighborsSimulator() override {
+        return Component<sc4::cSC4NeighborsSimulator>(sc4::CityComponent::NeighborsSimulator, sc4::kGZCLSID_cSC4NeighborsSimulator);
+    }
+    gz::cIGZWinCombo* CreateComboBox() override {   // GZCOM 0x59b: an editable combo the dialog then makes read-only
+        cIGZWinMgr* manager = WindowManager();
+        if (!manager) return nullptr;
+        auto* combo = new gz::cGZWinCombo(manager, true);
+        auto* view = static_cast<gz::cIGZWinCombo*>(combo);
+        view->AddRef();
+        return view;
+    }
+    sc4::cISCPropertyHolder* Exemplar(std::uint32_t group, std::uint32_t instance) override {
+        const std::uint64_t id = (std::uint64_t(group) << 32) | instance;
+        auto it = exemplars_.find(id);
+        if (it == exemplars_.end()) {
+            void* raw = nullptr;
+            const cGZPersistResourceKey key{0x6534284a, group, instance};
+            auto* exemplar = SL::spRM && SL::spRM->GetResource(key, 0xa52160f5, &raw, 0, nullptr) && raw ? static_cast<sc4::cISCResExemplar*>(raw) : nullptr;
+            it = exemplars_.emplace(id, exemplar).first;   // kept for the session, like the simulators' exemplars
+        }
+        return it->second ? it->second->AsISCPropertyHolder() : nullptr;
+    }
 
 private:
     std::map<std::uint32_t, cIGZBuffer*> images_;
+    std::map<std::uint64_t, sc4::cISCResExemplar*> exemplars_;
 };
 
 }  // namespace
