@@ -45,6 +45,7 @@
 namespace native {
 const sc4::cSC4SimGrid<std::uint8_t>* NativeFlammabilityGrid();   // app/NativeAdvisorFlammability.cpp
 const sc4::cSC4SimGrid<std::uint8_t>* NativePoweredGrid();        // app/NativePower.cpp
+const sc4::cISC4GrowthDeveloper* GrowthDeveloperInterfaceOfType(std::uint32_t type);   // app/NativeGrowthDevelopers.cpp
 namespace {
 using namespace sc4;
 
@@ -248,6 +249,14 @@ public:
             case kGridPlumbing:
                 if (auto* plumbing = CityAs<cSC4PlumbingSimulator>(CityComponent::PlumbingSimulator)) ok = Fill<std::uint8_t>(plumbing->GetWateredGrid(), out.u8, out);
                 break;
+            case kGridEducation:
+            case kGridHealth:
+                if (auto* res = CityAs<cSC4ResidentialSimulator>(CityComponent::ResidentialSimulator)) {
+                    cSC4SimGrid<float>* grid = source == kGridEducation ? res->GetAverageEQGrid(nullptr, nullptr) : res->GetAverageHQGrid(nullptr, nullptr);
+                    out.owner = static_cast<cISC4SimGridBase*>(grid);
+                    ok = Fill<float>(grid, out.f32, out);
+                }
+                break;
             case kGridResidentialAge:
                 if (auto* res = CityAs<cSC4ResidentialSimulator>(CityComponent::ResidentialSimulator)) ok = Fill<std::uint8_t>(res->GetAgeGrid(), out.u8, out);
                 break;
@@ -256,6 +265,7 @@ public:
         if (Trace()) std::fprintf(stderr, "map view: grid source %d (%d) -> %s\n", source, argument, ok ? "found" : "MISSING");
         return ok;
     }
+    const cISC4GrowthDeveloper* GrowthDeveloper(std::uint32_t type) override { return GrowthDeveloperInterfaceOfType(type); }
     void CityLots(std::vector<WinMapLot>& out) override {
         cSC4City* city = HostCity();
         auto* lots = city ? dynamic_cast<cSC4ZoneDeveloper*>(city->GetComponent(CityComponent::ZoneDeveloper)) : nullptr;

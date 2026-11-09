@@ -258,6 +258,8 @@ public:
     virtual bool SimulatorGrid(int source, int argument, struct WinMapGrid& out) { (void)source; (void)argument; (void)out; return false; }
     // BlockMapByLot's walk: spLotManager vslot 0x3c (every lot), lot 0x38 GetBoundingRect and 0x7c GetZoneType.
     virtual void CityLots(std::vector<struct WinMapLot>& out) { (void)out; }
+    // spBuildingDevelopmentSim vslot 0x84: the growth developer of a developer type (borrowed), or null.
+    virtual const cISC4GrowthDeveloper* GrowthDeveloper(std::uint32_t type) { (void)type; return nullptr; }
 };
 
 // One data view's exemplar (the properties SetDataView reads; `has*` = the property exists).
@@ -301,11 +303,15 @@ enum WinMapGridSource : int {
     kGridPlumbing,                 // spPlumbingSim 0x1c, uint8
     kGridAura,                     // spAuraSim 0x38, sint16
     kGridResidentialAge,           // spResidentialSim 0xa4, uint8
+    kGridEducation,                // spResidentialSim 0x54 GetAverageEQGrid, float (a new grid: `owner` holds it)
+    kGridHealth,                   // spResidentialSim 0x58 GetAverageHQGrid, float (a new grid: `owner` holds it)
 };
 struct WinMapGrid {
     const std::vector<std::vector<std::uint8_t>>* u8 = nullptr;
     const std::vector<std::vector<std::int8_t>>* s8 = nullptr;
     const std::vector<std::vector<std::int16_t>>* s16 = nullptr;
+    const std::vector<std::vector<float>>* f32 = nullptr;
+    cIGZUnknown* owner = nullptr;   // a grid made for the caller (one reference): Update releases it
     float cellSizeX = 0.0f, cellSizeZ = 0.0f;   // the grid's vslots 0x38 / 0x3c (tract widths)
 };
 struct WinMapLot {

@@ -51,6 +51,8 @@ sc4::cSC4GrowthDeveloper* GrowthDeveloperOfType(std::uint32_t type) {
     for (sc4::cSC4GrowthDeveloper* d : Developers()) if (static_cast<std::uint32_t>(d->GetSubType()) == type) return d;
     return nullptr;
 }
+// The same developer through its interface (for code that cannot include the class header next to its own).
+const sc4::cISC4GrowthDeveloper* GrowthDeveloperInterfaceOfType(std::uint32_t type) { return GrowthDeveloperOfType(type); }
 
 std::string GrowthDevelopersSummary() {
     std::string out;

@@ -403,6 +403,36 @@ void TestAutoBudget() {
 
 }  // namespace
 
+// GetAverageEQGrid / GetAverageHQGrid (i386 0x0017cef6 / 0x0017ce5c, AverageGrids 0x001751a4): population-weighted, truncated to
+// an int; 0 where nobody lives; a new grid with the EQ grids' tracts.
+void TestAverageGrids() {
+    World w;
+    cSC4ResidentialSimulator& sim = *w.sim;
+    sim.GetPopulationGrid(0)->SetTractValue(1, 1, 100);
+    sim.GetPopulationGrid(1)->SetTractValue(1, 1, 50);
+    sim.GetPopulationGrid(2)->SetTractValue(1, 1, 50);
+    sim.GetEQGrid(0)->SetTractValue(1, 1, 10.0f);
+    sim.GetEQGrid(1)->SetTractValue(1, 1, 40.0f);
+    sim.GetEQGrid(2)->SetTractValue(1, 1, 99.0f);
+    sim.GetHQGrid(2)->SetTractValue(1, 1, 80.0f);
+    sim.GetPopulationGrid(2)->SetTractValue(2, 2, 7);
+    sim.GetEQGrid(2)->SetTractValue(2, 2, 33.9f);
+    float low = -1.0f, high = -1.0f;
+    cSC4SimGrid<float>* eq = sim.GetAverageEQGrid(&low, &high);
+    CHECK(eq != nullptr && eq != sim.GetEQGrid(0));
+    if (eq) {
+        CHECK(eq->GetTractCountX() == sim.GetEQGrid(0)->GetTractCountX());
+        CHECK(eq->GetTractValue(1, 1) == 39.0f);   // (100*10 + 50*40 + 50*99) / 200 = 39.75 -> 39
+        CHECK(eq->GetTractValue(2, 2) == 33.0f);   // one wealth: its value, truncated
+        CHECK(eq->GetTractValue(0, 0) == 0.0f);    // nobody lives there
+        CHECK(low == 0.0f && high == 39.0f);
+        eq->Release();
+    }
+    cSC4SimGrid<float>* hq = sim.GetAverageHQGrid(nullptr, nullptr);
+    CHECK(hq != nullptr && hq->GetTractValue(1, 1) == 20.0f);   // 50*80 / 200
+    if (hq) hq->Release();
+}
+
 int main() {
     TestTuning();
     TestRecognition();
@@ -411,6 +441,7 @@ int main() {
     TestOrdinances();
     TestStrikes();
     TestAutoBudget();
+    TestAverageGrids();
     if (failures) return 1;
     std::printf("sc4_residentialsimulator: all passed\n");
     return 0;

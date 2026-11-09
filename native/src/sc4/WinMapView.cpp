@@ -4,6 +4,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <iterator>
 #include <type_traits>
 #include <utility>
@@ -439,8 +441,7 @@ bool cSC4WinMapView::MergeNewHighlights() {
 // ---------------------------------------------------------------------------------------------------------------
 // Update (0x10034a848; i386 0x0027db2e): draw the current data view's simulator grid into a new map buffer and hand
 // it to the panel's minimap (child 0x4203, cISC4WinMiniMap) as its overlay; data view 0 clears the overlay.
-//   PARTIAL: views 0x1b/0x1c (the residential EQ / health float grids), 0x1d (weather), 0x4c (traffic routes) and the
-//   growth developer views 0x40..0x4b draw nothing; crime incident icons, the lot shading (+0x9c0 colour) and the
+//   PARTIAL: views 0x1d (weather) and 0x4c (traffic routes) draw nothing; crime incident icons, the lot shading (+0x9c0 colour) and the
 //   highlight circles (+0x9c4 colour) are not drawn; the custom view (vslot 0x14) is not created.
 // ---------------------------------------------------------------------------------------------------------------
 void cSC4WinMapView::Update() {
@@ -491,8 +492,77 @@ void cSC4WinMapView::Update() {
                 case 0x18: s16(kGridPollution, 1); break;
                 case 0x19: s16(kGridPollution, 2); break;
                 case 0x1a: s16(kGridPollution, 3); break;
+                case 0x1b:
+                case 0x1c: {
+                    WinMapGrid average;
+                    if (g_host->SimulatorGrid(dataView_ == 0x1b ? kGridEducation : kGridHealth, 0, average) && average.f32 && !average.f32->empty())
+                        DisplayStandardFloat32GridAsUint8(*average.f32, buffer, average.cellSizeX, average.cellSizeZ);
+                    if (average.owner) average.owner->Release();
+                    break;
+                }
                 case 0x1e: u8(kGridResidentialAge); break;
-                default: break;   // case 0xb draws nothing in the original too
+                case 0xb: break;   // draws nothing in the original too
+                default: {
+                    // The growth developer views: developer type by view, then the grid the layer style asks for.
+                    static constexpr std::uint32_t kDeveloperTypes[12] = {0x1010, 0x1020, 0x1030, 0x3110, 0x3120, 0x3130,
+                                                                          0x3320, 0x3330, 0x4100, 0x4200, 0x4300, 0x4400};
+                    const cISC4GrowthDeveloper* developer =
+                        dataView_ >= 0x40 && dataView_ <= 0x4b ? g_host->GrowthDeveloper(kDeveloperTypes[dataView_ - 0x40]) : nullptr;
+                    if (!developer) {
+                        // Quirk kept: the original returns here, before SetOverlay and the timestamp (and leaks the buffer).
+                        buffer->Release();
+                        return;
+                    }
+                    const std::uint32_t style = keepGridWhileUpdating_ ? 6 : layerStyle_;
+                    if (std::getenv("SC4_MAPVIEWDEBUG")) {
+                        const cSC4SimGrid<std::int16_t>* d = developer->GetDesirabilityMap();
+                        int lo = 1 << 30, hi = -(1 << 30);
+                        if (d) for (const auto& col : d->GetGridData()) for (std::int16_t v : col) { lo = std::min<int>(lo, v); hi = std::max<int>(hi, v); }
+                        std::fprintf(stderr, "map view: developer view 0x%x style %u desirability %dx%d tract %.0f range %d..%d scale %lld\n", dataView_, style,
+                                     d ? d->GetTractCountX() : 0, d ? d->GetTractCountZ() : 0, d ? d->GetTractWidthX() : 0.0f, lo, hi, static_cast<long long>(s16GridScale_));
+                    }
+                    if (style > 6) break;
+                    switch (style) {
+                        case 0:
+                        case 1: break;
+                        case 2:
+                            if (const cSC4SimGrid<std::uint16_t>* g = developer->GetCapacityMap())
+                                DisplayStandardUint16GridScaled(g->GetGridData(), buffer, g->GetTractWidthX(), g->GetTractWidthZ());
+                            break;
+                        case 3:
+                        case 4:
+                            if (const cSC4SimGrid<std::int16_t>* g = developer->GetDesirabilityMap())
+                                DisplayStandardSint16GridScaled(g->GetGridData(), buffer, g->GetTractWidthX(), g->GetTractWidthZ());
+                            break;
+                        case 5:
+                            UpdateOccupancyMap(developer);
+                            if (occupancyGrid_)
+                                DisplayStandardSint16GridScaled(occupancyGrid_->GetGridData(), buffer, occupancyGrid_->GetTractWidthX(),
+                                                                occupancyGrid_->GetTractWidthZ());
+                            break;
+                        default: {
+                            // The growth list: each listed tract shows its style x 12, on a grid shaped like the desirability map; the
+                            // city-size resample is switched off meanwhile.
+                            const cSC4SimGrid<std::int16_t>* shape = developer->GetDesirabilityMap();
+                            if (!shape) break;
+                            const bool clamp = clampGridToCity_;
+                            clampGridToCity_ = false;
+                            std::vector<std::vector<std::int16_t>> listed(static_cast<std::size_t>(shape->GetTractCountX()),
+                                                                          std::vector<std::int16_t>(static_cast<std::size_t>(shape->GetTractCountZ()), 0));
+                            if (developer->GrowthAndDeclineListsAreValid()) {
+                                for (const GrowthItem& item : developer->GetGrowthList()) {
+                                    if (item.x >= 0 && item.x < static_cast<int>(listed.size()) && item.z >= 0 &&
+                                        item.z < static_cast<int>(listed[item.x].size()))
+                                        listed[item.x][item.z] = static_cast<std::int16_t>(item.style * 12);
+                                }
+                                DisplayStandardSint16GridScaled(listed, buffer, shape->GetTractWidthX(), shape->GetTractWidthZ());
+                            }
+                            clampGridToCity_ = clamp;
+                            break;
+                        }
+                    }
+                    break;
+                }
             }
             map->SetOverlay(buffer);
             if (dataView_ == kWinMapViewTraffic) map->Refresh();

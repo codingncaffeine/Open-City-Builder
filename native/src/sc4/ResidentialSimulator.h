@@ -249,6 +249,10 @@ public:
     cSC4SimGrid<float>* GetEQGrid(int wealth) const { return eq_[wealth].get(); }
     cSC4SimGrid<float>* GetHQGrid(int wealth) const { return hq_[wealth].get(); }
     cSC4SimGrid<std::uint8_t>* GetAgeGrid() const { return ageGrid_.get(); }                                   // slot 41
+    // i386 0x0017cef6 / 0x0017ce5c (vslots 0x54 / 0x58): a NEW float grid (one reference, the caller releases it) at the EQ tract
+    // size holding the three wealth grids' population-weighted average; `minimum` / `maximum` get its extremes when given.
+    cSC4SimGrid<float>* GetAverageEQGrid(float* minimum, float* maximum) const;
+    cSC4SimGrid<float>* GetAverageHQGrid(float* minimum, float* maximum) const;
     cSC4SimGrid<float>* GetGradeMap(bool school) const { return school ? schoolGrade_.get() : hospitalGrade_.get(); }   // 39 / 40
     float GetCellEQ(unsigned x, unsigned z) const;    // slots 35 / 36: cell coordinates
     float GetCellHQ(unsigned x, unsigned z) const;

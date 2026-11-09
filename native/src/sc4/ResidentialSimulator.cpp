@@ -1654,6 +1654,48 @@ float cSC4ResidentialSimulator::GetCellHQByWealth(unsigned x, unsigned z, int we
     return hq_[wealth - 1]->TractIsInBounds(tx, tz) ? hq_[wealth - 1]->GetTractValue(tx, tz) : 0.0f;
 }
 
+// AverageGrids (i386 0x001751a4): per tract, sum(value[w] x population[w]) / sum(population[w]) truncated to an int (0 where nobody
+// lives). Quirk kept: the population sum is an unsigned 16-bit value, so a crowded tract wraps.
+namespace {
+cSC4SimGrid<float>* AverageGrids(const SimGridPtr<float> (&values)[3], const SimGridPtr<std::uint16_t> (&population)[3],
+                                 std::int32_t tractSize, std::uint32_t id, float* minimum, float* maximum) {
+    auto* out = new cSC4SimGrid<float>();
+    out->AddRef();
+    out->Init();
+    out->SetTractSize(tractSize);
+    out->SetInstanceID(id);
+    float low = 3.402823466e38f, high = 0.0f;   // the seed of the minimum is a float constant (i386 0x00a706ec); nothing here reads it
+    const bool ready = values[0] && values[1] && values[2] && population[0] && population[1] && population[2];
+    for (std::int32_t x = 0; x < out->GetTractCountX(); ++x) {
+        for (std::int32_t z = 0; z < out->GetTractCountZ(); ++z) {
+            float value = 0.0f;
+            if (ready && population[0]->TractIsInBounds(x, z) && values[0]->TractIsInBounds(x, z)) {
+                const std::uint16_t p0 = population[0]->GetTractValue(x, z), p1 = population[1]->GetTractValue(x, z), p2 = population[2]->GetTractValue(x, z);
+                const std::uint16_t total = static_cast<std::uint16_t>(p0 + p1 + p2);
+                if (total != 0)
+                    value = static_cast<float>(static_cast<int>((static_cast<float>(p2) * values[2]->GetTractValue(x, z) +
+                                                                 static_cast<float>(p1) * values[1]->GetTractValue(x, z) +
+                                                                 static_cast<float>(p0) * values[0]->GetTractValue(x, z)) /
+                                                                static_cast<float>(total)));
+            }
+            low = std::min(low, value);
+            high = std::max(high, value);
+            out->SetTractValue(x, z, value);
+        }
+    }
+    if (minimum) *minimum = low;
+    if (maximum) *maximum = high;
+    return out;
+}
+}  // namespace
+
+cSC4SimGrid<float>* cSC4ResidentialSimulator::GetAverageEQGrid(float* minimum, float* maximum) const {
+    return AverageGrids(eq_, populationGrids_, eqTractSize_, 0x69d5c351, minimum, maximum);
+}
+cSC4SimGrid<float>* cSC4ResidentialSimulator::GetAverageHQGrid(float* minimum, float* maximum) const {
+    return AverageGrids(hq_, populationGrids_, eqTractSize_, 0x69d5c360, minimum, maximum);
+}
+
 float cSC4ResidentialSimulator::GlobalQuotient(const SimGridPtr<float> (&values)[3]) const {
     if (population_ == 0 || !values[0] || !populationGrids_[0]) return 0.0f;
     float sum = 0.0f;
