@@ -1,6 +1,7 @@
 #include "app/NativeBudgetUi.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <string>
@@ -50,6 +51,45 @@ template <class T> T* Component(sc4::CityComponent c, std::uint32_t clsid) {
     return out;
 }
 
+// The ordinance simulator as the budget panel reads it (CalculateValues: the available ordinances that are on, and each one's
+// current monthly income).
+class OrdinanceBudget final : public sc4::IOrdinanceBudgetApi {
+public:
+    std::uint32_t AvailableCount() override {
+        sc4::cSC4OrdinanceSimulator* o = Simulator();
+        return o ? static_cast<std::uint32_t>(o->GetOrdinanceAvailableCount()) : 0;
+    }
+    void AvailableIds(std::uint32_t* out, std::uint32_t& count) override {
+        sc4::cSC4OrdinanceSimulator* o = Simulator();
+        if (o) o->GetOrdinanceAvailableArray(out, count);
+        else count = 0;
+    }
+    sc4::IOrdinanceBudgetItem* OrdinanceById(std::uint32_t id) override {
+        sc4::cSC4OrdinanceSimulator* o = Simulator();
+        item_.ordinance = o ? dynamic_cast<sc4::cSC4OrdinanceSimple*>(o->GetOrdinanceByID(id)) : nullptr;
+        return item_.ordinance ? &item_ : nullptr;
+    }
+    bool IsOrdinanceOn(std::uint32_t id) override {
+        sc4::cSC4OrdinanceSimulator* o = Simulator();
+        return o && o->IsOrdinanceOn(id);
+    }
+
+private:
+    struct Item final : sc4::IOrdinanceBudgetItem {
+        sc4::cSC4OrdinanceSimple* ordinance = nullptr;
+        std::int64_t CurrentMonthlyIncome() override {
+            const std::int64_t income = ordinance ? ordinance->GetCurrentMonthlyIncome() : 0;
+            if (std::getenv("SC4_SUBBUDGETDEBUG"))
+                std::fprintf(stderr, "budget panel: ordinance %08x on %d income %lld\n", ordinance ? ordinance->GetID() : 0, ordinance && ordinance->IsOn() ? 1 : 0,
+                             static_cast<long long>(income));
+            return income;
+        }
+    } item_;
+    static sc4::cSC4OrdinanceSimulator* Simulator() {
+        return Component<sc4::cSC4OrdinanceSimulator>(sc4::CityComponent::OrdinanceSimulator, sc4::kGZCLSID_cSC4OrdinanceSimulator);
+    }
+};
+
 class BudgetHost final : public sc4::IBudgetUIWinProcHost {
 public:
     cIGZWin* ViewWindow() override { return g_view; }
@@ -63,7 +103,7 @@ public:
     cIGZWinMgr* WindowManager() override { return g_view ? g_view->GetWindowManager() : nullptr; }
     bool WindowManagerIsModal() override { return false; }
     sc4::cSC4BudgetSimulator* Budget() override { return Component<sc4::cSC4BudgetSimulator>(sc4::CityComponent::BudgetSimulator, sc4::kGZCLSID_cSC4BudgetSimulator); }
-    sc4::IOrdinanceBudgetApi* Ordinances() override { return nullptr; }
+    sc4::IOrdinanceBudgetApi* Ordinances() override { return &ordinances_; }
     sc4::INeighborsBudgetApi* Neighbors() override { return nullptr; }
     cIGZMessageServer2* Messages() override { return SL::spMS2; }
     void AddTickNotification(cIGZMessageTarget2* target, std::uint32_t channel) override { StartToolTick(target, channel); }
@@ -76,6 +116,9 @@ public:
     std::uint32_t MakeNativeColor(std::uint8_t r, std::uint8_t g, std::uint8_t b) override { return 0xff000000u | (std::uint32_t(r) << 16) | (std::uint32_t(g) << 8) | b; }
     bool FilterUICommandMessage(cGZMessage&) override { return true; }
     sc4::ISubBudgetWindow* CreateSubBudgetWindow() override { return new sc4::cSC4SubBudgetWindow(); }   // the department dialogs
+
+private:
+    OrdinanceBudget ordinances_;
 };
 
 std::string Group(std::int64_t value) {
