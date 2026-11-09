@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "gz/WinInterfaces.h"
+#include "gz/WinProc.h"
 #include "gz/cIGZMessage2.h"
 #include "rz/cRZCallbackTimer.h"
 #include "rz/cRZString.h"
@@ -121,6 +122,8 @@ public:
     virtual bool GetNeedsPower() { return false; }                                    // 0x208
     virtual bool GetHasPower() { return false; }                                      // 0x210
     virtual cISCPropertyHolder* AsPropertyHolder() { return nullptr; }                // 0x18
+    // vslot 0xc0 GetBuilding, then the building's AsOccupant (vslot 0xc): the lot's building occupant (borrowed), or null.
+    virtual cISC4Occupant* GetBuildingOccupant() { return nullptr; }
 };
 
 // The growth developer the rating rows read (cSC4GrowthDeveloper, recovered): the rating thresholds (vslot 0xf0 with a kind
@@ -378,6 +381,24 @@ public:
     virtual IQueryLandfillDeveloper* LandfillDeveloper() { return nullptr; }       // SL::spLandfillDeveloper
     virtual IQueryPortDeveloper* AirportDeveloper() { return nullptr; }   // SL::spCity slot 0x268
     virtual IQueryPortDeveloper* SeaportDeveloper() { return nullptr; }   // SL::spCity slot 0x260
+    // QueryInterface(0xa821ef94): the occupant as a network piece (one reference), or null when it is not one. The default
+    // casts the interface the occupant answers; the game's network occupants do not implement IQueryNetworkOccupant, so the
+    // game's host wraps them.
+    virtual IQueryNetworkOccupant* NetworkOccupant(cISC4Occupant* occupant) {
+        void* raw = nullptr;
+        return occupant && occupant->QueryInterface(0xa821ef94, &raw) && raw ? static_cast<IQueryNetworkOccupant*>(raw) : nullptr;
+    }
+    // The query dialogs (DoQueryDialog / DoZoneBasedQueryDialog / DoNeighborConnectionQueryDialog):
+    //   RZ::WM() vslot 0xa4 DoModalWin: runs the dialog until EndDialog; answers its result (0 = OK).
+    virtual int RunModalDialog(cIGZWin* dialog) { (void)dialog; return -1; }
+    //   RZ::WM() vslot 0x24 (0xf, window, result): ends the modal loop of `dialog` with `result`.
+    virtual void EndModalDialog(cIGZWin* dialog, std::uint32_t result) { (void)dialog; (void)result; }
+    //   SL::spWinLocationSaver vslot 0x24 (window, 1) before the modal loop / vslot 0x14 after it: place the dialog where
+    //   it was last time (first time: centered) and remember where the user left it.
+    virtual void RestoreDialogPlace(cIGZWin* dialog) { (void)dialog; }
+    virtual void SaveDialogPlace(cIGZWin* dialog) { (void)dialog; }
+    //   RZ::WM() vslot 0x5c DestroyWindow(dialog), then vslot 0x94 SetFocus(the 3D view).
+    virtual void CloseDialog(cIGZWin* dialog) { (void)dialog; }
     virtual IQueryPathView* CreatePathView() = 0;             // new cSC4PathView + Init
     virtual cISC4WinCalloutBox* CreateCalloutBox() = 0;       // new cSC4WinCalloutBox (0x1003c5f5c)
     // SC4CreateWindowFromScript(instance, parent, id, iid, out) (@ 0x100039bf7)
@@ -393,6 +414,38 @@ public:
 };
 IQueryHost* QueryHost();
 void SetQueryHost(IQueryHost* host);
+
+// cSC4QueryDialogWinProc (i386 0x00218e3c..): the query dialogs' window proc. OK / Cancel (0x287259f6 with id 0 or 1) end
+// the modal loop with that id; a funding slider (0x887113a4) re-captions its money text (id + 0x100) from the slider's
+// amount parameter, calls the row callback the slider carries and refreshes the rows its id list names.
+class cSC4QueryDialogWinProc final : public gz::cIGZWinProc {
+public:
+    explicit cSC4QueryDialogWinProc(cIGZWin* dialog);   // the original takes the dialog's cIGZWinGen (one reference)
+    ~cSC4QueryDialogWinProc();
+    bool QueryInterface(std::uint32_t iid, void** out) override;
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override;
+    bool SetOccupant(cISC4Occupant* occupant);                                         // 0x002080ee
+    void EndDialog(std::uint32_t result);                                              // 0x0020a56e
+    bool DoWinProcMessage(cIGZWin*, cGZMessage&) override { return false; }
+    bool DoWinMsg(cIGZWin* window, std::uint32_t type, std::uint64_t p1, std::uint64_t p2, std::uint64_t p3) override;   // 0x002182da
+
+private:
+    std::uint32_t refs_ = 0;
+    cIGZWin* dialog_ = nullptr;          // +0x10
+    cISC4Occupant* occupant_ = nullptr;  // +0x14
+};
+
+// cSC4QueryMessageFilter (i386 0x0020c3d8): put on every row of a query dialog; on a draw message (0x16) a performance
+// meter (a bitmap carrying parameter 0xea563ab0) paints its bar.
+//   PARTIAL: the bar painting (DrawPerformanceMeter, i386 0x0020c23c) is not ported; the meters show their bitmap only.
+class cSC4QueryMessageFilter final : public cIGZWinMessageFilter {
+public:
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return 1; }    // the original's: static lifetime semantics
+    std::uint32_t Release() override { return 0; }
+    bool DoMessage(cIGZWin*, cGZMessage&) override { return false; }
+};
 
 class cSC4ViewInputControlQuery : public cSC4ViewInputControl, public cIGZMessageTarget2 {
 public:
@@ -633,7 +686,10 @@ public:
     // @ 0x1002cfb90 a lot's headline sentences keyed by importance
     static void GetLotHeadlines(IQueryLot* lot, std::multimap<int, cRZString>& headlines);
     static std::uint32_t GetBuildingWealth(IQueryLot* lot);   // @ 0x1002cfae0
-    void DescribePick(int x, int y, cRZString& line1, cRZString& line2, cRZString& line3, bool detailed);
+    void DescribePick(int x, int y, cRZString& line1, cRZString& line2, cRZString& line3, bool detailed);   // @ 0x1002ccd38
+    bool DoQueryDialog(cISC4Occupant* occupant);                                              // i386 0x00218ed0
+    bool DoZoneBasedQueryDialog(std::uint32_t zoneType, std::uint32_t cellX, std::uint32_t cellZ);   // i386 0x00219306
+    bool DoNeighborConnectionQueryDialog(cISC4Occupant* occupant);                            // i386 0x00219668
     void GetOccupantPaths();
     void ShowAllRoutesThatIntersectCityRect(const SC4CellRect& rect);
     void WriteDetailedDebugInfo(int cellX, int cellZ);

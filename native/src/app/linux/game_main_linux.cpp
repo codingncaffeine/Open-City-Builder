@@ -868,7 +868,7 @@ void RunInputScript(const std::string& all) {
             {"left", {0x6a935cd8, 0x2a94826b}}, {"right", {0x6a935ce0, 0x2a94826e}}, {"up", {0x6a935cdd, 0x2a948272}},
             {"down", {0x6a935ce2, 0x2a948275}}, {"zin", {0x6a935cb7, 0}}, {"zout", {0x6a935cba, 0}},
             {"rl", {0x6a935cc9, 0}}, {"rr", {0x6a935ccc, 0}}, {"bulldoze", {0x6a935d36, 0}},
-            {"firetool", {0x6a935d39, 0}}, {"policetool", {0xca935dbd, 0}}};
+            {"firetool", {0x6a935d39, 0}}, {"policetool", {0xca935dbd, 0}}, {"query", {0x6a935cf3, 0}}};
         if (name.rfind("panel@", 0) == 0 && v) {   // panel@HEX: ShowPanel(index)
             v->ShowMayorSubPanel(static_cast<std::uint32_t>(std::strtoul(name.c_str() + 6, nullptr, 16)));
         } else if (name.rfind("zone", 0) == 0 && name.size() > 4 && v) {   // zoneN: the zoning tool for zone type N

@@ -96,6 +96,7 @@ void InstallViewInputStub();
 void InstallEffectToolStub();
 void InstallPlaceLotStub();
 void InstallQueryStub();
+void InstallQueryHost();   // app/NativeQuery.cpp
 void InstallSignToolStub();
 void InstallWeatherStub();
 void InstallNativeWeather();
@@ -209,6 +210,7 @@ void InstallStubHosts() {
     InstallEffectToolStub();
     InstallPlaceLotStub();
     InstallQueryStub();
+    InstallQueryHost();                   // the real query host replaces the stub above
     InstallSignToolStub();
     InstallWeatherStub();
     InstallNativeWeather();               // the real weather host replaces the stub above

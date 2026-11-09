@@ -37,6 +37,10 @@ constexpr std::uint32_t kMsgDialogTick = 0x66956814;    // periodic dialog row r
 constexpr std::uint32_t kMsgUpdatePaths = 0x69247dc7;   // routes changed
 constexpr std::uint32_t kMsgAutomatonPick = 0x2acd2cf3; // click that missed an automaton: send it to the automaton code
 constexpr std::uint32_t kTipOwner = 0x2a456cb1;         // the view's tool-tip id for the query tool
+constexpr std::uint32_t kPropQueryUi = 0x2a499f85;      // an occupant's query dialog (UI script instance)
+constexpr std::uint32_t kQueryDialogId = 0x10000005;    // the query dialogs' window id
+constexpr std::uint32_t kEnumRowIidDialog = 0x22ba0121; // EnumChildren argument of the dialog passes
+constexpr std::uint32_t kSoundNothingToQuery = 0xaa62c9d5;
 
 // iids the tool queries
 constexpr std::uint32_t kIID_cISC4Automaton = 0xa9b40f05;
@@ -342,9 +346,12 @@ void cSC4ViewInputControlQuery::MouseTipCallback(void* self) {
     if (!host || !tool) return;
     cIGZMessageServer2* messages = host->MessageServer();
     if (!messages) return;
-    cRZMessage2Standard message;
-    message.SetType(kMsgTick);
-    messages->GeneralMessagePostToTarget(&message, static_cast<cIGZMessageTarget2*>(tool));
+    // The server keeps the posted message by reference until it delivers it, so it lives on the heap (as the original).
+    auto* message = new cRZMessage2Standard();
+    message->AddRef();
+    message->SetType(kMsgTick);
+    messages->GeneralMessagePostToTarget(message, static_cast<cIGZMessageTarget2*>(tool));
+    message->Release();
 }
 
 // @ 0x1002d4eb0
@@ -354,9 +361,11 @@ void cSC4ViewInputControlQuery::CoverageRingCallback(void* self) {
     if (!host || !tool) return;
     cIGZMessageServer2* messages = host->MessageServer();
     if (!messages) return;
-    cRZMessage2Standard message;
-    message.SetType(kMsgCoverage);
-    messages->MessagePost(&message, false);
+    auto* message = new cRZMessage2Standard();   // heap: the queue holds it until delivery
+    message->AddRef();
+    message->SetType(kMsgCoverage);
+    messages->MessagePost(message, false);
+    message->Release();
 }
 
 // @ 0x1002c2a0e
@@ -2486,9 +2495,8 @@ void cSC4ViewInputControlQuery::GetFloraOccupantSummaryInfo(cRZString& title) { 
 // @ 0x1002c515c: the network piece's kind as a word, tried in the order road(2), rail(8), ... ; the pipe network adds the pipe counts in debug
 void cSC4ViewInputControlQuery::GetNetworkOccupantSummaryInfo(cRZString& title, cRZString& text) {
     IQueryHost* host = QueryHost();
-    void* raw = nullptr;
-    if (!host || !occupant_ || !occupant_->QueryInterface(0xa821ef94, &raw)) return;
-    auto* network = static_cast<IQueryNetworkOccupant*>(raw);
+    IQueryNetworkOccupant* network = host && occupant_ ? host->NetworkOccupant(occupant_) : nullptr;
+    if (!network) return;
     // {network type, string instance}; the first type the piece is of wins
     static constexpr struct { std::uint32_t type, instance; } kKinds[] = {
         {2, 0xaa5589fb}, {8, 0x8b8c5cbd}, {0xc, 0x2be09c9e}, {0, 0x6a5589d4}, {1, 0x4a5589f3}, {10, 0x4bd9fdd8},
@@ -2609,7 +2617,329 @@ void cSC4ViewInputControlQuery::GetTerrainSummaryInfo(cRZString& title, cRZStrin
     }
 }
 // PARTIAL stub (QUERY-6)
-void cSC4ViewInputControlQuery::DescribePick(int, int, cRZString&, cRZString&, cRZString&, bool) {}
+// @ 0x1002ccd38 (i386 0x00219cde): the click of the building query. The picked occupant (or the occupant of the lot under
+// the cursor) is replaced by its lot's building; its query sound plays and its dialog opens: a network piece at the city
+// edge opens the neighbor connection dialog, an occupant with a query UI (property 0x2a499f85) its script dialog, and a
+// landfill / airport / seaport zone the zone dialog; anything else plays the "nothing to query" sound.
+//   PARTIAL: the three debug description lines (the cell / piece / building texts the debug query shows) stay at their
+//   defaults; the coverage rings of the queried building are not drawn while its dialog is open.
+void cSC4ViewInputControlQuery::DescribePick(int x, int y, cRZString& line1, cRZString& line2, cRZString& line3, bool detailed) {
+    (void)detailed;
+    line1 = cRZString("Query");
+    line2 = cRZString("Query extra: none");
+    line3 = cRZString("Query extra2: none");
+    IQueryHost* host = QueryHost();
+    IQueryView* view = host ? host->QueryView() : nullptr;
+    if (!view) return;
+    cISC4Occupant* occupant = nullptr;
+    IQueryLotManager* lots = host->LotManager();
+    IOccupantFilter* filter = host->Renderer() ? host->Renderer()->CreateFilter(1) : nullptr;   // cSC4QueriableOccupantFilter
+    // The lot's building stands in for the picked occupant (or for the empty cell under the cursor).
+    auto takeBuilding = [&](IQueryLot* lot) {
+        if (!lot) return;
+        lot->AddRef();
+        if (cISC4Occupant* building = lot->GetBuildingOccupant()) {
+            building->AddRef();
+            if (occupant) occupant->Release();
+            occupant = building;
+        }
+        lot->Release();
+    };
+    if (filter && PickQueriableOccupant(x, y, &occupant, filter)) {
+        if (lots) takeBuilding(lots->GetLotForOccupant(occupant));
+    } else {
+        float pos[3] = {0.0f, 0.0f, 0.0f};
+        if (view->PickTerrain(x, y, pos, false) && host->City() && lots) {
+            int cellX = 0, cellZ = 0;
+            host->City()->PositionToCell(pos[0], pos[2], cellX, cellZ);
+            takeBuilding(lots->GetLotAtCell(cellX, cellZ, 0));
+        }
+    }
+    if (filter) filter->Release();
+    if (!occupant) return;
+
+    PlayOccupantQuerySound(occupant);
+    bool neighborOnly = false;
+    if (IQueryNetworkOccupant* network = host->NetworkOccupant(occupant)) {
+        network->Release();
+        DoNeighborConnectionQueryDialog(occupant);
+    } else {
+        void* raw = nullptr;
+        if (occupant->QueryInterface(0xa8c86142, &raw) && raw) {   // a neighbor connection occupant
+            static_cast<cIGZUnknown*>(raw)->Release();
+            DoNeighborConnectionQueryDialog(occupant);
+            neighborOnly = true;
+        }
+    }
+    if (!neighborOnly) {
+        std::uint32_t queryUi = 0;
+        cISCPropertyHolder* holder = occupant->AsPropertyHolder();
+        if (holder && cSCPropertyHelp::GetPropertyValue(holder, kPropQueryUi, queryUi)) {
+            DoQueryDialog(occupant);
+        } else {
+            float position[3] = {0.0f, 0.0f, 0.0f};
+            occupant->GetPosition(position);
+            int cellX = 0, cellZ = 0;
+            if (host->City()) host->City()->PositionToCell(position[0], position[2], cellX, cellZ);
+            const std::uint32_t zone = host->ZoneTypeAt(cellX, cellZ);
+            if (zone <= 0xe && ((1u << zone) & 0x5800u) != 0) {   // 11 landfill, 12 seaport, 14 airport
+                DoZoneBasedQueryDialog(zone, static_cast<std::uint32_t>(cellX), static_cast<std::uint32_t>(cellZ));
+            } else if (IViewInputHost* base = ViewInputHost()) {
+                base->PlaySound(1, kSoundNothingToQuery);
+            }
+        }
+    }
+    occupant->Release();
+}
+
+namespace {
+// The parts the three query dialogs share (each original entry point inlines them): the dialog's window proc and the
+// performance meter filter, the row fill (`set` over every row with `setContext`), the dialog tick refresh, the modal loop,
+// the rows read back on OK (`get`), and the teardown.
+bool RunQueryDialog(cIGZWin* dialog, cISC4Occupant* procOccupant, cIGZWin::EnumChildFn tickFn, void* tickContext1,
+                    void* tickContext2, const std::vector<std::pair<cIGZWin::EnumChildFn, void*>>& fills,
+                    cIGZWin::EnumChildFn get, void* getContext) {
+    IQueryHost* host = QueryHost();
+    dialog->PullToFront();
+    cSC4QueryDialogWinProc* proc = nullptr;
+    void* raw = nullptr;
+    if (dialog->QueryInterface(gz::kGZIID_cIGZWinGen, &raw) && raw) {
+        auto* gen = static_cast<gz::cIGZWinGen*>(raw);
+        proc = new cSC4QueryDialogWinProc(dialog);
+        proc->AddRef();
+        if (procOccupant) proc->SetOccupant(procOccupant);
+        gen->SetWinProc(proc);
+        gen->Release();
+    }
+    static cSC4QueryMessageFilter filter;
+    dialog->EnumChildren(kEnumRowIidDialog, &cSC4ViewInputControlQuery::EnumFuncSetFilter, &filter);
+    if (procOccupant) procOccupant->AddRef();
+    cSC4ViewInputControlQuery::SetEnumSetFunction(tickFn, tickContext1, tickContext2);
+    cSC4ViewInputControlQuery::SetQueryDialogWindow(dialog);
+    dialog->AddRef();
+    for (const auto& fill : fills) dialog->EnumChildren(kEnumRowIidDialog, fill.first, fill.second);
+    host->RestoreDialogPlace(dialog);
+    const int result = host->RunModalDialog(dialog);
+    host->SaveDialogPlace(dialog);
+    cSC4ViewInputControlQuery::SetEnumSetFunction(nullptr, nullptr, nullptr);
+    if (procOccupant) procOccupant->Release();
+    cSC4ViewInputControlQuery::SetQueryDialogWindow(nullptr);
+    dialog->Release();
+    if (result == 0 && get) dialog->EnumChildren(kEnumRowIidDialog, get, getContext);
+    dialog->EnumChildren(kEnumRowIidDialog, &cSC4ViewInputControlQuery::EnumFuncClearFilter, &filter);
+    if (proc) proc->SetOccupant(nullptr);
+    if (raw) {   // the window proc goes with the window
+        static_cast<gz::cIGZWinGen*>(raw)->SetWinProc(nullptr);
+    }
+    host->CloseDialog(dialog);
+    dialog->Release();
+    if (proc) proc->Release();
+    return result == 0;
+}
+}  // namespace
+
+// i386 0x00218ed0: the building's own query dialog (script instance = its property 0x2a499f85).
+bool cSC4ViewInputControlQuery::DoQueryDialog(cISC4Occupant* occupant) {
+    IQueryHost* host = QueryHost();
+    std::uint32_t instance = 0;
+    cISCPropertyHolder* holder = occupant ? occupant->AsPropertyHolder() : nullptr;
+    if (!host || !holder || !cSCPropertyHelp::GetPropertyValue(holder, kPropQueryUi, instance)) return false;
+    cIGZWin* dialog = host->CreateWindowFromScript(instance, nullptr, kQueryDialogId);
+    if (!dialog) return false;
+    return RunQueryDialog(dialog, occupant, &cSC4ViewInputControlQuery::EnumFuncUpdateValue, occupant, nullptr,
+                          {{&cSC4ViewInputControlQuery::EnumFuncSetValue, occupant}}, &cSC4ViewInputControlQuery::EnumFuncGetValue,
+                          occupant);
+}
+
+// i386 0x00219306: the dialog of a landfill (11), seaport (12) or airport (14) zone cell.
+bool cSC4ViewInputControlQuery::DoZoneBasedQueryDialog(std::uint32_t zoneType, std::uint32_t cellX, std::uint32_t cellZ) {
+    IQueryHost* host = QueryHost();
+    if (!host) return false;
+    std::uint32_t instance = zoneType;
+    if (zoneType == 0xc) {
+        instance = 0x4a562da5;
+    } else if (zoneType == 0xe) {
+        if (IViewInputHost* base = ViewInputHost()) base->PlaySound(1, 0x2a62c927);
+        instance = 0xaa561f93;
+    } else if (zoneType == 0xb) {
+        instance = 0x6a561b3a;
+    }
+    cIGZWin* dialog = host->CreateWindowFromScript(instance, nullptr, kQueryDialogId);
+    if (!dialog) return false;
+    tCellInfo info;
+    info.x = static_cast<std::int32_t>(cellX);
+    info.z = static_cast<std::int32_t>(cellZ);
+    info.idOffset = 0x200;
+    info.connectionType = 0;
+    return RunQueryDialog(dialog, nullptr, &cSC4ViewInputControlQuery::EnumFuncNeighborDialogSetValue, &info, nullptr,
+                          {{&cSC4ViewInputControlQuery::EnumFuncNeighborDialogSetValue, &info}},
+                          &cSC4ViewInputControlQuery::EnumFuncNeighborDialogGetValue, &info);
+}
+
+// i386 0x00219668: a network piece on the city edge that connects to a neighbor: one or two connections of the piece's
+// connection type around its cell, in the dialog for that type (one or two connections).
+bool cSC4ViewInputControlQuery::DoNeighborConnectionQueryDialog(cISC4Occupant* occupant) {
+    IQueryHost* host = QueryHost();
+    IQueryCity* city = host ? host->City() : nullptr;
+    IQueryNeighborsSim* neighbors = host ? host->NeighborsSim() : nullptr;
+    if (!occupant || !city || !neighbors) return false;
+    float position[3] = {0.0f, 0.0f, 0.0f};
+    occupant->GetPosition(position);
+    int cellX = 0, cellZ = 0;
+    city->PositionToCell(position[0], position[2], cellX, cellZ);
+    // The original reads one cell count (city vslot 0x174) for both edges.
+    const int last = city->CellCountX() - 1;
+    if (cellX != 0 && cellX != last && cellZ != 0 && cellZ != last) return false;
+
+    std::uint32_t connectionType = 0;
+    if (IQueryNetworkOccupant* network = host->NetworkOccupant(occupant)) {
+        std::uint32_t t = network->IsOfType(6) ? 8 : (network->IsOfType(0) ? 2 : 10);
+        if (network->IsOfType(0xc)) t = 0xc;
+        if (network->IsOfType(2)) t = 3;
+        if (network->IsOfType(7)) t = 6;
+        if (network->IsOfType(8)) t = 7;
+        if (network->IsOfType(9)) t = 0xb;
+        if (network->IsOfType(1)) t = 1;
+        if (network->IsOfType(4)) t = 5;
+        connectionType = t;
+        network->Release();
+    } else {
+        void* raw = nullptr;
+        if (occupant->QueryInterface(0xa8c86142, &raw) && raw) {
+            static_cast<cIGZUnknown*>(raw)->Release();
+            connectionType = 4;
+        }
+    }
+    static constexpr int kXOffsets[4] = {-1, 0, 1, 0};   // _XOffsets.288346
+    static constexpr int kZOffsets[4] = {0, -1, 0, 1};   // _ZOffsets.288347
+    std::vector<tCellInfo> cells;
+    for (int i = 0; i < 4; ++i) {
+        const int x = cellX + kXOffsets[i], z = cellZ + kZOffsets[i];
+        if (!neighbors->IsValidConnectionCell(x, z) || !neighbors->FindConnection(connectionType, x, z)) continue;
+        tCellInfo info;
+        info.x = x;
+        info.z = z;
+        info.idOffset = static_cast<std::int32_t>(cells.size()) << 9;
+        info.connectionType = static_cast<std::int32_t>(connectionType);
+        cells.push_back(info);
+    }
+    if (cells.empty() || cells.size() > 2) return false;
+    const bool one = cells.size() == 1;
+    std::uint32_t instance = 0;
+    switch (connectionType) {
+    case 1: case 6: case 7: case 0xb: instance = one ? 0xea566a49u : 0x4a5e7ed3u; break;
+    case 2: case 3: case 8: case 10: case 0xc: instance = one ? 0xca566f94u : 0xaa5e14ccu; break;
+    case 4: instance = one ? 0x4a566c14u : 0x8a5e7bd2u; break;
+    case 5: instance = one ? 0x4a566d6eu : 0x2a5e7490u; break;
+    default: break;   // the original leaves the instance unset here
+    }
+    cIGZWin* dialog = host->CreateWindowFromScript(instance, nullptr, kQueryDialogId);
+    if (!dialog) return false;
+    std::vector<std::pair<cIGZWin::EnumChildFn, void*>> fills;
+    for (tCellInfo& info : cells) fills.push_back({&cSC4ViewInputControlQuery::EnumFuncNeighborDialogSetValue, &info});
+    // The original writes no get pass for this dialog.
+    return RunQueryDialog(dialog, nullptr, &cSC4ViewInputControlQuery::EnumFuncNeighborDialogSetValue, &cells[0],
+                          cells.size() > 1 ? &cells[1] : nullptr, fills, nullptr, nullptr);
+}
+
+// ---- cSC4QueryDialogWinProc ------------------------------------------------------------------------------------------------
+
+cSC4QueryDialogWinProc::cSC4QueryDialogWinProc(cIGZWin* dialog) : dialog_(dialog) {   // i386 0x00218e3c
+    if (dialog_) dialog_->AddRef();
+}
+
+cSC4QueryDialogWinProc::~cSC4QueryDialogWinProc() {
+    if (dialog_) dialog_->Release();
+    if (occupant_) occupant_->Release();
+}
+
+bool cSC4QueryDialogWinProc::QueryInterface(std::uint32_t iid, void** out) {
+    if (iid == gz::kGZIID_cIGZWinProc || iid == 1) {
+        *out = static_cast<gz::cIGZWinProc*>(this);
+        AddRef();
+        return true;
+    }
+    return false;
+}
+
+std::uint32_t cSC4QueryDialogWinProc::Release() {
+    if (refs_ > 1) return --refs_;
+    delete this;
+    return 0;
+}
+
+bool cSC4QueryDialogWinProc::SetOccupant(cISC4Occupant* occupant) {
+    if (occupant_) {
+        occupant_->Release();
+        occupant_ = nullptr;
+    }
+    if (occupant) {
+        occupant_ = occupant;
+        occupant->AddRef();
+    }
+    return occupant != nullptr;
+}
+
+void cSC4QueryDialogWinProc::EndDialog(std::uint32_t result) {
+    IQueryHost* host = QueryHost();
+    if (host && dialog_) host->EndModalDialog(dialog_, result);
+    if (dialog_) {
+        dialog_->Release();
+        dialog_ = nullptr;
+    }
+    if (occupant_) {
+        occupant_->Release();
+        occupant_ = nullptr;
+    }
+}
+
+bool cSC4QueryDialogWinProc::DoWinMsg(cIGZWin* window, std::uint32_t type, std::uint64_t p1, std::uint64_t p2, std::uint64_t) {
+    if (!dialog_ || window != dialog_ || type != 3) return false;
+    const std::uint32_t message = static_cast<std::uint32_t>(p1);
+    const std::uint32_t id = static_cast<std::uint32_t>(p2);
+    if (message == 0x287259f6) {   // a button: OK (0) / Cancel (1)
+        if (id < 2) {
+            EndDialog(id);
+            return true;
+        }
+        return false;
+    }
+    if (message != 0x887113a4) return false;   // a slider moved
+    void* raw = nullptr;
+    if (!window->GetChildAsRecursive(id, gz::kGZIID_cIGZWinSlider, &raw) || !raw) return false;
+    auto* slider = static_cast<gz::cIGZWinSlider*>(raw);
+    const int value = slider->GetValue();
+    cIGZWin* sliderWin = slider->AsIGZWin();
+    slider->Release();
+    cIGZVariant* variant = nullptr;
+    double amount = 0.0;
+    if (sliderWin->GetParam(0x2aa6e8ad, &variant) && variant) {   // GetParam answers a counted reference
+        amount = static_cast<double>(variant->GetValSint64());
+        variant->Release();
+    }
+    cSC4ViewInputControlQuery::SetStaticControlSimoleons(window, id + 0x100,
+                                                         static_cast<std::int64_t>(amount * (static_cast<double>(value) / 100.0)));
+    variant = nullptr;
+    if (sliderWin->GetParam(0x6a8cc9d6, &variant) && variant) {
+        auto callback = reinterpret_cast<cSC4ViewInputControlQuery::tSetOrGetFn>(variant->GetValVoidPtr());
+        variant->Release();
+        if (callback && occupant_) callback(window, sliderWin->GetID(), false, occupant_);
+    }
+    variant = nullptr;
+    if (sliderWin->GetParam(0x0ab3f6db, &variant) && variant) {   // the rows that follow the slider
+        std::uint32_t size = variant->GetCount();   // bytes
+        std::vector<std::uint32_t> ids(size / sizeof(std::uint32_t));
+        size = static_cast<std::uint32_t>(ids.size() * sizeof(std::uint32_t));
+        if (!ids.empty()) variant->GetValVoid(ids.data(), size);
+        variant->Release();
+        for (std::uint32_t row : ids) {
+            const std::uint32_t index = row & 0xfff;
+            if ((row & 0x1000) == 0 || index > 0x7e || !occupant_) continue;
+            if (cSC4ViewInputControlQuery::tSetOrGetFn fn = cSC4ViewInputControlQuery::kRowFunctions[index]) fn(window, row, true, occupant_);
+        }
+    }
+    return false;
+}
 // PARTIAL stub (QUERY-6)
 void cSC4ViewInputControlQuery::GetOccupantPaths() {}
 // PARTIAL stub (QUERY-6)
