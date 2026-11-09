@@ -258,7 +258,7 @@ bool cSC4AdvisorSystem::DoLink(const cIGZString& link) {
     if (type != 0 && type != 0x1d) {
         cISC4Advisor* advisor = GetAdvisor(type);
         if (advisor && id != 0) {
-            cISC4Advice* advice = advisor->GetAdviceByGUID(id);
+            cISC4Advice* advice = advisor->GetAdviceBySessionID(id);   // i386 0x001e54xx: advisor vslot 0x34
             if (advice) {
                 text = text.Right(text.Strlen() - 0x10);
                 return advice->DoLink(text);

@@ -5,7 +5,7 @@
 //
 // The advisor window (cSC4AdvisorUIAdvisorWinProc) is created here too, over the city view, with its own host.
 //
-// PARTIAL: the advice text detokenizer's advice tokens, loose advisor scripts from the plugin folders
+// PARTIAL: loose advisor scripts from the plugin folders
 // (UpdateResourcesFromDirectory), the tutorial registry's Lua, the MySim functions, is_tutorial, and the building words of
 // a reward subject.
 #include <cfloat>
@@ -27,7 +27,9 @@
 #include "sc4/AdviceSubject.h"
 #include "sc4/Advisor.h"
 #include "sc4/AdvisorConcrete.h"
+#include "sc4/AdviceDetokenizer.h"
 #include "sc4/AdvisorUIAdvisorWinProc.h"
+#include "sc4/CitySituationManager.h"
 #include "sc4/AdvisorSystem.h"
 #include "sc4/BudgetSimulator.h"
 #include "sc4/Budget.h"
@@ -430,6 +432,8 @@ cIGZWin* ViewWin() {
 void ToolPlop(lua_State* L, std::uint32_t item) {
     cISCLua* lua = HostOf(L);
     if (lua->GetTop() == 0 || lua->Type(-1) != 3) return;
+    if (kTrace) std::fprintf(stderr, "advisors: tool plop 0x%08x type %u (view %s)\n", item,
+                             static_cast<unsigned>(Trunc(lua, -1)), ViewWin() ? "yes" : "none");
     if (cIGZWin* win = ViewWin()) {
         cGZMessage message{3, 0x49d993d4, item, static_cast<std::uint32_t>(Trunc(lua, -1))};
         win->DoMessage(message);
@@ -590,6 +594,19 @@ private:
     std::uint32_t refs_ = 0;
 };
 
+// The advice detokenizer reaches the city's situation manager.
+class AdviceDetokenizerHostImpl final : public IAdviceDetokenizerHost {
+public:
+    cSC4CitySituationManager* SituationManager() override {
+        cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(CityComponent::CitySituationManager) : nullptr;
+        return object ? dynamic_cast<cSC4CitySituationManager*>(object) : nullptr;
+    }
+    cISC4AdvisorSystem* System(void* context) override {
+        return static_cast<cISC4AdvisorSystem*>(static_cast<cSC4AdvisorSystem*>(context));
+    }
+};
+
 // ---- the hosts
 bool g_llama = false;   // the llama cheat: every advisor head is a llama
 
@@ -612,11 +629,7 @@ public:
         if (kTrace) std::fprintf(stderr, "advisors: create advisor class 0x%08x -> %s\n", classId, ok ? "ok" : "FAILED");
         return ok;
     }
-    // PARTIAL: the advice's own tokens (its subject's words) are not recovered; the method answers "unknown" so the
-    // detokenizer leaves them, instead of calling a null method for every token it does not know.
-    DetokenizeMethod AdviceDetokenizerFunction() override {
-        return +[](const cIGZString&, cIGZString&, void*) { return false; };
-    }
+    DetokenizeMethod AdviceDetokenizerFunction() override { return &sc4::AdviceDetokenizerFunction; }
     const LuaExtension* LuaExtensions(std::size_t& count) override {
         count = sizeof(kExtensions) / sizeof(kExtensions[0]);
         return kExtensions;
@@ -837,6 +850,8 @@ void InstallAdvisorHosts() {
     SetAdvisorConcreteHost(&concrete);
     static AdvisorWindowHost window;
     SetAdvisorUIAdvisorHost(&window);
+    static AdviceDetokenizerHostImpl tokens;
+    SetAdviceDetokenizerHost(&tokens);
 }
 
 // Runs `code` in the app's Lua (the advisors' VM) and prints its results: the scenario runner's `alua CODE`.
@@ -889,7 +904,7 @@ void NativeAdviceLinkProbe(int advisorId, const char* code) {
     if (!advisor || advisor->GetCurrentAdvices().empty()) { std::printf("adlink: advisor %d has no active advice\n", advisorId); return; }
     cISC4Advice* advice = advisor->GetCurrentAdvices().begin()->first.get();
     char head[64];
-    std::snprintf(head, sizeof head, "sc4://advice/%08x%08x", static_cast<unsigned>(advisorId), static_cast<unsigned>(advice->GetGUID()));
+    std::snprintf(head, sizeof head, "sc4://advice/%08x%08x", static_cast<unsigned>(advisorId), static_cast<unsigned>(advice->GetSessionID()));
     const std::string url = std::string(head) + code;
     const bool followed = NativeHtmlLinkDoURL(cRZString(url.c_str()));
     std::printf("adlink: %s -> %s\n", url.c_str(), followed ? "followed" : "NOT followed");
@@ -911,6 +926,7 @@ void NativePrintAdvisors() {
             if (!a) continue;
             std::printf("    advice 0x%08x mood %d priority %d event %d title \"%s\"\n", static_cast<std::uint32_t>(a->GetGUID()), a->GetMood(),
                         a->GetPriority(), a->GetEventID(), a->GetTextTitle().ToChar());
+            if (std::getenv("SC4_ADVICETEXT")) std::printf("      message \"%s\"\n", a->GetTextMessage().ToChar());
         }
     }
 }
