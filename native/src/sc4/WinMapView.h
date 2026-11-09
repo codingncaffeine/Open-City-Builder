@@ -20,7 +20,7 @@
 //   +0x1f4 int dataView (0 = none, 0x4c = the traffic route view), +0x1f8 int layerStyle (3 initially)
 //   +0x1fc uint32 paletteA[256], +0x5fc uint32 paletteB[256]  (the two colour tables the map layers fill)
 //   +0x9fc byte clampGridToCity, +0x9fd byte averageGridByLots, +0xa00 uint32 lotTypeMask
-//   +0xa04 uint32 trafficRouteMask (Update's traffic-route overlay), +0xa08 int64 u16GridScale,
+//   +0xa04 uint32 paletteSteps (0x4a0b47ec), +0xa08 int64 u16GridScale,
 //   +0xa10 int64 s16GridScale
 //   +0xa30 std::set<cHighlightInfo> newHighlights (the per-tick collection, cleared by MergeNewHighlights),
 //   +0xa18 std::set<cHighlightInfo> activeHighlights (the merged set the effects live in)
@@ -185,6 +185,11 @@ public:
     virtual void SetBaseColor(std::uint32_t color, std::uint32_t flags) = 0;   // vslot 0x40
     virtual void ResetColors() = 0;                                            // vslot 0x30
     virtual void SetColor(int index, std::uint32_t rgb) = 0;                   // vslot 0x38
+    // The rest of cISC4WinMiniMap that SetDataView / Update reach (i386 vslots 0x10, 0x24, 0xc -> window 0xc0 / 0x170).
+    virtual void SetOverlay(cIGZBuffer* overlay) { (void)overlay; }           // SetOverlay
+    virtual void Refresh() {}                                                  // Update
+    virtual void Invalidate() {}                                               // AsIGZWin()->InvalidateSelf
+    virtual bool MapSize(int& width, int& height) { (void)width; (void)height; return false; }   // AsIGZWin()->GetArea
 };
 
 class IWinMapViewHost {
@@ -238,6 +243,74 @@ public:
     // nsSC4TutorialSystem::FilterUICommandMessage (0x10006008e): false vetoes the command and DoMessage answers
     // true without forwarding it.
     virtual bool FilterUICommand(const cGZMessage& message) = 0;
+
+    // ---- SetDataView / Update (i386 0x0027fc98 / 0x0027db2e). Defaults answer "nothing".
+    // The data view's exemplar {0x6534284a, 0x690f693f, key} (RM vslot 0xc, iid 0xa52160f5), read into `out`.
+    virtual bool LoadDataViewExemplar(std::uint32_t key, struct WinMapViewExemplar& out) { (void)key; (void)out; return false; }
+    // nSC4UI::InterpolateRampToPalette: `count` entries from the (position, colour) stops.
+    virtual void InterpolateRamp(std::uint32_t* out, int count, const std::uint32_t* stops, int stopCount) {
+        (void)out; (void)count; (void)stops; (void)stopCount;
+    }
+    // GZCOM()->CreateInstance(0xc470d325, 0x20732180): a counted, uninitialised buffer.
+    virtual cIGZBuffer* CreateMapBuffer() { return nullptr; }
+    // The simulator grid a data view draws (Update's switch): the borrowed grid of `source` (WinMapGridSource), with its
+    // tract widths. `argument` is the pollution kind (0 air, 1 water, 2 garbage, 3 radiation).
+    virtual bool SimulatorGrid(int source, int argument, struct WinMapGrid& out) { (void)source; (void)argument; (void)out; return false; }
+    // BlockMapByLot's walk: spLotManager vslot 0x3c (every lot), lot 0x38 GetBoundingRect and 0x7c GetZoneType.
+    virtual void CityLots(std::vector<struct WinMapLot>& out) { (void)out; }
+};
+
+// One data view's exemplar (the properties SetDataView reads; `has*` = the property exists).
+struct WinMapViewExemplar {
+    std::vector<std::uint32_t> occupantGroups;   // 0x4a0b47e0
+    bool hasOccupantGroups = false;
+    bool hasInvertGroups = false, invertGroups = false;          // 0x4a0b47e1
+    bool hasHidePlain = false, hidePlain = false;                // 0x4a0b47e2
+    bool hasUnderground = false; std::uint32_t underground = 0;  // 0x4a0b47e3
+    std::vector<std::uint32_t> ramp;             // 0x4a0b47e4 (stops)
+    bool hasRamp = false;
+    bool hasDataView = false; std::uint32_t dataView = 0;        // 0x4a0b47e5
+    bool hasZoneDisplay = false; bool zoneDisplay = false;       // 0x4a0b47e6
+    bool hasClampToCity = false; bool clampToCity = false;       // 0x4a0b47e7
+    bool hasLotTypeMask = false; std::uint32_t lotTypeMask = 0;  // 0x4a0b47e8
+    bool hasHighlightView = false; std::uint32_t highlightView = 0;   // 0x4a0b47e9
+    bool hasEffectName = false; cRZString effectName;            // 0x4a0b47ea
+    bool hasCustomView = false; std::uint32_t customView = 0;    // 0x4a0b47eb (GZCOM class id)
+    bool hasSteps = false; std::uint32_t steps = 0;              // 0x4a0b47ec
+    bool hasLayerStyle = false; std::uint32_t layerStyle = 0;    // 0x4a0b47ed
+    bool hasCircleColor = false; std::uint32_t circleColor = 0;  // 0x4a0b47ee
+    bool hasLotShadeColor = false; std::uint32_t lotShadeColor = 0;   // 0x4a0b47ef
+    bool hasDevelopmentView = false; std::uint8_t developmentView = 0;   // 0x4a0b47f0
+    bool hasNetworkList = false; std::uint32_t networkList = 0;  // 0x4a0b47f1
+    bool hasShowZones = false; bool showZones = false;           // 0x4a0b47f5
+    std::vector<std::uint32_t> networkTypes;     // 0x6b7c5cdd
+    bool hasNetworkTypes = false;
+};
+
+// Update's grid sources (the simulator and its vslot in the original).
+enum WinMapGridSource : int {
+    kGridAuraMayorRating = 1,      // spAuraSim 0x30, sint8
+    kGridLandValue,                // spLandValueSim 0x20, uint8
+    kGridPolice,                   // spPoliceSim 0x14, uint8
+    kGridCrime,                    // spCrimeSim 0x14, uint8
+    kGridFireProtection,           // spFireProtectionSim 0x14, uint8
+    kGridFlammability,             // spFlammabilitySim 0x14, uint8
+    kGridPower,                    // spPowerSim 0x90, uint8
+    kGridPollution,                // spPollutionSim 0x14(kind), sint16
+    kGridTraffic,                  // spTrafficSim 0x28, uint8
+    kGridPlumbing,                 // spPlumbingSim 0x1c, uint8
+    kGridAura,                     // spAuraSim 0x38, sint16
+    kGridResidentialAge,           // spResidentialSim 0xa4, uint8
+};
+struct WinMapGrid {
+    const std::vector<std::vector<std::uint8_t>>* u8 = nullptr;
+    const std::vector<std::vector<std::int8_t>>* s8 = nullptr;
+    const std::vector<std::vector<std::int16_t>>* s16 = nullptr;
+    float cellSizeX = 0.0f, cellSizeZ = 0.0f;   // the grid's vslots 0x38 / 0x3c (tract widths)
+};
+struct WinMapLot {
+    std::int32_t x0 = 0, z0 = 0, x1 = 0, z1 = 0;   // GetBoundingRect, inclusive cells
+    std::uint8_t zoneType = 0;                      // GetZoneType
 };
 IWinMapViewHost* WinMapViewHost();
 void SetWinMapViewHost(IWinMapViewHost* host);
@@ -372,7 +445,7 @@ private:
     bool clampGridToCity_ = false;             // +0x9fc
     bool averageGridByLots_ = false;           // +0x9fd
     std::uint32_t lotTypeMask_ = 1;            // +0xa00
-    std::uint32_t trafficRouteMask_ = 0;       // +0xa04
+    std::uint32_t paletteSteps_ = 0x100;       // +0xa04 (i386 0x96c: 0x4a0b47ec; the scales below are 0xffff00 / 0x7fff00 over it)
     std::int64_t u16GridScale_ = 0x100;        // +0xa08
     std::int64_t s16GridScale_ = 0x100;        // +0xa10
     std::set<WinMapHighlightInfo, WinMapHighlightInfoLess> newHighlights_;      // +0xa18
@@ -380,6 +453,8 @@ private:
     std::uint32_t highlightView_ = 0;          // +0xa48
     cRZString effectName_;                     // +0xa50
     std::uint32_t unknownA70_ = 0;             // +0xa70 (only cleared by the constructor)
+    std::uint32_t lotShadeColor_ = 0;          // i386 0x9c0 (0x4a0b47ef): Update shades lots in this colour
+    std::uint32_t circleColor_ = 0;            // i386 0x9c4 (0x4a0b47ee): Update circles the highlights in this colour
     std::uint32_t desirabilityView_ = 99;      // +0xa80
     std::uint32_t trafficView_ = kWinMapViewTraffic;   // +0xa84
     std::uint32_t viewView_ = 0;               // +0xa88

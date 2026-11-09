@@ -107,6 +107,16 @@ struct FakeColorSink final : IWinMapViewColorSink {
     void SetBaseColor(std::uint32_t color, std::uint32_t flags) override { baseColor = color; baseFlags = flags; }
     void ResetColors() override { ++resets; colors.clear(); }
     void SetColor(int index, std::uint32_t rgb) override { colors[index] = rgb; }
+    cIGZBuffer* overlay = nullptr;   // one reference while held
+    int overlays = 0, refreshes = 0, width = 0, height = 0;
+    void SetOverlay(cIGZBuffer* buffer) override {
+        ++overlays;
+        if (buffer) buffer->AddRef();
+        if (overlay) overlay->Release();
+        overlay = buffer;
+    }
+    void Refresh() override { ++refreshes; }
+    bool MapSize(int& w, int& h) override { w = width; h = height; return width > 0; }
 };
 
 struct FakeHost final : IWinMapViewHost {
@@ -182,6 +192,31 @@ struct FakeHost final : IWinMapViewHost {
     }
     bool filter = true;
     bool FilterUICommand(const cGZMessage&) override { return filter; }
+    // SetDataView / Update
+    bool hasExemplar = false;
+    WinMapViewExemplar exemplar;
+    std::vector<std::vector<std::uint8_t>> grid8;
+    std::vector<int> gridRequests;
+    bool LoadDataViewExemplar(std::uint32_t, WinMapViewExemplar& out) override {
+        if (hasExemplar) out = exemplar;
+        return hasExemplar;
+    }
+    // The stops are taken as the palette itself (the real ramp interpolation is nSC4UI's, tested on its own).
+    void InterpolateRamp(std::uint32_t* out, int count, const std::uint32_t* stops, int stopCount) override {
+        for (int i = 0; i < count; ++i) out[i] = i < stopCount ? stops[i] : 0;
+    }
+    cIGZBuffer* CreateMapBuffer() override {
+        auto* buffer = new cGZBuffer();
+        buffer->AddRef();
+        return buffer;
+    }
+    bool SimulatorGrid(int source, int, WinMapGrid& out) override {
+        gridRequests.push_back(source);
+        if (source != kGridPower || grid8.empty()) return false;
+        out.u8 = &grid8;
+        out.cellSizeX = out.cellSizeZ = 64.0f;
+        return true;
+    }
 };
 
 // A minimal occupant: only the highlight notification and the position matter to the view.
@@ -868,6 +903,56 @@ void TestPotholeDecals() {
 
 }  // namespace
 
+// SetDataView + Update (i386 0x0027fc98 / 0x0027db2e) + DisplayStandardUint8Grid / MakeMapColorBuffer: the view's grid is
+// drawn into a new buffer in blocks of the power-of-two size that covers the map, [x][z] -> pixel (x, z), in the
+// premultiplied palette with red and blue back in place, and handed to the map as its overlay.
+void TestDataViewImage() {
+    Fixture f;
+    f.view->Init();
+    auto* activate = new cRZMessage2Standard();
+    activate->SetType(kWinMapMsgViewActivate);
+    f.view->DoMessage(static_cast<cIGZMessage2*>(activate));
+    f.host.sink.width = 16;   // a 4-cell grid -> blocks of 4
+    f.host.sink.height = 16;
+    f.host.hasExemplar = true;
+    f.host.exemplar.hasDataView = true;
+    f.host.exemplar.dataView = 7;
+    f.host.exemplar.hasRamp = true;
+    std::vector<std::uint32_t> ramp(16);
+    for (std::uint32_t v = 0; v < 16; ++v) ramp[v] = 0xff000000u | ((v * 8) << 16) | ((v * 4) << 8) | (0x10 + v);   // alpha 0xff: premultiply keeps them
+    f.host.exemplar.ramp = ramp;
+    f.host.grid8.assign(4, std::vector<std::uint8_t>(4, 0));
+    for (int x = 0; x < 4; ++x)
+        for (int z = 0; z < 4; ++z) f.host.grid8[x][z] = static_cast<std::uint8_t>(x * 4 + z);
+
+    CHECK(f.view->SetDataView(7));
+    CHECK(f.view->dataView() == 7);
+    CHECK(!f.host.gridRequests.empty() && f.host.gridRequests.back() == kGridPower);
+    // paletteA is stored with red and blue swapped
+    CHECK(f.view->paletteA()[5] == (0xff000000u | (0x15u << 16) | ((5u * 4) << 8) | (5u * 8)));
+    cIGZBuffer* overlay = f.host.sink.overlay;
+    CHECK(overlay != nullptr);
+    if (overlay && overlay->Lock(static_cast<cIGZBuffer::eLockFlags>(0x8040))) {
+        const auto* bits = static_cast<const std::uint8_t*>(overlay->GetColorSurfaceBits());
+        const std::uint32_t stride = overlay->GetColorSurfaceStride();
+        int wrong = 0;
+        for (int py = 0; py < 16; ++py)
+            for (int px = 0; px < 16; ++px) {
+                const std::uint32_t pixel = reinterpret_cast<const std::uint32_t*>(bits + py * stride)[px];
+                if (pixel != ramp[(px / 4) * 4 + py / 4]) ++wrong;
+            }
+        CHECK(wrong == 0);
+        overlay->Unlock(static_cast<cIGZBuffer::eLockFlags>(0x8040));
+    }
+    // the same view again is cached; view 0 clears the overlay
+    const int overlays = f.host.sink.overlays;
+    CHECK(f.view->SetDataView(7));
+    CHECK(f.host.sink.overlays == overlays);
+    CHECK(f.view->SetDataView(0));
+    CHECK(f.host.sink.overlay == nullptr);
+    CHECK(f.view->dataView() == 0);
+}
+
 int main() {
     TestConstructionAndQueryInterface();
     TestInitAndShutdown();
@@ -882,6 +967,7 @@ int main() {
     TestDisplayConverters();
     TestInitWindow();
     TestPotholeDecals();
+    TestDataViewImage();
     if (g_failures == 0) std::printf("sc4_winmapview_test: all checks passed\n");
     return g_failures == 0 ? 0 : 1;
 }

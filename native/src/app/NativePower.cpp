@@ -333,6 +333,7 @@ public:
     }
 
     // The supply grid's value at a cell (GetPoweredGrid, grid vslot 0x38): 0 not wired, 1 wired, 2 powered.
+    cSC4SimGrid<std::uint8_t>* Supply() const { return supply_; }
     std::uint8_t SupplyAt(int x, int z) const { return supply_ && supply_->TractIsInBounds(x, z) ? supply_->GetTractValue(x, z) : 0; }
 
 private:
@@ -351,6 +352,8 @@ PowerHost g_power;
 }  // namespace
 
 sc4::IPowerHost* NativePowerHost() { return &g_power; }
+// cSC4PowerSimulator::GetPoweredGrid (i386 vslot 0x90): the supply grid the host keeps for the simulator.
+const sc4::cSC4SimGrid<std::uint8_t>* NativePoweredGrid() { return g_power.Supply(); }
 
 sc4::cSC4PowerSimulator* NativePowerSimulator() {
     cSC4City* city = HostCity();

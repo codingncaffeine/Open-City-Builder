@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <type_traits>
 #include <utility>
 
 #include "gz/Font.h"
@@ -436,20 +437,69 @@ bool cSC4WinMapView::MergeNewHighlights() {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Update (0x10034a848) — PARTIAL. Only the marked-cell view registration that opens the function is recovered.
-// The 8.8 KB body then builds the map image (GZCOM buffer 0xc470d325 / 0x20732180, the 0x40-entry data-view switch
-// over the simulator grids, the route-arrow overlay of the traffic view, the lot/marked-cell overlay and the final
-// buffer blit) and is not recovered here.
+// Update (0x10034a848; i386 0x0027db2e): draw the current data view's simulator grid into a new map buffer and hand
+// it to the panel's minimap (child 0x4203, cISC4WinMiniMap) as its overlay; data view 0 clears the overlay.
+//   PARTIAL: views 0x1b/0x1c (the residential EQ / health float grids), 0x1d (weather), 0x4c (traffic routes) and the
+//   growth developer views 0x40..0x4b draw nothing; crime incident icons, the lot shading (+0x9c0 colour) and the
+//   highlight circles (+0x9c4 colour) are not drawn; the custom view (vslot 0x14) is not created.
 // ---------------------------------------------------------------------------------------------------------------
 void cSC4WinMapView::Update() {
     if (!viewActive_) return;
-    lastUpdateMs_ = g_host->NowMilliseconds();   // cRZTime::GetMillisecondSystemTime, +0xae8
     dirty_ = false;
     if (useMarkedCells_ && markedCells_ && !markedCellsRegistered_) {
         // renderer vslot 0x100: AddMarkedCellView(markedCells, 5, 1000)
         if (g_host->AddMarkedCells(markedCells_)) markedCellsRegistered_ = true;
     }
-    // PARTIAL: the data-view image generation is not recovered.
+    IWinMapViewColorSink* map = g_host->ViewColorSink(parentWin());
+    int width = 0, height = 0;
+    if (map && map->MapSize(width, height)) {
+        if (dataView_ == 0) {
+            map->SetOverlay(nullptr);
+        } else if (cIGZBuffer* buffer = g_host->CreateMapBuffer()) {
+            cGZBufferColorType type;
+            type.type = kBufferColorARGB8888;   // Init(w, h, 9, 0x20)
+            type.bitsPerPixel = 0x20;
+            buffer->Init(static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height), type);
+            buffer->Fill(0, nullptr);
+            WinMapGrid grid;
+            auto u8 = [&](int source, int argument = 0) {
+                if (g_host->SimulatorGrid(source, argument, grid) && grid.u8 && !grid.u8->empty())
+                    DisplayStandardUint8Grid(*grid.u8, buffer, grid.cellSizeX, grid.cellSizeZ);
+            };
+            auto s16 = [&](int source, int argument = 0) {
+                if (g_host->SimulatorGrid(source, argument, grid) && grid.s16 && !grid.s16->empty())
+                    DisplayStandardSint16GridScaled(*grid.s16, buffer, grid.cellSizeX, grid.cellSizeZ);
+            };
+            switch (dataView_) {
+                case 1:
+                    if (g_host->SimulatorGrid(kGridAuraMayorRating, 0, grid) && grid.s8 && !grid.s8->empty())
+                        DisplayStandardSint8Grid(*grid.s8, buffer, grid.cellSizeX, grid.cellSizeZ);
+                    break;
+                case 2: u8(kGridLandValue); break;
+                case 3: u8(kGridPolice); break;
+                case 4: u8(kGridCrime); break;   // PARTIAL: the incident icons
+                case 5: u8(kGridFireProtection); break;
+                case 6: u8(kGridFlammability); break;
+                case 7: u8(kGridPower); break;
+                case 8: s16(kGridPollution, 0); break;
+                case 9:
+                    u8(kGridTraffic);
+                    DrawTransportationPotholeDecals(buffer);
+                    break;
+                case 10: u8(kGridPlumbing); break;
+                case 0xc: s16(kGridAura); break;
+                case 0x18: s16(kGridPollution, 1); break;
+                case 0x19: s16(kGridPollution, 2); break;
+                case 0x1a: s16(kGridPollution, 3); break;
+                case 0x1e: u8(kGridResidentialAge); break;
+                default: break;   // case 0xb draws nothing in the original too
+            }
+            map->SetOverlay(buffer);
+            if (dataView_ == kWinMapViewTraffic) map->Refresh();
+            buffer->Release();
+        }
+    }
+    lastUpdateMs_ = g_host->NowMilliseconds();   // cRZTime::GetMillisecondSystemTime, +0xae8
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -745,30 +795,204 @@ void cSC4WinMapView::DisplayStandardUint16GridScaled(const std::vector<std::vect
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// DisplayStandardUint8Grid (0x10034e730) / DisplayStandardSint8Grid (0x10034f10a) — PARTIAL.
-// The original first rebuilds the grid at city size when +0x9fc asks for it, optionally replaces each lot's cells
-// with the lot's average (+0x9fd and the +0xa00 lot-type mask), then bilinearly resamples the grid into the map
-// buffer (Lock 0x8040, GetColorSurfaceBits/Stride, paletteB at +0x5fc) and finally hands the cells whose paletteA
-// entry is over 0xffffff to SC4MarkedCellView::AddMarkedCells / SetCellColors / SetCellSize. The city-size rebuild
-// and the per-lot averaging are the missing pieces: they need the lot manager walk and the 2-D fixed-point resample
-// (0x10034e9xx..0x10034f079), which are not translated yet. The functions are no-ops with a to-do row registered.
+// The grid helpers of the module's anonymous namespace (i386 0x006e0ea8 / 0x006e1366 SC4InterpolateGrid,
+// 0x006e1130 / 0x006e15f2 MakeMapColorBuffer, 0x006e1cd0 / 0x006e1a74 BlockMapByLot). Grids are [x][z].
+// ---------------------------------------------------------------------------------------------------------------
+namespace {
+using ByteGrid = std::vector<std::vector<std::uint8_t>>;
+
+// SC4InterpolateGrid<T, Bias>: 16.16 bilinear resample of `source` onto `out` (already sized); signed grids land
+// biased by 0x80. Positions start half a step in (step / 2 - 0x8000); past either edge the edge cell is used.
+template <class T, int Bias>
+void InterpolateGrid(ByteGrid& out, const std::vector<std::vector<T>>& source) {
+    const int srcX = static_cast<int>(source.size());
+    if (srcX == 0 || out.empty()) return;
+    const int srcZ = static_cast<int>(source[0].size());
+    const int dstX = static_cast<int>(out.size());
+    const int dstZ = static_cast<int>(out[0].size());
+    if (srcZ == 0 || dstZ == 0) return;
+    const int stepX = (srcX << 16) / dstX;
+    const int stepZ = (srcZ << 16) / dstZ;
+    int posX = stepX / 2 - 0x8000;
+    for (int x = 0; x < dstX; ++x, posX += stepX) {
+        const std::vector<T>* a;
+        const std::vector<T>* b;
+        int fracX = 0;
+        if (posX < 0) {
+            a = b = &source[0];
+        } else if (posX >= (srcX - 1) * 0x10000) {
+            a = b = &source[srcX - 1];
+        } else {
+            a = &source[posX >> 16];
+            b = &source[(posX >> 16) + 1];
+            fracX = posX & 0xffff;
+        }
+        std::uint32_t posZ = static_cast<std::uint32_t>(stepZ / 2 - 0x8000);
+        for (int z = 0; z < dstZ && z < static_cast<int>(out[x].size()); ++z, posZ += static_cast<std::uint32_t>(stepZ)) {
+            const int iz = static_cast<int>(posZ) >> 16;
+            int value;
+            if (posZ < static_cast<std::uint32_t>((srcZ - 1) * 0x10000)) {
+                const int fz = static_cast<int>(posZ & 0xffff);
+                const int va = (*a)[iz] + ((((*a)[iz + 1] - (*a)[iz]) * fz + 0x8000) >> 16);
+                const int vb = (*b)[iz] + ((((*b)[iz + 1] - (*b)[iz]) * fz + 0x8000) >> 16);
+                value = va + (((vb - va) * fracX + 0x8000) >> 16);
+            } else {
+                const int edge = iz >= 0 ? srcZ - 1 : 0;
+                value = (*a)[edge] + ((((*b)[edge] - (*a)[edge]) * fracX + 0x8000) >> 16);
+            }
+            out[x][z] = static_cast<std::uint8_t>(value + Bias);
+        }
+    }
+}
+
+// MakeMapColorBuffer (orientation 0): every cell becomes a block of the smallest power-of-two size that covers the
+// buffer, in the palette colour with red and blue swapped. GUARD: the original writes whole blocks even past the
+// buffer edge when the buffer is not a power-of-two multiple of the grid; the port clips them.
+template <class T>
+void MakeMapColorBuffer(const std::vector<std::vector<T>>& grid, int rows, int cols, cIGZBuffer* buffer, int width,
+                        int height, const std::uint32_t* palette) {
+    int blockX = 1, blockZ = 1;
+    for (int w = width; rows < w; w >>= 1) blockX <<= 1;
+    for (int h = height; cols < h; h >>= 1) blockZ <<= 1;
+    const auto lock = static_cast<cIGZBuffer::eLockFlags>(0x8040);
+    if (!buffer->Lock(lock)) return;
+    auto* bits = static_cast<std::uint8_t*>(buffer->GetColorSurfaceBits());
+    const std::uint32_t stride = buffer->GetColorSurfaceStride();
+    for (int x = 0; x < rows && bits; ++x) {
+        for (int z = 0; z < cols && z < static_cast<int>(grid[x].size()); ++z) {
+            const std::uint8_t index = std::is_signed_v<T> ? static_cast<std::uint8_t>(static_cast<std::uint8_t>(grid[x][z]) ^ 0x80)
+                                                           : static_cast<std::uint8_t>(grid[x][z]);
+            const std::uint32_t c = palette[index];
+            const std::uint32_t color = (((c & 0xff0000) >> 8 | (c & 0xff00) << 8 | c << 24) >> 8) | (c & 0xff000000);
+            const int px = x * blockX, py = z * blockZ;
+            for (int row = py; row < py + blockZ && row < height; ++row) {
+                auto* line = reinterpret_cast<std::uint32_t*>(bits + static_cast<std::size_t>(row) * stride);
+                for (int col = px; col < px + blockX && col < width; ++col) line[col] = color;
+            }
+        }
+    }
+    buffer->Unlock(lock);
+}
+
+// BlockMapByLot: every lot whose zone type bit is in `mask` gets its cells' rounded average (never 0: +-1) plus
+// `bias`; the cells of no such lot stay 0.
+template <class T>
+void BlockMapByLot(ByteGrid& out, const std::vector<std::vector<T>>& source, int bias, std::uint32_t mask,
+                   const std::vector<WinMapLot>& lots) {
+    for (const WinMapLot& lot : lots) {
+        if ((mask & (1u << (lot.zoneType & 0x1f))) == 0) continue;
+        const int count = (lot.z1 - lot.z0 + 1) * (lot.x1 - lot.x0 + 1);
+        if (count <= 0) continue;
+        int sum = 0;
+        for (int x = lot.x0; x <= lot.x1; ++x)
+            for (int z = lot.z0; z <= lot.z1; ++z)
+                if (x >= 0 && x < static_cast<int>(source.size()) && z >= 0 && z < static_cast<int>(source[x].size())) sum += source[x][z];
+        int average;
+        if (sum < 0) {
+            average = (sum - count / 2) / count;
+            if (average == 0) average = -1;
+        } else {
+            average = (sum + count / 2) / count;
+            if (average == 0) average = 1;
+        }
+        for (int x = lot.x0; x <= lot.x1; ++x)
+            for (int z = lot.z0; z <= lot.z1; ++z)
+                if (x >= 0 && x < static_cast<int>(out.size()) && z >= 0 && z < static_cast<int>(out[x].size()))
+                    out[x][z] = static_cast<std::uint8_t>((average + bias) & 0xff);
+    }
+}
+
+ByteGrid SizedGrid(int x, int z) { return ByteGrid(static_cast<std::size_t>(std::max(x, 0)), std::vector<std::uint8_t>(static_cast<std::size_t>(std::max(z, 0)), 0)); }
+constexpr float kCityCellMeters = 16.0f;   // spCity vslots 0x16c / 0x170 (only the marked-cell size reads them)
+}  // namespace
+
+// ---------------------------------------------------------------------------------------------------------------
+// DisplayStandardUint8Grid (0x10034e730; i386 0x0027ce5e) / DisplayStandardSint8Grid (0x10034f10a; i386 0x0027d686):
+// a grid coarser than the city is first resampled to city size when +0x9fc asks for it; with +0x9fd each lot of the
+// +0xa00 zone types shows its average; the cells are then drawn into the buffer through paletteB and, once the marked
+// cell view is registered, every cell whose paletteA colour has alpha is marked in that colour.
 // ---------------------------------------------------------------------------------------------------------------
 void cSC4WinMapView::DisplayStandardUint8Grid(const std::vector<std::vector<std::uint8_t>>& grid, cIGZBuffer* buffer,
                                               float cellSizeX, float cellSizeZ) {
-    (void)grid;
-    (void)buffer;
-    (void)cellSizeX;
-    (void)cellSizeZ;
-    // PARTIAL: see the comment above.
+    if (!buffer || grid.empty()) return;
+    const int rows = static_cast<int>(grid.size());
+    const int cols = static_cast<int>(grid[0].size());
+    const int cityX = g_host->CitySizeXInCells(), cityZ = g_host->CitySizeZInCells();
+    if (clampGridToCity_ && (rows < cityX || cols < cityZ)) {
+        ByteGrid city = SizedGrid(cityX, cityZ);
+        InterpolateGrid<std::uint8_t, 0>(city, grid);
+        DisplayStandardUint8Grid(city, buffer, kCityCellMeters, kCityCellMeters);
+        return;
+    }
+    const ByteGrid* use = &grid;
+    ByteGrid blocked;
+    if (averageGridByLots_) {
+        blocked = SizedGrid(rows, cityZ);
+        std::vector<WinMapLot> lots;
+        g_host->CityLots(lots);
+        BlockMapByLot(blocked, grid, 0, lotTypeMask_, lots);
+        use = &blocked;
+    }
+    cRZRect area;
+    buffer->GetBufferArea(area);
+    MakeMapColorBuffer(*use, rows, cols, buffer, area.right - area.left, area.bottom - area.top, paletteB_);
+    if (markedCellsRegistered_ && markedCells_) {
+        std::vector<WinMapCell> cells;
+        std::vector<std::uint32_t> colors;
+        for (int x = 0; x < rows; ++x) {
+            for (int z = 0; z < cols && z < static_cast<int>((*use)[x].size()); ++z) {
+                const std::uint32_t color = paletteA_[(*use)[x][z]];
+                if (color & 0xff000000) {
+                    cells.push_back({x, z});
+                    colors.push_back(color);
+                }
+            }
+        }
+        markedCells_->AddMarkedCells(cells);
+        markedCells_->SetCellColors(colors);
+        markedCells_->SetCellSize(cellSizeX, cellSizeZ);
+    }
 }
 
 void cSC4WinMapView::DisplayStandardSint8Grid(const std::vector<std::vector<std::int8_t>>& grid, cIGZBuffer* buffer,
                                               float cellSizeX, float cellSizeZ) {
-    (void)grid;
-    (void)buffer;
-    (void)cellSizeX;
-    (void)cellSizeZ;
-    // PARTIAL: see the comment above.
+    if (!buffer || grid.empty()) return;
+    const int rows = static_cast<int>(grid.size());
+    const int cols = static_cast<int>(grid[0].size());
+    const int cityX = g_host->CitySizeXInCells(), cityZ = g_host->CitySizeZInCells();
+    if (clampGridToCity_ && (rows < cityX || cols < cityZ)) {
+        ByteGrid city = SizedGrid(cityX, cityZ);
+        InterpolateGrid<std::int8_t, 0x80>(city, grid);
+        DisplayStandardUint8Grid(city, buffer, kCityCellMeters, kCityCellMeters);
+        return;
+    }
+    if (averageGridByLots_) {
+        // Quirk kept: the lot averages are drawn and then the raw grid is drawn over them below.
+        ByteGrid blocked = SizedGrid(rows, cityZ);
+        std::vector<WinMapLot> lots;
+        g_host->CityLots(lots);
+        BlockMapByLot(blocked, grid, 0x80, lotTypeMask_, lots);
+        DisplayStandardUint8Grid(blocked, buffer, static_cast<float>(rows), static_cast<float>(cols));
+    }
+    cRZRect area;
+    buffer->GetBufferArea(area);
+    MakeMapColorBuffer(grid, rows, cols, buffer, area.right - area.left, area.bottom - area.top, paletteB_);
+    if (markedCellsRegistered_ && markedCells_) {
+        std::vector<WinMapCell> cells;
+        std::vector<std::uint32_t> colors;
+        for (int x = 0; x < rows; ++x) {
+            for (int z = 0; z < cols && z < static_cast<int>(grid[x].size()); ++z) {
+                const std::uint32_t color = paletteA_[static_cast<std::uint8_t>(grid[x][z] + 0x80)];
+                if (color & 0xff000000) {
+                    cells.push_back({x, z});
+                    colors.push_back(color);
+                }
+            }
+        }
+        markedCells_->AddMarkedCells(cells);
+        markedCells_->SetCellColors(colors);
+        markedCells_->SetCellSize(cellSizeX, cellSizeZ);
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -852,10 +1076,12 @@ void cSC4WinMapView::UpdateOccupancyMap(const cISC4GrowthDeveloper* developer) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// SetDataView (0x100351858) — PARTIAL. Recovered: the active/unchanged guard, releasing the old exemplar and
-// removing the watched notifications. The rest reads the view's exemplar (0x4a0b47e0..0x4a0b47f4), builds the
-// cSC4ComplexViewOccupantFilter (network types, zone-type mask, building-development visibility), drives
-// spView3D / spTerrain / spZoneManager and fills the palettes through InterpolateRampToPalette.
+// SetDataView (0x100351858; i386 0x0027fc98): load the view's exemplar {0x6534284a, 0x690f693f, view + 0x4a0b6800}
+// and configure the map from it (data view, palettes, grid handling, highlights), then draw it.
+//   PARTIAL: the 3D side is not applied: the cSC4ComplexViewOccupantFilter (0x4a0b47e0/e1/e2, the network list
+//   0x4a0b47f1 and the pipe/subway inclusion), spView3D vslot 0x5c (underground mode 0x4a0b47e3) and 0x4c (filter),
+//   spTerrain 0x158/0x150, the zone manager's display (0x4a0b47e6), the building development view (0x4a0b47f0) and the
+//   custom view (GZCOM class 0x4a0b47eb, iid 0x8a175d6b).
 // ---------------------------------------------------------------------------------------------------------------
 bool cSC4WinMapView::SetDataView(std::uint32_t view) {
     if (!viewActive_) return false;
@@ -865,10 +1091,78 @@ bool cSC4WinMapView::SetDataView(std::uint32_t view) {
         viewExemplar_->Release();
         viewExemplar_ = nullptr;
     }
-    removeWatchedNotifications();
-    // PARTIAL: the exemplar-driven configuration of the view is not recovered; the cache is left untouched so a
-    // later call retries.
-    return false;
+    removeWatchedNotifications();   // UnhookUpdateMessages
+    if (key == 0) {
+        if (markedCells_) markedCells_->ClearMarkedCells();
+        dataView_ = 0;
+        clampGridToCity_ = false;
+        averageGridByLots_ = false;
+        highlightView_ = 0;
+        effectName_ = cRZString();
+        UpdateHighlights();
+        Update();
+        if (IWinMapViewColorSink* map = g_host->ViewColorSink(parentWin())) {
+            map->SetBaseColor(1, 0);   // SetFlags(1, 0)
+            map->Refresh();
+            map->Invalidate();
+        }
+        cachedViewKey_ = 0;
+        return true;
+    }
+    WinMapViewExemplar exemplar;
+    if (!g_host->LoadDataViewExemplar(key, exemplar)) return false;
+
+    if (exemplar.hasNetworkTypes) {   // 0x6b7c5cdd, at most 8
+        networkTypeCount_ = static_cast<std::uint8_t>(std::min<std::size_t>(exemplar.networkTypes.size(), 8));
+        for (int i = 0; i < networkTypeCount_; ++i) networkTypes_[i] = static_cast<std::uint8_t>(exemplar.networkTypes[i]);
+    }
+    if (exemplar.hasRamp && !exemplar.ramp.empty()) {   // 0x4a0b47e4: the palettes
+        g_host->InterpolateRamp(paletteA_, 0x100, exemplar.ramp.data(), static_cast<int>(exemplar.ramp.size()));
+        for (int i = 0; i < 0x100; ++i) {   // paletteB = paletteA premultiplied by its alpha
+            const std::uint32_t c = paletteA_[i], alpha = c >> 24;
+            paletteB_[i] = (c & 0xff000000) + ((((c & 0xff0000) * alpha + 0x800000) >> 8) & 0xff0000) +
+                           ((((c & 0xff00) * alpha + 0x8000) >> 8) & 0xff00) + (((alpha * (c & 0xff) + 0x80) >> 8) & 0xff);
+        }
+        for (int i = 0; i < 0x100; ++i) {   // both swapped to ABGR
+            for (std::uint32_t* palette : {paletteA_, paletteB_}) {
+                const std::uint32_t c = palette[i];
+                palette[i] = (c & 0xffffff) >> 16 | (((c << 8) & 0xff0000) >> 8) | (((c << 8) & 0xff00) << 8) | (c & 0xff000000);
+            }
+        }
+    }
+    if (markedCells_) markedCells_->ClearMarkedCells();
+    dataView_ = exemplar.hasDataView ? exemplar.dataView : 0;
+    if (markedCells_) markedCells_->SetShouldUseNetworkAltitude(dataView_ == 9 || dataView_ == kWinMapViewTraffic);
+    layerStyle_ = exemplar.hasLayerStyle ? exemplar.layerStyle : 1;
+    averageGridByLots_ = exemplar.hasLotTypeMask;
+    if (exemplar.hasLotTypeMask) lotTypeMask_ = exemplar.lotTypeMask;
+    clampGridToCity_ = (exemplar.hasClampToCity && exemplar.clampToCity) || averageGridByLots_;
+    u16GridScale_ = 0x100;
+    s16GridScale_ = 0x100;
+    paletteSteps_ = 0x100;
+    if (exemplar.hasSteps) {
+        const std::uint32_t steps = exemplar.steps;
+        if (steps - 2u < 0xfffffeu) {
+            u16GridScale_ = static_cast<std::int64_t>(0xffff00ull / steps);
+            s16GridScale_ = static_cast<std::int64_t>(0x7fff00ll / static_cast<std::int32_t>(steps));
+        }
+        paletteSteps_ = steps;
+    }
+    highlightView_ = exemplar.hasHighlightView ? exemplar.highlightView : 0;
+    effectName_ = exemplar.hasEffectName ? exemplar.effectName : cRZString();
+    lotShadeColor_ = exemplar.hasLotShadeColor ? exemplar.lotShadeColor : 0;
+    circleColor_ = exemplar.hasCircleColor ? exemplar.circleColor : 0;
+    UpdateHighlights();
+    Update();
+    if (IWinMapViewColorSink* map = g_host->ViewColorSink(parentWin())) {
+        map->SetBaseColor(1, 0);                                         // SetFlags(1, 0)
+        if (exemplar.hasShowZones && exemplar.showZones) map->SetBaseColor(1, 1);   // 0x4a0b47f5
+        map->Refresh();
+        map->Invalidate();
+    }
+    cachedViewKey_ = key;
+    HookUpdateMessages();
+    return true;
 }
 
 // ---------------------------------------------------------------------------------------------------------------

@@ -22,4 +22,16 @@ bool AdvisorFlammability(std::uint8_t* hotspot, int* x, int* z, std::uint8_t* av
     return true;
 }
 
+// The flammability simulator's grid (vslot 0x14), borrowed: the data view map draws it.
+const sc4::cSC4SimGrid<std::uint8_t>* NativeFlammabilityGrid() {
+    sc4::cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::FlammabilitySimulator) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(0xe4fda3d4, &raw) || !raw) return nullptr;
+    auto* serializable = static_cast<cIGZSerializable*>(raw);
+    auto* f = dynamic_cast<sc4::cSC4FlammabilitySimulator*>(serializable);
+    serializable->Release();
+    return f ? f->GetFlammabilityGrid() : nullptr;
+}
+
 }  // namespace native
