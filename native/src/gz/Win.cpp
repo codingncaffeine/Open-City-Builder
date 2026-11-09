@@ -1040,6 +1040,35 @@ void cGZWin::fade_advance() {
     if ((flags_ & 0x10020) == 0x10020 && privateBuffer_) privateBuffer_->SetFadeAlpha(static_cast<std::uint8_t>(a));
 }
 
+void* cGZWin::BeginPaintFrame() {
+    auto* ctx = static_cast<gz::cIGZDrawContext*>(drawContext_);
+    if (!ctx) return nullptr;
+    ctx->AddRef();
+    ctx->PushTransform();
+    ctx->OffsetAbsolute(cRZPoint{accumulatedArea_.left, accumulatedArea_.top});
+    ctx->ClipAbsolute(accumulatedArea_);
+    ctx->ClipReset();                      // as recovered (vslot 0x20): resets the clip right after ClipAbsolute
+    (void)ctx->GetTransformStackDepth();   // vslot 0x78, result unused
+    ctx->PushState();
+    ctx->ResetToDefaultState();
+    const bool blend = GetFlag(kWinFlag4) && !GetFlag(kWinPrivateBuffer);
+    ctx->SetAlphaBlend(blend);
+    ctx->SetBltModulate(blend);
+    if (!GetFlag(kWinUseShadeColor) || GetFlag(kWinPrivateBuffer)) ctx->SetColor(0xffffffffu);
+    else ctx->SetColor(shadeColor_);
+    ctx->Resume();
+    return ctx;
+}
+
+void cGZWin::EndPaintFrame(void* context) {
+    auto* ctx = static_cast<gz::cIGZDrawContext*>(context);
+    if (!ctx) return;
+    ctx->Suspend();
+    ctx->PopState();
+    ctx->PopTransform();
+    ctx->Release();
+}
+
 // Draws the window's own contents (PlotComposite 0x10016abd0): the paint message goes through the filters first
 // (a consuming filter suppresses the paint); then the window paints via GZPaint inside its draw context with
 // its children painted back to front. Children that would be hidden behind a "delayed plot" desktop-level child
@@ -1085,31 +1114,10 @@ bool cGZWin::PlotComposite() {
         if (parent_) invalid_ = false;
         if ((flags_ & 0x60000) == 0x60000) fill_private_buffer_with_transparent_color();
     }
-    auto* ctx = static_cast<gz::cIGZDrawContext*>(drawContext_);
-    if (ctx) {
-        ctx->AddRef();
-        ctx->PushTransform();
-        ctx->OffsetAbsolute(cRZPoint{accumulatedArea_.left, accumulatedArea_.top});
-        ctx->ClipAbsolute(accumulatedArea_);
-        ctx->ClipReset();                      // as recovered (vslot 0x20): resets the clip right after ClipAbsolute
-        (void)ctx->GetTransformStackDepth();   // vslot 0x78, result unused
-        ctx->PushState();
-        ctx->ResetToDefaultState();
-        const bool blend = GetFlag(kWinFlag4) && !GetFlag(kWinPrivateBuffer);
-        ctx->SetAlphaBlend(blend);
-        ctx->SetBltModulate(blend);
-        if (!GetFlag(kWinUseShadeColor) || GetFlag(kWinPrivateBuffer)) ctx->SetColor(0xffffffffu);
-        else ctx->SetColor(shadeColor_);
-        ctx->Resume();
-    }
+    void* ctx = BeginPaintFrame();
     GZPaint();
     if (privateBuffer_) flags_ |= kWinFlag400000;
-    if (ctx) {
-        ctx->Suspend();
-        ctx->PopState();
-        ctx->PopTransform();
-        ctx->Release();
-    }
+    EndPaintFrame(ctx);
 
     ChildList* list = LockChildListRead();
     if (!GetFlag(kWinDesktop)) {

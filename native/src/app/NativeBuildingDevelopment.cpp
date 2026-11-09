@@ -18,6 +18,7 @@
 
 #include "app/NativeCity.h"
 #include "app/NativeGrowthDevelopers.h"
+#include "app/NativeUi.h"
 #include "gz/CheatCodeManager.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "gz/cIGZPersistResourceKeyList.h"
@@ -271,7 +272,9 @@ public:
         held_.erase(it);
     }
     std::int64_t MaintenanceCost(cISCPropertyHolder*) override { return 0; }   // budget simulator vslot 0x190: not wired here
-    bool LoadLocalizedName(cISCPropertyHolder*, std::uint32_t, cRZString&) override { return false; }
+    bool LoadLocalizedName(cISCPropertyHolder* exemplar, std::uint32_t property, cRZString& out) override {
+        return LoadExemplarString(out, exemplar, property);   // SC4LoadExemplarString with the game's detokenizer
+    }
     void CityCellSize(float& x, float& z) override { x = 16.0f; z = 16.0f; }
     void PostBuildingTypesUpdated() override {}
     std::int32_t SimulatorDay() override {
@@ -451,6 +454,10 @@ void InstallBuildingDevelopmentHost() {
     sc4::SetBuildingDevelopmentSimHost(&host);
     static BuildingTypeHost types;
     sc4::SetBuildingDevelopment(&types);
+    // cSC4BuildingOccupant::GetName's localized fallback (the exemplar's user-visible name key)
+    sc4::SetExemplarStringLoader([](cRZString& out, sc4::cISCPropertyHolder* holder, std::uint32_t property) {
+        return LoadExemplarString(out, holder, property);
+    });
 }
 
 }  // namespace native

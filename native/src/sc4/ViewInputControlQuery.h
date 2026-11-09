@@ -41,6 +41,8 @@
 #include "sc4/ViewInputControl.h"
 #include "sc4/cSC4ResponseCurve.h"
 
+namespace gz { class cIGZWinBMP; }
+
 namespace sc4 {
 
 constexpr std::uint32_t kGZIID_cSC4ViewInputControlQuery = 0x452294aa;   // cIGZMessageTarget2 sub-object
@@ -139,14 +141,6 @@ public:
     virtual const cSC4ResponseCurve* CrimeCurve() = 0;
     virtual const cSC4ResponseCurve* TripLengthCurve() = 0;
     virtual const cSC4ResponseCurve* TrafficCurve() = 0;
-};
-
-// cISC4BuildingOccupant as SetOrGetName uses it (interface 0x87dda3a9): vslot 0x90 SetName.
-class IQueryBuildingOccupant : public cIGZUnknown {
-public:
-    virtual void SetName(cIGZString& name) = 0;   // vslot 0x90
-    virtual bool GetName(cRZString& name) = 0;    // 0x98
-    virtual std::uint16_t GetProfileCapacity() { return 0; }   // 0x58 GetBuildingProfile() -> the profile's capacity (+8)
 };
 
 // SL::spAuraSim: the per-cell aura value (a signed byte) the mayor rating averages over a lot.
@@ -437,14 +431,14 @@ private:
 };
 
 // cSC4QueryMessageFilter (i386 0x0020c3d8): put on every row of a query dialog; on a draw message (0x16) a performance
-// meter (a bitmap carrying parameter 0xea563ab0) paints its bar.
-//   PARTIAL: the bar painting (DrawPerformanceMeter, i386 0x0020c23c) is not ported; the meters show their bitmap only.
+// meter (a bitmap carrying parameter 0xea563ab0) paints its bar (cSC4ViewInputControlQuery::DrawPerformanceMeter) and the
+// paint is consumed.
 class cSC4QueryMessageFilter final : public cIGZWinMessageFilter {
 public:
     bool QueryInterface(std::uint32_t, void**) override { return false; }
     std::uint32_t AddRef() override { return 1; }    // the original's: static lifetime semantics
     std::uint32_t Release() override { return 0; }
-    bool DoMessage(cIGZWin*, cGZMessage&) override { return false; }
+    bool DoMessage(cIGZWin* window, cGZMessage& message) override;
 };
 
 class cSC4ViewInputControlQuery : public cSC4ViewInputControl, public cIGZMessageTarget2 {
@@ -514,6 +508,10 @@ public:
                                       std::uint32_t* array, std::uint32_t arraySize);                  // @ 0x1002d54a0
     static bool GetSliderControlValue(cIGZWin* win, std::uint32_t id, int& value);                      // @ 0x1002d5758
     static bool SetPerformanceMeterValue(cIGZWin* win, std::uint32_t id, float value);                  // @ 0x1002d5926
+    // i386 0x0020c23c: the meter image's lower half (the empty meter) tiled over the window, then its upper half (the full
+    // meter) over the first `value` of the width. The original drew into the window's buffer; the port draws through the
+    // window's paint frame (cGZWin::BeginPaintFrame).
+    static void DrawPerformanceMeter(gz::cIGZWinBMP* meter, float value);
 
     // rows of the query dialogs (only the ones that work without an unrecovered neighbour are implemented)
     static bool SetOrGetControlValue(cIGZWin* win, std::uint32_t id, bool set, tCellInfo* info);   // @ 0x1002daf96

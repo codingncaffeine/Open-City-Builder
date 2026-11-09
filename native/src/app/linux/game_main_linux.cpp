@@ -416,7 +416,9 @@ public:
 class UiHost final : public nSC4UI::INSC4UIHost {
 public:
     bool PopupModalDialogsEnabled() override { return gMgr && gMgr->modalDialogs; }
-    bool LoadExemplarString(cIGZString&, sc4::cISCPropertyHolder*, std::uint32_t, sc4::cSCStringDetokenizer*) override { return false; }
+    bool LoadExemplarString(cIGZString& out, sc4::cISCPropertyHolder* holder, std::uint32_t property, sc4::cSCStringDetokenizer* detokenizer) override {
+        return native::LoadExemplarString(out, holder, property, detokenizer);
+    }
     void MakeNumberString(std::int64_t value, cIGZString& out) override { char t[32]; std::snprintf(t, sizeof t, "%lld", (long long)value); out.AssignFromCString(t); }
     cIGZWinMgr* WindowManager() override { return gMgr.get(); }
     cIGZWin* CreateWindowFromScript(const cGZPersistResourceKey& key, cIGZWin* parent, std::uint32_t id) override { return native::CreateWindowFromScript(key, parent, id); }
@@ -1088,6 +1090,11 @@ int RunScenario(const std::string& path) {
             int limit = 8;
             words >> limit;
             native::NativeAnimationReport(limit);
+        } else if (command == "querylist") {   // querylist [SKIPUI] [N]: buildings with a query window other than SKIPUI (hex)
+            std::string skip;
+            int limit = 40;
+            words >> skip >> limit;
+            native::NativeQueryReport(skip.empty() ? 0u : static_cast<std::uint32_t>(std::strtoul(skip.c_str(), nullptr, 16)), limit);
         } else if (command == "pedestrians") {   // pedestrians [N]: the pedestrian manager's count and the first N on screen
             int limit = 8;
             words >> limit;

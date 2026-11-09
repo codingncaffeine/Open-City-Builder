@@ -8,6 +8,9 @@
 #include <vector>
 
 #include "sc4/GrowthDeveloper.h"
+#include "sc4/ViewInputControlQuery.h"
+#include <map>
+#include <memory>
 
 namespace native {
 
@@ -53,6 +56,69 @@ sc4::cSC4GrowthDeveloper* GrowthDeveloperOfType(std::uint32_t type) {
 }
 // The same developer through its interface (for code that cannot include the class header next to its own).
 const sc4::cISC4GrowthDeveloper* GrowthDeveloperInterfaceOfType(std::uint32_t type) { return GrowthDeveloperOfType(type); }
+
+namespace {
+// The developer as the query's rating rows read it: the subjective thresholds (vslot 0x78) and the curves.
+class QueryDeveloper final : public sc4::IQueryGrowthDeveloper {
+public:
+    explicit QueryDeveloper(sc4::cSC4GrowthDeveloper* developer) : d_(developer) {}
+    void GetRatingThresholds(int kind, int& low, int& high) override { d_->GetSubjectiveThresholds(kind, low, high); }
+    const cSC4ResponseCurve* PollutionCurve(int index) override {
+        const auto& curves = d_->PollutionCurves();
+        return index >= 0 && static_cast<std::size_t>(index) < curves.size() ? curves[static_cast<std::size_t>(index)] : nullptr;
+    }
+    const cSC4ResponseCurve* SchoolCurve() override { return d_->SchoolGradeCurve(); }
+    const cSC4ResponseCurve* HospitalCurve() override { return d_->HospitalGradeCurve(); }
+    const cSC4ResponseCurve* CrimeCurve() override { return d_->CrimeCurve(); }
+    const cSC4ResponseCurve* TripLengthCurve() override { return d_->TripLengthCurve(); }
+    const cSC4ResponseCurve* TrafficCurve() override { return d_->TrafficCurve(); }
+
+private:
+    sc4::cSC4GrowthDeveloper* d_;
+};
+sc4::IQueryGrowthDeveloper* QueryAdapter(sc4::cSC4GrowthDeveloper* developer) {
+    if (!developer) return nullptr;
+    static auto* adapters = new std::map<sc4::cSC4GrowthDeveloper*, std::unique_ptr<QueryDeveloper>>();   // never destroyed
+    auto& adapter = (*adapters)[developer];
+    if (!adapter) adapter = std::make_unique<QueryDeveloper>(developer);
+    return adapter.get();
+}
+}  // namespace
+
+sc4::IQueryGrowthDeveloper* NativeQueryGrowthDeveloper(std::uint32_t developerType, std::uint32_t zoneType, int cellX, int cellZ) {
+    if (developerType != 0) return QueryAdapter(GrowthDeveloperOfType(developerType));
+    // FindBestDeveloper(cISC4Lot*)::resi/comm/ires/ilgt/ihvy_developers (i386 0x00ab9700 / 96e8 / 96e0 / 96d4 / 96c4)
+    static const std::vector<std::uint32_t> kResidential{0x1010, 0x1020, 0x1030};
+    static const std::vector<std::uint32_t> kCommercial{0x3110, 0x3120, 0x3130, 0x3320, 0x3330};
+    static const std::vector<std::uint32_t> kAgriculture{0x4100};
+    static const std::vector<std::uint32_t> kLightIndustry{0x4400, 0x4300};
+    static const std::vector<std::uint32_t> kHeavyIndustry{0x4200, 0x4400, 0x4300};
+    const std::vector<std::uint32_t>* types = nullptr;
+    switch (zoneType) {
+    case 1: case 2: case 3: types = &kResidential; break;
+    case 4: case 5: case 6: types = &kCommercial; break;
+    case 7: types = &kAgriculture; break;
+    case 8: types = &kLightIndustry; break;
+    case 9: types = &kHeavyIndustry; break;
+    default: return nullptr;
+    }
+    std::int16_t best = -1000;
+    int bestDemand = -1000;
+    sc4::cSC4GrowthDeveloper* chosen = nullptr;
+    for (std::uint32_t type : *types) {
+        sc4::cSC4GrowthDeveloper* developer = GrowthDeveloperOfType(type);
+        if (!developer) continue;   // the original dereferences the simulator's answer unguarded
+        const auto desirability = static_cast<std::int16_t>(developer->EstimateDesirability(cellX, cellZ));
+        sc4::IGrowthDemandApi* demand = developer->GetSourceDemand();
+        const int active = demand ? static_cast<int>(demand->GetActiveValue()) : 0;
+        if (best < desirability || (best == desirability && bestDemand < active)) {
+            best = desirability;
+            bestDemand = active;
+            chosen = developer;
+        }
+    }
+    return QueryAdapter(chosen);
+}
 
 std::string GrowthDevelopersSummary() {
     std::string out;

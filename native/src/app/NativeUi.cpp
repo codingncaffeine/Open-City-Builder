@@ -41,6 +41,8 @@
 #include "gz/WinText.h"
 #include "rz/COMDirectors.h"
 #include "sc4/SLString.h"
+#include "sc4/SCPropertyHelp.h"
+#include "sc4/StringDetokenizer.h"
 #include "sc4/WinAuraAlert.h"
 #include "sc4/WinMapView.h"
 #include "sc4/WinRCI.h"
@@ -226,6 +228,21 @@ bool LoadLocalizedString(std::uint32_t group, std::uint32_t instance, cIGZString
         text.assign(bytes.begin(), bytes.end());
     }
     out.AssignFromChars(text.c_str(), static_cast<std::uint32_t>(text.size()));
+    return true;
+}
+
+// SC4LoadExemplarString (Mac i386 0x000d5d94) + SC4LoadString (0x000d5adc). Deviation: the Mac build then turns every
+// U+2022 bullet into a U+200B zero-width space (its fonts lacked the glyph); the native fonts draw it, so it stays.
+bool LoadExemplarString(cIGZString& out, sc4::cISCPropertyHolder* holder, std::uint32_t property,
+                        sc4::cSCStringDetokenizer* detokenizer) {
+    cGZPersistResourceKey key{0, 0, 0};
+    if (!holder || !sc4::cSCPropertyHelp::GetPropertyValue(holder, property, key) ||
+        !LoadLocalizedString(key.group, key.instance, out)) {
+        out.AssignFromCString(nullptr);
+        return false;
+    }
+    if (!detokenizer) detokenizer = NativeDetokenizer();
+    if (detokenizer) return detokenizer->Detokenize(out, out);
     return true;
 }
 

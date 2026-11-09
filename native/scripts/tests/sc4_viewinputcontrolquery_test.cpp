@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "fake_occupant.h"
+#include "sc4/BuildingOccupant.h"
 #include "gz/Win.h"
 #include "gz/WinBMP.h"
 #include "gz/WinSlider.h"
@@ -117,7 +118,7 @@ struct Holder final : cISCPropertyHolder {
     void CompactProperties() override {}
 };
 
-struct TestOccupant final : cISC4Occupant, IQueryBuildingOccupant {
+struct TestOccupant final : cISC4Occupant, cISC4BuildingOccupant {
     std::uint32_t type = 0x278128a0;
     int highlight = 0;
     int highlightSets = 0;
@@ -126,11 +127,12 @@ struct TestOccupant final : cISC4Occupant, IQueryBuildingOccupant {
     std::string lastSetName;
     Holder* holder = nullptr;
     std::uint16_t profileCapacity = 0;
-    std::uint16_t GetProfileCapacity() override { return profileCapacity; }
+    mutable BuildingProfile profile;
+    const BuildingProfile& GetBuildingProfile() const override { profile.capacity = profileCapacity; return profile; }
     IQueryNetworkOccupant* network = nullptr;   // answered to iid 0xa821ef94 (one reference taken by the tool, released by it)
 
     bool QueryInterface(std::uint32_t iid, void** out) override {
-        if (iid == 0x87dda3a9) { *out = static_cast<IQueryBuildingOccupant*>(this); return true; }
+        if (iid == 0x87dda3a9) { *out = static_cast<cISC4BuildingOccupant*>(this); return true; }
         if (iid == 0xa821ef94 && network) { *out = network; return true; }
         if (iid == 0x26bb767e) { *out = static_cast<cISC4Occupant*>(this); return true; }
         return false;
@@ -170,8 +172,23 @@ struct TestOccupant final : cISC4Occupant, IQueryBuildingOccupant {
     bool IsFlagSet(std::uint32_t) override { return false; }
     std::uint32_t GetFlags() override { return 0; }
 
-    void SetName(cIGZString& n) override { ++names; lastSetName = n.ToChar(); }
+    void SetName(const cRZString& n) override { ++names; lastSetName = n.ToChar(); }
     bool GetName(cRZString& n) override { n.AssignFromCString(name.c_str()); return true; }
+    // the rest of cISC4BuildingOccupant (the tool never reaches them)
+    cISC4Occupant* AsOccupant() override { return this; }
+    std::uint32_t GetBuildingType() const override { return 0; }
+    void SetBuildingType(std::uint32_t) override {}
+    std::int32_t GetBuildingAge() const override { return 0; }
+    void SetBuildingAge(std::int32_t) override {}
+    void SetBoundingBox(const float*, const float*) override {}
+    const float& GetCompletionPercent() override { static const float done = 1.0f; return done; }
+    void SetCompletionPercent(float) override {}
+    const cRZString& GetBuildingName() const override { static const cRZString none; return none; }
+    const cRZString& GetExemplarName() const override { static const cRZString none; return none; }
+    std::int32_t GetOrientation() const override { return 0; }
+    bool SetOrientation(std::int32_t) override { return true; }
+    bool IsLit() const override { return false; }
+    void SetLit(bool) override {}
 };
 
 struct Dummy final : cIGZUnknown {

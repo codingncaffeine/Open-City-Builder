@@ -12,6 +12,7 @@
 #include "gz/cGZPersistResourceKey.h"
 
 class cGZBuffer;
+namespace sc4 { class cISCPropertyHolder; class cSCStringDetokenizer; }
 namespace native {
 class WinMgr;
 
@@ -25,6 +26,11 @@ void SetPngDecoder(PngDecoder decoder);
 bool LoadResourceBytes(std::uint32_t type, std::uint32_t group, std::uint32_t instance, std::vector<std::uint8_t>& bytes);
 // A string resource (type 0x2026960b, LTEXT) as UTF-8; false when there is none.
 bool LoadLocalizedString(std::uint32_t group, std::uint32_t instance, cIGZString& out);
+// SC4LoadExemplarString (Mac i386 0x000d5d94): the string the exemplar's resource-key property points at, run through
+// `detokenizer` (the game's string detokenizer when null), as SC4LoadString (0x000d5adc) does. False when the property or
+// the string is missing; `out` is then emptied.
+bool LoadExemplarString(cIGZString& out, sc4::cISCPropertyHolder* holder, std::uint32_t property,
+                        sc4::cSCStringDetokenizer* detokenizer = nullptr);
 cGZBuffer* LoadBitmapResource(std::uint32_t group, std::uint32_t instance);
 PngDecoder DecodeFunction();
 

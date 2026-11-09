@@ -215,6 +215,11 @@ public:
     bool IsPointInWindowWindowCoordinates(int x, int y) const override;
     bool IsPointInWindowParentCoordinates(int x, int y) const override;
     bool PlotComposite() override;
+    // The draw context framed for this window's own paint, as PlotComposite sets it up before GZPaint (offset and clip to the
+    // window, default state, the shade colour); null without a context. Every Begin is paired with EndPaintFrame. A paint
+    // message filter that consumes the paint draws its own content between the two.
+    void* BeginPaintFrame();
+    void EndPaintFrame(void* context);
     bool PlotPresent() override;
     void SetFillColorRGB(std::uint32_t rgb) override { fillColor_ = rgb; }
     std::uint32_t GetFillColorRGB() const override { return fillColor_; }

@@ -71,6 +71,10 @@ public:
     virtual bool FundingFraction(IPoliceOccupant* occupant, std::uint32_t propertyId, float& fraction) = 0;
     // the same record's cost (budget simulator vslot 0x198 on the occupant's property holder, record +0x10)
     virtual bool FundingInfo(IPoliceOccupant* occupant, std::uint32_t propertyId, int& cost, float& fraction) = 0;
+    // the department's SetLocalFundingPercent for that record (budget vslot 0x6c -> department vslot 0x60); false when none
+    virtual bool SetFundingFraction(IPoliceOccupant* occupant, std::uint32_t propertyId, const SC4Percentage& fraction) {
+        (void)occupant; (void)propertyId; (void)fraction; return false;
+    }
     virtual float DepartmentBudgetFraction() = 0;          // police department +0x50
     virtual void SetStrikerGroup(IPoliceOccupant* occupant, bool add) = 0;
     virtual void SetJailbreakGroup(IPoliceOccupant* occupant, bool add) = 0;
@@ -142,6 +146,8 @@ public:
 
     // efficiency
     float GetStationEfficiency(IPoliceOccupant* station);
+    bool GetStationFunding(IPoliceOccupant* station, int* cost, SC4Percentage* fraction) const;   // i386 0x00077324
+    bool SetStationFunding(IPoliceOccupant* station, const SC4Percentage& fraction);             // i386 0x0007739e
     float CalculateJailEfficiency(IPoliceOccupant* jail);
     bool GetStationDispatchRadius(IPoliceOccupant* station, float& radius);
     bool GetOccupantCoverage(IPoliceOccupant* station, const SC4Percentage& share, float& covered, float& strength);

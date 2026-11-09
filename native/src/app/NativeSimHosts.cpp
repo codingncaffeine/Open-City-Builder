@@ -285,6 +285,12 @@ public:
         return true;
     }
 
+    // the adapter the simulator lists for `occupant` (the query tool's rows), null when the simulator never saw it
+    IPollutionOccupant* Adapter(cISC4Occupant* occupant) {
+        auto it = occupants_.find(occupant);
+        return it == occupants_.end() ? nullptr : it->second.get();
+    }
+
 private:
     std::map<cISC4Occupant*, std::unique_ptr<PollutionOccupant>> occupants_;
 };
@@ -304,6 +310,27 @@ bool StationFundingFraction(cISCPropertyHolder* holder, std::uint32_t purpose, f
         fraction = 1.0f;
     else
         fraction = department->IsLocallyFundedObjectInDepartment(holder, purpose) ? item.localFunding : department->GetFundingPercentage();
+    return true;
+}
+
+// GetStationFunding's record (fire/police i386 0x00237880 / 0x00077324): budget simulator vslot 0xcc GetBudgetItemForPurpose; the
+// item's cost (+0x10) and local funding (+0x1c).
+bool StationFundingInfo(cISCPropertyHolder* holder, std::uint32_t purpose, int& cost, float& fraction) {
+    auto* budget = Component<cSC4BudgetSimulator>(CityComponent::BudgetSimulator, kGZCLSID_cSC4BudgetSimulator);
+    BudgetItem item;
+    if (!budget || !holder || !budget->GetBudgetItemForPurpose(holder, purpose, item)) return false;
+    cost = static_cast<int>(item.cost);
+    fraction = item.localFunding;
+    return true;
+}
+// SetStationFunding (i386 0x002378fa / 0x0007739e): the item's department (budget vslot 0x6c) SetLocalFundingPercent (vslot 0x60).
+bool SetStationFundingFraction(cISCPropertyHolder* holder, std::uint32_t purpose, const SC4Percentage& fraction) {
+    auto* budget = Component<cSC4BudgetSimulator>(CityComponent::BudgetSimulator, kGZCLSID_cSC4BudgetSimulator);
+    BudgetItem item;
+    if (!budget || !holder || !budget->GetBudgetItemForPurpose(holder, purpose, item)) return false;
+    cSC4DepartmentBudget* department = budget->GetDepartmentBudget(static_cast<std::uint32_t>(item.departmentId));
+    if (!department) return false;
+    department->SetLocalFundingPercent(holder, fraction.value, purpose);
     return true;
 }
 
@@ -333,8 +360,12 @@ public:
     bool FundingFraction(IFireOccupant* station, std::uint32_t purpose, float& fraction) override {
         return station && StationFundingFraction(station->PropertyHolder(), purpose, fraction);
     }
-    bool FundingInfo(IFireOccupant*, std::uint32_t, int&, float&) override { return false; }
-    bool SetFundingFraction(IFireOccupant*, std::uint32_t, const SC4Percentage&) override { return false; }
+    bool FundingInfo(IFireOccupant* station, std::uint32_t purpose, int& cost, float& fraction) override {
+        return station && StationFundingInfo(station->PropertyHolder(), purpose, cost, fraction);
+    }
+    bool SetFundingFraction(IFireOccupant* station, std::uint32_t purpose, const SC4Percentage& fraction) override {
+        return station && SetStationFundingFraction(station->PropertyHolder(), purpose, fraction);
+    }
     float DepartmentBudgetFraction() override {
         auto* budget = Component<cSC4BudgetSimulator>(CityComponent::BudgetSimulator, kGZCLSID_cSC4BudgetSimulator);
         cSC4DepartmentBudget* department = budget ? budget->GetDepartmentBudget(0x28f55a9f) : nullptr;
@@ -400,7 +431,12 @@ public:
     bool FundingFraction(IPoliceOccupant* station, std::uint32_t purpose, float& fraction) override {
         return station && StationFundingFraction(station->PropertyHolder(), purpose, fraction);
     }
-    bool FundingInfo(IPoliceOccupant*, std::uint32_t, int&, float&) override { return false; }
+    bool FundingInfo(IPoliceOccupant* station, std::uint32_t purpose, int& cost, float& fraction) override {
+        return station && StationFundingInfo(station->PropertyHolder(), purpose, cost, fraction);
+    }
+    bool SetFundingFraction(IPoliceOccupant* station, std::uint32_t purpose, const SC4Percentage& fraction) override {
+        return station && SetStationFundingFraction(station->PropertyHolder(), purpose, fraction);
+    }
     float DepartmentBudgetFraction() override {
         auto* budget = Component<cSC4BudgetSimulator>(CityComponent::BudgetSimulator, kGZCLSID_cSC4BudgetSimulator);
         cSC4DepartmentBudget* department = budget ? budget->GetDepartmentBudget(0xa2963983) : nullptr;
@@ -601,6 +637,10 @@ bool NativeResidentialServed(cIGZUnknown* building, bool school, std::uint32_t& 
     served = data.served;   // the original reads the record whether or not the query succeeded
     return ok;
 }
+sc4::IResidentialOccupant* NativeResidentialOccupant(cIGZUnknown* building) {
+    return Residential() ? g_residential.Occupant(building) : nullptr;
+}
+sc4::IPollutionOccupant* NativePollutionOccupantFor(sc4::cISC4Occupant* occupant) { return g_pollution.Adapter(occupant); }
 cSC4SimGrid<float>* NativeResidentialGradeMap(bool school) {
     cSC4ResidentialSimulator* r = Residential();
     return r ? r->GetGradeMap(school) : nullptr;

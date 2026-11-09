@@ -8,7 +8,7 @@
 #include <vector>
 
 class cIGZUnknown;
-namespace sc4 { class cISCPropertyHolder; class cSC4LotConfiguration; class cISC4LotConfigurationFilter; template <class T> class cSC4SimGrid; class cSC4GrowthDeveloper; class cSC4Demand; }
+namespace sc4 { class IQueryGrowthDeveloper; class cISCPropertyHolder; class cSC4LotConfiguration; class cISC4LotConfigurationFilter; template <class T> class cSC4SimGrid; class cSC4GrowthDeveloper; class cSC4Demand; }
 
 namespace native {
 
@@ -49,6 +49,10 @@ sc4::cSC4SimGrid<std::uint8_t>* NativeIntrinsicLandValueMap();
 sc4::cSC4SimGrid<float>* NativeSlopeMap();
 
 void InstallGrowthDeveloperHost();
+// cSC4ViewInputControlQuery::FindBestDeveloper (Mac i386 0x0020eab6) as the query host answers it: the developer of `developerType`
+// when the lot has a building (non-zero type), else the zone's developer with the highest estimated desirability at the cell (ties:
+// the larger active demand); zones 1-9 only. Null when none. The result is a session-long adapter over the city's developer.
+sc4::IQueryGrowthDeveloper* NativeQueryGrowthDeveloper(std::uint32_t developerType, std::uint32_t zoneType, int cellX, int cellZ);
 // " subtype:growth/decline" per developer ('!' when the lists are not valid yet), for SC4_SIMDEBUG
 std::string GrowthDevelopersSummary();   // the growth developers' IGrowthDeveloperHost (growth layer 2)
 

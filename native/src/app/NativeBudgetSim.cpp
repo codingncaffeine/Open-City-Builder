@@ -105,7 +105,10 @@ struct LoadBudgetHost final : sc4::IBudgetHost {
         cRZString text;
         return native::LoadLocalizedString(group, instance, text) ? std::string(text.ToChar()) : std::string();
     }
-    std::string BuildingName(std::uint32_t) override { return {}; }
+    std::string BuildingName(std::uint32_t type) override {   // the building development simulator's localized name
+        sc4::IBuildingDevelopmentHost* types = sc4::BuildingDevelopment();
+        return types ? std::string(types->BuildingName(type).ToChar()) : std::string();
+    }
 };
 LoadBudgetHost g_loadBudgetHost;
 
@@ -253,7 +256,10 @@ struct BudgetEnvironment final : sc4::IBudgetSimEnvironment {
         cRZString text;
         return native::LoadLocalizedString(group, instance, text) ? std::string(text.ToChar()) : std::string();
     }
-    std::string BuildingName(std::uint32_t) override { return {}; }
+    std::string BuildingName(std::uint32_t type) override {   // the building development simulator's localized name
+        sc4::IBuildingDevelopmentHost* types = sc4::BuildingDevelopment();
+        return types ? std::string(types->BuildingName(type).ToChar()) : std::string();
+    }
 };
 
 // The history warehouse's calendar and agent registration (the original asks the simulator directly): without it every

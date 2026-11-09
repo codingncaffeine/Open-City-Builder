@@ -409,6 +409,20 @@ int cSC4PoliceSimulator::GetJailCapacity(IPoliceOccupant* jail) {
     return RoundEven(static_cast<float>(capacity) * efficiency);
 }
 
+// The station's budget record for the station funding purpose (this+0xa8 = 0x0a567baa): its cost and local funding.
+bool cSC4PoliceSimulator::GetStationFunding(IPoliceOccupant* station, int* cost, SC4Percentage* fraction) const {
+    int c = 0;
+    float f = 0.0f;
+    if (!host_->FundingInfo(station, kPoliceStationFundingProperty, c, f)) return false;
+    if (fraction) fraction->value = f;
+    if (cost) *cost = c;
+    return true;
+}
+
+bool cSC4PoliceSimulator::SetStationFunding(IPoliceOccupant* station, const SC4Percentage& fraction) {
+    return host_->SetFundingFraction(station, kPoliceStationFundingProperty, fraction);
+}
+
 long cSC4PoliceSimulator::GetJailCurrentUpkeepCost(IPoliceOccupant* jail, long maintenance) {
     float fraction = 0.0f;
     if (!host_->FundingFraction(jail, kPoliceJailFundingProperty, fraction)) return 0;

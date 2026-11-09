@@ -1,8 +1,12 @@
 #include "sc4/ViewInputControlQuery.h"
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
+#include "gz/Buffer.h"
+#include "gz/DrawContext.h"
 #include "gz/StreamOps.h"
 #include "gz/Win.h"
 #include "gz/WinBMP.h"
@@ -13,6 +17,7 @@
 #include "rz/cRZMessage2Standard.h"
 #include "rz/cRZPoint.h"
 #include "rz/cRZVariant.h"
+#include "sc4/BuildingOccupant.h"
 #include "sc4/SCProperty.h"
 #include "sc4/SCPropertyHelp.h"
 #include "sc4/cSC4ResponseCurve.h"
@@ -888,9 +893,47 @@ bool cSC4ViewInputControlQuery::SetPerformanceMeterValue(cIGZWin* win, std::uint
     if (!meter) return false;
     auto* variant = new cRZVariant();
     variant->SetValFloat32(value);
+    static const bool trace = std::getenv("SC4_QUERYDEBUG") != nullptr;
+    if (trace) std::fprintf(stderr, "query: meter %08x value %.3f\n", id, value);
     meter->AsIGZWin()->SetParam(0xea563ab0, variant);   // the window keeps the counted reference
     meter->Release();
     return true;
+}
+
+// @ i386 0x0020c23c (see the header). The image is the meter's two states stacked: the full meter above, the empty one below.
+void cSC4ViewInputControlQuery::DrawPerformanceMeter(gz::cIGZWinBMP* meter, float value) {
+    auto* window = dynamic_cast<cGZWin*>(meter->AsIGZWin());
+    void* raw = nullptr;
+    if (!window || !meter->GetBMP(kGZIID_cIGZBuffer, &raw) || !raw) return;
+    auto* image = static_cast<cIGZBuffer*>(raw);
+    if (auto* context = static_cast<gz::cIGZDrawContext*>(window->BeginPaintFrame())) {
+        cRZRect area{0, 0, window->GetW(), window->GetH()};
+        const int height = area.bottom - area.top;
+        const int half = static_cast<int>(image->Height() >> 1);
+        const int width = static_cast<int>(image->Width());
+        context->BltTiled(image, cRZRect{0, half, width, half + height}, area, 0, 0);   // the empty meter
+        area.right = area.left + static_cast<int>(static_cast<float>(area.right - area.left) * value);
+        if (area.right > area.left) context->BltTiled(image, cRZRect{0, 0, width, height}, area, 0, 0);   // the full part
+        window->EndPaintFrame(context);
+    }
+    image->Release();
+}
+
+// @ i386 0x0020c3d8
+bool cSC4QueryMessageFilter::DoMessage(cIGZWin* window, cGZMessage& message) {
+    if (message.type != kGZMsgPaint || !window) return false;
+    cIGZVariant* variant = nullptr;
+    if (!window->GetParam(0xea563ab0, &variant) || !variant) return false;
+    void* raw = nullptr;
+    bool handled = false;
+    if (window->QueryInterface(gz::kGZIID_cIGZWinBMP, &raw) && raw) {
+        auto* meter = static_cast<gz::cIGZWinBMP*>(raw);
+        cSC4ViewInputControlQuery::DrawPerformanceMeter(meter, variant->AsFloat32());   // variant i386 0x140: the stored scalar
+        meter->Release();
+        handled = true;
+    }
+    variant->Release();   // GetParam's reference
+    return handled;
 }
 
 // ---- airport / seaport rows ------------------------------------------------------------------------------------------------
@@ -1579,8 +1622,8 @@ std::uint32_t cSC4ViewInputControlQuery::GetOccupantCapacity(cISC4Occupant* occu
     if (capacity == 0) {
         void* building = nullptr;
         if (occupant->QueryInterface(kIID_cISC4BuildingOccupant, &building)) {
-            auto* profile = static_cast<IQueryBuildingOccupant*>(building);
-            capacity = profile->GetProfileCapacity();
+            auto* profile = static_cast<cISC4BuildingOccupant*>(building);   // interface 0x87dda3a9 (the real class's)
+            capacity = profile->GetBuildingProfile().capacity;
             profile->Release();
         }
     }
@@ -1920,7 +1963,7 @@ bool cSC4ViewInputControlQuery::SetOrGetName(cIGZWin* win, std::uint32_t id, boo
     if (occupant) {
         void* building = nullptr;
         if (occupant->QueryInterface(kIID_cISC4BuildingOccupant, &building)) {
-            auto* named = static_cast<IQueryBuildingOccupant*>(building);
+            auto* named = static_cast<cISC4BuildingOccupant*>(building);
             named->SetName(edited);
             named->Release();
         }
@@ -2004,7 +2047,7 @@ void cSC4ViewInputControlQuery::GetOccupantName(cISC4Occupant* occupant, cRZStri
     if (!occupant) return;
     void* building = nullptr;
     if (occupant->QueryInterface(kIID_cISC4BuildingOccupant, &building)) {
-        auto* named = static_cast<IQueryBuildingOccupant*>(building);
+        auto* named = static_cast<cISC4BuildingOccupant*>(building);
         named->GetName(out);
         named->Release();
     }

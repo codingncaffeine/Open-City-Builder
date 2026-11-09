@@ -435,6 +435,12 @@ public:
     const cSC4ResponseCurve* LandValueCurve() const { return landValueCurve_; }
     const cSC4ResponseCurve* SlopeCurve() const { return slopeCurve_; }
     const std::vector<cSC4ResponseCurve*>& PollutionCurves() const { return pollutionCurves_; }
+    // the query tool's rating curves (i386 +0x74 school, +0x78 hospital, +0x7c crime, +0x80 trip length, +0x84 traffic)
+    const cSC4ResponseCurve* SchoolGradeCurve() const { return residentialMap138Curve_; }
+    const cSC4ResponseCurve* HospitalGradeCurve() const { return residentialMap140Curve_; }
+    const cSC4ResponseCurve* CrimeCurve() const { return crimeCurve_; }
+    const cSC4ResponseCurve* TripLengthCurve() const { return trafficCurve_; }
+    const cSC4ResponseCurve* TrafficCurve() const { return trafficMap48Curve_; }
     const std::vector<cSC4ResponseCurve>& StyleCurves() const { return styleCurves_; }
     const std::map<std::int32_t, float>& AbandonmentThresholds() const { return abandonmentThresholds_; }
     std::int32_t PopulationTotal() const { return populationTotal_; }
