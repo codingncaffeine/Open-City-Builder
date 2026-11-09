@@ -1,7 +1,7 @@
 // The data-view map window's services on the native application (sc4::IWinMapViewHost). The generated stub this replaces
 // answered every call neutrally: no message server (so cSC4WinMapView::Init failed) and FilterUICommand false (so every
 // button of the Data Views panel was vetoed before the view saw it).
-//   PARTIAL: CollectHighlights views 6 and 9 (see there), the highlight effects and the pothole decal answer
+//   PARTIAL: CollectHighlights views 6 and 9 (see there) and the pothole decal answer
 //   "nothing"; the tutorial
 //   command filter always passes (no tutorial runs natively).
 #include <chrono>
@@ -14,6 +14,7 @@
 #include "app/NativeCity.h"
 #include "app/NativeCitySystems.h"
 #include "app/NativeCityView.h"
+#include "app/NativeEffects.h"
 #include "app/NativePower.h"
 #include "app/NativeZoneDeveloperHost.h"
 #include "gz/WinFont.h"
@@ -30,6 +31,7 @@
 #include "sc4/PollutionSimulator.h"
 #include "sc4/ResidentialSimulator.h"
 #include "sc4/SC4UI.h"
+#include "sc4/VisualEffect.h"
 #include "sc4/TrafficSimulator.h"
 #include "sc4/ZoneDeveloper.h"
 #include "sc4/CameraControl.h"
@@ -85,6 +87,38 @@ public:
         height = static_cast<int>(win->GetH());
         return width > 0 && height > 0;
     }
+};
+
+// A highlight's visual effect: the named effect from the effects manager. Place = the source transform (translation, uniform
+// scale, flags | 3, change counter + 2: UpdateHighlights' crime case, i386 0x0027bb0a), Activate = Start(0). When the highlight
+// lets go of it, the effect is stopped.
+class HighlightEffect final : public IWinMapViewEffect {
+public:
+    explicit HighlightEffect(cSC4VisualEffect* effect) : effect_(effect) {}
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override {
+        if (--refs_ != 0) return refs_;
+        effect_->Stop(0);
+        effect_->Release();
+        delete this;
+        return 0;
+    }
+    void Place(const float position[3], float size) override {
+        cS3DTransform source;
+        source.flags |= 3;
+        source.changeCounter += 2;
+        source.translation[0] = position[0];
+        source.translation[1] = position[1];
+        source.translation[2] = position[2];
+        source.scale = size;
+        effect_->SetSourceTransform(source);
+    }
+    void Activate(bool) override { effect_->Start(0); }
+
+private:
+    cSC4VisualEffect* effect_;   // one reference
+    std::uint32_t refs_ = 1;
 };
 
 template <class T> T* CityAs(CityComponent component) {
@@ -212,7 +246,13 @@ public:
     IWinMapViewMarkedCells* CreateMarkedCells() override { return NativeCreateMarkedCells(); }
     bool AddMarkedCells(IWinMapViewMarkedCells* cells) override { return NativeAddMarkedCells(cells); }
     bool RemoveMarkedCells(IWinMapViewMarkedCells* cells) override { return NativeRemoveMarkedCells(cells); }
-    bool CreateEffect(const cRZString&, IWinMapViewEffect**) override { return false; }
+    bool CreateEffect(const cRZString& name, IWinMapViewEffect** out) override {
+        cSC4VisualEffect* effect = CreateNamedEffect(name.ToChar());
+        if (Trace()) std::fprintf(stderr, "map view: highlight effect \"%s\" -> %s\n", name.ToChar(), effect ? "made" : "none");
+        if (!effect) return false;
+        *out = new HighlightEffect(effect);
+        return true;
+    }
     bool LoadLegendData(std::uint32_t view, std::vector<std::uint32_t>& colors, std::vector<std::uint32_t>& labelStrings,
                         std::uint32_t& titleString) override {
         void* resource = nullptr;

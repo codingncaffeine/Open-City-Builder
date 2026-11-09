@@ -133,6 +133,7 @@ struct FakeHost final : IWinMapViewHost {
     int animationAdds = 0, animationRemoves = 0, notificationCalls = 0;
     int addMarked = 0, removeMarked = 0;
     int createEffects = 0;
+    FakeEffect* lastEffect = nullptr;
     int markedShutdowns = 0;
     cRZString effectName;
     std::vector<std::uint32_t> colors, labels;
@@ -160,8 +161,8 @@ struct FakeHost final : IWinMapViewHost {
     bool CreateEffect(const cRZString& name, IWinMapViewEffect** out) override {
         ++createEffects;
         effectName = name;
-        auto* effect = new FakeEffect();
-        effect->AddRef();
+        auto* effect = new FakeEffect();   // one reference, as the host hands it out
+        lastEffect = effect;
         *out = effect;
         return true;
     }
@@ -1008,6 +1009,35 @@ void TestHighlightOverlay() {
     f.view->SetDataView(0);
 }
 
+// ActivateHighlight: the effect it makes is kept by the active record and outlives the call that made it.
+void TestHighlightEffect() {
+    Fixture f;
+    f.view->Init();
+    auto* activate = new cRZMessage2Standard();
+    activate->SetType(kWinMapMsgViewActivate);
+    f.view->DoMessage(static_cast<cIGZMessage2*>(activate));
+    f.host.cityX = f.host.cityZ = 4;
+    f.host.sink.width = f.host.sink.height = 16;
+    f.host.hasExemplar = true;
+    f.host.exemplar.hasDataView = true;
+    f.host.exemplar.dataView = 7;
+    f.host.exemplar.hasHighlightView = true;
+    f.host.exemplar.highlightView = 1;
+    f.host.exemplar.hasEffectName = true;
+    f.host.exemplar.effectName = cRZString("PlopMode_Education_Existing");
+    f.host.grid8.assign(4, std::vector<std::uint8_t>(4, 0));
+    FakeOccupant occupant;
+    f.host.highlights = {WinMapHighlight{&occupant, 10.0f}};
+    CHECK(f.view->SetDataView(7));
+    FakeEffect* effect = f.host.lastEffect;
+    CHECK(effect != nullptr);
+    bool held = false;
+    for (const WinMapHighlightInfo& info : f.view->activeHighlights()) held = held || (info.effect == effect);
+    CHECK(held);
+    CHECK(effect && effect->refs >= 1 && effect->activates == 1);
+    f.view->SetDataView(0);
+}
+
 int main() {
     TestConstructionAndQueryInterface();
     TestInitAndShutdown();
@@ -1024,6 +1054,7 @@ int main() {
     TestPotholeDecals();
     TestDataViewImage();
     TestHighlightOverlay();
+    TestHighlightEffect();
     if (g_failures == 0) std::printf("sc4_winmapview_test: all checks passed\n");
     return g_failures == 0 ? 0 : 1;
 }

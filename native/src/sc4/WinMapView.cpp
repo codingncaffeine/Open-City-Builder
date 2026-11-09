@@ -382,8 +382,8 @@ void cSC4WinMapView::ActivateHighlight(WinMapHighlightInfo& info) {
     const float position[3] = {info.x, info.y, info.z};
     effect->Place(position, info.scale + info.scale);   // the original's 2 * scale
     effect->Activate(false);                            // effect vslot 0x18, parameter 0
-    info.effect = effect;                               // operator= releases the old effect and keeps this one
-    effect->Release();
+    if (info.effect) info.effect->Release();
+    info.effect = effect;                               // the record keeps the creation reference (cRZAutoRefCount in the original)
 }
 
 // ---------------------------------------------------------------------------------------------------------------
