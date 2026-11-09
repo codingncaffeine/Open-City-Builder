@@ -797,3 +797,4 @@ src/sc4/GameDataRegistry.cpp
 src/gz/CommandParameterSet.cpp
 src/sc4/AnimationCoordinator.cpp
 src/s3d/ModelInstanceAnimatedMesh.cpp
+src/app/NativeWinMapView.cpp

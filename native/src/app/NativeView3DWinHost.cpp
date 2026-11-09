@@ -72,6 +72,7 @@ sc4::INewsTickerWindow* CreateNewsTickerWindow();     // app/NativeWinHtml.cpp
 void ShutdownNewsTickerWindow(cIGZUnknown* proc);
 sc4::IAdvisorPopupQueue* CreateAdvisorPopupQueue();
 bool NativeLlamaCheatActive();   // app/NativeAdvisors.cpp
+void NativeInitMapView(cIGZWin* window);   // app/NativeWinMapView.cpp
 std::string FontStyleName(std::uint32_t guid);   // linux/game_main_linux.cpp
 namespace {
 using namespace sc4;
@@ -246,7 +247,7 @@ struct StubView3DWin final : IView3DWinHost {
     void AttachCompassWinProc(gz::cIGZWinGen* window) override {}
     cISC4WinCalloutBox* CreateCalloutBox() override { return native::CreateCalloutBox(); }
     gz::cIGZWinBMP* CreateWinBMP() override { return {}; }
-    void InitMapView(cIGZWin* window) override {}
+    void InitMapView(cIGZWin* window) override { native::NativeInitMapView(window); }   // cSC4WinMapView::InitWindow
     bool IsKeyDownNow(std::uint32_t key) override { return {}; }
     // SL::spCommandServer vslot 0x98(command, 0, 0). The command server is not set up natively: a command goes to the city view, the
     // handler of every command its buttons send (ProcessCommand via its DoMessage in the original). COMMAND-1.

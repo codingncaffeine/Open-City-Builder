@@ -106,6 +106,7 @@ void InstallCatalogViewStub();
 void InstallLoadHeightFieldStub();
 void InstallWinLotConfigurationEditorStub();
 void InstallWinMapViewStub();
+void InstallWinMapViewHost();   // app/NativeWinMapView.cpp
 void InstallMiniMapStub();
 void InstallResizableOutlineStub();
 void InstallWinTertiaryMenuFrameStub();
@@ -217,6 +218,7 @@ void InstallStubHosts() {
     InstallLoadHeightFieldStub();
     InstallWinLotConfigurationEditorStub();
     InstallWinMapViewStub();
+    InstallWinMapViewHost();              // the data-view map window's real host replaces the stub above
     InstallMiniMapStub();
     InstallResizableOutlineStub();
     InstallWinTertiaryMenuFrameStub();
