@@ -65,6 +65,7 @@ void InstallPreBuiltModelOccupantStub();
 void InstallNetworkToolStub();
 void InstallOccupantGroupStub();
 void InstallOrdinanceStub();
+void InstallOrdinanceHost();   // app/NativeOrdinance.cpp
 void InstallOrdinanceSimStub();
 void InstallOverlayStub();
 void InstallPipeBurstStub();
@@ -177,6 +178,7 @@ void InstallStubHosts() {
     InstallNetworkToolStub();
     InstallOccupantGroupStub();
     InstallOrdinanceStub();
+    InstallOrdinanceHost();               // the real ordinance host replaces the stub above
     InstallOrdinanceSimStub();
     InstallOverlayStub();
     InstallPipeBurstStub();

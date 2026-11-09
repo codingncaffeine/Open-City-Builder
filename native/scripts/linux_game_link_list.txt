@@ -800,3 +800,4 @@ src/s3d/ModelInstanceAnimatedMesh.cpp
 src/app/NativeWinMapView.cpp
 src/app/NativeMarkedCells.cpp
 src/sc4/SubBudgetWindow.cpp
+src/app/NativeOrdinance.cpp
