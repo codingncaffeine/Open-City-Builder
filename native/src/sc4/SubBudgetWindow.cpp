@@ -12,6 +12,7 @@
 #include "rz/cRZString.h"
 #include "sc4/Budget.h"
 #include "sc4/BudgetSimulator.h"
+#include "sc4/Ordinance.h"
 #include "sc4/SC4Utilities.h"
 #include "sc4/SLString.h"
 
@@ -207,6 +208,27 @@ bool cSC4SubBudgetWindow::OnShutdown() {
 //   arrows.
 bool cSC4SubBudgetWindow::OnButtonActivated(cIGZWin* window, std::uint32_t id) {
     if (Trace()) std::fprintf(stderr, "sub budget: button %08x\n", id);
+    if (id == 0xcd) {   // the ordinance dialog's Accept: every changed ordinance switched (spOrdinanceSim 0x34)
+        if (cSC4OrdinanceSimulator* ordinances = g_host ? g_host->OrdinanceSimulator() : nullptr)
+            for (std::size_t i = 0; i < ordinanceIds_.size() && i < ordinanceOn_.size(); ++i)
+                if (ordinanceOn_[i].second != ordinanceOn_[i].first) {
+                    ordinances->SetOrdinanceOn(ordinanceIds_[i], ordinanceOn_[i].second);
+                    if (Trace()) std::fprintf(stderr, "sub budget: ordinance %08x -> %s (now %d)\n", ordinanceIds_[i], ordinanceOn_[i].second ? "on" : "off",
+                                              ordinances->IsOrdinanceOn(ordinanceIds_[i]) ? 1 : 0);
+                }
+        EndDialog(window, kResultClose);
+        return false;
+    }
+    if (id >= 300 && id - 300 < 200 && id - 300 < ordinanceRows_.size()) {   // an ordinance's check button
+        const std::uint32_t index = ordinanceRows_[id - 300];
+        void* raw = nullptr;
+        if (window->GetChildAsRecursive(id, gz::kGZIID_cIGZWinBtn, &raw) && raw) {
+            if (index < ordinanceOn_.size()) ordinanceOn_[index].second = static_cast<gz::cIGZWinBtn*>(raw)->IsChecked();
+            static_cast<gz::cIGZWinBtn*>(raw)->Release();
+        }
+        UpdateOrdinanceBudget(window);
+        return false;
+    }
     if (id == kButtonCancel) {
         RestoreStartSettings();
         EndDialog(window, kResultClose);
@@ -240,27 +262,33 @@ int cSC4SubBudgetWindow::GetBudgetSegment(std::uint32_t image, int x, int y, cIG
     return height;
 }
 
-// SetupWindowBig (i386 0x002658fe): the strips for `incomeRows` and `expenseRows` rows, the dialog sized to them and
-// centred in its parent.
-void cSC4SubBudgetWindow::SetupWindowBig(cIGZWin* window, std::uint32_t incomeRows, std::uint32_t expenseRows) {
-    height_ += GetBudgetSegment(kSegTop, 0, height_, body_);
+// SetupWindowBig (i386 0x002658fe) / SetupWindow (0x002655a4): the strips first+0 .. first+7 (top, income head, a body
+// strip per two income rows, income foot, the same for the expenses, bottom), the dialog sized to them and centred.
+void cSC4SubBudgetWindow::StackSegments(cIGZWin* window, std::uint32_t first, std::uint32_t incomeRows, std::uint32_t expenseRows) {
+    height_ += GetBudgetSegment(first + 0, 0, height_, body_);
     if (incomeRows != 0) {
-        height_ += GetBudgetSegment(kSegIncomeHead, 0, height_, body_);
+        height_ += GetBudgetSegment(first + 1, 0, height_, body_);
         incomeTop_ = height_;
-        for (std::uint32_t i = 0; i < incomeRows >> 1; ++i) height_ += GetBudgetSegment(kSegBody, 0, height_, body_);
-        height_ += GetBudgetSegment(kSegIncomeFoot, 0, height_, body_);
+        for (std::uint32_t i = 0; i < incomeRows >> 1; ++i) height_ += GetBudgetSegment(first + 2, 0, height_, body_);
+        height_ += GetBudgetSegment(first + 3, 0, height_, body_);
     }
     if (expenseRows != 0) {
-        height_ += GetBudgetSegment(kSegExpenseHead, 0, height_, body_);
+        height_ += GetBudgetSegment(first + 4, 0, height_, body_);
         expenseTop_ = height_;
-        for (std::uint32_t i = 0; i < expenseRows >> 1; ++i) height_ += GetBudgetSegment(kSegExpenseBody, 0, height_, body_);
-        height_ += GetBudgetSegment(kSegExpenseFoot, 0, height_, body_);
+        for (std::uint32_t i = 0; i < expenseRows >> 1; ++i) height_ += GetBudgetSegment(first + 5, 0, height_, body_);
+        height_ += GetBudgetSegment(first + 6, 0, height_, body_);
     }
-    height_ += GetBudgetSegment(kSegBottom, 0, height_, body_);
+    height_ += GetBudgetSegment(first + 7, 0, height_, body_);
     window->SetSize(width_, height_);
     if (cIGZWin* parent = window->GetParentWin())
         window->GZWinMoveTo((parent->GetW() - window->GetW()) / 2, (parent->GetH() - window->GetH()) / 2);
     if (body_) body_->SetSize(width_, height_);
+}
+void cSC4SubBudgetWindow::SetupWindowBig(cIGZWin* window, std::uint32_t incomeRows, std::uint32_t expenseRows) {
+    StackSegments(window, kSegTop, incomeRows, expenseRows);
+}
+void cSC4SubBudgetWindow::SetupWindow(cIGZWin* window, std::uint32_t incomeRows, std::uint32_t expenseRows) {
+    StackSegments(window, 0x140155f0, incomeRows, expenseRows);
 }
 
 // SetEmptyWindow (i386 0x00265ef4): a group without rows says so. PARTIAL: the empty dialog keeps the default size.
@@ -335,6 +363,24 @@ void cSC4SubBudgetWindow::AddImageButton(cIGZWin* parent, std::uint32_t id, int 
     button->Release();
 }
 
+// add_image_button1 (i386 0x00261e94): a check button (WCM button style 4) showing `checked`.
+void cSC4SubBudgetWindow::AddCheckButton(cIGZWin* parent, std::uint32_t id, int x, int y, std::uint32_t image, bool checked) {
+    if (!parent || !g_host) return;
+    gz::cIGZWinBtn* button = g_host->CreateButton(4, id, cRZString(), g_host->UiImage(image));
+    if (!button) return;
+    cIGZWin* win = button->AsIGZWin();
+    if (!g_host->UiImage(image)) win->SetSize(0x1a, 0x10);
+    button->SetBtnFlag(4, false);
+    win->SetFlag(0x10000, true);
+    win->SetFlag(0x20000, true);
+    win->SetFlag(0x40000, true);
+    win->SetFlag(4, true);
+    button->SetChecked(checked);
+    win->GZWinMoveTo(x, y);
+    parent->ChildAdd(win);
+    button->Release();
+}
+
 // add_Bitmap (i386 0x002625d2).
 void cSC4SubBudgetWindow::AddBitmap(std::uint32_t image, int x, int y, cIGZWin* parent, std::uint32_t id) {
     cIGZBuffer* buffer = g_host ? g_host->UiImage(image) : nullptr;
@@ -404,7 +450,15 @@ bool cSC4SubBudgetWindow::OnInit(cIGZWin* window) {
         gen->Release();
     }
     if (!body_) return false;
-    if (purpose_ == 1 || purpose_ == 2 || individual_) {
+    if (purpose_ == 1 && !individual_) {
+        cIGZBuffer* strip = g_host->UiImage(0x140155f2);
+        width_ = strip ? static_cast<int>(strip->Width()) : 0;
+        rowStep_ = strip ? static_cast<int>(strip->Height()) / 2 : 0;
+        InitOrdinanceBudget(window);
+        initialized_ = true;
+        return true;
+    }
+    if (purpose_ == 2 || individual_) {
         // PARTIAL: the ordinance, neighbor deal and individual building dialogs.
         cIGZBuffer* strip = g_host->UiImage(kSegBody);
         width_ = strip ? static_cast<int>(strip->Width()) : 0x1c8;
@@ -675,6 +729,136 @@ void cSC4SubBudgetWindow::UpdateValues(cIGZWin*) {
     }
     ReleaseDepartments(departments);
     updating_ = false;
+}
+
+// initOrdinanceBudget (i386 0x002678fe): every available ordinance as a row with a check button (on / off), an info button,
+// its name and, while it is on, its monthly money; income ordinances above, expense ordinances below. Accept (0xcd) switches
+// the changed ones, Cancel leaves them.
+void cSC4SubBudgetWindow::InitOrdinanceBudget(cIGZWin* window) {
+    cSC4OrdinanceSimulator* ordinances = g_host ? g_host->OrdinanceSimulator() : nullptr;
+    ordinanceIds_.clear();
+    ordinanceOn_.clear();
+    ordinanceRows_.clear();
+    ordinanceMoney_.clear();
+    incomeRows_ = expenseRows_ = 0;
+    if (ordinances) {
+        std::uint32_t count = static_cast<std::uint32_t>(ordinances->GetOrdinanceAvailableCount());
+        ordinanceIds_.resize(count);
+        if (count) ordinances->GetOrdinanceAvailableArray(ordinanceIds_.data(), count);
+        ordinanceIds_.resize(count);
+        for (std::uint32_t id : ordinanceIds_) {
+            cISC4Ordinance* ordinance = ordinances->GetOrdinanceByID(id);
+            if (ordinance && ordinance->IsIncomeOrdinance()) ++incomeRows_;
+            else ++expenseRows_;
+            const bool on = ordinances->IsOrdinanceOn(id);
+            ordinanceOn_.push_back({on, on});
+        }
+    }
+    if (incomeRows_ == 0 && expenseRows_ == 0) {
+        height_ = 0x60;
+        SetEmptyWindow(window, Text(0x8a579f31), Text(0x0a5cb1a1));
+    } else {
+        const std::uint32_t shownIncome = std::min<std::uint32_t>(incomeRows_, kMaxRows);
+        const std::uint32_t shownExpense = std::min<std::uint32_t>(expenseRows_, kMaxRows);
+        SetupWindow(window, shownIncome, shownExpense);
+        AddText(body_, 0xabcde00, 0x14, 8, Text(0x8a579f31), 0, kFontTitle, 'D', 'U', 'f');
+        std::uint32_t textId = 0xabcde01, checkId = 300, infoId = 500;
+        auto monthly = [&](std::uint32_t index) -> std::int64_t {
+            auto* simple = dynamic_cast<cSC4OrdinanceSimple*>(ordinances->GetOrdinanceByID(ordinanceIds_[index]));
+            return simple ? simple->GetCurrentMonthlyIncome() : 0;
+        };
+        for (int side = 0; side < 2; ++side) {
+            const bool income = side == 0;
+            if ((income ? incomeRows_ : expenseRows_) == 0) continue;
+            int& top = income ? incomeTop_ : expenseTop_;
+            const std::uint32_t headerFont = income ? kFontHeader : 0xaa0f4a9e;
+            AddText(body_, textId, 0x12, top - rowStep_ - 2, income ? incomeTitle_ : expenseTitle_, 0, headerFont, 'D', 'U', 'f');
+            AddText(body_, textId + 1, width_ - 0x26, top - rowStep_ - 2, income ? incomeHeader_ : expenseHeader_, 6, headerFont, 'D', 'U', 'f');
+            textId += 2;
+            std::int64_t total = 0;
+            int shown = 0;
+            for (std::uint32_t index = 0; index < ordinanceIds_.size(); ++index) {
+                cISC4Ordinance* ordinance = ordinances->GetOrdinanceByID(ordinanceIds_[index]);
+                if (!ordinance || ordinance->IsIncomeOrdinance() != income) continue;
+                const bool on = ordinanceOn_[index].second;
+                const std::int64_t money = (income ? monthly(index) : -monthly(index)) * multiplier_;
+                if (shown >= kMaxRows) {
+                    if (on) total += money;
+                    continue;
+                }
+                AddCheckButton(window, checkId++, 0x12, top, 0x144161ea, on);
+                ordinanceRows_.push_back(index);
+                AddImageButton(window, infoId, 0x22, top, kImageDepartmentButton, false);
+                if (cIGZWin* info = window->GetChildWindowFromIDRecursive(infoId)) info->SetNotificationTarget(window);
+                ++infoId;
+                AddText(body_, textId, 0x44, top, ordinance->GetName(), 0, kFontItem, 'D', 'U', 'f');
+                cRZString text;
+                if (on) {
+                    SC4MakeMoneyString(money, text);
+                    total += money;
+                }
+                if (income) AddText(body_, textId + 1, width_ - 0x26, top, text, 6, kFontItem, 0, 'f', 0);
+                else AddText(body_, textId + 1, width_ - 0x26, top, text, 6, kFontItem, 'w', 0, 0);
+                ordinanceMoney_.push_back({textId + 1, index, income});
+                textId += 2;
+                top += rowStep_;
+                ++shown;
+            }
+            if (((income ? shownIncome : shownExpense) & 1) == 0) top += rowStep_;
+            AddText(body_, textId, 0x96, top, totalCaption_, 0, kFontHeader, 'D', 'U', 'f');
+            cRZString text;
+            SC4MakeMoneyString(total, text);
+            if (income) AddText(body_, textId + 1, width_ - 0x26, top, text, 6, kFontHeader, 0, 'f', 0);
+            else AddText(body_, textId + 1, width_ - 0x26, top, text, 6, kFontHeader, 'w', 0, 0);
+            (income ? incomeTotalText_ : expenseTotalText_) = textId + 1;
+            textId += 2;
+        }
+    }
+    // Accept (0xcd) and Cancel
+    AddImageButton(window, 0xcd, 0xe, height_ - 0x28, kImageOkCancel, true);
+    if (cIGZWin* ok = window->GetChildWindowFromIDRecursive(0xcd)) {
+        ok->SetSize(0xb4, 0x1e);
+        ok->SetCaption(cSLString(0x0a554ae8, 0x2a6cd8fd, true));
+        ok->SetNotificationTarget(window);
+    }
+    AddImageButton(window, kButtonCancel, width_ - 0xc3, height_ - 0x28, kImageOkCancel, true);
+    if (cIGZWin* cancel = window->GetChildWindowFromIDRecursive(kButtonCancel)) {
+        cancel->SetSize(0xb4, 0x1e);
+        cancel->SetCaption(cSLString(0x6a231eaa, 0x6a56b0bb, true));
+        cancel->SetNotificationTarget(window);
+    }
+    for (std::uint32_t id = 300; id < 300 + ordinanceRows_.size(); ++id)
+        if (cIGZWin* check = window->GetChildWindowFromIDRecursive(id)) check->SetNotificationTarget(window);
+}
+
+// updateOrdinanceBudget (i386 0x002628da): the rows' money (shown only while the ordinance is checked) and both totals.
+void cSC4SubBudgetWindow::UpdateOrdinanceBudget(cIGZWin*) {
+    cSC4OrdinanceSimulator* ordinances = g_host ? g_host->OrdinanceSimulator() : nullptr;
+    if (!ordinances || !body_) return;
+    std::int64_t totals[2] = {0, 0};
+    for (std::uint32_t index = 0; index < ordinanceIds_.size(); ++index) {
+        cISC4Ordinance* ordinance = ordinances->GetOrdinanceByID(ordinanceIds_[index]);
+        if (!ordinance || !ordinanceOn_[index].second) continue;
+        auto* simple = dynamic_cast<cSC4OrdinanceSimple*>(ordinance);
+        const std::int64_t income = simple ? simple->GetCurrentMonthlyIncome() : 0;
+        totals[ordinance->IsIncomeOrdinance() ? 0 : 1] += (ordinance->IsIncomeOrdinance() ? income : -income) * multiplier_;
+    }
+    for (const OrdinanceRow& row : ordinanceMoney_) {
+        cRZString text;
+        if (ordinanceOn_[row.index].second) {
+            auto* simple = dynamic_cast<cSC4OrdinanceSimple*>(ordinances->GetOrdinanceByID(ordinanceIds_[row.index]));
+            const std::int64_t income = simple ? simple->GetCurrentMonthlyIncome() : 0;
+            SC4MakeMoneyString((row.income ? income : -income) * multiplier_, text);
+        }
+        if (cIGZWin* win = body_->GetChildWindowFromIDRecursive(row.moneyText)) win->SetCaption(text);
+    }
+    for (int side = 0; side < 2; ++side) {
+        const std::uint32_t id = side == 0 ? incomeTotalText_ : expenseTotalText_;
+        if (id == 0) continue;
+        cRZString text;
+        SC4MakeMoneyString(totals[side], text);
+        if (cIGZWin* win = body_->GetChildWindowFromIDRecursive(id)) win->SetCaption(text);
+    }
 }
 
 }  // namespace sc4

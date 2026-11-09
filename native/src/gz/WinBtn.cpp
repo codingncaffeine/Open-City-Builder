@@ -147,7 +147,7 @@ bool cGZWinBtn::SetStyle(int style, cIGZBuffer* image, const cRZRect* area) {
         frames = 4;
     } else if (style == 4) {
         layoutMode_ = 2;
-        cGZWin::SetFlag(kWinEnabled, false);
+        SetBtnFlag(kBtnShiftWhenPressed, false);   // i386 0x001de7f0: vslot 0x14 of the button's own interface (was read as the window's enabled flag)
         frames = 8;
     } else if (style == 1) {
         layoutMode_ = 0;

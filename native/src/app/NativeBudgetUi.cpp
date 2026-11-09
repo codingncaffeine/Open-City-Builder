@@ -21,6 +21,7 @@
 #include "gz/WinText.h"
 #include "gz/GZCOMDirector.h"
 #include "gz/WinCtrlFactory.h"
+#include "sc4/Ordinance.h"
 #include "sc4/SubBudgetWindow.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/SC4Utilities.h"
@@ -133,6 +134,9 @@ class SubBudgetHost final : public sc4::ISubBudgetWindowHost {
 public:
     sc4::cSC4BudgetSimulator* BudgetSimulator() override {
         return Component<sc4::cSC4BudgetSimulator>(sc4::CityComponent::BudgetSimulator, sc4::kGZCLSID_cSC4BudgetSimulator);
+    }
+    sc4::cSC4OrdinanceSimulator* OrdinanceSimulator() override {
+        return Component<sc4::cSC4OrdinanceSimulator>(sc4::CityComponent::OrdinanceSimulator, sc4::kGZCLSID_cSC4OrdinanceSimulator);
     }
     cIGZWinMgr* WindowManager() override { return g_view ? g_view->GetWindowManager() : nullptr; }
     gz::cIGZWinGen* CreateWinGen() override {

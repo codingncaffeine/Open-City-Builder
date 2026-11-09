@@ -133,6 +133,24 @@ int main() {
     int a, b, c, d;
     btn->GetGutters(a, b, c, d);
     CHECK(a == 2 && b == 3 && c == 2 && d == 3);
+    // style 4 (a check button, i386 SetStyle 0x001de7f0): frames of 8, "shift when pressed" off, the window still enabled,
+    // and a click toggles it
+    {
+        auto* check = new Button(&mgr);
+        check->SetID(6);
+        check->SetArea(100, 10, 110, 20);
+        check->Init();
+        target->ChildAdd(check);
+        check->SetCtx(&ctx);
+        check->SetBtnFlag(kBtnShiftWhenPressed, true);
+        check->SetStyle(4, strip, nullptr);
+        CHECK(check->GetImageW() == 5);
+        CHECK(!check->GetBtnFlag(kBtnShiftWhenPressed));
+        CHECK(check->GetFlag(kWinEnabled));
+        check->GZOnMouseDownL(1, 1, 0);
+        check->GZOnMouseUpL(1, 1, 0);
+        CHECK(check->IsChecked());
+    }
     strip->Release();
     target->Release();
     std::printf(failures ? "FAILED\n" : "gz_winbtn ok\n");

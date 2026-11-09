@@ -6,12 +6,13 @@
 // restores the funding the dialog opened with.
 //
 // It is a cIGZWinProc on the dialog window (DoWinMsg: init 0xa2bf8ad0, shutdown 0xa2bf8ad1, key 5, command 3).
-//   PARTIAL (phase A of the port, see the notes): the department path only; the ordinance (purpose 1), neighbor deal
-//   (purpose 2) and individual building (+0x24) dialogs, row scrolling (0x451..0x454) and the department buttons'
-//   individual budget windows are not ported yet: those dialogs open empty with OK and Cancel.
+//   PARTIAL (see the notes): the department and ordinance dialogs; the neighbor deal (purpose 2) and individual building
+//   (+0x24) dialogs, row scrolling (0x451..0x454), the ordinance info popups (500+n) and the department buttons'
+//   individual budget windows are not ported yet (those dialogs open empty with OK and Cancel).
 #pragma once
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "gz/WinProc.h"
@@ -32,6 +33,7 @@ namespace sc4 {
 
 class cSC4BudgetSimulator;
 class cSC4DepartmentBudget;
+class cSC4OrdinanceSimulator;
 
 // What the original reached through globals: spCity vslot 0xd0 (the budget simulator), RZ::WCM() (controls and fonts),
 // RZ::GS() (colours), cSLBuffer (UI art) and the window manager.
@@ -39,6 +41,7 @@ class ISubBudgetWindowHost {
 public:
     virtual ~ISubBudgetWindowHost() = default;
     virtual cSC4BudgetSimulator* BudgetSimulator() = 0;
+    virtual cSC4OrdinanceSimulator* OrdinanceSimulator() { return nullptr; }   // SL::spOrdinanceSim
     virtual cIGZWinMgr* WindowManager() = 0;
     // GZCOM()->CreateInstance(0x4386d516, 0x5386d516): a new cGZWinGen (one reference), or null.
     virtual gz::cIGZWinGen* CreateWinGen() = 0;
@@ -98,6 +101,11 @@ private:
     void RestoreStartSettings();                                        // 0x002638fc
     int GetBudgetSegment(std::uint32_t image, int x, int y, cIGZWin* parent);   // 0x0026279a
     void SetupWindowBig(cIGZWin* window, std::uint32_t incomeRows, std::uint32_t expenseRows);   // 0x002658fe
+    void SetupWindow(cIGZWin* window, std::uint32_t incomeRows, std::uint32_t expenseRows);      // 0x002655a4
+    void StackSegments(cIGZWin* window, std::uint32_t first, std::uint32_t incomeRows, std::uint32_t expenseRows);
+    void InitOrdinanceBudget(cIGZWin* window);                          // initOrdinanceBudget 0x002678fe
+    void UpdateOrdinanceBudget(cIGZWin* window);                        // updateOrdinanceBudget 0x002628da (the money texts)
+    void AddCheckButton(cIGZWin* parent, std::uint32_t id, int x, int y, std::uint32_t image, bool checked);   // add_image_button1 0x00261e94
     void SetEmptyWindow(cIGZWin* window, const cIGZString& title, const cIGZString& text);       // 0x00265ef4
     void AddText(cIGZWin* parent, std::uint32_t id, int x, int y, const cIGZString& text, int align, std::uint32_t font,
                  std::uint8_t r, std::uint8_t g, std::uint8_t b);      // add_text 0x002616ca
@@ -130,6 +138,13 @@ private:
     std::uint32_t expenseTotalText_ = 0;         // port: the expense total's money text
     struct ItemRow { std::uint32_t moneyText = 0; cSC4DepartmentBudget* department = nullptr; std::uint32_t item = 0; };
     std::vector<ItemRow> itemRows_;              // port: the expense item rows UpdateValues re-captions
+    // ordinances (purpose 1): +0xa0 ids, +0xa4 (opening, current) on-pairs, +0x74 check button row -> ordinance index
+    std::vector<std::uint32_t> ordinanceIds_;
+    std::vector<std::pair<bool, bool>> ordinanceOn_;
+    std::vector<std::uint32_t> ordinanceRows_;
+    struct OrdinanceRow { std::uint32_t moneyText = 0; std::uint32_t index = 0; bool income = false; };
+    std::vector<OrdinanceRow> ordinanceMoney_;   // port: the rows' money texts (UpdateOrdinanceBudget)
+    std::uint32_t incomeTotalText_ = 0;
 };
 
 }  // namespace sc4
