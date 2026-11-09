@@ -355,7 +355,6 @@ struct StubView3DWin final : IView3DWinHost {
     std::uint32_t SimulationFrameCounter() override { return {}; }
     bool FilterUiCommandMessage(cGZMessage&) override { return true; }   // no tutorial running: every message is kept
     bool HandleUrl(cIGZString* link) override { return link && native::NativeHtmlLinkDoURL(*link); }
-    void HandleAdviceLink(cGZMessage& message) override {}
     // Only the reward cheat so far (it sets the view's +0x456 byte, ProcessCheatCode 0x10078526a); the other cheats are not ported.
     void ProcessCheatCode(std::uint32_t id, const char* cmdLine) override {
         if (id == 0x4a82253eu) rewardsUnlocked_ = true;   // "You don't deserve it"

@@ -494,6 +494,8 @@ public:
     virtual void ShowWindow() = 0;                      // +0x38
     virtual void HideWindow() = 0;                      // +0x40
     virtual bool IsVisible() = 0;                       // +0x50
+    // The balance-sheet window (cSC4BudgetUIWinProc +0x20 -> AsIGZWin); the advice links press its buttons.
+    virtual cIGZWin* BalanceSheetWindow() { return nullptr; }
 };
 // cSC4GraphsViewWinProc (+0x488).
 class IGraphsViewWindow : public gz::cIGZWinProc {
@@ -723,7 +725,6 @@ public:
     virtual std::uint32_t SimulationFrameCounter() = 0;               // (+0x170) vslot 0x48
     virtual bool FilterUiCommandMessage(cGZMessage& message) = 0;     // nsSC4TutorialSystem @ 0x10006008e (true = keep it)
     virtual bool HandleUrl(cIGZString* link) = 0;                     // cSC4HTMLLinkHandler::DoURL @ 0x1001f22b6
-    virtual void HandleAdviceLink(cGZMessage& message) = 0;            // @ 0x100785070
     virtual void ProcessCheatCode(std::uint32_t id, const char* cmdLine) = 0;   // @ 0x10078526a (takes a cRZCmdLine)
     virtual void InvokeCatalogItemCommand(std::uint32_t item, std::uint32_t param, bool flag) = 0;   // @ 0x10078410a
     // spCommandServer vslot 0x28 + three empty parameters + vslot 0x98 ExecuteCommand (0x100784f1e).
@@ -955,6 +956,7 @@ public:
     void ShowPanel(std::uint32_t panel);                           // @ 0x10078ac02
     void HidePanel(std::uint32_t panel);                           // @ 0x10078aade
     void ShowMayorSubPanel(std::uint32_t panel);                   // @ 0x10078ad68
+    void HandleAdviceLinkMessage(cGZMessage& message);             // i386 0x0051e5f0 (64-bit 0x100785070)
 
 protected:
     void ApplyScrollSpeed();                                       // the shared tail of RecalcScrollVelocity

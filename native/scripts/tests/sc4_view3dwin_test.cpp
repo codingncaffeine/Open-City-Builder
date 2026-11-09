@@ -804,7 +804,7 @@ struct FakeHost final : IView3DWinHost {
     bool catalogFlag = false;
     int acceleratorCommands = 0;
     std::uint32_t lastAcceleratorCommand = 0;
-    int uiFilters = 0, adviceLinks = 0, urlHandles = 0;
+    int uiFilters = 0, urlHandles = 0;
     bool urlResult = false;
     // The new seams.
     FakeCityMouseRouter router;
@@ -1084,7 +1084,6 @@ struct FakeHost final : IView3DWinHost {
     std::uint32_t SimulationFrameCounter() override { return frameCounter; }
     bool FilterUiCommandMessage(cGZMessage&) override { ++uiFilters; return true; }
     bool HandleUrl(cIGZString*) override { ++urlHandles; return urlResult; }
-    void HandleAdviceLink(cGZMessage&) override { ++adviceLinks; }
     void ProcessCheatCode(std::uint32_t id, const char* cmdLine) override {
         cheatRuns.push_back(id);
         cheatTexts.push_back(cmdLine ? cmdLine : "");
@@ -1836,13 +1835,12 @@ int main() {
         view->SetKeyAccelerator(nullptr);
 
         // Advice links and the HTML link message.
+        // (No mayor-mode button in this view: HandleAdviceLinkMessage does nothing; the AddGUI view below has one.)
         message = cGZMessage{};
-        host.adviceLinks = 0;
         for (std::uint32_t type : {kMsgViewAdviceLink, kMsgViewAdviceLink2, kMsgViewAdviceLink3}) {
             message.type = type;
             view->DoMessage(message);
         }
-        CHECK(host.adviceLinks == 3);
         host.urlHandles = 0;
         host.urlResult = false;
         message = cGZMessage{};
@@ -2270,7 +2268,7 @@ int main() {
         host.server.posted.clear();
         view->RunGlobalTerrainTool(5);
         CHECK(host.globalTerrainSounds == 1);
-        CHECK(host.server.posted.size() == 1 && host.server.posted[0] == kMsgViewTerrainDisplayChanged);
+        CHECK(host.server.posted.size() == 1 && host.server.posted[0] == kMsgTerrainErosion);
         CHECK(host.server.lastData1 == 0);
         view->RunGlobalTerrainTool(6);
         CHECK(host.server.lastData1 == 1);
@@ -2565,6 +2563,7 @@ int main() {
         auto* mayorButton = new FakePanelButton(&mgr); mayorButton->SetID(kPanelMayorButtonId); panel->ChildAdd(mayorButton);
         auto* moduleButton = new FakePanelButton(&mgr); moduleButton->SetID(0x2988bc85u); panel->ChildAdd(moduleButton);
         auto* panel2Button = new FakePanelButton(&mgr); panel2Button->SetID(0x4988bc6au); panel->ChildAdd(panel2Button);
+        auto* mayorMode = new FakePanelButton(&mgr); mayorMode->SetID(0xc988bc79u); panel->ChildAdd(mayorMode);
         auto* speed1 = new FakePanelButton(&mgr); speed1->SetID(kSpeedButtonIds[1]); panel->ChildAdd(speed1);
         speed1->image = &skin;
         speed1->area = cRZRect{0, 0, 96, 32};
@@ -2768,6 +2767,15 @@ int main() {
         panel2Button->flags &= ~gz::kBtnOn;
         view->DoPanelCommandGUI(0x6a935ca8u);                     // panel 2 off again
         CHECK(View3DWinTestAccess::CurrentPanel(*view) == -1);
+        // ---- HandleAdviceLinkMessage: an advice's graph link (0x6a720993, data1 = the graph type) turns mayor mode on and shows that graph.
+        {
+            const int before = host.graphsProc ? host.graphsProc->graphTypes : 0;
+            cGZMessage link{0x6a720993u, 0x29d27ec0u, 0, 0};
+            view->DoMessage(link);
+            CHECK(mayorMode->GetBtnFlag(gz::kBtnOn));
+            CHECK(host.graphsProc && host.graphsProc->graphTypes == before + 1 && host.graphsProc->lastGraphType == 0x29d27ec0u);
+            mayorMode->SetBtnFlag(gz::kBtnOn, false);
+        }
         // ---- RemoveGUI takes the whole GUI down again.
         view->RemoveGUI();
         CHECK(View3DWinTestAccess::PanelWindow(*view) == nullptr);

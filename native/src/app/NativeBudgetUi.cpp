@@ -105,6 +105,7 @@ public:
     void ShowWindow() override { proc_->ShowWindow(); }
     void HideWindow() override { proc_->HideWindow(); }
     bool IsVisible() override { return proc_->IsVisible(); }
+    cIGZWin* BalanceSheetWindow() override { return proc_->Window() ? proc_->Window()->AsIGZWin() : nullptr; }
     void Update() { proc_->Update(); }
 
 private:

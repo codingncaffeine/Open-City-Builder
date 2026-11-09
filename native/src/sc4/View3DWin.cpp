@@ -2294,6 +2294,50 @@ void cSC4View3DWin::ShowPanel(std::uint32_t panel) {
     }
 }
 
+// HandleAdviceLinkMessage (Mac i386 0x0051e5f0; scratch/s51/ghidra/advlink.c): the window links of advice pages
+// (game.window_graph / window_budget / window_map post these to the view). Only while the mayor-mode button exists:
+// it is turned on, then
+//   0x6a720993  the graphs sub-panel, showing graph type data1;
+//   0xea5bdfbc  a balance-sheet button: data1 0x4a5bdfb8 / 0xca5bdfb0 open the budget panel first and press
+//               0xaa3ac40e / 0xaa3ac40f, any other data1 is pressed as is (a command posted to the balance sheet);
+//   0x6a5bdfcd  the map-view sub-panel, then its buttons 0x4a32ca92 and data1 are pressed (DoMessage on the map view).
+void cSC4View3DWin::HandleAdviceLinkMessage(cGZMessage& message) {
+    void* raw = nullptr;
+    if (!panelWindow_ || !panelWindow_->GetChildAsRecursive(0xc988bc79u, gz::kGZIID_cIGZWinBtn, &raw) || !raw) return;
+    auto* mayor = static_cast<gz::cIGZWinBtn*>(raw);
+    mayor->SetBtnFlag(gz::kBtnOn, true);
+    const std::uint32_t data1 = static_cast<std::uint32_t>(message.param1);
+    if (message.type == kMsgViewAdviceLink2) {                          // 0x6a720993: a graph
+        ShowMayorSubPanel(0x15200002u);
+        if (graphsViewWinProc_) graphsViewWinProc_->ShowGraphType(data1);
+    } else if (message.type == kMsgViewAdviceLink) {                   // 0xea5bdfbc: a balance-sheet button
+        cIGZWin* sheet = budgetUIWinProc_ ? budgetUIWinProc_->BalanceSheetWindow() : nullptr;
+        if (sheet) sheet->AddRef();
+        std::uint32_t button = data1;
+        if (data1 == 0x4a5bdfb8u) {
+            ShowMayorSubPanel(0x41u);
+            button = 0xaa3ac40eu;
+        } else if (data1 == 0xca5bdfb0u) {
+            ShowMayorSubPanel(0x41u);
+            button = 0xaa3ac40fu;
+        }
+        if (sheet) {
+            cGZMessage command{kGZMsgCommand, gz::kWinCommandSender, button, 0};
+            PostMsg(sheet, command);                                    // cIGZWin vslot [146]
+            sheet->Release();
+        }
+    } else if (message.type == kMsgViewAdviceLink3) {                  // 0x6a5bdfcd: a map view
+        ShowMayorSubPanel(0x99887755u);
+        if (viewManagerSource_) {
+            cGZMessage command{kGZMsgCommand, gz::kWinCommandSender, 0x4a32ca92u, 0};
+            viewManagerSource_->DoMessage(command);
+            command.param2 = data1;
+            viewManagerSource_->DoMessage(command);
+        }
+    }
+    mayor->Release();
+}
+
 // HidePanel (0x10078aade): disconnect the current secondary menu, hide every window of the panel that is not
 // flagged 0x1000, then run the panel's close step and hide the ticker when no sub-panel is left.
 void cSC4View3DWin::HidePanel(std::uint32_t panel) {
@@ -3124,7 +3168,7 @@ bool cSC4View3DWin::DoMessage(cGZMessage& message) {                         // 
             const bool handled = host_ && host_->HandleUrl(reinterpret_cast<cIGZString*>(message.param2));
             return !handled;
         } else if (message.type == kMsgViewAdviceLink) {     // -0x15a42044
-            if (host_) host_->HandleAdviceLink(message);
+            HandleAdviceLinkMessage(message);
         } else if (message.type == kMsgViewCommand && message.param1 == kCmdViewCatalogItem) {
             cGZWin::SetFocus();
             InvokeCatalogItemCommand(static_cast<std::uint32_t>(message.param2), static_cast<std::uint32_t>(message.param3), true);
@@ -3132,7 +3176,7 @@ bool cSC4View3DWin::DoMessage(cGZMessage& message) {                         // 
         }
     } else if (type > 0x6a5bdfcc) {
         if (message.type == kMsgViewAdviceLink2 || message.type == kMsgViewAdviceLink3) {
-            if (host_) host_->HandleAdviceLink(message);
+            HandleAdviceLinkMessage(message);
         }
     } else if (type == kMsgViewKey) {                        // cGZMsgKey
         const std::uint64_t sub = message.param2;
