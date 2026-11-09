@@ -42,6 +42,7 @@
 namespace native {
 
 cGZFont* HtmlFont(const std::string& faces, std::uint32_t size, bool bold, bool italic);   // linux/game_main_linux.cpp
+cGZFont* HtmlStyleFont(const std::string& styleName, std::uint32_t size);
 
 namespace {
 
@@ -264,7 +265,9 @@ public:
         // No face asked for: the document's default kinds (bit 1 = fixed width). The game ships no fixed-width face, so both use
         // the UI's default family.
         if (face.empty()) face = (kind & 2) ? "Courier New,Arta" : "Arta";
-        cGZFont* font = native::HtmlFont(face, size, (style & kHtmlBold) != 0, (style & kHtmlItalic) != 0);
+        // A font style's name (the advisor popups' system fonts) brings the style's face and parameters; else a face family.
+        cGZFont* font = native::HtmlStyleFont(face, size);
+        if (!font) font = native::HtmlFont(face, size, (style & kHtmlBold) != 0, (style & kHtmlItalic) != 0);
         if (HtmlDebug()) std::printf("html: font \"%s\" kind %u size %u style %x -> %s\n", faceName.c_str(), kind, size, style, font ? "ok" : "none");
         if (!font) return nullptr;
         auto* out = new HtmlFontFace(font);

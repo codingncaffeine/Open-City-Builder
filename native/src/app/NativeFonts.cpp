@@ -48,11 +48,16 @@ public:
     void SetTransform(const std::int32_t m[4]) override {
         FT_Matrix matrix{m[0], m[1], m[2], m[3]};
         FT_Set_Transform(face_, &matrix, nullptr);
+        transformed_ = !(m[0] == 0x10000 && m[1] == 0 && m[2] == 0 && m[3] == 0x10000);
     }
     std::uint32_t GetCharIndex(std::uint32_t c) override { return FT_Get_Char_Index(face_, c); }
     bool SetPixelSizes(std::uint32_t w, std::uint32_t h) override { return FT_Set_Pixel_Sizes(face_, w, h) == 0; }
     std::unique_ptr<IFontGlyph> LoadGlyph(std::uint32_t index) override {
-        if (FT_Load_Glyph(face_, index, 0) != 0) return nullptr;
+        // A scaled face (a font style's xscale / yscale) loads unhinted, as the game's 2003 FreeType did: its hinted advances
+        // were not kept under a transform. Measured against the original's advisor page (MessageBody, xscale 0.95): hinted
+        // advances made the lines 5% narrower with 2-pixel word gaps; unhinted ones match it to 1%.
+        const int flags = transformed_ ? FT_LOAD_NO_HINTING : 0;
+        if (FT_Load_Glyph(face_, index, flags) != 0) return nullptr;
         FT_Glyph g;
         if (FT_Get_Glyph(face_->glyph, &g) != 0) return nullptr;
         return std::make_unique<FtGlyph>(g);
@@ -71,6 +76,7 @@ public:
     std::string StyleName() const override { return face_->style_name ? face_->style_name : ""; }
 private:
     FT_Face face_;
+    bool transformed_ = false;
     FontFaceMetrics m_;
     std::vector<std::uint8_t> memory_;   // the decoded font of an .mxf file (the face reads it in place)
 };

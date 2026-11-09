@@ -72,6 +72,7 @@ sc4::INewsTickerWindow* CreateNewsTickerWindow();     // app/NativeWinHtml.cpp
 void ShutdownNewsTickerWindow(cIGZUnknown* proc);
 sc4::IAdvisorPopupQueue* CreateAdvisorPopupQueue();
 bool NativeLlamaCheatActive();   // app/NativeAdvisors.cpp
+std::string FontStyleName(std::uint32_t guid);   // linux/game_main_linux.cpp
 namespace {
 using namespace sc4;
 
@@ -612,9 +613,10 @@ public:
         gz::IWinFont* style = fonts ? fonts->Font(fontId) : nullptr;
         cIGZFont* font = style ? style->AsFont() : nullptr;
         if (!font) return false;
-        cRZString name;
-        font->GetName(name);
-        if (name.Strlen() > 0) out.name = name;
+        // The name the page's FONT FACE carries: the style's own name, which the native HTML font system resolves to the
+        // style's face and parameters (MessageHeader = StocletITC TT bold, stretched 1.2; MessageBody = Arta 0.95).
+        const std::string styleName = FontStyleName(fontId);
+        if (!styleName.empty()) out.name = cRZString(styleName.c_str());
         out.bold = font->GetStyle(1);
         out.size = font->GetSize();
         return true;

@@ -943,6 +943,46 @@ cGZFont* HtmlFont(const std::string& faces, std::uint32_t size, bool bold, bool 
     }
     return font;
 }
+
+// A [Font Styles] entry named as an HTML face (the advisor popups name their system fonts, MessageHeader / MessageBody):
+// the style's own font file, scaling, advance scaling and line spacing at the page's pixel size, one cGZFont per
+// (style, size). Null when no style has that name.
+cGZFont* HtmlStyleFont(const std::string& styleName, std::uint32_t size) {
+    if (!gFont || size == 0) return nullptr;
+    LoadFontStyles();
+    std::string key = styleName;
+    for (char& c : key) c = char(std::tolower(static_cast<unsigned char>(c)));
+    auto named = gStyleNames.find(key);
+    if (named == gStyleNames.end()) return nullptr;
+    auto style = gStyleFonts.find(named->second);
+    if (style == gStyleFonts.end() || !style->second.font) return nullptr;
+    static auto& cache = *new std::map<std::pair<std::string, std::uint32_t>, cGZFont*>();
+    cGZFont*& font = cache[{key, size}];
+    if (font) return font;
+    cGZFont* source = style->second.font;
+    cRZString path;
+    source->GetFilePath(path);
+    font = MakeFont(std::string(path.ToChar(), path.Strlen()), size);
+    float x = 1, y = 1;
+    source->GetScaling(x, y);
+    font->SetScaling(x, y);
+    source->GetAdvanceScaling(x, y);
+    font->SetAdvanceScaling(x, y);
+    int dx = 0, dy = 0;
+    source->GetSpacingAdjustment(dx, dy);
+    font->SetSpacingAdjustment(dx, dy);
+    font->SetAntialiasing(source->GetAntialiasing());
+    if (!font->Init()) std::printf("font: html style %s size %u did not load\n", styleName.c_str(), size);
+    return font;
+}
+
+// The [Font Styles] name of a style guid ("" when unknown).
+std::string FontStyleName(std::uint32_t guid) {
+    LoadFontStyles();
+    for (const auto& entry : gStyleNames)
+        if (entry.second == guid) return entry.first;
+    return {};
+}
 }  // namespace native
 namespace {
 bool OnRegionScreen() { return gAppWindow && gAppWindow->CurrentScreen() && gAppWindow->CurrentScreen()->GetID() == 0xea659793; }
