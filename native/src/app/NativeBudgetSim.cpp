@@ -89,6 +89,26 @@ private:
 };
 BudgetTarget g_target;
 
+// The departments' host while a city loads (before the budget simulator registers and becomes their host): the generated
+// stub answered every string empty, so the departments read from a save lost their names (cSC4DepartmentBudget::Read
+// resolves the saved name key; the original does it through cSLString).
+struct LoadBudgetHost final : sc4::IBudgetHost {
+    bool GetBudgetItemForPurpose(sc4::cISCPropertyHolder*, std::uint32_t, sc4::BudgetItem&) override { return false; }
+    bool GetBudgetItemInfo(sc4::cISCPropertyHolder*, std::vector<sc4::BudgetItem>&) override { return false; }
+    void ChangeBudgetItemCost(sc4::cISCPropertyHolder*, std::uint32_t, std::int64_t) override {}
+    void ChangeBudgetItemLocalFunding(sc4::cISCPropertyHolder*, std::uint32_t, float) override {}
+    void NeededFundingChanged(sc4::cSC4DepartmentBudget*) override {}
+    void FundingPercentageChanged(sc4::cSC4DepartmentBudget*) override {}
+    void PostBudgetMessage(std::uint32_t, sc4::cSC4DepartmentBudget*, std::uint32_t, std::uint32_t) override {}
+    void NotifyLocalFundingChanged(sc4::cISCPropertyHolder*) override {}
+    std::string LoadLocalizedString(std::uint32_t group, std::uint32_t instance) override {
+        cRZString text;
+        return native::LoadLocalizedString(group, instance, text) ? std::string(text.ToChar()) : std::string();
+    }
+    std::string BuildingName(std::uint32_t) override { return {}; }
+};
+LoadBudgetHost g_loadBudgetHost;
+
 struct BudgetServices final : sc4::IBudgetSimServices {
     void RegisterSimulatorNotifications(void* owner) override {
         auto* sim = static_cast<cSC4BudgetSimulator*>(owner);
@@ -112,7 +132,7 @@ struct BudgetServices final : sc4::IBudgetSimServices {
     void UnregisterSimulator(void*) override {
         RemoveCitySimulatorAgent(&g_target);
         g_target.simulator = nullptr;
-        InstallBudgetStub();
+        sc4::SetBudgetHost(&g_loadBudgetHost);
     }
     void SubscribeMessage(std::uint32_t message) override { if (SL::spMS2) SL::spMS2->AddNotification(&g_target, message); }
     void UnsubscribeMessage(std::uint32_t message) override { if (SL::spMS2) SL::spMS2->RemoveNotification(&g_target, message); }
@@ -251,7 +271,9 @@ public:
 
 }  // namespace
 
+
 void InstallBudgetSimHosts() {
+    sc4::SetBudgetHost(&g_loadBudgetHost);
     static HistoryEnvironment history;
     sc4::SetHistoryEnvironment(&history);
     static BudgetServices services;

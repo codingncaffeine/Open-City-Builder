@@ -799,3 +799,4 @@ src/sc4/AnimationCoordinator.cpp
 src/s3d/ModelInstanceAnimatedMesh.cpp
 src/app/NativeWinMapView.cpp
 src/app/NativeMarkedCells.cpp
+src/sc4/SubBudgetWindow.cpp
