@@ -23,17 +23,34 @@ void UpdateStubTicks() {
     g_ticksNS = 1'000'000ull + static_cast<std::uint64_t>(ms * 1'000'000.0);
 }
 
-// Fires the armed timer when its period has passed.
+// Fires every armed timer whose interval has passed (a timer is armed from the first pump after it was added). The callback
+// answers the next interval; 0 ends the timer. Callbacks may add or remove timers, so each one is looked up again by id.
 void PumpTimers() {
-    static double armedAt = -1; static int armedId = 0;
     const double now = NowMs();
     UpdateStubTicks();
-    if (g_activeTimerId != armedId) { armedId = g_activeTimerId; armedAt = armedId ? now : -1; }
-    if (armedId && g_timerCallback && now - armedAt >= g_timerInterval) {
-        if (std::getenv("SC4_DEBUG")) std::printf("debug: timer %d fires\n", armedId);
-        auto cb = g_timerCallback; void* param = g_timerParam;
-        armedId = 0; armedAt = -1;
-        cb(g_timerInterval, param);
+    std::vector<SDL_TimerID> due;
+    for (StubSDLTimer& t : g_timers) {
+        if (t.armedAt < 0) t.armedAt = now;
+        else if (now - t.armedAt >= t.interval) due.push_back(t.id);
+    }
+    for (SDL_TimerID id : due) {
+        StubSDLTimer timer{};
+        bool live = false;
+        for (const StubSDLTimer& t : g_timers) if (t.id == id) { timer = t; live = true; break; }
+        if (!live) continue;   // removed by an earlier callback of this pump
+        if (std::getenv("SC4_DEBUG")) std::printf("debug: timer %d fires\n", id);
+        const std::uint32_t next = timer.callback(timer.interval, timer.param);
+        for (auto it = g_timers.begin(); it != g_timers.end(); ++it) {
+            if (it->id != id) continue;
+            if (next == 0) {
+                g_timers.erase(it);
+                if (id == g_activeTimerId) { g_timerCallback = nullptr; g_activeTimerId = 0; }
+            } else {
+                it->interval = next;
+                it->armedAt = NowMs();
+            }
+            break;
+        }
     }
 }
 

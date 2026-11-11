@@ -31,7 +31,7 @@ for s in $(grep -v '^#' $LIST); do OBJS="$OBJS $OBJ/$(echo "$s" | tr '/' '_').o"
 FAILED=$(mktemp)
 for s in $(grep -v '^#' $LIST); do
   o=$OBJ/$(echo "$s" | tr '/' '_').o
-  if [ -f "$o" ] && [ "$o" -nt "$s" ] && [ -z "$(find src -name '*.h' -newer "$o" | head -1)" ]; then continue; fi
+  if [ -f "$o" ] && [ "$o" -nt "$s" ] && [ -z "$(find src scripts/tests/stubs -name '*.h' -newer "$o" | head -1)" ]; then continue; fi
   echo "$s $o"
 done | xargs -r -P "${JOBS:-$(( $(nproc) > 4 ? $(nproc) / 4 : 1 ))}" -L 1 sh -c 'clang++ '"$CF"' -c "$0" -o "$1" 2>"$1.err" || echo "$0" >>'"$FAILED"
 if [ -s "$FAILED" ]; then
