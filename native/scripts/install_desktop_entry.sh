@@ -16,7 +16,7 @@ if command -v magick >/dev/null; then
     magick ../art/logo-256.png -resize ${size}x${size} "$SHARE/icons/hicolor/${size}x${size}/apps/$ID.png"
   done
 fi
-EXEC="\"$ROOT/scripts/run_linux_game.sh\""
+EXEC="\"$(realpath "$ROOT/../bin")/open-city-builder\""
 [ -n "$1" ] && EXEC="$EXEC \"$(realpath "$1")\""
 cat > "$SHARE/applications/$ID.desktop" <<ENTRY
 [Desktop Entry]

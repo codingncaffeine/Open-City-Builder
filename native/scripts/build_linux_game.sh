@@ -45,3 +45,11 @@ fi
 rm -f "$FAILED"
 clang++ -stdlib=libc++ $LD $OBJS $OBJ/lua50/liblua50.a $(pkg-config --libs sdl3 epoxy freetype2 libpng libmpg123) $FFMPEG_LIBS -o $OUT
 echo "built $OUT"
+# The runnable dev build in the project's bin/ folder (gitignored): the executable and its launcher, bin/open-city-builder.
+if [ "$MODE" != debug ]; then
+  mkdir -p ../bin
+  cp -f "$OUT" ../bin/sc4_game_linux
+  cp -f scripts/open-city-builder.sh ../bin/open-city-builder
+  chmod +x ../bin/open-city-builder
+  echo "installed ../bin/open-city-builder"
+fi

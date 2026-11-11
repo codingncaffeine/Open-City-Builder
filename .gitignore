@@ -4,6 +4,7 @@
 /snapshots/
 /re/
 /build/
+/bin/
 
 # Never commit original game content or anything derived from the executable
 *.dat
