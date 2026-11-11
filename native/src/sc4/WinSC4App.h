@@ -36,6 +36,7 @@
 // cSC4View3DWin), constructed here exactly where the original constructs them.
 #pragma once
 #include <cstdint>
+#include <string>
 
 #include "gz/Win.h"
 #include "gz/WinInterfaces.h"
@@ -101,6 +102,11 @@ public:
     // --- SL::spRM vslot 0x18 GetResource(key {a2e3d533, 6a231eaa, 6a9362f1}, iid 0x42e3ea4b, ...) and then
     // GZCOM()->GetCOMObject(0x42e967be, 0xe2c1b3c4): the keyboard accelerator the key-unhandled path uses.
     virtual cIGZWinKeyAccelerator* CreateKeyAccelerator() = 0;
+    // --- (Mac i386 cWinSC4App::Init 0x004959da) the framework command line's "intro" switch: true and its value when present.
+    virtual bool CommandLineSwitch(const char* name, std::string& value) { (void)name; (void)value; return false; }
+    // --- cWinSC4App::CreateIntroVideoScreen (i386 0x0049537c): `new cSC4WinIntroVideoScreen`. The screen and its movie player
+    // are the host's (they need a movie decoder); null when it has none, and the window shows the splash screen instead.
+    virtual cIGZWin* CreateIntroVideoScreen(cIGZWinMgr* mgr) { (void)mgr; return nullptr; }
 };
 
 class cWinSC4App final : public cGZWin, public cIGZMessageTarget2 {
@@ -124,6 +130,7 @@ public:
 
     // --- the screen registry / swap path
     bool CreateSplashScreen();                                         // @ 0x1006cc39a
+    bool CreateIntroVideoScreen();                                     // @ i386 0x0049537c (not in the 64-bit build)
     bool CreateRegionScreen();                                         // @ 0x1006cc934
     bool CreateCityScreen();                                           // @ 0x1006cc9e8
     bool DestroyCurrentScreen();                                       // @ 0x1006ccaa0

@@ -36,6 +36,7 @@ public:
     // songs the radio may pick (`songEnabled` answers for a song's full path; unset = every song).
     void SetMusic(bool enabled, float gain);
     void SetSound(bool enabled, float gain);
+    float SoundGain() const { return soundEnabled_ && !muted_ ? soundGain_ : 0.0f; }   // the effects volume now (0 when off)
     void SetSongFilter(std::function<bool(const std::string& path)> songEnabled) { songEnabled_ = std::move(songEnabled); }
     // The dialog's Preview / Stop: plays one song now; Stop silences the radio until ResumeRadio (the dialog closing).
     bool PlaySong(const std::string& path);

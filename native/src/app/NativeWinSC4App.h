@@ -6,6 +6,9 @@
 // The services the host does not have yet are answered with "absent" (null / false), which is what the original does when
 // the service is missing: the window skips that feature and keeps going. Nothing here fakes a game behaviour.
 #pragma once
+#include <string>
+
+#include "app/NativeIntro.h"
 #include "sc4/WinSC4App.h"
 
 namespace native {
@@ -43,6 +46,15 @@ public:
     cIGZWinKeyAccelerator* CreateKeyAccelerator() override { return nullptr; }
 
     void ReadyToHearMusic() override { readyToHearMusic_ = true; }
+
+    // The game's -intro:<value> switch (the main program reads it from its arguments) and the intro screen (NativeIntro.cpp).
+    bool CommandLineSwitch(const char* name, std::string& value) override {
+        if (std::string(name) != "intro" || !hasIntroSwitch_) return false;
+        value = introSwitch_;
+        return true;
+    }
+    void SetIntroSwitch(const std::string& value) { introSwitch_ = value; hasIntroSwitch_ = true; }
+    cIGZWin* CreateIntroVideoScreen(cIGZWinMgr* mgr) override;
     bool readyToHearMusic() const { return readyToHearMusic_; }
 
 private:
@@ -50,6 +62,10 @@ private:
     cIGZUnknown* graphicSystem_ = nullptr;
     cIGZMessageServer2* messageServer_ = nullptr;
     bool readyToHearMusic_ = false;
+    std::string introSwitch_;
+    bool hasIntroSwitch_ = false;
 };
+
+inline cIGZWin* HostWinSC4App::CreateIntroVideoScreen(cIGZWinMgr* mgr) { return native::CreateIntroVideoScreen(mgr); }
 
 }  // namespace native

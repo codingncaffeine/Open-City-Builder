@@ -12,6 +12,10 @@ if [ "$MODE" = debug ]; then OBJ=build/linux_obj_debug; OUT=build/sc4_game_linux
 else OBJ=build/linux_obj; OUT=build/sc4_game_linux; OPT="-O1 -g"; LD=""; fi
 mkdir -p $OBJ
 PKG="$(pkg-config --cflags sdl3 epoxy freetype2 libpng libmpg123)"
+# The intro movies decode through FFmpeg when it is installed (libavformat, libavcodec, libavutil, libswscale, libswresample);
+# without it the game builds the same and skips the intro.
+FFMPEG_PKGS="libavformat libavcodec libavutil libswscale libswresample"
+if pkg-config --exists $FFMPEG_PKGS; then PKG="$PKG $(pkg-config --cflags $FFMPEG_PKGS) -DOCB_HAVE_FFMPEG"; FFMPEG_LIBS="$(pkg-config --libs $FFMPEG_PKGS)"; else FFMPEG_LIBS=""; fi
 CF="-std=c++20 -stdlib=libc++ -include cstdlib -include cmath -include platform/linux_char_traits.h -Dst_atimespec=st_atim -Dst_mtimespec=st_mtim -Dst_ctimespec=st_ctim -D_CS_DARWIN_USER_TEMP_DIR=_CS_PATH $OPT -Wno-overloaded-virtual -w -Isrc -Iscripts/tests/stubs $PKG"
 # The window and taskbar icon (art/logo-256.png) is compiled into the game; a new logo rebuilds the file that includes it.
 mkdir -p build/generated
@@ -39,5 +43,5 @@ if [ -s "$FAILED" ]; then
   rm -f "$FAILED"; exit 1
 fi
 rm -f "$FAILED"
-clang++ -stdlib=libc++ $LD $OBJS $OBJ/lua50/liblua50.a $(pkg-config --libs sdl3 epoxy freetype2 libpng libmpg123) -o $OUT
+clang++ -stdlib=libc++ $LD $OBJS $OBJ/lua50/liblua50.a $(pkg-config --libs sdl3 epoxy freetype2 libpng libmpg123) $FFMPEG_LIBS -o $OUT
 echo "built $OUT"

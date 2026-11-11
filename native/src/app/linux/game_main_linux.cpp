@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <strings.h>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -39,6 +40,7 @@
 #include "app/NativeCity.h"
 #include "app/NativeAnimationTicks.h"
 #include "app/NativeToolTips.h"
+#include "app/NativeIntro.h"
 #include "platform/PerfLog.h"
 #include "sc4/CameraControl.h"
 #include "sc4/Render3D.h"
@@ -456,6 +458,7 @@ void DumpTree(cIGZWin* window, int depth, int maxDepth) {
 
 // ---- the frame loop ---------------------------------------------------------------------------------------------------------
 native::HostWinSC4App* gAppHost = nullptr;
+std::string gIntroSwitch;   // the game's -intro:<value> switch (scenarios and shots default to off)
 cGZMessageServer2* gMessages2 = nullptr;   // ticked by the frame loop, as the framework ticks the service in the game
 sc4::cWinSC4App* gAppWindow = nullptr;
 
@@ -594,6 +597,14 @@ void Frame() {
     if (regionScreen && native::DrawRegionLayers()) InvalidateTree(gMgr->GetMainWindow());   // the map is drawn under the windows: they repaint over it
     // The city view redraws the 3D scene into the whole screen every frame, so the windows over it repaint every frame too.
     if (gAppWindow && gAppWindow->View3D() && !regionScreen) InvalidateTree(gMgr->GetMainWindow());
+    // The start-up screens (intro movies, logo, splash) repaint only what changed, but the frame alternates between two GL buffers: the
+    // whole tree repaints so neither buffer keeps a picture of the screen before (a movie frame around the splash, a faded logo).
+    if (gAppWindow && gAppWindow->CurrentScreen() && !regionScreen && !gAppWindow->View3D()) {
+        gDriver->SetViewport();   // the whole frame (no window clip), then black under the windows
+        gDriver->ClearColor(0, 0, 0, 0);
+        gDriver->Clear(gd::kClearColor);
+        InvalidateTree(gMgr->GetMainWindow());
+    }
     gMgr->Pump();
     gLaps.Lap("pump");
     gMgr->Plot();
@@ -642,6 +653,7 @@ bool Boot() {
     gMgr->AddRef();
     gMgr->Init();
     gMgr->GetMainWindow()->SetArea(0, 0, gW, gH);
+    SetWinClock([]() -> std::uint32_t { return static_cast<std::uint32_t>(SDL_GetTicks()); });   // the windows' fade clock (ms)
     native::InstallToolTips(gMgr.get());   // cSC4ToolTipManager + the callout boxes' buffers
     if (!InitFont()) std::printf("font: FAILED to initialise\n");
     gz::SetWinFontSource(&gFontSource);
@@ -667,6 +679,9 @@ bool Boot() {
         gMessages2 = messages2;
         static native::HostWinSC4App host(&framework);
         gAppHost = &host;
+        if (!gIntroSwitch.empty()) host.SetIntroSwitch(gIntroSwitch);
+        native::SetIntroServices({[] { gSplashHost.DestroyCurrentScreen(); }, [] { gSplashHost.CreateRegionScreen(); },
+                                  [] { if (gAppWindow) gAppWindow->CreateSplashScreen(); }, [] { gSplashHost.ClearScreenToBlack(); }});
         // The window scripts need the UI script service, which needs the resources Init has just registered; the application window
         // (created a few steps later, inside Init) builds the splash from them.
         app.StartupHooks().configureResourceCache = [] {
@@ -1088,6 +1103,9 @@ int RunScenario(const std::string& path) {
             native::NativePrintAdvisors();
         } else if (command == "ticker") {   // ticker: the news ticker's queue, flipper ring and scroll
             native::NativeTickerReport();
+        } else if (command == "wintree") {   // wintree [DEPTH]: the window tree under the main window (id, visible, area, kids)
+            int depth = 4; words >> depth;
+            DumpTree(gMgr->GetMainWindow(), 0, depth);
         } else if (command == "registry") {   // registry: the game-data registry's entry tree
             native::NativeRegistryReport();
         } else if (command == "animated") {   // animated [N]: the animation coordinator and the first N ticking props' frames
@@ -1254,8 +1272,14 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--size") && i + 1 < argc) std::sscanf(argv[++i], "%dx%d", &windowW, &windowH);
         else if (!std::strcmp(argv[i], "--scale") && i + 1 < argc) uiScale = std::strcmp(argv[i + 1], "auto") ? std::atof(argv[i + 1]) : 0.0, ++i;
         else if (!std::strcmp(argv[i], "--fullscreen")) fullscreen = true;
+        else if (!strncasecmp(argv[i], "-intro:", 7)) gIntroSwitch = argv[i] + 7;   // the game's own switch (-intro:off)
     }
     const bool interactive = shot.empty() && scenario.empty();
+    // A scenario or a shot starts at the region screen as before unless SC4_INTRO=on asks for the intro.
+    if (!interactive && gIntroSwitch.empty()) {
+        const char* intro = std::getenv("SC4_INTRO");
+        gIntroSwitch = intro && !strcasecmp(intro, "on") ? "on" : "off";
+    }
 
     SDL_SetAppMetadata("Open City Builder", nullptr, kAppId);
     if (!SDL_Init(SDL_INIT_VIDEO)) { std::fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1; }

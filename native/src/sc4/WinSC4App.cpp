@@ -1,6 +1,7 @@
 // cWinSC4App — see sc4/WinSC4App.h for the recovered behaviour, the object layout and the quirks kept.
 #include "sc4/WinSC4App.h"
 
+#include <cctype>
 #include <cstdio>
 
 #include "gz/CheatCodeManager.h"
@@ -80,7 +81,13 @@ bool cWinSC4App::Init() {   // @ 0x1006cc01e
         if (debugDisplay_) host_->AddDebugTextDisplay(&fpsText_);
     }
     timer_.Start();          // +0x198, cRZTimer::Start
-    CreateSplashScreen();    // the first screen
+    // The first screen. The 64-bit build always shows the splash; the 32-bit one (i386 0x004959da) plays the intro unless the
+    // command line says -intro:off.
+    std::string intro;
+    if (host_ && host_->CommandLineSwitch("intro", intro)) {
+        for (char& c : intro) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    if (intro == "off" || !CreateIntroVideoScreen()) CreateSplashScreen();
 
     // The graphic system (+0x168, one reference) and its 0xc47b747c view (+0x170, QueryInterface's own reference).
     if (host_) graphics_ = host_->GraphicSystem();
@@ -152,6 +159,17 @@ bool cWinSC4App::CreateSplashScreen() {   // @ 0x1006cc39a
     ChildAdd(window);                               // vslot 0x70 (which also runs its Init)
     window->ShowWindow();                           // vslot 0x228
     SetFocusTo(window);                             // cGZWin::SetFocusTo
+    return true;
+}
+
+bool cWinSC4App::CreateIntroVideoScreen() {   // @ i386 0x0049537c
+    if (currentScreen_ || !host_) return false;
+    cIGZWin* window = host_->CreateIntroVideoScreen(mgr_);   // 0x108 bytes in the original
+    if (!window) return false;
+    currentScreen_ = window;                        // +0xf8 in the i386 layout (the original's AddRef)
+    ChildAdd(window);                               // vslot 0x38
+    window->ShowWindow();                           // vslot 0x114
+    SetFocusTo(window);
     return true;
 }
 

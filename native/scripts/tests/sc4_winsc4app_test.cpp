@@ -144,6 +144,22 @@ struct FakeHost final : IWinSC4AppHost {
     void ReadyToHearMusic() override { ++readyToHearMusic; }
     cIGZWinKeyAccelerator* CreateKeyAccelerator() override { accelerator->AddRef(); return accelerator; }
     cGZCheatCodeManager* cheats = nullptr;
+    // the -intro switch and the intro screen (i386 cWinSC4App::Init / CreateIntroVideoScreen)
+    bool hasIntroSwitch = false, provideIntro = false;
+    std::string introSwitch;
+    int introRequests = 0;
+    bool CommandLineSwitch(const char* name, std::string& value) override {
+        if (std::string(name) != "intro" || !hasIntroSwitch) return false;
+        value = introSwitch;
+        return true;
+    }
+    cIGZWin* CreateIntroVideoScreen(cIGZWinMgr* manager) override {
+        ++introRequests;
+        if (!provideIntro) return nullptr;
+        auto* intro = new cGZWin(manager);
+        intro->SetID(0x1a7f0000);
+        return intro;
+    }
 };
 
 struct Fixture {
@@ -611,6 +627,30 @@ int main() {
     // ---- destruction through the desktop (ChildDeleteAll -> Shutdown -> Release -> delete)
     CHECK(f.main->ChildDeleteAll());
     CHECK(f.mgr.destroyed.size() == 5);   // + the application window
+
+    // ---- the first screen with an intro: the host's intro screen (no switch), or the splash for -intro:OFF
+    for (int variant = 0; variant < 3; ++variant) {
+        Fixture g;
+        g.host.provideIntro = variant != 2;
+        g.host.hasIntroSwitch = variant == 1;
+        g.host.introSwitch = "OFF";   // the original lower-cases the value before comparing
+        auto* app = new cWinSC4App(reinterpret_cast<cSC4App*>(&g.host), &g.mgr, &g.host);
+        CHECK(g.main->ChildAdd(app));
+        cIGZWin* first = app->CurrentScreen();
+        CHECK(first != nullptr);
+        if (variant == 0) {
+            CHECK(g.host.introRequests == 1);
+            CHECK(first->GetID() == 0x1a7f0000);
+            CHECK(first->IsVisible() && g.mgr.focus == first);
+            CHECK(!app->CreateSplashScreen());   // one screen at a time
+        } else {
+            CHECK(g.host.introRequests == (variant == 1 ? 0 : 1));   // -intro:off never asks; no intro screen falls back
+            CHECK(dynamic_cast<cSC4WinSplashScreen*>(first) != nullptr);
+        }
+        CHECK(app->DestroyCurrentScreen());
+        CHECK(app->Shutdown());
+        CHECK(g.main->ChildDeleteAll());
+    }
 
     RunTextWindowTests();
 
