@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "gz/FileFind.h"
 
@@ -26,6 +27,21 @@ int main() {
     d = RZFileFindFirst(cRZString((dir + "sub").c_str()));
     CHECK(d && std::string(d->name.ToChar()) == "sub" && d->isDirectory);
     RZFileFindFinish(d);
+    {   // the order: case-insensitive sorted, as FindFirstFile on NTFS lists it, whatever order the files were made in
+        // (the region loader keeps the first city it reads for a map slot)
+        const std::string ord = dir + "order/";
+        CHECK(std::system(("mkdir -p '" + ord + "' && cd '" + ord + "' && touch 'City - New City (21).sc4' 'b.sc4' "
+                           "'City - Making Money Tutorial.sc4' 'A.sc4' 'City - big.sc4'").c_str()) == 0);
+        std::vector<std::string> order;
+        RZFileFindData* o = RZFileFindFirst(cRZString((ord + "*.sc4").c_str()));
+        CHECK(o != nullptr);
+        if (o) {
+            do order.push_back(o->name.ToChar()); while (RZFileFindNext(o));
+            RZFileFindFinish(o);
+        }
+        CHECK(order == (std::vector<std::string>{"A.sc4", "b.sc4", "City - big.sc4", "City - Making Money Tutorial.sc4",
+                                                 "City - New City (21).sc4"}));
+    }
     CHECK(RZFileFindFirst(cRZString((dir + "*.zzz").c_str())) == nullptr);
     CHECK(RZFileFindFirst(cRZString("/no/such/dir/*")) == nullptr);
     RZFileFindFinish(nullptr);

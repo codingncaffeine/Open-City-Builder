@@ -1,6 +1,7 @@
 // Directory enumeration with a wildcard pattern (RZFileFindFirst / Next / Finish @ 0x1000327ea, 0x100032c33, 0x100032e6d) and
 // two path helpers that live beside them. The pattern is split at its last '/': the part before it is the directory ("./"
-// when there is none) and the rest is matched case-insensitively with fnmatch against each entry.
+// when there is none) and the rest is matched case-insensitively with fnmatch against each entry. Matches come back in
+// case-insensitive sorted order, as the original platforms list them (FileFind.cpp).
 //
 // Quirk kept: when the first search finds nothing, the data block is freed without closing the directory handle.
 #pragma once
