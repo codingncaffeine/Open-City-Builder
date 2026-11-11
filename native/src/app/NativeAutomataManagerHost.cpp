@@ -12,6 +12,7 @@
 #include "app/NativeAnimationTicks.h"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 #include "app/NativeAutomataViews.h"
 #include "app/NativeCity.h"
@@ -32,6 +33,7 @@
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
 
+namespace native { int NativeViewZoom(); }
 namespace native {
 sc4::ITrafficSimulatorApi* NativeTrafficSimulatorApi();          // app/NativeTrafficAutomata.cpp
 sc4::ITrafficNetworkManagerApi* NativeTrafficNetworkApi();
@@ -120,6 +122,8 @@ public:
     // toward the sides left at once.
     //   PARTIAL: when no pick finds terrain (the view is off the map) the original walks the city's boundary; here the
     //   ground plane's block rectangle answers.
+    //   The picks are the same until the camera moves, while the traffic population asks once per road tile (hundreds of times
+    //   a tick): the answer is kept for the camera's screen offset, zoom, rotation and the viewport size.
     void ViewRect(float out[4]) override {
         out[0] = out[1] = out[2] = out[3] = 0.0f;
         cSC43DRender* render = CityRenderer();
@@ -127,6 +131,32 @@ public:
         if (!render || !v) return;
         std::uint32_t width = 0, height = 0;
         render->GetViewportSize(width, height);
+        struct Key {
+            cS3DTransform view;
+            int zoom = -1;
+            std::uint32_t width = 0, height = 0;
+            const void* render = nullptr;
+        } key;
+        s3d::cS3DCamera* camera = render->GetCamera();
+        if (camera) key.view = camera->ViewXform();
+        key.zoom = NativeViewZoom();
+        key.width = width;
+        key.height = height;
+        key.render = render;
+        static Key cachedKey;
+        static bool cachedValid = false;
+        static float cached[4] = {};
+        if (camera && cachedValid && std::memcmp(&key.view, &cachedKey.view, sizeof key.view) == 0 && key.zoom == cachedKey.zoom &&
+            key.width == cachedKey.width && key.height == cachedKey.height && key.render == cachedKey.render) {
+            for (int i = 0; i < 4; ++i) out[i] = cached[i];
+            return;
+        }
+        ComputeViewRect(render, v, width, height, out);
+        cachedKey = key;
+        cachedValid = true;
+        for (int i = 0; i < 4; ++i) cached[i] = out[i];
+    }
+    static void ComputeViewRect(cSC43DRender* render, SC4ViewUtilities* v, std::uint32_t width, std::uint32_t height, float out[4]) {
         const int centreX = static_cast<int>(width) / 2, centreY = static_cast<int>(height) / 2;
         static constexpr int kOffsets[5][2] = {{0, 0}, {100, 0}, {0, 100}, {-100, 0}, {0, -100}};
         float sum[3] = {0.0f, 0.0f, 0.0f};
