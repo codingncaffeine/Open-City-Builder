@@ -1,3 +1,4 @@
+#include "app/NativeWaterRipple.h"
 #include "app/NativeDemolishTool.h"
 #include "app/NativeNetworkTool.h"
 #include "app/NativeAutomata.h"
@@ -95,6 +96,7 @@ public:
 
     bool Init() override { return render_->Init(); }
     void Shutdown() override {
+        native::DetachWaterRipple();
         native::DetachEffects();
         native::DetachModelMaker();
         render_->Shutdown();

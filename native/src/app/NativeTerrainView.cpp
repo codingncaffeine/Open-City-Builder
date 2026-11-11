@@ -1,4 +1,7 @@
+#include "app/NativeCity.h"
+#include "app/NativeWaterRipple.h"
 #include "app/NativeLighting.h"
+#include "sc4/cSC4City.h"
 #include "sc4/LightingManager.h"
 #include "app/NativeTerrainView.h"
 
@@ -352,6 +355,8 @@ bool AttachTerrainView(sc4::cSC43DRender& render, sc4::cSTETerrain& terrain, gd:
     // AddViewObject's list ids: 2 = drawn before the static view (view pass 0: the terrain), 0 = after it (view pass 2: the water)
     render.AddViewObject(new PassObject(render, *view, 0), 2, 100);
     render.AddViewObject(new PassObject(render, *view, 1), 0, 100);
+    // cSTETerrainView3D::Init (0x004f74a4) makes the shore ripples at this + 0x70
+    if (sc4::cSC4City* city = HostCity()) AttachWaterRipple(render, terrain, city->SizeX(), city->SizeZ());
     return true;
 }
 

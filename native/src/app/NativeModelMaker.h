@@ -2,7 +2,9 @@
 // manager hands cSC4ModelMaker, the texture bindings its materials point at, and the hosts that connect the recovered
 // model maker, placeable objects and model instances to the city and the 3D renderer.
 #pragma once
+#include <cstdint>
 #include <string>
+#include <vector>
 
 namespace gd { class cIGZGDriver; }
 namespace sc4 { class cSC43DRender; class cSC4City; class cISC4Occupant; class cSC4ModelMaker; }
@@ -15,6 +17,8 @@ void InstallModelResources(gd::cIGZGDriver* driver);
 unsigned int FshTextureId(unsigned int group, unsigned int instance);
 // Its size in texels (false when it is missing).
 bool FshTextureSize(unsigned int group, unsigned int instance, int& width, int& height);
+// Every frame of an FSH {0x7ab50e44, group, instance} as a driver texture, in file order (empty when missing).
+const std::vector<std::uint32_t>& FshFrameTextureIds(std::uint32_t group, std::uint32_t instance);
 // A driver texture from 32-bit BGRA pixels (one level), and its deletion; 0 without a driver.
 unsigned int CreateBgraTexture(int width, int height, const void* pixels);
 void DeleteDriverTexture(unsigned int id);

@@ -116,6 +116,28 @@ const sc4::CellTextureBinding* LotTextureBinding(std::uint32_t instance) {
     return slot->ids.empty() ? nullptr : &slot->binding;
 }
 
+// Every frame of an FSH {0x7ab50e44, group, instance} as a driver texture, in file order (an animated texture binding: the
+// water ripples cycle through them). Cached for the process; empty when the resource is missing.
+const std::vector<std::uint32_t>& FrameTextureIds(std::uint32_t group, std::uint32_t instance) {
+    static std::map<std::pair<std::uint32_t, std::uint32_t>, std::vector<std::uint32_t>> cache;
+    auto found = cache.find({group, instance});
+    if (found != cache.end()) return found->second;
+    std::vector<std::uint32_t>& ids = cache[{group, instance}];
+    std::vector<std::uint8_t> bytes;
+    s3d::FshFile file;
+    if (!g_driver || !LoadResourceBytes(kFshType, group, instance, bytes) || !file.Open(bytes.data(), bytes.size())) return ids;
+    for (std::uint32_t i = 0; i < file.FrameCount(); ++i) {
+        std::vector<std::uint8_t> rgba;
+        int w = 0, h = 0;
+        if (!file.DecodeRgba8(i, rgba, w, h)) continue;
+        for (std::size_t p = 0; p + 3 < rgba.size(); p += 4) std::swap(rgba[p], rgba[p + 2]);   // RGBA -> BGRA
+        const std::uint32_t id = g_driver->CreateTexture(4, static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h), 1, 1);
+        g_driver->LoadTextureLevel(id, 0, 0, 0, static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h), 3, 1, static_cast<std::uint32_t>(w), rgba.data());
+        ids.push_back(id);
+    }
+    return ids;
+}
+
 // ---- the S3D model resource ------------------------------------------------------------------------------------
 // The parsed model converted to what SC4DrawContext::RenderMesh draws: every vertex group as V3F_C4UB_T2F, the index
 // groups, one draw list per primitive group and one cS3DMaterial per material (frame 0 of every mesh).
@@ -699,6 +721,7 @@ bool AttachModelMaker(sc4::cSC43DRender& render, sc4::cSC4City& city) {
 
 namespace native {
 unsigned int FshTextureId(unsigned int group, unsigned int instance) { return TextureRecord(group, instance)->id; }
+const std::vector<std::uint32_t>& FshFrameTextureIds(std::uint32_t group, std::uint32_t instance) { return FrameTextureIds(group, instance); }
 bool FshTextureSize(unsigned int group, unsigned int instance, int& width, int& height) {
     const TextureBinding* record = TextureRecord(group, instance);
     width = record->width;
