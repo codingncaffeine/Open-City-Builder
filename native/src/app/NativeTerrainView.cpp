@@ -313,6 +313,13 @@ bool TerrainCullingInfo(int& rowBegin, int& rowEnd, const std::int32_t*& colStar
     g_terrainView->GetCullingInfo(&rowBegin, &rowEnd, &colStart, &colEnd);
     return colStart && colEnd;
 }
+// The whole viewport's row tables: what a pass drawn every frame outside the terrain draw needs (with the backing store the terrain
+// is drawn only where the view changed, so its draw-frustum tables cover that region alone).
+bool TerrainViewCullingInfo(int& rowBegin, int& rowEnd, const std::int32_t*& colStart, const std::int32_t*& colEnd) {
+    if (!g_terrainView) return false;
+    g_terrainView->GetViewCullingInfo(&rowBegin, &rowEnd, &colStart, &colEnd);
+    return colStart && colEnd;
+}
 
 bool AttachTerrainView(sc4::cSC43DRender& render, sc4::cSTETerrain& terrain, gd::cIGZGDriver* driver) {
     g_driver = driver;

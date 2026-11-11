@@ -396,6 +396,8 @@ struct cGLGDriver::Impl {
             const int srcW = int(toStore ? m->pixelWidth : w), dstW = int(toStore ? w : m->pixelWidth);
             cw = std::min(cw, std::min(srcW - sx, dstW - dx));
             ch = std::min(ch, std::min(srcH - sy, dstH - dy));
+            static const bool debug = std::getenv("SC4_BSDEBUG") != nullptr;   // the backing store copies
+            if (debug) std::fprintf(stderr, "bs: %s src %d,%d dst %d,%d size %dx%d store %ux%u frame %ux%u fbo %u/%u\n", toStore ? "save" : "restore", sx, sy, dx, dy, cw, ch, w, h, m->pixelWidth, m->pixelHeight, unsigned(m->frameFbo), unsigned(fbo));
             if (cw <= 0 || ch <= 0) return;
             // top-left rectangles -> GL's bottom-left rows
             const int gsy = srcH - sy - ch, gdy = dstH - dy - ch;

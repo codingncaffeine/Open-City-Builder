@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
 #include <vector>
 
 #include "gz/Buffer.h"
@@ -69,7 +70,9 @@ private:
 
 // The settings seam over the port's cSC4RenderProperties. The original reads fields of the inner cProperties object
 // (SL::spRenderProperties +0x18); the port has the generated default table, so the values below are the ones the
-// decompilation compares against, and the tests supply their own IRender3DSettings fake.
+// decompilation compares against, and the tests supply their own IRender3DSettings fake. The bool offsets map to the
+// property table as (offset - 0x38) / 0x40 and the int ones in the +0x30 block as (offset - 0x38) / 0x48
+// (RenderPropertyDefaults.inc gives the names and defaults).
 class DefaultSettings final : public IRender3DSettings {
 public:
     bool DisablePartialRegionWrites() const override { return false; }   // +0x7b8
@@ -80,13 +83,13 @@ public:
     int StaticViewMaxZoomC() const override { return 3; }                // +0x350
     bool StaticViewRedrawOnViewportChange() const override { return true; }   // +0xb8
     bool DrawDynamicViewEnabled() const override { return true; }        // +0x78
-    bool ViewCleanupEnabled() const override { return true; }            // +0x938
+    bool ViewCleanupEnabled() const override { return false; }           // +0x938 kUseViewCleanup (bool 36, default 0)
     bool ClearViewportPreservesLighting() const override { return false; }   // +0x738
-    bool TranslatedUpdateRebuildsDrawFrustum() const override { return true; }   // +0x438
+    bool TranslatedUpdateRebuildsDrawFrustum() const override { return false; }  // +0x438 kShowUpdateRegions (bool 16, default 0)
     bool ScreenShakeEnabled() const override { return true; }            // +0x5b8
     int ScreenShakeOffsetX() const override { return 0; }                // +0x30 block, +0x80
     int ScreenShakeOffsetY() const override { return 0; }                // +0x30 block, +0x38
-    int DirtyRectangleMaxAgeFrames() const override { return 10000; }    // +0x30 block, +0x548
+    int DirtyRectangleMaxAgeFrames() const override { return 4; }        // +0x30 block, +0x548 kDirtyRectMergeFrames (int 18, default 4)
 };
 
 struct StreamReader {
@@ -741,6 +744,16 @@ void cSC43DRender::DoFullViewUpdate(ViewUpdateReason reason) {
 }
 
 void cSC43DRender::ForceFullRedraw() { DoFullViewUpdate(kViewUpdateForceFullRedraw); }   // 0x1007658ae
+
+// i386 0x00504c0c: the camera control's screen offset moved since its last update; Draw blits the backing store by that many
+// pixels (AttemptTranslatedViewUpdate) and redraws only the uncovered strips. The original rounds with the 1.5 * 2^23 trick
+// (round to nearest, ties to even).
+void cSC43DRender::DoViewTranslationChange3() {
+    if (!cameraControl_) return;
+    const cS3DVector2 now = cameraControl_->ScreenOffset(), before = cameraControl_->PreviousScreenOffset();
+    viewOffsetX_ += static_cast<int>(std::nearbyint(now.x - before.x));
+    viewOffsetY_ += static_cast<int>(std::nearbyint(now.y - before.y));
+}
 
 void cSC43DRender::ClearDirtyRectangleQueue() {
     // 0x100763a56
@@ -2801,6 +2814,13 @@ void cSC43DRender::Draw() {
         restored = true;
         savedByRestore = true;
     }
+    static const bool bsDebug = std::getenv("SC4_BSDEBUG") != nullptr;   // the backing store state per frame, when it changes
+    if (bsDebug) {
+        static int lastState = -1;
+        const int state = int(mbBackingStoreEnabled) | int(backingStoreValid_) << 1 | int(restored) << 2;
+        if (state != lastState) std::fprintf(stderr, "bs: frame %u enabled %d valid %d restored %d changes %zu dirty %zu\n", changeCounter_, int(mbBackingStoreEnabled), int(backingStoreValid_), int(restored), modelChanges_.size(), dirtyRectangles_.size());
+        lastState = state;
+    }
     Set3DCameraView();
     if (fogEnabled_) drawContext_->SetFog(true, lightLevels_, fogStart_, fogEnd_);
     TurnOnLighting(true);
@@ -3053,11 +3073,10 @@ bool cSC43DRender::Pick(int, int, const float*, const float*, cISC4OccupantFilte
 }
 
 bool cSC43DRender::DoMessage(cIGZMessage2* message) {
-    // 0x100762b36 (PARTIAL: the camera zoom / rotation messages and the property reload are ported; the view
-    // translation (0xa6b79612, the translated backing-store update), the terrain dirty rectangles (0x870bc918), the
-    // full redraws (0xa6b79621 / 0x6acb92a9), the backing-store switch (0xc9f775bb), the lighting-manager swap
-    // (0x8acaa95f) and the city / terrain set-up (0x26d31ec1 / 0x4a9f2ffe) are not. See
-    // notes/ledger_pending/cSC43DRender.txt.)
+    // 0x100762b36 (i386 0x0050be0e). PARTIAL: the camera zoom / rotation, the view translation, the terrain dirty
+    // rectangles, the full redraws and the property reload are ported; the backing-store switch (0xc9f775bb), the
+    // lighting-manager swap (0x8acaa95f) and the city / terrain set-up (0x26d31ec1 / 0x4a9f2ffe) are not (the native
+    // application sets the store per zoom and sizes the city through its own host).
     if (!message) return true;
     auto* standard = static_cast<cIGZMessage2Standard*>(message);
     const std::uint32_t type = standard->GetType();
@@ -3073,6 +3092,22 @@ bool cSC43DRender::DoMessage(cIGZMessage2* message) {
         viewOffsetY_ = 0;
         if (oldView[0] != newView[0]) DoViewZoomChange3(oldView[0], oldView[1], newView[0], newView[1]);
         if (oldView[1] != newView[1] && !modelChanges_.empty()) ProcessModelChangeQueue();
+    } else if (type == 0xa6b79612) {   // the camera target moved: the view slides by whole pixels
+        DoViewTranslationChange3();
+    } else if (type == 0xa6b79621 || type == 0x6acb92a9) {   // full redraw requests (vslot 0x50 in the i386 build)
+        ForceFullRedraw();
+    } else if (type == 0x870bc918) {
+        // Terrain cells redrawn (cSTETerrain::RedisplayTerrain): data 1 / 2 pack the cell columns / rows (first << 16 | last),
+        // data 3 the altitude range (low << 16 | high), data 4 the kind of change; the box goes into the dirty-rectangle
+        // queue as kind 3 (i386 0x0050be0e). The cell width is the terrain's (16 in every city).
+        constexpr float kCell = 16.0f;
+        const auto d1 = static_cast<std::uint32_t>(standard->GetData1()), d2 = static_cast<std::uint32_t>(standard->GetData2());
+        const auto d3 = static_cast<std::uint32_t>(standard->GetData3());
+        const auto change = static_cast<std::int32_t>(standard->GetData4());
+        const float boxMin[3] = {static_cast<float>(d1 >> 16) * kCell, static_cast<float>(d3 >> 16), static_cast<float>(d2 >> 16) * kCell};
+        const float boxMax[3] = {static_cast<float>(d1 & 0xffff) * kCell, static_cast<float>(d3 & 0xffff), static_cast<float>(d2 & 0xffff) * kCell};
+        const int extra = (static_cast<std::uint32_t>(change - 1) < 2 || change == 3) ? 8 : 0;
+        if (viewUtilities_) QueueDirtyRectangleForBox(3, boxMin, boxMax, nullptr, extra);
     } else if (type == 0xc53d10aa) {
         ReadProperties();
     }

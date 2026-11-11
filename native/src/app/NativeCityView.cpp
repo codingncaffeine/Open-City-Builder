@@ -110,8 +110,10 @@ public:
         // device to the 3-D renderer for the frame (full viewport) and give it back afterwards.
         if (screen_) screen_->Suspend();
         driver_->SetViewport();
-        // The terrain does not cover every pixel yet (and the window frame persists between paints): start each frame from a clear.
-        driver_->ClearColor(0.12f, 0.12f, 0.20f, 1.0f);
+        // The terrain does not cover every pixel yet (and the window frame persists between paints): start each frame from a clear,
+        // in the renderer's own viewport clear colour (black: nothing in the game sets another), so the void around the city is the
+        // same whether the static view comes from the backing store or is drawn again.
+        driver_->ClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         driver_->ClearDepth(1.0);
         driver_->Clear(0x5000);
         // PARTIAL: the renderer's camera / city notifications (DoMessage) are not recovered; the view utilities follow the camera here.
@@ -401,6 +403,9 @@ bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* cityInterface, g
 
     auto* render = new sc4::cSC43DRender();
     render->AddRef();
+    // StaticSetGDriver sizes the backing store from the driver's viewport, which in the original is the whole screen at this point;
+    // here the 2-D windows last left it on one of their own rectangles.
+    driver->SetViewport();
     sc4::cSC43DRender::StaticSetGDriver(driver);
     if (terrain) native::AttachTerrainView(*render, *terrain, driver);
     render->SetViewportSize(static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height));
@@ -410,7 +415,9 @@ bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* cityInterface, g
     g_cityRender = render;
     const bool ok = render->Init();
     ApplySavedView();   // a saved camera read before the view existed
-    render->SetBackingStoreEnabled(false);   // the Metal driver keeps no backing store yet: a restore would replay whatever the screen held
+    // The static view (terrain, buildings) is kept in the driver's backing store below zoom 3 and only the moving things are
+    // drawn each frame, as DoViewZoomChange3 decides on every zoom change; this sets it for the zoom the city opened at.
+    render->SetBackingStoreEnabled(control->Zoom() < 3);
     std::printf("city view: renderer %s\n", ok ? "up" : "FAILED");
     // the lighting manager first: the model maker's shadows project through it as the models load
     {

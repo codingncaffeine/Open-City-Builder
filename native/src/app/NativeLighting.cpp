@@ -248,6 +248,9 @@ void TickLighting() {
     if (g_relight) {
         g_relight = false;
         g_terrain->RedisplayTerrain(false, false, TerrainRect{0, 0, static_cast<std::int32_t>(g_terrain->CellCountX()), static_cast<std::int32_t>(g_terrain->CellCountZ())}, 0);
+        // the lighting manager's ForceFullRedraw is the renderer's (cSC43DRender vslot 0xa0): the static view kept in the backing
+        // store was lit for the old time of day
+        if (g_render) g_render->ForceFullRedraw();
     }
 }
 

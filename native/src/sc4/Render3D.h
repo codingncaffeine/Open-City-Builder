@@ -535,6 +535,7 @@ public:
     void UpdateViewportRect(const cRZRect& rect);                   // @ 0x100764096
     void TurnOnLighting(bool enable);                               // @ 0x100764062
     void AddDirtyRectangle(int kind, const cRZRect& rect, s3d::cIS3DModelInstance* model, int extra);   // @ 0x100769c44
+    void DoViewTranslationChange3();                                // @ i386 0x00504c0c
     void AddDirtyRectangleInternal(int kind, const cRZRect& rect, s3d::cIS3DModelInstance* model, int extra);   // @ 0x100769cca (PARTIAL)
     bool AttemptTranslatedViewUpdate(int dx, int dy);               // @ 0x1007658be
     void SetClipRect(const cRZRect& rect);                          // @ 0x10076160e
@@ -661,8 +662,8 @@ private:
     float projectionMatrix_[16] = {};            // +0xf0
     s3d::cS3DCamera* uiCamera_ = nullptr;        // +0x130
     int cameraView_ = 0;                         // +0x138
-    [[maybe_unused]] int viewOffsetX_ = 0;                        // +0x13c
-    [[maybe_unused]] int viewOffsetY_ = 0;                        // +0x140
+    int viewOffsetX_ = 0;                        // +0x13c (DoViewTranslationChange3: the pixels the view moved since the last frame)
+    int viewOffsetY_ = 0;                        // +0x140
     bool lightingEnabled_ = true;                // +0x144
     bool fogEnabled_ = false;                    // +0x145
     // +0x148..+0x15b: the five floats the constructor writes (1, 1, 1, 1, 1); the first three are the fog colour

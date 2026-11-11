@@ -5,6 +5,7 @@
 //
 // The caller owns the GL context: it must be current on this thread for every call (the frame loop's thread).
 #pragma once
+#include <cstdlib>
 #include <memory>
 #include <vector>
 
@@ -33,6 +34,15 @@ public:
     void Present(int x, int y, int width, int height);
     bool ReadBack(std::vector<std::uint8_t>& bgra, std::uint32_t& width, std::uint32_t& height);   // top-left origin, pixels
     IBackingStore* BackingStore();
+    // The renderer's driver-extension query (cSC43DRender::StaticSetGDriver): 0x669565fe is the buffer-region extension, i.e. the
+    // backing store the static city view is kept in.
+    bool Punt(std::uint32_t code, void* data) override {
+        if (code == 0x669565fe && data && !std::getenv("SC4_NOBACKINGSTORE")) {   // SC4_NOBACKINGSTORE=1: A/B without it
+            *static_cast<void**>(data) = BackingStore();
+            return true;
+        }
+        return cGDriverBase::Punt(code, data);
+    }
     std::uint32_t DrawCalls() const;
     std::uint32_t PipelineCount() const;
     // The GL context is going away (the window closes, or the process exits with windows still alive): texture and target

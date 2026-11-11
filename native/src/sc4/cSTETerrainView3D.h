@@ -323,6 +323,8 @@ public:
     void ComputeMinimumVisibleHtAtDrawRows(const ITerrainDrawContext& dc, float* out) const;
     void ComputeMinimumVisibleHtAtViewRows(const ITerrainDrawContext& dc, float* out) const;
     void GetCullingInfo(int* rowBegin, int* rowEnd, const std::int32_t** colStart, const std::int32_t** colEnd) const;
+    // The same row tables for the view frustum (the whole viewport); the draw frustum above is the last region drawn.
+    void GetViewCullingInfo(int* rowBegin, int* rowEnd, const std::int32_t** colStart, const std::int32_t** colEnd) const;
 
     // ---- lighting ----------------------------------------------------------------------------------------
     void DoLighting();

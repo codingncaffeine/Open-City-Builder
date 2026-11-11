@@ -81,7 +81,9 @@ private:
 
 void AttachZoneOverlay(sc4::cSC43DRender& render, sc4::cSTETerrain& terrain) {
     g_terrain = &terrain;
-    render.AddViewObject(new OverlayObject(), 0, 200);
+    // list 3: drawn every frame just before the moving objects (the zones and the tools' drag cells change while the static view
+    // stays in the backing store; list 0 would draw them into the store once)
+    render.AddViewObject(new OverlayObject(), 3, 200);
 }
 void SetZoneOverlayManager(sc4::cSC4ZoneManager* zones) { g_zones = zones; }
 void SetDragHighlightCell(int x, int z, std::uint32_t argb) { g_drag[{x, z}] = argb; }

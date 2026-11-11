@@ -174,12 +174,14 @@ public:
         if (!packed) { state.PackRenderState(true, true, true, true, true, 1, false, 1, 4, 5, 4, 0.5f, -1, -1); packed = true; }   // renderStates_[kOverlayDrawModeShadow] (InitDrawStates)
         const int maxX = static_cast<int>(g_terrain->CellCountX()), maxZ = static_cast<int>(g_terrain->CellCountZ());
         auto& slots = g_manager->Overlays();
-        // only the cells the terrain view drew this frame (its draw-frustum culling, which the original's SDSFindOverlaysToDraw reads
-        // through GetTerrainCullingInfo): rows are z, colStart[z]..colEnd[z] the x range
+        // only the cells in view: the terrain view's view-frustum row tables (rows are z, colStart[z]..colEnd[z] the x range). The
+        // original draws the shadows inside the terrain draw and reads its draw-frustum tables (SDSFindOverlaysToDraw through
+        // GetTerrainCullingInfo); this pass runs every frame after the dynamic view, and with the backing store the terrain is only
+        // drawn where the view changed, so its draw-frustum tables would cover that region alone.
         int rowBegin = 0, rowEnd = maxZ;
         const std::int32_t* colStart = nullptr;
         const std::int32_t* colEnd = nullptr;
-        const bool culled = TerrainCullingInfo(rowBegin, rowEnd, colStart, colEnd);
+        const bool culled = TerrainViewCullingInfo(rowBegin, rowEnd, colStart, colEnd);
         rowBegin = std::max(0, rowBegin);
         rowEnd = std::min(maxZ, rowEnd);
         // dev: SC4_SHADOWDBG=1 draws the rectangles untextured in red, =2 keeps the textures and the mask but draws red at full strength

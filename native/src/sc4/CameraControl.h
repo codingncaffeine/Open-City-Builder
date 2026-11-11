@@ -166,6 +166,7 @@ public:
     const float* GroundPlane() const { return plane_; }
     cS3DVector2 CameraPlanePoint() const { return planePoint_; }
     cS3DVector2 ScreenOffset() const { return screenOffset_; }
+    cS3DVector2 PreviousScreenOffset() const { return prevScreenOffset_; }   // +0xb0 (the offset before the last update)
     float WorldPerPixel() const { return worldPerPixel_; }
     float PixelPerWorld() const { return pixelPerWorld_; }   // +0x140 (read by SC4ViewUtilities::UpdateCameraPosition)
     float YawAngle() const { return yaw_; }

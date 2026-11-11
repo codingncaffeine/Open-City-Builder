@@ -1103,6 +1103,8 @@ int RunScenario(const std::string& path) {
             native::NativePrintAdvisors();
         } else if (command == "ticker") {   // ticker: the news ticker's queue, flipper ring and scroll
             native::NativeTickerReport();
+        } else if (command == "redraw") {   // redraw: the renderer redraws the whole view (static view and backing store included)
+            if (sc4::cSC43DRender* render = native::CityRenderer()) render->ForceFullRedraw();
         } else if (command == "wintree") {   // wintree [DEPTH]: the window tree under the main window (id, visible, area, kids)
             int depth = 4; words >> depth;
             DumpTree(gMgr->GetMainWindow(), 0, depth);

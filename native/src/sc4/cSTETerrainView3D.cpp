@@ -811,6 +811,13 @@ void cSTETerrainView3D::GetCullingInfo(int* rowBegin, int* rowEnd, const std::in
     *colEnd = S().draw.colEnd.data();
 }
 
+void cSTETerrainView3D::GetViewCullingInfo(int* rowBegin, int* rowEnd, const std::int32_t** colStart, const std::int32_t** colEnd) const {
+    *rowBegin = S().view.rowBegin;
+    *rowEnd = S().view.rowEnd;
+    *colStart = S().view.colStart.data();
+    *colEnd = S().view.colEnd.data();
+}
+
 // ===============================================================================================================
 // Lighting
 // ===============================================================================================================
