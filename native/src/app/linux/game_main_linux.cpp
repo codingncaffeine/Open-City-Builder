@@ -102,7 +102,14 @@ std::unique_ptr<gd::cGLGDriver> gDriver;
 std::unique_ptr<native::Graphics> gGraphics;
 std::unique_ptr<native::WinMgr> gMgr;
 
-void Nap() { std::this_thread::sleep_for(std::chrono::milliseconds(4)); }
+// SC4_SCRIPTPRESENT=1: a scenario run shows its window and presents every frame, so its frames are paced like the interactive
+// loop's (the swap) instead of by the 4 ms nap.
+bool gScriptPresent = false;
+void Present();
+void Nap() {
+    if (gScriptPresent) { Present(); return; }
+    std::this_thread::sleep_for(std::chrono::milliseconds(4));
+}
 
 // ---- fonts: the recovered cGZFont over FreeType, drawing through the surface's context --------------------------------------
 native::FreeTypeFontHost* gFontHost;
@@ -628,6 +635,30 @@ Placement FramePlacement() {
     return p;
 }
 
+// Holds each frame to the display's refresh period. The swap normally waits for the display; when it does not (a compositor or
+// driver that ignores the swap interval, a window that is not on screen) the loop would spin at thousands of frames a second,
+// frames would come faster than the animation tick manager's 2 ms floor and every animation would run fast.
+void PaceFrame() {
+    static const bool off = std::getenv("SC4_NOPACE") != nullptr;   // debug: the loop as the swap alone paces it
+    if (off) return;
+    static double last = 0.0, period = 1000.0 / 60.0, asked = -1e9;
+    double now = NowMs();
+    if (now - asked > 1000.0) {   // the window can move to a display with another refresh rate
+        asked = now;
+        float hz = 60.0f;
+        if (gWindow)
+            if (const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(gWindow)))
+                if (mode->refresh_rate > 1.0f) hz = mode->refresh_rate;
+        period = 1000.0 / double(hz);
+    }
+    const double due = last + period * 0.95;   // a swap that did wait lands on the period: nothing is added to it
+    if (now < due) {
+        std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(due - now));
+        now = NowMs();
+    }
+    last = now;
+}
+
 void Present() {
     if (!gWindow) return;
     int pw = gW, ph = gH, ww = gW, wh = gH;
@@ -642,6 +673,8 @@ void Present() {
     gDriver->Present(int(std::lround(p.x * density)), int(std::lround(float(ph) - (p.y + p.h) * density)),
                      int(std::lround(p.w * density)), int(std::lround(p.h * density)));
     SDL_GL_SwapWindow(gWindow);
+    native::NoteFramePresented();
+    PaceFrame();
 }
 
 bool Boot() {
@@ -1147,7 +1180,9 @@ int RunScenario(const std::string& path) {
                 target.x = x;
                 target.y = 270.0f;
                 target.z = z;
+                native::AnnounceCameraScroll(true);
                 camera->SetViewTargetPosition(target);
+                native::AnnounceCameraScroll(false);
                 std::printf("look %.0f,%.0f\n", x, z);
             }
         } else if (command == "tap") {   // a single click (toolbar buttons toggle: a double click turns them on and off again)
@@ -1323,7 +1358,8 @@ int main(int argc, char** argv) {
     native::SetDisplayGeometry(windowW, windowH, gH);
     // The shot and scenario runs draw into a hidden window: the frame target is offscreen anyway, the window only holds the context.
     SDL_WindowFlags flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
-    if (!interactive) flags |= SDL_WINDOW_HIDDEN;
+    gScriptPresent = !interactive && std::getenv("SC4_SCRIPTPRESENT") != nullptr;
+    if (!interactive && !gScriptPresent) flags |= SDL_WINDOW_HIDDEN;
     if (fullscreen) flags |= SDL_WINDOW_FULLSCREEN;
     gWindow = SDL_CreateWindow("Open City Builder", int(windowW / contentScale), int(windowH / contentScale), flags);
     if (!gWindow) { std::fprintf(stderr, "SDL window: %s\n", SDL_GetError()); return 1; }

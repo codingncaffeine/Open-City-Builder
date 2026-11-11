@@ -42,10 +42,31 @@ void StopAnimationTicks() {
     if (g_atm) g_atm->Shutdown();
 }
 
+namespace { std::uint64_t g_presented = 0; }
+void NoteFramePresented() { ++g_presented; }
+
 std::uint32_t TickAnimation() {
     if (!g_atm) return 0;
     const std::uint32_t result = g_atm->DoAnimationTick();
     static const bool trace = std::getenv("SC4_SIMDEBUG") != nullptr;
+    if (trace) {   // the tick pace, once per 5 s: a tick that follows the last one by less than the manager's 2 ms floor is handed 2 ms
+        static std::uint64_t ticks = 0, short_ = 0, presentedBefore = 0;
+        static std::uint32_t last = SDL_GetTicks();
+        static std::uint64_t lastNs = SDL_GetTicksNS();
+        const std::uint64_t nowNs = SDL_GetTicksNS();
+        if (nowNs - lastNs < 2000000u) ++short_;
+        lastNs = nowNs;
+        ++ticks;
+        const std::uint32_t now = SDL_GetTicks();
+        if (now - last >= 5000) {
+            std::fprintf(stderr, "atm: pace %llu ticks in %u ms (%.1f ms per tick), %llu under the 2 ms floor, %llu frames presented\n",
+                         static_cast<unsigned long long>(ticks), now - last, double(now - last) / double(ticks),
+                         static_cast<unsigned long long>(short_), static_cast<unsigned long long>(g_presented - presentedBefore));
+            presentedBefore = g_presented;
+            ticks = short_ = 0;
+            last = now;
+        }
+    }
     if (trace && g_atm->TickCount() % 240 == 0)
         std::fprintf(stderr, "atm: sdl %u tick %u at %u us, objects %zu/%zu/%zu/%zu, %.1f ticks/s\n", SDL_GetTicks(), g_atm->TickCount(), g_atm->GetCurrentTickTime(), g_atm->BucketSize(0),
                      g_atm->BucketSize(1), g_atm->BucketSize(2), g_atm->BucketSize(3), g_atm->TicksPerSecond());
