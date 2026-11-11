@@ -1621,10 +1621,12 @@ bool cSC4TrafficNetworkMap::DoMessage2(std::uint32_t messageId, std::uint32_t da
         case kTrafficMessageScrollActive:
             scrollActive_ = true;
             return true;
-        case kTrafficMessageScrollInactive:
+        case kTrafficMessageScrollInactive:   // i386 0x001ecbd6: the flag is cleared and the visible cells are worked out again
             scrollActive_ = false;
+            HandleViewChanged();
             return true;
-        case 0xa6b79602:   // scroll start: DoAnimationTick-ish behaviour follows from the camera message path
+        case 0xa6b79602:   // the camera moved (zoom, rotation): the visible cells are worked out again
+            HandleViewChanged();
             return true;
         default:
             return true;

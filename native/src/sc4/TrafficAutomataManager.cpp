@@ -549,6 +549,13 @@ void cSC4TrafficAutomataManager::PopulateVisibleArea(float deltaMilliseconds) {
     for (tTrafficLayerUpdate& update : layerUpdates_) update.elapsed += deltaMilliseconds;
     int rect[4] = {0, 0, -1, -1};
     network->GetVisibleCellRect(rect);
+    // The sweep stays inside the rectangle the automata are kept by. The original reads both from view state that the same camera
+    // messages refresh (the map's visible cells here, the manager's view rectangle in IsAutomatonOnscreen), so both stand still
+    // during a scroll; a car spawned outside the manager's rectangle would be removed as off screen on its first tick.
+    rect[0] = std::max(rect[0], static_cast<int>(std::floor(ViewRect(0) / 16.0f)));
+    rect[1] = std::max(rect[1], static_cast<int>(std::floor(ViewRect(1) / 16.0f)));
+    rect[2] = std::min(rect[2], static_cast<int>(std::floor(ViewRect(2) / 16.0f)));
+    rect[3] = std::min(rect[3], static_cast<int>(std::floor(ViewRect(3) / 16.0f)));
     if (!currentLayerValid_ || currentCellX_ < 0) {
         AdvanceLayer();
         if (!currentLayerValid_) return;

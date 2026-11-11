@@ -211,6 +211,15 @@ public:
         tuning_.pathCurveFactor = t.f219b8;
         tuning_.turnDivisor = t.f21a34;
         tuning_.turnMax = t.f21a38;
+        static bool printed = false;
+        if (!printed && tuning_.defaultSpeedMax > 0 && std::getenv("SC4_TRAFFICSPEED")) {   // the tuning the vehicles drive by, once
+            printed = true;
+            std::fprintf(stderr, "traffic tuning: speed %d..%d, curve factor %.3f, turn %.3f / %.3f, sim speed x%.2f x%.2f x%.2f (drive x%.2f), network:",
+                         tuning_.defaultSpeedMin, tuning_.defaultSpeedMax, tuning_.pathCurveFactor, tuning_.turnDivisor, tuning_.turnMax, t.f21a54,
+                         t.f21a58, t.f21a5c, t.f21a60);
+            for (float v : t.f219d8) std::fprintf(stderr, " %.2f", v);
+            std::fprintf(stderr, "\n");
+        }
         return &tuning_;
     }
     // cSC4VehicleManager::sbDefaultCollide (cars follow their leaders) / sbDefaultHeadlights (off until the cheat).

@@ -957,12 +957,23 @@ int main() {
         message->AddRef();
         message->SetType(kMsgPostCityInit);
         CHECK(manager->DoMessage(message));
+        // A scroll: the camera's target messages are ignored while it lasts, and its end reads the view rectangle again
+        // (i386 0x000c8be0), so the automata are kept and culled against where the view stopped.
+        message->SetType(kMsgCameraMoved);
+        CHECK(manager->DoMessage(message));
+        const float rectBeforeScroll = manager->ViewRect(0);
         message->SetType(kMsgScrollStart);
         CHECK(manager->DoMessage(message));
         CHECK(manager->ScrollInProgress());
+        for (float& edge : host.view.rect) edge += 400.0f;   // the view moves during the scroll
+        message->SetType(kMsgCameraTargetDone);
+        CHECK(manager->DoMessage(message));
+        CHECK(manager->ViewRect(0) == rectBeforeScroll);
         message->SetType(kMsgScrollEnd);
         CHECK(manager->DoMessage(message));
         CHECK(!manager->ScrollInProgress());
+        CHECK(manager->ViewRect(0) == host.view.rect[0] - 64.0f);
+        CHECK(manager->ViewRect(2) == host.view.rect[2] + 64.0f);
         message->SetType(kMsgAutomataEnabled);
         message->SetData1(1);
         CHECK(manager->DoMessage(message));

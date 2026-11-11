@@ -2,6 +2,7 @@
 // decompilation at the address in its comment; the places where a value had to be inferred are marked "inferred" and are
 // also listed in notes/ledger_pending/cSC4AutomataManager.txt.
 #include "sc4/AutomataManager.h"
+#include "sc4/AutomataTrace.h"
 
 #include <chrono>
 #include <algorithm>
@@ -990,7 +991,9 @@ void cSC4AutomataManager::DoAnimationTick(std::uint32_t data, float deltaMillise
         if (occupant && occupant->IsInitialized() && !automaton->DoAnimationTick(data, deltaMilliseconds)) {
             if (traced) std::fprintf(stderr, "automata manager: %p leaves: its tick answered false\n", static_cast<void*>(automaton));
             ++reasons[0];
+            gAutomatonRemovalContext = "manager: its tick answered false";
             RemoveAutomaton(automaton, false);
+            gAutomatonRemovalContext = nullptr;
         }
         if (!automaton->GetMarkedForRemove() || automaton->GetOpacity() >= 0.1f) {
             if (!automaton->CheckAutomataFlag(0x10000) && !IsAutomatonOnscreen(automaton)) {
@@ -1000,16 +1003,23 @@ void cSC4AutomataManager::DoAnimationTick(std::uint32_t data, float deltaMillise
                     std::fprintf(stderr, "automata manager: %p leaves: off screen at (%.0f, %.1f, %.0f)\n", static_cast<void*>(automaton), p[0], p[1], p[2]);
                 }
                 ++reasons[1];
+                gAutomatonRemovalContext = "manager: off screen";
                 RemoveAutomaton(automaton, false);
+                gAutomatonRemovalContext = nullptr;
             }
         } else {
             if (traced) std::fprintf(stderr, "automata manager: %p leaves: marked for removal and faded out\n", static_cast<void*>(automaton));
             ++reasons[2];
             RemoveAutomaton(automaton, true);
         }
-        if (trace && ++reasons[3] % 2000 == 0)
-            std::fprintf(stderr, "automata manager %p: removals tick-false %d offscreen %d faded %d (of %d visits); view rect %.0f %.0f %.0f %.0f\n",
-                         static_cast<void*>(this), reasons[0], reasons[1], reasons[2], reasons[3], viewRect_[0], viewRect_[1], viewRect_[2], viewRect_[3]);
+        if (trace && ++reasons[3] % 2000 == 0) {
+            float camera[3] = {0.0f, 0.0f, 0.0f};
+            if (g_host)
+                if (IAutomataViewUtilities* view = g_host->ViewUtilities()) view->ViewPosition(camera);
+            std::fprintf(stderr, "automata manager %p: removals tick-false %d offscreen %d faded %d (of %d visits); view rect %.0f %.0f %.0f %.0f, camera at %.0f %.0f, scrolling %d\n",
+                         static_cast<void*>(this), reasons[0], reasons[1], reasons[2], reasons[3], viewRect_[0], viewRect_[1], viewRect_[2], viewRect_[3],
+                         camera[0], camera[2], int(scrollInProgress_));
+        }
     }
 }
 
@@ -1445,8 +1455,9 @@ bool cSC4AutomataManager::DoMessage(cIGZMessage2* message) {
         scrollInProgress_ = true;
         return true;
     }
-    if (type == kMsgScrollEnd) {
+    if (type == kMsgScrollEnd) {   // i386 0x000c8be0: the flag is cleared and the view rectangle is read again
         scrollInProgress_ = false;
+        HandleViewChanged();
         return true;
     }
     if (type == kMsgCameraMoved) {

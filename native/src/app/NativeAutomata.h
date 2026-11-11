@@ -14,6 +14,7 @@ void SetAutomataRenderer(sc4::cSC43DRender* render, sc4::cSC4City* city);
 
 void PostCityInitToAutomataManagers(sc4::cSC4City* city);   // after the renderer is attached: starts the restored automata
 void TickAutomata();                                        // once per frame: advances the started automata by the elapsed time
+void AnnounceCameraScroll(bool begin);                      // a camera move from outside the scroll path, announced as a scroll (begin, then end)
 std::vector<void*> LoadedAutomataOf(cIGZUnknown* manager);  // NativeAutomataList.cpp
 
 }  // namespace native

@@ -1,12 +1,16 @@
 #include "sc4/Automaton.h"
+#include "sc4/AutomataTrace.h"
 
 #include <algorithm>
 #include <chrono>
+#include <string>
+#include <dlfcn.h>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "rz/cRZMessage2Standard.h"
@@ -168,7 +172,43 @@ private:
 };
 
 // ---- construction ----------------------------------------------------------------------------------------------------
+namespace {
+// The move instruments (SC4_MOVEFAST / SC4_MOVEJUMP) follow automata by address: a new automaton at a freed one's address starts over.
+std::unordered_set<const cSC4Automaton*>& TraceNewborn() {
+    static std::unordered_set<const cSC4Automaton*> set;
+    return set;
+}
+const bool kTraceMoves = std::getenv("SC4_MOVEFAST") != nullptr || std::getenv("SC4_MOVEJUMP") != nullptr;
+// SC4_MOVELIFE=1: how long every automaton lived (constructor to destructor), printed with its group when it goes.
+const bool kTraceLife = std::getenv("SC4_MOVELIFE") != nullptr;
+std::unordered_map<const cSC4Automaton*, std::chrono::steady_clock::time_point>& TraceBirth() {
+    static std::unordered_map<const cSC4Automaton*, std::chrono::steady_clock::time_point> map;
+    return map;
+}
+struct TraceRemoval { std::string why; double atMs = 0; };
+std::unordered_map<const cSC4Automaton*, TraceRemoval>& TraceRemovals() {
+    static std::unordered_map<const cSC4Automaton*, TraceRemoval> map;
+    return map;
+}
+// The first time an automaton is marked for removal: who asked (the manager's reason, or the caller's address in the executable).
+void TraceFirstRemoval(const cSC4Automaton* automaton, void* caller) {
+    if (!kTraceLife || TraceRemovals().count(automaton)) return;
+    char text[96];
+    if (gAutomatonRemovalContext) std::snprintf(text, sizeof text, "%s", gAutomatonRemovalContext);
+    else {
+        Dl_info info{};
+        dladdr(caller, &info);
+        std::snprintf(text, sizeof text, "+0x%lx", static_cast<unsigned long>(static_cast<char*>(caller) - static_cast<char*>(info.dli_fbase)));
+    }
+    auto born = TraceBirth().find(automaton);
+    const double at = born == TraceBirth().end() ? -1.0 : std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - born->second).count();
+    TraceRemovals()[automaton] = TraceRemoval{text, at};
+}
+}  // namespace
+
 cSC4Automaton::cSC4Automaton(IAutomatonHost* host, const cGZPersistResourceKey& modelKey) : host_(host) {
+    if (kTraceMoves) TraceNewborn().insert(this);
+    if (kTraceLife) TraceBirth()[this] = std::chrono::steady_clock::now();
     type_ = kAutomatonOccupantType;            // +0x50
     flags_ = static_cast<std::uint8_t>(flags_ | 0x10);   // +0x5b: the automaton's own occupant flag bit
     saved_ = false;                            // +0x70
@@ -191,6 +231,17 @@ cSC4Automaton::cSC4Automaton(IAutomatonHost* host, const cGZPersistResourceKey& 
 }
 
 cSC4Automaton::~cSC4Automaton() {
+    if (kTraceLife) {
+        auto born = TraceBirth().find(this);
+        if (born != TraceBirth().end()) {
+            auto removal = TraceRemovals().find(this);
+            std::fprintf(stderr, "automaton life: group %08x %.0f ms, removal asked at %.0f ms by %s\n", automataGroupId_,
+                         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - born->second).count(),
+                         removal == TraceRemovals().end() ? -1.0 : removal->second.atMs, removal == TraceRemovals().end() ? "nobody" : removal->second.why.c_str());
+            if (removal != TraceRemovals().end()) TraceRemovals().erase(removal);
+            TraceBirth().erase(born);
+        }
+    }
     ClearStateStack();
     if (auxiliaryModel_) {
         Host() ? Host()->DestroyModel(auxiliaryModel_) : auxiliaryModel_->Release();
@@ -767,6 +818,11 @@ void TraceFastMove(const cSC4Automaton* automaton, std::uint32_t classId, std::u
     static std::unordered_map<const cSC4Automaton*, Window> windows;
     static const auto runStart = std::chrono::steady_clock::now();
     const auto now = std::chrono::steady_clock::now();
+    static std::unordered_map<const cSC4Automaton*, std::chrono::steady_clock::time_point> lastMove;   // SC4_MOVEJUMP
+    if (TraceNewborn().erase(automaton)) {
+        windows.erase(automaton);
+        lastMove.erase(automaton);
+    }
     auto found = windows.find(automaton);
     if (found == windows.end()) {
         windows[automaton] = Window{now, {to[0], to[1], to[2]}, {to[0], to[1], to[2]}, 0.0, 0};
@@ -775,6 +831,22 @@ void TraceFastMove(const cSC4Automaton* automaton, std::uint32_t classId, std::u
     Window& w = found->second;
     const double sx = to[0] - w.last[0], sy = to[1] - w.last[1], sz = to[2] - w.last[2];
     w.maxStep = std::max(w.maxStep, std::sqrt(sx * sx + sy * sy + sz * sz));
+    {   // SC4_MOVEJUMP=METERS: every single move of at least that length, with the wall-clock time since the automaton's last move
+        static const char* jump = std::getenv("SC4_MOVEJUMP");
+        if (jump) {
+            const double step = std::sqrt(sx * sx + sy * sy + sz * sz);
+            auto seen = lastMove.find(automaton);
+            const double since = seen == lastMove.end() ? -1.0 : std::chrono::duration<double, std::milli>(now - seen->second).count();
+            lastMove[automaton] = now;
+            static long jumps = 0;
+            if (step >= std::atof(jump) && jumps < 20000) {
+                ++jumps;
+                std::fprintf(stderr, "[%.1f s] %p move jump: class %08x group %08x %.1f m after %.0f ms from (%.0f,%.0f,%.0f) to (%.0f,%.0f,%.0f)\n",
+                             std::chrono::duration<double>(now - runStart).count(), static_cast<const void*>(automaton), classId, group, step, since,
+                             w.last[0], w.last[1], w.last[2], to[0], to[1], to[2]);
+            }
+        }
+    }
     w.last[0] = to[0]; w.last[1] = to[1]; w.last[2] = to[2];
     ++w.calls;
     const double ms = std::chrono::duration<double, std::milli>(now - w.start).count();
@@ -913,7 +985,10 @@ void cSC4Automaton::SetAutomataFlag(std::uint32_t flag, bool on) {
 bool cSC4Automaton::CheckAutomataFlag(std::uint32_t flag) const { return (automataFlags_ & flag) != 0; }
 
 bool cSC4Automaton::GetMarkedForRemove() const { return CheckAutomataFlag(kAutomataFlagMarkedForRemove); }
-void cSC4Automaton::SetMarkedForRemove(bool on) { SetAutomataFlag(kAutomataFlagMarkedForRemove, on); }
+void cSC4Automaton::SetMarkedForRemove(bool on) {
+    if (on) TraceFirstRemoval(this, __builtin_return_address(0));
+    SetAutomataFlag(kAutomataFlagMarkedForRemove, on);
+}
 bool cSC4Automaton::GetSelfControlling() const { return CheckAutomataFlag(kAutomataFlagSelfControlling); }
 void cSC4Automaton::SetSelfControlling(bool on) { SetAutomataFlag(kAutomataFlagSelfControlling, on); }
 bool cSC4Automaton::GetReachedDestination() const { return CheckAutomataFlag(kAutomataFlagReachedDestination); }
@@ -1868,6 +1943,7 @@ bool cSC4Automaton::HandlePlayerDriveCommand(std::uint32_t command, bool on) {
 
 // ---- removal / route / collision -------------------------------------------------------------------------------------
 void cSC4Automaton::Remove(bool immediate) {
+    TraceFirstRemoval(this, __builtin_return_address(0));
     SetAutomataFlag(kAutomataFlagMarkedForRemove, true);
     SetAutomataFlag(kAutomataFlagRemoved, true);
     if (immediate) {

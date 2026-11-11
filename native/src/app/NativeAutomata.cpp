@@ -233,6 +233,18 @@ void PostCityInitToAutomataManagers(sc4::cSC4City* city) {
     }
 }
 
+// A camera move from outside the view's own scroll path (a scenario's `look`) is announced as the scroll it stands for: the
+// view's scroll-begin message before the move, its scroll-end message after it (cSC4View3DWin::DoScrollBegin / DoScrollEnd
+// post the same two), so the automata managers and the traffic map read the view again where it stopped.
+void AnnounceCameraScroll(bool begin) {
+    if (!SL::spMS2) return;
+    auto* message = new cRZMessage2Standard();
+    message->AddRef();
+    message->SetType(begin ? 0xcad61e00 : 0xead61e16);
+    SL::spMS2->MessagePost(message, false);
+    message->Release();
+}
+
 void TickAutomata() {
     if (g_automata.empty()) return;
     const auto now = std::chrono::steady_clock::now();

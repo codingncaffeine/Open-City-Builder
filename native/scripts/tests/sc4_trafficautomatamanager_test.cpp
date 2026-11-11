@@ -550,7 +550,8 @@ struct FakeTrafficNetwork final : ITrafficNetworkManagerApi {
         auto it = tiles.find({x, z});
         return it == tiles.end() ? nullptr : it->second;
     }
-    TrafficTileInfo* GetFirstTileInfoAtCell(int x, int z) override { return GetTileInfoAtCell(x, z); }
+    std::vector<std::pair<int, int>> swept;   // the cells the population pass asked for
+    TrafficTileInfo* GetFirstTileInfoAtCell(int x, int z) override { swept.push_back({x, z}); return GetTileInfoAtCell(x, z); }
     void GetVisibleCellRect(int out[4]) override { std::memcpy(out, rect, sizeof rect); }
     bool GetResponseOccupants(cISC4Occupant*, int, int, std::uint32_t,
                               std::vector<ITrafficNetworkMapOccupant*>& out) override {
@@ -1220,6 +1221,31 @@ int main() {
         manager->DoAnimationTick(0, 16.0f);
         CHECK(manager->TrafficSimulator() != nullptr);
         CHECK(manager->Layers().size() == 10);
+
+        // ---- PopulateVisibleArea sweeps only cells inside the rectangle the manager keeps its automata by: the view's cells
+        // can be ahead of it (a scroll in progress), and a car spawned outside it is removed as off screen on its first tick.
+        {
+            auto& network = host.trafficNetwork;
+            network.rect[0] = 0; network.rect[1] = 0; network.rect[2] = 7; network.rect[3] = 7;
+            const auto sweep = [&] {
+                network.swept.clear();
+                for (int i = 0; i < 24; ++i) manager->PopulateVisibleArea(16.0f);
+            };
+            host.view.rect[0] = 0.0f; host.view.rect[1] = 0.0f; host.view.rect[2] = 128.0f; host.view.rect[3] = 128.0f;
+            manager->HandleViewChanged();   // kept: -64..192 m, every one of the 8 x 8 cells
+            sweep();
+            bool outside = false;
+            for (const auto& cell : network.swept) outside = outside || cell.first < 6 || cell.second < 6;
+            CHECK(!network.swept.empty());
+            CHECK(outside);                 // the control: with the whole view kept, the pass reaches the low cells
+            host.view.rect[0] = 160.0f; host.view.rect[1] = 160.0f; host.view.rect[2] = 200.0f; host.view.rect[3] = 200.0f;
+            manager->HandleViewChanged();   // kept: 96..264 m = cells 6 and up
+            sweep();
+            outside = false;
+            for (const auto& cell : network.swept) outside = outside || cell.first < 6 || cell.second < 6;
+            CHECK(!network.swept.empty());
+            CHECK(!outside);
+        }
 
         for (FakeTrafficAutomaton* candidate : {matching, inRect, special, outside, follower}) {
             manager->RemoveAutomaton(candidate, true);
