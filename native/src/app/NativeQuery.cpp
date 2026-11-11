@@ -107,8 +107,11 @@ struct QueryView final : IQueryView {
     cIGZWin* ViewWindow() override { return View(); }
     bool PickTerrain(int x, int y, float out[3], bool flag) override { cSC4View3DWin* v = View(); return v && v->PickTerrain(x, y, out, flag); }
     bool ShowCoordinates() override { return false; }
-    void SetTip(std::uint32_t, int, const cIGZString*, const cIGZString*, int) override {}
-    void ClearTip(std::uint32_t) override {}
+    // cISC4View3DWin 0x140 / 0x148: the tool's hover text goes into the view's cursor text box.
+    void SetTip(std::uint32_t id, int order, const cIGZString* title, const cIGZString* text, int icon) override {
+        if (cSC4View3DWin* v = View()) v->SetCursorText(id, static_cast<std::uint32_t>(order), title, text, icon);
+    }
+    void ClearTip(std::uint32_t id) override { if (cSC4View3DWin* v = View()) v->ClearCursorText(id); }
     void RecalcCoverage() override {}
 } g_view;
 

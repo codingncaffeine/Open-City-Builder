@@ -606,6 +606,7 @@ src/app/NativeTractDevelopment.cpp
 src/app/NativeDemandHost.cpp
 src/app/NativeLotConfigHost.cpp
 src/app/NativeCatalogUi.cpp
+src/app/NativeToolTips.cpp
 src/sc4/WinCalloutBox.cpp
 src/app/NativeAudio.cpp
 src/app/NativeRegionExtras.cpp

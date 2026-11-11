@@ -38,6 +38,7 @@
 #include "app/NativeBoot.h"
 #include "app/NativeCity.h"
 #include "app/NativeAnimationTicks.h"
+#include "app/NativeToolTips.h"
 #include "platform/PerfLog.h"
 #include "sc4/CameraControl.h"
 #include "sc4/Render3D.h"
@@ -575,6 +576,7 @@ void Frame() {
     native::EndFrameJobs();
     if (gAudio) gAudio->Tick();
     PumpTimers();
+    native::TickToolTips();
     gLaps.Lap("jobs+audio");
     cSC4App* app = native::BootApplication();
     if (app) {
@@ -640,6 +642,7 @@ bool Boot() {
     gMgr->AddRef();
     gMgr->Init();
     gMgr->GetMainWindow()->SetArea(0, 0, gW, gH);
+    native::InstallToolTips(gMgr.get());   // cSC4ToolTipManager + the callout boxes' buffers
     if (!InitFont()) std::printf("font: FAILED to initialise\n");
     gz::SetWinFontSource(&gFontSource);
     gz::SetWinStyleManager(&gStyleManager);
