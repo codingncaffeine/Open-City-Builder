@@ -79,10 +79,10 @@ int cSC4NetworkOccupantModel::Draw(SC4DrawContext* context, bool highlight) {
     context->ResetShade();
     if (occupant_.HasAnyNetworkFlag(kNetworkFlagQuadDrawA | kNetworkFlagQuadDrawB)) {
         std::uint32_t textures[2] = {0, 0};
-        // ([0] the under texture, [1] the piece texture at the variation)
-        // (the original's GetTexture for the under texture passes no fallback)
+        // ([0] the under texture, [1] the piece texture at the variation, falling back to the plain piece when the
+        // variation has no texture; i386 0x00133da8 -> GetTexture 0x00135342. The under texture has no fallback.)
         if (const std::uint32_t under = occupant_.UnderTexture()) textures[0] = GetTexture(under, 0, zoom);
-        textures[1] = GetTexture(occupant_.GetVariation() * 0x10u + occupant_.PieceId(), 0, zoom);
+        textures[1] = GetTexture(occupant_.GetVariation() * 0x10u + occupant_.PieceId(), occupant_.PieceId(), zoom);
         if (textures[1]) {
             context->SetTexWrapModes(2, 2, 0);
             context->SetTexFiltering(1, 1, 0);
