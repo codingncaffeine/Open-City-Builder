@@ -1,3 +1,4 @@
+#include "app/NativeRegionScreen.h"
 #include "app/NativeRegion.h"
 
 #include <cmath>
@@ -154,7 +155,7 @@ public:
         static cRZRandom random(0x5c4);
         return random.RandomUint32Uniform(range);
     }
-    void SetTutorialActive(int, bool) override {}
+    void SetTutorialActive(int guid, bool active) override { native::SetTutorialActive(guid, active); }
     void GetCityPosition(const cISC4RegionalCity* city, int& x, int& z) override { Concrete(city)->GetPosition(x, z); }
     void GetCitySize(const cISC4RegionalCity* city, int& w, int& h) override { Concrete(city)->GetCitySize(w, h); }
     void SetCityPosition(cISC4RegionalCity* city, int x, int z, bool fromImport) override { Concrete(city)->SetPosition(x, z, fromImport); }
@@ -184,9 +185,12 @@ public:
     bool IsRunFirstTimeAfterInstall() override { return false; }
     int TutorialLanguageIndex() override { return 0; }
     void TutorialRegionDirectoryNames(std::list<cRZString>&) override {}
-    cRZString TutorialRegionDefaultDirName(int) override { return cRZString(); }
+    cRZString TutorialRegionDefaultDirName(int id) override {   // the tutorial registry's default region (a first start opens it)
+        sc4::cSC4TutorialRegistry* registry = native::TutorialRegistry();
+        return cRZString(registry ? registry->GetTutorialRegionDefaultDirName(id).c_str() : "");
+    }
     void TutorialItems(std::list<NationTutorialItem>&, cISC4Region*) override {}
-    void SetTutorialActive(std::int32_t, bool) override {}
+    void SetTutorialActive(std::int32_t guid, bool active) override { native::SetTutorialActive(guid, active); }
     bool IsRegionScreenCurrent() override { return g_callbacks.isRegionScreenCurrent && g_callbacks.isRegionScreenCurrent(); }
     void DestroyCurrentScreen() override { if (g_callbacks.destroyCurrentScreen) g_callbacks.destroyCurrentScreen(); }
     void CreateRegionScreen() override { if (g_callbacks.createRegionScreen) g_callbacks.createRegionScreen(); }

@@ -12,6 +12,7 @@
 #include "app/NativeGraphics.h"
 #include "sc4/WinRegionScreen.h"
 #include "sc4/WinRegionView.h"
+#include "sc4/TutorialRegistry.h"
 
 class cSC4App;
 
@@ -31,5 +32,11 @@ void InstallRegionScreenHost(const RegionScreenServices& services);
 
 // Draws the region map's tiled canvas layers when they changed; true when it drew (the windows above must repaint).
 bool DrawRegionLayers();
+
+// The tutorial registry (SL::spSC4 vslot 0x178), read from tutorial_registry.lua on first use with the app's Lua; the finished
+// tutorials come from the preferences (+0xf34). Null when the script cannot be run.
+sc4::cSC4TutorialRegistry* TutorialRegistry();
+// cSC4TutorialRegistry::SetActive plus the preferences save the original does after it (spSC4 vslot 0x44).
+void SetTutorialActive(int guid, bool active);
 
 }  // namespace native

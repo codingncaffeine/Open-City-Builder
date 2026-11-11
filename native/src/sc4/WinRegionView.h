@@ -38,8 +38,8 @@
 // * The constructor never initialises +0x158; the screen sets it in LoadGUI. The port zeroes it so a hand-built view is
 //   deterministic (the constructor's store list, 0x10075afc6).
 //
-// RenderTile is PARTIAL: only the backdrop blit / black fill is recovered (0x10075bb66..0x10075bbf0); the per-city
-// compositing, the antialiased mask spans, the label windows and the selected-city grid of the remaining 5.4 KB are not.
+// RenderTile is PARTIAL: the backdrop, the per-city compositing and the city-name labels are drawn; the selected-city
+// grid and the icons of the original's 5.4 KB are not.
 #pragma once
 #include <cstdint>
 #include <list>
@@ -52,6 +52,8 @@
 #include "gz/cGZPersistResourceKey.h"
 #include "rz/cRZAutoRefCount.h"
 #include "rz/cRZString.h"
+
+class cIGZFont;
 #include "sc4/SCProperty.h"
 
 namespace sc4 {
@@ -229,6 +231,11 @@ public:
 
     // --- nSC4UI::GetChildWindowForCursorPos @ 0x10030a98e (cIGZWin::EnumChildren over iid 0x22ba0121).
     virtual cIGZWin* ChildWindowForCursorPos(cIGZWin* window, int x, int y) = 0;
+
+    // --- the city labels: RZ::WCM() vslot 0x14 SystemFont(id) (borrowed; null = no labels) and vslot 0x8c
+    //     DefaultText(0x5377be31), the ellipsis appended to a name cut to fit.
+    virtual cIGZFont* LabelFont(std::uint32_t /*id*/) { return nullptr; }
+    virtual void LabelEllipsis(cIGZString& out) { out.AssignFromCString("..."); }
 };
 IRegionViewHost* RegionViewHost();
 void SetRegionViewHost(IRegionViewHost* host);
@@ -346,9 +353,11 @@ private:
         std::vector<std::uint32_t> pixels;   // 0xAARRGGBB, colours premultiplied as the original treats them
         struct Run { int y, x0, x1; bool opaque; };
         std::vector<Run> runs;
+        int centerX = 0, centerY = 0;   // the label anchor: the alpha-weighted centre (RecalculateImagesFromCitySnapshots)
     };
     std::map<const cSC4RegionViewCity*, PreparedCity> prepared_;
     const PreparedCity& Prepare(const cSC4RegionViewCity& city);
+    void DrawCityLabel(cIGZBuffer* buffer, const cSC4RegionViewCity& city, const PreparedCity& prepared, int left, int top);
 };
 
 }  // namespace sc4

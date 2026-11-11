@@ -4,13 +4,18 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <map>
 #include <memory>
 
 #include "app/NativeBoot.h"
 #include "app/NativeUi.h"
 #include "dbpf/DBPFReader.h"
+#include "lua/ISCLua.h"
 #include "gz/RZServices.h"
+#include "gz/WinCtrlMgr.h"
+#include "gz/WinFont.h"
 #include "gz/cIGZMessage2.h"
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/App.h"
@@ -145,6 +150,28 @@ CityAdapter* AdapterFor(cISC4RegionalCity* city) {
     return raw;
 }
 
+// cSC4TutorialRegistry::GetRegionalCity (i386 0x004522ba): the active region's city whose tutorial GUID is `guid` (not for
+// -1), else the first whose name holds the GUID as eight hex digits.
+CityAdapter* TutorialCityFor(int guid) {
+    cISC4Region* region = ActiveRegion();
+    if (!region) return nullptr;
+    RegionCityList cities;
+    region->GetAllCities(cities);
+    char hex[16];
+    std::snprintf(hex, sizeof hex, "%08x", static_cast<unsigned>(guid));
+    for (auto& holder : cities) {
+        cISC4RegionalCity* city = holder.get();
+        if (!city) continue;
+        if (guid != -1 && Concrete(city)->GetTutorialGUID() == guid) return AdapterFor(city);
+        cRZString name;
+        Concrete(city)->GetCityName(name);
+        if (std::strstr(name.ToChar(), hex)) return AdapterFor(city);
+    }
+    return nullptr;
+}
+
+std::int32_t* InactiveTutorials() { return SL::spPreferences ? reinterpret_cast<std::int32_t*>(SL::spPreferences + 0xf34) : nullptr; }
+
 CityAdapter* CityAt(int x, int z) {
     cISC4Region* region = ActiveRegion();
     if (!region) return nullptr;
@@ -220,14 +247,41 @@ public:
         g_layers.erase(std::remove(g_layers.begin(), g_layers.end(), static_cast<TiledCanvas*>(canvas)), g_layers.end());
     }
     void InvalidateRenderer() override { for (TiledCanvas* layer : g_layers) layer->MarkDirty(); }
-    int NextActiveTutorialCity() override { return -1; }
-    sc4::IRegionCityView* TutorialCity(int) override { return nullptr; }
-    bool TutorialItemHidesMayorName(int) override { return false; }
+    int NextActiveTutorialCity() override {   // GetNextActive(region) -> the item's GUID
+        sc4::cSC4TutorialRegistry* registry = TutorialRegistry();
+        cISC4Region* region = ActiveRegion();
+        cIGZString* dir = region ? region->GetDirectoryName() : nullptr;
+        if (!registry || !dir) return -1;
+        const sc4::cSC4TutorialRegistry::Item* item =
+            registry->GetNextActive(dir->ToChar(), [](int guid) { return TutorialCityFor(guid) != nullptr; });
+        return item ? item->guid : -1;
+    }
+    sc4::IRegionCityView* TutorialCity(int guid) override { return TutorialCityFor(guid); }
+    bool TutorialItemHidesMayorName(int guid) override {
+        sc4::cSC4TutorialRegistry* registry = TutorialRegistry();
+        const sc4::cSC4TutorialRegistry::Item* item = registry ? registry->GetItem(guid) : nullptr;
+        return item && item->active;
+    }
     sc4::IRegionCityView* FindRegionalCity(int, int x, int z) override { return CityAt(x, z); }
     cIGZWin* CreateWindowFromScript(const cGZPersistResourceKey& key, cIGZWin* parent, std::uint32_t id) override {
         return g_services.createWindowFromScript ? g_services.createWindowFromScript(key, parent, id) : nullptr;
     }
     bool CreateRegionEffect(const char*, sc4::IRegionViewEffect**) override { return false; }
+    // The native build has no window control manager (RZ::WCM() is null); its system fonts come through the font seam.
+    cIGZFont* LabelFont(std::uint32_t id) override {
+        if (gz::cIGZWinCtrlMgr* controls = RZ::WCM()) {
+            gz::IWinFont* font = controls->SystemFont(static_cast<int>(id));
+            return font ? font->AsFont() : nullptr;
+        }
+        gz::IWinFontSource* fonts = gz::WinFontSource();
+        gz::IWinFont* font = fonts ? fonts->Font(id) : nullptr;
+        return font ? font->AsFont() : nullptr;
+    }
+    void LabelEllipsis(cIGZString& out) override {
+        gz::cIGZWinCtrlMgr* controls = RZ::WCM();
+        cIGZString* text = controls ? controls->DefaultText(0x5377be31) : nullptr;
+        out.AssignFromCString(text ? text->ToChar() : "...");
+    }
     sc4::cISCPropertyHolder* SignpostTuning() override { return nullptr; }
     cIGZWin* ChildWindowForCursorPos(cIGZWin* window, int x, int y) override { return nSC4UI::GetChildWindowForCursorPos(window, x, y); }
 } g_viewHost;
@@ -497,6 +551,40 @@ bool DrawRegionLayers() {
     bool drew = false;
     for (TiledCanvas* layer : g_layers) drew = layer->Draw() || drew;
     return drew;
+}
+
+void InstallScriptResources();   // app/NativeAutomataScripts.cpp
+
+// The app's scripting host (SL::spLua's cISCLua view, iid 0xea10c4a2; borrowed).
+static cISCLua* RegistryLua() {
+    cISCLua* lua = nullptr;
+    if (SL::spLua && SL::spLua->QueryInterface(0xea10c4a2, reinterpret_cast<void**>(&lua)) && lua) lua->Release();
+    return lua;
+}
+
+sc4::cSC4TutorialRegistry* TutorialRegistry() {
+    static sc4::cSC4TutorialRegistry registry;
+    static bool tried = false, ready = false;
+    if (!tried) {
+        cISCLua* lua = RegistryLua();
+        if (!lua) return nullptr;   // try again once the app has its Lua
+        tried = true;
+        InstallScriptResources();   // the loader reads tutorial_registry.lua from the game's packages
+        bool listChanged = false;
+        ready = registry.Init(lua, InactiveTutorials(), &listChanged);
+        if (ready && listChanged && g_services.app) g_services.app->SavePreferences();
+        if (std::getenv("SC4_DEBUG")) {
+            std::size_t count = 0;
+            for (const auto& entry : registry.Items()) count += entry.second.size();
+            std::fprintf(stderr, "tutorial registry: %s, %zu tutorials\n", ready ? "read" : "FAILED", count);
+        }
+    }
+    return ready ? &registry : nullptr;
+}
+
+void SetTutorialActive(int guid, bool active) {
+    sc4::cSC4TutorialRegistry* registry = TutorialRegistry();
+    if (registry && registry->SetActive(guid, active, InactiveTutorials()) && g_services.app) g_services.app->SavePreferences();
 }
 
 }  // namespace native

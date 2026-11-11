@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "gz/GZCOMDirector.h"
+#include "gz/Font.h"
 #include "gz/RZDraw.h"
 #include "gz/WinGen.h"
 #include "sc4/SC4Utilities.h"
@@ -316,6 +317,8 @@ const cSC4WinRegionView::PreparedCity& cSC4WinRegionView::Prepare(const cSC4Regi
     for (int row = 0; row < h; ++row)
         std::memcpy(&p.pixels[std::size_t(row) * w], src + std::size_t(row) * srcPitch, std::size_t(w) * 4);
     image->Unlock(cIGZBuffer::kLockRead);
+    p.centerX = w / 2;
+    p.centerY = h / 2;
 
     const bool maskUsable = mask && static_cast<int>(mask->Width()) >= w && static_cast<int>(mask->Height()) >= h &&
                             mask->Lock(cIGZBuffer::kLockRead);
@@ -342,6 +345,20 @@ const cSC4WinRegionView::PreparedCity& cSC4WinRegionView::Prepare(const cSC4Regi
             }
         }
         mask->Unlock(cIGZBuffer::kLockRead);
+        // The label anchor (RecalculateImagesFromCitySnapshots, i386 0x001a4cfe): the centre of the picture weighted by
+        // its alpha, rounded half up; the picture's middle when it has no alpha at all.
+        std::int64_t sumX = 0, sumY = 0, total = 0;
+        for (int row = 0; row < h; ++row)
+            for (int col = 0; col < w; ++col) {
+                const std::int64_t a = p.pixels[std::size_t(row) * w + col] >> 24;
+                sumX += col * a;
+                sumY += row * a;
+                total += a;
+            }
+        if (total > 0) {
+            p.centerX = static_cast<int>((sumX + total / 2) / total);
+            p.centerY = static_cast<int>((sumY + total / 2) / total);
+        }
     }
 
     // The grown edge: a pixel short of opaque takes in its right and lower neighbours (front-to-back "over"), so the
@@ -387,8 +404,9 @@ void cSC4WinRegionView::RenderTile(cIGZBuffer* buffer, int x, int y) {   // @ 0x
     }
     // The cities, back to front, each prepared once and blended over the tile at its map position: opaque runs copy,
     // partly transparent ones blend with the colours taken as premultiplied (dst = src + dst * (255 - alpha) / 255).
-    if (cities_.empty() || !buffer->Lock(cIGZBuffer::kLockWrite)) return;
-    auto* destination = static_cast<std::uint8_t*>(buffer->GetColorSurfaceBits());
+    // Each city locks the tile for its picture and lets go before its label, which the font renderer locks itself.
+    if (cities_.empty()) return;
+    std::uint8_t* destination = nullptr;
     const std::uint32_t destinationPitch = buffer->GetColorSurfaceStride();
     const cRZRect tileArea = *buffer->GetBufferArea();
     for (cSC4RegionViewCity* city : cities_) {
@@ -396,8 +414,13 @@ void cSC4WinRegionView::RenderTile(cIGZBuffer* buffer, int x, int y) {   // @ 0x
         cRZRect rect;
         GetRegionScreenRect(*city, rect);   // in view coordinates, i.e. canvas coordinates
         const int left = rect.left - x, top = rect.top - y;
-        if (left >= tileArea.right || top >= tileArea.bottom || rect.right - x <= tileArea.left || rect.bottom - y <= tileArea.top) continue;
+        const int labelReach = (rect.right - rect.left) / 6 + 1;   // the label may be 4/3 of the picture's width
+        if (left - labelReach >= tileArea.right || top >= tileArea.bottom || rect.right - x + labelReach <= tileArea.left ||
+            rect.bottom - y <= tileArea.top)
+            continue;
         const PreparedCity& p = Prepare(*city);
+        if (!buffer->Lock(cIGZBuffer::kLockWrite)) continue;
+        destination = static_cast<std::uint8_t*>(buffer->GetColorSurfaceBits());
         for (const PreparedCity::Run& run : p.runs) {
             const int ty = top + run.y;
             if (ty < tileArea.top || ty >= tileArea.bottom) continue;
@@ -421,8 +444,70 @@ void cSC4WinRegionView::RenderTile(cIGZBuffer* buffer, int x, int y) {   // @ 0x
                 *to = out;
             }
         }
+        buffer->Unlock(cIGZBuffer::kLockWrite);
+        DrawCityLabel(buffer, *city, p, left, top);
     }
-    buffer->Unlock(cIGZBuffer::kLockWrite);
+}
+
+// RenderTile's label (Mac i386 0x005002da, the block after the city's picture): the city name and, below it, the mayor
+// name, in the size's two system fonts (0x8a8cc984 / 0x8a8cc985, two ids lower per size step), colour (0xde, 0xe8, 0xe3),
+// centred on the picture's anchor, each cut to 4/3 of the picture's width with the default ellipsis text 0x5377be31.
+// Tutorial cities are always labelled; other established cities only with the labels option on; the selected city only
+// with "always labels".
+void cSC4WinRegionView::DrawCityLabel(cIGZBuffer* buffer, const cSC4RegionViewCity& city, const PreparedCity& prepared, int left, int top) {
+    static const bool trace = std::getenv("SC4_REGIONLABELDEBUG") != nullptr;
+    IRegionViewHost* host = RegionViewHost();
+    IRegionCityView* regional = host ? host->FindRegionalCity(regionIndex_, city.x, city.z) : nullptr;
+    if (trace) {
+        static std::map<const cSC4RegionViewCity*, bool> seen;
+        if (!seen[&city]) {
+            seen[&city] = true;
+            cRZString name;
+            if (regional) regional->GetCityName(name);
+            std::fprintf(stderr, "region label: city (%d, %d) size %u regional %p \"%s\" tutorial %d established %d labels %d\n", city.x, city.z,
+                         city.size, static_cast<void*>(regional), name.ToChar(), regional ? int(regional->IsTutorial()) : -1,
+                         regional ? int(regional->GetEstablished()) : -1, int(labels_));
+        }
+    }
+    if (!regional) return;
+    const bool tutorial = regional->IsTutorial();
+    if (!tutorial && !regional->GetEstablished()) return;
+    if (&city == selected_ && !alwaysLabels_) return;
+    if (!tutorial && !labels_) return;
+    const std::uint32_t sizeStep = static_cast<std::uint32_t>(city.size) * 2;
+    cIGZFont* nameFont = host->LabelFont(0x8a8cc984u - sizeStep);
+    cIGZFont* mayorFont = host->LabelFont(0x8a8cc985u - sizeStep);
+    if (!nameFont || !mayorFont) {
+        static bool reported = false;
+        if (!reported && std::getenv("SC4_DEBUG"))
+            std::fprintf(stderr, "region view: no label font for size %u (0x%08x)\n", city.size, 0x8a8cc984u - sizeStep);
+        reported = true;
+        return;
+    }
+    const std::uint32_t colour = buffer->ConvertRGBValueToNative(0xde, 0xe8, 0xe3);
+    cRZString cityName, mayorName;
+    regional->GetCityName(cityName);
+    regional->GetMayorName(mayorName);
+    filter_tutorial_mayor_name(regional, &mayorName);
+    const cRZRect* imageArea = city.image ? city.image->GetBufferArea() : nullptr;
+    const cRZRect fit{0, 0, imageArea ? (imageArea->right - imageArea->left) * 4 / 3 : 0, nameFont->GetLineHeight()};
+    cRZString ellipsis;
+    host->LabelEllipsis(ellipsis);
+    nameFont->FormatForEllipsis(cityName, ellipsis, fit, false);
+    mayorFont->FormatForEllipsis(mayorName, ellipsis, fit, false);
+    const int nameWidth = nameFont->GetStringWidth(cityName.ToChar(), cityName.Strlen());
+    const int mayorWidth = mayorFont->GetStringWidth(mayorName.ToChar(), mayorName.Strlen());
+    const int anchorX = left + prepared.centerX;
+    const int nameY = top + prepared.centerY - nameFont->GetLineHeight();
+    const int mayorY = nameY + mayorFont->GetLineHeight();
+    const bool drew = nameFont->DrawTextLine(buffer, anchorX - nameWidth / 2, nameY, cityName.ToChar(), cityName.Strlen(), colour, 0x8000000u, nullptr, nullptr);
+    if (trace) {
+        static int shown = 0;
+        if (shown++ < 12)
+            std::fprintf(stderr, "region label: draw \"%s\" at (%d, %d) width %d colour %08x drew %d tile %dx%d\n", cityName.ToChar(),
+                         anchorX - nameWidth / 2, nameY, nameWidth, colour, int(drew), int(buffer->Width()), int(buffer->Height()));
+    }
+    mayorFont->DrawTextLine(buffer, anchorX - mayorWidth / 2, mayorY, mayorName.ToChar(), mayorName.Strlen(), colour, 0x8000000u, nullptr, nullptr);
 }
 
 void cSC4WinRegionView::GetRegionScreenRect(const cSC4RegionViewCity& city, cRZRect& out) const {   // @ 0x10075dae2
@@ -594,8 +679,10 @@ void cSC4WinRegionView::UpdateSignpost(cSC4RegionViewCity& city) {   // @ 0x1007
     int tutorialZ = -1;
     IRegionViewHost* host = RegionViewHost();
     if (host) {
+        // The original null-checks the registry item; a GUID is any 32-bit value (Getting Started is 0xabfad020), so only
+        // the host's "none" answer (-1) skips it.
         const int item = host->NextActiveTutorialCity();
-        if (item >= 0) {
+        if (item != -1) {
             if (IRegionCityView* tutorialCity = host->TutorialCity(item)) tutorialCity->GetPosition(tutorialX, tutorialZ);
         }
     }

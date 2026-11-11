@@ -249,6 +249,7 @@ src/sc4/NeighborConnection.cpp
 src/sc4/NeighborDeal.cpp
 src/app/NativeRegionScreen.cpp
 src/sc4/WinRegionView.cpp
+src/sc4/TutorialRegistry.cpp
 src/sc4/SmallWinProcs.cpp
 src/app/NativeCity.cpp
 src/tools/city_probe_bindings.cpp
