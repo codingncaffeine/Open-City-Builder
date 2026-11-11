@@ -4,6 +4,8 @@
 #include "sc4/TrafficAutomataManager.h"
 #include "sc4/PathFinder.h"
 
+#include <chrono>
+#include <cstdio>
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -460,7 +462,8 @@ void cSC4TrafficAutomataManager::GetEdgeDensity(ITrafficNetworkMapOccupant* occu
         std::memset(weights, 0, 16 * sizeof(float));
         return;
     }
-    const float maxAutos = GetMaxAutosPerSecond(layer);
+    // i386 0x000cb5da: the scale is GetCommotionMultiplier (vslot 0x174), not the max autos per second.
+    const float commotion = GetCommotionMultiplier(occupant, layer);
     SC4CellRect rect{};
     occupant->AsOccupant()->GetBoundingCityCells(rect);
     bool mirrored = false;
@@ -478,28 +481,27 @@ void cSC4TrafficAutomataManager::GetEdgeDensity(ITrafficNetworkMapOccupant* occu
     }
     for (int row = 0; row < 4; ++row) {
         for (int column = 0; column < 4; ++column) {
-            weights[row][column] = static_cast<float>(table[row * 4 + column]) * multiplier * maxAutos;
+            weights[row][column] = static_cast<float>(table[row * 4 + column]) * multiplier * commotion;
         }
     }
 }
 
 void cSC4TrafficAutomataManager::GetOccupantTripEdgeDensity(ITrafficNetworkMapOccupant* occupant, TrafficTileInfo* tile,
                                                             float multiplier, float (*weights)[4]) {
-    // 0x100115310
-    (void)occupant;
+    // 0x100115310 / i386 0x000ca46a: scaled by GetCommotionMultiplier(occupant, layer 7).
     if (!tile || !weights) return;
-    const float maxAutos = GetMaxAutosPerSecond(PopulateLayer::kLayer7);
+    const float commotion = GetCommotionMultiplier(occupant, PopulateLayer::kLayer7);
     if (multiplier >= 0.0f) {
         for (int row = 0; row < 4; ++row)
             for (int column = 0; column < 4; ++column)
                 weights[row][column] =
-                    static_cast<float>(tile->distribution[row][column]) * multiplier * maxAutos;
+                    static_cast<float>(tile->distribution[row][column]) * multiplier * commotion;
     } else {
         // The original walks the table transposed with stride 8 bytes (column, row) and negates the product.
         for (int row = 0; row < 4; ++row)
             for (int column = 0; column < 4; ++column)
                 weights[row][column] =
-                    -(static_cast<float>(tile->distribution[column][row]) * multiplier * maxAutos);
+                    -(static_cast<float>(tile->distribution[column][row]) * multiplier * commotion);
     }
 }
 
@@ -578,7 +580,7 @@ void cSC4TrafficAutomataManager::PopulateVisibleArea(float deltaMilliseconds) {
         for (int z = currentCellZ_; z <= rect[3] && !timedOut; ++z) {
             for (int x = currentCellX_; x <= rect[2] && !timedOut; ++x) {
                 for (TrafficTileInfo* tile = network->GetFirstTileInfoAtCell(x, z); tile; tile = tile->next)
-                    PopulateNetworkOccupant(tile->occupant, tile, x, z, currentLayer_->elapsed);
+                    PopulateNetworkOccupant(tile->occupant, tile, x, z, layerUpdates_.front().elapsed);   // i386 0x000cc65a: the FRONT layer's time
                 timer.GetElapsedTimeFloat(elapsedSeconds);
                 if (elapsedSeconds >= 5.0f) timedOut = true;
                 currentCellX_ = x;
@@ -649,8 +651,35 @@ void cSC4TrafficAutomataManager::PopulateNetworkOccupant(ITrafficNetworkMapOccup
 // count, the summed edge densities of the layers on that path type, and the spawn-and-recall entry of the occupant's network type:
 // below the curve's target (total density / the cell's capacity) an automaton is spawned on a layer and edge picked by weight, far
 // above it one is recalled.
-//   PARTIAL: the layer-2 clock factor (tuning +0x178), the player-drive path (vslot 0x34 and tuning +0x170) and the map's
-//   "occupied" test (0x88) are not ported.
+//   PARTIAL: the layer-2 clock factor (tuning +0x178) and the player-drive path (vslot 0x34 and tuning +0x170) are not
+//   ported. The map test at 0x88 is IsIntersection: no car is spawned on an intersection tile.
+namespace {
+// SC4_SPAWNDEBUG: the car layers' spawn inputs per network type, summed over 5 s of real time: the summed edge density,
+// the cell capacity, the curve's target and the smoothed and current automata counts of the occupants passed.
+void TraceSpawnInputs(int networkType, float total, float capacity, float desired, float smoothed, std::uint32_t count,
+                      float f0, float f4) {
+    static const bool trace = std::getenv("SC4_SPAWNDEBUG") != nullptr;
+    if (!trace) return;
+    struct Sum { double n = 0, total = 0, capacity = 0, desired = 0, smoothed = 0, count = 0, under = 0; float f0 = 0, f4 = 0; };
+    static Sum sums[16];
+    static auto last = std::chrono::steady_clock::now();
+    Sum& s = sums[networkType & 15];
+    s.n += 1; s.total += total; s.capacity += capacity; s.desired += desired; s.smoothed += smoothed; s.count += count;
+    if (desired > 0.0f && smoothed / desired < f4) s.under += 1;
+    s.f0 = f0; s.f4 = f4;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last < std::chrono::seconds(5)) return;
+    last = now;
+    for (int t = 0; t < 16; ++t) {
+        Sum& v = sums[t];
+        if (v.n == 0) continue;
+        std::fprintf(stderr, "spawn: net %d passes %.0f total %.3f capacity %.2f desired %.3f smoothed %.3f count %.3f under %.0f%% (f0 %.2f f4 %.2f)\n",
+                     t, v.n, v.total / v.n, v.capacity / v.n, v.desired / v.n, v.smoothed / v.n, v.count / v.n, 100.0 * v.under / v.n, v.f0, v.f4);
+        v = Sum{};
+    }
+}
+}  // namespace
+
 void cSC4TrafficAutomataManager::PopulateNetworkOccupant(ITrafficNetworkMapOccupant* occupant, TrafficTileInfo* tile,
                                                          int cellX, int cellZ, float elapsedMilliseconds) {
     static constexpr int kTravelTypeForPathType[3] = {-1, 1, 0};   // kTrafficSimNetworkType, path types 1 and 2
@@ -686,8 +715,11 @@ void cSC4TrafficAutomataManager::PopulateNetworkOccupant(ITrafficNetworkMapOccup
         if (capacity == 0.0f) continue;
         auto& params = AutomataTuning().spawnRecall[networkType];
         const float desired = params.curve.GetOutputValue(total / capacity);
+        TraceSpawnInputs(networkType, total, capacity, desired, smoothed,
+                         network->OccupantAutomataCount(occupant, pathType), params.f0, params.f4);
         if (smoothed <= desired || (flags & 2) != 0) {
             if (!(desired > 0.0f && total > 0.01f && (flags & 1) == 0 && smoothed / desired < params.f4 &&
+                  !network->OccupantIsIntersection(occupant) &&
                   static_cast<float>(Random().RandomDoubleUniform()) < params.f0))
                 continue;
             float pick = static_cast<float>(Random().RandomDoubleRangeUniform(0.009999999776482582, static_cast<double>(total)));

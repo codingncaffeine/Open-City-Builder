@@ -3,6 +3,7 @@
 // also listed in notes/ledger_pending/cSC4AutomataManager.txt.
 #include "sc4/AutomataManager.h"
 
+#include <chrono>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -943,7 +944,21 @@ float cSC4AutomataManager::GetClockMultiplier(PopulateLayer layer) {
     auto it = sTuning.clockCurves.find(key);
     if (it == sTuning.clockCurves.end()) return 1.0f;
     const float input = static_cast<float>(minute) / 60.0f + static_cast<float>(hour);
-    return it->second.GetOutputValue(input);
+    const float out = it->second.GetOutputValue(input);
+    static const bool trace = std::getenv("SC4_SPAWNDEBUG") != nullptr;
+    if (trace) {   // SC4_SPAWNDEBUG: the city time and each layer's clock multiplier, once per 5 s of real time
+        static auto last = std::chrono::steady_clock::time_point{};
+        static float seen[12] = {};
+        seen[static_cast<std::uint32_t>(layer) % 12] = out;
+        const auto now = std::chrono::steady_clock::now();
+        if (now - last >= std::chrono::seconds(5)) {
+            last = now;
+            std::fprintf(stderr, "clock: %02d:%02d layers 1..11:", hour, minute);
+            for (int i = 1; i < 12; ++i) std::fprintf(stderr, " %.2f", seen[i]);
+            std::fprintf(stderr, "\n");
+        }
+    }
+    return out;
 }
 
 void cSC4AutomataManager::DoAnimationTick(std::uint32_t data, float deltaMilliseconds) {

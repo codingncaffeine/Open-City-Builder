@@ -166,6 +166,10 @@ public:
         std::uint32_t* count = m ? m->GetAutomataCount(o, pathType) : nullptr;
         return count ? *count : 0;
     }
+    bool OccupantIsIntersection(ITrafficNetworkMapOccupant* o) override {
+        cSC4TrafficNetworkMap* m = Map();
+        return m && m->IsIntersection(o);
+    }
     int LaneCount(ITrafficNetworkMapOccupant* o, std::uint32_t type, std::uint8_t entry, std::uint8_t exit) override {
         cISC4PathInfo* info = Info(o);
         return info ? info->GetLaneCount(type, entry, exit) : 0;

@@ -180,6 +180,8 @@ public:
     virtual bool PathStart(ITrafficNetworkMapOccupant*, std::uint32_t, cS3DVector3&) { return false; }
     // the map's automata of a path type on the occupant (0x60 in the car layers' pass)
     virtual std::uint32_t OccupantAutomataCount(ITrafficNetworkMapOccupant*, std::uint32_t) { return 0; }
+    // the traffic network map's IsIntersection (map vslot 0x88 in the car layers' pass): no car is spawned on an intersection
+    virtual bool OccupantIsIntersection(ITrafficNetworkMapOccupant*) { return false; }
 };
 
 class ITrafficAutomataManagerHost : public IAutomataManagerHost {

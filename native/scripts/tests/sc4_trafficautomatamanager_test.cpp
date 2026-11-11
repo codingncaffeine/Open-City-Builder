@@ -1087,18 +1087,21 @@ int main() {
             for (int column = 0; column < 4; ++column)
                 tripTile.distribution[row][column] = static_cast<std::uint16_t>(row * 4 + column + 1);
         float weights[4][4] = {};
-        tuning.f218d0 = 2.0f;   // GetMaxAutosPerSecond(layer 7)
+        // i386 0x000ca46a scales by GetCommotionMultiplier (1 while the commotion flag is clear), never by the max autos
+        // per second: a max-autos value of 2 must not show in the weights.
+        tuning.f218d0 = 2.0f;
         manager->GetOccupantTripEdgeDensity(nullptr, &tripTile, 0.5f, weights);
         for (int row = 0; row < 4; ++row)
             for (int column = 0; column < 4; ++column)
-                CHECK(weights[row][column] == static_cast<float>(tripTile.distribution[row][column]) * 0.5f * 2.0f);
+                CHECK(weights[row][column] == static_cast<float>(tripTile.distribution[row][column]) * 0.5f);
         manager->GetOccupantTripEdgeDensity(nullptr, &tripTile, -0.5f, weights);
         for (int row = 0; row < 4; ++row)
             for (int column = 0; column < 4; ++column)
                 CHECK(weights[row][column] ==
-                      -(static_cast<float>(tripTile.distribution[column][row]) * -0.5f * 2.0f));
+                      -(static_cast<float>(tripTile.distribution[column][row]) * -0.5f));
 
-        // ---- GetEdgeDensity (0x100115196): the 4x4 table from the traffic simulator, times multiplier and maxAutos
+        // ---- GetEdgeDensity (0x100115196 / i386 0x000cb5da): the 4x4 table from the traffic simulator, times the multiplier
+        // and GetCommotionMultiplier (1 here); the max autos per second (3) must not show in the weights
         for (int i = 0; i < 16; ++i) host.trafficSimulator.table[i] = static_cast<std::uint16_t>(i * 10 + 1);
         networkOccupant.city.rect = SC4CellRect{4, 5, 6, 7};
         tuning.f218d0 = 3.0f;
@@ -1109,7 +1112,7 @@ int main() {
         for (int row = 0; row < 4; ++row)
             for (int column = 0; column < 4; ++column)
                 CHECK(weights[row][column] ==
-                      static_cast<float>(host.trafficSimulator.table[row * 4 + column]) * 2.0f * 3.0f);
+                      static_cast<float>(host.trafficSimulator.table[row * 4 + column]) * 2.0f);
         manager->GetEdgeDensity(&networkOccupant, &tile, PopulateLayer::kLayer1, -2.0f, weights);
         CHECK(host.trafficSimulator.mirrored);
         manager->GetEdgeDensity(&networkOccupant, &tile, static_cast<PopulateLayer>(11), 1.0f, weights);
@@ -1125,7 +1128,7 @@ int main() {
         manager->GetEdgeDensity(&networkOccupant, &tile, PopulateLayer::kLayer10, 1.0f, weights);
         CHECK(host.trafficSimulator.lastNetworkType == 8);
         manager->GetEdgeDensity(&networkOccupant, &tripTile, PopulateLayer::kLayer7, 0.5f, weights);
-        CHECK(weights[0][0] == static_cast<float>(tripTile.distribution[0][0]) * 0.5f * tuning.f218d0);
+        CHECK(weights[0][0] == static_cast<float>(tripTile.distribution[0][0]) * 0.5f);   // commotion 1, not max autos
 
         // ---- ChooseRandomModel (0x10011471a): no exemplar -> the key stays untouched
         cGZPersistResourceKey key;

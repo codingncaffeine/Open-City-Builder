@@ -1102,12 +1102,12 @@ void cSC4TrafficNetworkMap::RemoveTrainJunction(ITrafficNetworkMapOccupant* occu
     trainJunctions_.erase(it);
 }
 
-// 0x10029c2a0
+// 0x10029c2a0 / i386 0x001e7cf2: the path info's IsIntersection of path type 0 only.
 bool cSC4TrafficNetworkMap::IsIntersection(ITrafficNetworkMapOccupant* occupant) {
     if (!occupant) return false;
     ITrafficNetworkMapPathInfo* pathInfo = occupant->GetPathInfo();
     if (!pathInfo) return false;
-    return pathInfo->IsIntersection(0) || pathInfo->IsIntersection(3);
+    return pathInfo->IsIntersection(0);
 }
 
 // 0x10029c2cc
