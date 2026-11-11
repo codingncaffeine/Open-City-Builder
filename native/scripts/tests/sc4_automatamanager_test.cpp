@@ -317,12 +317,12 @@ struct FakeDispatchView final : IAutomataDispatchView {
 };
 
 struct FakeSimulator final : IAutomataSimulator {
-    bool paused = false, fast = false, panel = true;
+    bool emergency = false, paused = false, panel = true;
     int speed = 0;
+    bool IsEmergencyPaused() override { return emergency; }
     bool IsPaused() override { return paused; }
-    bool IsFastForward() override { return fast; }
-    int SpeedIndex() override { return speed; }
-    bool SpeedPanelVisible() override { return panel; }
+    int SimSpeed() override { return speed; }
+    bool VariableSpeedAutomata() override { return panel; }
 };
 
 struct FakeMessageServer final : cIGZMessageServer2 {
@@ -1175,18 +1175,27 @@ int main() {
         host.simulator.speed = 1;
         CHECK(!manager->CalculateSimSpeedModifier());
         CHECK(cSC4AutomataManager::SimSpeedModifier() == 2.0f);
+        host.simulator.speed = 3;   // i386 0x000bd8a8: any speed but 0 and 2 takes the +0x58 value
+        CHECK(!manager->CalculateSimSpeedModifier());
+        CHECK(cSC4AutomataManager::SimSpeedModifier() == 2.0f);
         host.simulator.speed = 0;
         CHECK(!manager->CalculateSimSpeedModifier());
         CHECK(cSC4AutomataManager::SimSpeedModifier() == 1.0f);
-        host.simulator.fast = true;
+        host.simulator.panel = false;
+        host.simulator.speed = 2;
+        CHECK(!manager->CalculateSimSpeedModifier());
+        CHECK(cSC4AutomataManager::SimSpeedModifier() == 1.0f);   // variable speed automata off
+        host.simulator.panel = true;
+        host.simulator.speed = 0;
+        host.simulator.paused = true;
         CHECK(manager->CalculateSimSpeedModifier());
         CHECK(cSC4AutomataManager::SimSpeedPaused());
         CHECK(cSC4AutomataManager::SimSpeedModifier() == 0.0f);
-        host.simulator.fast = false;
-        host.simulator.paused = true;
+        host.simulator.paused = false;
+        host.simulator.emergency = true;
         CHECK(!manager->CalculateSimSpeedModifier());
         CHECK(cSC4AutomataManager::SimSpeedModifier() == 1.0f);
-        host.simulator.paused = false;
+        host.simulator.emergency = false;
     }
 
     // ---------------------------------------------------------------- tuning reader

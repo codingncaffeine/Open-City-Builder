@@ -15,7 +15,7 @@ class cSC4App;
 class cIGZString;
 class cIGZUnknown;
 class cIGZMessageTarget2;
-namespace sc4 { enum class CityComponent : std::uint8_t; class cSC4City; class IAdvisorWindow; class cSC4AdvisorUIAdvisorWinProc; }
+namespace sc4 { enum class CityComponent : std::uint8_t; class cSC4City; class cSC4Simulator; class IAdvisorWindow; class cSC4AdvisorUIAdvisorWinProc; }
 
 namespace native {
 
@@ -51,6 +51,7 @@ void TickSimulatorServices(std::uint32_t tickNumber);
 bool AddCitySimulatorAgent(cIGZMessageTarget2* agent, int interval, const char* name, std::uint32_t flags);
 void RemoveCitySimulatorAgent(cIGZMessageTarget2* agent);
 bool CitySimulatorPresent();   // SL::spSimulator != nullptr
+sc4::cSC4Simulator* CitySimulatorObject();   // SL::spSimulator: the city's cSC4Simulator, null outside a city
 // cSC4City::Init / Shutdown for one component: its recovered class's Init / Shutdown (NativeCityComponents.cpp).
 sc4::cSC4City* HostCity();   // the city being loaded or played (NativeCity.cpp)
 cIGZSerializable* NativeCreateSerializable(std::uint32_t classId);   // a new object of a city class, one reference (NativeCity.cpp)

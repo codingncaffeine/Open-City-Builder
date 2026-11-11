@@ -87,6 +87,7 @@ bool AddCitySimulatorAgent(cIGZMessageTarget2* agent, int interval, const char* 
 }
 
 bool CitySimulatorPresent() { return CitySimulator() != nullptr; }
+sc4::cSC4Simulator* CitySimulatorObject() { return CitySimulator(); }
 
 void RemoveCitySimulatorAgent(cIGZMessageTarget2* agent) {
     if (cSC4Simulator* simulator = CitySimulator()) simulator->RemoveAgent(agent);

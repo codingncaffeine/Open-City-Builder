@@ -373,12 +373,12 @@ struct FakeDispatchView final : IAutomataDispatchView {
 };
 
 struct FakeSimulator final : IAutomataSimulator {
-    bool paused = false, fast = false, panel = true;
+    bool emergency = false, paused = false, panel = true;
     int speed = 0;
+    bool IsEmergencyPaused() override { return emergency; }
     bool IsPaused() override { return paused; }
-    bool IsFastForward() override { return fast; }
-    int SpeedIndex() override { return speed; }
-    bool SpeedPanelVisible() override { return panel; }
+    int SimSpeed() override { return speed; }
+    bool VariableSpeedAutomata() override { return panel; }
 };
 
 struct FakeMessageServer final : cIGZMessageServer2 {

@@ -409,14 +409,15 @@ public:
     virtual void ShowAllIndicators(int type, bool show) = 0;
 };
 
-// The simulator's speed panel (SL::spSimulator and SL::spSC4).
+// The simulator's speed and the variable-speed preference (SL::spSimulator and SL::spSC4). Slots are x64; the i386 calls
+// in CalculateSimSpeedModifier (0x000bd8a8) are 0x44 / 0x3c / 0x6c = vtable entries +0x4c / +0x44 / +0x74 of cSC4Simulator.
 class IAutomataSimulator {
 public:
     virtual ~IAutomataSimulator() = default;
-    virtual bool IsPaused() = 0;                                                // 0x88
-    virtual bool IsFastForward() = 0;                                           // 0x78
-    virtual int SpeedIndex() = 0;                                               // 0xd8
-    virtual bool SpeedPanelVisible() = 0;                                       // spSC4 0x130 -> +0xf18
+    virtual bool IsEmergencyPaused() = 0;                                       // 0x88 cSC4Simulator::IsEmergencyPaused
+    virtual bool IsPaused() = 0;                                                // 0x78 cSC4Simulator::IsPaused
+    virtual int SimSpeed() = 0;                                                 // 0xd8 cSC4Simulator::GetSimSpeed (0..2)
+    virtual bool VariableSpeedAutomata() = 0;                                   // spSC4 0x130 -> preferences +0xf18
 };
 
 // cSC4AutomataTuningParams and the loose tuning values that do not belong to it. The field names are the original
@@ -538,7 +539,7 @@ public:
     virtual void ReleaseObject(cIGZUnknown* object) = 0;                              // vslot 0x10 on any object
     // ---- simulator / misc
     virtual IAutomataSimulator* Simulator() = 0;                                      // SL::spSimulator (null in headless)
-    virtual bool VehicleManagerPaused() = 0;                                          // SL::spVehicleManager vslot 0x68
+    virtual bool VehicleManagerPaused() = 0;                                          // SL::spVehicleManager vslot 0x68 = IsDrivingMode
     virtual bool LandfillDeveloperPresent() = 0;                                      // SL::spLandfillDeveloper != 0
     virtual int LandfillSourceBuildingCount() = 0;                                    // spLandfillDeveloper vslot 0x58
     virtual bool GetTuningProperties(cISCPropertyHolder** out) = 0;                   // spRM vslot 0x18 -> exemplar 0x30

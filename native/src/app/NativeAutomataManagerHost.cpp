@@ -27,6 +27,7 @@
 #include "sc4/Exemplar.h"
 #include "sc4/OccupantGroupTemplate.h"
 #include "sc4/ServiceLocator.h"
+#include "sc4/Simulator.h"
 #include "sc4/TrafficAutomataManager.h"
 #include "sc4/VehicleManager.h"
 #include "sc4/cSC424HourClock.h"
@@ -196,6 +197,19 @@ private:
     static SC4ViewUtilities* View() { cSC43DRender* r = CityRenderer(); return r ? r->GetViewUtilities() : nullptr; }
 } g_viewUtilities;
 
+// SL::spSimulator and the variable-speed preference as CalculateSimSpeedModifier (i386 0x000bd8a8) reads them; the
+// automata move 1x / 2x / 4x at turtle / llama / cheetah (tuning 0x6b42922c) and freeze while the simulator is paused.
+class SimulatorView final : public IAutomataSimulator {
+public:
+    bool IsEmergencyPaused() override { cSC4Simulator* s = CitySimulatorObject(); return s && s->IsEmergencyPaused(); }
+    bool IsPaused() override { cSC4Simulator* s = CitySimulatorObject(); return s && s->IsPaused(); }
+    int SimSpeed() override { cSC4Simulator* s = CitySimulatorObject(); return s ? s->GetSimSpeed() : 0; }
+    bool VariableSpeedAutomata() override {
+        const std::uint8_t* preferences = SL::spPreferences;
+        return preferences && preferences[0xf18] != 0;   // Graphics options "variable speed automata", on by default
+    }
+};
+
 class Host final : public IVehicleManagerHost {
 public:
     // ---- framework
@@ -254,8 +268,11 @@ public:
     IAutomataDispatchView* DispatchView() override { return nullptr; }
     void ReleaseObject(cIGZUnknown* object) override { if (object) object->Release(); }
     // ---- simulator / misc
-    IAutomataSimulator* Simulator() override { return nullptr; }
-    bool VehicleManagerPaused() override { return false; }
+    IAutomataSimulator* Simulator() override {
+        static SimulatorView view;
+        return CitySimulatorObject() ? &view : nullptr;
+    }
+    bool VehicleManagerPaused() override { return false; }   // IsDrivingMode: the native game has no driving mode yet
     bool LandfillDeveloperPresent() override { return false; }
     int LandfillSourceBuildingCount() override { return 0; }
     bool GetTuningProperties(cISCPropertyHolder** out) override {

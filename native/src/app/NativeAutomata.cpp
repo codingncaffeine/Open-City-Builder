@@ -10,6 +10,7 @@
 #include "rz/cRZMessage2Standard.h"
 #include "s3d/ModelInstance.h"
 #include "s3d/ModelInstanceAnimatedSprite.h"
+#include "sc4/AutomataManager.h"
 #include "sc4/Automaton.h"
 #include "sc4/TrafficAutomaton.h"
 #include "sc4/TrafficNetworkMap.h"
@@ -164,8 +165,10 @@ public:
     }
     IAutomatonGroupTemplate* FindAutomataGroup(std::uint32_t id) override { return NativeFindAutomatonGroup(id); }
     bool AnimationUpdateAllowed() override { return true; }
-    float SimSpeedModifier() override { return 1.0f; }
-    float MaxSpeedUnits() override { return 3600.0f; }   // the tests of the recovered classes use the same value
+    float SimSpeedModifier() override { return cSC4AutomataManager::SimSpeedModifier(); }   // cSC4AutomataManager::sfSimSpeedModifier
+    // The int global 0x100b21888 = the second value of tuning property 0x4998c900 (the shipped default speed range 80..110 km/h):
+    // every new vehicle starts at this speed (cSC4Vehicle ctor), so a wrong value sends the whole traffic flow at it.
+    float MaxSpeedUnits() override { return static_cast<float>(AutomataTuning().f21888); }
     float FadeDurationSeconds() override { return 0.5f; }
     void PostMessage(cIGZMessage2*) override {}
     std::uint32_t GenerateSoundInstanceId() override { return ++sound_; }

@@ -2,6 +2,7 @@
 // port of the exported decompile; where the decompiler dropped SIMD lanes, arguments or the float/int rounding idiom the
 // disassembly was used and the comment names the address (scripts/dec_addrs.py, /disassemble_function).
 #include "sc4/Vehicle.h"
+#include <cstdlib>
 
 #include <algorithm>
 #include <cfloat>
@@ -347,6 +348,26 @@ bool cSC4Vehicle::DoStateTick(float milliseconds) {
 // When the path ends the reached-destination flag and callback fire, otherwise the segment direction (averaged with the
 // previous one) offsets the point by half the radius and the vehicle moves there. The actual speed is the distance
 // travelled over the frame time.
+namespace {
+// SC4_TRAFFICSPEED: the mean and peak driven speed (km/h; speeds are metres per millisecond) of every vehicle path step,
+// printed once per 40 s of summed vehicle tick time.
+void TraceDrivenSpeed(float meters, float milliseconds, float modifier, float maxSpeed) {
+    static const bool trace = std::getenv("SC4_TRAFFICSPEED") != nullptr;
+    if (!trace) return;
+    static double sumMeters = 0.0, sumMs = 0.0, peak = 0.0;
+    static long steps = 0;
+    sumMeters += meters;
+    sumMs += milliseconds;
+    ++steps;
+    if (milliseconds > 0.0f) peak = std::max(peak, double(meters) / milliseconds * 3600.0);
+    if (sumMs < 40000.0) return;
+    std::fprintf(stderr, "traffic speed: mean %.1f km/h, peak %.1f km/h, modifier %.2f, max %.1f km/h over %ld steps\n",
+                 sumMeters / sumMs * 3600.0, peak, modifier, maxSpeed * 3600.0, steps);
+    sumMeters = sumMs = peak = 0.0;
+    steps = 0;
+}
+}  // namespace
+
 bool cSC4Vehicle::DoPathTick(float milliseconds) {
     const cS3DVector3 startPosition = position_;
     float speed = GetCurrentSpeed();
@@ -360,6 +381,7 @@ bool cSC4Vehicle::DoPathTick(float milliseconds) {
             SetSpeed(leaderSpeed, 0.5f);
         }
         const float step = safe <= distance ? safe : distance;
+        TraceDrivenSpeed(step > 0.0f ? step : 0.0f, milliseconds, modifier, GetMaxSpeed());
         bool result = true;
         if (step <= 0.0f) {
             distance = step;

@@ -913,17 +913,18 @@ bool cSC4AutomataManager::CalculateSimSpeedModifier() {
     if (!simulator) return false;
     if (g_host->VehicleManagerPaused()) {
         sfSimSpeedModifier = sTuning.f21a60;
+    } else if (simulator->IsEmergencyPaused()) {
+        sfSimSpeedModifier = sTuning.f21a54;
+    } else if (!simulator->VariableSpeedAutomata()) {
+        sfSimSpeedModifier = sTuning.f21a54;
     } else if (simulator->IsPaused()) {
-        sfSimSpeedModifier = sTuning.f21a54;
-    } else if (!simulator->SpeedPanelVisible()) {
-        sfSimSpeedModifier = sTuning.f21a54;
-    } else if (simulator->IsFastForward()) {
         sfSimSpeedModifier = 0.0f;
         sbSimSpeedPaused = true;
     } else {
-        const int index = simulator->SpeedIndex();
-        const float* table = &sTuning.f21a54;
-        if (index == 1) table = &sTuning.f21a58;
+        // i386: speed 0 -> +0x54, 2 -> +0x5c, any other -> +0x58 (the shipped tuning: 1, 4, 2 = turtle, cheetah, llama)
+        const int index = simulator->SimSpeed();
+        const float* table = &sTuning.f21a58;
+        if (index == 0) table = &sTuning.f21a54;
         else if (index == 2) table = &sTuning.f21a5c;
         sfSimSpeedModifier = *table;
     }
