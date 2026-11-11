@@ -32,6 +32,7 @@ sc4::cSC4Automaton* AutomatonOf(sc4::IAutomataAutomaton* view);
 sc4::ITrafficAutomataAutomaton* TrafficAutomatonView(sc4::IAutomataAutomaton* view);
 // The managers' views of a city occupant / of a building (QI 0x87dda3a9 on the object); stateless, kept per address.
 sc4::IAutomataOccupant* CityOccupantView(sc4::cISC4Occupant* occupant);
+sc4::cISC4Occupant* CityOccupantOf(sc4::IAutomataOccupant* view);
 sc4::IAutomataBuildingOccupant* CityBuildingView(cIGZUnknown* object);
 // The manager's view of a script group template (one per template, kept for the process).
 sc4::IAutomataGroupTemplate* GroupTemplateView(sc4::cSC4OccupantGroupTemplate* group);

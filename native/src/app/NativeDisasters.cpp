@@ -339,6 +339,17 @@ bool CityComponentInit_cSC4DisasterLayer(cIGZUnknown* object, bool init) {
     return true;
 }
 
+// The fires burning in the city (the fire engines' host: fire manager -> fire instance -> GetFireCount).
+int NativeFireCount() {
+    sc4::cISC4DisasterLayer* layer = Layer();
+    auto* manager = dynamic_cast<sc4::cSC4DisasterManagerFire*>(layer ? layer->GetDisasterManager(sc4::kDisasterManagerIdFire) : nullptr);
+    sc4::cISC4DisasterInstanceFire* fire = manager ? manager->GetFireInstance() : nullptr;
+    if (!fire) return 0;
+    const int count = fire->GetFireCount();
+    fire->Release();
+    return count;
+}
+
 // The view's "go to the next disaster" button and key.
 void GoToNextDisaster() {
     if (sc4::cISC4DisasterLayer* layer = Layer()) layer->GoToNextDisaster();

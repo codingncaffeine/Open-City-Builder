@@ -379,8 +379,10 @@ src/sc4/CivicBuildingSimulator.cpp
 src/sc4/PipeBurstInstance.cpp
 src/sc4/DisasterManagers.cpp
 src/sc4/DisasterInstanceFire.cpp
+src/sc4/SimFireCrew.cpp
 src/app/NativeDisasters.cpp
 src/app/NativeFireEffects.cpp
+src/app/NativeFireCrew.cpp
 src/app/NativeFlammabilityHost.cpp
 src/sc4/FloraSimulator.cpp
 src/sc4/FoundationOccupant.cpp

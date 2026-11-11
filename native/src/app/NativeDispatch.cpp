@@ -37,6 +37,17 @@ extern IPatrolCarHost* g_loadPatrolCarHost;
 }  // namespace sc4
 
 namespace native {
+// app/NativeFireCrew.cpp and app/NativeDisasters.cpp: the crews and the fire count of the fire engines' host.
+cIGZUnknown* NativeNewFireFilter();
+cIGZUnknown* NativeNewSpillFilter();
+bool NativeCountOccupantsInBox(const float* min, const float* max, cIGZUnknown* filter, int& count);
+cIGZUnknown* NativeNewFireCrew(sc4::cSC4FireTruck& truck);
+void NativeSetFireCrewCompetence(cIGZUnknown* crew, float competence);
+void NativeRegisterFireCrew(cIGZUnknown* crew);
+void NativeSetupFireCrew(cIGZUnknown* crew);
+void NativeRemoveFireCrew(cIGZUnknown* crew);
+int NativeFireCount();
+void InstallFireCrewHost();
 // app/NativeAutomataControllerHost.cpp: the controller manager's add (by template name, riding on the occupant) and remove
 cIGZUnknown* NativeAddController(sc4::cISC4Occupant* occupant, const char* templateName);
 void NativeRemoveController(cIGZUnknown* controller);
@@ -435,12 +446,12 @@ bool CityCellCount(int& width, int& height) {
     return true;
 }
 
-// PARTIAL: the fire and spill managers, the fire crews (cSC4SimFireCrew) and the hose aiming are not native yet: a fire engine
-// drives to the call, finds nothing to put out and goes home.
+// The fire engines' host: the fire counts come from the fire disaster, the crew is a cSC4SimFireCrew (app/NativeFireCrew.cpp).
+// PARTIAL: the toxic spill counts (the spill manager has no native host yet) and the player-driven hose aim.
 class FireTruckHost final : public IFireTruckHost {
 public:
-    cIGZUnknown* NewFireFilter() override { return nullptr; }
-    cIGZUnknown* NewSpillFilter() override { return nullptr; }
+    cIGZUnknown* NewFireFilter() override { return NativeNewFireFilter(); }
+    cIGZUnknown* NewSpillFilter() override { return NativeNewSpillFilter(); }
     bool FireCompetence(cIGZUnknown* source, float& competence) override {
         cSC4FireProtectionSimulator* fire = FireSim();
         cISC4Occupant* station = AsOccupant(source);
@@ -451,19 +462,24 @@ public:
     bool StationRadius(cIGZUnknown* source, float& radius) override {
         cSC4FireProtectionSimulator* fire = FireSim();
         cISC4Occupant* station = AsOccupant(source);
+        static const bool trace = std::getenv("SC4_FIREDEBUG") != nullptr;
+        if (trace) std::fprintf(stderr, "crew: engine source %p station %p radius %.0f\n", static_cast<void*>(source), static_cast<void*>(station),
+                                fire && station ? fire->GetStationDispatchRadius(NativeFireStation(station)) : -1.0f);
         if (!fire || !station) return false;
         radius = fire->GetStationDispatchRadius(NativeFireStation(station));
         return true;
     }
-    int FireCount() override { return 0; }
-    bool OccupantsInBox(const float*, const float*, cIGZUnknown*, int&) override { return false; }
+    int FireCount() override { return NativeFireCount(); }
+    bool OccupantsInBox(const float* min, const float* max, cIGZUnknown* filter, int& count) override {
+        return NativeCountOccupantsInBox(min, max, filter, count);
+    }
     int SpillTotal() override { return 0; }
     int SpillsInRect(const int*) override { return 0; }
-    cIGZUnknown* NewFireCrew(cSC4FireTruck&) override { return nullptr; }
-    void SetFireCrewCompetence(cIGZUnknown*, float) override {}
-    void RegisterFireCrew(cIGZUnknown*) override {}
-    void SetupFireCrew(cIGZUnknown*) override {}
-    void RemoveFireCrew(cIGZUnknown*) override {}
+    cIGZUnknown* NewFireCrew(cSC4FireTruck& truck) override { return NativeNewFireCrew(truck); }
+    void SetFireCrewCompetence(cIGZUnknown* crew, float competence) override { NativeSetFireCrewCompetence(crew, competence); }
+    void RegisterFireCrew(cIGZUnknown* crew) override { NativeRegisterFireCrew(crew); }
+    void SetupFireCrew(cIGZUnknown* crew) override { NativeSetupFireCrew(crew); }
+    void RemoveFireCrew(cIGZUnknown* crew) override { NativeRemoveFireCrew(crew); }
     bool PickGroundPoint(float, float, cS3DVector3&) override { return false; }
     bool CityCells(int& width, int& height) override { return CityCellCount(width, height); }
     float MaxStreamDistance() override { return AutomataTuning().f21a18; }
@@ -624,6 +640,7 @@ void InstallNativeDispatchHost() {
     SetDispatchHost(&g_host);
     g_loadEmergencyHost = &g_emergency;
     g_loadFireTruckHost = &g_fireTruck;
+    InstallFireCrewHost();
     g_loadPatrolCarHost = &g_patrolCar;
 }
 

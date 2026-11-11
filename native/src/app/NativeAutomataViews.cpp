@@ -75,6 +75,7 @@ IAutomatonGroupTemplate* AutomatonGroupView::Parent() const { GroupPair* p = Pai
 class OccupantView final : public IAutomataOccupant {
 public:
     explicit OccupantView(cISC4Occupant& occupant) : a_(occupant) {}
+    cISC4Occupant* CityOccupant() const { return &a_; }
     bool QueryInterface(std::uint32_t iid, void** out) override { return a_.QueryInterface(iid, out); }
     std::uint32_t AddRef() override { return a_.AddRef(); }
     std::uint32_t Release() override { return a_.Release(); }
@@ -267,6 +268,12 @@ IAutomataOccupant* CityOccupantView(cISC4Occupant* occupant) {
     auto& slot = g_occupants[occupant];
     if (!slot) slot = std::make_unique<OccupantView>(*occupant);
     return slot.get();
+}
+
+// The city occupant behind a view CityOccupantView made (a dispatch's source station); null for any other view.
+cISC4Occupant* CityOccupantOf(IAutomataOccupant* view) {
+    auto* impl = view ? dynamic_cast<OccupantView*>(view) : nullptr;
+    return impl ? impl->CityOccupant() : nullptr;
 }
 
 IAutomataBuildingOccupant* CityBuildingView(cIGZUnknown* object) {
