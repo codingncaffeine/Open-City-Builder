@@ -70,6 +70,7 @@ if [[ -n "$hook" ]]; then
 fi
 
 export bed seconds out shot_after OB_PROBE_DIR="${OB_PROBE_DIR:-}" OB_WINEDBG_SCRIPT="${OB_WINEDBG_SCRIPT:-}"
+export OB_ACTIONS="${OB_ACTIONS:-}" OB_INPUT_EXE="${OB_INPUT_EXE:-}"
 export OB_ARGS="$(printf '%q ' "${args[@]}")" OB_WIDTH="$w" OB_HEIGHT="$h"
 rm -f "$bed/logs/lifetime.txt"
 "$root/tools/nested.sh" "$root/scratch/nested" $(( seconds + 120 )) "$root/tools/original-session.sh" | grep -v '^nested: compositor exit 0$' || true

@@ -47,6 +47,20 @@ if ! game_running; then
   echo "game process never appeared" >"$bed/logs/lifetime.txt"
 else
   [[ -n "${OB_PROBE_DIR:-}" ]] && mkdir -p "$OB_PROBE_DIR"
+  # OB_ACTIONS=file drives the game: lines "wait SECONDS", "shot PNG", or "input ARGS" (OB_INPUT_EXE, a Win32
+  # helper run in the same prefix, tools/obinput.c: click/rclick X Y, drag/rdrag X0 Y0 X1 Y1, move X Y, wheel N, key VK).
+  if [[ -n "${OB_ACTIONS:-}" ]]; then
+    (
+      while read -r verb rest; do
+        case "$verb" in
+          wait) sleep "$rest" ;;
+          shot) shoot "$rest"; echo "$(date +%s.%N) shot $rest" >>"$bed/logs/actions.txt" ;;
+          input) eval "wine \"\$OB_INPUT_EXE\" $rest" </dev/null >>"$bed/logs/actions.txt" 2>&1 ;;
+          ''|'#'*) ;;
+        esac
+      done <"$OB_ACTIONS"
+    ) &
+  fi
   gone=0
   for (( t = 1; t <= seconds; t++ )); do
     sleep 1
