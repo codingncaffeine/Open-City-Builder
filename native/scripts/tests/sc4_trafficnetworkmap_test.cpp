@@ -335,6 +335,18 @@ int main() {
     CHECK(*map.GetAutomataCount(&street, 0, automaton.lane) == 1);
     CHECK(map.GetAutomataCountForLane(&street, automaton.lane) == 1);
     CHECK(!map.EnterNetwork(&automaton, &street));   // already in the list
+    // A later arrival goes in front of the earlier one: FindLeaderInTile scans from an automaton towards the end of the
+    // list, i.e. over the automata that entered the tile before it (Mac i386 0x001ea0da pushes at the front).
+    FakeAutomaton later;
+    later.lane = automaton.lane;
+    later.pathType = 2;
+    CHECK(map.EnterNetwork(&later, &street));
+    {
+        const TrafficTileInfo* listTile = map.GetTileInfoByNetwork(&street);
+        CHECK(listTile && listTile->automata.size() == 2);
+        CHECK(listTile && listTile->automata.front() == &later && listTile->automata.back() == &automaton);
+    }
+    CHECK(map.ExitNetwork(&later, &street, later.lane));
     CHECK(map.ExitNetwork(&automaton, &street, automaton.lane));
     CHECK(automaton.refs == 1);
     CHECK(*map.GetAutomataCount(&street, 0, automaton.lane) == 0);

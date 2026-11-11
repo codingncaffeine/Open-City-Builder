@@ -733,21 +733,22 @@ int main() {
         PlaceOnMap(world, occupant, 1, 1);
         const std::vector<cS3DVector3> points = {Vec(20.0f, 3.0f, 20.0f), Vec(60.0f, 3.0f, 20.0f)};
         const std::uint32_t key = AddPath(info, 1, 0, 2, points);
-        // The follower enters the tile first, so the leader is after it in the tile's automata list (the scan starts
-        // at the automaton itself and only walks forwards).
-        cSC4TrafficAutomaton* follower = MakeAutomaton(world);
-        const float followerPosition[3] = {20.0f, 3.0f, 20.0f};
-        follower->SetPosition(followerPosition);
-        follower->SetRadius(1.0f);
-        follower->SetPath(&occupant, key, &points, true);
+        // The leader enters the tile first and the follower after it. An arrival goes in front of the tile's automata
+        // list, so the list is [follower, leader] and the follower's scan (from itself towards the end) reaches the
+        // automaton ahead of it; the leader's own scan finds nobody.
         cSC4TrafficAutomaton* leader = MakeAutomaton(world);
         const float leaderPosition[3] = {30.0f, 3.0f, 20.0f};
         leader->SetPosition(leaderPosition);
         leader->SetAutomataFlag(kAutomataFlagCollideCandidate, true);
         leader->SetAutomataFlag(kAutomataFlagSelfControlling, true);
         leader->SetPath(&occupant, key, &points, true);
-        // the map tile list is [leader, follower]; scanning from the automaton's own occupant starts at itself
+        cSC4TrafficAutomaton* follower = MakeAutomaton(world);
+        const float followerPosition[3] = {20.0f, 3.0f, 20.0f};
+        follower->SetPosition(followerPosition);
+        follower->SetRadius(1.0f);
+        follower->SetPath(&occupant, key, &points, true);
         CHECK(follower->FindLeaderInTile(&occupant, key, 0xfff00ffu, 0xfffff00u) == leader);
+        CHECK(leader->FindLeaderInTile(&occupant, key, 0xfff00ffu, 0xfffff00u) == nullptr);
         // safe distance: |path end - position| - radius = 40 - 1 = 39, floored at the 16 default
         follower->SetAutomataFlag(kTrafficFlagWaiting, true);
         CHECK_NEAR(follower->GetSafeDistance(), 16.0f);

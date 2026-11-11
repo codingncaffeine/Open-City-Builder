@@ -309,6 +309,8 @@ public:
     cGZPersistResourceKey LastEffectKey() const { return lastEffectKey_; }
 
 protected:
+    void NormalizeLoadedSpeed();                                             // port choice (not in the original), from DoPathTick
+    bool loadedSpeedChecked_ = false;                                        // port choice: a loaded vehicle's speed was looked at
     IVehicleHost* vehicleHost_ = nullptr;                                    // port seam (not in the original)
     float headlightTimer_ = 0.0f;                                            // +0x398
     IAutomatonModel* headlights_[2] = {nullptr, nullptr};                    // +0x3a0 / +0x3a8

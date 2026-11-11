@@ -991,6 +991,103 @@ void TestCollisionAndDamage() {
     vehicle->Release();
 }
 
+// The leader term of the vehicle's safe distance (Mac i386 0x000a5310): behind the leader the gap is measured to the
+// leader's rear (position - radius * orientation) minus 1; when the leader's position is the nearer point, to that
+// position minus 3; half the vehicle's own radius comes off either. Without the collision flag the leader does not count.
+void TestSafeDistanceBehindALeader() {
+    World world;
+    cSC4Vehicle* vehicle = MakeVehicle(world);
+    cSC4Vehicle* leader = MakeVehicle(world);
+    const cS3DVector3 leaderPosition = Vec(0, 0, 20), heading = Vec(0, 0, 1);
+    leader->SetPosition(&leaderPosition.x);
+    leader->SetOrientation(&heading.x);
+    leader->SetRadius(2.0f);
+    vehicle->SetRadius(2.0f);
+    vehicle->SetLeader(leader);
+    vehicle->SetAutomataFlag(kAutomataFlagCollideCandidate, true);
+    vehicle->SetPathPos(Vec(0, 0, 10));          // rear at z 18: 8 away, the position 10 away
+    CHECK_NEAR(vehicle->GetSafeDistance(), 8.0f - 1.0f - 1.0f);
+    vehicle->SetPathPos(Vec(0, 0, 17.5f));       // half a unit behind the rear
+    CHECK_NEAR(vehicle->GetSafeDistance(), 0.5f - 1.0f - 1.0f);
+    vehicle->SetPathPos(Vec(0, 0, 21));          // past the leader: its position (1 away) is nearer than its rear (3)
+    CHECK_NEAR(vehicle->GetSafeDistance(), 1.0f - 3.0f - 1.0f);
+    vehicle->SetAutomataFlag(kAutomataFlagCollideCandidate, false);
+    CHECK_NEAR(vehicle->GetSafeDistance(), 16.0f);
+    vehicle->SetLeader(nullptr);
+    leader->Shutdown();
+    leader->Release();
+    vehicle->Shutdown();
+    vehicle->Release();
+}
+
+// A new vehicle drives at the default speed it rolled, not at the manager's maximum (Mac i386 0x000a4034).
+void TestConstructionSpeed() {
+    World world;
+    world.vehicleHost.tuning.defaultSpeedMin = 1800;
+    world.vehicleHost.tuning.defaultSpeedMax = 1800;
+    world.automatonHost.maxSpeedUnits = 3600.0f;
+    cSC4Vehicle* vehicle = MakeVehicle(world);
+    CHECK_NEAR(vehicle->GetDefaultSpeed(), 0.5f);
+    CHECK_NEAR(vehicle->GetCurrentSpeed(), 0.5f);
+    CHECK_NEAR(vehicle->GetMaxSpeed(), 1.0f);
+    vehicle->Shutdown();
+    vehicle->Release();
+}
+
+// The port's rule for saved vehicles (not in the original): a loaded vehicle whose default speed is more than twice the
+// top of the tuning range takes a default inside the range on its first drive step, with its tween scaled alike; a loaded
+// vehicle inside that bound and a vehicle that was never loaded keep their speeds.
+void TestLoadedSpeedIsBroughtIntoRange() {
+    World world;
+    world.vehicleHost.tuning.defaultSpeedMin = 90;
+    world.vehicleHost.tuning.defaultSpeedMax = 90;
+    const float unit = 1.0f / 3600.0f;
+    cSC4PathInfo* info = MakePathInfo();
+    const std::vector<cS3DVector3> points = {Vec(0, 0, 0), Vec(0, 0, 16), Vec(16, 0, 16)};
+    const std::uint32_t key = AddPath(info, 1, 0, 2, points);
+    FakeOccupant* occupant = MakeOccupant(info);
+    struct Case { float savedDefault, savedSpeed; bool loaded; float wantDefault, wantSpeed; };
+    const Case cases[] = {
+        {550.0f, 500.0f, true, 90.0f, 500.0f * 90.0f / 550.0f},   // the tutorial cities' cars
+        {550.0f, 0.0f, true, 90.0f, 0.0f},                        // stopped: stays stopped
+        {150.0f, 150.0f, true, 150.0f, 150.0f},                   // inside twice the top (180): untouched
+        {550.0f, 500.0f, false, 550.0f, 500.0f},                  // never loaded: untouched
+    };
+    for (const Case& c : cases) {
+        cSC4Vehicle* source = MakeVehicle(world);
+        source->Init();
+        source->SetDefaultSpeed(c.savedDefault * unit);
+        source->SetSpeed(c.savedSpeed * unit, 0.0f);
+        cSC4Vehicle* vehicle = source;
+        if (c.loaded) {
+            PortMemoryOStream out;
+            CHECK(source->Write(out));
+            PortMemoryIStream in(out.bytes().data(), out.bytes().size());
+            vehicle = new cSC4Vehicle(&world.host, &world.automatonHost);
+            vehicle->AddRef();
+            CHECK(vehicle->Read(in));
+            CHECK_NEAR(vehicle->GetDefaultSpeed(), c.savedDefault * unit);   // Read itself keeps the saved speed
+            vehicle->Init();
+        }
+        vehicle->SetRadius(1.0f);
+        vehicle->SetAutomataFlag(kAutomataFlagSelfControlling, true);
+        CHECK(vehicle->StartTrip(occupant, key, false));
+        vehicle->SetPathPos(Vec(0, 0, 0));
+        vehicle->DoPathTick(10.0f);
+        CHECK_NEAR(vehicle->GetDefaultSpeed(), c.wantDefault * unit);
+        CHECK_NEAR(vehicle->GetCurrentSpeed(), c.wantSpeed * unit);
+        vehicle->Shutdown();
+        if (vehicle != source) {
+            vehicle->Release();
+            source->Shutdown();
+        }
+        source->Release();
+    }
+    occupant->Release();
+    delete occupant;
+    info->Release();
+}
+
 void TestPersistence() {
     World world;
     cSC4Vehicle* vehicle = MakeVehicle(world);
@@ -1822,6 +1919,9 @@ int main() {
     TestStartTripAndPathTick();
     TestCollisionAndDamage();
     TestPersistence();
+    TestConstructionSpeed();
+    TestSafeDistanceBehindALeader();
+    TestLoadedSpeedIsBroughtIntoRange();
     TestLotIntersection();
     TestPlayerDriveTickAndOffRoad();
     TestEmergencyVehicle();

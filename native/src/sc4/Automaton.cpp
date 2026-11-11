@@ -1,9 +1,12 @@
 #include "sc4/Automaton.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <unordered_map>
 #include <vector>
 
 #include "rz/cRZMessage2Standard.h"
@@ -748,7 +751,50 @@ void cSC4Automaton::FinishMove(bool fadeIn, bool fadeOut) {
 
 // 0x100107572: heading first (direction), then the position; both may be null. Quirk kept: the city bounds are only
 // checked when a coordinate is NaN, and FinishMove always runs.
+namespace {
+// SC4_MOVEFAST=KMH: the real-time speed of every automaton (car, train, boat, aircraft, pedestrian, animal), measured as the
+// straight-line distance it covers over each half second of wall-clock time. A window faster than KMH prints the class, the
+// speed, where it is and how many MoveTo calls made it up; windows holding a single jump of 40 m or more (a re-used or
+// re-placed automaton) are left out.
+void TraceFastMove(const cSC4Automaton* automaton, std::uint32_t classId, std::uint32_t group, const float* to) {
+    static const char* threshold = std::getenv("SC4_MOVEFAST");
+    if (!threshold || !to) return;
+    struct Window {
+        std::chrono::steady_clock::time_point start;
+        double from[3], last[3], maxStep;
+        int calls;
+    };
+    static std::unordered_map<const cSC4Automaton*, Window> windows;
+    static const auto runStart = std::chrono::steady_clock::now();
+    const auto now = std::chrono::steady_clock::now();
+    auto found = windows.find(automaton);
+    if (found == windows.end()) {
+        windows[automaton] = Window{now, {to[0], to[1], to[2]}, {to[0], to[1], to[2]}, 0.0, 0};
+        return;
+    }
+    Window& w = found->second;
+    const double sx = to[0] - w.last[0], sy = to[1] - w.last[1], sz = to[2] - w.last[2];
+    w.maxStep = std::max(w.maxStep, std::sqrt(sx * sx + sy * sy + sz * sz));
+    w.last[0] = to[0]; w.last[1] = to[1]; w.last[2] = to[2];
+    ++w.calls;
+    const double ms = std::chrono::duration<double, std::milli>(now - w.start).count();
+    if (ms < 500.0) return;
+    const double dx = to[0] - w.from[0], dy = to[1] - w.from[1], dz = to[2] - w.from[2];
+    const double meters = std::sqrt(dx * dx + dy * dy + dz * dz);
+    const double kmh = meters / ms * 3600.0;
+    static long printed = 0;
+    if (ms < 1500.0 && w.maxStep < 40.0 && kmh > std::atof(threshold) && printed < 20000) {
+        ++printed;
+        std::fprintf(stderr, "[%.1f s] %p move fast: class %08x group %08x %.0f km/h (%.1f m in %.0f ms, %d moves, biggest %.1f m) at (%.0f,%.0f,%.0f)\n",
+                     std::chrono::duration<double>(now - runStart).count(), static_cast<const void*>(automaton), classId, group, kmh,
+                     meters, ms, w.calls, w.maxStep, to[0], to[1], to[2]);
+    }
+    w = Window{now, {to[0], to[1], to[2]}, {to[0], to[1], to[2]}, 0.0, 0};
+}
+}  // namespace
+
 void cSC4Automaton::MoveTo(const float* position, const float* direction) {
+    TraceFastMove(this, GetGZCLSID(), automataGroupId_, position);
     bool moved = false;
     if (direction && IsFinite(direction[0]) && IsFinite(direction[1]) && IsFinite(direction[2]) &&
         !(std::fabs(direction[0]) < kDirectionEpsilon && std::fabs(direction[1]) < kDirectionEpsilon &&

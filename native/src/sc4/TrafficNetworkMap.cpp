@@ -820,7 +820,9 @@ bool cSC4TrafficNetworkMap::EnterNetwork(ITrafficNetworkMapAutomaton* automaton,
         if (existing == automaton) return false;
     }
     automaton->AddRef();
-    tile->automata.push_back(automaton);
+    // In front (Mac i386 0x001ea0da): the list runs from the newest arrival to the oldest, and FindLeaderInTile scans
+    // from an automaton towards the end, i.e. over the ones that entered the tile before it and are ahead of it.
+    tile->automata.push_front(automaton);
     const std::uint32_t lane = automaton->GetLane();
     std::uint32_t* aggregate = GetAutomataCount(occupant, automaton->PathTypeWord(), lane);
     *aggregate += 1;

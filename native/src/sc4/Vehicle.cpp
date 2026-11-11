@@ -93,7 +93,7 @@ const VehicleTuning& cSC4Vehicle::Tuning() const {
 // 0x1000dacf2: the base constructor, then the vehicle fields; the occupant type id becomes 0xc7cc75f1 (+0x50 of the
 // object = the occupant sub-object's +0x48 type), the two path vectors and the four ghost slots start empty, the path
 // history deque is constructed, and the default speed is a random value in the manager's range * 1/3600. The speed tween
-// is then told to reach the maximum speed with a zero duration.
+// is then told to reach that default speed with a zero duration.
 cSC4Vehicle::cSC4Vehicle(ITrafficAutomatonHost* host, IAutomatonHost* automatonHost, IVehicleHost* vehicleHost,
                          const cGZPersistResourceKey& modelKey)
     : cSC4TrafficAutomaton(host, automatonHost, modelKey), vehicleHost_(vehicleHost ? vehicleHost : VehicleHost()) {
@@ -109,7 +109,7 @@ cSC4Vehicle::cSC4Vehicle(ITrafficAutomatonHost* host, IAutomatonHost* automatonH
         speed = static_cast<float>(rolled) * kAutomatonSpeedScale;
     }
     SetDefaultSpeed(speed);
-    speedTween_.SetDesired(GetMaxSpeed(), 0.0f);
+    SetSpeed(speed, 0.0f);   // the tween goes to the rolled default speed at once (Mac i386 0x000a4034)
 }
 
 // 0x100510920: the path history deque, the two headlight models and the base. The virtual destructor generated at
@@ -350,25 +350,40 @@ bool cSC4Vehicle::DoStateTick(float milliseconds) {
 // travelled over the frame time.
 namespace {
 // SC4_TRAFFICSPEED: the mean and peak driven speed (km/h; speeds are metres per millisecond) of every vehicle path step,
-// printed once per 40 s of summed vehicle tick time.
-void TraceDrivenSpeed(float meters, float milliseconds, float modifier, float maxSpeed) {
+// printed once per 40 s of summed vehicle tick time, with the mean per network type the vehicle stands on (13 = none).
+void TraceDrivenSpeed(float meters, float milliseconds, float modifier, float maxSpeed, int networkType) {
     static const bool trace = std::getenv("SC4_TRAFFICSPEED") != nullptr;
     if (!trace) return;
     static double sumMeters = 0.0, sumMs = 0.0, peak = 0.0;
+    static double typeMeters[14] = {}, typeMs[14] = {}, typePeak[14] = {};
     static long steps = 0;
+    const int slot = networkType >= 0 && networkType < 13 ? networkType : 13;
     sumMeters += meters;
     sumMs += milliseconds;
+    typeMeters[slot] += meters;
+    typeMs[slot] += milliseconds;
     ++steps;
-    if (milliseconds > 0.0f) peak = std::max(peak, double(meters) / milliseconds * 3600.0);
+    if (milliseconds > 0.0f) {
+        const double kmh = double(meters) / milliseconds * 3600.0;
+        peak = std::max(peak, kmh);
+        typePeak[slot] = std::max(typePeak[slot], kmh);
+    }
     if (sumMs < 40000.0) return;
     std::fprintf(stderr, "traffic speed: mean %.1f km/h, peak %.1f km/h, modifier %.2f, max %.1f km/h over %ld steps\n",
                  sumMeters / sumMs * 3600.0, peak, modifier, maxSpeed * 3600.0, steps);
+    for (int i = 0; i < 14; ++i) {
+        if (typeMs[i] <= 0.0) continue;
+        std::fprintf(stderr, "traffic speed:   network type %d: mean %.1f km/h, peak %.1f km/h, %.0f%% of the time\n", i,
+                     typeMeters[i] / typeMs[i] * 3600.0, typePeak[i], typeMs[i] / sumMs * 100.0);
+        typeMeters[i] = typeMs[i] = typePeak[i] = 0.0;
+    }
     sumMeters = sumMs = peak = 0.0;
     steps = 0;
 }
 }  // namespace
 
 bool cSC4Vehicle::DoPathTick(float milliseconds) {
+    if (IsSavedFlagSet() && !loadedSpeedChecked_) NormalizeLoadedSpeed();   // port choice, see the function
     const cS3DVector3 startPosition = position_;
     float speed = GetCurrentSpeed();
     const float modifier = GetSpeedModifier();
@@ -381,7 +396,28 @@ bool cSC4Vehicle::DoPathTick(float milliseconds) {
             SetSpeed(leaderSpeed, 0.5f);
         }
         const float step = safe <= distance ? safe : distance;
-        TraceDrivenSpeed(step > 0.0f ? step : 0.0f, milliseconds, modifier, GetMaxSpeed());
+        {
+            static const bool trace = std::getenv("SC4_TRAFFICSPEED") != nullptr;
+            static const char* fast = std::getenv("SC4_TRAFFICFAST");   // km/h: print each step driven faster than this
+            if (trace || fast) {
+                int networkType = -1;
+                if (networkOccupant_)
+                    for (std::uint32_t type = 0; type < 13 && networkType < 0; ++type)
+                        if (networkOccupant_->IsOfType(type)) networkType = static_cast<int>(type);
+                TraceDrivenSpeed(step > 0.0f ? step : 0.0f, milliseconds, modifier, GetMaxSpeed(), networkType);
+                static int printed = 0;
+                if (fast && milliseconds > 0.0f && step / milliseconds * 3600.0f > std::atof(fast) && printed < 2000) {
+                    ++printed;
+                    std::fprintf(stderr,
+                                 "traffic fast: %.0f km/h at (%.0f,%.0f,%.0f) speed %.1f km/h x modifier %.2f (base %.2f) "
+                                 "network type %d, %.1f ms, safe %.1f, behavior %u, flags %08x, path %zu pts key %08x, group %08x default %.0f\n",
+                                 step / milliseconds * 3600.0f, position_.x, position_.y, position_.z, speed * 3600.0f,
+                                 modifier, cSC4Automaton::GetSpeedModifier(), networkType, milliseconds, safe,
+                                 GetBehavior(), static_cast<unsigned>(automataFlags_), path_ ? path_->size() : 0,
+                                 static_cast<unsigned>(pathKey_), AutomataGroupId(), GetDefaultSpeed() * 3600.0f);
+                }
+            }
+        }
         bool result = true;
         if (step <= 0.0f) {
             distance = step;
@@ -497,6 +533,29 @@ bool cSC4Vehicle::Read(cIGZIStream& stream) {
     stream >> discarded;
     stream.GetFloat32(pathRemaining_);
     return true;
+}
+
+// PORT CHOICE, not in the original (run on a loaded vehicle's first drive step, once the tuning has been read). A saved
+// vehicle keeps the speeds it was saved with, and the original drives it at them until it leaves the city. The shipped
+// tutorial cities carry cars saved with default speeds of 500..600 units against this game's range of 80..110 (the
+// simulator exemplar's 0x4998c900), so the cars that were on screen when those cities were saved cross the map at five
+// times the speed of the traffic around them. A saved default speed above twice the top of the range is rolled again
+// inside the range, and the speed tween is scaled by the same factor (a stopped car stays stopped, an accelerating one
+// keeps its place on the curve).
+void cSC4Vehicle::NormalizeLoadedSpeed() {
+    const VehicleTuning& tuning = Tuning();
+    const float top = static_cast<float>(tuning.defaultSpeedMax) * kAutomatonSpeedScale;
+    const float saved = GetDefaultSpeed();
+    if (top <= 0.0f) return;   // no tuning yet: look again on the next step
+    loadedSpeedChecked_ = true;
+    if (saved <= top * 2.0f) return;
+    float speed = top;
+    if (IAutomatonHost* ih = this->Host())
+        speed = static_cast<float>(ih->RandomInt(tuning.defaultSpeedMin, tuning.defaultSpeedMax)) * kAutomatonSpeedScale;
+    const float factor = speed / saved;
+    SetDefaultSpeed(speed);
+    speedTween_.current *= factor;
+    speedTween_.desired *= factor;
 }
 
 // ---- accessors ----------------------------------------------------------------------------------------------------------
@@ -708,20 +767,29 @@ bool cSC4Vehicle::StartTrip(ITrafficAutomatonOccupant* occupant, std::uint32_t k
     return result;
 }
 
-// 0x1000dccae: the traffic safe distance, but measured from the vehicle's *path* position (+0x3b4) instead of the
-// simulated one. The path term only counts with the 0x10 flag set; the leader term needs a leader and the collision
-// flag. Both start at 16 (the smaller one wins), like the base class.
+// 0x1000dccae (Mac i386 0x000a5310): the vehicle's own safe distance, measured from its *path* position (+0x3b4).
+//   * The path term counts only with the 0x10 flag set: the distance to the path's last point, 0 when under 1 (the base
+//     class takes the radius off here; the vehicle does not).
+//   * The leader term needs a leader and the collision flag. The leader's rear is its position minus radius * orientation;
+//     when the rear is the nearer of the two points the gap is the distance to it minus 1, otherwise (the vehicle is not
+//     behind the leader) the distance to the leader's position minus 3. Half the vehicle's own radius comes off either.
+// Both start at 16 and the smaller one wins.
 float cSC4Vehicle::GetSafeDistance() {
     float pathSafe = 16.0f;
     if (path_ && CheckAutomataFlag(0x10)   /* the traffic wait bit */) {
-        const float distance = Distance3(path_->back(), pathPos_) - GetRadius();
+        const float distance = Distance3(path_->back(), pathPos_);
         pathSafe = distance < 1.0f ? 0.0f : distance;
     }
     float leaderSafe = 16.0f;
     if (leader_ && GetDetectCollisions()) {
-        cS3DVector3 collide{};
-        leader_->GetCollidePosition(collide);
-        leaderSafe = Distance3(collide, pathPos_) - GetRadius() - 3.0f;
+        float center[3] = {0.0f, 0.0f, 0.0f};
+        leader_->GetPosition(center);
+        cS3DVector3 rear{};
+        leader_->GetCollidePosition(rear);
+        const float toRear = Distance3(rear, pathPos_);
+        const float toCenter = Distance3(MakeVector(center[0], center[1], center[2]), pathPos_);
+        const float gap = toCenter < toRear ? toCenter - 3.0f : toRear - 1.0f;
+        leaderSafe = gap - 0.5f * GetRadius();
     }
     return pathSafe < leaderSafe ? pathSafe : leaderSafe;
 }
