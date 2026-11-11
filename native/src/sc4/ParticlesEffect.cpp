@@ -132,6 +132,11 @@ void SetParticlesDescriptionLifecycle(void (*retain)(cSC4ParticlesDescription*),
     g_descriptionRelease = release;
 }
 
+namespace {
+ParticlesModelBounds g_modelBounds = nullptr;
+}
+void SetParticlesModelBounds(ParticlesModelBounds bounds) { g_modelBounds = bounds; }
+
 namespace sc4 {
 
 cRZRandom& cSC4ParticlesEffect::Random() { return g_random; }
@@ -462,7 +467,7 @@ bool cSC4ParticlesEffect::SetFloatParams(int type, const float* values, int coun
 bool cSC4ParticlesEffect::SetVoidParams(int type, void** values, int count) {
     (void)count;
     if (type == 7) {
-        SetModel(static_cast<IParticlesModelInstance*>(values[0]));
+        SetModel(values[0]);
     }
     return type == 7;
 }
@@ -864,12 +869,13 @@ void cSC4ParticlesEffect::SetTexture(std::uint32_t texture) {
 }
 
 // 0x1005f48da
-void cSC4ParticlesEffect::SetModel(IParticlesModelInstance* model) {
+// Mac i386 0x00414b7c: with description flag bit 6 or 7 the emission box becomes the model's local bounds (model vslot 0x1c
+// writes them into the box); bit 7 flattens the box onto its floor, so the particles rise from the model's base.
+void cSC4ParticlesEffect::SetModel(void* model) {
     const std::uint64_t flags = description_->flags;
-    if ((flags & 0x40) != 0 || (static_cast<std::int8_t>(flags & 0xff) < 0)) {
-        model->SetPosition(cS3DVector3{emissionBox_.min[0], emissionBox_.min[1], emissionBox_.min[2]});
-        if (static_cast<std::int8_t>(flags & 0xff) < 0) emissionBox_.max[1] = emissionBox_.min[1];
-    }
+    if ((flags & 0x40) == 0 && (flags & 0x80) == 0) return;
+    if (!g_modelBounds || !model || !g_modelBounds(model, emissionBox_)) return;
+    if ((flags & 0x80) != 0) emissionBox_.max[1] = emissionBox_.min[1];
 }
 
 // 0x1005f4922

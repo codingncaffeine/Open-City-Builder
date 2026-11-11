@@ -396,6 +396,12 @@ bool BindManager() {
         model = instance;
         return true;
     };
+    // cSC4ParticlesEffect::SetModel: the same model instance answers its local bounds (the emission box of the fire and smoke
+    // that rise from a burning building).
+    SetParticlesModelBounds([](void* model, cS3DBoundingBox& bounds) {
+        static_cast<s3d::cIS3DModelInstance*>(model)->GetBounds(bounds);
+        return true;
+    });
     sc4::SetModelParticlesHost(&g_models);
     g_manager->SetHost(&g_host);
     sc4::SetPropVisualEffectHost(g_manager);  // visual-effect props create their effects through the manager (vslots 0x30 / 0x38)

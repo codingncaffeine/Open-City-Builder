@@ -791,14 +791,53 @@ void cSC4LotDeveloper::EndDemolishLot(cSC4Lot* lot) {
     if ((zone == 0 || zone == 15 || zone == 11 || zone == 12) && g_construction) g_construction->DeleteLot(lot);
 }
 
-// Slot 14 (lot-developer.md §7.2): a destroyed lot keeps rubble. PARTIAL: the burnt-building prop, the terrain decal and the
-// rubble props (AddLotRubbleProps) are not ported; the buildings, props and the building type go as in the original.
+// Slot 14 (lot-developer.md §7.2, Mac i386 0x000f189a): a destroyed lot keeps rubble where its building stood. PARTIAL: the
+// burnt-building prop (cSC4PropOccupantBurntBuilding, the charred floor) and the terrain decal under it are not ported; the
+// buildings, props, rubble and the building type go as in the original.
 void cSC4LotDeveloper::ExplodeLot(cSC4Lot* lot, bool burnt) {
     if (!lot || lot->GetState() == 5 || lot->GetState() == 6) return;
+    float boxMin[3] = {}, boxMax[3] = {};
+    cISC4Occupant* building = GetFirstBuilding(lot);
+    if (building) building->GetBoundingBox(boxMin, boxMax);
+    const bool hadBuilding = building != nullptr;
     ClearLotBuildings(lot, 6, false, 4);
     if (g_construction) g_construction->RemoveLotProps(lot);
+    if (hadBuilding) AddLotRubbleProps(lot, boxMin, boxMax, burnt);
     if (burnt) lot->SetCondition(6);
     lot->SetBuildingType(0);
+}
+
+// Corner piles on a box of at least 10 m a side (each corner with even odds; a box over 12 m draws the kind and turns the plain
+// one to face inwards), then one pile per 128 square metres anywhere in the box.
+void cSC4LotDeveloper::AddLotRubbleProps(cSC4Lot* lot, const float* boxMin, const float* boxMax, bool burnt) {
+    if (!g_construction) return;
+    static constexpr std::uint32_t kCornerRubbleBurnt[2] = {0x1c480000, 0x1c460000};
+    static constexpr std::uint32_t kMiddleRubbleBurnt[2] = {0x1c470000, 0x1c490000};
+    static constexpr std::uint32_t kRubble[6] = {0x1dcf0000, 0x1dd00000, 0x1dd10000, 0x1dd20000, 0x1dd30000, 0x1dd30000};
+    static constexpr int kCornerX[4] = {1, 0, 0, 1}, kCornerZ[4] = {1, 1, 0, 0};
+    const float dx = boxMax[0] - boxMin[0], dz = boxMax[2] - boxMin[2];
+    const bool tooSmall = dx < 10.0f || dz < 10.0f;
+    const bool roomy = dx > 12.0f && dz > 12.0f;
+    const int count = static_cast<int>(static_cast<double>(dx * dz) * 0.0078125) + 4;
+    for (int i = 0; i < count; ++i) {
+        std::uint32_t type = 0, rotation = 0;
+        float position[3] = {0.0f, boxMin[1], 0.0f};
+        if (i < 4) {
+            if (tooSmall || g_construction->RandomBelow(2) == 0) continue;
+            std::uint32_t kind = 0;
+            if (roomy) kind = g_construction->RandomBelow(burnt ? 2 : 6);
+            rotation = kind == 0 ? static_cast<std::uint32_t>((i + 2) & 3) : static_cast<std::uint32_t>(i);
+            type = burnt ? kCornerRubbleBurnt[kind] : kRubble[kind];
+            position[0] = kCornerX[i] ? boxMax[0] : boxMin[0];
+            position[2] = kCornerZ[i] ? boxMax[2] : boxMin[2];
+        } else {
+            rotation = g_construction->RandomBelow(4);
+            type = burnt ? kMiddleRubbleBurnt[g_construction->RandomBelow(2)] : kRubble[g_construction->RandomBelow(6)];
+            position[0] = static_cast<float>(g_construction->RandomGaussianRange(boxMin[0], boxMax[0]));
+            position[2] = static_cast<float>(g_construction->RandomGaussianRange(boxMin[2], boxMax[2]));
+        }
+        if (type != 0) g_construction->AddRubbleProp(lot, type, rotation, position, boxMin, boxMax);
+    }
 }
 
 std::uint32_t cSC4LotDeveloper::FirstBuildingTypeOf(const std::vector<std::uint32_t>& ids, const std::function<bool(std::uint32_t)>& isType,

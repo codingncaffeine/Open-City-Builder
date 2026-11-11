@@ -4,6 +4,7 @@
 // and the family / filter queries. Seeding, daily / monthly simulation and the persisted obliterated-flora list
 // stay unrecovered (they need the occupant manager and the terrain model).
 #pragma once
+#include <list>
 #include <cstdint>
 #include <map>
 #include <unordered_set>
@@ -118,6 +119,10 @@ public:
     void DoTerrainChangedMessage(std::uint32_t data1, std::uint32_t data2);
     void DoTerrainAltitudeChange(const std::int32_t rect[4]);
     void AdjustFloraPositionFromTerrainChange(cISC4Occupant* occupant, cISC4FloraOccupant* flora);
+    // Flora burnt by a fire (vslot 0x5c, Mac i386 0x0008ad00): the plant becomes the burnt type 0x29cff3cb in state 3 and joins
+    // the dead list; false when the occupant is not flora in the city.
+    bool KillFloraOccupant(cISC4Occupant* occupant);
+    const std::list<cISC4Occupant*>& DeadFlora() const { return dead_; }
     static std::uint32_t NextClusterType(std::uint32_t type);
     static std::uint32_t AdvanceClusterType(std::uint32_t a, std::uint32_t b);
 
@@ -130,6 +135,7 @@ private:
     std::uint32_t refCount_ = 0;                                    // +0x1c
     cRZRandom random_{0};                                           // +0x84
     bool keepFloraOnTerrainChange_ = false;                         // +0x2f (a debug console option): move, never remove
+    std::list<cISC4Occupant*> dead_;                                // +0x9c (i386): killed flora, a reference each
     float elevationScale_ = 1.0f;                                   // +0xd0 (i386 +0x98: 16 / tunable 0xc9dbdd02)
 };
 

@@ -30,6 +30,7 @@ void InstallCitySituationAdviceStub();
 void InstallCivicBuildingStub();
 void InstallDemandSimulatorStub();
 void InstallDisasterStub();
+void InstallDisasterHosts();   // NativeDisasters.cpp
 void InstallEffectsStub();
 void InstallEffectsManagerStub();
 void InstallCityPanelHosts();
@@ -144,6 +145,7 @@ void InstallStubHosts() {
     InstallCivicBuildingStub();
     InstallDemandSimulatorStub();
     InstallDisasterStub();
+    InstallDisasterHosts();               // the real disaster, fire and flammability hosts replace the stub
     InstallEffectsStub();
     InstallEffectsManagerStub();
     InstallCityPanelHosts();              // the RCI and opinion-poll gauges' services (NativeCityPanel.cpp)

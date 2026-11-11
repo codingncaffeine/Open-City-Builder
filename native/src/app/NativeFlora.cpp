@@ -233,3 +233,12 @@ sc4::cSC4FloraSimulator* CityFloraSimulator() {
 }
 
 }  // namespace native
+
+namespace native {
+// flora simulator vslot 0x5c: a fire burnt this plant.
+void NativeKillFloraOccupant(sc4::cISC4Occupant* occupant) {
+    sc4::cSC4City* city = HostCity();
+    auto* flora = city ? dynamic_cast<sc4::cSC4FloraSimulator*>(city->GetComponent(sc4::CityComponent::FloraSimulator)) : nullptr;
+    if (flora && occupant) flora->KillFloraOccupant(occupant);
+}
+}  // namespace native

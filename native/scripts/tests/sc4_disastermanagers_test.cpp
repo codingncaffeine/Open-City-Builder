@@ -30,9 +30,13 @@ public:
     std::uint32_t GetID() const override { return 1; }
     bool GetLocation(int&, int&) const override { return false; }
     int GetPhase() const override { return 1; }
-    bool InitInstance() override { ++inits; manager->AddInstanceToList(this); return true; }
-    void Begin() override { ++begins; }
-    bool IgniteOccupant(cISC4Occupant*, bool a, bool b, bool c) override { flags = (a ? 1 : 0) | (b ? 2 : 0) | (c ? 4 : 0); return true; }
+    bool Init() override { ++inits; manager->AddInstanceToList(this); return true; }
+    void Update() override { ++begins; }
+    bool Ignite(cISC4Occupant*, bool a, std::uint32_t b, bool c) override { flags = (a ? 1 : 0) | (b ? 2 : 0) | (c ? 4 : 0); return true; }
+    bool Extinguish(cISC4Occupant*) override { return true; }
+    bool BurnDown(cISC4Occupant*) override { return true; }
+    int GetFireCountInCellRect(const SC4CellRect&) override { return 0; }
+    int GetFireCount() override { return 0; }
     bool IgniteCell(std::uint32_t x, std::uint32_t z, bool, bool, std::uint32_t) override { cell = x * 100 + z; return true; }
     std::uint32_t ExtinguishCell(std::uint32_t x, std::uint32_t z, int amount) override { return x + z + amount; }
     bool QuickBurnCell(std::uint32_t, std::uint32_t) override { return true; }

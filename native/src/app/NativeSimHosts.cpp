@@ -55,6 +55,8 @@ bool NativeDispatchRecord(std::uint32_t id, sc4::ProtectionDispatchInfo& info);
 void NativeRegisterDispatchSource(std::uint32_t type, bool add);
 void InstallNativeDispatchHost();
 }
+namespace sc4 { class IFlammabilityHost; }
+namespace native { sc4::IFlammabilityHost* NativeFlammabilityHost(); }
 #include "sc4/PoliceSimulator.h"
 #include "sc4/ResidentialSimulator.h"
 #include "sc4/Simulator.h"
@@ -659,6 +661,7 @@ void InstallNativeSimHosts() {
     sc4::g_loadVehicleHost = NativeVehicleHost();
     sc4::g_loadPedestrianHost = NativePedestrianHost();   // and the pedestrians walk on it
     hosts.fire = &g_fire;
+    hosts.flammability = NativeFlammabilityHost();   // app/NativeDisasters.cpp
     hosts.police = &g_police;
     hosts.residential = &g_residential;
     hosts.demolition = NativeDemolitionHost();

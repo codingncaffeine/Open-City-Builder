@@ -58,7 +58,7 @@ cISC4DisasterInstanceFire* cSC4DisasterManagerFire::FireInstance() {
     IDisasterInstanceFactory* factory = DisasterInstanceFactory();
     if (!factory) return nullptr;
     cISC4DisasterInstanceFire* fire = factory->CreateFire();
-    fire->InitInstance();
+    fire->Init();
     fire->AddRef();
     return fire;
 }
@@ -66,7 +66,7 @@ cISC4DisasterInstanceFire* cSC4DisasterManagerFire::FireInstance() {
 bool cSC4DisasterManagerFire::Init() {
     cSC4DisasterManager::Init();
     if (cISC4DisasterInstanceFire* fire = FireInstance()) {
-        fire->Begin();
+        fire->Update();
         fire->Release();
     }
     return true;
@@ -96,7 +96,7 @@ std::uint32_t cSC4DisasterManagerFire::GetCause() {
 bool cSC4DisasterManagerFire::IgniteOccupant(cISC4Occupant* occupant) {
     cISC4DisasterInstanceFire* fire = FireInstance();
     if (!fire) return false;
-    const bool result = fire->IgniteOccupant(occupant, false, false, true);
+    const bool result = fire->Ignite(occupant, false, 0, true);
     fire->Release();
     return result;
 }

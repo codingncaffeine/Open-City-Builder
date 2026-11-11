@@ -108,6 +108,7 @@ public:
     std::uint32_t GetCounter() const { return counter_; }
     void SetCounter(std::uint32_t counter) { counter_ = counter; }
     std::uint32_t GetHosed() const { return hosed_; }
+    bool IsExtinguishing() const { return extinguish_ != 0; }   // +0x80: the deadline Extinguish() stored
     std::uint32_t GetFamily() const { return family_; }
     void SetFamily(std::uint32_t family) { family_ = family; }
     const std::vector<cSC4Flame*>& Flames() const { return flames_; }

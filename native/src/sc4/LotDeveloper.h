@@ -196,6 +196,12 @@ public:
     virtual cISC4Occupant* FirstBuildingOnLot(cSC4Lot* lot) { (void)lot; return nullptr; }
     virtual void RemoveBuildingProps(cISC4Occupant* building) { (void)building; }              // +0x30 prop manager slot 38
     virtual void RemoveLotProps(cSC4Lot* lot) { (void)lot; }                                   // +0x30 prop manager slot 28
+    // Rubble (AddLotRubbleProps): the global generator's Gaussian range, and one rubble prop: +0x30 prop manager vslot 0x3c
+    // CreateProp(type), Init, flag 0x40, the rotation, the position (moved so that the prop's box stays inside boxMin..boxMax on
+    // x and z), then vslot 0x68 AddLotProp(lot, prop).
+    virtual double RandomGaussianRange(double lo, double hi) { return (lo + hi) * 0.5; }
+    virtual void AddRubbleProp(cSC4Lot* lot, std::uint32_t type, std::uint32_t rotation, const float position[3], const float* boxMin,
+                               const float* boxMax) { (void)lot; (void)type; (void)rotation; (void)position; (void)boxMin; (void)boxMax; }
     virtual void RemoveLotFlora(cSC4Lot* lot) { (void)lot; }                                   // flora slot 20 DemolishFloraInCellArea(rect, 0)
     virtual void RemoveOccupant(cISC4Occupant* occupant, std::uint32_t flags) { (void)occupant; (void)flags; }   // +0x28 slot 21 (o, 1, flags)
     virtual void DeleteLot(cSC4Lot* lot) { (void)lot; }                                        // +0x24 lot manager slot 24
@@ -287,6 +293,8 @@ public:
     bool StartDemolishLot(cSC4Lot* lot);                                                          // slot 12
     void EndDemolishLot(cSC4Lot* lot);                                                            // slot 13
     void ExplodeLot(cSC4Lot* lot, bool burnt);                                                    // slot 14
+    // Mac i386 0x000ee31e: rubble piles on a destroyed lot, inside the box the building stood in (burnt: the charred kinds).
+    void AddLotRubbleProps(cSC4Lot* lot, const float* boxMin, const float* boxMax, bool burnt);
     cISC4Occupant* GetFirstBuilding(cSC4Lot* lot);                                                // slot 38
     bool ClearLotBuildings(cSC4Lot* lot, std::uint32_t state, bool removeFoundation, std::uint32_t flags);
     void ClearLot(cSC4Lot* lot);

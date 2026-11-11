@@ -542,3 +542,24 @@ void cSC4FloraSimulator::AdjustFloraPositionFromTerrainChange(cISC4Occupant* occ
 }
 
 }  // namespace sc4
+
+namespace sc4 {
+bool cSC4FloraSimulator::KillFloraOccupant(cISC4Occupant* occupant) {
+    constexpr std::uint32_t kBurntFloraType = 0x29cff3cb, kMessageOccupantChanged = 0x99ef1145;
+    cISC4FloraOccupant* flora = nullptr;
+    bool killed = false;
+    if (occupant->QueryInterface(kGZIID_cISC4FloraOccupant, reinterpret_cast<void**>(&flora)) && occupant->IsFlagSet(1)) {
+        if (flora->GetState() != 3) {
+            flora->SetState(3);
+            flora->SetFloraType(kBurntFloraType);
+            flora->SetStaticFloraData(GetStaticFloraData(kBurntFloraType));
+            occupant->PostOccupantMessage(kMessageOccupantChanged, 0);
+            occupant->AddRef();
+            dead_.push_back(occupant);
+        }
+        killed = true;
+    }
+    if (flora) flora->Release();
+    return killed;
+}
+}  // namespace sc4

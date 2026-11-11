@@ -20,7 +20,7 @@ cSC4FloraOccupant::~cSC4FloraOccupant() {
 }
 
 bool cSC4FloraOccupant::QueryInterface(std::uint32_t iid, void** out) {
-    if (iid == kGZIID_cISC4FloraOccupant) {
+    if (iid == kGZIID_cISC4FloraOccupant || iid == 0xc83dd057) {   // 0xc83dd057: the interface id the original asks for
         *out = static_cast<cISC4FloraOccupant*>(this);
         AddRef();
         return true;

@@ -67,6 +67,7 @@
 #include "app/NativeAnimationTicks.h"
 #include "app/NativeWinMgr.h"
 
+namespace native { void GoToNextDisaster(); }   // NativeDisasters.cpp
 namespace native {
 sc4::INewsTickerWindow* CreateNewsTickerWindow();     // app/NativeWinHtml.cpp
 void ShutdownNewsTickerWindow(cIGZUnknown* proc);
@@ -273,7 +274,7 @@ struct StubView3DWin final : IView3DWinHost {
     void SetCitySituationIndicatorVisible(bool visible) override {
         if (auto* m = SituationManager()) m->SetVisible(visible);   // SetCSIVisible (vslot 0xe8)
     }
-    void GoToNextDisaster() override { SC4_UNWIRED("IView3DWinHost::GoToNextDisaster (cSC4DisasterLayer not recovered)"); }
+    void GoToNextDisaster() override { native::GoToNextDisaster(); }
     cSC4ViewInputControl* CreateDispatchTool(int type) override { return native::CreateDispatchTool(type); }
     cSC4ViewInputControl* CreateNetworkTool(int type) override { return native::CreateNetworkTool(type); }
     void ShowMyStreetSim() override { SC4_UNWIRED("IView3DWinHost::ShowMyStreetSim"); }

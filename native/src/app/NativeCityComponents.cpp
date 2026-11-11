@@ -12,6 +12,7 @@
 #include "sc4/cSC4City.h"
 
 namespace native {
+bool CityComponentInit_cSC4DisasterLayer(cIGZUnknown* object, bool init);
 namespace {
 using namespace sc4;
 
@@ -44,6 +45,7 @@ bool Skipped(const char* name, bool init) {
 // cSC4TrafficSimulator, cSC4CrimeSimulator (Init takes the tunables: the slot-0x18 wrapper is not recovered), the effects manager,
 // the disaster layer and the demolition utility.
 bool Dispatch(cIGZUnknown* object, bool init) {
+    if (CityComponentInit_cSC4DisasterLayer(object, init)) return true;   // NativeDisasters.cpp
 #define SC4_TRY_CITY_COMPONENT(c) if (CityComponentInit_##c(object, init)) return true;
     SC4_CITY_COMPONENTS(SC4_TRY_CITY_COMPONENT)
 #undef SC4_TRY_CITY_COMPONENT

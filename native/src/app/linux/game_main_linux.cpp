@@ -1147,6 +1147,13 @@ int RunScenario(const std::string& path) {
             int limit = 8;
             words >> limit;
             native::NativeAnimationReport(limit);
+        } else if (command == "ignite") {   // ignite X Z [force]: sets the occupants of a city cell alight (the torch's call)
+            int x = 0, z = 0;
+            std::string force;
+            words >> x >> z >> force;
+            native::NativeIgniteCell(x, z, force == "force");
+        } else if (command == "fires") {   // fires: the fire disaster's state, one line per fire
+            native::NativeFireReport();
         } else if (command == "querylist") {   // querylist [SKIPUI] [N]: buildings with a query window other than SKIPUI (hex)
             std::string skip;
             int limit = 40;

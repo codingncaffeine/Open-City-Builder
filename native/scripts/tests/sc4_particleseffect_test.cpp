@@ -115,14 +115,17 @@ struct FakeTextures final : IParticlesTextures {
     }
 };
 
-struct FakeModel final : IParticlesModelInstance {
+// The model handed as void parameter 7: its bounds are asked through the host's function.
+struct FakeModel {
     int calls = 0;
-    cS3DVector3 position;
-    void SetPosition(const cS3DVector3& value) override {
-        ++calls;
-        position = value;
-    }
+    cS3DBoundingBox bounds{{1.0f, 2.0f, 3.0f}, {4.0f, 6.0f, 8.0f}};
 };
+bool FakeModelBounds(void* model, cS3DBoundingBox& out) {
+    auto* fake = static_cast<FakeModel*>(model);
+    ++fake->calls;
+    out = fake->bounds;
+    return true;
+}
 
 struct FakeVertexBuffer final : IParticlesVertexBuffer {
     int addRefs = 0, releases = 0, locks = 0, unlocks = 0, draws = 0;
@@ -646,13 +649,24 @@ void TestFloatAndVoidParams() {
     CHECK(effect.SetFloatParams(10, point, 3));
     const float length = 5.0f;
     CHECK(effect.SetFloatParams(0xb, &length, 1));
-    // SetVoidParams type 7 places the model at the emission box minimum when flag 0x40 is set.
+    // SetVoidParams type 7: with flag 0x40 the emission box becomes the model's bounds; flag 0x80 also flattens it onto its floor;
+    // without either flag the model is not asked.
     FakeModel model;
     void* modelPointer = &model;
+    SetParticlesModelBounds(&FakeModelBounds);
+    CHECK(effect.SetVoidParams(7, &modelPointer, 1));
+    CHECK_EQ(model.calls, 0);
     description.flags |= 0x40;
     CHECK(effect.SetVoidParams(7, &modelPointer, 1));
     CHECK_EQ(model.calls, 1);
-    CHECK_NEAR(model.position.x, description.emitMin[0], 0);
+    CHECK_NEAR(effect.EmissionBox().min[0], 1.0f, 0);
+    CHECK_NEAR(effect.EmissionBox().max[1], 6.0f, 0);
+    description.flags |= 0x80;
+    CHECK(effect.SetVoidParams(7, &modelPointer, 1));
+    CHECK_NEAR(effect.EmissionBox().max[1], 2.0f, 0);
+    CHECK_NEAR(effect.EmissionBox().max[2], 8.0f, 0);
+    description.flags &= ~std::uint64_t{0xc0};
+    SetParticlesModelBounds(nullptr);
     CHECK(!effect.SetVoidParams(1, &modelPointer, 1));
     effect.Shutdown();
 }

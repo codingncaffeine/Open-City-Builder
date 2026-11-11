@@ -239,6 +239,32 @@ public:
     }
     void RemoveBuildingProps(cISC4Occupant* building) override { if (cSC4PropManager* p = Props()) p->RemoveBuildingProps(building); }
     void RemoveLotProps(cSC4Lot* lot) override { if (cSC4PropManager* p = Props()) p->RemoveLotProps(lot); }
+    double RandomGaussianRange(double lo, double hi) override {
+        static cRZRandom random(0x2f1u);   // the original draws from the global generator (::_sRandom)
+        return random.RandomDoubleRangeGaussian(lo, hi);
+    }
+    void AddRubbleProp(cSC4Lot* lot, std::uint32_t type, std::uint32_t rotation, const float position[3], const float* boxMin,
+                       const float* boxMax) override {
+        cSC4PropManager* props = Props();
+        cSC4PropOccupant* prop = nullptr;
+        if (!props || !props->CreateProp(type, prop) || !prop) return;
+        cISC4Occupant* occupant = prop;
+        if (occupant->Init()) {
+            occupant->SetFlag(0x40);
+            prop->SetOrientation(static_cast<std::int32_t>(rotation));
+            float p[3] = {position[0], position[1], position[2]};
+            occupant->SetPosition(p);
+            float lo[3] = {}, hi[3] = {};
+            occupant->GetBoundingBox(lo, hi);
+            if (lo[0] < boxMin[0]) p[0] += boxMin[0] - lo[0];
+            else if (boxMax[0] < hi[0]) p[0] += boxMax[0] - hi[0];
+            if (lo[2] < boxMin[2]) p[2] += boxMin[2] - lo[2];
+            else if (boxMax[2] < hi[2]) p[2] += boxMax[2] - hi[2];
+            occupant->SetPosition(p);
+            props->AddLotProp(lot, occupant);
+        }
+        prop->Release();
+    }
     void RemoveLotFlora(cSC4Lot* lot) override {   // DemolishFloraInCellArea(rect, 0): every flora occupant on the lot's cells
         cISC4OccupantManager* occupants = Occupants();
         if (!occupants) return;

@@ -26,17 +26,22 @@ constexpr std::uint32_t kGZIID_cISC4DisasterManagerFire = 0x49b43f57, kGZIID_cIS
                         kGZIID_cISC4PipeOccupant = 0x49c05b9f;
 constexpr std::uint32_t kOccupantTypeNetworkOccupant = 0xc772bf98;
 
+// The fire instance's own interface (iid 0x49b43f58; Mac i386 slots 0xc..0x40 in this order).
 class cISC4DisasterInstanceFire : public cISC4DisasterInstance {
 public:
-    virtual bool InitInstance() = 0;       // object slot 0x38: registers the instance with the fire manager
-    virtual void Begin() = 0;              // view slot 3
-    virtual bool IgniteOccupant(cISC4Occupant* occupant, bool a, bool b, bool c) = 0;
-    virtual bool IgniteCell(std::uint32_t x, std::uint32_t z, bool a, bool b, std::uint32_t c) = 0;
+    virtual bool Init() = 0;               // reads the tuning, registers the instance with the fire manager
+    virtual void Update() = 0;
+    virtual bool Ignite(cISC4Occupant* occupant, bool force, std::uint32_t family, bool jump) = 0;
+    virtual bool IgniteCell(std::uint32_t x, std::uint32_t z, bool roll, bool force, std::uint32_t family) = 0;
     virtual std::uint32_t ExtinguishCell(std::uint32_t x, std::uint32_t z, int amount) = 0;
     virtual bool QuickBurnCell(std::uint32_t x, std::uint32_t z) = 0;
-    virtual bool IgniteCellRadius(std::uint32_t x, std::uint32_t z, std::uint32_t radius, std::uint32_t c) = 0;
+    virtual bool IgniteCellRadius(std::uint32_t x, std::uint32_t z, std::uint32_t inner, std::uint32_t outer) = 0;
+    virtual bool Extinguish(cISC4Occupant* target) = 0;
+    virtual bool BurnDown(cISC4Occupant* target) = 0;
     virtual std::uint32_t SetCause(std::uint32_t cause) = 0;
     virtual std::uint32_t GetCause() = 0;
+    virtual int GetFireCountInCellRect(const SC4CellRect& rect) = 0;
+    virtual int GetFireCount() = 0;
 };
 class cISC4DisasterInstanceVolcano : public cISC4DisasterInstance {
 public:

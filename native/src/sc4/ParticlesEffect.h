@@ -323,12 +323,10 @@ public:
     virtual IParticlesTextureBinding* Create(std::uint32_t textureId) = 0;   // +0x28
 };
 
-// cIS3DModelInstance::SetPosition (vslot 0x38; the original hands it the emission box minimum).
-class IParticlesModelInstance {
-public:
-    virtual ~IParticlesModelInstance() = default;
-    virtual void SetPosition(const cS3DVector3& position) = 0;               // +0x38
-};
+// The model instance handed to an effect as void parameter 7 (a cIS3DModelInstance in the original). SetModel asks it for its
+// local bounds (vslot 0x1c on i386): the host turns the raw pointer into those bounds; without a host the parameter is ignored.
+using ParticlesModelBounds = bool (*)(void* model, cS3DBoundingBox& bounds);
+void SetParticlesModelBounds(ParticlesModelBounds bounds);
 
 // The cIGZGDriverVertexBufferExtension RenderActiveParticlesVB streams through.
 class IParticlesVertexBuffer {
@@ -411,7 +409,7 @@ public:
 
     bool Update(float elapsed, IParticlesDrawContext* context);          // @ 0x1005f38f4
     void SetDescription(cSC4ParticlesDescription* description);          // @ 0x1005f4226
-    void SetModel(IParticlesModelInstance* model);                       // @ 0x1005f48da
+    void SetModel(void* model);                       // @ 0x1005f48da
     void SetTarget(const cS3DVector3& target);                           // @ 0x1005f4922
     void SetGlobalParams(const cSC4GlobalEffectParams* params);          // @ 0x1005f4c9e
     void SuppressEmission();                                             // @ 0x1005f4cac
@@ -461,6 +459,7 @@ public:
     double SpawnAccumulator() const { return spawnAccumulator_; }
     double Elapsed() const { return timeAccumulator_; }
     const cS3DTransform& EffectTransform() const { return effectTransform_; }
+    const cS3DBoundingBox& EmissionBox() const { return emissionBox_; }
     const cS3DTransform& SourceTransform() const { return sourceTransform_; }
     std::uint32_t TextureId() const { return textureId_; }
     float WorldWidth() const { return worldWidth_; }

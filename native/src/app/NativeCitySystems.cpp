@@ -137,3 +137,26 @@ void BindView3DServices(sc4::cSC4View3DWin* view, sc4::cSC43DRender* render) {
 }
 
 }  // namespace native
+
+namespace native {
+void AnnounceCameraScroll(bool begin);   // app/NativeAutomataViews.cpp
+sc4::cSC43DRender* CityRenderer();      // app/NativeCityView.cpp
+// The camera's target to a world position (the disaster layer's jump): the automata managers hear the scroll.
+void NativeMoveCameraTo(float x, float y, float z) {
+    sc4::cSC43DRender* render = CityRenderer();
+    sc4::cSC4CameraControl* camera = render ? render->GetCameraControl() : nullptr;
+    if (!camera) return;
+    cS3DVector3 target;
+    target.x = x;
+    target.y = y;
+    target.z = z;
+    AnnounceCameraScroll(true);
+    camera->SetViewTargetPosition(target);
+    AnnounceCameraScroll(false);
+}
+// 3D view vslot 0x58: 1 = the surface; 1 without a view.
+int NativeCurrentViewLevel() {
+    sc4::cSC4View3DWin* view = CityView3DWin();
+    return view ? static_cast<int>(view->GetCurrentViewLevel()) : 1;
+}
+}  // namespace native
