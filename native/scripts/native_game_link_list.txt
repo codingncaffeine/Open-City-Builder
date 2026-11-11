@@ -614,6 +614,7 @@ src/app/NativeWaterRipple.cpp
 src/app/NativeDisasters.cpp
 src/app/NativeFireEffects.cpp
 src/app/NativeFireCrew.cpp
+src/app/NativeCrime.cpp
 src/app/NativeFlammabilityHost.cpp
 src/app/NativeMovie.cpp
 src/app/NativeIntro.cpp

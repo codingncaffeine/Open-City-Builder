@@ -626,7 +626,10 @@ Probe21 g_ILandValueHost;
 // interface-typed getters declared in tools/city_probe_hosts.h.
 namespace sc4 {
 IDemolitionHost* CityProbeDemolitionHost() { return &g_IDemolitionHost; }
-ICrimeHost* CityProbeCrimeHost() { return &g_ICrimeHost; }
+namespace { ICrimeHost* g_crimeHostOverride = nullptr; }
+// The native game's crime host (app/NativeCrime.cpp) replaces the neutral one for the simulators created after this call.
+void SetCityProbeCrimeHost(ICrimeHost* host) { g_crimeHostOverride = host; }
+ICrimeHost* CityProbeCrimeHost() { return g_crimeHostOverride ? g_crimeHostOverride : &g_ICrimeHost; }
 IWealthHost* CityProbeWealthHost() { return &g_IWealthHost; }
 INeighborsHost* CityProbeNeighborsHost() { return &g_INeighborsHost; }
 IWeatherHost* CityProbeWeatherHost() { return &g_IWeatherHost; }

@@ -13,6 +13,7 @@
 
 namespace native {
 bool CityComponentInit_cSC4DisasterLayer(cIGZUnknown* object, bool init);
+bool CityComponentInit_cSC4CrimeSimulator(cIGZUnknown* object, bool init);
 namespace {
 using namespace sc4;
 
@@ -46,6 +47,7 @@ bool Skipped(const char* name, bool init) {
 // the disaster layer and the demolition utility.
 bool Dispatch(cIGZUnknown* object, bool init) {
     if (CityComponentInit_cSC4DisasterLayer(object, init)) return true;   // NativeDisasters.cpp
+    if (CityComponentInit_cSC4CrimeSimulator(object, init)) return true;  // NativeCrime.cpp
 #define SC4_TRY_CITY_COMPONENT(c) if (CityComponentInit_##c(object, init)) return true;
     SC4_CITY_COMPONENTS(SC4_TRY_CITY_COMPONENT)
 #undef SC4_TRY_CITY_COMPONENT

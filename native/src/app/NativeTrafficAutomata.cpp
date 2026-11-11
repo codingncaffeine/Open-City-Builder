@@ -22,6 +22,11 @@
 namespace sc4 { IVehicleHost* NewStubIVehicleHost(); }   // app/hosts/IfaceIVehicleHost.cpp
 
 namespace native {
+// app/NativeCrime.cpp: the crime simulator's incident list as the crime layer reads it.
+bool NativeCrimeIncidents(std::vector<sc4::ITrafficNetworkManagerApi::CrimeIncidentCell>& out);
+void NativeSetCrimeVisualsCreated(std::uint32_t index, bool created);
+}
+namespace native {
 sc4::ITrafficAutomatonOccupant* NativeTrafficPiece(sc4::cISC4Occupant* occupant);   // app/NativeTrafficNetworkMap.cpp
 sc4::ITrafficNetworkMapLot* NativeTrafficLotAt(int cellX, int cellZ);                 // app/NativeTrafficNetworkMap.cpp
 void NativeOccupantsInBox(const float* lo, const float* hi, std::uint32_t type, int count, std::vector<sc4::cISC4Occupant*>& out);
@@ -181,6 +186,12 @@ public:
         out = path->points.front();
         return true;
     }
+    bool RandomPathPoint(ITrafficNetworkMapOccupant* o, std::uint32_t type, cRZRandomSuper* random, std::uint32_t& key, cS3DVector3& out) override {
+        cISC4PathInfo* info = Info(o);
+        return info && info->GetRandomPathWildcard(type, 0xff, 0xff, random, &key, nullptr) && info->GetRandomPathPoint(key, out);
+    }
+    bool CrimeIncidents(std::vector<CrimeIncidentCell>& out) override { return NativeCrimeIncidents(out); }
+    void SetCrimeVisualsCreated(std::uint32_t index, bool created) override { NativeSetCrimeVisualsCreated(index, created); }
     void SetVisibleCells(int x0, int z0, int x1, int z1) { visible_[0] = x0; visible_[1] = z0; visible_[2] = x1; visible_[3] = z1; }
     void Clear() { densities_.clear(); counts_.clear(); accumulators_.clear(); }
 private:

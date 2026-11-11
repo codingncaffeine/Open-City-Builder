@@ -178,6 +178,13 @@ public:
     virtual std::uint32_t LaneAutomataCount(ITrafficNetworkMapOccupant*, std::uint32_t, std::uint32_t) { return 0; }
     virtual int LaneCount(ITrafficNetworkMapOccupant*, std::uint32_t, std::uint8_t, std::uint8_t) { return 0; }
     virtual bool PathStart(ITrafficNetworkMapOccupant*, std::uint32_t, cS3DVector3&) { return false; }
+    // The crime layer: any path of a type on the occupant (cISC4PathInfo 0x24 GetRandomPathWildcard(type, 0xff, 0xff, random, &key))
+    // and a point on it (0x5c GetRandomPathPoint).
+    virtual bool RandomPathPoint(ITrafficNetworkMapOccupant*, std::uint32_t, cRZRandomSuper*, std::uint32_t&, cS3DVector3&) { return false; }
+    // spCrimeSim (the crime layer's incidents): cell, crime type and whether its figures were made (vslots 0x2c / 0x30).
+    struct CrimeIncidentCell { int x = 0, z = 0; std::uint32_t typeId = 0; bool visualsCreated = false; };
+    virtual bool CrimeIncidents(std::vector<CrimeIncidentCell>&) { return false; }
+    virtual void SetCrimeVisualsCreated(std::uint32_t, bool) {}
     // the map's automata of a path type on the occupant (0x60 in the car layers' pass)
     virtual std::uint32_t OccupantAutomataCount(ITrafficNetworkMapOccupant*, std::uint32_t) { return 0; }
     // the traffic network map's IsIntersection (map vslot 0x88 in the car layers' pass): no car is spawned on an intersection

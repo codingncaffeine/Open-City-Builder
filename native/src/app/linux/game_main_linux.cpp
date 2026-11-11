@@ -32,6 +32,7 @@
 #include "gz/CheatCodeManager.h"
 #include "platform/GameDataPath.h"
 #include "platform/PointerState.h"
+#include "sc4/Simulator.h"
 #include "sc4/RegionDialogs.h"
 #include "app/NativeBudgetUi.h"
 #include "app/NativeAnimationCoordinator.h"
@@ -1147,6 +1148,13 @@ int RunScenario(const std::string& path) {
             int limit = 8;
             words >> limit;
             native::NativeAnimationReport(limit);
+        } else if (command == "simspeed") {   // simspeed N: the simulator's speed (0 turtle, 1 llama, 2 cheetah)
+            int speed = 2;
+            words >> speed;
+            if (sc4::cSC4Simulator* simulator = native::CitySimulatorObject()) {
+                simulator->SetSimSpeed(speed);
+                std::printf("simspeed %d\n", speed);
+            }
         } else if (command == "ignite") {   // ignite X Z [force]: sets the occupants of a city cell alight (the torch's call)
             int x = 0, z = 0;
             std::string force;

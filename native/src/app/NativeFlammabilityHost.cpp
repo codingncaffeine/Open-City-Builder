@@ -2,6 +2,8 @@
 // no fires). Its header cannot be combined with the lot, building and disaster headers, so what it asks of those comes from
 // NativeDisasters.cpp.
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <vector>
 
@@ -92,6 +94,13 @@ public:
             }
             default:
                 sim->OnMessage(type, nullptr);
+                if (type == kMessageDailyTick) {
+                    static const bool trace = std::getenv("SC4_FIREDEBUG") != nullptr;
+                    static int days = 0;
+                    if (trace && ++days % 30 == 0)
+                        std::fprintf(stderr, "flammability: %d daily passes, average %u, %zu hotspots\n", days, sim->GetAverageFlammability(),
+                                     sim->GetHotspots().size());
+                }
                 break;
         }
         return true;

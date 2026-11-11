@@ -367,8 +367,9 @@ struct LotHost final : ILotHost {
     // the message object). The lot travels as a copy. PARTIAL: the condition change is not posted.
     void PostLotMessage(std::uint32_t message, const cSC4Lot& snapshot, std::uint32_t oldValue, std::uint32_t newValue, std::uint32_t buildingType,
                         std::int32_t wealth) override {
-        if (message != sc4::kMessageLotStateChanged) return;
-        if (cSC4LotDeveloper* developer = LotDeveloper()) developer->DoLotStateChanged(snapshot, oldValue, newValue);
+        if (message != sc4::kMessageLotStateChanged && message != sc4::kMessageLotConditionChanged) return;
+        if (message == sc4::kMessageLotStateChanged)
+            if (cSC4LotDeveloper* developer = LotDeveloper()) developer->DoLotStateChanged(snapshot, oldValue, newValue);
         if (!SL::spMS2) return;
         // Reference counted and on the heap: a message sent while the server is dispatching may be delivered later.
         struct LotObject final : cIGZUnknown {   // the plain lot behind the message's object slot (a copy it owns)

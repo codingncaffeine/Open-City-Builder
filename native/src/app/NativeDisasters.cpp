@@ -35,6 +35,7 @@
 #include "sc4/cSC4City.h"
 #include "sc4/cSC4ZoneManager.h"
 #include "sc4/cSTETerrain.h"
+#include "tools/city_probe_plain.h"
 
 namespace native {
 const sc4::cSC4SimGrid<std::uint8_t>* NativeFlammabilityGrid();   // app/NativeAdvisorFlammability.cpp
@@ -297,7 +298,8 @@ int NativeLotZoneTypeOfOccupant(sc4::cISC4Occupant* occupant) {
 }
 // The building of the lot a "lot changed" message carries (iid 0xe818fced), one reference; null when it has none.
 sc4::cISC4Occupant* NativeLotMessageBuilding(cIGZUnknown* unknown) {
-    sc4::cSC4Lot* lot = unknown ? dynamic_cast<sc4::cSC4Lot*>(unknown) : nullptr;
+    void* plain = nullptr;   // the message's object answers the plain lot (app/NativeZoneDeveloperHost.cpp PostLotMessage)
+    sc4::cSC4Lot* lot = unknown && unknown->QueryInterface(sc4::kGZIID_PlainObject, &plain) ? static_cast<sc4::cSC4Lot*>(plain) : nullptr;
     cIGZUnknown* building = lot ? lot->GetBuilding() : nullptr;
     void* view = nullptr;
     if (!building || !building->QueryInterface(sc4::kGZIID_cISC4Occupant, &view)) return nullptr;
@@ -348,6 +350,18 @@ int NativeFireCount() {
     const int count = fire->GetFireCount();
     fire->Release();
     return count;
+}
+
+// A crime of the arson kind (crime simulator, Mac i386 0x00172cea): the fire manager's IgniteOccupant, then SetCause(2).
+void NativeStartArson(sc4::cISC4Occupant* building) {
+    sc4::cISC4DisasterLayer* layer = Layer();
+    sc4::cISC4DisasterManager* manager = layer ? layer->GetDisasterManager(sc4::kDisasterManagerIdFire) : nullptr;
+    sc4::cISC4DisasterManagerFire* fire = nullptr;
+    if (!building || !manager || !manager->QueryInterface(sc4::kGZIID_cISC4DisasterManagerFire, reinterpret_cast<void**>(&fire)) || !fire) return;
+    const bool lit = fire->IgniteOccupant(building);
+    fire->SetCause(2);
+    fire->Release();
+    if (Trace()) std::fprintf(stderr, "fire: arson -> %s\n", lit ? "lit" : "nothing lit");
 }
 
 // The view's "go to the next disaster" button and key.

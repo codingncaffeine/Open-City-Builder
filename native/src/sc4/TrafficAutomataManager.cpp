@@ -888,23 +888,73 @@ bool cSC4TrafficAutomataManager::IsOffscreenEntryEdge(TrafficTileInfo* tile, int
     return !info->occupant->HasNetworkFlag(0x200000);
 }
 
+// Mac i386 0x000ccc60: every crime incident in view whose figures are not out yet gets them on its cell's network tile (or the
+// first of the eight cells around it that has one). The pass gives up after 5 ms and answers false, so the layer is taken up
+// again on the next tick.
 bool cSC4TrafficAutomataManager::PopulateCrimeLayer(float clockMultiplier) {
-    // 0x1001154ba PARTIAL: needs SL::spCrimeSim (the crime records + their cell rectangles), which is unrecovered.
-    (void)clockMultiplier;
+    ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
+    ITrafficNetworkManagerApi* network = host ? host->TrafficNetworkManager() : nullptr;
+    if (!network) return true;
+    std::vector<ITrafficNetworkManagerApi::CrimeIncidentCell> incidents;
+    if (!network->CrimeIncidents(incidents)) return true;
+    static constexpr int kAround[8][2] = {{0, -1}, {-1, 0}, {-1, 1}, {-1, 1}, {0, 1}, {1, 0}, {1, -1}, {1, -1}};   // 0x00843f00
+    int rect[4] = {0, 0, -1, -1};
+    network->GetVisibleCellRect(rect);
+    cRZTimer budget(cRZTimer::kMilliseconds);
+    budget.Start();
+    for (std::uint32_t i = 0; i < incidents.size(); ++i) {
+        const auto& incident = incidents[i];
+        if (!incident.visualsCreated && rect[0] <= incident.x && rect[1] <= incident.z && incident.x <= rect[2] && incident.z <= rect[3]) {
+            TrafficTileInfo* tile = network->GetTileInfoAtCell(incident.x, incident.z);
+            for (int n = 0; !tile && n < 8; ++n) tile = network->GetTileInfoAtCell(incident.x + kAround[n][0], incident.z + kAround[n][1]);
+            if (tile && tile->occupant) {
+                std::uint32_t sameCell = 0;
+                for (const auto& other : incidents)
+                    if (other.x == incident.x && other.z == incident.z) ++sameCell;
+                if (PopulateNetworkOccupantForCrimeLayer(tile->occupant, tile, clockMultiplier, sameCell, incident.typeId))
+                    network->SetCrimeVisualsCreated(i, true);
+            }
+        }
+        float elapsed = 0.0f;
+        budget.GetElapsedTimeFloat(elapsed);
+        if (5.0f <= elapsed) return false;
+    }
     return true;
 }
 
+// Mac i386 0x000cf606: the tile wants (incidents on the cell) x tuning x clock x the manager's crime multiplier figures of the
+// crime layer (8); surplus ones leave, and while it is short one more starts on a random path of the tile: a model of the crime
+// type's kind (any crime's when the type has none), group 0x4102.
 bool cSC4TrafficAutomataManager::PopulateNetworkOccupantForCrimeLayer(ITrafficNetworkMapOccupant* occupant,
                                                                       TrafficTileInfo* tile, float density,
-                                                                      std::uint32_t cellX, std::uint32_t cellZ) {
-    // 0x10011574e PARTIAL: ported as far as the effect-manager gate; the rest uses the crime record list (SL::spCrimeSim)
-    // and the automaton's path API.
-    (void)occupant;
-    (void)tile;
-    (void)density;
-    (void)cellX;
-    (void)cellZ;
-    return false;
+                                                                      std::uint32_t incidentCount, std::uint32_t crimeType) {
+    ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
+    ITrafficNetworkManagerApi* network = host ? host->TrafficNetworkManager() : nullptr;
+    if (!occupant || !tile || !network) return false;
+    constexpr std::uint32_t kCrimeLayer = static_cast<std::uint32_t>(PopulateLayer::kLayer8), kCrimeGroup = 0x4102;
+    const float wanted = static_cast<float>(incidentCount) * AutomataTuning().f21a3c * density * crimeLayerMultiplier_;
+    float have = 0.0f;
+    const float limit = 1.0f + wanted;
+    std::vector<ITrafficNetworkMapAutomaton*> surplus;
+    for (ITrafficNetworkMapAutomaton* automaton : tile->automata) {
+        if (!automaton || automaton->PathTypeWord() != kCrimeLayer) continue;
+        have += 1.0f;
+        if (limit < have) surplus.push_back(automaton);
+    }
+    for (ITrafficNetworkMapAutomaton* automaton : surplus) static_cast<ITrafficTileAutomaton*>(automaton)->Remove(false);
+    if (!(have < wanted)) return false;
+    std::uint32_t key = 0;
+    cS3DVector3 start{};
+    if (!network->RandomPathPoint(occupant, defaultPathType_, &Random(), key, start)) return false;
+    tExemplarData* exemplar = ChooseExemplarByCrimeType(DefaultGroup(), crimeType, PopulateLayer::kLayer8);
+    if (!exemplar) exemplar = ChooseExemplarByCrimeType(DefaultGroup(), 1, PopulateLayer::kLayer8);
+    if (!exemplar) return false;
+    IAutomataAutomaton* automaton = CreateAutomaton(kCrimeGroup, start, 2, exemplar->modelKey, nullptr, 0, nullptr);
+    ITrafficAutomataAutomaton* traffic = automaton && host ? host->AsTrafficAutomaton(automaton) : nullptr;
+    if (!traffic) return false;
+    traffic->SetPopulateLayer(kCrimeLayer);
+    traffic->StartTrip(occupant, key, true);
+    return true;
 }
 
 // ---- response / creation helpers ---------------------------------------------------------------------------------------
