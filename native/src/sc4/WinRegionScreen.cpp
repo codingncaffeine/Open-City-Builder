@@ -703,12 +703,18 @@ void cSC4WinRegionScreen::LoadGUI() {   // @ 0x10023927a
 void cSC4WinRegionScreen::PutCitiesInView() {   // @ 0x100236398 (PARTIAL)
     // One record per city place of the active region, in the original's formulas: the cell corner (x - 1 + 2^size, z - 1 + 2^size),
     // the map position (-37.49 * (z + 2^size) + 90.51 * x, 45.25 * (z + 2^size) + 18.75 * (x + 2^size)) and the default snapshots of
-    // the city's size. PARTIAL: the draw-order sort (cCityDrawingOrderSort), the city file thumbnails (SC4ReadCityRegionViewThumbnails)
-    // and their resampling are not recovered, so every city keeps the default picture.
+    // the city's size. PARTIAL: the city file thumbnails (SC4ReadCityRegionViewThumbnails) and their resampling are not
+    // recovered, so every city keeps the default picture.
     IRegionScreenHost* host = RegionScreenHost();
     if (host) {
         std::vector<cISC4Region::cLocation> locations;
         host->CityLocations(locations);
+        // cCityDrawingOrderSort (Mac i386 0x006a73ae): back to front by the front corner's depth x + z + 2^size, the lower x
+        // first on a tie, so a city's side walls are covered by the neighbours drawn after it.
+        std::sort(locations.begin(), locations.end(), [](const cISC4Region::cLocation& a, const cISC4Region::cLocation& b) {
+            const int depthA = a.x + a.z + (1 << (a.size & 0x1f)), depthB = b.x + b.z + (1 << (b.size & 0x1f));
+            return depthA < depthB || (depthA == depthB && a.x < b.x);
+        });
         cities_.clear();
         for (const cISC4Region::cLocation& location : locations) {
             RegionViewCity city;
