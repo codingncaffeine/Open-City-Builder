@@ -4,6 +4,7 @@
 #   scripts/build_linux_game.sh [debug]      debug: -O0 + AddressSanitizer
 #   JOBS=N scripts/build_linux_game.sh      N parallel compiles (default: a quarter of the cores, so the desktop stays usable)
 #   SC4_GAME_CONTENTS=<folder with GameData/> build/sc4_game_linux [--shot out.png [--frames N] | --script scenario.txt]
+# A header edit rebuilds only the objects that include it (each object keeps the list of what it included in <object>.d).
 # Needs clang, ar, xxd, libc++, SDL3, libepoxy, FreeType, libpng and libmpg123 (the Mac-derived classes assert libc++'s layouts).
 set -e
 cd "$(dirname "$0")/.."
@@ -33,11 +34,24 @@ LIST=scripts/linux_game_link_list.txt
 OBJS=""
 for s in $(grep -v '^#' $LIST); do OBJS="$OBJS $OBJ/$(echo "$s" | tr '/' '_').o"; done
 FAILED=$(mktemp)
+# An object is rebuilt when its source or any file it included is newer. The compiler writes the list of included files next to
+# the object (<object>.d); an object without that list is rebuilt.
+stale() {
+  local o=$1 line d
+  [ -f "$o.d" ] || return 0
+  while read -r line; do
+    for d in $line; do
+      case $d in *:|\\) continue;; esac
+      [ "$d" -nt "$o" ] && return 0
+    done
+  done < "$o.d"
+  return 1
+}
 for s in $(grep -v '^#' $LIST); do
   o=$OBJ/$(echo "$s" | tr '/' '_').o
-  if [ -f "$o" ] && [ "$o" -nt "$s" ] && [ -z "$(find src scripts/tests/stubs -name '*.h' -newer "$o" | head -1)" ]; then continue; fi
+  if [ -f "$o" ] && [ "$o" -nt "$s" ] && ! stale "$o"; then continue; fi
   echo "$s $o"
-done | xargs -r -P "${JOBS:-$(( $(nproc) > 4 ? $(nproc) / 4 : 1 ))}" -L 1 sh -c 'clang++ '"$CF"' -c "$0" -o "$1" 2>"$1.err" || echo "$0" >>'"$FAILED"
+done | xargs -r -P "${JOBS:-$(( $(nproc) > 4 ? $(nproc) / 4 : 1 ))}" -L 1 sh -c 'clang++ '"$CF"' -MMD -MF "$1.d" -c "$0" -o "$1" 2>"$1.err" || { rm -f "$1.d"; echo "$0" >>'"$FAILED"'; }'
 if [ -s "$FAILED" ]; then
   echo "COMPILE ERRORS:"; for s in $(cat "$FAILED"); do echo "--- $s"; grep -m5 error "$OBJ/$(echo "$s" | tr '/' '_').o.err"; done
   rm -f "$FAILED"; exit 1
