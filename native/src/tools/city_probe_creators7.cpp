@@ -15,6 +15,11 @@ cIGZSerializable* CreateCityProbeSerializable7(std::uint32_t classId) {
             object->AddRef();
             return object;
         }
+        case sc4::kGZCLSID_cSC4PedestrianOneShot: {   // the crime layer's standing figures
+            auto* object = new sc4::cSC4PedestrianOneShot(sc4::g_loadPedestrianHost ? sc4::g_loadPedestrianHost : sc4::NewStubIPedestrianHost());
+            object->AddRef();
+            return object;
+        }
         default: return nullptr;
     }
 }

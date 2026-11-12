@@ -931,4 +931,19 @@ void NativePrintAdvisors() {
     }
 }
 
+// Is `occupant` the running mission's current target (city vslot 0xc4 GetCitySituationManager, its vslot 0x24)? The same
+// object answers the same cIGZUnknown.
+bool NativeIsSituationTarget(cIGZUnknown* occupant) {
+    cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(CityComponent::CitySituationManager) : nullptr;
+    auto* situations = object ? dynamic_cast<cSC4CitySituationManager*>(object) : nullptr;
+    ISituationOccupant* target = situations ? situations->GetCurrentTarget() : nullptr;
+    if (!target || !occupant) return false;
+    void *a = nullptr, *b = nullptr;
+    const bool same = target->QueryInterface(kGZIID_cIGZUnknown, &a) && occupant->QueryInterface(kGZIID_cIGZUnknown, &b) && a == b;
+    if (a) static_cast<cIGZUnknown*>(a)->Release();
+    if (b) static_cast<cIGZUnknown*>(b)->Release();
+    return same;
+}
+
 }  // namespace native

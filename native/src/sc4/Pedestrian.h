@@ -65,6 +65,8 @@ struct PedestrianTuning {
     std::int32_t speedMax = 0;      // 0x100b2189c
     float pathOffsetMin = -1.0f;    // 0x100b21a24 (RecalculatePathOffset's RandomDoubleRangeUniform range)
     float pathOffsetMax = 1.0f;     // 0x100b21a28
+    std::uint8_t oneShotAnimMin = 0;   // 0x100b21a40 (tuning property 0x6a09f630: how many times a one-shot figure plays, low)
+    std::uint8_t oneShotAnimMax = 0;   // 0x100b21a41 (high)
 };
 
 // ---- seams -----------------------------------------------------------------------------------------------------------
@@ -151,6 +153,26 @@ protected:
     cS3DVector3 crowdReactionDirection_{0.0f, 0.0f, 0.0f};   // +0x3a0
     float collisionTimer_ = 0.0f;                  // +0x3ac
     float animationSpeed_ = kPedestrianAnimationSpeed;   // +0x3b0
+};
+
+// cSC4PedestrianOneShot (Mac i386 0x000b1c0a..0x000b28cc, class id 0xaa09dc28): a figure that stands in place and plays its
+// animation a few times, then leaves: the crime layer's fights, muggings and the like. The count is rolled at Init from the
+// tuning's range, or the exemplar's own (property 0xea958845, two bytes).
+constexpr std::uint32_t kGZCLSID_cSC4PedestrianOneShot = 0xaa09dc28;
+constexpr std::uint32_t kPedestrianOneShotAnimCountProperty = 0xea958845;
+
+class cSC4PedestrianOneShot : public cSC4Pedestrian {
+public:
+    using cSC4Pedestrian::cSC4Pedestrian;                                 // i386 0x000b28cc
+    bool QueryInterface(std::uint32_t iid, void** out) override;          // i386 0x000b1c0a
+    bool Init() override;                                                 // i386 0x000b1f4c
+    bool DoAnimationTick(std::uint32_t unknown, float milliseconds) override;   // i386 0x000b1e66
+    std::uint32_t GetGZCLSID() const override { return kGZCLSID_cSC4PedestrianOneShot; }
+    std::uint8_t GetAnimCount() const { return animCount_; }              // i386 0x0063373c
+    void SetAnimCount(std::uint8_t count) { animCount_ = count; }         // i386 0x0063374c
+
+private:
+    std::uint8_t animCount_ = 5;   // +0x280 (i386)
 };
 
 }  // namespace sc4

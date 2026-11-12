@@ -302,6 +302,8 @@ public:
         pedestrianTuning_.speedMax = static_cast<std::int32_t>(t.f2189c);
         pedestrianTuning_.pathOffsetMin = t.f21a24;                         // 0x100b21a24
         pedestrianTuning_.pathOffsetMax = t.f21a28;
+        pedestrianTuning_.oneShotAnimMin = t.f21a40;                        // 0x100b21a40 (property 0x6a09f630)
+        pedestrianTuning_.oneShotAnimMax = t.f21a41;
         return &pedestrianTuning_;
     }
 private:

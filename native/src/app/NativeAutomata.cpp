@@ -58,6 +58,7 @@ public:
     int GetFrameCount() const override { return animated_ ? animated_->GetFrameCount() : 1; }
     void SetZoomAndRotation(int zoom, int rotation) override { if (animated_) animated_->SetZoomAndRotation(zoom, rotation); }
     void SetPlayMode(s3d::PlayMode mode) override { if (animated_) animated_->SetPlayMode(mode); }
+    float GetOpacity() const override { return instance_->GetDrawAttributes().shade[3]; }
 
 private:
     s3d::cIS3DModelInstance* instance_;
@@ -109,12 +110,31 @@ public:
         void* resource = nullptr;
         if (!SL::spRM || !SL::spRM->GetResource(key, kGZIID_cIS3DResModel, &resource, 0, nullptr) || !resource) return nullptr;
         auto* res = static_cast<s3d::cIS3DResModel*>(resource);
+        static const bool frozen = std::getenv("SC4_STATICAUTOMATA") != nullptr;   // A/B: every model stays on its first frame
+        if (res->FrameCount() > 1 && !frozen) {   // a model with animation frames plays them (the original makes every automaton model animated)
+            res->Release();
+            return CreateAnimatedModel(key);
+        }
         s3d::cIS3DModelInstance* instance = nullptr;
         const bool ok = res->CreateModelInstance(0, &instance);
         res->Release();
         if (std::getenv("SC4_DEBUG")) { static int shown = 0; if (shown++ < 4) std::fprintf(stderr, "automata: model %08x/%08x/%08x -> %s\n", key.type, key.group, key.instance, ok && instance ? "ok" : "none"); }
         IAutomatonModel* model = ok && instance ? new AutomatonModel(instance) : nullptr;
         if (ModelTrace()) std::fprintf(stderr, "automata: model %p created from %08x\n", static_cast<void*>(model), key.instance);
+        return model;
+    }
+    // GetAnimatedModelFromResourceKey's model branch: the instance whose meshes follow the model's animation frames.
+    IAutomatonModel* CreateAnimatedModel(const cGZPersistResourceKey& key) override {
+        if (key.type == s3d::kGZIID_cIS3DResSpriteAnim) return CreateModel(key);
+        void* resource = nullptr;
+        if (!SL::spRM || !SL::spRM->GetResource(key, kGZIID_cIS3DResModel, &resource, 0, nullptr) || !resource) return nullptr;
+        auto* res = static_cast<s3d::cIS3DResModel*>(resource);
+        s3d::cIS3DModelInstanceAnimated* animated = nullptr;
+        const bool ok = res->CreateAnimatedModelInstance(0, &animated);
+        const int rate = res->FrameRate();
+        res->Release();
+        IAutomatonModel* model = ok && animated ? new AutomatonModel(animated->AsModelInstance(), animated) : nullptr;
+        if (ModelTrace()) std::fprintf(stderr, "automata: model %p created animated from %08x, %d frames, rate %d\n", static_cast<void*>(model), key.instance, model ? model->GetFrameCount() : 0, rate);
         return model;
     }
     void DestroyModel(IAutomatonModel* model) override {
@@ -169,7 +189,7 @@ public:
     // The int global 0x100b21888 = the second value of tuning property 0x4998c900 (the shipped default speed range 80..110 km/h):
     // every new vehicle starts at this speed (cSC4Vehicle ctor), so a wrong value sends the whole traffic flow at it.
     float MaxSpeedUnits() override { return static_cast<float>(AutomataTuning().f21888); }
-    float FadeDurationSeconds() override { return 0.5f; }
+    float FadeDurationSeconds() override { return AutomataTuning().f219b4; }   // tuning 0x4998c916 (1.0 in the shipped data)
     void PostMessage(cIGZMessage2*) override {}
     std::uint32_t GenerateSoundInstanceId() override { return ++sound_; }
     void StopSoundLoop(std::uint32_t) override {}

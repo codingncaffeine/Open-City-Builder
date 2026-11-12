@@ -567,6 +567,7 @@ src/tools/city_probe_creators2.cpp
 src/tools/city_probe_creators3.cpp
 src/tools/city_probe_creators4.cpp
 src/tools/city_probe_creators5.cpp
+src/sc4/SpecialVehicles.cpp
 src/sc4/CitySituationManager.cpp
 src/sc4/WatercraftManager.cpp
 src/sc4/Watercraft.cpp

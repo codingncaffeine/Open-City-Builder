@@ -25,6 +25,7 @@
 #include "sc4/PylonOccupant.h"
 #include "sc4/SCPropertyHelp.h"
 #include "sc4/ServiceLocator.h"
+#include "sc4/SpecialVehicles.h"
 #include "sc4/TrafficAutomataManager.h"
 #include "sc4/TrafficNetworkMap.h"
 #include "sc4/cSC4City.h"
@@ -636,7 +637,22 @@ void NativeDispatchReport() {
     std::printf("dispatches: %d fire, %d police\n", NativeDispatchCount(1), NativeDispatchCount(0));
 }
 
+bool NativeIsSituationTarget(cIGZUnknown* occupant);                                             // app/NativeAdvisors.cpp
+bool NativePoliceAndCrimeAt(int cellX, int cellZ, std::uint8_t& police, std::uint8_t& crime);   // app/NativeCrime.cpp
+
+namespace {
+// What a getaway van asks when it appears: is it the mission's target, and do the police outweigh the crime where it stands.
+class GetawayVanHost final : public sc4::IGetawayVanHost {
+public:
+    bool IsSituationTarget(sc4::cISC4Occupant* occupant) override { return NativeIsSituationTarget(occupant); }
+    bool PoliceAndCrimeAt(int cellX, int cellZ, std::uint8_t& police, std::uint8_t& crime) override {
+        return NativePoliceAndCrimeAt(cellX, cellZ, police, crime);
+    }
+} g_getawayVanHost;
+}  // namespace
+
 void InstallNativeDispatchHost() {
+    sc4::SetGetawayVanHost(&g_getawayVanHost);
     SetDispatchHost(&g_host);
     g_loadEmergencyHost = &g_emergency;
     g_loadFireTruckHost = &g_fireTruck;

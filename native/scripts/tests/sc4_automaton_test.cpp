@@ -46,7 +46,9 @@ struct FakeModel final : IAutomatonModel {
     int GetFrame() const override { return frame; }
     int GetFrameCount() const override { return frameCount; }
     void SetZoomAndRotation(int, int) override {}
-    void SetPlayMode(s3d::PlayMode) override {}
+    void SetPlayMode(s3d::PlayMode mode) override { playMode = static_cast<int>(mode); }
+    float GetOpacity() const override { return opacity; }
+    int playMode = -1;
 };
 
 struct FakeEffects final : IAutomatonEffects {
@@ -137,6 +139,8 @@ struct FakeHost final : IAutomatonHost {
         }
         return model;
     }
+    IAutomatonModel* CreateAnimatedModel(const cGZPersistResourceKey& key) override { ++createdAnimated; return CreateModel(key); }
+    int createdAnimated = 0;
     void DestroyModel(IAutomatonModel* model) override { ++destroyedModels; if (model) model->Release(); }
     IAutomatonEffects* CreateEffects() override { return &effects; }
     void DestroyEffects(IAutomatonEffects*) override {}
@@ -1026,6 +1030,58 @@ int main() {
         CHECK(!automaton->ShutdownGhostModel());
         CHECK(!automaton->UpdateGhostModel());
         CHECK(!automaton->AttachAnim(cGZPersistResourceKey{}, s3d::kPlayLoop, true, 1.0f));
+        CHECK(automaton->Release() == 0);
+    }
+
+    // ---- AttachAnim (i386 0x000c1b92), its tick (0x000bbf9c) and its exit (0x000c0418) ---------------------------------
+    {
+        FakeHost host;
+        host.fadeSeconds = 1.0f;
+        cSC4Automaton* automaton = MakeAutomaton(host);
+        FakeModel figures;
+        figures.frameCount = 4;
+        host.nextModel = &figures;
+        const cGZPersistResourceKey key{0x5ad0e817, 0xbadb57f1, 0x112a0000};
+        CHECK(automaton->AttachAnim(key, static_cast<s3d::PlayMode>(1), true, 5.0f));
+        tAutomataState* state = automaton->GetState();
+        CHECK(state && state->stateType == kStateAttachAnim && state->timer == 5.0f);
+        CHECK(host.createdAnimated == 1 && host.createdInstances.back() == 0x112a0000);
+        CHECK(figures.opacity == 0.0f && figures.translucent && figures.playMode == 1);   // joins invisible
+        CHECK(figures.refs == 2);                                                          // the instance list and the state
+        // each tick adds ms / (half the fade time); the answer is the flag AttachAnim was given
+        CHECK(automaton->DoAttachAnimTick(0.125f));
+        CHECK_NEAR(figures.opacity, 0.25f);
+        CHECK(automaton->DoAttachAnimTick(0.5f));
+        CHECK_NEAR(figures.opacity, 1.0f);
+        const int sets = figures.opacitySets;
+        CHECK(automaton->DoAttachAnimTick(0.5f) && figures.opacitySets == sets);           // opaque: left alone
+        CHECK(automaton->GetState() == state);
+        // the last frame of a one-shot animation ends the state, and the instance leaves with it
+        figures.frame = 3;
+        CHECK(automaton->DoAttachAnimTick(0.5f));
+        CHECK(automaton->GetState() != state);
+        CHECK(host.destroyedModels == 1 && figures.refs == 0);
+        CHECK(automaton->GetModelInstance() == nullptr);
+
+        // a looping animation (mode 3) and a ping-pong one (2) never end by themselves; the flag is what the tick answers
+        for (int mode : {2, 3}) {
+            FakeModel loop;
+            loop.frameCount = 4;
+            loop.frame = 3;
+            host.nextModel = &loop;
+            CHECK(automaton->AttachAnim(key, static_cast<s3d::PlayMode>(mode), false, 5.0f));
+            tAutomataState* looping = automaton->GetState();
+            CHECK(!automaton->DoAttachAnimTick(0.5f));
+            CHECK(automaton->GetState() == looping && loop.refs == 2);
+            CHECK(automaton->PopState());
+            CHECK(loop.refs == 0);
+        }
+
+        // no model for the key: the state is pushed all the same (as in the original) and the call answers false
+        host.nextModel = nullptr;
+        CHECK(!automaton->AttachAnim(key, s3d::kPlayOnce, true, 5.0f));
+        CHECK(automaton->GetState() && automaton->GetState()->stateType == kStateAttachAnim);
+        CHECK(automaton->DoAttachAnimTick(0.5f));
         CHECK(automaton->Release() == 0);
     }
 

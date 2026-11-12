@@ -385,12 +385,22 @@ constexpr std::uint32_t kNotifications[4] = {kCrimeMsgOccupantAdded, kCrimeMsgOc
 
 void InstallCrimeHost() { sc4::SetCityProbeCrimeHost(&g_crimeHost); }
 
+// The police power and the crime at a cell (the getaway van's question, app/NativeDispatch.cpp); false without the two grids
+// or outside the city.
+bool NativePoliceAndCrimeAt(int cellX, int cellZ, std::uint8_t& police, std::uint8_t& crime) {
+    cSC4City* city = HostCity();
+    auto* policeSim = CityAs<cSC4PoliceSimulator>(CityComponent::PoliceSimulator);
+    cSC4CrimeSimulator* crimeSim = Crime();
+    const cSC4SimGrid<std::uint8_t>* policeGrid = policeSim ? policeSim->Protection().AdjustedGrid() : nullptr;
+    const cSC4SimGrid<std::uint8_t>* crimeGrid = crimeSim ? crimeSim->GetCrimeGrid() : nullptr;
+    if (!city || !policeGrid || !crimeGrid || !city->CellIsInBounds(cellX, cellZ)) return false;
+    police = policeGrid->GetCellValue(cellX, cellZ);
+    crime = crimeGrid->GetCellValue(cellX, cellZ);
+    return true;
+}
+
 // The crime layer of the automata (cSC4TrafficAutomataManager::PopulateCrimeLayer): the incidents by cell.
-// Off unless SC4_CRIMELAYER is set: two of the figures the layer creates (the carjacked car 0xcbb32b0a and the getaway van)
-// have no class yet, so their crime types cannot be shown.
 bool NativeCrimeIncidents(std::vector<sc4::ITrafficNetworkManagerApi::CrimeIncidentCell>& out) {
-    static const bool enabled = std::getenv("SC4_CRIMELAYER") != nullptr;
-    if (!enabled) return false;
     sc4::cSC4CrimeSimulator* crime = Crime();
     std::vector<sc4::CrimeIncident> incidents;
     if (!crime || !crime->GetCrimeIncidentArray(incidents)) return false;

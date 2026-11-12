@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "sc4/PathInfo.h"
+#include "sc4/SCPropertyHelp.h"
 
 namespace sc4 {
 
@@ -715,6 +716,55 @@ bool cSC4Pedestrian::Read(cIGZIStream& stream) {
         stream.GetUint32(crowdReactionState_);
     }
     return !stream.GetError();
+}
+
+// ---- cSC4PedestrianOneShot ---------------------------------------------------------------------------------------------
+bool cSC4PedestrianOneShot::QueryInterface(std::uint32_t iid, void** out) {
+    if (iid == kGZCLSID_cSC4PedestrianOneShot && out) {
+        *out = this;
+        AddRef();
+        return true;
+    }
+    return cSC4Pedestrian::QueryInterface(iid, out);
+}
+
+// i386 0x000b1f4c: the models play at the pedestrian's animation speed; the play count is a roll in the tuning's range, or
+// in the exemplar's own when it has one of two or more bytes.
+bool cSC4PedestrianOneShot::Init() {
+    if (!cSC4Pedestrian::Init()) return false;
+    for (IAutomatonModel* model : Models())
+        if (model) model->SetAutoFrameRate(kPedestrianAnimationSpeed);
+    const PedestrianTuning& tuning = Tuning();
+    std::uint32_t low = tuning.oneShotAnimMin;
+    std::uint8_t high = tuning.oneShotAnimMax;
+    std::vector<std::uint8_t> own;
+    if (cSCPropertyHelp::GetPropertyValue(AsPropertyHolder(), kPedestrianOneShotAnimCountProperty, own) && own.size() > 1) {
+        low = own[0];
+        high = own[1];
+    }
+    animCount_ = static_cast<std::uint8_t>(low + RandomBelow((high - low) + 1));
+    return true;
+}
+
+// i386 0x000b1e66: no movement at all: the opacity tween, then every model's animation; when the first model stands on its
+// last frame one play is used up, and the last one removes the figure (the tick then answers false).
+bool cSC4PedestrianOneShot::DoAnimationTick(std::uint32_t unknown, float milliseconds) {
+    (void)unknown;
+    UpdateOpacity(milliseconds);
+    bool alive = true, first = true;
+    const std::vector<IAutomatonModel*> models = Models();   // Remove may empty the list
+    for (IAutomatonModel* model : models) {
+        if (!model) continue;
+        model->UpdateAnimation(milliseconds);
+        if (first && model->GetFrameCount() - 1 <= model->GetFrame()) {
+            if (animCount_ == 0 || --animCount_ == 0) {
+                Remove(false);
+                alive = false;
+            }
+        }
+        first = false;
+    }
+    return alive;
 }
 
 }  // namespace sc4

@@ -948,9 +948,16 @@ bool cSC4TrafficAutomataManager::PopulateNetworkOccupantForCrimeLayer(ITrafficNe
     if (!network->RandomPathPoint(occupant, defaultPathType_, &Random(), key, start)) return false;
     tExemplarData* exemplar = ChooseExemplarByCrimeType(DefaultGroup(), crimeType, PopulateLayer::kLayer8);
     if (!exemplar) exemplar = ChooseExemplarByCrimeType(DefaultGroup(), 1, PopulateLayer::kLayer8);
-    if (!exemplar) return false;
+    static const bool trace = std::getenv("SC4_CRIMEDEBUG") != nullptr;
+    if (!exemplar) {
+        if (trace) std::fprintf(stderr, "crime layer: type %u at (%.0f, %.0f): no figure for it\n", crimeType, start.x, start.z);
+        return false;
+    }
     IAutomataAutomaton* automaton = CreateAutomaton(kCrimeGroup, start, 2, exemplar->modelKey, nullptr, 0, nullptr);
     ITrafficAutomataAutomaton* traffic = automaton && host ? host->AsTrafficAutomaton(automaton) : nullptr;
+    if (trace)
+        std::fprintf(stderr, "crime layer: type %u at (%.0f, %.0f): %s, model %08x -> %s\n", crimeType, start.x, start.z,
+                     exemplar->name.ToChar(), exemplar->modelKey.instance, traffic ? "started" : automaton ? "not a traffic automaton" : "not created");
     if (!traffic) return false;
     traffic->SetPopulateLayer(kCrimeLayer);
     traffic->StartTrip(occupant, key, true);

@@ -1,5 +1,7 @@
 #include "sc4/AutomataStates.h"
 
+#include "sc4/Automaton.h"
+
 #include "sc4/DBSegment.h"
 
 namespace sc4 {
@@ -174,6 +176,10 @@ bool tAutomataStateCollide::Write(cIGZOStream& stream) const {
 bool tAutomataStateCollide::Read(cIGZIStream& stream) {
     if (!tAutomataState::Read(stream)) return false;
     return !stream.GetError();
+}
+
+tAutomataStateAttachAnim::~tAutomataStateAttachAnim() {
+    if (model) model->Release();
 }
 
 bool tAutomataStateAttachAnim::Write(cIGZOStream& stream) const {

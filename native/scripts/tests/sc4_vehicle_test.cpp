@@ -169,11 +169,14 @@ struct FakeModel final : IAutomatonModel {
         lastOpacity = opacity;
         transparent = translucent;
     }
-    void UpdateAnimation(float) override {}
-    int GetFrame() const override { return 0; }
-    int GetFrameCount() const override { return 1; }
+    void UpdateAnimation(float) override { ++animationUpdates; }
+    int GetFrame() const override { return frame; }
+    int GetFrameCount() const override { return frameCount; }
     void SetZoomAndRotation(int, int) override {}
     void SetPlayMode(s3d::PlayMode) override {}
+    void SetAutoFrameRate(float rate) override { autoRate = rate; }
+    int frame = 0, frameCount = 1, animationUpdates = 0;
+    float autoRate = 0.0f;
 };
 
 struct FakeEffect final : IVehicleEffect {
@@ -207,10 +210,14 @@ struct FakeAutomatonHost final : IAutomatonHost {
     float terrainHeight = 0.0f;
     int modelsCreated = 0;
     int createdRefs = 0;
-    IAutomatonModel* CreateModel(const cGZPersistResourceKey&) override {
+    std::vector<std::uint32_t> createdInstances;
+    FakeModel* lastModel = nullptr;
+    IAutomatonModel* CreateModel(const cGZPersistResourceKey& key) override {
+        createdInstances.push_back(key.instance);
         ++modelsCreated;
         auto* model = new FakeModel();
         createdRefs = model->refs;
+        lastModel = model;
         return model;
     }
     void DestroyModel(IAutomatonModel* model) override { if (model) model->Release(); }
@@ -1327,13 +1334,13 @@ void TestEmergencyVehicle() {
         ev->SetAutomataFlag(0x80, true);
         ev->SetDispatchStateRaw(3);
         emergencyHost.tuning.teleportCells = 4;                                  // 64 metres
-        const float here[3] = {100.0f, 0.0f, 100.0f};
+        const float here[3] = {100.0f, 0.0f, 20.0f};                             // cell (6, 1) of the 8 x 4 test map
         ev->SetPosition(here);
-        ev->SetDispatchDestination(Vec(100.0f, 0.0f, 140.0f));                   // 40 away: close
+        ev->SetDispatchDestination(Vec(100.0f, 0.0f, 60.0f));                    // 40 away: close
         CHECK(ev->CloseEnoughToDispatchDestination());
-        ev->SetDispatchDestination(Vec(100.0f, 0.0f, 200.0f));                   // 100 away: far
+        ev->SetDispatchDestination(Vec(100.0f, 0.0f, 120.0f));                   // 100 away: far
         CHECK(!ev->CloseEnoughToDispatchDestination());
-        ev->SetDispatchDestination(Vec(100.0f, 0.0f, 140.0f));
+        ev->SetDispatchDestination(Vec(100.0f, 0.0f, 60.0f));
         ev->HandleReachedRouteDestination();
         CHECK(ev->GetDispatchState() == 5 && ev->GetState() != nullptr && ev->GetState()->stateType == kEmergencyStateHandlingEvent);
         CHECK(ev->CheckAutomataFlag(0x4000) && !ev->CheckAutomataFlag(4));
@@ -1442,6 +1449,70 @@ void TestEmergencyVehicle() {
         roundTrip(&van, &vanTwin, 3);
         roundTrip(&limo, &limoTwin, 1);
         CHECK(limo.Value424() == 50 && limo.Value428() == 48.0f && limo.Value42c() == 10.0f);
+    }
+
+    // ---- the crime layer's two vehicles (PostInit: i386 0x0049d9a8 carjacked, 0x0039189c getaway van) ------------------------
+    {
+        struct FakeCity final : IGetawayVanHost {
+            cISC4Occupant* target = nullptr;
+            bool grids = true;
+            std::uint8_t police = 0, crime = 0;
+            int askedX = -1, askedZ = -1;
+            bool IsSituationTarget(cISC4Occupant* occupant) override { return occupant == target; }
+            bool PoliceAndCrimeAt(int x, int z, std::uint8_t& p, std::uint8_t& c) override {
+                askedX = x;
+                askedZ = z;
+                p = police;
+                c = crime;
+                return grids;
+            }
+        } city;
+        constexpr std::uint32_t kLeavingTown = 0x201180a;
+
+        auto* jacked = new cSC4CarjackedVehicle(&world.host, &world.automatonHost);
+        jacked->AddRef();
+        CHECK(!jacked->CheckAutomataFlag(kLeavingTown));
+        cSC4Automaton* asAutomaton = jacked;
+        CHECK(asAutomaton->PostInit());                                             // reached through the base (the manager's call)
+        CHECK(jacked->CheckAutomataFlag(kLeavingTown));
+        CHECK(jacked->GetState() && jacked->GetState()->stateType == kStateAttachAnim && jacked->GetState()->timer == 5.0f);
+        CHECK(!world.automatonHost.createdInstances.empty() && world.automatonHost.createdInstances.back() == 0x112a0000);
+        jacked->Release();
+
+        const auto vanModel = [&](bool withCity, cS3DVector3 at, bool target) {
+            SetGetawayVanHost(withCity ? &city : nullptr);
+            auto* van = new cSC4GetawayVan(&world.host, &world.automatonHost);
+            van->AddRef();
+            van->SetPosition(&at.x);
+            city.target = target ? van->AsOccupant() : nullptr;
+            CHECK(van->PostInit());
+            CHECK(van->CheckAutomataFlag(kLeavingTown));
+            CHECK(van->GetState() && van->GetState()->stateType == kStateAttachAnim);
+            const std::uint32_t instance = world.automatonHost.createdInstances.back();
+            CHECK(van->Escapes() == (instance == 0x117c0000));
+            van->Release();
+            SetGetawayVanHost(nullptr);
+            return instance;
+        };
+        constexpr std::uint32_t kEscape = 0x117c0000, kCaught = 0x117b0000;
+        // the police outweigh the crime at the van's cell (world / 16): caught
+        city.police = 5;
+        city.crime = 3;
+        CHECK(vanModel(true, cS3DVector3{40.0f, 0.0f, 72.0f}, false) == kCaught);
+        CHECK(city.askedX == 2 && city.askedZ == 4);
+        city.crime = 5;                                                             // as much crime as police: away
+        CHECK(vanModel(true, cS3DVector3{40.0f, 0.0f, 72.0f}, false) == kEscape);
+        city.police = 0;                                                            // no police at all: away
+        city.crime = 0;
+        CHECK(vanModel(true, cS3DVector3{40.0f, 0.0f, 72.0f}, false) == kEscape);
+        city.police = 5;                                                            // the mission's target always gets away
+        city.crime = 3;
+        city.askedX = -1;
+        CHECK(vanModel(true, cS3DVector3{40.0f, 0.0f, 72.0f}, true) == kEscape);
+        CHECK(city.askedX == -1);
+        city.grids = false;                                                         // no grids: the coin (this host rolls range - 1)
+        CHECK(vanModel(true, cS3DVector3{40.0f, 0.0f, 72.0f}, false) == kCaught);
+        CHECK(vanModel(false, cS3DVector3{40.0f, 0.0f, 72.0f}, false) == kCaught);
     }
 
     // attraction: emergency mode drops the attraction controller instead of updating it
@@ -1903,6 +1974,48 @@ void TestPedestrian() {
     PortMemoryIStream badStream(bad, sizeof(bad));
     CHECK(!copy->Read(badStream));
     copy->Release();
+
+    // ---- cSC4PedestrianOneShot (i386 0x000b1c0a..0x000b28cc): stands, plays its animation a rolled number of times, leaves ----
+    {
+        host.tuning.oneShotAnimMin = 2;
+        host.tuning.oneShotAnimMax = 4;
+        auto* shot = new cSC4PedestrianOneShot(&host);
+        shot->AddRef();
+        CHECK(shot->GetGZCLSID() == 0xaa09dc28 && shot->GetAnimCount() == 5);
+        void* answer = nullptr;
+        CHECK(shot->QueryInterface(kGZCLSID_cSC4PedestrianOneShot, &answer) && answer == shot);
+        shot->Release();
+        CHECK(shot->QueryInterface(kGZIID_cISC4Pedestrian, &answer) && answer == shot);
+        shot->Release();
+        shot->AddModelResourceKey(cGZPersistResourceKey{0x5ad0e817, 0xbadb57f1, 0x0b400000});
+        CHECK(shot->Init());
+        CHECK(shot->GetAnimCount() == 4);                      // 2 + roll(4 - 2 + 1), this host rolls range - 1
+        FakeModel* model = world.automatonHost.lastModel;
+        CHECK(model && model->autoRate == kPedestrianAnimationSpeed);
+        if (model) {
+            model->frameCount = 3;
+            const float before[3] = {shot->Position().x, shot->Position().y, shot->Position().z};
+            CHECK(shot->DoAnimationTick(0, 16.0f));            // mid animation: nothing is counted
+            CHECK(model->animationUpdates == 1 && shot->GetAnimCount() == 4);
+            model->frame = 2;                                  // the last frame uses one play up per tick
+            CHECK(shot->DoAnimationTick(0, 16.0f) && shot->GetAnimCount() == 3);
+            CHECK(shot->DoAnimationTick(0, 16.0f) && shot->GetAnimCount() == 2);
+            CHECK(shot->DoAnimationTick(0, 16.0f) && shot->GetAnimCount() == 1 && !shot->GetMarkedForRemove());
+            CHECK(!shot->DoAnimationTick(0, 16.0f) && shot->GetMarkedForRemove());   // the last one: it leaves
+            CHECK(shot->Position().x == before[0] && shot->Position().z == before[2]);   // and never walked
+        }
+        shot->Release();
+
+        // the exemplar's own range is not set here, so an equal low and high gives exactly that count; a count of 0 leaves at once
+        host.tuning.oneShotAnimMin = 1;
+        host.tuning.oneShotAnimMax = 1;
+        auto* once = new cSC4PedestrianOneShot(&host);
+        once->AddRef();
+        once->AddModelResourceKey(cGZPersistResourceKey{0x5ad0e817, 0xbadb57f1, 0x0b300000});
+        CHECK(once->Init() && once->GetAnimCount() == 1);
+        CHECK(!once->DoAnimationTick(0, 16.0f) && once->GetMarkedForRemove());
+        once->Release();
+    }
 
     other->Release();
     pedestrian->Release();

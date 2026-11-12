@@ -366,12 +366,17 @@ bool cSC4Automaton::AddModelResourceKey(const cGZPersistResourceKey& key) {
     return result;
 }
 
-IAutomatonModel* cSC4Automaton::AddModelInstance(const cGZPersistResourceKey& key) {
-    if (!Host()) return nullptr;
-    IAutomatonModel* model = Host()->CreateModel(key);
-    if (!model) return nullptr;
-    models_.push_back(model);
-    PositionModelInstance(model);   // the original places a new instance at the automaton's position/heading
+// Mac i386 0x000c15c8: an automaton already in the renderer leaves it while the instance joins and enters again with it.
+IAutomatonModel* cSC4Automaton::AddModelInstance(const cGZPersistResourceKey& key, bool animated) {
+    if (!Host() || key.instance == 0) return nullptr;
+    const bool inRenderer = IsFlagSet(kAutomatonOccupantInRenderer);
+    if (inRenderer) PlaceInRenderer(false);
+    IAutomatonModel* model = animated ? Host()->CreateAnimatedModel(key) : Host()->CreateModel(key);
+    if (model) {
+        models_.push_back(model);
+        PositionModelInstance(model);   // a new instance starts at the automaton's position and heading
+    }
+    if (inRenderer) PlaceInRenderer(true);
     return model;
 }
 
@@ -1460,6 +1465,12 @@ bool cSC4Automaton::HandleExitState(const tAutomataState* state) {
                 attach->animation->Release();
                 attach->animation = nullptr;
             }
+            if (attach->model) {   // i386 0x000c0418: the attached instance leaves with its state
+                IAutomatonModel* model = attach->model;
+                attach->model = nullptr;
+                RemoveModelInstance(model);
+                model->Release();
+            }
         }
     } else {
         const_cast<tAutomataState*>(state)->Shutdown(this);
@@ -1634,13 +1645,20 @@ std::uint32_t cSC4Automaton::GetAnimOffsetByName(const cRZString& name) const {
 }
 
 bool cSC4Automaton::AttachAnim(const cGZPersistResourceKey& key, s3d::PlayMode mode, bool flag, float rate) {
-    (void)key;
-    (void)mode;
-    (void)flag;
-    (void)rate;
-    // PARTIAL: creates an auxiliary animated instance (AddModelInstance) and an attach-animation state; both need the
-    // uncaptured animated-instance layer.
-    return false;
+    // Mac i386 0x000c1b92: an attach-animation state on top of the stack that owns one more model instance, invisible at
+    // first (DoAttachAnimTick fades it in).
+    if (!PushState(kStateAttachAnim, nullptr, rate, false, 0, 0, nullptr)) return false;
+    auto* attach = static_cast<tAutomataStateAttachAnim*>(GetState());
+    attach->flag40 = flag;
+    attach->value44 = static_cast<std::uint32_t>(mode);
+    IAutomatonModel* model = AddModelInstance(key, true);
+    if (model) model->AddRef();
+    if (attach->model) attach->model->Release();
+    attach->model = model;
+    if (!model) return false;
+    model->SetPlayMode(mode);
+    model->SetOpacity(0.0f, true);
+    return true;
 }
 
 void cSC4Automaton::UpdateAnimation(float milliseconds) {
@@ -1905,13 +1923,24 @@ bool cSC4Automaton::DoCollideTick(float milliseconds) {
 }
 
 bool cSC4Automaton::DoAttachAnimTick(float milliseconds) {
-    (void)milliseconds;
+    // Mac i386 0x000bbf9c: the attached instance fades in over half the automata fade time; an animation that does not
+    // repeat (any mode but ping-pong and loop) ends the state on its last frame.
     if (CheckAutomataFlag(kAutomataFlagMarkedForRemove)) return false;
     tAutomataState* state = GetState();
     if (!state) return true;
     auto* attach = static_cast<tAutomataStateAttachAnim*>(state);
-    // PARTIAL: the attached animated instance's frame count drives the exit; without the animated-instance layer only
-    // the state's own flag decides.
+    if (IAutomatonModel* model = attach->model) {
+        float opacity = model->GetOpacity();
+        if (opacity < 1.0f) {
+            opacity = milliseconds / (0.5f * (Host() ? Host()->FadeDurationSeconds() : 0.0f)) + opacity;   // the global 0x00c1f07c
+            if (1.0f < opacity) opacity = 1.0f;
+            model->SetOpacity(opacity, true);
+        }
+        if (1u < attach->value44 - 2u && model->GetFrameCount() - 1 <= model->GetFrame()) {
+            PopState();
+            return true;
+        }
+    }
     return attach->flag40;
 }
 

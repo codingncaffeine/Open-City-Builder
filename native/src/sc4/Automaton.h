@@ -190,6 +190,7 @@ public:
     virtual int GetFrameCount() const = 0;                          // slot 0xf8
     virtual void SetZoomAndRotation(int zoom, int rotation) = 0;    // slot 0xd8
     virtual void SetPlayMode(s3d::PlayMode mode) = 0;
+    virtual float GetOpacity() const { return 1.0f; }               // slot 0x78: the draw attributes' opacity (+0x10)
 };
 
 // The cSC4ModelRegEffects object embedded at +0x290 (unrecovered neighbour).
@@ -248,6 +249,8 @@ public:
     virtual ~IAutomatonHost() = default;
     // ---- models and effects (cS3DModelProcessor, cSC4ModelRegEffects — unrecovered)
     virtual IAutomatonModel* CreateModel(const cGZPersistResourceKey& key) = 0;   // cS3DModelProcessor::AddModelInstance
+    // The same for a model whose frames play (AttachAnim's extra instance). Defaults to CreateModel.
+    virtual IAutomatonModel* CreateAnimatedModel(const cGZPersistResourceKey& key) { return CreateModel(key); }
     virtual void DestroyModel(IAutomatonModel* model) = 0;                        // the model's Release
     virtual IAutomatonEffects* CreateEffects() = 0;                               // cSC4ModelRegEffects ctor
     virtual void DestroyEffects(IAutomatonEffects* effects) = 0;                  // ~cSC4ModelRegEffects
@@ -427,7 +430,7 @@ public:
     bool UnloadModels();                                              // 0x348 @ 0x10010b81a
     bool LoadAuxiliaryModel(std::uint32_t specifier, IAutomatonModel** out);   // 0x350 @ 0x10010b8b6
     void FinishMove(bool fadeIn, bool fadeOut);                       // 0x358 @ 0x100107b2a
-    bool PostInit();                                                  // 0x360 @ 0x100108016
+    virtual bool PostInit();                                          // 0x360 @ 0x100108016
     void SendCallbackMessage(std::uint32_t event, std::uint32_t data);   // 0x368 @ 0x10010bf22
     virtual void UpdateAnimation(float milliseconds);                         // 0x370 @ 0x100108136
     void UpdateEffects();                                             // 0x378 @ 0x10010b956
@@ -467,7 +470,7 @@ public:
     void StartAllEffects();                                           // @ 0x100106c5e
     void StopKeyEffects();                                            // @ 0x10010a3b2
     void InitKeyEffects();                                            // @ 0x10010dd56
-    IAutomatonModel* AddModelInstance(const cGZPersistResourceKey& key);   // @ 0x10010b052
+    IAutomatonModel* AddModelInstance(const cGZPersistResourceKey& key, bool animated = false);   // @ 0x10010b052
     bool RemoveModelInstance(IAutomatonModel* model);                 // @ 0x10010a25c
     bool AddToCollisionSystem(tAutomataStateCollide* state);          // @ 0x100109d28
     void PositionModelInstance(IAutomatonModel* model);               // @ 0x100107006

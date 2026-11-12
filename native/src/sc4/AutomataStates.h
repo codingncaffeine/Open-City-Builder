@@ -18,6 +18,8 @@
 
 namespace sc4 {
 
+class IAutomatonModel;   // sc4/Automaton.h
+
 constexpr std::uint16_t kAutomataStateVersion = 3;
 constexpr std::uint32_t kControllerFlagTransient = 0x8;   // controllers with this flag are saved as null
 constexpr std::uint32_t kAutomatonIid = 0xa9b40f05;
@@ -155,9 +157,11 @@ class tAutomataStateAttachAnim : public tAutomataState {    // @ Write 0x10010e8
 public:
     bool Write(cIGZOStream& stream) const override;
     bool Read(cIGZIStream& stream) override;
+    ~tAutomataStateAttachAnim() override;
     cIGZUnknown* animation = nullptr;   // +0x38 (counted; the original keeps the 0xa818edd8 interface pointer)
-    bool flag40 = false;                // +0x40
-    std::uint32_t value44 = 0;          // +0x44 (saved as 16 bit)
+    bool flag40 = false;                // +0x40: what the state's tick answers while the animation plays
+    std::uint32_t value44 = 0;          // +0x44 the play mode (saved as 16 bit)
+    IAutomatonModel* model = nullptr;   // the attached instance as the automaton holds it (counted; the original's +0x38 pointer)
 };
 class tAutomataStateChase : public tAutomataState {         // @ Write 0x10010e984, Read 0x10010e9be
 public:

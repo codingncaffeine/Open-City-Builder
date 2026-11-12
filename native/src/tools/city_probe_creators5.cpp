@@ -1,6 +1,7 @@
 #include <cstdint>
 
 #include "sc4/CameraControl.h"
+#include "sc4/SpecialVehicles.h"
 #include "sc4/TrailerVehicle.h"
 #include "sc4/Vehicle.h"
 #include "tools/city_probe_plain.h"
@@ -22,6 +23,16 @@ cIGZSerializable* CreateCityProbeSerializable5(std::uint32_t classId) {
         }
         case 0x4a5b69ed: {   // cSC4TrailerVehicle: a vehicle pulling trailer cars (its leader refs point at it)
             auto* object = new sc4::cSC4TrailerVehicle(sc4::g_loadTrafficHost ? sc4::g_loadTrafficHost : sc4::NewStubITrafficAutomatonHost(), sc4::AutomatonHost() ? sc4::AutomatonHost() : sc4::NewStubIAutomatonHost(), sc4::g_loadVehicleHost ? sc4::g_loadVehicleHost : sc4::NewStubIVehicleHost());
+            object->AddRef();
+            return object;
+        }
+        case sc4::kCarjackedVehicleGZCLSID: {   // the crime layer's carjacked car
+            auto* object = new sc4::cSC4CarjackedVehicle(sc4::g_loadTrafficHost ? sc4::g_loadTrafficHost : sc4::NewStubITrafficAutomatonHost(), sc4::AutomatonHost() ? sc4::AutomatonHost() : sc4::NewStubIAutomatonHost(), sc4::g_loadVehicleHost ? sc4::g_loadVehicleHost : sc4::NewStubIVehicleHost());
+            object->AddRef();
+            return object;
+        }
+        case sc4::kGetawayVanGZCLSID: {   // the crime layer's getaway van
+            auto* object = new sc4::cSC4GetawayVan(sc4::g_loadTrafficHost ? sc4::g_loadTrafficHost : sc4::NewStubITrafficAutomatonHost(), sc4::AutomatonHost() ? sc4::AutomatonHost() : sc4::NewStubIAutomatonHost(), sc4::g_loadVehicleHost ? sc4::g_loadVehicleHost : sc4::NewStubIVehicleHost());
             object->AddRef();
             return object;
         }
