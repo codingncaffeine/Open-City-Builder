@@ -220,9 +220,12 @@ public:
         return !out.empty();
     }
 
+    const s3d::RegPointTable* RegPoints() const override { return regPoints_.empty() ? nullptr : &regPoints_; }
+
     bool Load(const std::uint8_t* data, std::size_t size) {
         s3d::Model model;
         if (!model.Parse(data, size)) return false;
+        regPoints_ = model.regPoints;
         for (const s3d::VertexGroup& group : model.vertexGroups) vertexData_.push_back(ConvertVertices(group));
         vertexGroups_.resize(model.vertexGroups.size());
         for (std::size_t i = 0; i < model.vertexGroups.size(); ++i)
@@ -378,6 +381,7 @@ private:
     std::vector<std::vector<SC4Mesh>> frameMeshes_;              // every animation frame (frame 0 = meshes_)
     std::vector<std::vector<s3d::cS3DMaterial>> frameMaterials_;
     int frameRate_ = 0;
+    s3d::RegPointTable regPoints_;                               // the REGP chunk
     cS3DBoundingBox bounds_{{0, 0, 0}, {0, 0, 0}};
 };
 

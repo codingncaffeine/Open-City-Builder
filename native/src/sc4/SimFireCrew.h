@@ -82,6 +82,7 @@ public:
     bool Shutdown() override;                                                         // @ 0x0038f0aa
     bool DoAnimationTick(std::uint32_t unknown, float milliseconds) override;         // @ 0x003907f4
     bool DoMessage(cIGZMessage2* message) override;                                   // @ 0x0038eef8
+    void SetZoomAndRotation(int zoom, int rotation) override;                         // @ 0x0038ebc8
     bool Write(cIGZOStream& stream) const override;                                   // @ 0x0038f448
     bool Read(cIGZIStream& stream) override;                                          // @ 0x0038f32e
 

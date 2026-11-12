@@ -47,6 +47,11 @@ public:
     float SpeedMax() const override { return group_->kphMax; }
     void GetGroupHierarchyDepth() override { (void)group_->GetGroupHierarchyDepth(); }
     const std::list<std::uint32_t>* TrailerGroupIds() const override { return &group_->trailerGroupIds; }
+    void KeyEffects(std::vector<AutomatonKeyEffect>& out) const override {
+        out.clear();
+        for (const auto& entry : group_->keyEffects)
+            out.push_back(AutomatonKeyEffect{entry.first, std::string(entry.second.fx.ToChar()), std::string(entry.second.bone.ToChar())});
+    }
     cSC4OccupantGroupTemplate* group_;
 };
 

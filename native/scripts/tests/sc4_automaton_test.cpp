@@ -146,8 +146,8 @@ struct FakeHost final : IAutomatonHost {
     void DestroyEffects(IAutomatonEffects*) override {}
     bool AddModelToRenderer(IAutomatonModel*) override { ++rendererAdded; return true; }
     bool RemoveModelFromRenderer(IAutomatonModel*) override { ++rendererRemoved; return true; }
-    void FadeModelIn(IAutomatonModel*) override { ++fadesIn; }
-    void FadeModelOut(IAutomatonModel*, int) override { ++fadesOut; }
+    void MoveModelInRenderer(IAutomatonModel*) override { ++fadesIn; }
+    void ChangeModelInRenderer(IAutomatonModel*, int) override { ++fadesOut; }
     bool InsertOccupant(cISC4Occupant*) override { ++inserted; return true; }
     void RemoveOccupant(cISC4Occupant*) override { ++removed; }
     bool RefreshOccupant(cISC4Occupant*) override { ++refreshed; return true; }

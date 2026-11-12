@@ -124,6 +124,21 @@ void cSC4SimFireCrew::SendFireCrewMessage(std::uint32_t type, cISC4Occupant* occ
     message->Release();
 }
 
+// A figure calling for help keeps facing the camera; the hose team re-aims at once.
+void cSC4SimFireCrew::SetZoomAndRotation(int zoom, int rotation) {
+    cSC4Automaton::SetZoomAndRotation(zoom, rotation);
+    if (!truck_) return;
+    if (truck_->GetDispatchState() == 1) {
+        if (!g_host) return;
+        float view[3] = {};
+        g_host->ViewDirection(view);
+        const float facing[3] = {-view[0], -view[1], -view[2]};
+        MoveTo(nullptr, facing);
+    } else {
+        DoAnimationTick(0, 0.0f);
+    }
+}
+
 bool cSC4SimFireCrew::DoMessage(cIGZMessage2* message) {
     if (message->GetType() != kCrewMessageOccupantRemoved) return cSC4Automaton::DoMessage(message);
     void* removed = static_cast<cIGZMessage2Standard*>(message)->GetVoid1();

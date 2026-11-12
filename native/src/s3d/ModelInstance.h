@@ -12,6 +12,8 @@
 // Seams: ModelPick / RenderModelInstance (SC4ViewUtilities / SC4DrawContext) and TransformBoundingBox.
 #pragma once
 #include <cstdint>
+#include <string>
+#include <map>
 #include <cstring>
 #include <vector>
 
@@ -44,6 +46,9 @@ struct ShadowMeshData {
     std::uint64_t texture = 0;           // the first layer's texture binding (material + 0x18), opaque to the model maker
 };
 
+struct RegPoint;                                                        // s3d/S3DModel.h: one frame of a registration point
+using RegPointTable = std::map<std::string, std::vector<RegPoint>>;    // by lower-cased name
+
 class cIS3DResModel : public cIGZUnknown {
 public:
     virtual void Slot3() {}
@@ -60,6 +65,8 @@ public:
     virtual int FrameCount() const { return 1; }
     virtual int FrameRate() const { return 0; }
     virtual bool SelectFrame(cIS3DModelInstance* instance, int frame) { (void)instance; (void)frame; return false; }
+    // The model's registration points (the REGP chunk; cS3DRegPoints in the original), null without any.
+    virtual const RegPointTable* RegPoints() const { return nullptr; }
 };
 
 class cIS3DModelInstance : public cIGZUnknown {

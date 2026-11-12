@@ -52,7 +52,17 @@ public:
     void SetVisible(bool visible) override { automaton_->SetVisible(visible); }
     void AddRegEffect(const cRZString& effect, const cRZString& point) override { automaton_->AddRegEffect(effect, point); }
     void RemoveRegEffect(const cRZString& effect) override { automaton_->RemoveRegEffect(effect); }
-    void SetState(std::uint32_t state, float timer, bool flag) override { automaton_->SetState(state, nullptr, timer, flag, 0, 0, nullptr); }
+    void SetState(std::uint32_t state, float timer, bool flag) override {
+        if (Trace() && state == kRiotOverState) {
+            float p[3] = {};
+            automaton_->GetPosition(p);
+            const tAutomataState* top = automaton_->GetState();
+            std::fprintf(stderr, "riot: leader at (%.0f, %.0f) leaves the riot: in the city %d, automata flags 0x%x, state %d\n", p[0], p[2],
+                         automaton_->AsOccupant()->IsFlagSet(1) ? 1 : 0, static_cast<unsigned>(automaton_->GetFlags()),
+                         top ? static_cast<int>(top->stateType) : -1);
+        }
+        automaton_->SetState(state, nullptr, timer, flag, 0, 0, nullptr);
+    }
 
 private:
     cSC4Automaton* automaton_;
@@ -167,6 +177,12 @@ cSC4DisasterManagerRiot* RiotManager() {
 void InstallRiotHost() { sc4::SetRiotInstanceHost(&g_riotHost); }
 // A closed city's road tiles are gone: so are their views.
 void NativeRiotCityClosed() { g_riotHost.ForgetTiles(); }
+
+// The patrol cars' question (IPatrolCarHost::RiotInProgress, the disaster layer's vslot 0x28): is any disaster running.
+bool NativeDisasterOngoing() {
+    cISC4DisasterLayer* layer = g_riotHost.DisasterLayer();
+    return layer && layer->IsADisasterOngoing();
+}
 
 // Kit command `riot X Z`: what the mayor rating simulator does at a hotspot (the riot manager's AttemptDisasterStart).
 void NativeStartRiot(int cellX, int cellZ) {

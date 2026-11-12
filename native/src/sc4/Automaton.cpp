@@ -793,8 +793,8 @@ void cSC4Automaton::FinishMove(bool fadeIn, bool fadeOut) {
         } else {
             for (IAutomatonModel* model : models_) {
                 if (!model) continue;
-                if (fadeIn) Host()->FadeModelIn(model);
-                else if (fadeOut) Host()->FadeModelOut(model, 3);
+                if (fadeIn) Host()->MoveModelInRenderer(model);
+                else if (fadeOut) Host()->ChangeModelInRenderer(model, 3);
             }
             if (IsFlagSet(kAutomatonOccupantInManager)) Host()->RefreshOccupant(this);
         }
@@ -1008,8 +1008,15 @@ float cSC4Automaton::GetSpeedModifier() const {
 }
 
 // ---- effects, lighting, attraction -----------------------------------------------------------------------------------
+// i386 0x000c06c6. PARTIAL: the keys of a player-driven automaton are not read (no key counts as held).
 void cSC4Automaton::StartAllEffects() {
-    if (IAutomatonEffects* effects = EnsureEffects()) effects->StartAll();
+    IAutomatonEffects* effects = EnsureEffects();
+    if (!effects) return;
+    std::vector<AutomatonKeyEffect> keys;
+    if (IAutomatonGroupTemplate* group = GetAutomataGroup()) group->KeyEffects(keys);
+    std::vector<std::pair<std::string, bool>> keyed;
+    for (const AutomatonKeyEffect& key : keys) keyed.emplace_back(key.effect, false);
+    effects->StartAllEffectsByKeys(keyed);
 }
 
 void cSC4Automaton::UpdateEffects() {
@@ -1044,21 +1051,22 @@ void cSC4Automaton::RecreateNamedEffects(const cRZString& effect, int transition
     if (IAutomatonEffects* effects = EnsureEffects()) effects->RecreateNamed(effect, transition, on);
 }
 
+// i386 0x000be656: the effects of the group's player-drive keys stop, except those whose key is held (PARTIAL: no key
+// counts as held).
 void cSC4Automaton::StopKeyEffects() {
-    // The key effects are the registered effects of the automata group's behaviour templates; the effect registry is a
-    // seam, so the group's snapshot (the effect name of each behaviour) is what gets stopped.
     if (!effects_) return;
-    const auto* behavior = GetState() ? reinterpret_cast<const tBehaviorTemplate*>(GetState()->runtime30) : nullptr;
-    (void)behavior;
-    effects_->StopAll(true);
+    std::vector<AutomatonKeyEffect> keys;
+    if (IAutomatonGroupTemplate* group = GetAutomataGroup()) group->KeyEffects(keys);
+    for (const AutomatonKeyEffect& key : keys) effects_->StopNamed(cRZString(key.effect.c_str()), 1);
 }
 
+// i386 0x000c050c: every player-drive key of the group that names a registration point gets its effect there, not started.
 void cSC4Automaton::InitKeyEffects() {
     if (!effects_) return;
-    const auto* behavior = GetState() ? reinterpret_cast<const tBehaviorTemplate*>(GetState()->runtime30) : nullptr;
-    (void)behavior;
-    // The behaviour templates carry effect names; the group's templates are recovered but the effect creation is a seam.
-    effects_->Init();
+    std::vector<AutomatonKeyEffect> keys;
+    if (IAutomatonGroupTemplate* group = GetAutomataGroup()) group->KeyEffects(keys);
+    for (const AutomatonKeyEffect& key : keys)
+        if (!key.point.empty()) effects_->AddKeyEffect(cRZString(key.point.c_str()), cRZString(key.effect.c_str()));
 }
 
 void cSC4Automaton::InitLighting() {}

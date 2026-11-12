@@ -51,6 +51,8 @@
 #pragma once
 #include <cstdint>
 #include <list>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "gz/StreamOps.h"
@@ -221,6 +223,17 @@ public:
         StartNamed(effect, transition, loop);
         return FindRegEffect(effect) != nullptr;
     }
+    // cSC4ModelRegEffects::AddRegEffect as cSC4Automaton::InitKeyEffects calls it: the effect is added on the point, not started.
+    virtual bool AddKeyEffect(const cRZString& point, const cRZString& effect) { return AddRegEffect(point, effect); }
+    // cSC4Automaton::StartAllEffects' walk over the collection: every effect runs unless it is one that starts off; an effect
+    // named in `keyed` (a player-drive key's effect) runs only while its key is held.
+    virtual void StartAllEffectsByKeys(const std::vector<std::pair<std::string, bool>>& keyed) { (void)keyed; StartAll(); }
+};
+
+// A player-drive key's effect as the automaton reads it from its group (tKeyEffect: the key, the effect, its registration point).
+struct AutomatonKeyEffect {
+    std::uint8_t key = 0;
+    std::string effect, point;
 };
 
 // The occupant group template of the automata script system (cSC4OccupantGroupTemplate); only the fields
@@ -235,6 +248,8 @@ public:
     virtual void GetGroupHierarchyDepth() = 0;            // cSC4OccupantGroupTemplate::GetGroupHierarchyDepth
     // +0x58 (i386): the groups of the cars a vehicle of this group pulls ("trailers"), in order; null without a list.
     virtual const std::list<std::uint32_t>* TrailerGroupIds() const { return nullptr; }
+    // +0x80 (i386): the group's player-drive key effects.
+    virtual void KeyEffects(std::vector<AutomatonKeyEffect>& out) const { out.clear(); }
 };
 
 class cSC4AutomataController;
@@ -258,8 +273,8 @@ public:
     virtual void DestroyEffects(IAutomatonEffects* effects) = 0;                  // ~cSC4ModelRegEffects
     virtual bool AddModelToRenderer(IAutomatonModel* model) = 0;                  // SL::spRenderer slot 0xe0
     virtual bool RemoveModelFromRenderer(IAutomatonModel* model) = 0;             // slot 0xe8
-    virtual void FadeModelIn(IAutomatonModel* model) = 0;                         // slot 0xf0
-    virtual void FadeModelOut(IAutomatonModel* model, int length) = 0;            // slot 0xf8
+    virtual void MoveModelInRenderer(IAutomatonModel* model) = 0;                 // renderer slot 0xf0 MoveModel: the model stands elsewhere
+    virtual void ChangeModelInRenderer(IAutomatonModel* model, int change) = 0;   // renderer slot 0xf8 ChangeModel(model, change)
     // ---- occupant manager (SL::spOccupantManager)
     virtual bool InsertOccupant(cISC4Occupant* occupant) = 0;                     // slot 0xa0
     virtual void RemoveOccupant(cISC4Occupant* occupant) = 0;                     // slot 0xa8
@@ -406,7 +421,7 @@ public:
     bool PlaceInRenderer(bool add);                                   // 0x270 @ 0x100107370
     virtual bool DoAnimationTick(std::uint32_t unknown, float milliseconds);   // 0x278 @ 0x100107ce2
     virtual bool ShouldCollide(cSC4Automaton* other) const;                   // 0x280 @ 0x10010b9c8
-    void SetZoomAndRotation(int zoom, int rotation);                  // 0x288 @ 0x10010bba2
+    virtual void SetZoomAndRotation(int zoom, int rotation);          // 0x288 @ 0x10010bba2
     void SetTransform(const cS3DTransform& transform);                // 0x290 @ 0x10010aa68
     std::uint32_t GetAnimOffsetByName(const cRZString& name) const;   // 0x298 @ 0x10010aee2
     void EnableActiveSound(bool on);                                  // 0x2a0 @ 0x10010ea18

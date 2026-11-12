@@ -1,6 +1,7 @@
 #include <cstdint>
 
 #include "sc4/Pedestrian.h"
+#include "sc4/RiotPolice.h"
 #include "tools/city_probe_plain.h"
 
 namespace sc4 {
@@ -17,6 +18,11 @@ cIGZSerializable* CreateCityProbeSerializable7(std::uint32_t classId) {
         }
         case sc4::kGZCLSID_cSC4PedestrianOneShot: {   // the crime layer's standing figures
             auto* object = new sc4::cSC4PedestrianOneShot(sc4::g_loadPedestrianHost ? sc4::g_loadPedestrianHost : sc4::NewStubIPedestrianHost());
+            object->AddRef();
+            return object;
+        }
+        case sc4::kGZCLSID_cSC4RiotPolice: {   // a patrol car's figures; Read finds the car
+            auto* object = new sc4::cSC4RiotPolice(nullptr, sc4::g_loadPedestrianHost ? sc4::g_loadPedestrianHost : sc4::NewStubIPedestrianHost());
             object->AddRef();
             return object;
         }

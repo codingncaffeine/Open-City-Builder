@@ -367,6 +367,7 @@ src/sc4/CitySituationManager.cpp
 src/sc4/EmergencyVehicle.cpp
 src/sc4/FireTruck.cpp
 src/sc4/PatrolCar.cpp
+src/sc4/RiotPolice.cpp
 src/sc4/TrailerVehicle.cpp
 src/sc4/PipeConnectionOccupant.cpp
 src/sc4/SubwayOccupant.cpp

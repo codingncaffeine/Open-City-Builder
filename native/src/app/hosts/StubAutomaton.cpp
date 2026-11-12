@@ -13,8 +13,8 @@ struct StubAutomaton final : IAutomatonHost {
     void DestroyEffects(IAutomatonEffects* effects) override {}
     bool AddModelToRenderer(IAutomatonModel* model) override { return {}; }
     bool RemoveModelFromRenderer(IAutomatonModel* model) override { return {}; }
-    void FadeModelIn(IAutomatonModel* model) override {}
-    void FadeModelOut(IAutomatonModel* model, int length) override {}
+    void MoveModelInRenderer(IAutomatonModel* model) override {}
+    void ChangeModelInRenderer(IAutomatonModel* model, int length) override {}
     bool InsertOccupant(cISC4Occupant* occupant) override { return {}; }
     void RemoveOccupant(cISC4Occupant* occupant) override {}
     bool RefreshOccupant(cISC4Occupant* occupant) override { return {}; }

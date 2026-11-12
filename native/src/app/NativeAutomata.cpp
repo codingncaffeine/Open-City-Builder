@@ -10,8 +10,10 @@
 #include "rz/cRZMessage2Standard.h"
 #include "s3d/ModelInstance.h"
 #include "s3d/ModelInstanceAnimatedSprite.h"
+#include "s3d/S3DModel.h"
 #include "sc4/AutomataManager.h"
 #include "sc4/Automaton.h"
+#include "sc4/ModelRegEffects.h"
 #include "sc4/TrafficAutomaton.h"
 #include "sc4/TrafficNetworkMap.h"
 #include "sc4/Render3D.h"
@@ -23,6 +25,7 @@ namespace native {
 sc4::cSC4AutomataController* NativeFindAttraction(sc4::cISC4Occupant* occupant, cS3DVector3* direction, float* distance, float* strength);   // app/NativeAutomataControllerHost.cpp
 sc4::IAutomatonGroupTemplate* NativeFindAutomatonGroup(std::uint32_t id);                                                                  // app/NativeAutomataManagerHost.cpp
 s3d::cS3DModelInstanceAnimatedSprite* NativeCreateSpriteInstance(const cGZPersistResourceKey& key);   // app/NativeSprites.cpp
+sc4::IAutomatonEffects* NativeNewModelRegEffects();                                                   // app/NativeModelRegEffects.cpp
 namespace {
 using namespace sc4;
 
@@ -41,6 +44,17 @@ public:
     // `animated` is the same instance's animated interface when it has one (the sprites: frames, opacity, view).
     explicit AutomatonModel(s3d::cIS3DModelInstance* instance, s3d::cIS3DModelInstanceAnimated* animated = nullptr)
         : instance_(instance), animated_(animated) {}
+    // The registration points of the model resource the instance was made from, in the effects collection's form.
+    void SetRegPoints(const s3d::RegPointTable* table) {
+        regPoints_.clear();
+        if (!table) return;
+        for (const auto& entry : *table) {
+            sc4::RegPointFrames& frames = regPoints_[entry.first];
+            frames.reserve(entry.second.size());
+            for (const s3d::RegPoint& p : entry.second) frames.push_back(sc4::RegPointTransform{{p.v[0], p.v[1], p.v[2]}, {p.v[3], p.v[4], p.v[5]}, p.v[6]});
+        }
+    }
+    const sc4::RegPointMap* RegPoints() const { return regPoints_.empty() ? nullptr : &regPoints_; }
     s3d::cIS3DModelInstance* Instance() const { return instance_; }
     void AddRef() override { ++refs_; }
     void Release() override { if (--refs_ <= 0) { instance_->Release(); delete this; } }
@@ -68,24 +82,8 @@ public:
 private:
     s3d::cIS3DModelInstance* instance_;
     s3d::cIS3DModelInstanceAnimated* animated_;
+    sc4::RegPointMap regPoints_;
     int refs_ = 1;
-};
-
-class NullEffects final : public IAutomatonEffects {
-public:
-    void SetModel(IAutomatonModel*) override {}
-    bool Init() override { return true; }
-    void Update(const cS3DVector3&, const cS3DVector3&, float) override {}
-    void StartAll() override {}
-    void StopAll(bool) override {}
-    void StartNamed(const cRZString&, int, bool) override {}
-    void StopNamed(const cRZString&, int) override {}
-    void ToggleNamed(const cRZString&, int, bool) override {}
-    void RecreateNamed(const cRZString&, int, bool) override {}
-    bool AddRegEffect(const cRZString&, const cRZString&) override { return true; }
-    void* FindRegEffect(const cRZString&) override { return nullptr; }
-    void RemoveRegEffect(const cRZString&) override {}
-    void Shutdown() override {}
 };
 
 sc4::cSTETerrain* Terrain() {
@@ -122,9 +120,11 @@ public:
         }
         s3d::cIS3DModelInstance* instance = nullptr;
         const bool ok = res->CreateModelInstance(0, &instance);
+        const s3d::RegPointTable* regPoints = res->RegPoints();   // the instance keeps the resource
         res->Release();
         if (std::getenv("SC4_DEBUG")) { static int shown = 0; if (shown++ < 4) std::fprintf(stderr, "automata: model %08x/%08x/%08x -> %s\n", key.type, key.group, key.instance, ok && instance ? "ok" : "none"); }
-        IAutomatonModel* model = ok && instance ? new AutomatonModel(instance) : nullptr;
+        AutomatonModel* model = ok && instance ? new AutomatonModel(instance) : nullptr;
+        if (model) model->SetRegPoints(regPoints);
         if (ModelTrace()) std::fprintf(stderr, "automata: model %p created from %08x\n", static_cast<void*>(model), key.instance);
         return model;
     }
@@ -137,8 +137,10 @@ public:
         s3d::cIS3DModelInstanceAnimated* animated = nullptr;
         const bool ok = res->CreateAnimatedModelInstance(0, &animated);
         const int rate = res->FrameRate();
+        const s3d::RegPointTable* regPoints = res->RegPoints();   // the instance keeps the resource
         res->Release();
-        IAutomatonModel* model = ok && animated ? new AutomatonModel(animated->AsModelInstance(), animated) : nullptr;
+        AutomatonModel* model = ok && animated ? new AutomatonModel(animated->AsModelInstance(), animated) : nullptr;
+        if (model) model->SetRegPoints(regPoints);
         if (ModelTrace()) std::fprintf(stderr, "automata: model %p created animated from %08x, %d frames, rate %d\n", static_cast<void*>(model), key.instance, model ? model->GetFrameCount() : 0, rate);
         return model;
     }
@@ -146,7 +148,7 @@ public:
         if (ModelTrace()) std::fprintf(stderr, "automata: model %p destroyed\n", static_cast<void*>(model));
         if (model) model->Release();
     }
-    IAutomatonEffects* CreateEffects() override { return new NullEffects(); }
+    IAutomatonEffects* CreateEffects() override { return NativeNewModelRegEffects(); }
     void DestroyEffects(IAutomatonEffects* effects) override { delete effects; }
     bool AddModelToRenderer(IAutomatonModel* model) override {
         auto* instance = static_cast<AutomatonModel*>(model)->Instance();
@@ -164,8 +166,15 @@ public:
         return removed;
     }
     static bool ModelTrace() { static const bool on = std::getenv("SC4_MODELDEBUG") != nullptr; return on; }   // every renderer insert / remove
-    void FadeModelIn(IAutomatonModel*) override {}
-    void FadeModelOut(IAutomatonModel*, int) override {}
+    // The renderer keeps every model in a grid by where it stands: a model that moved is filed again.
+    void MoveModelInRenderer(IAutomatonModel* model) override {
+        static const bool off = std::getenv("SC4_NOMODELMOVE") != nullptr;   // A/B: models stay filed where they were inserted
+        if (g_render && model && !off) g_render->MoveModel(static_cast<AutomatonModel*>(model)->Instance());
+    }
+    void ChangeModelInRenderer(IAutomatonModel* model, int change) override {
+        static const bool off = std::getenv("SC4_NOMODELMOVE") != nullptr;
+        if (g_render && model && !off) g_render->ChangeModel(static_cast<AutomatonModel*>(model)->Instance(), change);
+    }
     bool InsertOccupant(cISC4Occupant*) override { return true; }
     void RemoveOccupant(cISC4Occupant*) override {}
     bool RefreshOccupant(cISC4Occupant*) override { return true; }
@@ -233,6 +242,11 @@ void SetAutomataRenderer(sc4::cSC43DRender* render, sc4::cSC4City* city) {
 // The city posts message 0x26d31ec1 once it is up and every automata manager Inits the automata it restored (HandlePostCityInit);
 // the managers then tick them. What is left here: the restored automata go into the renderer at the current zoom and rotation.
 // PARTIAL: where the original places a restored automaton in the renderer is not traced; this is the port's stand-in.
+// The effects collections' question (app/NativeModelRegEffects.cpp): the registration points of an automaton's model.
+const sc4::RegPointMap* NativeAutomatonModelRegPoints(sc4::IAutomatonModel* model) {
+    return model ? static_cast<AutomatonModel*>(model)->RegPoints() : nullptr;
+}
+
 void PostCityInitToAutomataManagers(sc4::cSC4City* city) {
     if (!city) return;
     if (const char* zoom = std::getenv("SC4_ZOOM")) g_zoom = std::atoi(zoom);

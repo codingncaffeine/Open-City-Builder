@@ -225,8 +225,8 @@ struct FakeAutomatonHost final : IAutomatonHost {
     void DestroyEffects(IAutomatonEffects*) override {}
     bool AddModelToRenderer(IAutomatonModel*) override { return true; }
     bool RemoveModelFromRenderer(IAutomatonModel*) override { return true; }
-    void FadeModelIn(IAutomatonModel*) override {}
-    void FadeModelOut(IAutomatonModel*, int) override {}
+    void MoveModelInRenderer(IAutomatonModel*) override {}
+    void ChangeModelInRenderer(IAutomatonModel*, int) override {}
     bool InsertOccupant(cISC4Occupant*) override { return true; }
     void RemoveOccupant(cISC4Occupant*) override {}
     bool RefreshOccupant(cISC4Occupant*) override { return true; }

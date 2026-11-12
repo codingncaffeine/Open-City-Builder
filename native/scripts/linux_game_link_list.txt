@@ -381,8 +381,12 @@ src/sc4/DisasterManagers.cpp
 src/sc4/DisasterInstanceFire.cpp
 src/sc4/DisasterInstanceRiot.cpp
 src/sc4/SimFireCrew.cpp
+src/sc4/RiotPolice.cpp
+src/sc4/ModelRegEffects.cpp
 src/app/NativeDisasters.cpp
 src/app/NativeRiot.cpp
+src/app/NativeRiotPolice.cpp
+src/app/NativeModelRegEffects.cpp
 src/app/NativeFireEffects.cpp
 src/app/NativeFireCrew.cpp
 src/app/NativeCrime.cpp

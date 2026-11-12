@@ -276,7 +276,7 @@ void cSC4Vehicle::UpdateMotionBlur(float milliseconds) {
             if (added) {
                 h->AddModelToRenderer(model);
             } else {
-                h->FadeModelIn(model);
+                h->MoveModelInRenderer(model);
             }
         }
     }

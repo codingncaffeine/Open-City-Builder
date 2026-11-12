@@ -209,8 +209,8 @@ struct FakeHost final : IWatercraftHost {
     void DestroyEffects(IAutomatonEffects*) override {}
     bool AddModelToRenderer(IAutomatonModel*) override { ++rendererAdds; return true; }
     bool RemoveModelFromRenderer(IAutomatonModel*) override { ++rendererRemoves; return true; }
-    void FadeModelIn(IAutomatonModel*) override { ++fadesIn; }
-    void FadeModelOut(IAutomatonModel*, int) override { ++fadesOut; }
+    void MoveModelInRenderer(IAutomatonModel*) override { ++fadesIn; }
+    void ChangeModelInRenderer(IAutomatonModel*, int) override { ++fadesOut; }
     bool InsertOccupant(cISC4Occupant*) override { ++insertions; return true; }
     void RemoveOccupant(cISC4Occupant*) override { ++removals; }
     bool RefreshOccupant(cISC4Occupant*) override { ++refreshes; return true; }

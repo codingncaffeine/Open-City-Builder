@@ -49,6 +49,12 @@ void NativeSetupFireCrew(cIGZUnknown* crew);
 void NativeRemoveFireCrew(cIGZUnknown* crew);
 int NativeFireCount();
 void InstallFireCrewHost();
+// app/NativeRiotPolice.cpp: the figures of the patrol cars' host
+bool NativeDisasterOngoing();
+cIGZUnknown* NativeNewRiotPolice(sc4::cSC4PatrolCar& car);
+void NativeSetupRiotPolice(cIGZUnknown* riot, float competence);
+void NativeRemoveRiotPolice(cIGZUnknown* riot);
+void InstallRiotPoliceHost();
 // app/NativeAutomataControllerHost.cpp: the controller manager's add (by template name, riding on the occupant) and remove
 cIGZUnknown* NativeAddController(sc4::cISC4Occupant* occupant, const char* templateName);
 void NativeRemoveController(cIGZUnknown* controller);
@@ -486,10 +492,11 @@ public:
     float MaxStreamDistance() override { return AutomataTuning().f21a18; }
 } g_fireTruck;
 
-// PARTIAL: the crime simulator's records, riots and arrests are not native yet: a patrol car drives to the call and goes home.
+// PARTIAL: arrests are not native yet (the crime simulator's street figures are not looked up): without a disaster a patrol car
+// drives to the call and goes home.
 class PatrolCarHost final : public IPatrolCarHost {
 public:
-    bool RiotInProgress() override { return false; }
+    bool RiotInProgress() override { return NativeDisasterOngoing(); }
     bool PoliceCompetence(cIGZUnknown* source, float& competence) override {
         cSC4PoliceSimulator* police = PoliceSim();
         cISC4Occupant* station = AsOccupant(source);
@@ -504,9 +511,9 @@ public:
     }
     cSC4Automaton* FindCrimeAutomaton(const cS3DVector3&, float) override { return nullptr; }
     ICrimeParticipant* FindCrimeParticipant(const cS3DVector3&, float) override { return nullptr; }
-    cIGZUnknown* NewRiotPolice(cSC4PatrolCar&) override { return nullptr; }
-    void SetupRiotPolice(cIGZUnknown*, float) override {}
-    void RemoveRiotPolice(cIGZUnknown*) override {}
+    cIGZUnknown* NewRiotPolice(cSC4PatrolCar& car) override { return NativeNewRiotPolice(car); }
+    void SetupRiotPolice(cIGZUnknown* riot, float competence) override { NativeSetupRiotPolice(riot, competence); }
+    void RemoveRiotPolice(cIGZUnknown* riot) override { NativeRemoveRiotPolice(riot); }
     void ReplaceArrestModel(cSC4PatrolCar&, const cGZPersistResourceKey&) override {}
 } g_patrolCar;
 
@@ -658,6 +665,7 @@ void InstallNativeDispatchHost() {
     g_loadFireTruckHost = &g_fireTruck;
     InstallFireCrewHost();
     g_loadPatrolCarHost = &g_patrolCar;
+    InstallRiotPoliceHost();
 }
 
 }  // namespace native
