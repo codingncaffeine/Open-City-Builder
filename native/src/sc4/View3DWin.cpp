@@ -1531,7 +1531,7 @@ void cSC4View3DWin::InvokeCatalogItemCommand(std::uint32_t itemType, std::uint32
             break;
         case 0x4a2b2464u:                                               // a disaster
             if (closeMenu) CloseTertiaryMenu();
-            if (host_) host_->InvokeDisaster(id);
+            if (host_) host_->InvokeDisaster(*this, id);
             break;
         case 0x4a2b2466u:                                               // a zone type
             if (closeMenu) CloseTertiaryMenu();

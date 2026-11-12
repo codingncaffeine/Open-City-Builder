@@ -34,6 +34,11 @@
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
 
+namespace native {
+int NativeResidentialPopulation();              // app/NativeSimHosts.cpp
+float NativeAttractionCommotion(const float* xyz);   // app/NativeAutomataScripts.cpp
+}
+
 namespace native { int NativeViewZoom(); }
 namespace native {
 sc4::ITrafficSimulatorApi* NativeTrafficSimulatorApi();          // app/NativeTrafficAutomata.cpp
@@ -98,6 +103,11 @@ public:
     std::uint32_t Release() override { return 1; }
     int Hour() override { cSC424HourClock* c = Get(); return c ? int(c->GetHour()) : 12; }
     int Minute() override { cSC424HourClock* c = Get(); return c ? int(c->GetMinute()) : 0; }
+    float TimeMagnification() {
+        float value = 1.0f;
+        if (cSC424HourClock* c = Get()) c->GetTimeMagnification(value);
+        return value;
+    }
 private:
     static cSC424HourClock* Get() {
         if (auto* c = Concrete<cSC424HourClock>(CityComponent::Clock24Hour)) return c;
@@ -337,9 +347,15 @@ public:
         NativeSetTrafficVisibleCells(clamp(rect[0]), clamp(rect[1]), clamp(rect[2]), clamp(rect[3]));
         return NativeTrafficNetworkApi();
     }
-    int CityHour() override { return g_clock.Hour(); }
-    float CityTimeFraction() override { return float(g_clock.Hour() * 60 + g_clock.Minute()) / 1440.0f; }
-    float CityClockPercent() override { return CityTimeFraction(); }
+    int ResidentialPopulation() override { return NativeResidentialPopulation(); }
+    float ClockTimeMagnification() override { return g_clock.TimeMagnification(); }
+    float AttractionCommotion(ITrafficNetworkMapOccupant* occupant) override {
+        cISC4Occupant* piece = occupant ? occupant->AsOccupant() : nullptr;
+        if (!piece) return 0.0f;
+        float p[3] = {0.0f, 0.0f, 0.0f};
+        piece->GetPosition(p);
+        return NativeAttractionCommotion(p);
+    }
     ITrafficAutomataAutomaton* AsTrafficAutomaton(IAutomataAutomaton* automaton) override { return TrafficAutomatonView(automaton); }
     cISC4Occupant* AsCityOccupant(IAutomataOccupant* view) override { return CityOccupantOf(view); }   // a dispatch's source station
     IAutomataOccupant* AsAutomataOccupant(cISC4Occupant*) override { return nullptr; }

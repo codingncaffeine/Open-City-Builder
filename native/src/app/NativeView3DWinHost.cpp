@@ -68,6 +68,7 @@
 #include "app/NativeWinMgr.h"
 
 namespace native { void GoToNextDisaster(); }   // NativeDisasters.cpp
+#include "app/NativeDisasterTools.h"
 namespace native {
 sc4::INewsTickerWindow* CreateNewsTickerWindow();     // app/NativeWinHtml.cpp
 void ShutdownNewsTickerWindow(cIGZUnknown* proc);
@@ -295,7 +296,7 @@ struct StubView3DWin final : IView3DWinHost {
         manager->GetCursorPos(view, x, y);                              // RZ::WM() vslot 0x110
         return true;
     }
-    void InvokeDisaster(std::uint32_t) override { SC4_UNWIRED("IView3DWinHost::InvokeDisaster (cSC4View3DWin::InvokeDisaster not recovered)"); }
+    void InvokeDisaster(cSC4View3DWin& view, std::uint32_t id) override { native::InvokeDisasterTool(view, id); }
     bool FocusVehicle(std::uint32_t) override { SC4_UNWIRED("IView3DWinHost::FocusVehicle (vehicle managers)"); return false; }
     // new cSC4GamePreferencesWinProc; AddRef; ShowDialog(kGameOptions) (vslot 0x28); DoModalWin; the view takes the focus back
     void RunPreferencesDialog(int which) override {

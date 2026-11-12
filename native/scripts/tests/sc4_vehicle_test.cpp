@@ -25,6 +25,7 @@
 #include "sc4/Pedestrian.h"
 #include "sc4/SpecialVehicles.h"
 #include "sc4/TrailerVehicle.h"
+#include "sc4/Train.h"
 #include "sc4/Vehicle.h"
 
 static int failures = 0;
@@ -255,7 +256,11 @@ struct FakeAutomatonHost final : IAutomatonHost {
     std::uint32_t GenerateSoundInstanceId() override { return 1; }
     void StopSoundLoop(std::uint32_t) override {}
     void PostAudioEvent(std::uint32_t) override {}
-    std::uint32_t RandomBelow(std::uint32_t range) override { return range ? range - 1 : 0; }
+    std::uint32_t RandomBelow(std::uint32_t range) override {
+        if (belowAnswer >= 0) return static_cast<std::uint32_t>(belowAnswer);
+        return range ? range - 1 : 0;
+    }
+    int belowAnswer = -1;   // the train and bus tests choose the coin
     std::int32_t RandomInt(std::int32_t lo, std::int32_t) override { return lo; }
     double RandomDouble(double lo, double) override { return lo; }
     double RandomUnit() override { return 0.5; }
@@ -408,6 +413,17 @@ struct FakeVehicleHost final : IVehicleHost {
     }
     float PlayerDriveDisasterDamage(float, float) override { return disasterDamage; }
     void PostCollisionMessage() override { ++collisionMessages; }
+    // the trains' and the bus's questions
+    bool disasterOngoing = false, railAccident = false;
+    int zipper = -1, zipperCalls = 0, railMessages = 0;
+    std::uint32_t lotGroup = 0;
+    std::function<bool(int, int)> lotAt = [](int, int) { return false; };
+    bool DisasterOngoing() override { return disasterOngoing; }
+    bool CheckRailAccident(int, int) override { return railAccident; }
+    void PostRailAccidentMessage(int, int) override { ++railMessages; }
+    int ZipperPieceType(ITrafficAutomatonOccupant*) override { ++zipperCalls; return zipper; }
+    bool IsLotAtCell(int cellX, int cellZ) override { return lotAt(cellX, cellZ); }
+    bool IsLotBuildingInGroup(void* lot, std::uint32_t group) override { return lot && group == lotGroup; }
     cSC4Automaton* CollidingAutomaton(cSC4Automaton*, float) override { return nullptr; }
     void ResetEffects() {
         for (FakeEffect* effect : effects) delete effect;
@@ -621,6 +637,298 @@ void TestTrailerVehicle() {
     info->Release();
 }
 
+// ---- the trains (i386 0x003930be .. 0x00397524, 0x004b1008 .. 0x004b12fc) and the bus (0x003913ec ..) ------------------
+struct TestEngine final : cSC4Train {
+    using cSC4Train::cSC4Train;
+    void SetRadiusForTest(float radius) { radius_ = radius; }
+};
+struct TestMassTransit final : cSC4MassTransitTrain {
+    using cSC4MassTransitTrain::cSC4MassTransitTrain;
+};
+struct TestRailCar final : cSC4TrainCar {
+    using cSC4TrainCar::cSC4TrainCar;
+    void SetRadiusForTest(float radius) { radius_ = radius; }
+};
+void TestTrain() {
+    World world;
+    VehicleTuning& tuning = world.vehicleHost.tuning;
+    tuning.trainSpeedMin = 1800;   // half a unit per millisecond
+    tuning.trainSpeedMax = 1800;
+    tuning.freightCarsMin = 2;
+    tuning.freightCarsMax = 5;
+    tuning.passengerCarsMin = 1;
+    tuning.passengerCarsMax = 1;
+    auto* engine = new TestEngine(&world.host, &world.automatonHost);
+    engine->AddRef();
+    CHECK_NEAR(engine->GetDefaultSpeed(), 0.5f);
+    engine->AddOccupantGroup(kTrainGroupFreightEngine);
+    CHECK(engine->Init());
+    // a train never collides on its own and ignores attractors; the engine is not pulled
+    CHECK(engine->CheckAutomataFlag(0x10000) && engine->CheckAutomataFlag(0x4000) && !engine->CheckAutomataFlag(0x10000000));
+    CHECK(engine->CarGroup() == kTrainGroupFreightCar);
+    CHECK(engine->GetDesiredNumCars() == 4);   // 2 + a roll below 5 - 2 (the fake rolls the highest)
+    CHECK(engine->IsEngine() && engine->IsTrain() && engine->GetDesiredLookaheadCount() == 6 && engine->CheckIntersectionDensity());
+    CHECK(!engine->IsElevated() && engine->GetNumCars() == 0);
+    CHECK(engine->GetGZCLSID() == kTrainGZCLSID && engine->FindDrivingAutomaton() == engine);
+    void* raw = nullptr;
+    CHECK(engine->QueryInterface(kTrainGZCLSID, &raw) && raw == static_cast<cSC4Train*>(engine));
+    if (raw) engine->Release();
+    raw = nullptr;
+    CHECK(engine->QueryInterface(kTrainCarGZCLSID, &raw) && raw == static_cast<cSC4TrainCar*>(engine));
+    if (raw) engine->Release();
+
+    // a car: pulled, moved by its engine only, driven by the engine at the head of its leaders
+    auto* car = new TestRailCar(&world.host, &world.automatonHost);
+    car->AddRef();
+    car->SetRadiusForTest(4.0f);
+    CHECK(car->Init());
+    CHECK(car->CheckAutomataFlag(0x10000000) && !car->IsEngine() && car->IsTrain());
+    CHECK(car->GetGZCLSID() == kTrainCarGZCLSID);
+    raw = nullptr;
+    CHECK(!car->QueryInterface(kTrainGZCLSID, &raw));
+    CHECK(car->DoPathTick(16.0f) && !car->DoPlayerDriveTick(16.0f));
+    CHECK(car->FindDrivingAutomaton() == nullptr);
+    car->SetAutomataFlag(2, true);
+
+    // a passenger engine pulls passenger cars, as many as the other range says
+    auto* passenger = new TestEngine(&world.host, &world.automatonHost);
+    passenger->AddRef();
+    passenger->AddOccupantGroup(kTrainGroupPassengerEngine);
+    passenger->Init();
+    CHECK(passenger->CarGroup() == kTrainGroupPassengerCar && passenger->GetDesiredNumCars() == 1);
+    passenger->Shutdown();
+    passenger->Release();
+
+    // the elevated groups ask the tile whether it is underground; the others never do
+    auto* elevated = new TestRailCar(&world.host, &world.automatonHost);
+    elevated->AddRef();
+    elevated->AddOccupantGroup(kTrainGroupElevatedCar);
+    elevated->Init();
+    CHECK(elevated->IsElevated());
+
+    // a rail along x; the engine's nose at x = 60, its radius 8
+    cSC4PathInfo* info = MakePathInfo();
+    const std::uint32_t key = AddPath(info, 3, 0, 2, {Vec(0, 0, 50), Vec(100, 0, 50)});
+    FakeOccupant* rail = MakeOccupant(info);
+    rail->cellX = 3;
+    rail->cellZ = 3;
+    const tPath* stored = info->GetPath(key, nullptr);
+    CHECK(stored != nullptr);
+    if (stored) {
+        const float heading[3] = {1.0f, 0.0f, 0.0f};
+        world.vehicleHost.zipperCalls = 0;
+        elevated->SetPath(rail, key, &stored->points, true);
+        CHECK(world.vehicleHost.zipperCalls == 1);
+        engine->SetRadiusForTest(8.0f);
+        engine->SetPath(rail, key, &stored->points, true);
+        CHECK(world.vehicleHost.zipperCalls == 1);
+        engine->SetPathIndex(0);
+        engine->SetPathPos(Vec(60, 0, 50));
+        const float at56[3] = {56.0f, 0.0f, 50.0f};
+        engine->MoveTo(at56, heading);
+        engine->SetBackPoint(Vec(52, 0, 50));
+
+        // one step: half a unit per millisecond for two milliseconds. The nose goes to 61, the back point one radius
+        // behind it on the track, and the engine sits halfway between its OLD nose and the new back point behind the nose
+        CHECK(engine->DoPathTick(2.0f));
+        CHECK_NEAR(engine->GetPathPos().x, 61.0f);
+        CHECK_NEAR(engine->BackPoint().x, 53.0f);
+        float p[3] = {0, 0, 0};
+        engine->GetPosition(p);
+        CHECK_NEAR(p[0], 57.5f);   // 61 - (60 - 53) / 2
+        CHECK_NEAR(p[2], 50.0f);
+        CHECK_NEAR(engine->GetPrevOrient().x, 1.0f);
+        CHECK(!engine->CheckAutomataFlag(0x20));
+        CHECK_NEAR(engine->GetActualSpeed(), 0.5f);
+
+        // the first tick remembers where cars appear: the tail's place, its tile and path
+        engine->DoAnimationTick(0, 0.0f);
+        const float appear = engine->TailPosition().x;
+        CHECK_NEAR(appear, 57.5f);
+        CHECK(engine->TailOccupant() == rail && engine->TailPathKey() == key);
+        CHECK(engine->GetNumCars() == 0 && world.manager.created == 0);   // the back point is not 2.5 radii away yet
+
+        // 27 further on the back point is at 80: 22.5 from the appear place, past the 20 that 2.5 radii ask for
+        for (int i = 0; i < 27; ++i) engine->DoPathTick(2.0f);
+        CHECK_NEAR(engine->GetPathPos().x, 88.0f);
+        CHECK_NEAR(engine->BackPoint().x, 80.0f);
+        engine->SetDesiredNumCars(2);
+        world.manager.nextCreated = car;
+        CHECK(engine->AddCarAtEnd());
+        CHECK(engine->GetNumCars() == 1 && world.manager.created == 1);
+        CHECK(world.manager.createdGroup == kTrainGroupFreightCar);   // not the last car yet
+        CHECK_NEAR(world.manager.createdAt.x, appear);
+        CHECK(!car->CheckAutomataFlag(2));
+        CHECK(car->GetNetworkOccupant() == rail && car->GetPathKey() == key);
+        CHECK(engine->GetTailCar() == car);
+        CHECK(!engine->ShouldCollide(car));
+
+        // the cars follow: the car's nose half the engine's plus half its own radius (6) behind the engine's back point,
+        // its back point one radius (4) behind its nose, the car halfway between the two
+        engine->TickFollowingCars(16.0f);
+        CHECK_NEAR(car->GetPathPos().x, 74.0f);
+        CHECK_NEAR(car->BackPoint().x, 70.0f);
+        car->GetPosition(p);
+        CHECK_NEAR(p[0], 72.0f);
+        CHECK_NEAR(p[2], 50.0f);
+        CHECK_NEAR(car->GetPrevOrient().x, 1.0f);
+        CHECK(car->CurrentPath() == &stored->points);
+        CHECK(car->GetLeader() == engine && car->FindDrivingAutomaton() == engine);   // the follow tick names the leader
+
+        // the last car of a freight train is the caboose group; a car the manager does not make is not added
+        world.manager.nextCreated = nullptr;
+        CHECK(!engine->AddCarAtEnd() && engine->GetNumCars() == 1);
+        CHECK(world.manager.createdGroup == kTrainGroupFreightLastCar);
+
+        // the cars stand at a station with their engine and leave with it
+        CHECK(engine->PushState(kTrafficStateStopAtStation, nullptr, 4800.0f, false, 0, 0, nullptr));
+        CHECK(car->GetBehavior() == kTrafficStateStopAtStation);
+        engine->PopState();
+        CHECK(car->GetBehavior() != kTrafficStateStopAtStation);
+
+        // a station's lot (building group 0x1300) stops the train for 4.8 s on a path of the tile; any other lot ends it
+        int lot = 0;
+        world.vehicleHost.lotGroup = kStationGroup1300;
+        CHECK(engine->HandleExitNetwork(rail, key, &lot, SC4RectInt32{}));
+        CHECK(engine->GetBehavior() == kTrafficStateStopAtStation && !engine->GetMarkedForRemove());
+        CHECK_NEAR(engine->GetState()->timer, 4800.0f);
+        engine->PopState();
+
+        // a wreck: the engine and its cars go into the collide state for twenty seconds, the cars at the engine's speed
+        CHECK(engine->HandleCollision(nullptr, Vec(0, 0, 0)));
+        CHECK(engine->GetBehavior() == kStateCollide && car->GetBehavior() == kStateCollide);
+        CHECK_NEAR(engine->GetState()->timer, 20000.0f);
+        CHECK_NEAR(car->GetActualSpeed(), engine->GetActualSpeed());
+        CHECK_NEAR(engine->GetCurrentSpeed(), 0.0f);
+        // while a disaster runs the wreck stays at least ten more seconds
+        car->GetState()->timer = 50.0f;
+        car->DoCollideTick(16.0f);
+        CHECK_NEAR(car->GetState()->timer, 50.0f);
+        world.vehicleHost.disasterOngoing = true;
+        car->DoCollideTick(16.0f);
+        CHECK_NEAR(car->GetState()->timer, 10000.0f);
+        world.vehicleHost.disasterOngoing = false;
+        // a wrecked car does not pass a further hit on
+        CHECK(car->HandleCollision(nullptr, Vec(0, 0, 0)));
+
+        // fewer cars: the surplus leaves from the tail
+        engine->SetNumCars(0);
+        CHECK(engine->GetNumCars() == 0 && car->GetMarkedForRemove());
+
+        // a rail accident cell: an accident and a message when a train starts there
+        auto* late = new TestEngine(&world.host, &world.automatonHost);
+        late->AddRef();
+        late->Init();
+        world.vehicleHost.railAccident = true;
+        const int accidentsBefore = world.vehicleHost.accidents;
+        late->StartTrip(rail, key, false);
+        CHECK(world.vehicleHost.accidents == accidentsBefore + 1 && world.vehicleHost.railMessages == 1);
+        world.vehicleHost.railAccident = false;
+        // the trip puts the nose at the path's end and the engine behind it
+        CHECK_NEAR(late->GetPathPos().x, 100.0f);
+        // a train that stands still for ten seconds leaves on a coin toss
+        late->SetSpeed(0.0f, 0.0f);
+        late->SetAutomataFlag(0x20, true);
+        world.automatonHost.belowAnswer = 1;
+        late->DoAnimationTick(0, 6000.0f);
+        CHECK_NEAR(late->StandStillSeconds(), 6.0f);
+        late->DoAnimationTick(0, 6000.0f);
+        CHECK(!late->GetMarkedForRemove());   // the coin said stay
+        world.automatonHost.belowAnswer = 0;
+        late->DoAnimationTick(0, 16.0f);
+        CHECK(late->GetMarkedForRemove());
+        world.automatonHost.belowAnswer = -1;
+        late->Shutdown();
+        late->Release();
+
+        // the mass-transit train stops at its own stations (0x1303) and at the train's
+        auto* subway = new TestMassTransit(&world.host, &world.automatonHost);
+        subway->AddRef();
+        subway->Init();
+        CHECK(subway->GetGZCLSID() == kMassTransitTrainGZCLSID);
+        world.vehicleHost.lotGroup = kStationGroup1303;
+        CHECK(subway->HandleExitNetwork(rail, key, &lot, SC4RectInt32{}));
+        CHECK(subway->GetBehavior() == kTrafficStateStopAtStation);
+        subway->PopState();
+        world.vehicleHost.lotGroup = kStationGroup1302;
+        CHECK(subway->HandleExitNetwork(rail, key, &lot, SC4RectInt32{}));
+        subway->PopState();
+        world.vehicleHost.lotGroup = 0x1301;   // a bus stop is no train station: the train leaves the network
+        CHECK(!subway->HandleExitNetwork(rail, key, &lot, SC4RectInt32{}));
+        CHECK(subway->GetMarkedForRemove());
+        // records: version 1 around the train's version 2 around the train car's version 2
+        PortMemoryOStream out;
+        CHECK(subway->Write(out));
+        CHECK(out.bytes().size() > 6 && out.bytes()[0] == 1 && out.bytes()[2] == 2 && out.bytes()[4] == 2);
+        const std::uint8_t wrong[2] = {2, 0};
+        PortMemoryIStream wrongStream(wrong, sizeof(wrong));
+        CHECK(!subway->Read(wrongStream));
+        subway->Shutdown();
+        subway->Release();
+
+        // the bus: a bus stop's lot (0x1301) stops it; standing there it lets one waiting pedestrian board on a coin toss
+        // and drives on once nobody is left
+        auto* bus = new cSC4Bus(&world.host, &world.automatonHost);
+        bus->AddRef();
+        bus->Init();
+        CHECK(bus->GetGZCLSID() == kBusGZCLSID);
+        world.vehicleHost.lotGroup = kStationGroup1300;
+        CHECK(!bus->HandleExitNetwork(rail, key, &lot, SC4RectInt32{}));   // a train station is no bus stop
+        auto* bus2 = new cSC4Bus(&world.host, &world.automatonHost);
+        bus2->AddRef();
+        bus2->Init();
+        world.vehicleHost.lotGroup = kBusStationGroup;
+        CHECK(bus2->HandleExitNetwork(rail, key, &lot, SC4RectInt32{}));
+        CHECK(bus2->GetBehavior() == kTrafficStateStopAtStation);
+        bus2->SetAutomataFlag(0x20, true);
+        auto* walker = MakeVehicle(world);
+        walker->Init();
+        walker->PushState(kStateQueue, nullptr, -1.0f, false, 0, 0, nullptr);
+        walker->AddRef();   // the box query's reference, released by the bus
+        world.vehicleHost.boxOccupants = {walker->AsOccupant()};
+        world.automatonHost.belowAnswer = 1;   // the coin says not this tick
+        CHECK(bus2->DoStopAtStationTick(100.0f));
+        CHECK_NEAR(bus2->GetState()->timer, 4700.0f);
+        CHECK(!walker->GetMarkedForRemove());
+        world.automatonHost.belowAnswer = 0;
+        CHECK(bus2->DoStopAtStationTick(100.0f));
+        CHECK(walker->GetMarkedForRemove());                                // boarded
+        CHECK(bus2->GetBehavior() == kTrafficStateStopAtStation);          // and the bus waits for more
+        world.vehicleHost.boxOccupants.clear();
+        CHECK(bus2->DoStopAtStationTick(100.0f));
+        CHECK(bus2->GetBehavior() != kTrafficStateStopAtStation);          // nobody left: it drives on
+        world.automatonHost.belowAnswer = -1;
+        PortMemoryOStream busOut;
+        CHECK(bus2->Write(busOut));
+        CHECK(busOut.bytes().size() > 2 && busOut.bytes()[0] == 2);
+        walker->Shutdown();
+        walker->Release();
+        bus->Shutdown();
+        bus->Release();
+        bus2->Shutdown();
+        bus2->Release();
+    }
+    elevated->Shutdown();
+    elevated->Release();
+    engine->Shutdown();
+    engine->Release();
+    car->Shutdown();
+    car->Release();
+    rail->Release();
+    info->Release();
+}
+void TestMayorLimo() {
+    World world;
+    auto* limo = new cSC4MayorLimo(&world.host, &world.automatonHost);
+    limo->AddRef();
+    CHECK(limo->Cost() == 50);
+    CHECK_NEAR(limo->AuraRadius(), 48.0f);
+    CHECK_NEAR(limo->AuraMagnitude(), 10.0f);
+    CHECK(limo->Init());   // no exemplar: the constructor's values stay
+    CHECK(limo->Cost() == 50);
+    limo->Shutdown();
+    limo->Release();
+}
 void TestConstructionAndQueries() {
     World world;
     world.vehicleHost.tuning.defaultSpeedMin = 3600;
@@ -1456,7 +1764,7 @@ void TestEmergencyVehicle() {
         roundTrip(&jacked, &jackedTwin, 1);
         roundTrip(&van, &vanTwin, 3);
         roundTrip(&limo, &limoTwin, 1);
-        CHECK(limo.Value424() == 50 && limo.Value428() == 48.0f && limo.Value42c() == 10.0f);
+        CHECK(limo.Cost() == 50 && limo.AuraRadius() == 48.0f && limo.AuraMagnitude() == 10.0f);
     }
 
     // ---- the crime layer's two vehicles (PostInit: i386 0x0049d9a8 carjacked, 0x0039189c getaway van) ------------------------
@@ -2065,6 +2373,8 @@ int main() {
     TestFireTruck();
     TestPedestrian();
     TestTrailerVehicle();
+    TestTrain();
+    TestMayorLimo();
     if (failures == 0) {
         std::printf("sc4_vehicle: ok\n");
         return 0;

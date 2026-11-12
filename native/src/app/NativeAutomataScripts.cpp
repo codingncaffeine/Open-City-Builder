@@ -171,4 +171,16 @@ void InstallAutomataScriptHost() {
     sc4::SetAutomataScriptHost(&host);
 }
 
+// The summed pull of the attractors that reach a world point (the controller manager's GetCompositeAttractionCommotion, asked by
+// the traffic and pedestrian managers for a network tile).
+float NativeAttractionCommotion(const float* xyz) {
+    struct Point final : INetworkOccupantView {
+        float p[3];
+        void GetWorldPosition(float* out) override { out[0] = p[0]; out[1] = p[1]; out[2] = p[2]; }
+    } point;
+    point.p[0] = xyz[0]; point.p[1] = xyz[1]; point.p[2] = xyz[2];
+    cSC4AutomataControllerManager* manager = ControllerManager();
+    return manager ? manager->GetCompositeAttractionCommotion(&point) : 0.0f;
+}
+
 }  // namespace native

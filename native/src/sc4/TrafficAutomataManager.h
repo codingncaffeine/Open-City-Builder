@@ -110,6 +110,8 @@ public:
     virtual std::deque<RouteData>* RouteDeque() = 0;                              // +0x368 (i386 +0x23c)
     virtual bool BeginRoute(bool onlyStart) = 0;                                  // 0x4a8 (i386 0x254)
     virtual void ReturnToDefaultSpeed() = 0;                                      // 0x538 (i386 0x29c)
+    // cSC4Train's slot (i386 0x328): how many cars a train should pull; nothing for any other automaton
+    virtual void SetDesiredNumCars(std::uint8_t count) { (void)count; }
 };
 
 // The occupant view the manager's network handlers use (cISC4NetworkOccupant slots 0x180 / 0x40): the base's
@@ -196,9 +198,13 @@ public:
     ~ITrafficAutomataManagerHost() override = default;
     virtual ITrafficSimulatorApi* TrafficSimulator() = 0;                         // SL::spCity vslot 0x228
     virtual ITrafficNetworkManagerApi* TrafficNetworkManager() = 0;               // the same object as NetworkManager()
-    virtual int CityHour() = 0;                                                   // SL::spCity 0x220 -> 0x80
-    virtual float CityTimeFraction() = 0;                                         // SL::spCity 0x2b0 -> 0xa0 (0..1)
-    virtual float CityClockPercent() = 0;                                         // SL::spCity 0x178 -> 0xb8
+    // SL::spCity GetResidentialSimulator (i386 slot 0x110) -> GetPopulation (0x40): the input of the layers' density curves
+    virtual int ResidentialPopulation() = 0;
+    // SL::spCity Get24HourClock (0x158) -> GetTimeMagnification (0x50): how fast the city's day runs
+    virtual float ClockTimeMagnification() = 0;
+    // the automata controller manager's GetCompositeAttractionCommotion (0x5c): the summed pull of the attractors that reach
+    // the network occupant
+    virtual float AttractionCommotion(ITrafficNetworkMapOccupant* occupant) = 0;
     // The traffic automaton that matches a base automaton; the GZCOM automata adapter answers this.
     virtual ITrafficAutomataAutomaton* AsTrafficAutomaton(IAutomataAutomaton* automaton) = 0;
     // The two views of an occupant the response list and the dispatch locations swap between.
@@ -261,10 +267,11 @@ public:
                                          int cellZ, float elapsedMilliseconds);        // 0x2a0 @ 0x10011347e (PARTIAL)
     // MaybeSpawnAutomaton's and SpawnAutomaton's common part: the edge's lane key, the automaton made there on its trip.
     bool SpawnOnEdge(ITrafficNetworkMapOccupant* occupant, PopulateLayer layer, std::uint8_t entry, std::uint8_t exit,
-                     bool gated, float elapsedSeconds, double density);
+                     bool gated, float elapsedSeconds, double density, float weight);
+    // `weight` is the edge's density: a train pulls one car per `f21a50` of it, within its kind's range.
     virtual bool MaybeSpawnAutomaton(ITrafficNetworkMapOccupant* occupant, TrafficTileInfo* tile, PopulateLayer layer,
-                                     float elapsedMilliseconds, double density, std::uint8_t entry,
-                                     std::uint8_t exit);                              // 0x2a8 @ 0x100114214 (PARTIAL)
+                                     float elapsedSeconds, double density, std::uint8_t entry, std::uint8_t exit,
+                                     float weight);                                   // 0x2a8 @ i386 0x000cfa2a
     virtual void SpawnAutomaton(ITrafficNetworkMapOccupant* occupant, TrafficTileInfo* tile, PopulateLayer layer,
                                 std::uint8_t entry, std::uint8_t exit, float elapsedMilliseconds);   // 0x2b0 (PARTIAL)
     virtual void RecallAutomatonFromNetwork(TrafficTileInfo* tile, std::uint32_t pathType);   // 0x2b8 @ 0x100114c6e

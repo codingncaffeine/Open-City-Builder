@@ -18,6 +18,7 @@
 #include "sc4/ServiceLocator.h"
 #include "sc4/TrafficAutomaton.h"
 #include "sc4/TrafficNetworkMap.h"
+#include "sc4/UndergroundOccupant.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
 
@@ -203,6 +204,39 @@ void NativeOccupantsInBox(const float* lo, const float* hi, std::uint32_t type, 
     OccupantList found;
     if (occupants && occupants->GetOccupantsByBBox(found, lo, hi, type, std::uint32_t(count)))
         for (cISC4Occupant* occupant : found) out.push_back(occupant);
+}
+
+// The train car's question about the tile it enters (cSC4TrainCar::SetPath): an underground piece's zipper type (slot
+// 0x1d8 of the interface 0x4a10afc2), -1 for a piece that is not underground.
+int NativeZipperPieceType(sc4::ITrafficAutomatonOccupant* occupant) {
+    cISC4Occupant* piece = occupant ? occupant->AsOccupant() : nullptr;
+    auto* under = piece ? dynamic_cast<cSC4UndergroundOccupant*>(piece) : nullptr;
+    if (!under) return -1;
+    bool direction = false;
+    return under->GetZipperPieceType(direction);
+}
+
+// The HandleExitNetwork overrides' question: the lot's building (lot slot 0xc0), as an occupant, is in `group`.
+bool NativeLotBuildingInGroup(void* lot, std::uint32_t group) {
+    cIGZUnknown* object = lot ? static_cast<cSC4Lot*>(lot)->GetBuilding() : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(kGZIID_cISC4Occupant, &raw) || !raw) return false;
+    auto* building = static_cast<cISC4Occupant*>(raw);
+    const bool in = building->IsOccupantGroup(group);
+    building->Release();
+    return in;
+}
+
+// A message with two data words, posted to the city's subscribers.
+void NativePostCityMessage(std::uint32_t type, std::uint32_t data1, std::uint32_t data2) {
+    if (!SL::spMS2) return;
+    auto* message = new cRZMessage2Standard();
+    message->AddRef();
+    message->SetType(type);
+    message->SetData1(data1);
+    message->SetData2(data2);
+    SL::spMS2->MessagePost(message, false);
+    message->Release();
 }
 
 sc4::ITrafficAutomatonOccupant* NativeTrafficPiece(sc4::cISC4Occupant* occupant) {

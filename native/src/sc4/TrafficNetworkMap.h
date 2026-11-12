@@ -176,6 +176,7 @@ public:
     virtual bool IsRemoved() = 0;                     // 0x2e0
     virtual std::uint32_t GetLane() = 0;              // 0x478
     virtual std::uint32_t PathTypeWord() const = 0;   // +0x308
+    virtual bool IsTrain() const { return false; }    // 0x4a0 (i386 0x250): the manager keeps trains apart when it spawns one
 };
 
 // ---- tuning ---------------------------------------------------------------------------------------

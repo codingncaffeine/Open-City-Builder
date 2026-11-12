@@ -141,6 +141,11 @@ struct VehicleTuning {
     float pathCurveFactor = 1.0f;          // sTuningParams + 0x138 (a straight path multiplies it by 0.6)
     float turnMax = 1.5707964f;            // sTuningParams + 0x1b8 (curve clamp)
     float turnDivisor = 1.0f;              // sTuningParams + 0x1b4 (curve clamp divisor)
+    // The trains' part (i386 sTuningParams +0x13e..+0x148): how many cars a freight train (car group 0x4203) and any other
+    // train pulls, and the trains' speed range in units per hour.
+    std::uint8_t freightCarsMin = 0, freightCarsMax = 0;       // +0x13e / +0x13f (property 0xea441c97)
+    std::uint8_t passengerCarsMin = 0, passengerCarsMax = 0;   // +0x140 / +0x141 (property 0x8a441c9c)
+    std::uint32_t trainSpeedMin = 0, trainSpeedMax = 0;        // +0x144 / +0x148 (property 0x6a440d40)
 };
 
 // One "named / managed visual effect" object as the vehicle uses it: the effect the effects manager hands out (slot 0x30)
@@ -199,6 +204,20 @@ public:
     virtual cSC4Automaton* CollidingAutomaton(cSC4Automaton* automaton, float distance) = 0;
     // SC4PostMessage2(0x49e64802, 0, 0, 0, 0, null) in HandleCollision
     virtual void PostCollisionMessage() = 0;
+    // ---- what the trains and the bus ask (sc4/Train.h, sc4/SpecialVehicles.h); the defaults are a city without them
+    // SL::spDisasterLayer slot 0x28 IsADisasterOngoing (cSC4TrainCar::DoCollideTick)
+    virtual bool DisasterOngoing() { return false; }
+    // SL::spTrafficSim slot 0x44 CheckRailAccident(cellX, cellZ) (cSC4Train::StartTrip)
+    virtual bool CheckRailAccident(int cellX, int cellZ) { (void)cellX; (void)cellZ; return false; }
+    // message 0x0c05e4cd with the cell in its first two data words, sent through SL::spMS2 (cSC4Train::StartTrip)
+    virtual void PostRailAccidentMessage(int cellX, int cellZ) { (void)cellX; (void)cellZ; }
+    // the occupant asked for 0x4a10afc2 (an underground piece), then its slot 0x1d8 GetZipperPieceType; -1 when the
+    // occupant is not underground (cSC4TrainCar::SetPath)
+    virtual int ZipperPieceType(ITrafficAutomatonOccupant* occupant) { (void)occupant; return -1; }
+    // SL::spLotManager slot 0x14 GetLot(cellX, cellZ, false) != null (cSC4MassTransitTrain::ChooseNewDestination)
+    virtual bool IsLotAtCell(int cellX, int cellZ) { (void)cellX; (void)cellZ; return false; }
+    // the lot's building (lot slot 0xc0), as an occupant, is in `group` (the HandleExitNetwork overrides)
+    virtual bool IsLotBuildingInGroup(void* lot, std::uint32_t group) { (void)lot; (void)group; return false; }
 };
 
 // The process-wide vehicle host (installed by the game / the test). Null degrades to the no-manager behaviour.

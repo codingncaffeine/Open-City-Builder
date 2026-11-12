@@ -159,7 +159,7 @@ public:
         cSC4SimGrid<float>* grid = s_.GetVolumeMap(n);
         return grid && InCity(x, z) ? grid->GetCellValue(x, z) : 0.0f;
     }
-    std::uint32_t TransitSwitchId(int, int) override { return 0; }   // PARTIAL: no transit switches natively
+    std::uint32_t TransitSwitchId(int x, int z) override { return s_.SwitchIdAt(x, z); }
     float TransitSwitchCost(std::uint32_t id) override { return s_.TransitSwitchEntryCost(id); }
     std::uint8_t DestinationByte(int x, int z) override { return s_.DestinationByte(x, z); }
     void SetDestinationByte(int x, int z, std::uint8_t value) override {
@@ -464,8 +464,204 @@ void cSC4TrafficSimulator::DoConnectionsChanged(int x1, int z1, int x2, int z2) 
         }
         occupant->Release();
     }
+    // 4. the transit switches over R grown by one more
+    ApplyTransitSwitches(SC4RectInt32{std::max(r.x0 - 1, 0), std::max(r.z0 - 1, 0), std::min(r.x1 + 1, cellsX_ - 1), std::min(r.z1 + 1, cellsZ_ - 1)});
     networkChanged_ = subnetworksStale_ = true;
     continueSearch_ = false;
+}
+
+// ---- transit switches (traffic-network.md §4.7) -----------------------------------------------------------------------------
+
+namespace {
+constexpr std::uint32_t kPropertySwitchRules = 0xe90e25a1, kPropertySwitchTimeFactor = 0xe90e25a2, kPropertySwitchCapacity = 0xe90e25a3;
+constexpr std::uint32_t kPropertySwitchToll = 0x0bfc0a4c, kPropertySwitchIsIntersection = 0x4bfc47b0;
+constexpr int kSwitchRotation[4][4] = {{2, 3, 0, 1}, {1, 2, 3, 0}, {0, 1, 2, 3}, {3, 0, 1, 2}};   // ROT[facing][i] (0x00AB3280)
+
+// A float property that an exemplar may also hold as an integer.
+bool SwitchFloatProperty(const cISCPropertyHolder* holder, std::uint32_t id, float& out) {
+    if (cSCPropertyHelp::GetPropertyValue(holder, id, out)) return true;
+    std::uint32_t whole = 0;
+    if (!cSCPropertyHelp::GetPropertyValue(holder, id, whole)) return false;
+    out = float(whole);
+    return true;
+}
+}  // namespace
+
+// Both grids cover the fixed 256 x 256 cells of the connection table, packed (x << 8) | z; they exist once a switch does.
+std::uint32_t cSC4TrafficSimulator::SwitchIdAt(int x, int z) const {
+    if (!(unsigned(x) < 256u && unsigned(z) < 256u) || switchIds_.empty()) return 0;
+    return switchIds_[(std::size_t(x) << 8) | std::size_t(z)];
+}
+
+void cSC4TrafficSimulator::SetSwitchIdAt(int x, int z, std::uint32_t id) {
+    if (!(unsigned(x) < 256u && unsigned(z) < 256u)) return;
+    if (switchIds_.empty()) {
+        switchIds_.assign(0x10000, 0);
+        switchModes_.assign(0x10000, 0);
+    }
+    switchIds_[(std::size_t(x) << 8) | std::size_t(z)] = id;
+}
+
+std::uint8_t cSC4TrafficSimulator::SwitchModeMaskAt(int x, int z) const {
+    if (!(unsigned(x) < 256u && unsigned(z) < 256u) || switchModes_.empty()) return 0;
+    return switchModes_[(std::size_t(x) << 8) | std::size_t(z)];
+}
+
+// §4.7.2: four bytes per rule: 0x82 = kind 1 (else 0), the side bits (bit 7 - i = the i-th side, turned by the lot's facing), from, to.
+// The rules REPLACE the switch's (the original appends on a reload; nothing rebuilt depends on the duplicates).
+void cSC4TrafficSimulator::ReadTransitSwitchRules(TransitSwitch& out, const std::vector<std::uint8_t>& bytes, int facing) {
+    out.rules.clear();
+    out.toMask = 0;
+    out.flags = 0;
+    for (std::size_t i = 0; i + 4 <= bytes.size(); i += 4) {
+        TransitSwitchRule rule;
+        rule.kind = bytes[i] == 0x82 ? 1 : 0;
+        for (int s = 0; s < 4; ++s) rule.side[kSwitchRotation[facing & 3][s]] = ((bytes[i + 1] >> (7 - s)) & 1) != 0;
+        rule.from = bytes[i + 2];
+        rule.to = bytes[i + 3];
+        if (rule.kind == 0 && rule.to < 16) out.toMask = std::uint16_t(out.toMask | (1u << rule.to));
+        switch (rule.to) {
+            case 2: out.flags |= 0x01; break;
+            case 3: out.flags |= 0x02; break;
+            case 6: out.flags |= 0x04; break;
+            case 7: out.flags |= 0x08; break;
+            case 8: out.flags |= 0x10; break;
+            default: break;
+        }
+        if ((rule.from == 6 && rule.to == 7) || (rule.from == 7 && rule.to == 6)) out.flags |= 0x40;
+        out.rules.push_back(rule);
+    }
+}
+
+// §4.7.1 steps 1-5: a lot whose building has the rules property becomes a switch over its rectangle.
+//   PARTIAL: a subway switch's access point is the lot's NW cell (the access occupant, type 0x8a13918a, is not looked for).
+bool cSC4TrafficSimulator::ActivateTransitSwitch(ITrafficLot* lot) {
+    const cISCPropertyHolder* building = lot ? host_->LotBuildingProperties(lot) : nullptr;
+    std::vector<std::uint8_t> bytes;
+    if (!building || !cSCPropertyHelp::GetPropertyValue(building, kPropertySwitchRules, bytes)) return false;
+    if (bytes.size() % 4 != 0) return false;
+    SC4RectInt32 rect;
+    lot->OccupiedRect(rect);
+    if (switchIds_.empty()) {
+        switchIds_.assign(0x10000, 0);
+        switchModes_.assign(0x10000, 0);
+    }
+    if (SwitchIdAt(rect.x0, rect.z0) != 0) DeactivateTransitSwitch(rect);   // port guard: activated twice
+    TransitSwitch entry;
+    entry.occupant = lot->Building();
+    entry.cost = 1.0f;
+    SwitchFloatProperty(building, kPropertySwitchTimeFactor, entry.cost);
+    SwitchFloatProperty(building, kPropertySwitchCapacity, entry.capacity);
+    SwitchFloatProperty(building, kPropertySwitchToll, entry.toll);
+    cSCPropertyHelp::GetPropertyValue(building, kPropertySwitchIsIntersection, entry.countsAsIntersection);
+    ReadTransitSwitchRules(entry, bytes, lot->Facing());
+    if (entry.flags & 0x04) {
+        entry.hasAccessPoint = true;
+        entry.accessX = std::uint8_t(rect.x0);
+        entry.accessZ = std::uint8_t(rect.z0);
+    }
+    std::uint8_t modes = 0;
+    for (const TransitSwitchRule& rule : entry.rules)
+        if (rule.kind == 0 && rule.from < 8) modes = std::uint8_t(modes | (1u << rule.from));
+    const std::uint32_t id = nextSwitchId_++;
+    for (int x = std::max(rect.x0, 0); x <= std::min(rect.x1, lastX_); ++x)
+        for (int z = std::max(rect.z0, 0); z <= std::min(rect.z1, lastZ_); ++z) {
+            switchIds_[(std::size_t(x) << 8) | std::size_t(z)] = id;
+            switchModes_[(std::size_t(x) << 8) | std::size_t(z)] = modes;
+        }
+    if (Debug()) {
+        std::fprintf(stderr, "traffic: transit switch %u at (%d,%d)..(%d,%d) facing %d capacity %.0f time factor %.2f flags %02x modes %02x, %zu rules:", id, rect.x0,
+                     rect.z0, rect.x1, rect.z1, lot->Facing(), entry.capacity, entry.cost, entry.flags, modes, entry.rules.size());
+        for (const TransitSwitchRule& rule : entry.rules)
+            std::fprintf(stderr, " %s %d>%d sides %d%d%d%d;", rule.kind ? "out" : "in", rule.from, rule.to, rule.side[0], rule.side[1], rule.side[2], rule.side[3]);
+        std::fprintf(stderr, "\n");
+    }
+    transitSwitches_[id] = std::move(entry);
+    return true;
+}
+
+// §4.7.5 step 1: the switch at the rectangle's NW cell goes, with its cells of both grids.
+bool cSC4TrafficSimulator::DeactivateTransitSwitch(const SC4RectInt32& rect) {
+    const std::uint32_t id = SwitchIdAt(rect.x0, rect.z0);
+    if (id == 0) return false;
+    transitSwitches_.erase(id);
+    for (int x = std::max(rect.x0, 0); x <= std::min(rect.x1, lastX_); ++x)
+        for (int z = std::max(rect.z0, 0); z <= std::min(rect.z1, lastZ_); ++z) {
+            switchIds_[(std::size_t(x) << 8) | std::size_t(z)] = 0;
+            switchModes_[(std::size_t(x) << 8) | std::size_t(z)] = 0;
+        }
+    return true;
+}
+
+// §4.7.4: every switch cell of the rectangle loses its own connections (the subway's stay) and gets what its rules give: travel
+// inside the lot, the type changes on the way in from each neighbour cell and on the way out to it.
+void cSC4TrafficSimulator::ApplyTransitSwitches(const SC4RectInt32& r1) {
+    if (switchIds_.empty()) return;
+    const auto inCity = [this](int x, int z) { return x >= 0 && z >= 0 && x <= lastX_ && z <= lastZ_; };
+    auto setConnection = [&](int x, int z, int entry, int exit, int t) {   // SetConnection 0x0070EAB0
+        if (t < 0 || t > 8) return;                                         // port guard: no shipped rule names another type
+        CellConnections(x, z).masks[std::size_t(t)] |= std::uint16_t(1u << (exit + 4 * entry));
+        const int nx = x + kSideX[exit], nz = z + kSideZ[exit];
+        if (kNetworkOfType[t] == 1 && inCity(nx, nz)) CellConnections(nx, nz).priorCar[std::size_t((exit + 2) & 3)] |= std::uint16_t(0x1111u << entry);
+    };
+    const auto hasExit = [&](int x, int z, int t, int exit) {   // some entry of the cell leads out through `exit`
+        return ((CellConnections(x, z).masks[std::size_t(t)] >> exit) & 0x1111) != 0;
+    };
+    const auto setSwitch = [&](int x, int z, int from, int side, int to) {
+        std::uint16_t& word = CellConnections(x, z).switches[std::size_t(from)];
+        word = std::uint16_t((word & ~(0xfu << (4 * side))) | (std::uint32_t(to & 0xf) << (4 * side)));
+    };
+    for (int x = r1.x0; x <= r1.x1; ++x)
+        for (int z = r1.z0; z <= r1.z1; ++z) {
+            const std::uint32_t id = SwitchIdAt(x, z);
+            if (id == 0) continue;
+            const TransitSwitch& sw = transitSwitches_[id];
+            TrafficCellConnections& cell = CellConnections(x, z);
+            for (int t = 0; t < 9; ++t) {
+                if (t == 6) continue;
+                cell.masks[std::size_t(t)] = 0;
+                cell.switches[std::size_t(t)] = 0xffff;
+            }
+            for (int d = 0; d < 4; ++d) {
+                const int nx = x + kSideX[d], nz = z + kSideZ[d];
+                if (!inCity(nx, nz)) continue;
+                if (SwitchIdAt(nx, nz) == id) {
+                    for (const TransitSwitchRule& rule : sw.rules) {
+                        if (rule.kind != 0 || !rule.side[d]) continue;
+                        for (int k = 0; k < 4; ++k)
+                            if (rule.side[k]) setConnection(x, z, k, d, rule.to);
+                    }
+                    continue;
+                }
+                const int ns = (d + 2) & 3;   // the neighbour's side that faces this cell
+                for (const TransitSwitchRule& rule : sw.rules) {
+                    if (!rule.side[d] || rule.from > 8 || rule.to > 8) continue;
+                    if (rule.kind == 1) {   // out of the switch onto the neighbour
+                        if (FindNetworkInfo(kNetworkOfType[rule.to], nx, nz)) {
+                            if (rule.from == rule.to) {
+                                for (int k = 0; k < 4; ++k) setConnection(x, z, k, d, rule.from);
+                            } else {
+                                setSwitch(x, z, rule.from, d, rule.to);
+                            }
+                        }
+                        for (int k = 0; k < 4; ++k)
+                            if (k != ns && hasExit(nx, nz, rule.to, k)) setConnection(nx, nz, ns, k, rule.to);
+                    } else {                // from the neighbour into the switch
+                        if (FindNetworkInfo(kNetworkOfType[rule.from], nx, nz)) {
+                            if (rule.from != rule.to) {
+                                setSwitch(nx, nz, rule.from, ns, rule.to);
+                            } else {
+                                for (int j = 0; j < 4; ++j)
+                                    if ((CellConnections(nx, nz).masks[std::size_t(rule.from)] >> (4 * j)) & 0xf) setConnection(nx, nz, j, ns, rule.from);
+                            }
+                        }
+                        if (rule.from == 1)
+                            for (int k = 0; k < 4; ++k)
+                                if (k != ns && hasExit(nx, nz, 1, k)) setConnection(nx, nz, ns, k, 1);
+                    }
+                }
+            }
+        }
 }
 
 // §4.6: car capacity falls near intersections (the tuned factors 0.7 / 0.8 / 0.9 at 0 / 1 / 2 cells).
@@ -595,6 +791,11 @@ void cSC4TrafficSimulator::DoNetworkOccupantChanged(cSC4NetworkOccupant* occupan
 
 void cSC4TrafficSimulator::DoLotActivated(ITrafficLot* lot) {
     if (!lot) return;
+    if (ActivateTransitSwitch(lot)) {   // traffic-network.md §4.7.1: a station's lot, then the rebuild over it
+        SC4RectInt32 rect;
+        lot->OccupiedRect(rect);
+        DoConnectionsChanged(rect.x0, rect.z0, rect.x1, rect.z1);
+    }
     cISCPropertyHolder* holder = lot->Properties();
     int lx = 0, lz = 0;
     lot->Location(lx, lz);
@@ -631,6 +832,7 @@ void cSC4TrafficSimulator::DoLotDeactivated(ITrafficLot* lot) {
     }
     SC4RectInt32 rect;
     lot->OccupiedRect(rect);
+    if (DeactivateTransitSwitch(rect)) DoConnectionsChanged(rect.x0 - 1, rect.z0 - 1, rect.x1 + 1, rect.z1 + 1);   // §4.7.5
     if (cycleState_ != 10) {
         const std::uint8_t bits = DestinationByte(rect.x0, rect.z0);
         for (int k = 0; k < 4; ++k)
@@ -667,6 +869,18 @@ void cSC4TrafficSimulator::DoPostCityInit() {
             NetworkBookkeeping(occupant, true, false);
             occupant->Release();
         }
+    }
+    // The transit switches: the original restores its table from the record and re-reads every switch's rules from its building;
+    // here each lot with the rules property is activated afresh (the ids and the loads start over).
+    transitSwitches_.clear();
+    switchIds_.clear();
+    switchModes_.clear();
+    nextSwitchId_ = 1;
+    {
+        std::vector<std::unique_ptr<ITrafficLot>> lots;
+        host_->AllLots(lots);
+        for (auto& lot : lots) ActivateTransitSwitch(lot.get());
+        if (Debug()) std::fprintf(stderr, "traffic: %zu transit switches from %zu lots\n", transitSwitches_.size(), lots.size());
     }
     DoConnectionsChanged(0, 0, cellsX_ - 1, cellsZ_ - 1);
     // register the neighbour connections (an Add for each, in list order), then one pool sweep (traffic-network.md §2.7.2)
@@ -1263,6 +1477,12 @@ void cSC4TrafficSimulator::FinishTripMap() {
 
 // §4.9
 void cSC4TrafficSimulator::CreateMaps() {
+    // §4.9 step 4: each switch's published usage and how full it is
+    for (auto& [id, sw] : transitSwitches_) {
+        sw.usage = sw.traffic;
+        const float ratio = sw.traffic / sw.capacity;
+        sw.percent = ratio < 1.0f ? ratio : 1.0f;
+    }
     if (Debug()) {
         double sums[6] = {};
         for (int n = 0; n < 6; ++n)
@@ -1527,7 +1747,8 @@ void cSC4TrafficSimulator::ApplyRoute(const std::vector<std::uint8_t>& route, st
             if (ITrafficLot* lot = host_->LotAt(destX, destZ, 0)) lot->OccupiedRect(r);
     }
     float income = 0;
-    const float fees = 0;   // only transit switches (toll booths) charge: none natively
+    float fees = 0;                 // what the switches on the route charge (toll booths)
+    std::uint32_t lastSwitch = 0;   // traffic-simulator.md §4.5 step 2: a switch counts once each time the route comes onto it
     int lastType = records.back().type;
     for (std::size_t i = 0; i < records.size(); ++i) {
         const RouteRecord& rec = records[i];
@@ -1541,6 +1762,16 @@ void cSC4TrafficSimulator::ApplyRoute(const std::vector<std::uint8_t>& route, st
                 float& vol = volume_[std::size_t(kNetworkOfType[t])]->GetGridData()[std::size_t(rec.x)][std::size_t(rec.z)];
                 vol += q;
                 if (mode == 2) vol += q;
+            }
+            // 2. transit switch: its load and fee, unless the route passes under it by subway
+            if (const std::uint32_t id = SwitchIdAt(rec.x, rec.z); id != lastSwitch) {
+                const int nextType = i + 1 < records.size() ? records[i + 1].type : t;
+                if (id != 0 && !(t == 6 && nextType == 6)) {
+                    TransitSwitch& sw = transitSwitches_[id];
+                    sw.traffic += q;
+                    fees += q * sw.toll;
+                }
+                lastSwitch = id;
             }
             // 3. edge density
             int e = rec.entry, o = rec.exit;

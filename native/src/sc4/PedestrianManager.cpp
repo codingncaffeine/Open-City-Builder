@@ -151,14 +151,13 @@ float cSC4PedestrianManager::GetMaxAutosPerSecond(PopulateLayer layer) {
     return AutomataTuning().f219a0;
 }
 
-// 0x1000f1554: when the automata are loaded, the clock percent / 50 + 1; otherwise 1.
+// i386 0x000b179a: more walkers where attractors pull: when the automata are loaded, commotion / 50 + 1; otherwise 1.
 float cSC4PedestrianManager::GetCommotionMultiplier(ITrafficNetworkMapOccupant* occupant, PopulateLayer layer) {
-    (void)occupant;
     (void)layer;
     if (LoadedFlag() == 0) return 1.0f;
     ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
     if (!host) return 1.0f;
-    return host->CityClockPercent() / 50.0f + 1.0f;
+    return host->AttractionCommotion(occupant) / 50.0f + 1.0f;
 }
 
 // 0x1000f121c PARTIAL: the building property arrays (0xe9aee3dc / 0xe9aee3dd) that name the response groups and flags are

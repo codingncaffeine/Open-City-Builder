@@ -588,7 +588,7 @@ float cSC4TrafficSimulator::GetBackgroundTraffic(int x, int z) const {
 bool cSC4TrafficSimulator::GetTransitSwitchQueryData(int x, int z, TransitSwitchQueryData& out) {
     const bool striking = strikeState_ == kStrikeOn;
     cISCPropertyHolder* holder = nullptr;
-    const std::uint32_t switchId = host_->TransitSwitchIdAtCell(x, z);
+    const std::uint32_t switchId = SwitchIdAt(x, z);
     if (switchId != 0) {
         TransitSwitch& entry = transitSwitches_[switchId];
         out.capacity = static_cast<std::int32_t>(entry.capacity);
@@ -889,10 +889,10 @@ void cSC4TrafficSimulator::FloodSubnetwork(int startX, int startZ, int startEntr
                 if ((mask & (1u << (cur.e + 4 * k))) && info->subnetwork[std::size_t(k)] == 0) { next = {cur.x, cur.z, k, 0}; found = true; }
             } else if (const NetworkInfo* neighbour = GetNetworkInfo(1, nx, nz)) {
                 if (neighbour->subnetwork[std::size_t(entry)] == 0) { next = {nx, nz, entry, 0}; found = true; }
-            } else if (const std::uint32_t id = host_->TransitSwitchIdAtCell(nx, nz)) {
+            } else if (const std::uint32_t id = SwitchIdAt(nx, nz)) {
                 // straight across a switch lot to the first cell with another id
                 int sx = nx, sz = nz;
-                while (inCity(sx, sz) && host_->TransitSwitchIdAtCell(sx, sz) == id) { sx += kCellStepX[k]; sz += kCellStepZ[k]; }
+                while (inCity(sx, sz) && SwitchIdAt(sx, sz) == id) { sx += kCellStepX[k]; sz += kCellStepZ[k]; }
                 const NetworkInfo* beyond = inCity(sx, sz) ? GetNetworkInfo(1, sx, sz) : nullptr;
                 if (beyond && beyond->subnetwork[std::size_t(entry)] == 0) { next = {sx, sz, entry, 0}; found = true; }
             }

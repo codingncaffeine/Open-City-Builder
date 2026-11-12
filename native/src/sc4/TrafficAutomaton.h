@@ -239,14 +239,14 @@ public:
                          const std::vector<cS3DVector3>* path, bool keepDestination);   // 0x458 @ 0x100117dbe
     bool InterpolateAlongPath(float distance, const cS3DVector3& from, cS3DVector3& out, std::int32_t* index,
                               const std::vector<cS3DVector3>* path, float* remaining);   // 0x460 @ 0x100117a96
-    bool SnapToPath();                                                     // 0x468 @ 0x1001182e4
+    virtual bool SnapToPath();                                             // 0x468 @ 0x1001182e4
     virtual void HandleNetworkOccupantRemoved();                           // 0x470 @ 0x1001187cc
     std::uint32_t GetPathKey() const override;                             // 0x478 @ 0x1006f3190
     ITrafficAutomatonOccupant* GetNetworkOccupant() const;                 // 0x480 @ 0x100506880
     float GetPathOffset() const;                                           // 0x488 @ 0x1000e25d0
     void SetPathOffset(float offset);                                      // 0x490 @ 0x100507130
     virtual const cS3DVector3& GetPathPos() const;                         // 0x498 @ 0x1000f3cc0
-    virtual bool IsTrain() const;                                          // 0x4a0 @ 0x1005075b0
+    bool IsTrain() const override;                                         // 0x4a0 @ 0x1005075b0
     bool BeginRoute(bool onlyStart);                                       // 0x4a8 @ 0x100119aac
     const cS3DVector3& GetDispatchDestination() const;                     // 0x4b0 @ 0x1005075b8
     const std::deque<RouteData>& GetRouteInfo() const;                     // 0x4b8 @ 0x1000e25e0
@@ -267,9 +267,9 @@ public:
     virtual void SlowDownForStopLight();                                           // 0x530 @ 0x10011a580
     void ReturnToDefaultSpeed();                                           // 0x538 @ 0x10011a5d0
     void UpdateCollision();                                                // 0x540 @ 0x100116cb6
-    bool CheckIntersectionDensity();                                       // 0x548 @ 0x1001174e2
+    virtual bool CheckIntersectionDensity();                               // 0x548 @ 0x1001174e2
     bool DoStopSignTick(float milliseconds);                               // 0x550 @ 0x1001173cc
-    bool DoStopAtStationTick(float milliseconds);                          // 0x558 @ 0x10011733e
+    virtual bool DoStopAtStationTick(float milliseconds);                  // 0x558 @ 0x10011733e
     virtual bool ChooseNewDestination();                                           // 0x560 @ 0x1001187dc
     bool ChooseLookaheadTiles();                                           // 0x568 @ 0x100118b1c
     bool ChooseLookaheadTileByDensity(const tLookaheadNode& from, tLookaheadNode& out);   // 0x570 @ 0x1001190b6
@@ -279,10 +279,10 @@ public:
     bool ApplyAttractionWeight(ITrafficAutomatonOccupant* occupant, float* weights);      // 0x588 @ 0x10011971c
     bool GetEdgeFromVector(ITrafficAutomatonOccupant* occupant, const cS3DVector3& direction, std::uint8_t& edge,
                            bool checkConnection);                                        // 0x590 @ 0x100119906
-    bool HandleExitNetwork(ITrafficAutomatonOccupant* occupant, std::uint32_t key, void* lot, const SC4RectInt32& rect);   // 0x598
+    virtual bool HandleExitNetwork(ITrafficAutomatonOccupant* occupant, std::uint32_t key, void* lot, const SC4RectInt32& rect);   // 0x598
     bool ChooseRandomPath(ITrafficAutomatonOccupant* occupant, std::uint32_t key);         // 0x5a0 @ 0x10011968e
     virtual ITrafficAutomataManager* GetTrafficAutomataManager() const;                   // 0x5a8 (pure in the original)
-    std::uint8_t GetDesiredLookaheadCount() const;                                        // 0x5b0 @ 0x100507160
+    virtual std::uint8_t GetDesiredLookaheadCount() const;                                // 0x5b0 @ 0x100507160
 
     // ---- non-virtual helpers / lifecycle (no vtable slot) ----
     void SetPopulateLayer(std::uint32_t layer);                            // @ 0x100114798

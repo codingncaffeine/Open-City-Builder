@@ -655,7 +655,8 @@ public:
     virtual cSC4ViewInputControl* CreatePlaceLotTool(std::uint32_t lot) { (void)lot; return nullptr; }         // cSC4ViewInputControlPlaceLot(0, lot, 0, false) @ 0x1003bb93c
     // RZ::WM() cursor position in the view's coordinates, true when the window under it (GetChildWindowForCursorPosRecursive) is the view
     virtual bool CursorOverView(cIGZWin* view, int& x, int& y) { (void)view; (void)x; (void)y; return false; }
-    virtual void InvokeDisaster(std::uint32_t type) { (void)type; }                    // cSC4View3DWin::InvokeDisaster @ 0x100783e2a
+    // cSC4View3DWin::InvokeDisaster @ 0x100783e2a (i386 0x00521612): the menu item's tool becomes the view's current one
+    virtual void InvokeDisaster(cSC4View3DWin& view, std::uint32_t type) { (void)view; (void)type; }
     virtual bool FocusVehicle(std::uint32_t vehicle) { (void)vehicle; return false; }  // the 0x0bb2e43e catalog branch (vehicle managers + CSI vslot 0xb8)
     virtual void RunPreferencesDialog(int which) { (void)which; }                      // 0 game, 1 video, 2 audio: new + DoModalWin + SetFocus
     virtual void ShowSnapshotAlbum(cIGZWin* parent) { (void)parent; }                  // cSC4WinSnapshotTaker::ShowSnapshotAlbum @ 0x1003a15f2 + DoModalWin

@@ -1,6 +1,7 @@
 // The traffic automata's city services (sc4::ITrafficAutomatonHost: the traffic network map, the city's cells, their automata
 // manager, saved network occupant references) and the car's view of its automata manager (ITrafficAutomataManager over
 // cSC4TrafficAutomataManager). In the original the car calls its manager directly.
+#include <algorithm>
 #include <map>
 #include <memory>
 
@@ -14,6 +15,8 @@
 #include "sc4/TrafficAutomaton.h"
 #include "sc4/TrafficNetworkMap.h"
 #include "sc4/TrafficSimulator.h"
+#include "sc4/SpecialVehicles.h"
+#include "sc4/Train.h"
 #include "sc4/PathInfo.h"
 #include "sc4/Vehicle.h"
 #include "sc4/VehicleManager.h"
@@ -30,6 +33,11 @@ namespace native {
 sc4::ITrafficAutomatonOccupant* NativeTrafficPiece(sc4::cISC4Occupant* occupant);   // app/NativeTrafficNetworkMap.cpp
 sc4::ITrafficNetworkMapLot* NativeTrafficLotAt(int cellX, int cellZ);                 // app/NativeTrafficNetworkMap.cpp
 void NativeOccupantsInBox(const float* lo, const float* hi, std::uint32_t type, int count, std::vector<sc4::cISC4Occupant*>& out);
+int NativeZipperPieceType(sc4::ITrafficAutomatonOccupant* occupant);                   // app/NativeTrafficNetworkMap.cpp
+bool NativeLotBuildingInGroup(void* lot, std::uint32_t group);
+void NativePostCityMessage(std::uint32_t type, std::uint32_t data1, std::uint32_t data2);
+bool NativeDisasterOngoing();                                                         // app/NativeRiot.cpp
+bool NativeProjectToViewport(const float* xyz, float out[3]);                         // app/NativeAutomataManagerHost.cpp
 
 namespace {
 using namespace sc4;
@@ -206,6 +214,23 @@ private:
     int visible_[4] = {0, 0, -1, -1};
 } g_networkApi;
 
+// The pedestrians inside a box, from their manager's list (the native automata are not in the occupant manager); at most
+// `count` (a negative count: all of them), one reference each for the caller.
+void PedestriansInBox(const float* lo, const float* hi, int count, std::vector<cISC4Occupant*>& out) {
+    auto* manager = Component<cSC4AutomataManager>(CityComponent::PedestrianManager);
+    if (!manager) return;
+    for (IAutomataAutomaton* view : manager->Automata()) {
+        if (count >= 0 && static_cast<int>(out.size()) >= count) break;
+        auto* pedestrian = view ? dynamic_cast<cSC4Pedestrian*>(AutomatonOf(view)) : nullptr;
+        if (!pedestrian) continue;
+        float p[3] = {0.0f, 0.0f, 0.0f};
+        pedestrian->GetPosition(p);
+        if (p[0] < lo[0] || p[0] > hi[0] || p[1] < lo[1] || p[1] > hi[1] || p[2] < lo[2] || p[2] > hi[2]) continue;
+        pedestrian->AddRef();
+        out.push_back(pedestrian->AsOccupant());
+    }
+}
+
 // The vehicles' city services (sc4::IVehicleHost). The tuning comes from the automata managers' globals (AutomataTuning(), the
 // original's sTuningParams at 0x100b21880: +0x04/+0x08 speed range, +0x1ac/+0x1b0 path offsets, +0x158 network speeds,
 // +0x138 curve factor, +0x1b4/+0x1b8 turn limits). The services the native game does not have yet (player drive, accidents,
@@ -222,6 +247,12 @@ public:
         tuning_.pathCurveFactor = t.f219b8;
         tuning_.turnDivisor = t.f21a34;
         tuning_.turnMax = t.f21a38;
+        tuning_.freightCarsMin = t.f21a42;
+        tuning_.freightCarsMax = t.f21a43;
+        tuning_.passengerCarsMin = t.f21a44;
+        tuning_.passengerCarsMax = t.f21a45;
+        tuning_.trainSpeedMin = t.f21a48;
+        tuning_.trainSpeedMax = t.f21a4c;
         static bool printed = false;
         if (!printed && tuning_.defaultSpeedMax > 0 && std::getenv("SC4_TRAFFICSPEED")) {   // the tuning the vehicles drive by, once
             printed = true;
@@ -255,9 +286,21 @@ public:
     bool LotBoundingRectAtCell(int cellX, int cellZ, std::int32_t rect[4]) override { return stub()->LotBoundingRectAtCell(cellX, cellZ, rect); }
     IVehicleEffect* CreateNamedEffect(const char* name) override { return stub()->CreateNamedEffect(name); }
     cIGZUnknown* CreateAccident(cISC4Occupant* o, std::int32_t type, std::uint32_t duration) override { return stub()->CreateAccident(o, type, duration); }
+    // The pedestrians of a box come from their manager (the native automata are not in the occupant manager); the references
+    // go to the caller. Other types: PARTIAL (the player-drive collision check asks for vehicles).
     void OccupantsInBox(const float* lo, const float* hi, std::uint32_t type, int count, std::vector<cISC4Occupant*>& out) override {
-        stub()->OccupantsInBox(lo, hi, type, count, out);
+        if (type == kPedestrianOccupantType) PedestriansInBox(lo, hi, count, out);
+        else stub()->OccupantsInBox(lo, hi, type, count, out);
     }
+    bool DisasterOngoing() override { return NativeDisasterOngoing(); }
+    bool CheckRailAccident(int cellX, int cellZ) override {
+        auto* sim = Component<cSC4TrafficSimulator>(CityComponent::TrafficSimulator);
+        return sim && sim->CheckRailAccident(cellX, cellZ);
+    }
+    void PostRailAccidentMessage(int cellX, int cellZ) override { NativePostCityMessage(0x0c05e4cd, std::uint32_t(cellX), std::uint32_t(cellZ)); }
+    int ZipperPieceType(ITrafficAutomatonOccupant* occupant) override { return NativeZipperPieceType(occupant); }
+    bool IsLotAtCell(int cellX, int cellZ) override { return NativeTrafficLotAt(cellX, cellZ) != nullptr; }
+    bool IsLotBuildingInGroup(void* lot, std::uint32_t group) override { return NativeLotBuildingInGroup(lot, group); }
     float PlayerDriveDisasterDamage(float x, float z) override { return stub()->PlayerDriveDisasterDamage(x, z); }
     cSC4Automaton* CollidingAutomaton(cSC4Automaton* automaton, float distance) override {
         auto* manager = Component<cSC4TrafficAutomataManager>(CityComponent::VehicleManager);
@@ -281,18 +324,7 @@ public:
             NativeOccupantsInBox(lo, hi, type, count, out);
             return;
         }
-        auto* manager = Component<cSC4AutomataManager>(CityComponent::PedestrianManager);
-        if (!manager) return;
-        for (IAutomataAutomaton* view : manager->Automata()) {
-            if (static_cast<int>(out.size()) >= count) break;
-            auto* pedestrian = view ? dynamic_cast<cSC4Pedestrian*>(AutomatonOf(view)) : nullptr;
-            if (!pedestrian) continue;
-            float p[3] = {0.0f, 0.0f, 0.0f};
-            pedestrian->GetPosition(p);
-            if (p[0] < lo[0] || p[0] > hi[0] || p[1] < lo[1] || p[1] > hi[1] || p[2] < lo[2] || p[2] > hi[2]) continue;
-            pedestrian->AddRef();
-            out.push_back(pedestrian->AsOccupant());
-        }
+        PedestriansInBox(lo, hi, count, out);
     }
     void IgniteOccupant(cISC4Occupant*) override {}   // PARTIAL: the fire disaster manager (arsonists)
     ITrafficNetworkMapLot* LotAt(int cellX, int cellZ) override { return NativeTrafficLotAt(cellX, cellZ); }
@@ -323,5 +355,80 @@ sc4::ITrafficNetworkManagerApi* NativeTrafficNetworkApi() { return &g_networkApi
 void NativeSetTrafficVisibleCells(int x0, int z0, int x1, int z1) { g_networkApi.SetVisibleCells(x0, z0, x1, z1); }
 void NativeClearTrafficNetworkApi() { g_networkApi.Clear(); }
 sc4::IPedestrianHost* NativePedestrianHost() { return &g_pedestrians; }
+
+// Kit command `trains [N]`: where the city has track (network types 1 rail, 8 elevated rail, 9 monorail, 7 subway), the
+// vehicle manager's trains and buses, and the first N engines with their cars.
+void NativeTrainReport(int limit) {
+    auto* map = Component<cSC4TrafficNetworkMap>(CityComponent::TrafficNetwork);
+    cSC4City* city = HostCity();
+    if (map && city) {
+        const std::uint32_t kinds[4] = {1, 8, 9, 7};
+        const char* names[4] = {"rail", "elevated", "monorail", "subway"};
+        for (int k = 0; k < 4; ++k) {
+            int count = 0, x0 = 1 << 30, z0 = 1 << 30, x1 = -1, z1 = -1, firstX = -1, firstZ = -1;
+            for (int z = 0; z < city->CellCountZ(); ++z)
+                for (int x = 0; x < city->CellCountX(); ++x) {
+                    ITrafficNetworkMapOccupant* piece = map->FindNetworkOccupant(x, z);
+                    if (!piece || !piece->IsOfType(kinds[k])) continue;
+                    if (count++ == 0) { firstX = x; firstZ = z; }
+                    x0 = std::min(x0, x); z0 = std::min(z0, z); x1 = std::max(x1, x); z1 = std::max(z1, z);
+                }
+            if (count) std::printf("trains: %d %s cells, %d,%d..%d,%d, first %d,%d\n", count, names[k], x0, z0, x1, z1, firstX, firstZ);
+            else std::printf("trains: no %s cells\n", names[k]);
+        }
+    }
+    // the traffic simulator's edge volumes per travel type (both directions), summed over the city: what the layers spawn from
+    if (auto* simulator = Component<cSC4TrafficSimulator>(CityComponent::TrafficSimulator); simulator && city) {
+        std::printf("trains: edge volume by travel type:");
+        for (int type = 0; type < 9; ++type) {
+            long volume = 0, cells = 0;
+            for (int z = 0; z < city->CellCountZ(); ++z)
+                for (int x = 0; x < city->CellCountX(); ++x)
+                    for (int evening = 0; evening < 2; ++evening) {
+                        long sum = 0;
+                        for (std::uint16_t v : simulator->GetTrafficEdgeDensity(x, z, type, evening != 0).last) sum += v;
+                        volume += sum;
+                        if (sum) ++cells;
+                    }
+            std::printf(" %d: %ld in %ld cells;", type, volume, cells);
+        }
+        std::printf("\n");
+    }
+    auto* manager = Component<cSC4TrafficAutomataManager>(CityComponent::VehicleManager);
+    if (!manager) { std::printf("trains: no manager\n"); return; }
+    int engines = 0, transit = 0, loose = 0, cars = 0, buses = 0, shown = 0;
+    for (IAutomataAutomaton* view : manager->Automata()) {
+        cSC4Automaton* automaton = view ? AutomatonOf(view) : nullptr;
+        if (!automaton) continue;
+        if (dynamic_cast<cSC4Bus*>(automaton)) { ++buses; continue; }
+        auto* engine = dynamic_cast<cSC4Train*>(automaton);
+        if (!engine) {
+            if (dynamic_cast<cSC4TrainCar*>(automaton)) ++loose;
+            continue;
+        }
+        ++engines;
+        if (dynamic_cast<cSC4MassTransitTrain*>(engine)) ++transit;
+        cars += static_cast<int>(engine->GetNumCars());
+        if (shown >= limit) continue;
+        ++shown;
+        float p[3] = {0, 0, 0}, s[3] = {0, 0, 0};
+        engine->GetPosition(p);
+        NativeProjectToViewport(p, s);
+        std::printf("trains: engine group %04x on screen (%.0f, %.0f) at (%.1f, %.1f, %.1f) heading (%.2f, %.2f) nose (%.1f, %.1f) back (%.1f, %.1f) radius %.1f opacity %.2f speed %.1f behavior %x flags %08x model %p pulls %u of %u (car group %04x)",
+                    engine->AutomataGroupId(), s[0], s[1], p[0], p[1], p[2], engine->Orientation().x, engine->Orientation().z, engine->GetPathPos().x, engine->GetPathPos().z,
+                    engine->BackPoint().x, engine->BackPoint().z, engine->GetRadius(), engine->GetOpacity(), engine->GetCurrentSpeed() * 3600.0f,
+                    engine->GetBehavior(), engine->AutomataFlags(), static_cast<void*>(engine->GetModelInstance()), engine->GetNumCars(),
+                    static_cast<unsigned>(engine->GetDesiredNumCars()), engine->CarGroup());
+        for (cSC4TrainCar* car : engine->Cars()) {
+            float c[3] = {0, 0, 0}, cs[3] = {0, 0, 0};
+            car->GetPosition(c);
+            NativeProjectToViewport(c, cs);
+            std::printf("; car %04x on screen (%.0f, %.0f) at (%.1f, %.1f, %.1f) radius %.1f opacity %.2f model %p", car->AutomataGroupId(), cs[0], cs[1], c[0], c[1], c[2], car->GetRadius(),
+                        car->GetOpacity(), static_cast<void*>(car->GetModelInstance()));
+        }
+        std::printf("\n");
+    }
+    std::printf("trains: %d engines (%d mass transit), %d cars in trains, %d cars in the manager, %d buses\n", engines, transit, cars, loose, buses);
+}
 
 }  // namespace native

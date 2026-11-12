@@ -26,6 +26,17 @@ int FloorIdiomImpl(float value) {
     return low + 1;
 }
 
+// The groups MaybeSpawnAutomaton (i386 0x000cfa2a) sizes a train for.
+bool IsTrainSpawnGroup(std::uint32_t group) {
+    switch (group) {
+        case 0x4005: case 0x4201: case 0x4203: case 0x4215: case 0x4216: case 0x4208: case 0x4217: case 0x422d: case 0x422c:
+        case 0x422f: case 0x422e: case 0x4230: case 0x4233:
+            return true;
+        default:
+            return false;
+    }
+}
+
 // The binary tables (0x100a18b20 / 0x100a18b40): index layer - 4 and layer - 2.
 const std::uint32_t kPathTypeTable[7] = {3, 3, 4, 3, 3, 6, 7};
 const std::uint32_t kAutomataGroupTable[9] = {0x4200, 0x4204, 0x4215, 0x4216, 0x4217, 0x4200, 0x4102, 0x422c, 0x422e};
@@ -412,24 +423,24 @@ cSC4ResponseCurve& cSC4TrafficAutomataManager::GetEdgeDensityCurve(PopulateLayer
 }
 
 double cSC4TrafficAutomataManager::GetEdgeDensityMultiplier(PopulateLayer layer) {
-    // 0x1001153c6: city vslot 0x220 -> vslot 0x80 (the hour), city vslot 0x2b0 -> vslot 0xa0 (a 0..1 fraction).
+    // i386 0x000cab6e: the layer's curve at the city's residential population (automata per hour), per second, times the
+    // 24 hour clock's time magnification.
     ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
     if (!host) return 0.0;
-    const int hour = host->CityHour();
-    const float fraction = host->CityTimeFraction();
+    const int population = host->ResidentialPopulation();
+    const float magnification = host->ClockTimeMagnification();
     cSC4ResponseCurve& curve = GetEdgeDensityCurve(layer);
-    const float value = curve.GetOutputValue(static_cast<float>(hour));
-    return static_cast<double>(fraction * 0.00027777778f) * static_cast<double>(value);
+    const float value = curve.GetOutputValue(static_cast<float>(population));
+    return static_cast<double>(value * 0.00027777778f * magnification);
 }
 
 float cSC4TrafficAutomataManager::GetCommotionMultiplier(ITrafficNetworkMapOccupant* occupant, PopulateLayer layer) {
-    // 0x10011596c
-    (void)occupant;
+    // i386 0x000ca5c6: less traffic where attractors (a fire, a riot, a parade) pull: 1 - commotion / 100, held in 0..0.5.
     (void)layer;
     if (LoadedFlag() == 0) return 1.0f;
     ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
     if (!host) return 1.0f;
-    float value = host->CityClockPercent() / -100.0f + 1.0f;
+    float value = host->AttractionCommotion(occupant) / -100.0f + 1.0f;
     if (value < 0.0f) value = 0.0f;
     if (value > 0.5f) value = 0.5f;
     return value;
@@ -619,6 +630,44 @@ void cSC4TrafficAutomataManager::PopulateVisibleArea(float deltaMilliseconds) {
     currentLayer_->elapsed = 0.0f;
 }
 
+namespace {
+// SC4_TRAINSPAWN: the train layers' populate pass, summed per layer over 5 s of real time: the tiles passed, the tiles with
+// any edge density, the edges a train may enter by (no connection behind them, or off screen), and what became of each try.
+struct TrainSpawnTrace {
+    double tiles = 0, dense = 0, weight = 0, edges = 0, tries = 0, reasons[9] = {};
+    double longestWaited = 0, itsInterval = 0, shortestInterval = 0;   // seconds, of the tries still waiting
+    double clock = 0, densityMultiplier = 0, maxAutos = 0;             // the last pass's inputs
+};
+TrainSpawnTrace g_trainTrace[11];
+bool TrainTraceOn() {
+    static const bool on = std::getenv("SC4_TRAINSPAWN") != nullptr;
+    return on;
+}
+void TrainTraceFlush() {
+    static auto last = std::chrono::steady_clock::now();
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last < std::chrono::seconds(5)) return;
+    last = now;
+    static const char* const kReasons[9] = {"spawned", "no path", "no lanes", "no density", "lane busy", "waiting", "no model", "not started", "train near"};
+    for (int layer = 0; layer < 11; ++layer) {
+        TrainSpawnTrace& t = g_trainTrace[layer];
+        if (t.tiles == 0) continue;
+        std::fprintf(stderr, "train spawn: layer %d tiles %.0f with density %.0f (sum %.1f) clock %.3f density x%.6f max %.4f/s entry edges %.0f tries %.0f:",
+                     layer, t.tiles, t.dense, t.weight, t.clock, t.densityMultiplier, t.maxAutos, t.edges, t.tries);
+        for (int r = 0; r < 9; ++r)
+            if (t.reasons[r] != 0) std::fprintf(stderr, " %s %.0f", kReasons[r], t.reasons[r]);
+        if (t.reasons[5] != 0)
+            std::fprintf(stderr, "; longest wait %.1f s of %.1f s, shortest interval %.1f s", t.longestWaited, t.itsInterval, t.shortestInterval);
+        std::fprintf(stderr, "\n");
+        t = TrainSpawnTrace{};
+    }
+}
+void TrainTraceReason(PopulateLayer layer, int reason) {
+    const auto index = static_cast<std::uint32_t>(layer);
+    if (TrainTraceOn() && index < 11) g_trainTrace[index].reasons[reason] += 1;
+}
+}  // namespace
+
 void cSC4TrafficAutomataManager::PopulateNetworkOccupant(ITrafficNetworkMapOccupant* occupant, TrafficTileInfo* tile,
                                                          PopulateLayer layer, int cellX, int cellZ,
                                                          float clockMultiplier, double densityMultiplier) {
@@ -635,6 +684,19 @@ void cSC4TrafficAutomataManager::PopulateNetworkOccupant(ITrafficNetworkMapOccup
     const float elapsed = currentLayerValid_ ? currentLayer_->elapsed * 0.001f : 0.0f;
     float weights[4][4] = {};
     GetEdgeDensity(occupant, tile, layer, clockMultiplier, weights);
+    TrainSpawnTrace* trace = TrainTraceOn() && static_cast<std::uint32_t>(layer) < 11 ? &g_trainTrace[static_cast<std::uint32_t>(layer)] : nullptr;
+    if (trace) {
+        float sum = 0.0f;
+        for (auto& row : weights)
+            for (float v : row) sum += v;
+        trace->tiles += 1;
+        trace->clock = clockMultiplier;
+        trace->densityMultiplier = densityMultiplier;
+        trace->maxAutos = maxAutos;
+        if (sum > 0.0f) trace->dense += 1;
+        trace->weight += sum;
+        TrainTraceFlush();
+    }
     for (std::uint8_t entry = 0; entry < 4; ++entry) {
         const bool offscreen = IsOffscreenEntryEdge(tile, cellX, cellZ, entry);
         for (std::uint8_t exit = 0; exit < 4; ++exit) {
@@ -649,7 +711,11 @@ void cSC4TrafficAutomataManager::PopulateNetworkOccupant(ITrafficNetworkMapOccup
             double spawn = static_cast<double>(maxAutos);
             const double scaled = static_cast<double>(weights[entry][exit]) * densityMultiplier;
             if (scaled <= static_cast<double>(maxAutos)) spawn = scaled;
-            MaybeSpawnAutomaton(occupant, tile, layer, elapsed, spawn, entry, exit);
+            if (trace) {
+                trace->edges += 1;
+                trace->tries += 1;
+            }
+            MaybeSpawnAutomaton(occupant, tile, layer, elapsed, spawn, entry, exit, weights[entry][exit]);
         }
     }
 }
@@ -756,11 +822,12 @@ void cSC4TrafficAutomataManager::PopulateNetworkOccupant(ITrafficNetworkMapOccup
 // wildcard path; a random lane of the edge gives the path key. Gated (MaybeSpawnAutomaton) adds the elapsed time to the edge's
 // accumulator and spawns only once it reaches the spawn interval (1 / density) and the lane is empty. The automaton starts at
 // the path's first point, faded in, on a trip along it.
-//   PARTIAL: the "no train within two cells" test of layers 4/5/6/9/10, the camera-follow distance test of SpawnAutomaton, the
-//   random priority of layers 7/8 and the cell lifespan of the special groups are not ported; the accumulator is never reset
-//   (as in the original's code).
+// The train layers (4, 5, 6, 9, 10) spawn nothing while any train is on a tile within two cells of the occupant, and a train
+// that is made is told how many cars to pull: one per `f21a50` of the edge's density, within its kind's range.
+//   PARTIAL: the camera-follow distance test of SpawnAutomaton and the cell lifespan of layers 7/8 are not ported; the
+//   accumulator is never reset (as in the original's code).
 bool cSC4TrafficAutomataManager::SpawnOnEdge(ITrafficNetworkMapOccupant* occupant, PopulateLayer layer, std::uint8_t entry,
-                                             std::uint8_t exit, bool gated, float elapsedSeconds, double density) {
+                                             std::uint8_t exit, bool gated, float elapsedSeconds, double density, float weight) {
     ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
     ITrafficNetworkManagerApi* network = host ? host->TrafficNetworkManager() : nullptr;
     if (!occupant || !network) return false;
@@ -778,7 +845,10 @@ bool cSC4TrafficAutomataManager::SpawnOnEdge(ITrafficNetworkMapOccupant* occupan
                 }
             if (found < 0) {
                 cS3DVector3 unused;
-                if (!network->PathStart(occupant, (pathType << 24) | 0xff00u | exit, unused)) return false;
+                if (!network->PathStart(occupant, (pathType << 24) | 0xff00u | exit, unused)) {
+                    TrainTraceReason(layer, 1);
+                    return false;
+                }
                 from = 0xff;
             } else {
                 from = static_cast<std::uint8_t>(found);
@@ -786,40 +856,87 @@ bool cSC4TrafficAutomataManager::SpawnOnEdge(ITrafficNetworkMapOccupant* occupan
         }
     }
     const int lanes = network->LaneCount(occupant, pathType, from, exit);
-    if (lanes <= 0) return false;
+    if (lanes <= 0) {
+        TrainTraceReason(layer, 2);
+        return false;
+    }
     const std::uint32_t lane = lanes >= 2 ? (Random().RandomUint32Uniform(static_cast<std::uint32_t>(lanes)) & 0xffu) : 0u;
     const std::uint32_t key = (pathType << 24) | (lane << 16) | (static_cast<std::uint32_t>(from) << 8) | exit;
     if (gated) {
-        if (density <= 0.0) return false;
+        if (density <= 0.0) {
+            TrainTraceReason(layer, 3);
+            return false;
+        }
         float& accumulated = network->SpawnAccumulator(occupant, static_cast<std::uint32_t>(layer), pathType, from, exit);
         accumulated += elapsedSeconds;
-        if (network->LaneAutomataCount(occupant, static_cast<std::uint32_t>(layer), key) != 0) return false;
-        if (static_cast<double>(accumulated) < 1.0 / density) return false;
+        if (network->LaneAutomataCount(occupant, static_cast<std::uint32_t>(layer), key) != 0) {
+            TrainTraceReason(layer, 4);
+            return false;
+        }
+        if (static_cast<double>(accumulated) < 1.0 / density) {
+            TrainTraceReason(layer, 5);
+            if (TrainTraceOn() && static_cast<std::uint32_t>(layer) < 11) {
+                TrainSpawnTrace& t = g_trainTrace[static_cast<std::uint32_t>(layer)];
+                if (accumulated > t.longestWaited) { t.longestWaited = accumulated; t.itsInterval = 1.0 / density; }
+                if (t.shortestInterval == 0 || 1.0 / density < t.shortestInterval) t.shortestInterval = 1.0 / density;
+            }
+            return false;
+        }
+        const auto layerId = static_cast<std::uint32_t>(layer);
+        if (layerId == 6 || layerId == 4 || layerId == 5 || layerId == 9 || layerId == 10) {
+            SC4CellRect rect{};
+            occupant->AsOccupant()->GetBoundingCityCells(rect);
+            for (int x = static_cast<int>(rect.x0) - 2; x <= static_cast<int>(rect.x1) + 2; ++x)
+                for (int z = static_cast<int>(rect.z0) - 2; z <= static_cast<int>(rect.z1) + 2; ++z)
+                    for (TrafficTileInfo* near = network->GetFirstTileInfoAtCell(x, z); near; near = near->next)
+                        for (ITrafficNetworkMapAutomaton* there : near->automata)
+                            if (there && there->IsTrain()) {
+                                TrainTraceReason(layer, 8);
+                                return false;
+                            }
+        }
     }
     cS3DVector3 start{};
     network->PathStart(occupant, key, start);
     cGZPersistResourceKey model;
     ChooseRandomModel(group, occupant, layer, model);
-    if (model.instance == 0) return false;
+    if (model.instance == 0) {
+        TrainTraceReason(layer, 6);
+        return false;
+    }
     IAutomataAutomaton* automaton = CreateAutomaton(group, start, 2, model, nullptr, 0, nullptr);
     ITrafficAutomataAutomaton* traffic = automaton && host ? host->AsTrafficAutomaton(automaton) : nullptr;
-    if (!traffic) return false;
+    if (!traffic) {
+        TrainTraceReason(layer, 7);
+        return false;
+    }
     traffic->SetPopulateLayer(static_cast<std::uint32_t>(layer));
     if (!traffic->StartTrip(occupant, key, false)) {
         RemoveAutomaton(automaton, true);
+        TrainTraceReason(layer, 7);
         return false;
     }
+    TrainTraceReason(layer, 0);
     automaton->SetOpacity(0.0f, 0.0f);
     automaton->SetOpacity(1.0f, AutomataTuning().f219b4);
+    if (gated && IsTrainSpawnGroup(group)) {
+        const AutomataTuningGlobals& tuning = AutomataTuning();
+        const int wanted = FloorIdiomImpl(weight / static_cast<float>(tuning.f21a50));
+        const bool freight = group == 0x4216 || group == 0x4230 || group == 0x4233;
+        const int lo = freight ? tuning.f21a42 : tuning.f21a44, hi = freight ? tuning.f21a43 : tuning.f21a45;
+        int cars = lo;
+        if (lo <= wanted) cars = hi < wanted ? hi : wanted;
+        traffic->SetDesiredNumCars(static_cast<std::uint8_t>(cars));
+    }
     return true;
 }
 
 bool cSC4TrafficAutomataManager::MaybeSpawnAutomaton(ITrafficNetworkMapOccupant* occupant, TrafficTileInfo* tile,
                                                      PopulateLayer layer, float elapsedSeconds, double density,
-                                                     std::uint8_t entry, std::uint8_t exit) {
+                                                     std::uint8_t entry, std::uint8_t exit, float weight) {
     // @ i386 0x000cfa2a
     (void)tile;
-    return SpawnOnEdge(occupant, layer, entry, exit, true, elapsedSeconds, density);
+    return SpawnOnEdge(occupant, layer, entry, exit, true, elapsedSeconds, density, weight);
 }
 
 void cSC4TrafficAutomataManager::SpawnAutomaton(ITrafficNetworkMapOccupant* occupant, TrafficTileInfo* tile,
@@ -828,7 +945,7 @@ void cSC4TrafficAutomataManager::SpawnAutomaton(ITrafficNetworkMapOccupant* occu
     // @ i386 0x000d0b70
     (void)tile;
     (void)weight;
-    SpawnOnEdge(occupant, layer, entry, exit, false, 0.0f, 0.0);
+    SpawnOnEdge(occupant, layer, entry, exit, false, 0.0f, 0.0, weight);
 }
 
 ITrafficAutomataAutomaton* cSC4TrafficAutomataManager::SpawnOccupantAutomaton(ITrafficNetworkMapOccupant* occupant,

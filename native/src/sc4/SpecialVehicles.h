@@ -1,7 +1,10 @@
 // The small vehicles derived straight from cSC4Vehicle: cSC4CarjackedVehicle (0x1006d6864.., class id 0xcbb32b0a),
 // cSC4GetawayVan (0x100507244.., id 0xea863423) and cSC4MayorLimo (0x1006f3580.., id 0x4c0dd224). RECOVERED here: constructors
-// and the stream / identity members, and the PostInit of the first two (Mac i386 0x0049d9a8 / 0x0039189c). NOT recovered: the
-// limo's Init / Shutdown / TranslatePlayerDriveCommands / HandleExitState-adjacent work (see the ledger).
+// and the stream / identity members, the PostInit of the first two (Mac i386 0x0049d9a8 / 0x0039189c) and the limo's Init
+// (0x004b1536). NOT recovered: the limo's TranslatePlayerDriveCommands (0x004b142c: the player throws money, which costs
+// the budget `cost` and raises the aura around the limo by `auraMagnitude` within `auraRadius`).
+// Also cSC4Bus (Mac i386 0x003913ec..0x00391774, class id 0xaa9f4a3d): a vehicle that takes waiting pedestrians on at a
+// station.
 #pragma once
 #include "sc4/Vehicle.h"
 
@@ -10,6 +13,11 @@ namespace sc4 {
 constexpr std::uint32_t kCarjackedVehicleGZCLSID = 0xcbb32b0a;
 constexpr std::uint32_t kGetawayVanGZCLSID = 0xea863423;
 constexpr std::uint32_t kMayorLimoGZCLSID = 0x4c0dd224;
+constexpr std::uint32_t kBusGZCLSID = 0xaa9f4a3d;
+constexpr std::uint32_t kMayorLimoTuningProperty = 0xec15654a;   // three floats: cost, aura radius, aura magnitude
+constexpr std::uint32_t kBusStationGroup = 0x1301;               // the building a bus stops at
+constexpr float kBusStationStopMilliseconds = 4800.0f;           // 0x459c4000
+constexpr float kBusNearbyPedRadius = 16.0f;                     // DoStopAtStationTick's kfNearbyPedRadius
 
 // The animated figures the two crime vehicles carry (model resources, group 0xbadb57f1).
 constexpr cGZPersistResourceKey kCarjackingSimsModelKey{0x5ad0e817, 0xbadb57f1, 0x112a0000};   // _simsModelKey (0x00c18a40)
@@ -54,13 +62,14 @@ private:
     bool escapes_ = false;   // port only: which of the two animations PostInit chose
 };
 
-// Version 1 around the vehicle record. Its three fields after the vehicle's (+0x424: 50, +0x428: 48.0f, +0x42c: 10.0f) are
-// initialised by the constructor; their meaning is not known yet.
+// Version 1 around the vehicle record. Its three fields after the vehicle's (cost 50, aura radius 48, aura magnitude 10) are
+// set by the constructor and replaced in Init by the exemplar's property 0xec15654a when it has that many floats.
 class cSC4MayorLimo : public cSC4Vehicle {
 public:
     cSC4MayorLimo(ITrafficAutomatonHost* host = nullptr, IAutomatonHost* automatonHost = nullptr,
                   IVehicleHost* vehicleHost = nullptr, const cGZPersistResourceKey& modelKey = {})
         : cSC4Vehicle(host, automatonHost, vehicleHost, modelKey) {}          // @ 0x1006f3580
+    bool Init() override;                                                     // @ i386 0x004b1536
     bool HandlePlayerDriveCommand(std::uint32_t command, bool on) override {   // 0x1e0 @ 0x1006f3706 (just the vehicle's)
         return cSC4Vehicle::HandlePlayerDriveCommand(command, on);
     }
@@ -70,14 +79,25 @@ public:
     bool Write(cIGZOStream& stream) const override;                           // 0x240 @ 0x1006f3814
     bool Read(cIGZIStream& stream) override;                                  // 0x248 @ 0x1006f38c8
     std::uint32_t GetGZCLSID() const override { return kMayorLimoGZCLSID; }   // 0x250 @ 0x1006f3a30
-    std::uint32_t Value424() const { return value424_; }
-    float Value428() const { return value428_; }
-    float Value42c() const { return value42c_; }
+    std::uint32_t Cost() const { return cost_; }
+    float AuraRadius() const { return auraRadius_; }
+    float AuraMagnitude() const { return auraMagnitude_; }
 
 private:
-    std::uint32_t value424_ = 50;        // +0x424 (0x32)
-    float value428_ = 48.0f;             // +0x428 (0x42400000)
-    float value42c_ = 10.0f;             // +0x42c (0x41200000)
+    std::uint32_t cost_ = 50;            // +0x424 (i386 +0x2c8)
+    float auraRadius_ = 48.0f;           // +0x428 (i386 +0x2cc)
+    float auraMagnitude_ = 10.0f;        // +0x42c (i386 +0x2d0)
+};
+
+// Version 2 around the vehicle record.
+class cSC4Bus : public cSC4Vehicle {
+public:
+    using cSC4Vehicle::cSC4Vehicle;                                           // @ 0x00391774
+    bool Write(cIGZOStream& stream) const override;                           // @ 0x003914f0
+    bool Read(cIGZIStream& stream) override;                                  // @ 0x00391522
+    std::uint32_t GetGZCLSID() const override { return kBusGZCLSID; }
+    bool DoStopAtStationTick(float milliseconds) override;                    // @ 0x0039155e
+    bool HandleExitNetwork(ITrafficAutomatonOccupant* occupant, std::uint32_t key, void* lot, const SC4RectInt32& rect) override;   // @ 0x00391418
 };
 
 }  // namespace sc4

@@ -120,14 +120,12 @@ struct Host : ITrafficHost {
     std::map<std::uint32_t, int> demandTotals;
     SC4RectInt32 sourceRect{};
     // GetTransitSwitchQueryData: the switch grid, the switch/lot property holders and the budget
-    std::map<std::pair<int, int>, std::uint32_t> switchGrid;
     cSCPropertyHolder switchHolder, lotHolder;
     bool lotHasBuilding = true, itemOk = true, departmentOk = true;
     std::uint32_t itemDepartment = 4, lastPurpose = 0, lastDepartment = 0;
     std::int64_t itemCost = 0;
     float departmentFraction = 1.0f;
     const sc4::cISCPropertyHolder* lastHolder = nullptr;
-    std::uint32_t TransitSwitchIdAtCell(int x, int z) override { auto it = switchGrid.find({x, z}); return it == switchGrid.end() ? 0 : it->second; }
     sc4::cISCPropertyHolder* TransitSwitchProperties(void*) override { return &switchHolder; }
     sc4::cISCPropertyHolder* LotBuildingProperties(ITrafficLot*) override { return lotHasBuilding ? &lotHolder : nullptr; }
     bool BudgetItemForPurpose(sc4::cISCPropertyHolder* holder, std::uint32_t purpose, std::uint32_t& department, std::int64_t& cost) override {
@@ -308,7 +306,7 @@ int main() {
         // a transit switch wins over the lot: capacity, usage and percent come from its entry; the holder is its own
         auto& entry = sim.TransitSwitchEntry(5);
         entry.capacity = 80.9f; entry.usage = 33.7f; entry.percent = 0.4f;
-        host.switchGrid[{11, 21}] = 5;
+        sim.SetSwitchIdAt(11, 21, 5);
         CHECK(sim.GetTransitSwitchQueryData(11, 21, data));
         CHECK(data.served == 80 && data.capacity == 80 && data.usage == 33 && data.percent == 0.4f);
         CHECK(host.lastHolder == &host.switchHolder && data.maintenance == 755);
@@ -381,11 +379,11 @@ int main() {
         {   // while the strike is on, a transit switch reports nothing served, no usage and a zero percent (its capacity stays)
             auto& entry = sim.TransitSwitchEntry(6);
             entry.capacity = 40.0f; entry.usage = 10.0f; entry.percent = 0.5f;
-            host.switchGrid[{30, 31}] = 6;
+            sim.SetSwitchIdAt(30, 31, 6);
             TransitSwitchQueryData data;
             CHECK(sim.GetTransitSwitchQueryData(30, 31, data));
             CHECK(data.served == 0 && data.capacity == 40 && data.usage == 0 && data.percent == 0.0f);
-            host.switchGrid.erase({30, 31});
+            sim.SetSwitchIdAt(30, 31, 0);
         }
         sim.UpdateStrikes();                                   // day cap reached -> ends
         CHECK(sim.GetStrikeState() == cSC4TrafficSimulator::kStrikeNone && !sim.StrikeActiveFlag() && host.messages[kTrafficMessageStrikeEnded] == 1);
@@ -512,6 +510,95 @@ int main() {
         net.ClearSubnetworks();
         net.GetSubnetworksInRectangle({0, 0, 7, 7}, ids);
         CHECK(ids.empty() && net.NextSubnetworkId() == 1);
+    }
+
+    // ==== transit switches (traffic-network.md §2.4, §4.7) ====
+    {
+        using Switch = cSC4TrafficSimulator::TransitSwitch;
+        // the spec's worked example, the shipped light-rail / subway station: 81 F0 07 07, 82 F0 07 06, 81 F0 06 07, 82 F0 07 07
+        Switch example;
+        cSC4TrafficSimulator::ReadTransitSwitchRules(
+            example, {0x81, 0xf0, 0x07, 0x07, 0x82, 0xf0, 0x07, 0x06, 0x81, 0xf0, 0x06, 0x07, 0x82, 0xf0, 0x07, 0x07}, 0);
+        CHECK(example.rules.size() == 4 && example.toMask == 0x0080 && example.flags == 0x4c);
+        CHECK(example.rules[0].kind == 0 && example.rules[1].kind == 1 && example.rules[1].from == 7 && example.rules[1].to == 6);
+        CHECK(example.rules[2].side[0] && example.rules[2].side[1] && example.rules[2].side[2] && example.rules[2].side[3]);
+        // the side bits turn with the lot's facing: the first stored side is city side 2, 1, 0, 3 for facing 0, 1, 2, 3
+        const int firstSide[4] = {2, 1, 0, 3}, secondSide[4] = {3, 2, 1, 0};
+        for (int facing = 0; facing < 4; ++facing) {
+            Switch turned;
+            cSC4TrafficSimulator::ReadTransitSwitchRules(turned, {0x81, 0x80, 0x00, 0x03, 0x82, 0x40, 0x03, 0x02}, facing);
+            CHECK(turned.rules.size() == 2);
+            for (int side = 0; side < 4; ++side) {
+                CHECK(turned.rules[0].side[side] == (side == firstSide[facing]));
+                CHECK(turned.rules[1].side[side] == (side == secondSide[facing]));
+            }
+            CHECK(turned.toMask == 0x0008);     // only the kind-0 rule's "to"
+            CHECK(turned.flags == 0x03);        // the "to" types of both kinds: train 2, bus 1
+        }
+        // re-reading replaces the rules; a tail of fewer than four bytes is no rule
+        cSC4TrafficSimulator::ReadTransitSwitchRules(example, {0x81, 0xf0, 0x00, 0x08, 0x82, 0xf0}, 2);
+        CHECK(example.rules.size() == 1 && example.flags == 0x10 && example.toMask == 0x0100);
+
+        // A station on cell (4, 4) of an 8 x 8 city, facing 2 (sides as stored): a footpath on its west cell, rail on its east cell.
+        //   in from the west, walk -> train;  out to the east, train -> train;
+        //   in from the east, train -> walk;  out to the west, walk -> walk
+        cSC4TrafficSimulator net(&host, &random);
+        net.InitGrid(8, 8);
+        const std::uint16_t through = std::uint16_t((1u << (2 + 4 * 0)) | (1u << (0 + 4 * 2)));   // west -> east and east -> west
+        net.AddNetworkInfo(0, 3, 4);
+        net.CellConnections(3, 4).masks[0] = through;
+        net.AddNetworkInfo(2, 5, 4);
+        net.CellConnections(5, 4).masks[3] = through;
+        FakeLot station;
+        station.rect = {4, 4, 4, 4};
+        const bool hadBuilding = host.lotHasBuilding;
+        host.lotHasBuilding = false;
+        CHECK(!net.ActivateTransitSwitch(&station));                        // no building: no switch
+        host.lotHasBuilding = true;
+        CHECK(!net.ActivateTransitSwitch(&station));                        // a building without the rules property: no switch
+        cSCPropertyHelp::SetPropertyValue(&host.lotHolder, 0xe90e25a1u,
+                                          std::vector<std::uint8_t>{0x81, 0x80, 0x00, 0x03, 0x82, 0x20, 0x03, 0x03, 0x81, 0x20, 0x03, 0x00, 0x82, 0x80, 0x00, 0x00});
+        cSCPropertyHelp::SetPropertyValue(&host.lotHolder, 0xe90e25a2u, 2.0f);
+        cSCPropertyHelp::SetPropertyValue(&host.lotHolder, 0xe90e25a3u, 500.0f);
+        CHECK(net.ActivateTransitSwitch(&station));
+        const std::uint32_t id = net.SwitchIdAt(4, 4);
+        CHECK(id == 1 && net.SwitchIdAt(3, 4) == 0 && net.SwitchIdAt(5, 4) == 0 && net.SwitchIdAt(-1, 4) == 0);
+        CHECK(net.SwitchModeMaskAt(4, 4) == 0x09);                           // the kind-0 "from" types: walk and train
+        CHECK(net.TransitSwitches().size() == 1);
+        if (net.TransitSwitches().count(id)) {
+            const Switch& made = net.TransitSwitches().at(id);
+            CHECK(made.capacity == 500.0f && made.cost == 2.0f && made.flags == 0x02 && made.toMask == 0x0009 && !made.hasAccessPoint);
+        }
+        net.CellConnections(4, 4).masks[1] = 0xffff;                         // stale words on the station's own cell
+        net.CellConnections(4, 4).masks[6] = 0x0021;                         // the subway's are left alone
+        net.CellConnections(4, 4).switches[1] = 0x1234;
+        net.ApplyTransitSwitches({3, 3, 5, 5});
+        CHECK(net.CellConnections(4, 4).masks[1] == 0 && net.CellConnections(4, 4).switches[1] == 0xffff);
+        CHECK(net.CellConnections(4, 4).masks[6] == 0x0021);
+        // a walker leaving the footpath eastward (its side 2) becomes a train rider
+        CHECK(net.CellConnections(3, 4).switches[0] == 0xf3ff);
+        // on the station a train rider may leave eastward from every entry side; a walker westward
+        CHECK(net.CellConnections(4, 4).masks[3] == 0x4444);
+        CHECK(net.CellConnections(4, 4).masks[0] == 0x1111);
+        // a train rider leaving the rail westward (its side 0) becomes a walker
+        CHECK(net.CellConnections(5, 4).switches[3] == 0xfff0);
+        // the rail and the footpath keep their own through connections (the ones the rules add are there already)
+        CHECK(net.CellConnections(5, 4).masks[3] == through && net.CellConnections(3, 4).masks[0] == through);
+        // nothing else changed type words
+        CHECK(net.CellConnections(3, 4).switches[3] == 0xffff && net.CellConnections(5, 4).switches[0] == 0xffff);
+        // the entry cost: the congestion curve at load / capacity, times the time factor and the simulator's scale; 5 times full is shut
+        net.TransitSwitchEntry(id).traffic = 0.0f;
+        CHECK(net.TransitSwitchEntryCost(id) == net.CongestionToInverseSpeedCurve().GetOutputValue(0.0f) * 2.0f * net.transitSwitchCostScale);
+        net.TransitSwitchEntry(id).traffic = 2500.0f;
+        CHECK(net.TransitSwitchEntryCost(id) == 1.7014117e+38f);
+        // the lot goes: the switch and its cells of both grids go
+        CHECK(net.DeactivateTransitSwitch({4, 4, 4, 4}));
+        CHECK(net.SwitchIdAt(4, 4) == 0 && net.SwitchModeMaskAt(4, 4) == 0 && net.TransitSwitches().empty());
+        CHECK(!net.DeactivateTransitSwitch({4, 4, 4, 4}));
+        host.lotHolder.RemoveProperty(0xe90e25a1u, false);
+        host.lotHolder.RemoveProperty(0xe90e25a2u, false);
+        host.lotHolder.RemoveProperty(0xe90e25a3u, false);
+        host.lotHasBuilding = hadBuilding;
     }
 
     // ==== neighbour connection tables (0x1000820ac, 0x100082358, 0x1000828a2, 0x100082ae2, 0x1000884e8,

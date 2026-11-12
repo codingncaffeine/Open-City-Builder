@@ -15,6 +15,7 @@
 #include "sc4/OccupantGroupTemplate.h"
 #include "sc4/TrafficAutomataManager.h"
 #include "sc4/TrafficAutomaton.h"
+#include "sc4/Train.h"
 
 namespace native {
 namespace {
@@ -215,6 +216,9 @@ public:
     std::uint32_t GetPathKey() const override { return traffic_ ? traffic_->GetPathKey() : 0xffff; }           // 0x478
     ITrafficNetworkMapOccupant* GetNetworkOccupant() const override { return traffic_ ? traffic_->GetNetworkOccupant() : nullptr; }   // 0x480
     bool IsTrain() const override { return traffic_ && traffic_->IsTrain(); }                                   // 0x4a0
+    void SetDesiredNumCars(std::uint8_t count) override {
+        if (auto* train = dynamic_cast<cSC4Train*>(traffic_)) train->SetDesiredNumCars(count);
+    }
     bool GetDetectCollisions() const override { return traffic_ && traffic_->GetDetectCollisions(); }           // 0x4e8
     IAutomataAutomaton* FindLeader() override {                                                                  // 0x4d8
         cSC4Automaton* leader = traffic_ ? traffic_->FindLeader() : nullptr;

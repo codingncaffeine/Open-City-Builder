@@ -163,6 +163,8 @@ public:
     virtual int ZoneType() { return 0; }
     virtual bool HasRoadAccess() { return false; }
     virtual ITrafficLot* LinkedLot() { return nullptr; }            // slot 59: the lot whose trips this one shares (none natively)
+    virtual int Facing() { return 2; }                              // slot 23: 0..3 (2 leaves a transit switch's rule sides as stored)
+    virtual void* Building() { return nullptr; }                    // the lot's building occupant, as an identity only
     virtual void ClearTripFlag() {}                                 // flag 0x80 (FinishTripMap)
     virtual bool IsSameLot(ITrafficLot* other) { return other == this; }
     // lot slot 54 GetPopulations: occupant counts by developer type, one map per occupant group (none: empty)
@@ -209,8 +211,6 @@ public:
     virtual SC4RectInt32 TrafficSourceStartRect(void* source) = 0;
 
     // ---- GetTransitSwitchQueryData (the query tool's transit station rows); defaults answer "nothing" ----
-    // The transit-switch grid (+0x890, a cSC4SimGrid<uint32>) vslot 0x38: the switch id stored at a cell, 0 when none.
-    virtual std::uint32_t TransitSwitchIdAtCell(int x, int z) { (void)x; (void)z; return 0; }
     // vslot 0x30 of the object a switch entry keeps at +0: its property holder (the budget item is looked up on it).
     virtual cISCPropertyHolder* TransitSwitchProperties(void* occupant) { (void)occupant; return nullptr; }
     // The lot's building (lot vslot 0x180 -> 0x18 -> 0x30): its property holder; null when the lot has none.
@@ -351,7 +351,30 @@ public:
     // ---- transit switches ----
     // The map value (the original's operator[] result): +0 the switch's object, +8 traffic, +0xc cost, +0x10 capacity, +0x18 usage,
     // +0x1c percent. +0x14 is not read.
-    struct TransitSwitch { void* occupant = nullptr; float traffic = 0, cost = 0, capacity = 1; float field14 = 0, usage = 0, percent = 0; };
+    // One rule of a switch (traffic-network.md §2.4): on the city sides `side`, a type-`from` traveller becomes type `to`; kind 0
+    // on the way INTO the switch's lot from the neighbour cell, kind 1 on the way OUT of it.
+    struct TransitSwitchRule { std::uint8_t kind = 0; bool side[4] = {false, false, false, false}; std::uint8_t from = 0, to = 0; };
+    struct TransitSwitch {
+        void* occupant = nullptr; float traffic = 0, cost = 0, capacity = 1; float field14 = 0, usage = 0, percent = 0;
+        std::vector<TransitSwitchRule> rules;
+        std::uint8_t flags = 0;                 // from the rules' "to" types: bus 1, train 2, subway 4, el train 8, monorail 0x10; 0x40 subway <-> el
+        std::uint16_t toMask = 0;               // 1 << to over the kind-0 rules
+        float toll = 0;                         // building property 0x0bfc0a4c: the fee per unit of traffic through it
+        bool countsAsIntersection = false;      // building property 0x4bfc47b0
+        bool hasAccessPoint = false;            // a subway switch's access cell
+        std::uint8_t accessX = 0, accessZ = 0;
+    };
+    // The switch id grid and the mode mask grid (1 << from over the kind-0 rules), written over a switch's lot.
+    std::uint32_t SwitchIdAt(int x, int z) const;
+    std::uint8_t SwitchModeMaskAt(int x, int z) const;
+    const std::unordered_map<std::uint32_t, TransitSwitch>& TransitSwitches() const { return transitSwitches_; }
+    // traffic-network.md §4.7.2: the rules of a property's raw bytes (4 per rule) for a lot facing, with the flags and the "to" mask.
+    static void ReadTransitSwitchRules(TransitSwitch& out, const std::vector<std::uint8_t>& bytes, int facing);
+    bool ActivateTransitSwitch(ITrafficLot* lot);                  // §4.7.1 steps 1-5; true when a switch was made
+    bool DeactivateTransitSwitch(const SC4RectInt32& rect);        // §4.7.5 step 1 without the rebuild
+    void ApplyTransitSwitches(const SC4RectInt32& r1);             // §4.7.4, the switch phase of DoConnectionsChanged
+    // An id over one cell of the switch grid (what a loaded record's grid gives).
+    void SetSwitchIdAt(int x, int z, std::uint32_t id);
     std::list<TransitStationRecord>& TransitStations() { return transitStations_; }   // +0x1e8
     // 0x10008d8bc: the switch under the cell, or the station whose lot covers it; false when there is neither.
     bool GetTransitSwitchQueryData(int x, int z, TransitSwitchQueryData& out);
@@ -545,6 +568,10 @@ private:
     mutable std::vector<std::vector<std::vector<NetworkInfo>>> grid_;
     std::unordered_map<std::uint32_t, TrafficEdgeDensity> edgeDensities_;
     std::unordered_map<std::uint32_t, TransitSwitch> transitSwitches_;
+    std::vector<std::uint32_t> switchIds_;      // empty, or 0x10000 cells packed (x << 8) | z; 0 = no switch
+    std::vector<std::uint8_t> switchModes_;
+    std::uint32_t nextSwitchId_ = 1;
+
     std::list<TransitStationRecord> transitStations_;   // +0x1e8
     TrafficEdgeDensity emptyEdgeDensity_{};
     std::uint16_t nextSubnetworkId_ = 1;                 // +0xa4

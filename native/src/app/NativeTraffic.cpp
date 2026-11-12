@@ -114,6 +114,8 @@ public:
         auto* view = dynamic_cast<LotView*>(other);
         return view && view->lot_ == lot_;
     }
+    int Facing() override { return lot_->GetFacing(); }
+    void* Building() override { return lot_->GetBuilding(); }
     cSC4Lot* Lot() const { return lot_; }
 private:
     cSC4Lot* lot_;
@@ -234,6 +236,17 @@ public:
         return day;
     }
     std::uint32_t SimDateNumber() override { cSC4Simulator* s = Simulator(); return s ? s->GetSimDateNumber() : 0; }
+    // The lot's building as a property holder (a station's switch rules and capacity are on its exemplar).
+    sc4::cISCPropertyHolder* LotBuildingProperties(ITrafficLot* lot) override {
+        auto* view = dynamic_cast<LotView*>(lot);
+        cIGZUnknown* object = view ? view->Lot()->GetBuilding() : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(kGZIID_cISC4Occupant, &raw) || !raw) return nullptr;
+        auto* building = static_cast<cISC4Occupant*>(raw);
+        sc4::cISCPropertyHolder* holder = building->AsPropertyHolder();
+        building->Release();   // the lot keeps it
+        return holder;
+    }
     void AllLots(std::vector<std::unique_ptr<ITrafficLot>>& out) override {
         cSC4ZoneDeveloper* developer = ZoneDeveloper();
         if (!developer) return;

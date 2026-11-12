@@ -41,6 +41,7 @@
 #include "sc4/DBSegment.h"
 #include "sc4/AutoHelpers.h"
 #include "sc4/ModelMaker.h"
+#include "sc4/ViewInputControlEffect.h"
 #include "sc4/ViewInputControlCityScroll.h"
 #if defined(__APPLE__)
 #include <CoreGraphics/CoreGraphics.h>
@@ -159,8 +160,14 @@ private:
 // The view input tools' services (SL::spView3D / RZ::WM()) and the right-button scroll tool's.
 class ViewInput final : public sc4::IViewInputHost, public sc4::ICityScrollHost {
 public:
-    struct ViewAdapter final : sc4::IViewInputView {
+    struct ViewAdapter final : sc4::IEffectView {   // the effect tools pick the terrain through it
         sc4::cSC4View3DWin* view = nullptr;
+        bool PickTerrain(int x, int y, cS3DVector3* out, bool flag) override {   // vslot 0x120
+            float p[3] = {0.0f, 0.0f, 0.0f};
+            if (!view || !out || !view->PickTerrain(x, y, p, flag)) return false;
+            out->x = p[0]; out->y = p[1]; out->z = p[2];
+            return true;
+        }
         bool QueryInterface(std::uint32_t, void**) override { return false; }
         std::uint32_t AddRef() override { return 1; }
         std::uint32_t Release() override { return 1; }

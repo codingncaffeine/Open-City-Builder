@@ -13,10 +13,13 @@
 #include "app/NativePlumbing.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "rz/cRZMessage2Standard.h"
+#include "rz/cRZRandom.h"
 #include "sc4/AnimationTickManager.h"
 #include "sc4/AuraSimulator.h"
 #include "sc4/Demolition.h"
 #include "sc4/Disaster.h"
+#include "sc4/AutomataControllerManager.h"
+#include "sc4/DisasterInstanceEarthquake.h"
 #include "sc4/DisasterInstanceFire.h"
 #include "sc4/DisasterInstanceRiot.h"
 #include "sc4/DisasterManagers.h"
@@ -37,6 +40,7 @@
 #include "sc4/cSC4ZoneManager.h"
 #include "sc4/cSTETerrain.h"
 #include "tools/city_probe_plain.h"
+#include "app/NativeDisasterTools.h"
 
 namespace native {
 const sc4::cSC4SimGrid<std::uint8_t>* NativeFlammabilityGrid();   // app/NativeAdvisorFlammability.cpp
@@ -158,6 +162,97 @@ public:
     }
 } g_disasterHost;
 
+// ------------------------------------------------------------------------------------------ the earthquake's city
+
+bool QuakeTrace() {
+    static const bool on = std::getenv("SC4_DISASTERDEBUG") != nullptr;
+    return on;
+}
+
+class EarthquakeHost final : public IEarthquakeHost {
+public:
+    float CitySizeX() override { cSC4City* c = HostCity(); return c ? float(c->CellCountX()) * 16.0f : 0.0f; }
+    float CitySizeZ() override { cSC4City* c = HostCity(); return c ? float(c->CellCountZ()) * 16.0f : 0.0f; }
+    float Altitude(float x, float z) override { cSTETerrain* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
+    void ApplyBrush(std::uint32_t brush, EarthquakeBrush& b) override {
+        cSTETerrain* terrain = Terrain();
+        if (!terrain) return;
+        TerrainBrushParameters p;
+        p.previousX = b.previousX; p.previousZ = b.previousZ; p.currentX = b.currentX; p.currentZ = b.currentZ;
+        p.zoom = b.zoom; p.valid = b.valid; p.strengthScale = b.strengthScale; p.radiusScale = b.radiusScale;
+        p.redisplayFlags = b.redisplayFlags; p.levelAltitude = b.levelAltitude;
+        p.rect = TerrainRect{b.rect[0], b.rect[1], b.rect[2], b.rect[3]};
+        const float before = terrain->GetAltitude(b.currentX, b.currentZ);
+        const bool applied = terrain->ApplyBrush(brush, p);
+        const float after = terrain->GetAltitude(b.currentX, b.currentZ);
+        if (after != before) ++moved_;
+        b.valid = p.valid;
+        b.rect[0] = p.rect.left; b.rect[1] = p.rect.top; b.rect[2] = p.rect.right; b.rect[3] = p.rect.bottom;
+        ++brushes_;
+        if (QuakeTrace() && (brushes_ <= 4 || brushes_ % 50 == 0))
+            std::fprintf(stderr, "earthquake: brush %#x #%d (%.0f, %.0f) -> (%.0f, %.0f) strength %.3f width %.3f -> %s, cells %d,%d..%d,%d\n", brush, brushes_,
+                         b.previousX, b.previousZ, b.currentX, b.currentZ, b.strengthScale, b.radiusScale, applied ? "applied" : "refused", b.rect[0], b.rect[1],
+                         b.rect[2], b.rect[3]);
+        if (QuakeTrace() && (brushes_ <= 4 || brushes_ % 50 == 0))
+            std::fprintf(stderr, "earthquake:   altitude there %.3f -> %.3f, valid %d, %d strokes moved the ground so far\n", before, after, p.valid, moved_);
+    }
+    void RedisplayTerrain(const std::int32_t rect[4]) override {
+        if (cSTETerrain* t = Terrain()) t->RedisplayTerrain(true, true, TerrainRect{rect[0], rect[1], rect[2], rect[3]}, 3);
+    }
+    void StartTextureUpdates() override { if (cSTETerrain* t = Terrain()) t->StartAccumulatingTextureUpdates(); }
+    void StopTextureUpdates() override { if (cSTETerrain* t = Terrain()) t->StopAccumulatingTextureUpdates(); }
+    void BeginLongTerrainOperation() override {
+        if (cSTETerrain* t = Terrain()) t->BeginLongTerrainOperation();
+        if (!QuakeTrace()) return;
+        for (std::uint32_t id : {kEarthquakeBrushA, kEarthquakeBrushB}) {   // what the two brushes are made of
+            const auto& map = cSTETerrain::BrushDescriptions();
+            const auto it = map.find(id);
+            if (it == map.end()) { std::fprintf(stderr, "earthquake: brush %#x: no description\n", id); continue; }
+            std::fprintf(stderr, "earthquake: brush %#x: rotate %d, %zu components\n", id, it->second.rotateToDrag, it->second.components.size());
+            for (const TerrainBrushComponent& c : it->second.components) {
+                std::fprintf(stderr, "earthquake:   component %08x type %d texture %u decals %u, radius", c.exemplarID, c.type, c.textureValue, c.maxDecals);
+                for (float v : c.radiusPerZoom) std::fprintf(stderr, " %.2f", v);
+                std::fprintf(stderr, ", strength");
+                for (float v : c.strengthPerZoom) std::fprintf(stderr, " %.3f", v);
+                std::fprintf(stderr, "\n");
+            }
+        }
+    }
+    void EndLongTerrainOperation() override {
+        if (cSTETerrain* t = Terrain()) t->EndLongTerrainOperation();
+        if (QuakeTrace()) std::fprintf(stderr, "earthquake: deformation over after %d brush strokes\n", brushes_);
+        brushes_ = 0;
+    }
+    void* CreateEffect(const char* name, const float xyz[3]) override { return NativeCreateEffectAtPoint(name, xyz); }
+    void MoveEffect(void* effect, const float xyz[3]) override { NativeMoveEffectTo(effect, xyz); }
+    void ReleaseEffect(void* effect) override { NativeReleaseEffectHandle(effect); }
+    void* AddRepulsor(const char* templateName, const float xyz[3]) override {
+        auto* controllers = CityAs<cSC4AutomataControllerManager>(CityComponent::AutomataControllerManager);
+        cSC4AutomataController* made = controllers ? controllers->AddControllerFromTemplateName(nullptr, cRZString(templateName), xyz) : nullptr;
+        if (made) made->AddRef();
+        if (QuakeTrace()) std::fprintf(stderr, "earthquake: repulsor %s at (%.0f, %.0f) -> %s\n", templateName, xyz[0], xyz[2], made ? "added" : "none");
+        return made;
+    }
+    void RemoveRepulsor(void* handle) override {
+        auto* controller = static_cast<cSC4AutomataController*>(handle);
+        if (!controller) return;
+        if (auto* controllers = CityAs<cSC4AutomataControllerManager>(CityComponent::AutomataControllerManager)) controllers->RemoveController(controller);
+        controller->Release();
+    }
+    void AddTickable(cIGZMessageTarget2* target, std::uint32_t priority) override {
+        if (cSC4AnimationTickManager* atm = AnimationTickManager()) atm->AddTickableObject(target, priority);
+    }
+    void RemoveTickable(cIGZMessageTarget2* target, std::uint32_t priority) override {
+        if (cSC4AnimationTickManager* atm = AnimationTickManager()) atm->RemoveTickableObject(target, priority);
+    }
+    double RandomRange(double lo, double hi) override { return random_.RandomDoubleRangeUniform(lo, hi); }
+    const cISCPropertyHolder* TuningExemplar() override { return HeldExemplar(kEarthquakeTuningKey); }
+private:
+    cRZRandom random_{0xffffffffu};
+    int brushes_ = 0, moved_ = 0;
+};
+EarthquakeHost g_earthquakeHost;
+
 // ------------------------------------------------------------------------------------------ the instance factory
 
 class InstanceFactory final : public IDisasterInstanceFactory {
@@ -166,7 +261,7 @@ public:
     cISC4DisasterInstanceVolcano* CreateVolcano() override { return nullptr; }
     cISC4DisasterInstanceRiot* CreateRiot() override { return new cSC4DisasterInstanceRiot(); }
     cISC4DisasterInstancePipeBurst* CreatePipeBurst() override { return nullptr; }
-    cISC4DisasterInstanceEarthquake* CreateEarthquake() override { return nullptr; }
+    cISC4DisasterInstanceEarthquake* CreateEarthquake() override { return new cSC4DisasterInstanceEarthquake(); }
     IPlumbingGrid* PlumbingGrid() override { return nullptr; }
     // Mac i386 0x0033a55c: how many riots may run at once and how many leaders one may have
     bool ReadRiotTuning(int& maxInstances, int& maxLeaders) override {
@@ -291,6 +386,7 @@ void InstallDisasterHosts() {
     sc4::SetFireInstanceHost(&g_fireHost);
     InstallFireServices();
     InstallRiotHost();
+    sc4::SetEarthquakeHost(&g_earthquakeHost);
 }
 
 // ---- what the flammability simulator's host (app/NativeFlammabilityHost.cpp) asks of the city: its header cannot be combined with
@@ -396,6 +492,89 @@ void GoToNextDisaster() {
 }
 
 // Kit command `ignite X Z [force]`: sets the occupants of a city cell alight through the fire manager (the torch's call).
+// ---- what the disaster menu's tools ask (app/NativeDisasterTools.h) ----------------------------------------------------------
+
+namespace {
+// The tools' effect as sc4/Disaster.h's interface.
+class EffectFaceAdapter final : public sc4::cISC4VisualEffect {
+public:
+    explicit EffectFaceAdapter(IDisasterEffectFace* face) : face_(face) { face_->Retain(); }
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override {
+        if (refs_ > 1) return --refs_;
+        face_->Drop();
+        delete this;
+        return 0;
+    }
+    void Start(int flags) override { face_->Start(flags); }
+    void Stop(int flags) override { face_->Stop(flags); }
+    bool IsPlaying() override { return face_->IsPlaying(); }
+    void SetCompletionMessage(std::uint32_t message, std::uint32_t userValue) override { face_->SetCompletionMessage(message, userValue); }
+    void SetIntParameter(int parameter, const void* data, int count) override { face_->SetIntParameter(parameter, data, count); }
+    void SetPointerParameter(int parameter, const void* data, int count) override { face_->SetPointerParameter(parameter, data, count); }
+private:
+    IDisasterEffectFace* face_;
+    std::uint32_t refs_ = 1;
+};
+
+sc4::cISC4DisasterManagerFire* FireManagerFace() {   // one reference, or null
+    sc4::cISC4DisasterLayer* layer = Layer();
+    sc4::cISC4DisasterManager* manager = layer ? layer->GetDisasterManager(sc4::kDisasterManagerIdFire) : nullptr;
+    sc4::cISC4DisasterManagerFire* fire = nullptr;
+    if (!manager || !manager->QueryInterface(sc4::kGZIID_cISC4DisasterManagerFire, reinterpret_cast<void**>(&fire))) return nullptr;
+    return fire;
+}
+}  // namespace
+
+bool NativeHasDisasterManager(std::uint32_t id) {
+    sc4::cISC4DisasterLayer* layer = Layer();
+    return layer && layer->GetDisasterManager(id) != nullptr;
+}
+
+void NativeAttemptDisasterStart(std::uint32_t id, int x, int z) {
+    sc4::cISC4DisasterLayer* layer = Layer();
+    if (sc4::cISC4DisasterManager* manager = layer ? layer->GetDisasterManager(id) : nullptr) manager->AttemptDisasterStart(x, z);
+}
+
+bool NativeTorchIgnite(int cellX, int cellZ, bool again, bool force, std::uint32_t value) {
+    sc4::cISC4DisasterManagerFire* fire = FireManagerFace();
+    if (!fire) return false;
+    const bool lit = fire->IgniteCell(static_cast<std::uint32_t>(cellX), static_cast<std::uint32_t>(cellZ), again, force, value);
+    fire->Release();
+    return lit;
+}
+
+void NativeSetFireCause(std::uint32_t cause) {
+    if (sc4::cISC4DisasterManagerFire* fire = FireManagerFace()) {
+        fire->SetCause(cause);
+        fire->Release();
+    }
+}
+
+cIGZUnknown* NativeStartDisasterEffect(std::uint32_t managerId, IDisasterEffectFace* effect, const float position[3], std::uint32_t id) {
+    sc4::cISC4DisasterLayer* layer = Layer();
+    sc4::cISC4DisasterManager* manager = layer ? layer->GetDisasterManager(managerId) : nullptr;
+    sc4::cISC4DisasterManagerEffect* effects = nullptr;
+    auto* adapter = new EffectFaceAdapter(effect);
+    cIGZUnknown* instance = nullptr;
+    if (manager && manager->QueryInterface(sc4::kGZIID_cISC4DisasterManagerEffect, reinterpret_cast<void**>(&effects)) && effects) {
+        cS3DVector3 at;
+        at.x = position[0]; at.y = position[1]; at.z = position[2];
+        if (sc4::cISC4DisasterInstance* made = effects->StartDisasterEffect(adapter, at, id)) {
+            made->AddRef();   // the tool's reference
+            instance = made;
+        }
+        effects->Release();
+    }
+    adapter->Release();   // the instance keeps its own
+    return instance;
+}
+
+void NativeStopDisasterEffect(cIGZUnknown* instance) {
+    if (auto* effect = dynamic_cast<sc4::cSC4DisasterInstanceEffect*>(instance)) effect->Stop();
+}
+
 void NativeIgniteCell(int x, int z, bool force) {
     sc4::cISC4DisasterLayer* layer = Layer();
     sc4::cISC4DisasterManager* manager = layer ? layer->GetDisasterManager(sc4::kDisasterManagerIdFire) : nullptr;

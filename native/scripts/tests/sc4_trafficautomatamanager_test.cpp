@@ -726,17 +726,18 @@ struct FakeTrafficHost final : ITrafficAutomataManagerHost {
     // ---- the traffic manager's extended host ----
     FakeTrafficSimulator trafficSimulator;
     FakeTrafficNetwork trafficNetwork;
-    int hour = 12;
-    float timeFraction = 0.5f;
-    float clockPercent = 80.0f;
+    int population = 12;
+    float magnification = 0.5f;
+    float commotion = 80.0f;
+    ITrafficNetworkMapOccupant* commotionAsked = nullptr;
     std::map<IAutomataAutomaton*, ITrafficAutomataAutomaton*> trafficAutomata;
     std::map<IAutomataOccupant*, cISC4Occupant*> cityOccupants;
     std::map<IAutomataNetworkOccupant*, ITrafficNetworkOccupant*> networkOccupantViews;
     ITrafficSimulatorApi* TrafficSimulator() override { return &trafficSimulator; }
     ITrafficNetworkManagerApi* TrafficNetworkManager() override { return &trafficNetwork; }
-    int CityHour() override { return hour; }
-    float CityTimeFraction() override { return timeFraction; }
-    float CityClockPercent() override { return clockPercent; }
+    int ResidentialPopulation() override { return population; }
+    float ClockTimeMagnification() override { return magnification; }
+    float AttractionCommotion(ITrafficNetworkMapOccupant* occupant) override { commotionAsked = occupant; return commotion; }
     ITrafficAutomataAutomaton* AsTrafficAutomaton(IAutomataAutomaton* automaton) override {
         auto it = trafficAutomata.find(automaton);
         return it == trafficAutomata.end() ? nullptr : it->second;
@@ -893,7 +894,7 @@ int main() {
         CHECK(manager->EffectManager().Effects().size() == 2);
         // Update runs through the manager's ITrafficEffectHost (the timer at +0xb78).
         manager->EffectManager().Update();
-        host.clockPercent = 80.0f;
+        host.commotion = 80.0f;
         manager->DoAnimationTick(0, 16.0f);
         CHECK(manager->EffectManager().Effects().size() == 2);
 
@@ -906,20 +907,22 @@ int main() {
         CHECK(manager->cSC4AutomataManager::DoMessage(loaded));
         CHECK(manager->LoadedFlag() != 0);
         loaded->Release();
-        host.clockPercent = 80.0f;
+        host.commotion = 80.0f;
         CHECK(std::fabs(manager->GetCommotionMultiplier(nullptr, PopulateLayer::kLayer1) - 0.2f) < 1e-6f);
-        host.clockPercent = 200.0f;
+        host.commotion = 200.0f;
         CHECK(manager->GetCommotionMultiplier(nullptr, PopulateLayer::kLayer1) == 0.0f);
-        host.clockPercent = 0.0f;
+        host.commotion = 0.0f;
         CHECK(manager->GetCommotionMultiplier(nullptr, PopulateLayer::kLayer1) == 0.5f);
-        host.clockPercent = 80.0f;
+        host.commotion = 80.0f;
 
-        // ---- GetEdgeDensityMultiplier (0x1001153c6) = (fraction / 3600) * curve(hour)
-        tuning.f218b0.SetResponseCurveData(std::vector<SC4Point>{{0.0f, 1.0f}, {12.0f, 3.0f}, {24.0f, 5.0f}});
-        host.hour = 12;
-        host.timeFraction = 0.5f;
-        const double expectedMultiplier = static_cast<double>(0.5f * 0.00027777778f) * 3.0;
-        CHECK(manager->GetEdgeDensityMultiplier(static_cast<PopulateLayer>(7)) == expectedMultiplier);
+        // ---- GetEdgeDensityMultiplier (i386 0x000cab6e) = curve(residential population) / 3600 * the clock's time magnification
+        tuning.f218b0.SetResponseCurveData(std::vector<SC4Point>{{0.0f, 1.0f}, {12000.0f, 3.0f}, {24000.0f, 5.0f}});
+        host.population = 12000;
+        host.magnification = 0.5f;
+        CHECK(std::fabs(manager->GetEdgeDensityMultiplier(static_cast<PopulateLayer>(7)) - 3.0 / 3600.0 * 0.5) < 1e-9);
+        host.population = 18000;   // the curve is read at the population, not at an hour of the day
+        host.magnification = 2.0f;
+        CHECK(std::fabs(manager->GetEdgeDensityMultiplier(static_cast<PopulateLayer>(7)) - 4.0 / 3600.0 * 2.0) < 1e-9);
 
         // ---- IsAutomatonOnscreen (0x1001159fc): the base view rect expanded by 48, x/z only
         host.view.rect[0] = 10.0f; host.view.rect[1] = 20.0f; host.view.rect[2] = 30.0f; host.view.rect[3] = 40.0f;

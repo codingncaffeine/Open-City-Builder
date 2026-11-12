@@ -46,6 +46,7 @@
 #include "sc4/CameraControl.h"
 #include "sc4/Render3D.h"
 #include "app/NativeCityView.h"
+#include "app/NativeDisasterTools.h"
 #include "app/NativeModelMaker.h"
 #include "app/NativeFonts.h"
 #include "app/NativeGraphics.h"
@@ -1078,6 +1079,32 @@ int RunScenario(const std::string& path) {
                 SDL_PushEvent(&b); PumpEvents(); Frame(); Nap();
             }
             for (int i = 0; i < 5; ++i) { PumpEvents(); Frame(); Nap(); }
+        } else if (command == "sdlhold") {   // sdlhold X Y MS: the left button pressed at a window point, held for MS ms of frames, released
+            float x = 0, y = 0;
+            int ms = 0;
+            words >> x >> y >> ms;
+            SDL_Event e{};
+            e.type = SDL_EVENT_MOUSE_MOTION; e.motion.windowID = SDL_GetWindowID(gWindow); e.motion.x = x; e.motion.y = y;
+            SDL_PushEvent(&e); PumpEvents(); Frame(); Nap();
+            for (const SDL_EventType type : {SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_EVENT_MOUSE_BUTTON_UP}) {
+                SDL_Event b{};
+                b.type = type; b.button.windowID = SDL_GetWindowID(gWindow); b.button.button = SDL_BUTTON_LEFT;
+                b.button.down = type == SDL_EVENT_MOUSE_BUTTON_DOWN; b.button.clicks = 1; b.button.x = x; b.button.y = y;
+                SDL_PushEvent(&b); PumpEvents(); Frame(); Nap();
+                if (type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+                    const double end = NowMs() + ms;
+                    while (NowMs() < end) { Frame(); Nap(); }
+                }
+            }
+        } else if (command == "disasters") {   // disasters: the disaster menu's items (exemplar ids with their effect and manager)
+            native::NativeDisasterMenuReport();
+        } else if (command == "disaster") {   // disaster HEXID: what picking that item of the disaster menu does (the tool becomes current)
+            std::string hex;
+            words >> hex;
+            const std::uint32_t id = std::uint32_t(std::strtoul(hex.c_str(), nullptr, 16));
+            sc4::cSC4View3DWin* view = gAppWindow ? gAppWindow->View3D() : nullptr;
+            if (view) view->InvokeCatalogItemCommand(0x4a2b2464u, id, false);
+            std::printf("disaster %08x: %s\n", id, view ? (view->GetCurrentViewInputControl() ? "a tool is current" : "no tool") : "no view");
         } else if (command == "rdrag") {   // rdrag X Y DX DY MS: a real SDL right-button drag (window points), held for MS ms of frames
             float x = 0, y = 0, dx = 0, dy = 0;
             int ms = 0;
@@ -1125,6 +1152,10 @@ int RunScenario(const std::string& path) {
             int limit = 8;
             words >> limit;
             native::NativeTrailerReport(limit);
+        } else if (command == "trains") {   // trains [N]: the city's track cells, the trains and buses, and the first N engines with their cars
+            int limit = 8;
+            words >> limit;
+            native::NativeTrainReport(limit);
         } else if (command == "lua") {   // lua CODE: run CODE in the city's automata script VM and print what it returns
             std::string code;
             std::getline(words, code);

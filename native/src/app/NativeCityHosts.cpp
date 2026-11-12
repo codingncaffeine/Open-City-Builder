@@ -31,6 +31,7 @@ void InstallCivicBuildingStub();
 void InstallDemandSimulatorStub();
 void InstallDisasterStub();
 void InstallDisasterHosts();   // NativeDisasters.cpp
+void InstallDisasterTools();   // NativeDisasterTools.cpp
 void InstallEffectsStub();
 void InstallEffectsManagerStub();
 void InstallCityPanelHosts();
@@ -210,6 +211,7 @@ void InstallStubHosts() {
     InstallView3DWinStub();
     InstallViewInputStub();
     InstallEffectToolStub();
+    InstallDisasterTools();               // the disaster menu's tools; the effect tools' cursor effects replace the stub
     InstallPlaceLotStub();
     InstallQueryStub();
     InstallQueryHost();                   // the real query host replaces the stub above

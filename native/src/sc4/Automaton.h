@@ -384,7 +384,7 @@ public:
     void RecreateNamedEffects(const cRZString& effect, int transition, bool on);  // 0x178
     cSC4Automaton* GetLeader() const;                                 // 0x180 @ 0x10011b710
     void SetLeader(cSC4Automaton* leader);                            // 0x188 @ 0x100106b86
-    cSC4Automaton* FindDrivingAutomaton() { return this; }            // 0x190 @ 0x100107cd8
+    virtual cSC4Automaton* FindDrivingAutomaton() { return this; }    // 0x190 @ 0x100107cd8
     bool SetState(std::uint32_t state, cSC4AutomataController* controller, float timer, bool flag, std::uint32_t animOffset,
                   std::uint32_t sfx, const tBehaviorTemplate* behavior);   // 0x198 @ 0x10010cda2
     bool PushState(std::uint32_t state, cSC4AutomataController* controller, float timer, bool flag, std::uint32_t animOffset,

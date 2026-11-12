@@ -386,6 +386,9 @@ src/sc4/ModelRegEffects.cpp
 src/app/NativeDisasters.cpp
 src/app/NativeRiot.cpp
 src/app/NativeRiotPolice.cpp
+src/app/NativeDisasterTools.cpp
+src/sc4/ViewInputControlDisaster.cpp
+src/sc4/DisasterInstanceEarthquake.cpp
 src/app/NativeModelRegEffects.cpp
 src/app/NativeFireEffects.cpp
 src/app/NativeFireCrew.cpp
@@ -690,6 +693,7 @@ src/sc4/EmergencyVehicle.cpp
 src/sc4/FireTruck.cpp
 src/sc4/PatrolCar.cpp
 src/sc4/TrailerVehicle.cpp
+src/sc4/Train.cpp
 src/sc4/Ambulance.cpp
 src/gz/gzcom_creators/cSTESurfaceWater.cpp
 src/sc4/SurfaceWater.cpp
