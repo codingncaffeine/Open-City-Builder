@@ -157,7 +157,7 @@ struct FakeHost final : IAutomatonHost {
     float TerrainHeight(float, float) override { return terrainY; }
     bool NetworkAt(int, int) override { ++networkCalls; return networkHere; }
     bool LotAt(int, int) override { ++lotCalls; return lotHere; }
-    void PlaceOnNetwork(const cS3DVector3& from, const cS3DVector3& to, std::uint32_t) override { networkMoves.push_back(from); networkMoves.push_back(to); }
+    void PlaceOnNetwork(const cS3DVector3& from, cS3DVector3& to, std::uint32_t) override { networkMoves.push_back(from); networkMoves.push_back(to); }
     cSC4AutomataController* FindAttraction(cISC4Occupant*, cS3DVector3*, float* radius, float* distance) override {
         if (!attraction) return nullptr;
         *radius = 10.0f;

@@ -242,7 +242,7 @@ struct FakeAutomatonHost final : IAutomatonHost {
     float TerrainHeight(float, float) override { return 0.0f; }
     bool NetworkAt(int, int) override { return true; }
     bool LotAt(int, int) override { return false; }
-    void PlaceOnNetwork(const cS3DVector3&, const cS3DVector3&, std::uint32_t) override {}
+    void PlaceOnNetwork(const cS3DVector3&, cS3DVector3&, std::uint32_t) override {}
     cSC4AutomataController* FindAttraction(cISC4Occupant*, cS3DVector3*, float*, float*) override { return nullptr; }
     IAutomatonGroupTemplate* FindAutomataGroup(std::uint32_t) override { return nullptr; }
     bool AnimationUpdateAllowed() override { return true; }

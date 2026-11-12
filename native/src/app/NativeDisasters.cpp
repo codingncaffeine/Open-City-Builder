@@ -18,6 +18,7 @@
 #include "sc4/Demolition.h"
 #include "sc4/Disaster.h"
 #include "sc4/DisasterInstanceFire.h"
+#include "sc4/DisasterInstanceRiot.h"
 #include "sc4/DisasterManagers.h"
 #include "sc4/Exemplar.h"
 #include "sc4/FireProtectionSimulator.h"
@@ -44,6 +45,8 @@ int NativeCurrentViewLevel();
 void NativeStartEffectOnOccupant(const char* name, sc4::cISC4Occupant* occupant);   // app/NativeFireEffects.cpp
 void NativeStartEffectAt(const char* name, const float position[3]);
 void InstallFireServices();
+void InstallRiotHost();   // app/NativeRiot.cpp
+void NativeRiotCityClosed();
 bool NativeFireSkip(const char* what);
 void NativeKillFloraOccupant(sc4::cISC4Occupant* occupant);   // app/NativeFlora.cpp
 
@@ -97,6 +100,14 @@ public:
     cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
     cISC4DisasterLayer* DisasterLayer() override { return Layer(); }
     cISC4OccupantManager* Occupants() override { return OccupantManager(); }
+    // The automata are not in the native occupant manager: one that still has its in-city flag counts.
+    bool IsOccupantInCity(cISC4Occupant* occupant) override {
+        if (IDisasterHost::IsOccupantInCity(occupant)) return true;
+        void* automaton = nullptr;
+        if (!occupant || !occupant->QueryInterface(0xa9b40f05, &automaton) || !automaton) return false;
+        occupant->Release();
+        return occupant->IsFlagSet(1);
+    }
     bool CityEstablished() override { cSC4City* city = HostCity(); return city && city->GetEstablished(); }
     void EmergencyPause() override { if (cSC4Simulator* s = CitySimulatorObject()) s->EmergencyPause(); }
     void EmergencyResume() override { if (cSC4Simulator* s = CitySimulatorObject()) s->EmergencyResume(); }
@@ -153,11 +164,21 @@ class InstanceFactory final : public IDisasterInstanceFactory {
 public:
     cISC4DisasterInstanceFire* CreateFire() override { return new cSC4DisasterInstanceFire(); }
     cISC4DisasterInstanceVolcano* CreateVolcano() override { return nullptr; }
-    cISC4DisasterInstanceRiot* CreateRiot() override { return nullptr; }
+    cISC4DisasterInstanceRiot* CreateRiot() override { return new cSC4DisasterInstanceRiot(); }
     cISC4DisasterInstancePipeBurst* CreatePipeBurst() override { return nullptr; }
     cISC4DisasterInstanceEarthquake* CreateEarthquake() override { return nullptr; }
     IPlumbingGrid* PlumbingGrid() override { return nullptr; }
-    bool ReadRiotTuning(int&, int&) override { return false; }
+    // Mac i386 0x0033a55c: how many riots may run at once and how many leaders one may have
+    bool ReadRiotTuning(int& maxInstances, int& maxLeaders) override {
+        const cISCPropertyHolder* tuning = HeldExemplar(cGZPersistResourceKey{0x6534284a, kRiotTuningGroup, kRiotTuningInstance});
+        if (!tuning) return false;
+        std::uint32_t instances = static_cast<std::uint32_t>(maxInstances), leaders = static_cast<std::uint32_t>(maxLeaders);
+        cSCPropertyHelp::GetPropertyValue(tuning, 0xcadb6b3e, instances);
+        cSCPropertyHelp::GetPropertyValue(tuning, 0x2adb6b6d, leaders);
+        maxInstances = static_cast<int>(instances);
+        maxLeaders = static_cast<int>(leaders);
+        return true;
+    }
 } g_factory;
 
 // -------------------------------------------------------------------------------------- the fire instance's services
@@ -269,6 +290,7 @@ void InstallDisasterHosts() {
     sc4::SetDisasterInstanceFactory(&g_factory);
     sc4::SetFireInstanceHost(&g_fireHost);
     InstallFireServices();
+    InstallRiotHost();
 }
 
 // ---- what the flammability simulator's host (app/NativeFlammabilityHost.cpp) asks of the city: its header cannot be combined with
@@ -336,8 +358,12 @@ void NativeRecordHistory(std::uint32_t id, std::int32_t value) {
 bool CityComponentInit_cSC4DisasterLayer(cIGZUnknown* object, bool init) {
     auto* layer = dynamic_cast<sc4::cSC4DisasterLayer*>(object);
     if (!layer) return false;
-    if (init) layer->Init();
-    else layer->Shutdown();
+    if (init) {
+        layer->Init();
+    } else {
+        layer->Shutdown();
+        NativeRiotCityClosed();   // the riot host's views of the old city's road tiles
+    }
     return true;
 }
 

@@ -440,6 +440,13 @@ void cSC4AutomataManager::HandleViewChanged() {
             viewRect_[1] -= kViewRectMargin;
             viewRect_[2] += kViewRectMargin;
             viewRect_[3] += kViewRectMargin;
+            static const bool trace = std::getenv("SC4_AUTOMATADEBUG") != nullptr;
+            if (trace) {
+                int zoom = 0, rotation = 0;
+                view->GetZoomAndRotation(zoom, rotation);
+                std::fprintf(stderr, "automata manager %p: view changed, rect %.0f %.0f %.0f %.0f, zoom %d\n", static_cast<void*>(this), viewRect_[0],
+                             viewRect_[1], viewRect_[2], viewRect_[3], zoom);
+            }
         }
     }
     UpdateZoomAndRotation();

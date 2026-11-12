@@ -1388,19 +1388,54 @@ bool cSC4TrafficNetworkMap::ConstrainPointToNetworkTile(cS3DVector3& point, std:
     return true;
 }
 
-// 0x10029d174 — PARTIAL: only the trivial cases are recovered; the border-walk that snaps the segment
-// to the first network cell is still to be hand-written.
+// 0x10029d174 (Mac i386 0x001e9154): keep a step from `from` to `point` on tiles of the wanted networks. A point already on
+// one stays. Otherwise the part of the step that crosses an edge of the tile `from` stands on is turned along that edge: one
+// candidate per crossed edge (x first), and the first candidate on a wanted tile becomes the point (true). With no such
+// candidate the point is clamped into the starting tile (false). A step that crosses no edge, or one of no length, falls
+// back to the nearest wanted tile around the point. The point's height follows the road.
 bool cSC4TrafficNetworkMap::ConstrainVectorToNetworkTile(const cS3DVector3& from, cS3DVector3& point,
                                                          std::uint32_t flags) const {
-    const int cellX = static_cast<int>(point.x * 0.0625f);
-    const int cellZ = static_cast<int>(point.z * 0.0625f);
-    TrafficTileInfo* tile = SafeGetTileInfoAtCell(cellX, cellZ);
-    if (tile && tile->occupant && tile->occupant->HasAnyNetworkFlag(flags)) return true;
+    const auto wanted = [&](float x, float z) {
+        TrafficTileInfo* tile = SafeGetTileInfoAtCell(static_cast<int>(0.0625f * x), static_cast<int>(z * 0.0625f));
+        return tile && tile->occupant && tile->occupant->HasAnyNetworkFlag(flags);
+    };
+    if (wanted(point.x, point.z)) return true;
     const float dx = point.x - from.x;
     const float dy = point.y - from.y;
     const float dz = point.z - from.z;
-    if (std::sqrt(dy * dy + dx * dx + dz * dz) <= 1e-05f) return ConstrainPointToNetworkTile(point, flags);
-    return false;
+    if (std::sqrt(dx * dx + dy * dy + dz * dz) <= 1e-05f) return ConstrainPointToNetworkTile(point, flags);
+    constexpr float kInside = 0.01f;   // 0x00a706d0: how far inside the far edge a point is put
+    const float lowX = static_cast<float>(static_cast<int>(from.x * 0.0625f) * 0x10);
+    const float lowZ = static_cast<float>(static_cast<int>(0.0625f * from.z) * 0x10);
+    const float highX = lowX + 16.0f, highZ = lowZ + 16.0f;
+    const float signX = 0.0f <= dx ? 1.0f : -1.0f;
+    const float signZ = 0.0f <= dz ? 1.0f : -1.0f;
+    cS3DVector3 candidates[2];
+    int count = 0;
+    const float px = point.x, pz = point.z;
+    if (px < lowX) {
+        candidates[count++] = cS3DVector3{lowX, point.y, signZ * (lowX - px) + pz};
+    } else if (highX <= px) {
+        candidates[count++] = cS3DVector3{highX - kInside, point.y, signZ * (px - highX) + pz};
+    }
+    if (pz < lowZ) {
+        candidates[count++] = cS3DVector3{signX * (lowZ - pz) + px, point.y, lowZ};
+    } else if (highZ <= pz) {
+        candidates[count++] = cS3DVector3{signX * (pz - highZ) + px, point.y, highZ - kInside};
+    }
+    if (count == 0) return ConstrainPointToNetworkTile(point, flags);
+    bool onNetwork = false;
+    for (int i = 0; i < count && !onNetwork; ++i) {
+        if (!wanted(candidates[i].x, candidates[i].z)) continue;
+        point = candidates[i];
+        onNetwork = true;
+    }
+    if (!onNetwork) {
+        point.x = px < lowX ? lowX : (px <= highX - kInside ? px : highX - kInside);
+        point.z = pz < lowZ ? lowZ : (pz <= highZ - kInside ? pz : highZ - kInside);
+    }
+    point.y = GetRoadAltitude(point.x, point.z);
+    return onNetwork;
 }
 
 // 0x10029d538

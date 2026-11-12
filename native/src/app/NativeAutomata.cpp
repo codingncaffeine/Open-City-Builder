@@ -49,6 +49,11 @@ public:
         instance_->GetBounds(box);
         for (int i = 0; i < 3; ++i) { minXyz[i] = box.min[i]; maxXyz[i] = box.max[i]; }
     }
+    void GetWorldBounds(float* minXyz, float* maxXyz) override {
+        cS3DBoundingBox box;
+        instance_->GetWorldBounds(box);
+        for (int i = 0; i < 3; ++i) { minXyz[i] = box.min[i]; maxXyz[i] = box.max[i]; }
+    }
     void GetTransform(cS3DTransform& out) override { instance_->GetTransform(out); }
     void SetTransform(const cS3DTransform& transform) override { instance_->SetTransform(transform); }
     void SetOpacity(float opacity, bool translucent) override { if (animated_) animated_->SetOpacity(translucent, opacity); }
@@ -178,7 +183,12 @@ public:
     }
     bool NetworkAt(int, int) override { return false; }
     bool LotAt(int, int) override { return false; }
-    void PlaceOnNetwork(const cS3DVector3&, const cS3DVector3&, std::uint32_t) override {}
+    // traffic network map vslot 0xb0 (Mac i386): a step that would leave the road tiles is pulled back onto them
+    void PlaceOnNetwork(const cS3DVector3& from, cS3DVector3& to, std::uint32_t mask) override {
+        static const bool off = std::getenv("SC4_NOROADCONSTRAINT") != nullptr;   // A/B switch
+        if (off) return;
+        if (cSC4TrafficNetworkMap* map = NetworkMap()) map->ConstrainVectorToNetworkTile(from, to, mask);
+    }
     cSC4AutomataController* FindAttraction(cISC4Occupant* occupant, cS3DVector3* direction, float* distance, float* strength) override {
         static const bool off = std::getenv("SC4_NOATTRACTION") != nullptr;   // A/B switch
         return off ? nullptr : NativeFindAttraction(occupant, direction, distance, strength);

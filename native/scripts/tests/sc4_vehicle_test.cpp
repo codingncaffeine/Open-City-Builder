@@ -236,7 +236,15 @@ struct FakeAutomatonHost final : IAutomatonHost {
     float TerrainHeight(float, float) override { return terrainHeight; }
     bool NetworkAt(int, int) override { return true; }
     bool LotAt(int, int) override { return false; }
-    void PlaceOnNetwork(const cS3DVector3&, const cS3DVector3&, std::uint32_t) override {}
+    void PlaceOnNetwork(const cS3DVector3&, cS3DVector3& to, std::uint32_t mask) override {
+        ++placeCalls;
+        placeMask = mask;
+        if (placeOnRoad) to = roadPoint;
+    }
+    int placeCalls = 0;
+    std::uint32_t placeMask = 0;
+    bool placeOnRoad = false;
+    cS3DVector3 roadPoint{0.0f, 0.0f, 0.0f};
     cSC4AutomataController* FindAttraction(cISC4Occupant*, cS3DVector3*, float*, float*) override { return nullptr; }
     IAutomatonGroupTemplate* FindAutomataGroup(std::uint32_t) override { return nullptr; }
     bool AnimationUpdateAllowed() override { return true; }
@@ -1974,6 +1982,21 @@ void TestPedestrian() {
     PortMemoryIStream badStream(bad, sizeof(bad));
     CHECK(!copy->Read(badStream));
     copy->Release();
+
+    // ---- a free step is put back on the road tiles before it is taken (MoveForwardWithCollision, i386: map vslot 0xb0) ----
+    {
+        cSC4Pedestrian* walker = MakePedestrian(world, host);
+        const float start[3] = {40.0f, 0.0f, 56.0f};
+        walker->SetPosition(start);
+        world.automatonHost.placeOnRoad = true;
+        world.automatonHost.roadPoint = cS3DVector3{47.0f, 3.0f, 48.0f};
+        const int callsBefore = world.automatonHost.placeCalls;
+        CHECK(walker->MoveForwardWithCollision(cS3DVector3{0.0f, 0.0f, -1.0f}, 16.0f));
+        CHECK(world.automatonHost.placeCalls == callsBefore + 1 && world.automatonHost.placeMask == 0xc49);
+        CHECK(walker->Position().x == 47.0f && walker->Position().z == 48.0f);
+        world.automatonHost.placeOnRoad = false;
+        walker->Release();
+    }
 
     // ---- cSC4PedestrianOneShot (i386 0x000b1c0a..0x000b28cc): stands, plays its animation a rolled number of times, leaves ----
     {

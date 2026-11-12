@@ -181,6 +181,8 @@ public:
     virtual void AddRef() = 0;
     virtual void Release() = 0;
     virtual void GetBounds(float* minXyz, float* maxXyz) = 0;       // cIS3DModelInstance slot 0x38
+    // slot 0x40: the bounds where the instance stands (the automaton's occupant box). Defaults to the model's own box.
+    virtual void GetWorldBounds(float* minXyz, float* maxXyz) { GetBounds(minXyz, maxXyz); }
     virtual void GetTransform(cS3DTransform& out) = 0;              // slot 0x48
     virtual void SetTransform(const cS3DTransform& transform) = 0;  // slot 0x50
     virtual void SetOpacity(float opacity, bool translucent) = 0;   // slot 0x128
@@ -273,7 +275,8 @@ public:
     virtual float RoadAltitude(float x, float z) { return TerrainHeight(x, z); }
     virtual bool NetworkAt(int cellX, int cellZ) = 0;                             // network manager slot 0x70
     virtual bool LotAt(int cellX, int cellZ) = 0;                                 // lot manager slot 0x28
-    virtual void PlaceOnNetwork(const cS3DVector3& from, const cS3DVector3& to, std::uint32_t mask) = 0;   // slot 0x160
+    // the same map's ConstrainVectorToNetworkTile as the walking states call it: `to` comes back on the road tiles
+    virtual void PlaceOnNetwork(const cS3DVector3& from, cS3DVector3& to, std::uint32_t mask) = 0;   // slot 0x160
     // ---- automata controller manager (city slot 0x178)
     virtual cSC4AutomataController* FindAttraction(cISC4Occupant* occupant, cS3DVector3* attraction, float* radius,
                                                    float* distance) = 0;          // controller manager slot 0xb0

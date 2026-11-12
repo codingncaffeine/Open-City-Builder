@@ -1162,6 +1162,12 @@ int RunScenario(const std::string& path) {
             native::NativeIgniteCell(x, z, force == "force");
         } else if (command == "fires") {   // fires: the fire disaster's state, one line per fire
             native::NativeFireReport();
+        } else if (command == "riot") {   // riot X Z: a riot starts on the road nearest to a city cell (what a mayor rating hotspot does)
+            int x = 0, z = 0;
+            words >> x >> z;
+            native::NativeStartRiot(x, z);
+        } else if (command == "riots") {   // riots: every riot's phase and leaders
+            native::NativeRiotReport();
         } else if (command == "querylist") {   // querylist [SKIPUI] [N]: buildings with a query window other than SKIPUI (hex)
             std::string skip;
             int limit = 40;

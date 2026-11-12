@@ -24,7 +24,7 @@ struct StubAutomaton final : IAutomatonHost {
     float TerrainHeight(float x, float z) override { return {}; }
     bool NetworkAt(int cellX, int cellZ) override { return {}; }
     bool LotAt(int cellX, int cellZ) override { return {}; }
-    void PlaceOnNetwork(const cS3DVector3& from, const cS3DVector3& to, std::uint32_t mask) override {}
+    void PlaceOnNetwork(const cS3DVector3& from, cS3DVector3& to, std::uint32_t mask) override {}
     cSC4AutomataController* FindAttraction(cISC4Occupant* occupant, cS3DVector3* attraction, float* radius, float* distance) override { return {}; }
     IAutomatonGroupTemplate* FindAutomataGroup(std::uint32_t id) override { return {}; }
     bool AnimationUpdateAllowed() override { return {}; }

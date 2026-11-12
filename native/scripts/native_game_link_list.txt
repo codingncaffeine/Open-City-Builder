@@ -383,6 +383,7 @@ src/sc4/CivicBuildingSimulator.cpp
 src/sc4/PipeBurstInstance.cpp
 src/sc4/DisasterManagers.cpp
 src/sc4/DisasterInstanceFire.cpp
+src/sc4/DisasterInstanceRiot.cpp
 src/sc4/SimFireCrew.cpp
 src/sc4/FloraSimulator.cpp
 src/sc4/FoundationOccupant.cpp
@@ -613,6 +614,7 @@ src/app/NativeCatalogUi.cpp
 src/app/NativeToolTips.cpp
 src/app/NativeWaterRipple.cpp
 src/app/NativeDisasters.cpp
+src/app/NativeRiot.cpp
 src/app/NativeFireEffects.cpp
 src/app/NativeFireCrew.cpp
 src/app/NativeCrime.cpp

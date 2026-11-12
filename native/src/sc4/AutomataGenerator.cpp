@@ -1,6 +1,8 @@
 #include "sc4/AutomataGenerator.h"
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "sc4/GeometryUtilities.h"
@@ -137,6 +139,7 @@ void cSC4AutomataGenerator::DoAnimationTick(float dt, std::uint32_t arg, const C
     std::uint32_t limit = 0xffffffffu;
     limit = groupLimit_;
     if (limit < 2) limit = tmpl->maxAutomata == 0 ? 0xffffffffu : tmpl->maxAutomata;
+    static const bool trace = std::getenv("SC4_GENERATORDUE") != nullptr;   // why a due generator does or does not spawn
     if (host_->BaseLiveCount() < limit) {
         float now = 0;
         std::int32_t day = 0;
@@ -145,8 +148,15 @@ void cSC4AutomataGenerator::DoAnimationTick(float dt, std::uint32_t arg, const C
             const float curve = tmpl->spawnCurve.GetOutputValue(now);
             const double roll = random_.RandomDoubleUniform();
             const float magnitude = curve < 0.0f ? -curve : curve;
+            if (trace)
+                std::fprintf(stderr, "generator %p due: live %u of %u, clock %.2f day %d, curve %.3f, roll %.2f of %.2f\n", static_cast<void*>(this),
+                             host_->BaseLiveCount(), limit, now, day, curve, roll, tmpl->probability);
             if (0.0f < magnitude && static_cast<float>(roll) <= tmpl->probability) TriggerGenerator(curve);
+        } else if (trace) {
+            std::fprintf(stderr, "generator %p due: day %d is not in its day mask %x\n", static_cast<void*>(this), day, tmpl->dayMask);
         }
+    } else if (trace) {
+        std::fprintf(stderr, "generator %p due: full, %u of %u\n", static_cast<void*>(this), host_->BaseLiveCount(), limit);
     }
     float period = 0.0f;
     if (static_cast<std::uint64_t>(static_cast<std::int64_t>(tmpl->periodUnit)) < 4)
@@ -259,6 +269,10 @@ void cSC4AutomataGenerator::TriggerGenerator(float curveValue) {
     std::uint32_t maxLive = groupLimit_;
     if (maxLive < 2) maxLive = tmpl->maxAutomata == 0 ? 0xffffffffu : tmpl->maxAutomata;
     const float zeroVector[3] = {0, 0, 0};
+    static const bool trace = std::getenv("SC4_GENERATORDUE") != nullptr;
+    if (trace)
+        std::fprintf(stderr, "generator %p triggers: %u attempts from (%.0f, %.0f), network mask %x, %zu cells\n", static_cast<void*>(this), attempts,
+                     origin[0], origin[2], mask, cells.size());
 
     for (std::uint32_t attempt = 0; attempt < attempts; ++attempt) {
         if (maxLive < host_->BaseLiveCount()) break;
@@ -321,13 +335,18 @@ void cSC4AutomataGenerator::TriggerGenerator(float curveValue) {
                 place = true;
             }
         }
-        if (!place) continue;
+        if (!place) {
+            if (trace) std::fprintf(stderr, "generator %p: the point (%.0f, %.0f) is not on its networks\n", static_cast<void*>(this), pos[0], pos[2]);
+            continue;
+        }
 
         // spawn
         if (group_ == 0 || groupLimit_ <= groupSpawned_) ChooseAutomataGroup();
         IAutomatonManager* manager = host_->ManagerForGroup(group_);
+        if (trace && !manager) std::fprintf(stderr, "generator %p: no manager for group %x\n", static_cast<void*>(this), group_);
         if (!manager) break;
         IAutomaton* automaton = manager->CreateAutomaton(group_, pos, kAutomataSpawnFlags, zeroVector, 0, tmpl->spawnArgument);
+        if (trace && !automaton) std::fprintf(stderr, "generator %p: the manager made no automaton of group %x\n", static_cast<void*>(this), group_);
         if (!automaton) continue;
         host_->BaseAddAutomaton(automaton);
         ++groupSpawned_;

@@ -220,7 +220,7 @@ struct FakeHost final : IWatercraftHost {
     float TerrainHeight(float, float) override { return terrainY; }
     bool NetworkAt(int, int) override { return false; }
     bool LotAt(int cellX, int cellZ) override { return lotCells.count({cellX, cellZ}) != 0; }
-    void PlaceOnNetwork(const cS3DVector3&, const cS3DVector3&, std::uint32_t) override {}
+    void PlaceOnNetwork(const cS3DVector3&, cS3DVector3&, std::uint32_t) override {}
     cSC4AutomataController* FindAttraction(cISC4Occupant*, cS3DVector3*, float*, float*) override { return nullptr; }
     IAutomatonGroupTemplate* FindAutomataGroup(std::uint32_t id) override { return id == group.id ? &group : nullptr; }
     bool AnimationUpdateAllowed() override { return animationAllowed; }

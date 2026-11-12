@@ -403,7 +403,7 @@ bool cSC4Automaton::LoadModels() {
     for (const cGZPersistResourceKey& key : modelKeys_) AddModelInstance(key);
     if (!models_.empty()) {
         float bounds[6] = {1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f};
-        models_.front()->GetBounds(bounds, bounds + 3);
+        models_.front()->GetWorldBounds(bounds, bounds + 3);   // i386 0x000c9f20: instance vslot 0x20
         std::memcpy(boundingBox_, bounds, sizeof(boundingBox_));
         // the radius is half the first model's length; a model longer than 64 gets 32
         radius_ = (bounds[5] - bounds[2]) * 0.5f;
@@ -723,7 +723,7 @@ bool cSC4Automaton::PlaceInOccupantManager(bool add) {
     if (add) {
         if (!models_.empty()) {
             float bounds[6];
-            models_.front()->GetBounds(bounds, bounds + 3);
+            models_.front()->GetWorldBounds(bounds, bounds + 3);   // i386 0x000bde78: instance vslot 0x20
             std::memcpy(boundingBox_, bounds, sizeof(boundingBox_));
         }
         if (!Host()->InsertOccupant(this)) return false;
@@ -782,7 +782,7 @@ bool cSC4Automaton::PlaceInRenderer(bool add) {
 void cSC4Automaton::FinishMove(bool fadeIn, bool fadeOut) {
     if (!models_.empty()) {
         float bounds[6];
-        models_.front()->GetBounds(bounds, bounds + 3);
+        models_.front()->GetWorldBounds(bounds, bounds + 3);   // the occupant's box is where the model stands (instance vslot 0x20)
         std::memcpy(boundingBox_, bounds, sizeof(boundingBox_));
     }
     if (IsFlagSet(kOccupantFlagVisible) && Host()) {
@@ -1911,7 +1911,7 @@ bool cSC4Automaton::DoCollideTick(float milliseconds) {
     if (IsFlagSet(kAutomatonOccupantInRenderer)) SetVisible(false);
     if (!models_.empty()) {
         float bounds[6];
-        models_.front()->GetBounds(bounds, bounds + 3);
+        models_.front()->GetWorldBounds(bounds, bounds + 3);   // the occupant's box is where the model stands (instance vslot 0x20)
         std::memcpy(boundingBox_, bounds, sizeof(boundingBox_));
     }
     if (IsFlagSet(kAutomatonOccupantInManager) && Host()) Host()->RefreshOccupant(this);

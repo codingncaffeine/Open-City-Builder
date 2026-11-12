@@ -394,6 +394,35 @@ int main() {
     cS3DVector3 onTile{40.0f, 42.0f, 56.0f};
     CHECK(map.ConstrainVectorToNetworkTile(onTile, onTile, 0x1f4f));   // already on the network
 
+    // ---- a step off the road is turned along the tile edge it crossed (Mac i386 0x001e9154) ----
+    {
+        // the street tile is cell (2, 3): x 32..48, z 48..64, road altitude 42; nothing else around it carries a road
+        const cS3DVector3 from{40.0f, 42.0f, 56.0f};
+        cS3DVector3 north{44.0f, 42.0f, 45.0f};                 // 3 past the low z edge, heading +x
+        CHECK(map.ConstrainVectorToNetworkTile(from, north, 0x1f4f));
+        CHECK(north.x == 47.0f && north.z == 48.0f && north.y == 42.0f);
+        cSC4TrafficNetworkMap& mapRef = map;
+        cS3DVector3 south{44.0f, 42.0f, 66.0f};                 // 2 past the high z edge: the point stops just inside it
+        CHECK(mapRef.ConstrainVectorToNetworkTile(from, south, 0x1f4f));
+        CHECK(south.x == 46.0f && std::fabs(south.z - 63.99f) < 1e-4f);
+        cS3DVector3 west{30.0f, 42.0f, 54.0f};                  // 2 past the low x edge, heading -z
+        CHECK(map.ConstrainVectorToNetworkTile(from, west, 0x1f4f));
+        CHECK(west.x == 32.0f && west.z == 52.0f);
+        // a corner step whose two turned points both land off the road: clamped into the starting tile, and the answer is false
+        const cS3DVector3 corner{34.0f, 42.0f, 50.0f};
+        cS3DVector3 out{30.0f, 9.0f, 46.0f};
+        CHECK(!map.ConstrainVectorToNetworkTile(corner, out, 0x1f4f));
+        CHECK(out.x == 32.0f && out.z == 48.0f && out.y == 42.0f);
+        // a step inside a tile without a road crosses no edge: the nearest road tile around the point takes it
+        const cS3DVector3 offRoad{40.0f, 5.0f, 40.0f};
+        cS3DVector3 stillOff{41.0f, 5.0f, 41.0f};
+        CHECK(map.ConstrainVectorToNetworkTile(offRoad, stillOff, 0x1f4f));
+        CHECK(stillOff.x == 41.0f && stillOff.z == 48.0f && stillOff.y == 42.0f);
+        // networks the tile does not carry do not hold the step
+        cS3DVector3 other{44.0f, 42.0f, 45.0f};
+        CHECK(!map.ConstrainVectorToNetworkTile(from, other, 0x2));
+    }
+
     // ---- surrounding roads ----
     FakeOccupant near;   // top-left inside the rectangle -> rejected as "surrounding"
     InitStreet(near, 2, 3);

@@ -149,6 +149,9 @@ public:
     virtual cIGZMessageServer2* MessageServer() { return nullptr; }              // SL::spMS2 (null when absent)
     virtual cISC4DisasterLayer* DisasterLayer() = 0;                             // city vslot 0x240
     virtual cISC4OccupantManager* Occupants() = 0;                               // SL::spOccupantManager
+    // occupant manager vslot FindOccupant: is the occupant still in the city (a disaster location follows it while it is).
+    // A host whose automata live outside the occupant manager answers for them too.
+    virtual bool IsOccupantInCity(cISC4Occupant* occupant);
     virtual bool CityEstablished() { return true; }                              // city vslot 0xb0
     virtual void EmergencyPause() {}                                             // simulator vslot 0x58
     virtual void EmergencyResume() {}                                            // simulator vslot 0x70

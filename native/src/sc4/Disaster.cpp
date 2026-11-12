@@ -277,11 +277,15 @@ void cSC4DisasterLayer::EndDispatchTimers() {
     policeDispatchRatio_ = police != 0 ? policeBusy / (static_cast<float>(police) * total) : 0.0f;
 }
 
+bool IDisasterHost::IsOccupantInCity(cISC4Occupant* occupant) {
+    cISC4OccupantManager* manager = Occupants();
+    return manager && manager->FindOccupant(occupant, false, nullptr, nullptr);
+}
+
 void cSC4DisasterLayer::ResolveDisasterLocation(Location& location) {
     if (!g_host) return;
     if (location.occupant) {
-        cISC4OccupantManager* manager = g_host->Occupants();
-        if (manager && manager->FindOccupant(location.occupant, false, nullptr, nullptr)) {
+        if (g_host->IsOccupantInCity(location.occupant)) {
             float position[3] = {};
             location.occupant->GetPosition(position);
             int cellX = 0, cellZ = 0;
