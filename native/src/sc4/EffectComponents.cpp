@@ -68,7 +68,7 @@ void cSC4AttractorDescription::Read(cIGZIStream& stream) {
 }
 void cSC4AttractorDescription::Write(cIGZOStream& stream) const {
     stream.SetUint16(0);
-    stream.SetRZCharStr(name.c_str());
+    WriteEffectString(stream, name);
     stream.SetUint8(flag ? 1 : 0);
 }
 
@@ -106,7 +106,7 @@ void cSC4SequenceDescription::Write(cIGZOStream& stream) const {
     stream.SetUint32(static_cast<std::uint32_t>(items.size()));
     for (const cItemRec& item : items) {
         stream << item.range;
-        stream.SetRZCharStr(item.name.c_str());
+        WriteEffectString(stream, item.name);
     }
     stream.SetUint32(value);
 }

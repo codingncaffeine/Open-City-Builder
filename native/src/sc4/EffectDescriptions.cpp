@@ -26,6 +26,11 @@ std::string ReadEffectString(cIGZIStream& s) {
     return text;
 }
 
+void WriteEffectString(cIGZOStream& s, const std::string& text) {
+    s.SetUint32(static_cast<std::uint32_t>(text.size()));
+    if (!text.empty()) s.SetVoid(text.data(), static_cast<std::uint32_t>(text.size()));
+}
+
 void S3DTransformLegacySave(cIGZOStream& s, const cS3DTransform& v) {
     for (int row = 0; row < 3; ++row)
         for (int col = 0; col < 3; ++col) s.SetFloat32(v.rotation[row][col]);
@@ -127,7 +132,7 @@ cIGZIStream& operator>>(cIGZIStream& s, cSC4MessageTriggerDescription& v) {
 }
 cIGZOStream& operator<<(cIGZOStream& s, const cSC4MessageTriggerDescription& v) {
     s.SetUint32(v.message);
-    s.SetRZCharStr(v.name.c_str());
+    WriteEffectString(s, v.name);
     return s;
 }
 
@@ -148,7 +153,7 @@ cIGZIStream& operator>>(cIGZIStream& s, cSC4EffectDescription::cDescriptionRec& 
     return s;
 }
 cIGZOStream& operator<<(cIGZOStream& s, const cSC4EffectDescription::cDescriptionRec& v) {
-    s.SetRZCharStr(v.name.c_str());
+    WriteEffectString(s, v.name);
     s.SetUint8(static_cast<std::uint8_t>(v.kind));
     s.SetUint32(static_cast<std::uint32_t>(v.type));
     S3DTransformLegacySave(s, v.transform);
@@ -172,7 +177,7 @@ cIGZIStream& operator>>(cIGZIStream& s, cSC4EffectDescription::cEventRec& v) {
 }
 cIGZOStream& operator<<(cIGZOStream& s, const cSC4EffectDescription::cEventRec& v) {
     s.SetUint32(static_cast<std::uint32_t>(v.type));
-    s.SetRZCharStr(v.name.c_str());
+    WriteEffectString(s, v.name);
     s.SetFloat32(v.delay);
     s.SetUint32(v.flags);
     return s;
@@ -198,7 +203,7 @@ cIGZOStream& operator<<(cIGZOStream& s, const cSC4EffectDescription& v) {
     for (const auto& r : v.records) s << r;
     s.SetUint32(static_cast<std::uint32_t>(v.events.size()));
     for (const auto& e : v.events) s << e;
-    s.SetRZCharStr(v.label.c_str());
+    WriteEffectString(s, v.label);
     for (std::uint32_t x : v.values) s.SetUint32(x);
     return s;
 }
@@ -241,7 +246,7 @@ cIGZIStream& operator>>(cIGZIStream& s, cSC4DynamicParticleDescription& v) {
 }
 cIGZOStream& operator<<(cIGZOStream& s, const cSC4DynamicParticleDescription& v) {
     s.SetUint32(static_cast<std::uint32_t>(v.type));
-    s.SetRZCharStr(v.name.c_str());
+    WriteEffectString(s, v.name);
     s.SetUint32(v.count);
     s << v.curve;
     for (float f : v.values) s.SetFloat32(f);

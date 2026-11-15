@@ -56,14 +56,14 @@ int main() {
         cSC4ParticlesDescriptionBase::cTractorPoint t; t.position = {1, 2, 3}; t.direction = {4, 5, 6}; t.strength = 7; t.radius = 8;
         cSC4DynamicParticleDescription d; d.type = 4; d.name = "spark"; d.count = 3; d.curve = {1, 2}; d.values[5] = 6;
         PortMemoryOStream os; os << t << d;
-        os.SetRZCharStr("late");   // a timed effect: name then time
+        WriteEffectString(os, "late");   // a timed effect: name then time
         os.SetFloat32(2.5f);
         PortMemoryIStream is(os.bytes().data(), os.bytes().size());
         cSC4ParticlesDescriptionBase::cTractorPoint t2; cSC4DynamicParticleDescription d2; cSC4ParticlesDescriptionBase::cTimedEffect te;
         is >> t2 >> d2 >> te;
         CHECK(t2.direction.z == 6 && t2.radius == 8 && d2.type == 4 && d2.name == "spark" && d2.count == 3 && d2.curve.size() == 2 && d2.values[5] == 6);
         CHECK(te.name == "late" && te.time == 2.5f);
-        PortMemoryOStream os2; os2 << cS3DVector2{1, 2}; os2.SetRZCharStr("item");
+        PortMemoryOStream os2; os2 << cS3DVector2{1, 2}; WriteEffectString(os2, "item");
         PortMemoryIStream is2(os2.bytes().data(), os2.bytes().size());
         sc4::cSC4SequenceDescription::cItemRec item; is2 >> item;
         CHECK(item.range.y == 2 && item.name == "item");
