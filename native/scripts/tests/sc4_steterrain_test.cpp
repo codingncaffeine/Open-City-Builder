@@ -2566,7 +2566,14 @@ int main() {
             host.floraPlaced.clear();
             host.floraAuras.clear();
             host.cityIsEstablished = true;
-            for (cSTETerrain::Vertex& vertex : brush.Vertices()) vertex.altitude = 0.0f;   // the "can plant" test
+            // under water nothing is planted, and the "cannot plant here" sound is posted
+            brush.WaterDepth().assign(brush.VertexCount(), 5.0f);
+            host.soundPosts.clear();
+            const auto randomBefore = host.randomState;
+            for (std::int32_t i = 0; i < 200; ++i) brush.BrushFnFlora(brush.GetVertIndex(2 + i % 4, 2 + i % 3), ctx);
+            CHECK(host.floraPlaced.empty() && !host.soundPosts.empty());
+            host.randomState = randomBefore;
+            brush.WaterDepth().assign(brush.VertexCount(), 0.0f);   // dry land: the "can plant" test is the water's depth
             bool planted = false;
             for (std::int32_t i = 0; i < 200 && !planted; ++i) {
                 brush.BrushFnFlora(brush.GetVertIndex(2 + i % 4, 2 + i % 3), ctx);
