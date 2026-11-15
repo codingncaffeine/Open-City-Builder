@@ -464,6 +464,120 @@ int main() {
         host.tract = nullptr;
         growth->Release();
     }
+    // ---- DoTerrainChanged (i386 0x000f77e8): lots whose ground left them are demolished, the others refitted
+    {
+        struct Ground final : ITerrainChangedLot {
+            std::int32_t rect[4] = {0, 0, 0, 0};
+            float center[3] = {0, 0, 0};
+            float builtSlope = 0.0f, slopeNow = 0.0f;
+            bool demolishable = true;
+            void GetBoundingRect(std::int32_t out[4]) override { for (int i = 0; i < 4; ++i) out[i] = rect[i]; }
+            void GetCenter(float xyz[3]) override { for (int i = 0; i < 3; ++i) xyz[i] = center[i]; }
+            float GetSlopeAtTimeOfConstruction() override { return builtSlope; }
+            bool IsInDemolishableState() override { return demolishable; }
+        };
+        struct City final : ITerrainChangedHost {
+            std::vector<Ground*> lots;
+            float altitude = 100.0f;
+            std::int64_t demolitionCost = 250;
+            std::int32_t asked[4] = {0, 0, 0, 0};
+            int queries = 0, done = 0, demolitions = 0;
+            std::vector<ITerrainChangedLot*> updated, demolished;
+            std::vector<std::uint32_t> updateReasons;
+            std::vector<std::pair<int, bool>> cleared;     // the cleared rect's x0, and whether the mayor pays
+            std::vector<std::int64_t> charged;
+            void LotsInCellRect(const std::int32_t rect[4], std::vector<ITerrainChangedLot*>& out) override {
+                ++queries;
+                for (int i = 0; i < 4; ++i) asked[i] = rect[i];
+                for (Ground* lot : lots) out.push_back(lot);
+            }
+            void LotsDone() override { ++done; }
+            float TerrainAltitude(float, float) override { return altitude; }
+            float LotSlope(ITerrainChangedLot* lot) override { return static_cast<Ground*>(lot)->slopeNow; }
+            float CellWidthX() override { return 16.0f; }
+            void UpdateLotElements(ITerrainChangedLot* lot, std::uint32_t reason) override { updated.push_back(lot); updateReasons.push_back(reason); }
+            void ClearZone(const std::int32_t rect[4], bool mayorPays) override { cleared.emplace_back(rect[0], mayorPays); }
+            std::int64_t DemolishLots(const std::vector<ITerrainChangedLot*>& doomed) override {
+                ++demolitions;
+                demolished.insert(demolished.end(), doomed.begin(), doomed.end());
+                return doomed.empty() ? 0 : demolitionCost;
+            }
+            void ChargeFunds(std::int64_t cost) override { charged.push_back(cost); }
+        } city;
+        SetTerrainChangedHost(&city);
+        auto* growth = new S();
+        growth->AddRef();
+        growth->SetCityCells(64, 64);
+        Ground level, sunk, raised, steep, vacant;
+        level.center[1] = 99.5f;                           // the ground moved half a unit: fine
+        sunk.center[1] = 101.5f;                           // the ground is 1.5 under the lot
+        raised.center[1] = 97.5f;                          // ... 2.5 over it
+        steep.center[1] = 100.0f; steep.builtSlope = 1.0f; steep.slopeNow = 3.0f;   // about 7 degrees steeper than built
+        vacant.center[1] = 90.0f; vacant.demolishable = false; vacant.rect[0] = 7;
+        city.lots = {&level, &sunk, &raised, &steep, &vacant};
+        const std::int32_t rect[4] = {3, 4, 9, 12};
+        growth->DoTerrainChanged(rect, 3);                 // a disaster: nobody pays
+        CHECK(city.queries == 1 && city.done == 1 && city.asked[0] == 3 && city.asked[3] == 12);
+        CHECK(city.updated.size() == 1 && city.updated[0] == &level && city.updateReasons[0] == 3);
+        CHECK(city.demolished.size() == 3 && city.demolished[0] == &sunk && city.demolished[1] == &raised && city.demolished[2] == &steep);
+        CHECK(city.cleared.size() == 1 && city.cleared[0].first == 7 && !city.cleared[0].second);   // nothing to demolish there: the zone goes
+        CHECK(city.charged.empty());
+        // the limits themselves are fine: exactly 1 down, exactly 2 up, exactly as steep as the lot may get
+        Ground edgeDown, edgeUp;
+        edgeDown.center[1] = 101.0f;
+        edgeUp.center[1] = 98.0f;
+        city.lots = {&edgeDown, &edgeUp};
+        city.updated.clear(); city.demolished.clear();
+        growth->DoTerrainChanged(rect, 3);
+        CHECK(city.updated.size() == 2 && city.demolished.empty());
+        Ground slight;
+        slight.center[1] = 100.0f; slight.builtSlope = 1.0f; slight.slopeNow = 2.0f;   // about 3.5 degrees steeper: under the 5
+        city.lots = {&slight};
+        city.updated.clear();
+        growth->DoTerrainChanged(rect, 3);
+        CHECK(city.updated.size() == 1 && city.demolished.empty());
+        // the mayor's own terraforming (reasons 1 and 2) is charged what the demolition cost, and the zone is cleared at
+        // the mayor's expense
+        city.lots = {&sunk, &vacant};
+        city.demolished.clear(); city.cleared.clear();
+        growth->DoTerrainChanged(rect, 1);
+        CHECK(city.demolished.size() == 1 && city.charged.size() == 1 && city.charged[0] == 250);
+        CHECK(city.cleared.size() == 1 && city.cleared[0].second);
+        growth->DoTerrainChanged(rect, 2);
+        CHECK(city.charged.size() == 2);
+        city.lots = {&level};                              // nothing demolished: nothing charged
+        growth->DoTerrainChanged(rect, 1);
+        CHECK(city.charged.size() == 2);
+        // any other reason only refits the lots, whatever happened to their ground
+        city.lots = {&sunk, &vacant};
+        city.updated.clear(); city.demolished.clear(); city.cleared.clear();
+        const int demolitionsBefore = city.demolitions;
+        growth->DoTerrainChanged(rect, 0);
+        CHECK(city.updated.size() == 2 && city.updateReasons.back() == 0 && city.demolitions == demolitionsBefore && city.cleared.empty());
+        // an empty rectangle asks nothing
+        const int queriesBefore = city.queries;
+        const std::int32_t empty[4] = {5, 5, 4, 9};
+        growth->DoTerrainChanged(empty, 3);
+        CHECK(city.queries == queriesBefore);
+        // the message: the cells come packed, widened by one towards the origin and cut to the city; data4 is the reason
+        cRZMessage2Standard moved;
+        moved.SetType(kMessageTerrainChanged);
+        moved.SetData1((10u << 16) | 70u);                 // x 10..70 of a 64 cell city
+        moved.SetData2((0u << 16) | 20u);                  // z 0..20
+        moved.SetData3(1);                                 // not the reason: read as one, the mayor would pay below
+        moved.SetData4(3);
+        city.lots = {&sunk};
+        city.demolished.clear();
+        const std::size_t chargesBefore = city.charged.size();
+        growth->DoMessage(&moved);
+        CHECK(city.queries == queriesBefore + 1);
+        CHECK(city.asked[0] == 9 && city.asked[1] == 0 && city.asked[2] == 63 && city.asked[3] == 20);
+        CHECK(city.demolished.size() == 1 && city.charged.size() == chargesBefore);
+        city.lots.clear();
+        SetTerrainChangedHost(nullptr);
+        growth->DoTerrainChanged(rect, 3);                 // without the city's services: nothing
+        growth->Release();
+    }
     S::StaticShutdown();
     std::puts(failures ? "sc4_buildingdevelopment: FAILED" : "sc4_buildingdevelopment ok");
     return failures != 0;

@@ -80,6 +80,8 @@ public:
     virtual std::int64_t MaintenanceCost(cISCPropertyHolder* exemplar) = 0;                // budget sim vslot 0x190
     virtual bool LoadLocalizedName(cISCPropertyHolder* exemplar, std::uint32_t property, cRZString& out) = 0;
     virtual void CityCellSize(float& x, float& z) = 0;                                      // city vslot 0x2d8/0x2e0
+    // SL::spTerrain vslots 0x1c / 0x20: the city's size in cells (Init keeps it at +0x74 / +0x78); false = not known
+    virtual bool CityCellCounts(int& x, int& z) { (void)x; (void)z; return false; }
     virtual void PostBuildingTypesUpdated() = 0;
     virtual std::int32_t SimulatorDay() = 0;
     // The lot configurations the zone capacity map is computed from.
@@ -244,6 +246,39 @@ public:
 IBuildingDevelopmentSimHost* BuildingDevelopmentSimHost();
 void SetBuildingDevelopmentSimHost(IBuildingDevelopmentSimHost* host);
 
+// ---- what DoTerrainChanged reaches (Mac i386 0x000f77e8) ----------------------------------------------------------------
+// A lot under ground that moved (cISC4Lot vslots 0x38, 0x3c, 0x4c, 0x9c).
+class ITerrainChangedLot {
+public:
+    virtual ~ITerrainChangedLot() = default;
+    virtual void GetBoundingRect(std::int32_t rect[4]) = 0;
+    virtual void GetCenter(float xyz[3]) = 0;                               // the height is the one the lot was built at
+    virtual float GetSlopeAtTimeOfConstruction() = 0;
+    virtual bool IsInDemolishableState() = 0;
+};
+class ITerrainChangedHost {
+public:
+    virtual ~ITerrainChangedHost() = default;
+    // the lot manager (+0x2c) vslot 0x1c GetLotsInCellRect(list, x0, z0, x1, z1, false); the lots stay valid until LotsDone
+    virtual void LotsInCellRect(const std::int32_t rect[4], std::vector<ITerrainChangedLot*>& out) = 0;
+    virtual void LotsDone() = 0;
+    virtual float TerrainAltitude(float x, float z) = 0;                    // the terrain (+0x38) vslot 0x30
+    virtual float LotSlope(ITerrainChangedLot* lot) = 0;                    // the lot developer (+0x88) vslot 0x78 (lot, false)
+    virtual float CellWidthX() = 0;                                         // the city (+0x1c) vslot 0x16c
+    virtual void UpdateLotElements(ITerrainChangedLot* lot, std::uint32_t reason) = 0;   // the lot developer vslot 0x94
+    // the zone manager (+0x28) vslot 0x2c PlaceZone(the rect's cells, zone 0, true, mayorPays, false, true, true, null, null, null)
+    virtual void ClearZone(const std::int32_t rect[4], bool mayorPays) = 0;
+    // SL::spDemolition vslot 0x1c DemolishLots(true, lots, privilege 0, flags 1, true, null, &cost, null): what it cost
+    virtual std::int64_t DemolishLots(const std::vector<ITerrainChangedLot*>& lots) = 0;
+    virtual void ChargeFunds(std::int64_t cost) = 0;                        // SL::spBudgetSim: the total funds less the cost
+};
+ITerrainChangedHost* TerrainChangedHost();
+void SetTerrainChangedHost(ITerrainChangedHost* host);
+constexpr float kTerrainChangedMaxSink = -1.0f;            // 0x00a706e8: the ground may fall this far under a lot's center
+constexpr float kTerrainChangedMaxRise = 2.0f;             // 0x00a7072c: ... and rise this far
+constexpr float kTerrainChangedMaxSteepening = 0.0872665f; // 0x00a70880: 5 degrees more slope than the lot was built on
+constexpr std::uint32_t kMessageTerrainChanged = 0x278e6003;   // data1 = x0 << 16 | x1, data2 = z0 << 16 | z1, data4 = the reason
+
 class cSC4BuildingDevelopmentSimulator {
 public:
     cSC4BuildingDevelopmentSimulator() = default;
@@ -258,6 +293,10 @@ public:
     // ---- the simulation (0x10014e84c..0x10014f222)
     bool DoMessage(cIGZMessage2* message);                                  // @ 0x10014e84c
     void DoIdle();                                                          // @ 0x10014ecba
+    // The ground moved under the cells of `rect` (x0, z0, x1, z1): for reasons 1..3 a lot whose ground left it (or
+    // steepened too much) is demolished (its zone is cleared when it holds nothing to demolish) and the others are refitted;
+    // reasons 1 and 2 charge the mayor. Any other reason only refits.
+    void DoTerrainChanged(const std::int32_t rect[4], std::uint32_t reason);   // @ i386 0x000f77e8
     void DoDailySimulation();                                               // @ 0x10014edcc
     void DoMonthlySimulation();                                             // @ 0x10014ee44
     void ReadSimulatorTunableValues();                                      // @ 0x10014d71e

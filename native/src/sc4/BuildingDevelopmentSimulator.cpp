@@ -37,6 +37,9 @@ void CopyKeyList(const std::unordered_map<std::uint32_t, cGZPersistResourceKey>&
 
 IBuildingDevelopmentSimHost* BuildingDevelopmentSimHost() { return g_host; }
 void SetBuildingDevelopmentSimHost(IBuildingDevelopmentSimHost* host) { g_host = host; }
+namespace { ITerrainChangedHost* g_terrainChangedHost = nullptr; }
+ITerrainChangedHost* TerrainChangedHost() { return g_terrainChangedHost; }
+void SetTerrainChangedHost(ITerrainChangedHost* host) { g_terrainChangedHost = host; }
 
 // ------------------------------------------------------------------------------------ type mapping
 
@@ -452,6 +455,10 @@ bool cSC4BuildingDevelopmentSimulator::Init() {
     StaticInit();
     if (!placement_ && g_host) placement_ = g_host->PlacementServices();
     if (!tractDeveloper_ && g_host) tractDeveloper_ = g_host->TractDeveloper();    // SL::spTractDeveloper (+0xd0)
+    if (g_host) {                                                                  // i386 0x000fafaa: the terrain's cell counts
+        int cellsX = 0, cellsZ = 0;
+        if (g_host->CityCellCounts(cellsX, cellsZ)) SetCityCells(cellsX, cellsZ);
+    }
     // A loaded city's developers are the record's (+0xb8 is read with them): CreateDeveloper below re-initialises them from their
     // exemplars and keeps their maps, instead of making empty ones.
     for (const auto& [key, object] : loadedDevelopers_)
@@ -526,13 +533,62 @@ void cSC4BuildingDevelopmentSimulator::ReadSimulatorTunableValues() {
     developerWeightBonus_ = bonus;
 }
 
-// 0x10014e84c. PARTIAL: the building-changed (0xe8bda2e7 -> DoBuildingChanged), terrain-changed (0x278e6003 ->
-// DoTerrainChanged) and PlaceBuilding command (0xb99ae81) branches need functions that are not recovered.
+// i386 0x000f77e8.
+void cSC4BuildingDevelopmentSimulator::DoTerrainChanged(const std::int32_t rect[4], std::uint32_t reason) {
+    ITerrainChangedHost* host = TerrainChangedHost();
+    if (!host || rect[3] < rect[1] || rect[2] < rect[0]) return;
+    std::vector<ITerrainChangedLot*> lots;
+    host->LotsInCellRect(rect, lots);
+    if (reason == 1 || reason == 2 || reason == 3) {
+        const bool mayorPays = reason < 3;
+        std::vector<ITerrainChangedLot*> doomed;
+        for (ITerrainChangedLot* lot : lots) {
+            float center[3] = {0.0f, 0.0f, 0.0f};
+            lot->GetCenter(center);
+            const float moved = host->TerrainAltitude(center[0], center[2]) - center[1];
+            bool destroyed = moved < kTerrainChangedMaxSink || kTerrainChangedMaxRise < moved;
+            if (!destroyed) {
+                const float built = lot->GetSlopeAtTimeOfConstruction();
+                const float now = host->LotSlope(lot);
+                const float cell = host->CellWidthX();
+                destroyed = kTerrainChangedMaxSteepening < std::atan(now / cell) - std::atan(built / cell);
+            }
+            if (!destroyed) {
+                host->UpdateLotElements(lot, reason);
+            } else if (lot->IsInDemolishableState()) {
+                doomed.push_back(lot);
+            } else {
+                std::int32_t bounds[4] = {0, 0, 0, 0};
+                lot->GetBoundingRect(bounds);
+                host->ClearZone(bounds, mayorPays);
+            }
+        }
+        const std::int64_t cost = host->DemolishLots(doomed);
+        if (mayorPays && 0 < cost) host->ChargeFunds(cost);
+    } else {
+        for (ITerrainChangedLot* lot : lots) host->UpdateLotElements(lot, reason);
+    }
+    host->LotsDone();
+}
+
+// 0x10014e84c. PARTIAL: the building-changed (0xe8bda2e7 -> DoBuildingChanged) and PlaceBuilding command (0xb99ae81)
+// branches need functions that are not recovered.
 bool cSC4BuildingDevelopmentSimulator::DoMessage(cIGZMessage2* message) {
     if (!message) return true;
     auto* standard = static_cast<cIGZMessage2Standard*>(message);
     const std::uint32_t type = message->GetType();
     switch (type) {
+        case kMessageTerrainChanged: {                       // the cells are widened by one towards the origin and cut to the city
+            const std::uint32_t xs = static_cast<std::uint32_t>(standard->GetData1()), zs = static_cast<std::uint32_t>(standard->GetData2());
+            std::int32_t rect[4] = {static_cast<std::int32_t>(xs >> 16) - 1, static_cast<std::int32_t>(zs >> 16) - 1,
+                                    static_cast<std::int32_t>(xs & 0xffff), static_cast<std::int32_t>(zs & 0xffff)};
+            if (rect[0] < 0) rect[0] = 0;
+            if (rect[1] < 0) rect[1] = 0;
+            if (cityCellsX_ <= rect[2]) rect[2] = cityCellsX_ - 1;
+            if (cityCellsZ_ <= rect[3]) rect[3] = cityCellsZ_ - 1;
+            DoTerrainChanged(rect, static_cast<std::uint32_t>(standard->GetData4()));
+            break;
+        }
         case 0x99ef1142:                                     // an occupant inserted: civic buildings (families 0x150a / 0x150b)
         case 0x99ef1143: {                                   // ... removed
             auto* occupant = static_cast<cISC4Occupant*>(standard->GetVoid1());

@@ -276,6 +276,13 @@ public:
         return LoadExemplarString(out, exemplar, property);   // SC4LoadExemplarString with the game's detokenizer
     }
     void CityCellSize(float& x, float& z) override { x = 16.0f; z = 16.0f; }
+    bool CityCellCounts(int& x, int& z) override {
+        cSC4City* city = HostCity();
+        if (!city) return false;
+        x = city->CellCountX();
+        z = city->CellCountZ();
+        return x > 0 && z > 0;
+    }
     void PostBuildingTypesUpdated() override {}
     std::int32_t SimulatorDay() override {
         cSC4Simulator* simulator = CityComponent<cSC4Simulator>(sc4::CityComponent::Simulator, kGZCLSID_cSC4Simulator);
@@ -449,9 +456,12 @@ private:
 };
 }  // namespace
 
+void InstallTerrainChangedHost();   // app/NativeTerrainChangedLots.cpp
+
 void InstallBuildingDevelopmentHost() {
     static BuildingDevelopmentHost host;
     sc4::SetBuildingDevelopmentSimHost(&host);
+    InstallTerrainChangedHost();
     static BuildingTypeHost types;
     sc4::SetBuildingDevelopment(&types);
     // cSC4BuildingOccupant::GetName's localized fallback (the exemplar's user-visible name key)

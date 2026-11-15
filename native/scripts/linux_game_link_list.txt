@@ -622,6 +622,7 @@ src/app/NativeZoneTool.cpp
 src/app/NativeZoneOverlay.cpp
 src/app/NativeZoneDeveloperHost.cpp
 src/app/NativeBuildingDevelopment.cpp
+src/app/NativeTerrainChangedLots.cpp
 src/app/NativeGrowthDevelopers.cpp
 src/app/NativeGrowthMaps.cpp
 src/app/NativeTractDevelopment.cpp
