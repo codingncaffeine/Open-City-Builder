@@ -214,6 +214,23 @@ void NativeReleaseEffectHandle(void* handle) {
     if (auto* effect = static_cast<cSC4VisualEffect*>(handle)) effect->Release();
 }
 
+void* NativeCreateEffectWithFinishMessage(const char* name, const float xyz[3], std::uint32_t finishMessage, std::uint32_t finishData) {
+    cSC4VisualEffect* effect = CreateNamedEffect(name);
+    if (Trace()) std::fprintf(stderr, "disaster effect \"%s\" at (%.0f, %.0f, %.0f) -> %s\n", name, xyz[0], xyz[1], xyz[2], effect ? "made" : "none");
+    if (!effect) return nullptr;
+    effect->SetFinishNotifyMessage(finishMessage, finishData);
+    NativeMoveEffectTo(effect, xyz);
+    effect->Start(0);
+    return effect;
+}
+
+void NativeStopEffectHandle(void* handle) {
+    auto* effect = static_cast<cSC4VisualEffect*>(handle);
+    if (!effect) return;
+    effect->Stop(1);
+    effect->Release();
+}
+
 void NativeDisasterMenuReport() {
     if (!SL::spRM) { std::printf("disasters: no resource manager\n"); return; }
     struct Filter final : cIGZPersistResourceKeyFilter {

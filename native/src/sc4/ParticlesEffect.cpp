@@ -2045,10 +2045,8 @@ void cSC4ParticlesEffect::RenderActiveParticlesVB(IParticlesDrawContext* context
 
 // ---- next group -----------------------------------------------------------------------------------
 
-// 0x1005f9018
-// PARTIAL: the trigger object comes from the unrecovered effects manager (seam) and the legacy transform the original
-// builds inline (flags 0x1005f9074..0x1005f90a0) is passed as the effect's source transform; only its translation is
-// recovered with confidence.
+// 0x1005f9018 (i386 0x00413ae2): the effect "<the description's name><suffix>" from the effects manager, placed at the
+// point (a transform that is only that translation) and started.
 void cSC4ParticlesEffect::TriggerEffect(const char* suffix, const cS3DVector3& position) {
     static std::string name;
     name = description_->name;
@@ -2057,6 +2055,8 @@ void cSC4ParticlesEffect::TriggerEffect(const char* suffix, const cS3DVector3& p
     if (ParticlesEffects()) effect = ParticlesEffects()->FindTriggerEffect(name.c_str());
     if (effect) {
         cS3DTransform transform{};
+        transform.flags = 1;                 // a translation (without the flag the effect stays at the map's origin)
+        transform.changeCounter = 1;
         transform.translation[0] = position.x;
         transform.translation[1] = position.y;
         transform.translation[2] = position.z;

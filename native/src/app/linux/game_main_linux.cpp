@@ -1168,6 +1168,8 @@ int RunScenario(const std::string& path) {
             native::NativePrintAdvisors();
         } else if (command == "ticker") {   // ticker: the news ticker's queue, flipper ring and scroll
             native::NativeTickerReport();
+        } else if (command == "terrainflags") {   // terrainflags: hidden-terrain cell flags against the city file's (SC4_TERRAINHIDEDEBUG=1)
+            native::NativeTerrainHidingReport();
         } else if (command == "redraw") {   // redraw: the renderer redraws the whole view (static view and backing store included)
             if (sc4::cSC43DRender* render = native::CityRenderer()) render->ForceFullRedraw();
         } else if (command == "wintree") {   // wintree [DEPTH]: the window tree under the main window (id, visible, area, kids)
@@ -1343,6 +1345,14 @@ namespace platform {
 bool RightMouseButtonDown() { return (gButtons & SDL_BUTTON_RMASK) != 0; }
 }  // namespace platform
 
+// The game's windows are closed here, while everything they use is still alive. Left to the window manager's destructor (a
+// global's), the city view shut down after other globals were already destroyed (the sprite cache, the audio device): an effect
+// that drives automata, stopped then, made them load a sprite from the freed cache.
+void CloseWindows() {
+    if (!gMgr) return;
+    if (cIGZWin* desktop = gMgr->GetMainWindow()) desktop->ChildDeleteAll();
+}
+
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     // The stub SDL clock (PumpTimers refreshes it every frame) must be valid before the boot: a cRZTimer restarted while it reads 0
@@ -1513,7 +1523,11 @@ int main(int argc, char** argv) {
         }
     }
     if (!native::VerifyRuntimeWiring(gDriver.get(), gAudio != nullptr)) { std::fprintf(stderr, "boot halted: a required dependency is not wired\n"); return 3; }
-    if (!scenario.empty()) return RunScenario(scenario);
+    if (!scenario.empty()) {
+        const int result = RunScenario(scenario);
+        CloseWindows();
+        return result;
+    }
 
     if (!shot.empty()) {
         const int n = frames > 0 ? frames : 120;
@@ -1531,6 +1545,7 @@ int main(int argc, char** argv) {
             for (auto& kv : gDriver->UnsupportedCalls()) std::printf("debug: unsupported %s x%d\n", kv.first.c_str(), kv.second);
         }
         WritePng(shot);
+        CloseWindows();
         return 0;
     }
     int n = 0;
@@ -1540,6 +1555,7 @@ int main(int argc, char** argv) {
         Present();
         if (frames > 0 && ++n >= frames) break;
     }
+    CloseWindows();
     if (gAudio) gAudio->Close();   // its voices are SDL audio streams: they go before SDL_Quit (the static outlives it)
     if (gDriver) gDriver->DetachContext();
     SDL_GL_DestroyContext(context);

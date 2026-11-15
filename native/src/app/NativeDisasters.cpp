@@ -22,6 +22,7 @@
 #include "sc4/DisasterInstanceEarthquake.h"
 #include "sc4/DisasterInstanceFire.h"
 #include "sc4/DisasterInstanceRiot.h"
+#include "sc4/DisasterInstanceVolcano.h"
 #include "sc4/DisasterManagers.h"
 #include "sc4/Exemplar.h"
 #include "sc4/FireProtectionSimulator.h"
@@ -253,12 +254,43 @@ private:
 };
 EarthquakeHost g_earthquakeHost;
 
+// ------------------------------------------------------------------------------------------ the volcano's city
+
+class VolcanoHostImpl final : public IVolcanoHost {
+public:
+    float CitySizeX() override { cSC4City* c = HostCity(); return c ? float(c->CellCountX()) * 16.0f : 0.0f; }
+    float CitySizeZ() override { cSC4City* c = HostCity(); return c ? float(c->CellCountZ()) * 16.0f : 0.0f; }
+    float Altitude(float x, float z) override { cSTETerrain* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
+    void* CreateEffect(const char* name, const float xyz[3], std::uint32_t finishMessage, std::uint32_t finishData) override {
+        void* effect = NativeCreateEffectWithFinishMessage(name, xyz, finishMessage, finishData);
+        if (QuakeTrace()) std::fprintf(stderr, "volcano: effect %s at (%.0f, %.0f, %.0f) -> %s\n", name, xyz[0], xyz[1], xyz[2], effect ? "started" : "none");
+        return effect;
+    }
+    void StopEffect(void* effect) override {
+        NativeStopEffectHandle(effect);
+        if (QuakeTrace()) std::fprintf(stderr, "volcano: effect stopped, the volcano is over\n");
+    }
+    void AddTickable(cIGZMessageTarget2* target, std::uint32_t priority) override {
+        if (cSC4AnimationTickManager* atm = AnimationTickManager()) atm->AddTickableObject(target, priority);
+    }
+    void RemoveTickable(cIGZMessageTarget2* target, std::uint32_t priority) override {
+        if (cSC4AnimationTickManager* atm = AnimationTickManager()) atm->RemoveTickableObject(target, priority);
+    }
+    void AddNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->AddNotification(target, message); }
+    void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->RemoveNotification(target, message); }
+    const cISCPropertyHolder* TuningExemplar() override { return HeldExemplar(kVolcanoTuningKey); }
+    // PARTIAL: cSTEVolcanoLava (the lava that flows from the vent, i386 0x004f8170..0x004facd8) is not ported: the volcano
+    // erupts, raises its cone and burns around it, without lava.
+    IVolcanoLava* CreateLava() override { return nullptr; }
+};
+VolcanoHostImpl g_volcanoHost;
+
 // ------------------------------------------------------------------------------------------ the instance factory
 
 class InstanceFactory final : public IDisasterInstanceFactory {
 public:
     cISC4DisasterInstanceFire* CreateFire() override { return new cSC4DisasterInstanceFire(); }
-    cISC4DisasterInstanceVolcano* CreateVolcano() override { return nullptr; }
+    cISC4DisasterInstanceVolcano* CreateVolcano() override { return new cSC4DisasterInstanceVolcano(); }
     cISC4DisasterInstanceRiot* CreateRiot() override { return new cSC4DisasterInstanceRiot(); }
     cISC4DisasterInstancePipeBurst* CreatePipeBurst() override { return nullptr; }
     cISC4DisasterInstanceEarthquake* CreateEarthquake() override { return new cSC4DisasterInstanceEarthquake(); }
@@ -387,6 +419,7 @@ void InstallDisasterHosts() {
     InstallFireServices();
     InstallRiotHost();
     sc4::SetEarthquakeHost(&g_earthquakeHost);
+    sc4::SetVolcanoHost(&g_volcanoHost);
 }
 
 // ---- what the flammability simulator's host (app/NativeFlammabilityHost.cpp) asks of the city: its header cannot be combined with

@@ -158,13 +158,14 @@ bool cSC4DisasterManagerVolcano::AttemptDisasterStart() {
     return AttemptDisasterStart(x, z);
 }
 
-bool cSC4DisasterManagerVolcano::AttemptDisasterStart(int, int) {
+// i386 0x003430ba: one volcano at a time; the new one is placed, initialized and set erupting.
+bool cSC4DisasterManagerVolcano::AttemptDisasterStart(int x, int z) {
     if (!instances_.empty()) return false;
     cISC4DisasterInstanceVolcano* instance = nullptr;
-    if (!CreateVolcanoInstance(&instance)) return false;
-    instance->Erupt();
-    instance->Prepare();
-    instance->SetPhase(3);
+    if (!CreateVolcanoInstance(&instance) || !instance) return false;
+    instance->SetLocation(x, z);
+    instance->Init();
+    instance->SetState(3);
     return true;
 }
 
@@ -172,6 +173,7 @@ bool cSC4DisasterManagerVolcano::CreateVolcanoInstance(cISC4DisasterInstanceVolc
     IDisasterInstanceFactory* factory = DisasterInstanceFactory();
     if (!factory) return false;
     cISC4DisasterInstanceVolcano* instance = factory->CreateVolcano();
+    if (!instance) return false;
     AddInstanceToList(instance);
     *out = instance;
     return true;

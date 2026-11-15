@@ -40,6 +40,9 @@ void InstallDisasterTools();
 void* NativeCreateEffectAtPoint(const char* name, const float xyz[3]);
 void NativeMoveEffectTo(void* effect, const float xyz[3]);
 void NativeReleaseEffectHandle(void* effect);
+// The same, told to post `finishMessage` (data1 = `finishData`) when it is over; and its Stop(1) with the reference let go.
+void* NativeCreateEffectWithFinishMessage(const char* name, const float xyz[3], std::uint32_t finishMessage, std::uint32_t finishData);
+void NativeStopEffectHandle(void* effect);
 // cSC4View3DWin::InvokeDisaster: the menu item's tool becomes the view's current one.
 void InvokeDisasterTool(sc4::cSC4View3DWin& view, std::uint32_t id);
 // Kit command `disasters`: every disaster exemplar with its effect and manager.

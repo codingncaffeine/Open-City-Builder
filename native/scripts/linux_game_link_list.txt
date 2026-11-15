@@ -389,6 +389,7 @@ src/app/NativeRiotPolice.cpp
 src/app/NativeDisasterTools.cpp
 src/sc4/ViewInputControlDisaster.cpp
 src/sc4/DisasterInstanceEarthquake.cpp
+src/sc4/DisasterInstanceVolcano.cpp
 src/app/NativeModelRegEffects.cpp
 src/app/NativeFireEffects.cpp
 src/app/NativeFireCrew.cpp
@@ -415,11 +416,15 @@ src/sc4/EffectsResource.cpp
 src/sc4/ModelBasedParticlesEffect.cpp
 src/sc4/GeometrySourcedParticlesEffect.cpp
 src/app/NativeEffects.cpp
+src/app/NativeEffectComponents.cpp
+src/app/NativeSequenceEffects.cpp
 src/app/NativeCityPanel.cpp
 src/sc4/WinRCI.cpp
 src/sc4/WinTrendBar.cpp
 src/sc4/EffectDescriptions.cpp
 src/sc4/EffectComponents.cpp
+src/sc4/ScrubberEffect.cpp
+src/sc4/AttractorEffect.cpp
 src/sc4/ParticlesEffect.cpp
 src/sc4/Vehicle.cpp
 src/sc4/VisualEffect.cpp

@@ -46,9 +46,10 @@ public:
 class cISC4DisasterInstanceVolcano : public cISC4DisasterInstance {
 public:
     virtual float GetLavaHeightByCityCell(int x, int z) = 0;   // view slot 6 (0x30)
-    virtual void Erupt() = 0;                      // instance slot 0x98
-    virtual void Prepare() = 0;                    // 0x60
-    virtual void SetPhase(int phase) = 0;          // 0xa8
+    // (i386 instance slots 0x4c, 0x30, 0x54, as cSC4DisasterManagerVolcano::AttemptDisasterStart 0x003430ba calls them)
+    virtual void SetLocation(int x, int z) = 0;    // the place, in world units
+    virtual bool Init() = 0;
+    virtual bool SetState(int state) = 0;          // 3 = erupt
 };
 class cISC4DisasterInstanceRiot : public cISC4DisasterInstance {
 public:

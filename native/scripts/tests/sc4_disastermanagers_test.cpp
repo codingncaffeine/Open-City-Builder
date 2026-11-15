@@ -64,9 +64,10 @@ public:
     bool GetLocation(int&, int&) const override { return false; }
     int GetPhase() const override { return phase; }
     float GetLavaHeightByCityCell(int x, int z) override { return float(x * 10 + z); }
-    void Erupt() override { calls += "e"; }
-    void Prepare() override { calls += "p"; }
-    void SetPhase(int p) override { phase = p; calls += "s"; }
+    void SetLocation(int x, int z) override { placedX = x; placedZ = z; calls += "l"; }
+    bool Init() override { calls += "i"; return true; }
+    bool SetState(int p) override { phase = p; calls += "s"; return true; }
+    int placedX = 0, placedZ = 0;
     std::uint32_t refs = 0;
     int phase = 1;
     std::string calls;
@@ -277,7 +278,8 @@ int main() {
         CHECK(m->GetLavaHeightByCityCell(1, 2) == 0.0f);
         CHECK(m->Init());
         CHECK(m->AttemptDisasterStart(5, 5));
-        CHECK(factory.volcano && factory.volcano->calls == "eps" && factory.volcano->phase == 3);
+        CHECK(factory.volcano && factory.volcano->calls == "lis" && factory.volcano->phase == 3);   // placed, initialized, set erupting
+        CHECK(factory.volcano && factory.volcano->placedX == 5 && factory.volcano->placedZ == 5);
         CHECK(m->GetInstances().size() == 1);
         CHECK(m->GetLavaHeightByCityCell(3, 4) == 34.0f);
         CHECK(!m->AttemptDisasterStart(1, 1));                   // one at a time

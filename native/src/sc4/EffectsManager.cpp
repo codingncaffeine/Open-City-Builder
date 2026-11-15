@@ -458,8 +458,8 @@ void cSC4EffectsManager::ActivateNewVisualEffects() {
 // @ 0x1005de2b6: only while the manager is "active" (the 0xab96b05f message sets +0x2f1).
 void cSC4EffectsManager::UpdateActiveVisualEffects() {
     if (!effectsActive_) return;
-    for (int index : activeVisualEffectSlots_)
-        UpdateVisualEffect(visualEffects_[static_cast<std::size_t>(index)].get(), false);
+    for (std::size_t i = 0; i < activeVisualEffectSlots_.size(); ++i)   // by index: a component started here can make effects
+        UpdateVisualEffect(visualEffects_[static_cast<std::size_t>(activeVisualEffectSlots_[i])].get(), false);
     ActivateNewVisualEffects();
 }
 
@@ -636,7 +636,7 @@ void cSC4EffectsManager::UpdateVisualEffect(cSC4VisualEffect* effect, bool force
         rec->reserved40 = r;
         CreateComponentFromDescription(record, rec, &chained);
         rec = &components.back();
-        if (!rec->component) {   // a kind the port does not create (decals, dynamic / geometry particles, nested effects)
+        if (!rec->component) {   // a kind the port does not create (dynamic particles) or a component that could not be made
             components.pop_back();
             continue;
         }
@@ -957,13 +957,34 @@ private:
     cSC4ParticlesEffect* effect_;
 };
 
+// A visual effect as a component of another one (record kind 2). The original's cSC4VisualEffect is a
+// cISC4ComponentEffect too (its second vtable, at +4, forwards these seven calls); the port's class has the one
+// interface, so the component is this adapter. It holds one reference on the effect; the manager's pool holds the other.
+class NestedEffectComponent final : public cISC4VisualEffectComponent {
+public:
+    explicit NestedEffectComponent(cSC4VisualEffect* effect) : effect_(effect) { effect_->AddRef(); }
+    ~NestedEffectComponent() override { effect_->Release(); }
+    void Start(int transition) override { effect_->Start(transition); }
+    void Stop(int transition) override { effect_->Stop(transition); }
+    bool IsStarted() const override { return effect_->IsStarted(); }
+    void SetTransforms(const cS3DTransform& source, const cS3DTransform& effect) override { effect_->SetTransforms(source, effect); }
+    void ApplyEffect(float elapsed) override { effect_->ApplyEffect(elapsed); }
+    bool SetFloatParams(int type, const float* values, int count) override { return effect_->SetFloatParams(static_cast<std::uint32_t>(type), values, count); }
+    bool SetVoidParams(int type, void** values, int count) override { return effect_->SetVoidParams(static_cast<std::uint32_t>(type), values, count); }
+
+private:
+    cSC4VisualEffect* effect_;
+};
+
 bool ModelBased(const cSC4ParticlesDescription& description) { return (description.flag10 & 1) != 0; }
 }  // namespace
 
 // @ i386 0x00406246. Kind 0 = particle systems (count of them, each delayed by the record's spacing; model-based ones
-// can chain), 1 = a decal from the pool, 3..15 = the component description tables (Instantiate). Nested visual effects
-// (2), dynamic particles (16) and geometry-sourced particle systems are not ported: the component stays empty and the caller drops
-// it. Bit 0 of the record's type marks the component "not needed to finish".
+// can chain), 1 = a decal from the pool, 2 = another visual effect, by the record's name (a pooled effect like any
+// other: the manager builds its components on the next activation round and ticks it itself, on top of the tick it gets
+// as a component, as the original does), 3..15 = the component description tables (Instantiate). Dynamic particles
+// (16) are not ported: the component stays empty and the caller drops it. Bit 0 of the record's type marks the
+// component "not needed to finish".
 void cSC4EffectsManager::CreateComponentFromDescription(const cSC4EffectDescription::cDescriptionRec& record,
                                                         cSC4VisualEffect::cComponentRec* component,
                                                         cSC4ModelBasedParticlesEffect** chained) {
@@ -1015,6 +1036,17 @@ void cSC4EffectsManager::CreateComponentFromDescription(const cSC4EffectDescript
         decal->AddRef();
         if (component->component) component->component->Release();
         component->component = decal;
+    } else if (kind == 2) {
+        cSC4VisualEffect* nested = NewVisualEffect();
+        const std::string lower = LowercaseName(record.name.c_str());
+        nested->SetName(lower);
+        const int index = ResolveDescriptionByName(lower);                   // FindEffectDesc 0x0078fcfe
+        nested->SetSlot(index);
+        if (index >= 0) nested->SetDescription(collection_.Effects()[static_cast<std::size_t>(index)]);
+        auto* wrapped = new NestedEffectComponent(nested);
+        wrapped->AddRef();
+        if (component->component) component->component->Release();
+        component->component = wrapped;
     } else if (kind >= 3 && kind - 3 < 13) {
         if (record.intValue < 0) return;
         const auto& table = collection_.ComponentDescs()[kind - 3].descriptions;
@@ -1164,9 +1196,11 @@ void cSC4EffectsManager::DoAnimationTick(std::uint32_t elapsedMs) {
     elapsedSeconds_ = static_cast<float>(static_cast<double>(tickCount_) * 1e-06);
     // @ i386 0x0040448c: every running effect applies this tick (the cursor-ray parameter of effects with flag 5 is
     // not ported).
+    // By index, the size read again each time, as the original: an effect's tick can start other effects (a scrubber's
+    // demolition makes the rubble effects), which grows this list under the loop; the new ones are ticked in this pass too.
     const float step = static_cast<float>(static_cast<double>(scaled) * 1e-06);
-    for (int index : activeVisualEffectSlots_) {
-        cSC4VisualEffect* effect = visualEffects_[static_cast<std::size_t>(index)].get();
+    for (std::size_t i = 0; i < activeVisualEffectSlots_.size(); ++i) {
+        cSC4VisualEffect* effect = visualEffects_[static_cast<std::size_t>(activeVisualEffectSlots_[i])].get();
         if (effect->IsStarted()) effect->ApplyEffect(step);
     }
 }

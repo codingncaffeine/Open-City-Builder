@@ -6,6 +6,7 @@
 // animation tick manager (AddTickableObject(manager, 0xc0)) and the message server; here the city view attaches it once
 // its renderer exists (AttachEffects) and detaches it when the renderer shuts down (DetachEffects).
 #include "app/NativeEffects.h"
+#include "app/NativeEffectComponents.h"
 #include "sc4/NetworkOccupant.h"
 
 #include <cstdio>
@@ -15,6 +16,9 @@
 #include <cmath>
 #include <memory>
 #include <map>
+#include <set>
+#include <string>
+#include <cctype>
 
 #include "sc4/DrawContext.h"
 #include "sc4/PackedRenderState.h"
@@ -364,9 +368,108 @@ private:
     sc4::cSC4VisualEffect* effect_;
 };
 
+// ---- the effects a particle system starts by name (SL::spEffectsManager as cSC4ParticlesEffect uses it) ----
+// A particle's timed effects and what it leaves where it hits the ground or the water ("<name>_terrain", "<name>_water":
+// a meteor's crater) are ordinary visual effects made by name.
+class ParticleTriggeredEffect final : public IParticlesEffectLookup {
+public:
+    explicit ParticleTriggeredEffect(sc4::cSC4VisualEffect* effect) : effect_(effect) {}   // takes the caller's reference
+    void Release() override {
+        if (effect_) effect_->Release();
+        delete this;
+    }
+    void Start(int transition) override { effect_->Start(transition); }
+    void SetSourceTransform(const cS3DTransform& transform) override { effect_->SetSourceTransform(transform); }
+private:
+    sc4::cSC4VisualEffect* effect_;
+};
+class ParticleEffectPresent final : public IParticlesEffectLookup {   // "there is such an effect": nothing to hold
+public:
+    void Release() override {}
+    void Start(int) override {}
+    void SetSourceTransform(const cS3DTransform&) override {}
+};
+class ParticlesEffectsHost final : public IParticlesEffects {
+public:
+    IParticlesEffectLookup* FindEffect(const char* name) override {   // vslot 0x14 HasVisualEffect
+        static ParticleEffectPresent present;
+        return g_manager && g_manager->HasVisualEffect(name) ? &present : nullptr;
+    }
+    IParticlesEffectLookup* FindTriggerEffect(const char* name) override {   // vslot 0x18 CreateVisualEffect(name)
+        sc4::cSC4VisualEffect* effect = nullptr;
+        if (!g_manager || !g_manager->CreateVisualEffect(name, &effect) || !effect) return nullptr;
+        if (std::getenv("SC4_FXDEBUG")) std::fprintf(stderr, "effects: a particle starts %s\n", name);
+        return new ParticleTriggeredEffect(effect);
+    }
+    IParticlesEffectMaps* EffectMaps() override { return nullptr; }
+};
+ParticlesEffectsHost g_particleEffects;
+
 }  // namespace
 
 namespace {
+// SC4_EFFECTDUMP=name,name: what the named effects are made of (their records, the component descriptions behind them and the
+// effects a sequence plays), printed once when the manager comes up.
+void DumpEffect(const sc4::cSC4EffectsCollection& collection, const std::string& name, int depth, std::set<std::string>& seen) {
+    std::string key = name;
+    for (char& c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    const std::string pad(static_cast<std::size_t>(depth) * 2, ' ');
+    const auto range = collection.EffectNames().equal_range(key);
+    if (range.first == range.second) { std::fprintf(stderr, "fxdump: %s%s: no such effect\n", pad.c_str(), name.c_str()); return; }
+    if (!seen.insert(key).second) { std::fprintf(stderr, "fxdump: %s%s: (shown above)\n", pad.c_str(), name.c_str()); return; }
+    for (auto it = range.first; it != range.second; ++it) {
+        const cSC4EffectDescription& d = collection.Effects()[static_cast<std::size_t>(it->second)];
+        std::fprintf(stderr, "fxdump: %s%s [%d]: flags %llx version %u start message %08x %08x %08x, %zu records, %zu events\n", pad.c_str(), name.c_str(), it->second,
+                     static_cast<unsigned long long>(d.id), d.version, d.values[0], d.values[1], d.values[2], d.records.size(), d.events.size());
+        for (const auto& r : d.records) {
+            std::fprintf(stderr, "fxdump: %s  record kind %u type %llx index %d '%s' lod %u..%u count %u spacing %u group %u chance %u at (%.1f, %.1f, %.1f) scale %.2f\n", pad.c_str(),
+                         r.kind, static_cast<unsigned long long>(r.type), r.intValue, r.name.c_str(), r.flagA, r.flagB, r.shortA, r.shortB, r.shortC, r.shortD,
+                         r.transform.translation[0], r.transform.translation[1], r.transform.translation[2], r.transform.scale);
+            if (r.kind == 2) DumpEffect(collection, r.name, depth + 2, seen);
+            if (r.kind == 0 && r.intValue >= 0 && static_cast<std::size_t>(r.intValue) < collection.Particles().size()) {
+                const cSC4ParticlesDescription& p = collection.Particles()[static_cast<std::size_t>(r.intValue)];
+                std::fprintf(stderr, "fxdump: %s    particles flags %08llx flags8 %02llx flag10 %02x/%04x max %u life %.2f..%.2f model ids %zu name '%s' terrain drag %.2f bounce %.2f %.2f %.2f %.2f %.2f %.2f %.2f height %.1f..%.1f\n",
+                             pad.c_str(), static_cast<unsigned long long>(p.flags), static_cast<unsigned long long>(p.flags8), p.flag10, p.flag10High, p.maxParticles, p.lifetimeMin,
+                             p.lifetimeMax, p.modelIds.size(), p.name.c_str(), p.terrainDrag, p.terrainBounce[0], p.terrainBounce[1], p.terrainBounce[2], p.terrainBounce[3],
+                             p.terrainBounce[4], p.terrainBounce[5], p.terrainBounce[6], p.heightMin, p.heightMax);
+                for (const auto& timed : p.timedEffects) {
+                    std::fprintf(stderr, "fxdump: %s      timed effect '%s' at %.2f\n", pad.c_str(), timed.name.c_str(), timed.time);
+                    if (!timed.name.empty()) DumpEffect(collection, timed.name, depth + 4, seen);
+                }
+                if (p.flag10 & 1) {
+                    DumpEffect(collection, p.name + "_slave", depth + 4, seen);
+                    DumpEffect(collection, p.name + "_death", depth + 4, seen);
+                }
+            }
+            if (r.kind < 3 || r.kind - 3 >= collection.ComponentDescs().size() || r.intValue < 0) continue;
+            const auto& table = collection.ComponentDescs()[r.kind - 3].descriptions;
+            if (static_cast<std::size_t>(r.intValue) >= table.size()) continue;
+            sc4::cISC4ComponentDescription* c = table[static_cast<std::size_t>(r.intValue)].get();
+            if (auto* b = dynamic_cast<sc4::cSC4BrushDescription*>(c))
+                std::fprintf(stderr, "fxdump: %s    brush %#x rate %.3f life %.3f oneshot %u zoom %d strength %.3f..%.3f width %.3f..%.3f level %.1f\n", pad.c_str(), b->id, b->f18, b->f1c,
+                             b->flag, static_cast<int>(b->u24), b->v28.x, b->v28.y, b->v30.x, b->v30.y, b->f38);
+            else if (auto* s = dynamic_cast<sc4::cSC4ScrubberDescription*>(c))
+                std::fprintf(stderr, "fxdump: %s    scrubber u18 %#x u20 %#x u24 %#x u28 %u f2c %.3f f30 %.3f u34 %#x u38 %#x u3c %#x u40 %#x u44 %#x u48 %#x f4c %.2f v50 (%.2f, %.2f) f58 %.3f f5c %.3f\n",
+                             pad.c_str(), s->u18, s->u20, s->u24, s->u28, s->f2c, s->f30, s->u34, s->u38, s->u3c, s->u40, s->u44, s->u48, s->f4c, s->v50.x, s->v50.y, s->f58, s->f5c);
+            else if (auto* a = dynamic_cast<sc4::cSC4AttractorDescription*>(c))
+                std::fprintf(stderr, "fxdump: %s    attractor '%s' flag %d\n", pad.c_str(), a->name.c_str(), a->flag);
+            else if (auto* snd = dynamic_cast<sc4::cSC4SoundDescription*>(c))
+                std::fprintf(stderr, "fxdump: %s    sound %08x flags %#x interval %.2f duration %.2f\n", pad.c_str(), snd->soundId, snd->flags, snd->interval, snd->duration);
+            else if (auto* cam = dynamic_cast<sc4::cSC4CameraDescription*>(c))
+                std::fprintf(stderr, "fxdump: %s    camera flags %#x zoom %u rotation %u radius %.1f\n", pad.c_str(), cam->flags, cam->zoom, cam->rotation, cam->radius);
+            else if (auto* q = dynamic_cast<sc4::cSC4SequenceDescription*>(c)) {
+                std::fprintf(stderr, "fxdump: %s    sequence value %#x, %zu items\n", pad.c_str(), q->value, q->items.size());
+                for (const auto& item : q->items) {
+                    std::fprintf(stderr, "fxdump: %s      item %.2f..%.2f '%s'\n", pad.c_str(), item.range.x, item.range.y, item.name.c_str());
+                    if (!item.name.empty()) DumpEffect(collection, item.name, depth + 4, seen);
+                }
+            }
+        }
+        for (const auto& e : d.events)
+            std::fprintf(stderr, "fxdump: %s  event type %llx '%s' delay %.2f flags %#x\n", pad.c_str(), static_cast<unsigned long long>(e.type), e.name.c_str(), e.delay, e.flags);
+    }
+}
+
 // The city's effects manager, once it exists: hosts installed, Init (the packed library, the messages, the tick).
 bool BindManager() {
     if (g_manager) return true;
@@ -377,6 +480,7 @@ bool BindManager() {
     SetParticlesTerrain(&g_terrain);
     SetParticlesCity(&g_cityCells);
     SetParticlesTextures(&g_textures);
+    SetParticlesEffects(&g_particleEffects);
     sc4::SetEffectsHost(&g_componentsHost);
     // cSC4VisualEffect::SetModelFromOccupant: the occupant's first model instance and its transform (the demolition effects
     // hand the building's or tree's model to their geometry-sourced particles).
@@ -403,6 +507,7 @@ bool BindManager() {
         return true;
     });
     sc4::SetModelParticlesHost(&g_models);
+    InstallEffectComponentHosts();            // the scrubber, attractor and sequence classes and the brush component's terrain
     g_manager->SetHost(&g_host);
     sc4::SetPropVisualEffectHost(g_manager);  // visual-effect props create their effects through the manager (vslots 0x30 / 0x38)
     g_manager->Init();                        // loads the packed library, registers the messages and the tick
@@ -412,6 +517,19 @@ bool BindManager() {
     if (g_debug)
         std::fprintf(stderr, "effects: manager up, %zu effects, %zu bindings\n", g_manager->Collection().Effects().size(),
                      g_manager->EffectBindings().size());
+    if (const char* part = std::getenv("SC4_EFFECTNAMES")) {   // every effect name that holds the given text
+        for (const auto& entry : g_manager->Collection().EffectNames())
+            if (entry.first.find(part) != std::string::npos) std::fprintf(stderr, "fxname: %s [%d]\n", entry.first.c_str(), entry.second);
+    }
+    if (const char* names = std::getenv("SC4_EFFECTDUMP")) {
+        std::set<std::string> seen;
+        std::string list = names;
+        for (std::size_t at = 0; at <= list.size();) {
+            const std::size_t comma = std::min(list.find(',', at), list.size());
+            if (comma > at) DumpEffect(g_manager->Collection(), list.substr(at, comma - at), 0, seen);
+            at = comma + 1;
+        }
+    }
     return true;
 }
 }  // namespace
@@ -435,6 +553,7 @@ void DetachEffects() {
     g_render = nullptr;
     sc4::SetModelParticlesHost(nullptr);
     sc4::SetPropVisualEffectHost(nullptr);
+    SetParticlesEffects(nullptr);
 }
 
 sc4::ITerrainEffect* CreateTerrainEffect(std::uint32_t group, std::uint32_t type) {
