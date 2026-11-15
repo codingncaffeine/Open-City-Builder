@@ -19,6 +19,8 @@ unsigned int FshTextureId(unsigned int group, unsigned int instance);
 bool FshTextureSize(unsigned int group, unsigned int instance, int& width, int& height);
 // Every frame of an FSH {0x7ab50e44, group, instance} as a driver texture, in file order (empty when missing).
 const std::vector<std::uint32_t>& FshFrameTextureIds(std::uint32_t group, std::uint32_t instance);
+// The pixels of an FSH image's first frame, four bytes each (red, green, blue, alpha), top row first.
+bool FshPixelsRgba(std::uint32_t group, std::uint32_t instance, std::vector<std::uint8_t>& rgba, int& width, int& height);
 // A driver texture from 32-bit BGRA pixels (one level), and its deletion; 0 without a driver.
 unsigned int CreateBgraTexture(int width, int height, const void* pixels);
 void DeleteDriverTexture(unsigned int id);

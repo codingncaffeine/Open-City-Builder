@@ -224,10 +224,12 @@ void* NativeCreateEffectWithFinishMessage(const char* name, const float xyz[3], 
     return effect;
 }
 
-void NativeStopEffectHandle(void* handle) {
+void NativeStopEffectHandle(void* handle) { NativeEndEffectHandle(handle, 1); }
+
+void NativeEndEffectHandle(void* handle, int stopTransition) {
     auto* effect = static_cast<cSC4VisualEffect*>(handle);
     if (!effect) return;
-    effect->Stop(1);
+    if (stopTransition >= 0) effect->Stop(stopTransition);
     effect->Release();
 }
 

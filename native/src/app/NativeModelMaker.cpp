@@ -807,6 +807,11 @@ bool AttachModelMaker(sc4::cSC43DRender& render, sc4::cSC4City& city) {
 namespace native {
 unsigned int FshTextureId(unsigned int group, unsigned int instance) { return TextureRecord(group, instance)->id; }
 const std::vector<std::uint32_t>& FshFrameTextureIds(std::uint32_t group, std::uint32_t instance) { return FrameTextureIds(group, instance); }
+bool FshPixelsRgba(std::uint32_t group, std::uint32_t instance, std::vector<std::uint8_t>& rgba, int& width, int& height) {
+    std::vector<std::uint8_t> bytes;
+    s3d::FshFile file;
+    return LoadResourceBytes(kFshType, group, instance, bytes) && file.Open(bytes.data(), bytes.size()) && file.DecodeRgba8(0, rgba, width, height);
+}
 bool FshTextureSize(unsigned int group, unsigned int instance, int& width, int& height) {
     const TextureBinding* record = TextureRecord(group, instance);
     width = record->width;

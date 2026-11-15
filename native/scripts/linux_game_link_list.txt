@@ -644,6 +644,8 @@ src/app/NativeLotConfigHost.cpp
 src/app/NativeCatalogUi.cpp
 src/app/NativeToolTips.cpp
 src/app/NativeWaterRipple.cpp
+src/app/NativeVolcanoLava.cpp
+src/sc4/VolcanoLava.cpp
 src/app/NativeMovie.cpp
 src/app/NativeIntro.cpp
 src/sc4/WinCalloutBox.cpp

@@ -1,5 +1,6 @@
 #include "app/NativeCity.h"
 #include "app/NativeWaterRipple.h"
+#include "app/NativeVolcanoLava.h"
 #include "app/NativeLighting.h"
 #include "sc4/cSC4City.h"
 #include "sc4/LightingManager.h"
@@ -369,6 +370,7 @@ bool AttachTerrainView(sc4::cSC43DRender& render, sc4::cSTETerrain& terrain, gd:
     render.AddViewObject(new PassObject(render, *view, 1), 0, 100);
     // cSTETerrainView3D::Init (0x004f74a4) makes the shore ripples at this + 0x70
     if (sc4::cSC4City* city = HostCity()) AttachWaterRipple(render, terrain, city->SizeX(), city->SizeZ());
+    AttachVolcanoLava(render);
     return true;
 }
 

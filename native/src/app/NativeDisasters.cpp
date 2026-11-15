@@ -42,6 +42,7 @@
 #include "sc4/cSTETerrain.h"
 #include "tools/city_probe_plain.h"
 #include "app/NativeDisasterTools.h"
+#include "app/NativeVolcanoLava.h"
 
 namespace native {
 const sc4::cSC4SimGrid<std::uint8_t>* NativeFlammabilityGrid();   // app/NativeAdvisorFlammability.cpp
@@ -279,9 +280,11 @@ public:
     void AddNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->AddNotification(target, message); }
     void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->RemoveNotification(target, message); }
     const cISCPropertyHolder* TuningExemplar() override { return HeldExemplar(kVolcanoTuningKey); }
-    // PARTIAL: cSTEVolcanoLava (the lava that flows from the vent, i386 0x004f8170..0x004facd8) is not ported: the volcano
-    // erupts, raises its cone and burns around it, without lava.
-    IVolcanoLava* CreateLava() override { return nullptr; }
+    IVolcanoLava* CreateLava() override {
+        IVolcanoLava* lava = CreateVolcanoLava();
+        if (QuakeTrace()) std::fprintf(stderr, "volcano: lava -> %s\n", lava ? "made" : "none");
+        return lava;
+    }
 };
 VolcanoHostImpl g_volcanoHost;
 

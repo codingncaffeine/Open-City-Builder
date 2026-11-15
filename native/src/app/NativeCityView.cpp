@@ -1,4 +1,5 @@
 #include "app/NativeWaterRipple.h"
+#include "app/NativeVolcanoLava.h"
 #include "app/NativeDemolishTool.h"
 #include "app/NativeNetworkTool.h"
 #include "app/NativeAutomata.h"
@@ -97,6 +98,7 @@ public:
 
     bool Init() override { return render_->Init(); }
     void Shutdown() override {
+        native::DetachVolcanoLava();   // first: it stops its steam effects and drops its scorch decals
         native::DetachWaterRipple();
         native::DetachEffects();
         native::DetachModelMaker();
