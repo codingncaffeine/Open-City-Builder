@@ -1391,6 +1391,8 @@ void cSC4ModelMaker::RebuildDynamicTexture(int slot) {
     (void)tint;
 }
 
+// i386 0x00246820: the occupant's cells, cut to the city; the flags of those cells are worked out again, and the terrain is
+// redisplayed where one changed. (A foundation of usage 2 that is being shown hides its cells outright first.)
 bool cSC4ModelMaker::DoTerrainHidingForOccupantCells(cISC4Occupant* occupant, std::uint32_t type, bool hide) {
     if (!occupant) return false;
     SC4CellRect cells{};
@@ -1399,56 +1401,99 @@ bool cSC4ModelMaker::DoTerrainHidingForOccupantCells(cISC4Occupant* occupant, st
     if (rect.x1 < rect.x0 || rect.z1 < rect.z0) return false;
     SC4RectT<int> clipped;
     if (!clipped.IntersectRect(rect, cityRect_)) return false;
-    bool waterCells = false;
-    if (type == kModelOccupantTypeFoundation && hide) {
-        void* raw = nullptr;
-        if (occupant->QueryInterface(0xc8fce101, &raw)) {
-            static_cast<cIGZUnknown*>(raw)->Release();
-        }
-    }
-    if (!DoTerrainHidingForCells(clipped, waterCells)) return false;
-    if (terrain_ && g_host) g_host->TerrainRefreshCell(clipped.x0, clipped.z0);
+    const bool hideAll = type == kModelOccupantTypeFoundation && hide && g_host && g_host->FoundationUsage(occupant) == 2;
+    if (!DoTerrainHidingForCells(clipped, hideAll)) return false;
+    if (g_host) g_host->TerrainRedisplay(SC4RectT<int>{clipped.x0, clipped.z0, clipped.x1 + 1, clipped.z1 + 1});
     return true;
 }
 
-bool cSC4ModelMaker::DoTerrainHidingForCells(const SC4RectT<int>& rect, bool water) {
-    // PARTIAL: 0x10031200e reads the terrain cell flag word (terrain vslot 0x290), keeps its low three bits, and
-    // ORs a per-occupant hiding mask built from the network flags (0xa821ef94 vslot 0x40), the lot base texture
-    // occupancy (0x97f6d98 vslot 0x38) and the foundation state (0xc8fce101 vslot 0x48), then writes the word back
-    // through terrain vslot 0x288 and refreshes changed cells. Only the flag-preserving write and the change test
-    // are recovered here; the three occupant masks need interfaces that are not recovered.
+// i386 0x00246020. Each cell of the rectangle gets the flags the occupants standing on it ask for (those the current
+// view shows):
+//   a network piece hides the cell's triangles unless its flags say otherwise (0x4000 see-through: nothing; 0x8000000
+//   neither; 0x2000000 / 0x4000000 keep the first / second; 0x1000000 flips the cell's diagonal), and an underground piece
+//   adds the triangles it hides;
+//   a foundation of usage 2 on a lot with flag 1 and one of flags 2 / 4 hides both;
+//   a pipe or subway connection hides both;
+//   a lot's base texture marks the cells an opaque texture covers.
+// True when a cell's flags changed. Quirk kept: the base texture is asked about cells counted from the rectangle's corner,
+// not city cells, so only the whole-city pass (a rectangle that starts at cell 0, 0) finds its covered cells.
+bool cSC4ModelMaker::DoTerrainHidingForCells(const SC4RectT<int>& rect, bool hideAll) {
     if (!g_host) return false;
-    if (water) {
+    if (hideAll) {
         for (int x = rect.x0; x <= rect.x1; ++x) {
             for (int z = rect.z0; z <= rect.z1; ++z) {
                 const std::uint32_t flags = g_host->TerrainCellFlags(x, z);
-                if ((flags & 3u) != 3u) g_host->TerrainSetCellFlags(x, z);
+                const std::uint32_t hidden = (flags & 0xfffffff8u) | 3u;
+                if (flags != hidden) g_host->TerrainSetCellFlags(x, z, hidden);
             }
         }
     }
-    // gather the current flags, build the mask per occupant and write the changed cells back
-    bool changed = false;
     const int sizeX = rect.x1 - rect.x0 + 1;
     const int sizeZ = rect.z1 - rect.z0 + 1;
-    std::vector<std::uint32_t> before(static_cast<std::size_t>(sizeX) * sizeZ);
-    std::vector<std::uint32_t> after(before.size());
-    if (sizeX > 0 && sizeZ > 0) {
-        for (int x = 0; x < sizeX; ++x) {
-            for (int z = 0; z < sizeZ; ++z) {
-                const std::size_t index = static_cast<std::size_t>(x) * sizeZ + z;
-                before[index] = g_host->TerrainCellFlags(rect.x0 + x, rect.z0 + z);
-                after[index] = before[index];
+    if (sizeX <= 0 || sizeZ <= 0) return false;
+    std::vector<std::uint32_t> wanted(static_cast<std::size_t>(sizeX) * static_cast<std::size_t>(sizeZ));
+    const auto at = [&wanted, sizeZ](int x, int z) -> std::uint32_t& { return wanted[static_cast<std::size_t>(x) * static_cast<std::size_t>(sizeZ) + static_cast<std::size_t>(z)]; };
+    for (int x = 0; x < sizeX; ++x)
+        for (int z = 0; z < sizeZ; ++z) at(x, z) = g_host->TerrainCellFlags(rect.x0 + x, rect.z0 + z) & 0xfffffff8u;
+    if (occupantManager_) {
+        OccupantList occupants;
+        const int low[2] = {rect.x0, rect.z0}, high[2] = {rect.x1, rect.z1};
+        // the current view's filter (+0x58 on i386): the normal view leaves the underground pieces out, the pipe and
+        // subway views let them hide the ground above them
+        occupantManager_->GetOccupantsByStandardCityCells(occupants, low, high, viewFilter_, 0xffffffffu);
+        for (cISC4Occupant* occupant : occupants) {
+            if (!occupant) continue;
+            const std::uint32_t type = occupant->GetType();
+            SC4CellRect cells{};
+            occupant->GetBoundingCityCells(cells);
+            // the occupant's cells inside the rectangle, counted from the rectangle's corner
+            const int x0 = std::max(cells.x0 - rect.x0, 0), z0 = std::max(cells.z0 - rect.z0, 0);
+            const int x1 = std::min(cells.x1 - rect.x0 + 1, sizeX), z1 = std::min(cells.z1 - rect.z0 + 1, sizeZ);
+            std::uint32_t keep = 0xffffffffu, bits = 0;
+            if (type == kModelOccupantTypeNetwork) {
+                std::uint32_t flags = 0;
+                if (g_host->NetworkPieceFlags(occupant, 0x4000u | 0x1000000u | 0x2000000u | 0x4000000u | 0x8000000u, flags) && (flags & 0x4000u) == 0) {
+                    if (flags & 0x1000000u) bits |= 8;
+                    if ((flags & 0x8000000u) == 0) {
+                        if ((flags & 0x2000000u) == 0) bits |= 1;
+                        if ((flags & 0x4000000u) == 0) bits |= 2;
+                    }
+                    keep = 0xfffffff7u;
+                }
+                bool even = false, odd = false;
+                if (g_host->UndergroundHiddenTriangles(occupant, even, odd)) {
+                    if (even) bits |= 1;
+                    if (odd) bits |= 2;
+                }
+                if (bits == 0 && keep == 0xffffffffu) continue;
+            } else if (type == kModelOccupantTypeFoundation) {
+                std::uint32_t lotFlags = 0;
+                if (g_host->FoundationUsage(occupant) != 2 || !g_host->LotFlagsAt(cells.x0, cells.z0, lotFlags) || (lotFlags & 1) == 0 || (lotFlags & 6) == 0) continue;
+                bits = 3;
+            } else if (type == kModelOccupantTypeLotBaseTexture) {
+                for (int x = x0; x < x1; ++x) {
+                    for (int z = z0; z < z1; ++z) {
+                        bool covered = false;
+                        if (g_host->BaseTextureCellCovered(occupant, x, z, covered) && covered) at(x, z) |= 4;
+                    }
+                }
+                continue;
+            } else if (type == kModelOccupantTypeUnderground || type == kModelOccupantTypeMiscA) {
+                bits = 3;
+            } else {
+                continue;
             }
+            for (int x = x0; x < x1; ++x)
+                for (int z = z0; z < z1; ++z) at(x, z) = (at(x, z) & keep) | bits;
         }
-        // The occupant pass (0x100312564..0x1003127c0) is not recovered: without the three occupant masks the
-        // cells keep their flags.
-        for (int x = 0; x < sizeX; ++x) {
-            for (int z = 0; z < sizeZ; ++z) {
-                const std::size_t index = static_cast<std::size_t>(x) * sizeZ + z;
-                if (after[index] == before[index]) continue;
-                changed = true;
-                g_host->TerrainSetCellFlags(rect.x0 + x, rect.z0 + z);
-            }
+        occupantManager_->ReleaseOccupantList(occupants);
+    }
+    bool changed = false;
+    for (int x = 0; x < sizeX; ++x) {
+        for (int z = 0; z < sizeZ; ++z) {
+            if (g_host->TerrainCellFlags(rect.x0 + x, rect.z0 + z) == at(x, z)) continue;
+            g_host->TerrainSetCellFlags(rect.x0 + x, rect.z0 + z, at(x, z));
+            changed = true;
         }
     }
     return changed;

@@ -353,6 +353,11 @@ bool AttachTerrainView(sc4::cSC43DRender& render, sc4::cSTETerrain& terrain, gd:
     std::printf("city view: terrain view %s\n", ok ? "up" : "FAILED");
     if (!ok) return false;
     g_terrainView = view;
+    // A cell whose hidden-triangle flags change (a road, a lot texture or a foundation came or went) gets its two triangles
+    // again: the original's terrain writes the view's index table itself (cSTETerrainView3D::SetTriangleIndicesForCell).
+    terrain.SetCellChangedCallback([](std::uint32_t z, std::uint32_t x) {
+        if (g_terrainView) g_terrainView->SetTriangleIndicesForCell(static_cast<int>(z), static_cast<int>(x));
+    });
     // DoPostCityInit's hook-up: the terrain gets its view and redisplays from here on (brushes, levelling, reconcile).
     static TerrainViewLink* link = nullptr;
     delete link;

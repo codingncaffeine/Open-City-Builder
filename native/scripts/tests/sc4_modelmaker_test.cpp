@@ -7,6 +7,7 @@
 #include <cstring>
 #include <list>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -375,6 +376,7 @@ struct FakeBuildingOccupant final : sc4::cISC4BuildingOccupant {
 };
 
 struct FakeOccupantManager final : cISC4OccupantManager {
+    bool applyFilter = false;   // the cell queries hand out only what the filter includes (off: everything, the filter is only recorded)
     std::vector<cISC4Occupant*> occupants;
     cISC4OccupantFilter* lastFilter = nullptr;
     int queries = 0;
@@ -456,6 +458,7 @@ struct FakeOccupantManager final : cISC4OccupantManager {
         ++queries;
         lastFilter = filter;
         for (cISC4Occupant* occupant : occupants) {
+            if (applyFilter && filter && !filter->IsOccupantIncluded(occupant)) continue;
             occupant->AddRef();
             out.push_back(occupant);
         }
@@ -625,8 +628,17 @@ struct FakeHost final : sc4::IModelMakerHost {
     float lighting[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     int terrainX = 100;
     int terrainZ = 100;
-    std::vector<std::pair<int, int>> refreshedCells;
+    // the terrain's cell flags and what the occupants on a cell answer the terrain hiding
+    std::map<std::pair<int, int>, std::uint32_t> cellFlags;
+    std::uint32_t defaultCellFlags = 3;
     std::vector<std::pair<int, int>> setCellFlags;
+    std::vector<sc4::SC4RectT<int>> redisplayed;
+    std::map<cISC4Occupant*, std::uint32_t> networkFlags;                   // present = a network piece
+    std::map<cISC4Occupant*, std::pair<bool, bool>> undergroundTriangles;   // present = an underground piece
+    std::map<cISC4Occupant*, int> foundationUsage;
+    std::map<std::pair<int, int>, std::uint32_t> lotFlags;
+    std::map<cISC4Occupant*, std::set<std::pair<int, int>>> baseTextureCovered;   // the cells an opaque texture covers
+    std::vector<std::pair<int, int>> baseTextureAsked;
     int cityCellX = 0;
     int cityCellZ = 0;
     std::string configBackgroundLoad;
@@ -690,9 +702,41 @@ struct FakeHost final : sc4::IModelMakerHost {
     }
     int TerrainSizeX() override { return terrainX; }
     int TerrainSizeZ() override { return terrainZ; }
-    std::uint32_t TerrainCellFlags(int, int) override { return 3; }
-    void TerrainSetCellFlags(int x, int z) override { setCellFlags.emplace_back(x, z); }
-    void TerrainRefreshCell(int x, int z) override { refreshedCells.emplace_back(x, z); }
+    std::uint32_t TerrainCellFlags(int x, int z) override {
+        const auto found = cellFlags.find({x, z});
+        return found == cellFlags.end() ? defaultCellFlags : found->second;
+    }
+    void TerrainSetCellFlags(int x, int z, std::uint32_t flags) override {
+        cellFlags[{x, z}] = flags;
+        setCellFlags.emplace_back(x, z);
+    }
+    void TerrainRedisplay(const sc4::SC4RectT<int>& cells) override { redisplayed.push_back(cells); }
+    bool NetworkPieceFlags(cISC4Occupant* occupant, std::uint32_t mask, std::uint32_t& flags) override {
+        const auto found = networkFlags.find(occupant);
+        flags = found == networkFlags.end() ? 0 : found->second & mask;
+        return found != networkFlags.end();
+    }
+    bool UndergroundHiddenTriangles(cISC4Occupant* occupant, bool& even, bool& odd) override {
+        const auto found = undergroundTriangles.find(occupant);
+        even = found != undergroundTriangles.end() && found->second.first;
+        odd = found != undergroundTriangles.end() && found->second.second;
+        return found != undergroundTriangles.end();
+    }
+    int FoundationUsage(cISC4Occupant* occupant) override {
+        const auto found = foundationUsage.find(occupant);
+        return found == foundationUsage.end() ? -1 : found->second;
+    }
+    bool LotFlagsAt(int x, int z, std::uint32_t& flags) override {
+        const auto found = lotFlags.find({x, z});
+        flags = found == lotFlags.end() ? 0 : found->second;
+        return found != lotFlags.end();
+    }
+    bool BaseTextureCellCovered(cISC4Occupant* occupant, int x, int z, bool& covered) override {
+        baseTextureAsked.emplace_back(x, z);
+        const auto found = baseTextureCovered.find(occupant);
+        covered = found != baseTextureCovered.end() && found->second.count({x, z}) != 0;
+        return found != baseTextureCovered.end();
+    }
     bool TerrainCellHasWater(int, int) override { return false; }
     void TerrainNormalAt(float, float, float out[3]) override {
         out[0] = 0;
@@ -1412,18 +1456,190 @@ int main() {
     // ---- 10. the terrain hiding -----------------------------------------------------------------------------
     {
         FakeHost host;
+        FakeOccupantManager occupants;
+        auto* viewFilter = new FakeFilter();
+        host.occupantManager = &occupants;
+        host.viewFilter = viewFilter;
         sc4::SetModelMakerHost(&host);
         auto* maker = new sc4::cSC4ModelMaker();
-        const sc4::SC4RectT<int> rect{0, 0, 3, 3};
-        // the fake reports flag 3 everywhere, so nothing changes and the return value is false
+        maker->Init();
+        maker->DoPostCityInit();                              // the managers, the view filter, the city rectangle 0..99
+        const auto flagsAt = [&host](int x, int z) { return host.TerrainCellFlags(x, z); };
+        const auto occupant = [&occupants](std::uint32_t type, int x0, int z0, int x1, int z1) {
+            auto* made = new FakeOccupant();
+            made->type = type;
+            made->cells = SC4CellRect{x0, z0, x1, z1};
+            occupants.occupants.push_back(made);
+            return made;
+        };
+        const auto reset = [&host](std::uint32_t everywhere) {
+            host.cellFlags.clear();
+            host.defaultCellFlags = everywhere;
+            host.setCellFlags.clear();
+            host.redisplayed.clear();
+            host.baseTextureAsked.clear();
+        };
+
+        // nothing stands on the cells: the three low flags go, the flipped diagonal stays
+        reset(0xf);
+        const sc4::SC4RectT<int> rect{10, 20, 12, 21};
+        CHECK(maker->DoTerrainHidingForCells(rect, false));
+        CHECK(host.setCellFlags.size() == 6 && flagsAt(10, 20) == 8 && flagsAt(12, 21) == 8);
+        CHECK(flagsAt(13, 21) == 0xf && flagsAt(10, 19) == 0xf);        // outside the rectangle: untouched
+        CHECK(!maker->DoTerrainHidingForCells(rect, false));           // a second pass changes nothing
+        CHECK(host.setCellFlags.size() == 6);
+        // "hide all" first hides every cell of the rectangle outright (a foundation going up); the pass then puts back what
+        // the occupants ask for, here nothing
+        reset(4);
+        CHECK(maker->DoTerrainHidingForCells(rect, true));
+        CHECK(host.setCellFlags.size() == 12 && flagsAt(11, 20) == 0);
+
+        // a network piece hides both triangles of its cells; its flags take triangles back, flip the diagonal, or
+        // (a see-through preview piece) leave everything alone
+        reset(8);
+        FakeOccupant* road = occupant(sc4::kModelOccupantTypeNetwork, 11, 20, 11, 21);
+        host.networkFlags[road] = 0;
+        CHECK(maker->DoTerrainHidingForCells(rect, false));
+        CHECK(flagsAt(11, 20) == 3 && flagsAt(11, 21) == 3);          // hidden, and the piece's own (unflipped) diagonal
+        CHECK(flagsAt(10, 20) == 8 && flagsAt(12, 21) == 8);          // the cells beside it keep their diagonal
+        CHECK(occupants.lastFilter == viewFilter);                    // the occupants are those of the current view
+        host.networkFlags[road] = 0x1000000;
+        maker->DoTerrainHidingForCells(rect, false);
+        CHECK(flagsAt(11, 20) == 0xb);
+        host.networkFlags[road] = 0x2000000;
+        maker->DoTerrainHidingForCells(rect, false);
+        CHECK(flagsAt(11, 20) == 2);
+        host.networkFlags[road] = 0x4000000;
+        maker->DoTerrainHidingForCells(rect, false);
+        CHECK(flagsAt(11, 20) == 1);
+        host.networkFlags[road] = 0x8000000 | 0x1000000;
+        maker->DoTerrainHidingForCells(rect, false);
+        CHECK(flagsAt(11, 20) == 8);
+        reset(0xb);
+        host.networkFlags[road] = 0x4000;                               // see-through: it hides nothing and flips nothing
+        CHECK(maker->DoTerrainHidingForCells(rect, false));           // (the rectangle's hide flags went)
+        CHECK(flagsAt(11, 20) == 8);
+        // an occupant of the network type that is no network piece does nothing, unless it is an underground piece:
+        // that adds the triangles it hides
+        reset(0);
+        host.networkFlags.erase(road);
         CHECK(!maker->DoTerrainHidingForCells(rect, false));
+        host.undergroundTriangles[road] = {true, false};
+        CHECK(maker->DoTerrainHidingForCells(rect, false));
+        CHECK(flagsAt(11, 20) == 1);
+        host.undergroundTriangles[road] = {false, true};
+        host.networkFlags[road] = 0x2000000 | 0x4000000;                // a piece that hides nothing itself
+        maker->DoTerrainHidingForCells(rect, false);
+        CHECK(flagsAt(11, 20) == 2);
+        // an occupant the current view leaves out is not asked (the normal view and the pipes)
+        reset(0);
+        viewFilter->included = false;
+        occupants.applyFilter = true;
+        CHECK(!maker->DoTerrainHidingForCells(rect, false));
+        viewFilter->included = true;
+        CHECK(maker->DoTerrainHidingForCells(rect, false));
+        CHECK(flagsAt(11, 20) == 2);
+        occupants.applyFilter = false;
+        // an occupant that reaches out of the rectangle only counts inside it
+        reset(0);
+        host.undergroundTriangles.erase(road);
+        host.networkFlags[road] = 0;
+        road->cells = SC4CellRect{9, 19, 10, 20};
+        maker->DoTerrainHidingForCells(rect, false);
+        CHECK(flagsAt(10, 20) == 3 && flagsAt(9, 19) == 0 && flagsAt(11, 20) == 0 && host.setCellFlags.size() == 1);
+        occupants.occupants.clear();
+        road->Release();
+
+        // a foundation hides its cells only when it is of usage 2 on a lot with flag 1 and one of flags 2 / 4
+        reset(0);
+        FakeOccupant* foundation = occupant(sc4::kModelOccupantTypeFoundation, 10, 20, 10, 21);
+        host.foundationUsage[foundation] = 2;
+        CHECK(!maker->DoTerrainHidingForCells(rect, false));           // no lot there
+        host.lotFlags[{10, 20}] = 1;
+        CHECK(!maker->DoTerrainHidingForCells(rect, false));
+        host.lotFlags[{10, 20}] = 6;
+        CHECK(!maker->DoTerrainHidingForCells(rect, false));
+        host.lotFlags[{10, 20}] = 5;
+        CHECK(maker->DoTerrainHidingForCells(rect, false));
+        CHECK(flagsAt(10, 20) == 3 && flagsAt(10, 21) == 3 && flagsAt(11, 20) == 0);
+        host.foundationUsage[foundation] = 1;
+        CHECK(maker->DoTerrainHidingForCells(rect, false));
+        CHECK(flagsAt(10, 20) == 0);
+        // shown through the occupant entry: a foundation of usage 2 hides its cells outright first; the pass after it
+        // finds them as they should be, so it reports no change (and asks for no redisplay)
+        reset(0);
+        host.foundationUsage[foundation] = 2;
+        CHECK(!maker->DoTerrainHidingForOccupantCells(foundation, sc4::kModelOccupantTypeFoundation, true));
+        CHECK(flagsAt(10, 20) == 3 && flagsAt(10, 21) == 3 && host.setCellFlags.size() == 2 && host.redisplayed.empty());
+        // not being shown (or another usage): no outright pass
+        reset(0);
+        host.lotFlags.clear();
+        CHECK(!maker->DoTerrainHidingForOccupantCells(foundation, sc4::kModelOccupantTypeFoundation, false));
         CHECK(host.setCellFlags.empty());
-        CHECK(!maker->DoTerrainHidingForCells(rect, true));   // (flags & 3) == 3: the water pass writes nothing
-        auto* occupant = new FakeOccupant();
-        occupant->cells = SC4CellRect{0, 0, 1, 1};
-        CHECK(!maker->DoTerrainHidingForOccupantCells(occupant, sc4::kModelOccupantTypeNetwork, true));
-        occupant->Release();
+        host.foundationUsage[foundation] = 1;
+        CHECK(!maker->DoTerrainHidingForOccupantCells(foundation, sc4::kModelOccupantTypeFoundation, true));
+        CHECK(host.setCellFlags.empty());
+        occupants.occupants.clear();
+        foundation->Release();
+
+        // through the occupant entry the changed cells are redisplayed, one cell further each way; an occupant outside the
+        // city does nothing, one across the edge is cut to the city
+        reset(0);
+        FakeOccupant* street = occupant(sc4::kModelOccupantTypeNetwork, 30, 40, 31, 40);
+        host.networkFlags[street] = 0;
+        CHECK(maker->DoTerrainHidingForOccupantCells(street, sc4::kModelOccupantTypeNetwork, true));
+        CHECK(flagsAt(30, 40) == 3 && flagsAt(31, 40) == 3 && host.setCellFlags.size() == 2);
+        CHECK(host.redisplayed.size() == 1);
+        if (host.redisplayed.size() == 1)
+            CHECK(host.redisplayed[0].x0 == 30 && host.redisplayed[0].z0 == 40 && host.redisplayed[0].x1 == 32 && host.redisplayed[0].z1 == 41);
+        CHECK(!maker->DoTerrainHidingForOccupantCells(street, sc4::kModelOccupantTypeNetwork, true));   // nothing changes: no redisplay
+        CHECK(host.redisplayed.size() == 1);
+        occupants.occupants.clear();                                   // the piece is gone: its cells show again
+        CHECK(maker->DoTerrainHidingForOccupantCells(street, sc4::kModelOccupantTypeNetwork, false));
+        CHECK(flagsAt(30, 40) == 0 && flagsAt(31, 40) == 0 && host.redisplayed.size() == 2);
+        occupants.occupants.push_back(street);
+        street->cells = SC4CellRect{100, 20, 101, 21};
+        CHECK(!maker->DoTerrainHidingForOccupantCells(street, sc4::kModelOccupantTypeNetwork, true));
+        street->cells = SC4CellRect{98, 20, 101, 20};
+        reset(0);
+        CHECK(maker->DoTerrainHidingForOccupantCells(street, sc4::kModelOccupantTypeNetwork, true));
+        CHECK(flagsAt(98, 20) == 3 && flagsAt(99, 20) == 3 && host.cellFlags.count({100, 20}) == 0);
+        occupants.occupants.clear();
+        street->Release();
+
+        // pipe and subway connections hide both triangles
+        reset(0);
+        FakeOccupant* pipeEnd = occupant(sc4::kModelOccupantTypeUnderground, 10, 20, 10, 20);
+        FakeOccupant* subwayEnd = occupant(sc4::kModelOccupantTypeMiscA, 12, 21, 12, 21);
+        CHECK(maker->DoTerrainHidingForCells(rect, false));
+        CHECK(flagsAt(10, 20) == 3 && flagsAt(12, 21) == 3 && flagsAt(11, 20) == 0);
+        occupants.occupants.clear();
+        pipeEnd->Release();
+        subwayEnd->Release();
+
+        // a lot's base texture marks the cells an opaque texture covers. Quirk kept: it is asked about cells counted from
+        // the rectangle's corner, so a rectangle at the city's corner finds them and any other one does not
+        reset(0);
+        FakeOccupant* ground = occupant(sc4::kModelOccupantTypeLotBaseTexture, 1, 1, 2, 1);
+        host.baseTextureCovered[ground] = {{1, 1}};
+        const sc4::SC4RectT<int> corner{0, 0, 3, 2};
+        CHECK(maker->DoTerrainHidingForCells(corner, false));
+        CHECK(flagsAt(1, 1) == 4 && flagsAt(2, 1) == 0);
+        CHECK(host.baseTextureAsked.size() == 2 && host.baseTextureAsked[0] == std::make_pair(1, 1) && host.baseTextureAsked[1] == std::make_pair(2, 1));
+        reset(4);
+        const sc4::SC4RectT<int> own{1, 1, 2, 1};
+        CHECK(maker->DoTerrainHidingForCells(own, false));             // the lot's own rectangle: asked (0, 0) and (1, 0)
+        CHECK(host.baseTextureAsked.size() == 2 && host.baseTextureAsked[0] == std::make_pair(0, 0) && host.baseTextureAsked[1] == std::make_pair(1, 0));
+        CHECK(flagsAt(1, 1) == 0 && flagsAt(2, 1) == 0);               // so the mark goes until the next whole-city pass
+        // an occupant of the type that is not a base texture marks nothing
+        reset(0);
+        host.baseTextureCovered.erase(ground);
+        CHECK(!maker->DoTerrainHidingForCells(corner, false));
+        occupants.occupants.clear();
+        ground->Release();
+
         maker->Release();
+        viewFilter->Release();
         sc4::SetModelMakerHost(nullptr);
     }
 

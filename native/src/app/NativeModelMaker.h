@@ -38,4 +38,6 @@ void DetachModelMaker();
 // drops (hide) as for a created + shown / hidden + destroyed occupant. False without a model maker.
 bool ShowPreviewOccupant(sc4::cISC4Occupant* occupant, bool show);
 
+void NativeTerrainHidingReport();   // kit command `terrainflags`
+
 }  // namespace native

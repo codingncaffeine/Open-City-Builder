@@ -38,6 +38,14 @@
 #include "sc4/cSTETerrain.h"
 
 namespace native {
+// app/NativeTerrainHiding.cpp: the occupant side of the model maker's terrain hiding
+bool TerrainHidingNetworkFlags(sc4::cISC4Occupant* occupant, std::uint32_t mask, std::uint32_t& flags);
+bool TerrainHidingUndergroundTriangles(sc4::cISC4Occupant* occupant, bool& even, bool& odd);
+int TerrainHidingFoundationUsage(sc4::cISC4Occupant* occupant);
+bool TerrainHidingLotFlagsAt(int x, int z, std::uint32_t& flags);
+void TerrainHidingDescribeCell(int x, int z);
+void TerrainHidingDescribeDefaultFilter();
+
 namespace {
 
 constexpr std::uint32_t kFshType = 0x7ab50e44;
@@ -537,6 +545,14 @@ public:
     }
 };
 
+std::vector<std::uint8_t> g_savedCellFlags;   // SC4_TERRAINHIDEDEBUG: every cell's flags before the first change
+int g_savedCellsX = 0;
+
+bool TerrainHidingTrace() {   // SC4_TERRAINHIDEDEBUG=1: the cells whose hidden-triangle flags change, counted by old -> new
+    static const bool on = std::getenv("SC4_TERRAINHIDEDEBUG") != nullptr;
+    return on;
+}
+
 class ModelMakerHost final : public sc4::IModelMakerHost {
 public:
     cIGZUnknown* Renderer() override { return static_cast<cIGZUnknown*>(static_cast<cISC43DRender*>(g_render)); }
@@ -558,9 +574,11 @@ public:
     float ShadowViewScale() override { return 1.0f; }
     sc4::IShadowOverlay* ShadowOverlay(int) override { return native::TheShadowOverlay(); }
     sc4::cISC4OccupantFilter* CurrentViewFilter() override {
-        auto* all = new sc4::cSC4OccupantFilter();   // every occupant is in view
-        all->AddRef();
-        return all;
+        // The normal view's filter (cSC4DefaultOccupantFilter): everything but the underground pieces and the few props
+        // marked for other views. There is no pipe or subway view natively yet, the views that swap another filter in.
+        auto* filter = new sc4::cSC4DefaultOccupantFilter();
+        filter->AddRef();
+        return filter;
     }
     void RefreshViewFilter() override {}
     bool RendererHasModelInstance(s3d::cIS3DModelInstance* instance) override { return g_render && g_render->IsModelInserted(instance); }
@@ -589,9 +607,46 @@ public:
     void LightingColour(float out[4]) override { out[0] = out[1] = out[2] = out[3] = 1.0f; }
     int TerrainSizeX() override { sc4::cSTETerrain* t = native::Terrain(); return t ? static_cast<int>(t->CellCountX()) : 64; }
     int TerrainSizeZ() override { sc4::cSTETerrain* t = native::Terrain(); return t ? static_cast<int>(t->CellCountZ()) : 64; }
-    std::uint32_t TerrainCellFlags(int, int) override { return 0; }
-    void TerrainSetCellFlags(int, int) override {}
-    void TerrainRefreshCell(int, int) override {}
+    // The terrain's cell flags (which triangles of a cell are hidden under roads, lot textures and foundations): the saved
+    // city carries them, and the model maker works them out again where an occupant comes or goes.
+    // A/B switch SC4_NOTERRAINHIDING=1: the flags stay as the city file has them (the behavior before the hiding was ported).
+    static bool HidingOff() { static const bool off = std::getenv("SC4_NOTERRAINHIDING") != nullptr; return off; }
+    std::uint32_t TerrainCellFlags(int x, int z) override {
+        sc4::cSTETerrain* t = native::Terrain();
+        if (HidingOff()) return 0;
+        return t && x >= 0 && z >= 0 ? t->GetTerrainCellFlags(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z)) : 0;
+    }
+    void TerrainSetCellFlags(int x, int z, std::uint32_t flags) override {
+        sc4::cSTETerrain* t = native::Terrain();
+        if (!t || x < 0 || z < 0 || HidingOff()) return;
+        if (TerrainHidingTrace()) {
+            if (g_savedCellFlags.empty()) {   // the flags the city file came with: the original's own answer for every cell
+                g_savedCellsX = static_cast<int>(t->CellCountX());
+                const int cellsZ = static_cast<int>(t->CellCountZ());
+                g_savedCellFlags.resize(static_cast<std::size_t>(g_savedCellsX) * static_cast<std::size_t>(cellsZ));
+                for (int cz = 0; cz < cellsZ; ++cz)
+                    for (int cx = 0; cx < g_savedCellsX; ++cx)
+                        g_savedCellFlags[static_cast<std::size_t>(cz) * g_savedCellsX + cx] = static_cast<std::uint8_t>(t->GetTerrainCellFlags(cx, cz));
+            }
+            const std::uint32_t old = t->GetTerrainCellFlags(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z));
+            int& count = hidingChanges_[{old, flags}];
+            if (++count <= 3) std::fprintf(stderr, "terrain hiding: cell %d,%d flags %x -> %x\n", x, z, old, flags);
+            else if ((count & (count - 1)) == 0) std::fprintf(stderr, "terrain hiding: %d cells went %x -> %x so far\n", count, old, flags);
+        }
+        t->SetTerrainCellFlags(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z), flags);
+    }
+    void TerrainRedisplay(const sc4::SC4RectT<int>& cells) override {
+        if (sc4::cSTETerrain* t = native::Terrain()) t->RedisplayTerrain(false, false, sc4::TerrainRect{cells.x0, cells.z0, cells.x1, cells.z1}, 0);
+    }
+    bool NetworkPieceFlags(sc4::cISC4Occupant* occupant, std::uint32_t mask, std::uint32_t& flags) override { return TerrainHidingNetworkFlags(occupant, mask, flags); }
+    bool UndergroundHiddenTriangles(sc4::cISC4Occupant* occupant, bool& even, bool& odd) override { return TerrainHidingUndergroundTriangles(occupant, even, odd); }
+    int FoundationUsage(sc4::cISC4Occupant* occupant) override { return TerrainHidingFoundationUsage(occupant); }
+    bool LotFlagsAt(int x, int z, std::uint32_t& flags) override { return TerrainHidingLotFlagsAt(x, z, flags); }
+    bool BaseTextureCellCovered(sc4::cISC4Occupant* occupant, int x, int z, bool& covered) override {
+        covered = false;
+        auto* texture = dynamic_cast<sc4::cSC4LotBaseTextureOccupant*>(occupant);
+        return texture && texture->IsCellCovered(x, z, &covered);
+    }
     bool TerrainCellHasWater(int, int) override { return false; }
     void TerrainNormalAt(float, float, float out[3]) override { out[0] = 0; out[1] = 1; out[2] = 0; }
     bool NetworkAt(float, float) override { return false; }
@@ -616,6 +671,7 @@ public:
     std::uint32_t AddShadowDecal(int, const cGZPersistResourceKey&, float, float, float, float, bool) override { return 0; }
 
 private:
+    std::map<std::pair<std::uint32_t, std::uint32_t>, int> hidingChanges_;   // the trace's counts by (old, new) flags
     static const SC4ViewUtilities* Utilities() { return g_render ? g_render->GetViewUtilities() : nullptr; }
 };
 
@@ -649,6 +705,31 @@ const std::vector<std::uint32_t>* NativeFshFrameTextures(std::uint32_t group, st
         }
     }
     return slot->empty() ? nullptr : slot.get();
+}
+
+// Kit command `terrainflags` (with SC4_TERRAINHIDEDEBUG=1): the cells whose hidden-triangle flags differ from the ones the
+// city file came with, counted by (saved, now), and the first few of each kind.
+void NativeTerrainHidingReport() {
+    sc4::cSTETerrain* t = native::Terrain();
+    if (!t || g_savedCellFlags.empty()) { std::printf("terrainflags: nothing recorded\n"); return; }
+    std::map<std::pair<int, int>, int> kinds;
+    int same = 0;
+    const int cellsZ = static_cast<int>(g_savedCellFlags.size()) / g_savedCellsX;
+    for (int cz = 0; cz < cellsZ; ++cz) {
+        for (int cx = 0; cx < g_savedCellsX; ++cx) {
+            const int saved = g_savedCellFlags[static_cast<std::size_t>(cz) * g_savedCellsX + cx];
+            const int now = t->GetTerrainCellFlags(cx, cz);
+            if (saved == now) { ++same; continue; }
+            if (++kinds[{saved, now}] <= 3) {
+                std::printf("terrainflags: cell %d,%d saved %x now %x\n", cx, cz, saved, now);
+                TerrainHidingDescribeCell(cx, cz);
+            }
+        }
+    }
+    TerrainHidingDescribeDefaultFilter();
+    std::printf("terrainflags: %d cells as saved", same);
+    for (const auto& [kind, count] : kinds) std::printf(", %d went %x -> %x", count, kind.first, kind.second);
+    std::printf("\n");
 }
 
 void InstallModelResources(gd::cIGZGDriver* driver) {

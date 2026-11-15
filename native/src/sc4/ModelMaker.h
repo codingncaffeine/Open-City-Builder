@@ -261,9 +261,24 @@ public:
     // 0x228 refresh the overlay for a rectangle, 0x268 "cell has water", 0xd0 ground normal.
     virtual int TerrainSizeX() = 0;
     virtual int TerrainSizeZ() = 0;
+    // (i386: the terrain's vslots 0x148 GetTerrainCellFlags, 0x144 SetTerrainCellFlags, 0x114 RedisplayTerrain(false, false,
+    // rect, 0).) The cell flags: 1 / 2 hide the cell's two triangles, 4 the cell is covered by an opaque lot texture, 8 the
+    // cell's diagonal is flipped.
     virtual std::uint32_t TerrainCellFlags(int x, int z) = 0;
-    virtual void TerrainSetCellFlags(int x, int z) = 0;
-    virtual void TerrainRefreshCell(int x, int z) = 0;
+    virtual void TerrainSetCellFlags(int x, int z, std::uint32_t flags) = 0;
+    virtual void TerrainRedisplay(const SC4RectT<int>& cells) = 0;
+    // What DoTerrainHidingForCells asks of the occupants on a cell (i386 0x00246020); the defaults answer "not that kind".
+    // cISC4NetworkOccupant (0xa821ef94) vslot 0x20 HasNetworkFlag: the piece's flags out of `mask`; false = not a network piece
+    virtual bool NetworkPieceFlags(cISC4Occupant* occupant, std::uint32_t mask, std::uint32_t& flags) { (void)occupant; (void)mask; flags = 0; return false; }
+    // cISC4UndergroundOccupant (0x4a10afc2) vslot 0x1bc GetHiddenTriangles: its second and third answers
+    virtual bool UndergroundHiddenTriangles(cISC4Occupant* occupant, bool& even, bool& odd) { (void)occupant; even = odd = false; return false; }
+    // cISC4FoundationOccupant (0xc8fce101) vslot 0x24 GetUsage; -1 = not a foundation
+    virtual int FoundationUsage(cISC4Occupant* occupant) { (void)occupant; return -1; }
+    // the lot manager's GetLot(x, z, false) and that lot's GetFlags (vslot 0x30); false = no lot there
+    virtual bool LotFlagsAt(int x, int z, std::uint32_t& flags) { (void)x; (void)z; flags = 0; return false; }
+    // cISC4LotBaseTextureOccupant (0x097f6d98) vslot 0x1c IsCellCovered(x, z, &covered); false = not a base texture
+    // occupant or no texture on that cell
+    virtual bool BaseTextureCellCovered(cISC4Occupant* occupant, int x, int z, bool& covered) { (void)occupant; (void)x; (void)z; covered = false; return false; }
     virtual bool TerrainCellHasWater(int x, int z) = 0;
     virtual void TerrainNormalAt(float x, float z, float out[3]) = 0;
     // SL::spTrafficNetworkMap vslot 0x58 network-at(x, z, 0x1f4f, 1); false when the cell has no network.

@@ -32,8 +32,8 @@ struct StubModelMaker final : IModelMakerHost {
     int TerrainSizeX() override { return {}; }
     int TerrainSizeZ() override { return {}; }
     std::uint32_t TerrainCellFlags(int x, int z) override { return {}; }
-    void TerrainSetCellFlags(int x, int z) override {}
-    void TerrainRefreshCell(int x, int z) override {}
+    void TerrainSetCellFlags(int x, int z, std::uint32_t flags) override {}
+    void TerrainRedisplay(const SC4RectT<int>& cells) override {}
     bool TerrainCellHasWater(int x, int z) override { return {}; }
     void TerrainNormalAt(float x, float z, float out[3]) override {}
     bool NetworkAt(float x, float z) override { return {}; }
