@@ -3072,7 +3072,8 @@ bool cSTETerrain::ApplyBrush(std::uint32_t brushType, TerrainBrushParameters& pa
     const auto it = map.find(brushType);
     if (it == map.end()) return false;
     ApplyBrushComponents(const_cast<TerrainBrushDescription&>(it->second), parameters);
-    parameters.valid = true;
+    // i386 0x004ea326: the caller's flag (+0x14) decides whether this stroke redisplays; a caller that applies many
+    // strokes a frame (the earthquake, the effects' brushes) sets it on the last one or redisplays itself.
     if (parameters.valid && parameters.rect.left <= parameters.rect.right &&
         parameters.rect.top <= parameters.rect.bottom) {
         RedisplayTerrain(true, true, parameters.rect, parameters.redisplayFlags);   // vslot 0x228

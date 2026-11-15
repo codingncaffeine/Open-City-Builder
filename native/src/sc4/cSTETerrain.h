@@ -299,12 +299,12 @@ struct TerrainBrushParameters {
     float currentX = 0.0f;                    // +0x08
     float currentZ = 0.0f;                    // +0x0c
     std::int32_t zoom = -1;                   // +0x10 (-1 = the terrain's zoom)
-    bool valid = false;                       // +0x14 (set by ApplyBrushComponents)
+    bool valid = true;                        // +0x14: redisplay the touched cells when the stroke is applied
     float strengthScale = 1.0f;               // +0x18
     float radiusScale = 1.0f;                 // +0x1c
-    std::uint32_t redisplayFlags = 0;         // +0x20
+    std::uint32_t redisplayFlags = 3;         // +0x20 (the constructor's values, i386 0x006f3aee)
     TerrainRect rect = kEmptyTerrainRect;     // +0x24 (in/out: the cells the brush touched)
-    float levelAltitude = 0.0f;               // +0x34
+    float levelAltitude = 100.0f;             // +0x34
 };
 static_assert(sizeof(TerrainBrushParameters) == 0x38);
 

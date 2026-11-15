@@ -2391,13 +2391,28 @@ int main() {
         parameters.radiusScale = 1.0f;
         parameters.redisplayFlags = 2;
 
-        // unknown brush
-        CHECK(!brush.ApplyBrush(99, parameters) && !parameters.valid);
+        // unknown brush: refused, and nothing is touched
+        CHECK(!brush.ApplyBrush(99, parameters) && IsEmptyTerrainRect(parameters.rect));
 
-        // RaiseLower through ApplyBrush: texture 10 above the component's 2 raises by 8
+        // RaiseLower through ApplyBrush: texture 10 above the component's 2 raises the ground. The caller's flag (+0x14)
+        // decides whether the stroke redisplays what it touched; the terrain-changed post carries the caller's flags.
         brushes[3] = makeDescription(0, 2, 0x1234);
-        brush.ApplyBrush(3, parameters);
-        CHECK(parameters.valid);
+        brush.SetDisplayEnabled(true);
+        host.messages.posts.clear();
+        parameters.valid = false;
+        CHECK(brush.ApplyBrush(3, parameters));
+        CHECK(!IsEmptyTerrainRect(parameters.rect) && 10.0f < brush.GetAltitudeAtVertex(4, 4) && host.messages.posts.empty());
+        {
+            const auto raisedOnce = brush.Vertices();                  // the checks below read the ground after one stroke
+            parameters.valid = true;
+            CHECK(brush.ApplyBrush(3, parameters));
+            bool announced = false;
+            for (const PostedMessage& post : host.messages.posts) announced = announced || (post.type == 0x278e6003 && post.data[3] == 2);
+            CHECK(announced);
+            brush.Vertices() = raisedOnce;
+        }
+        brush.SetDisplayEnabled(false);
+        CHECK(TerrainBrushParameters().valid && TerrainBrushParameters().redisplayFlags == 3 && TerrainBrushParameters().levelAltitude == 100.0f);
         CHECK(parameters.rect.left <= parameters.rect.right && parameters.rect.top <= parameters.rect.bottom);
         const std::int32_t centre = brush.GetVertIndex(4, 4);
         CHECK(Near(brush.GetAltitude(centre), 18.0f, 0.01f));
