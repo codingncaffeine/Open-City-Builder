@@ -55,6 +55,8 @@
 #include "sc4/cSC4City.h"
 #include "sc4/cSC4ZoneManager.h"
 
+namespace native { sc4::cSC4CrimeSimulator* NativeCrimeSimulator(); }   // app/NativeCrime.cpp
+
 namespace native {
 // app/NativeSimHosts.cpp: the simulators' own occupant adapters
 sc4::IFireOccupant* NativeFireStation(sc4::cISC4Occupant* occupant);
@@ -691,7 +693,7 @@ public:
     float SchoolGradeValue(int x, int z) override { return CellOf(NativeResidentialGradeMap(true), x, z); }
     float HospitalGradeValue(int x, int z) override { return CellOf(NativeResidentialGradeMap(false), x, z); }
     std::uint8_t CrimeValue(int x, int z) override {
-        auto* crime = CityAs<cSC4CrimeSimulator>(CityComponent::CrimeSimulator);
+        cSC4CrimeSimulator* crime = NativeCrimeSimulator();   // a plain object behind its adapter
         return crime ? CellOf(crime->GetCrimeGrid(), x, z) : 0;
     }
     std::uint8_t TrafficValue(int x, int z) override {

@@ -51,6 +51,13 @@ template <class T> T* CityAs(CityComponent component) {
     cSC4City* city = HostCity();
     return city ? dynamic_cast<T*>(city->GetComponent(component)) : nullptr;
 }
+template <class T> T* Plain(CityComponent component) {   // the components held in their serializable adapter (the plain view)
+    cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(component) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(kGZIID_PlainObject, &raw) || !raw) return nullptr;
+    return static_cast<T*>(raw);
+}
 cSC4CrimeSimulator* Crime() {
     cSC4City* city = HostCity();
     cIGZUnknown* object = city ? city->GetComponent(CityComponent::CrimeSimulator) : nullptr;
@@ -174,9 +181,12 @@ public:
         return zones ? zones->GetZoneType(x, z) : 0;
     }
     int PropCrimeTypeId(std::uint32_t propId) override {
-        auto* props = CityAs<cSC4PropManager>(CityComponent::PropManager);
+        cSC4PropManager* props = Plain<cSC4PropManager>(CityComponent::PropManager);   // a plain object behind its adapter
         const PropProfile* profile = props ? props->GetPropProfilePtr(propId) : nullptr;
-        return profile ? static_cast<int>(profile->valueC) : 0;
+        const int crimeType = profile ? static_cast<int>(profile->valueC) : 0;
+        static const bool trace = std::getenv("SC4_CRIMEDEBUG") != nullptr;
+        if (trace) std::fprintf(stderr, "crime: prop %08x crime type %08x\n", propId, static_cast<unsigned>(crimeType));
+        return crimeType;
     }
     int PoliceJailPopulation() override {
         auto* police = CityAs<cSC4PoliceSimulator>(CityComponent::PoliceSimulator);
