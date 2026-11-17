@@ -249,6 +249,13 @@ public:
         delete vertexBuffer;
         // effectMaps is a real cSC4EffectMaps: the manager owns and deletes it.
     }
+    IParticlesDrawContext* ParticlesDrawContext(SC4DrawContext* context) override {
+        (void)context;
+        return drawContext;
+    }
+    bool IsBoundingBoxInView(const cS3DBoundingBox& box) override { return box.max[0] < hiddenFromX; }
+    IParticlesDrawContext* drawContext = nullptr;
+    float hiddenFromX = 1.0e9f;   // a particle system whose bounds reach this x is out of view
     std::vector<FakeUnknown*> renderers;
     FakeUnknown* weatherSim = nullptr;
     FakeVertexBuffer* vertexBuffer = nullptr;
@@ -915,6 +922,123 @@ void TestParticlePool() {
     CHECK(terrain.refs == 0);               // Shutdown released the reference Init took
 }
 
+// The particle view of the draw context Update draws through: it keeps the textures in the order the systems drew.
+class RecordingDrawContext final : public IParticlesDrawContext {
+public:
+    void SetVertexBuffer(std::uint32_t, std::uint32_t, const void*) override {}
+    void DrawPrims(std::uint32_t, int, int) override {}
+    void DrawPrimsIndexed(std::uint32_t, int, const std::uint16_t*) override {}
+    void SetTexture(int texture, int) override { textures.push_back(texture); }
+    void SetRenderState(const cSC4PackedRenderState&) override {}
+    void SetSelfLitShade(const cS3DVector3&) override {}
+    void ResetShade() override {}
+    void ResetModelViewTransform() override {}
+    int Rotation() const override { return rotation; }
+    void GetBillboardBasis(cS3DVector3& a, cS3DVector3& b) const override {
+        a = cS3DVector3{0.0f, 0.0f, 1.0f};
+        b = cS3DVector3{1.0f, 0.0f, 0.0f};
+    }
+    int rotation = 0;
+    std::vector<int> textures;
+};
+
+class OrderTextures final : public IParticlesTextures {
+public:
+    class Binding final : public IParticlesTextureBinding {
+    public:
+        void Release() override {}
+        std::uint32_t TextureId() const override { return id; }
+        std::uint32_t id = 0;
+    };
+    IParticlesTextureBinding* Create(std::uint32_t textureId) override {
+        bindings.emplace_back(new Binding());
+        bindings.back()->id = textureId;
+        return bindings.back();
+    }
+    ~OrderTextures() override {
+        for (Binding* binding : bindings) delete binding;
+    }
+    std::vector<Binding*> bindings;
+};
+
+cSC4ParticlesDescription DrawnDescription(std::uint32_t texture, float x, float z, float bias) {
+    cSC4ParticlesDescription description;
+    description.lifetimeMin = description.lifetimeMax = 10.0f;
+    description.spawnPhase = 1.0f;
+    description.maxParticles = 4;
+    description.delayMinA = description.delayMinB = -1.0f;
+    description.rateCurve.assign(1, 1.0f);
+    description.sizeCurve.assign(1, 1.0f);
+    description.alphaCurve.assign(1, 1.0f);
+    description.spinCurve.assign(1, 0.0f);
+    description.colorCurve.assign(1, cS3DVector3{1.0f, 1.0f, 1.0f});
+    description.textureId = texture;
+    description.origin[0] = x;
+    description.origin[2] = z;
+    description.value130 = bias;   // i386 description +0xd8: added to the depth key
+    return description;
+}
+
+// Update (i386 0x00407524): the running systems in view draw in ascending order of their depth key (the view rotation
+// picks the axis and its sign, the description adds its bias), the ones out of view only advance, a description with
+// flag 0x10 draws even out of view, a system not started is left alone.
+void TestUpdateDrawOrder() {
+    FakeHost host;
+    SetEffectsManagerHost(&host);
+    FakeParticlesTerrain terrain;
+    SetParticlesTerrain(&terrain);
+    OrderTextures textures;
+    SetParticlesTextures(&textures);
+    RecordingDrawContext draw;
+    host.drawContext = &draw;
+    host.hiddenFromX = 500.0f;
+    cSC4EffectsManager manager;
+    manager.SetHost(&host);
+    CHECK(manager.Init());
+
+    std::vector<cSC4ParticlesDescription> descriptions;
+    descriptions.reserve(6);
+    descriptions.push_back(DrawnDescription(1, 9.0f, 5.0f, 0.0f));     // rotation 0 key  5, rotation 1 key -9
+    descriptions.push_back(DrawnDescription(2, 1.0f, 1.0f, 0.0f));     //                 1                 -1
+    descriptions.push_back(DrawnDescription(3, 4.0f, 3.0f, -10.0f));   //                -7               -14
+    descriptions.push_back(DrawnDescription(4, 1000.0f, 0.0f, 0.0f));  // out of view
+    descriptions.push_back(DrawnDescription(5, 1000.0f, 2.0f, 0.0f));  // out of view, flag 0x10: key 2 / -1000
+    descriptions.back().flags = 0x10u;
+    descriptions.push_back(DrawnDescription(6, 0.0f, 0.0f, 0.0f));     // never started
+    std::vector<cSC4ParticlesEffect*> effects;
+    for (std::size_t i = 0; i < descriptions.size(); ++i) {
+        cSC4ParticlesEffect* effect = manager.NewParticlesEffect();
+        CHECK(effect != nullptr);
+        if (!effect) return;
+        effect->SetDescription(&descriptions[i]);
+        if (i != 5) effect->Start(0);
+        cSC4EffectsParticle* particle = reinterpret_cast<cSC4EffectsParticle*>(effect->CreateParticle());
+        particle->position = cS3DVector3{descriptions[i].origin[0], 0.0f, descriptions[i].origin[2]};
+        effect->AddParticle(reinterpret_cast<cSCParticle*>(particle));
+        effects.push_back(effect);
+    }
+    // A system's bounds come from its own Update: one frame without a draw context sets them.
+    host.drawContext = nullptr;
+    CHECK(manager.Update(nullptr));
+    CHECK(draw.textures.empty());
+    CHECK(effects[3]->BoundingBox().max[0] >= 500.0f);   // the out-of-view systems really are out of view
+    CHECK(effects[0]->BoundingBox().max[0] < 500.0f);
+    host.drawContext = &draw;
+
+    CHECK(manager.Update(nullptr));
+    CHECK((draw.textures == std::vector<int>{3, 2, 5, 1}));
+    CHECK(manager.ParticleSystemCount() == 4);
+
+    draw.textures.clear();
+    draw.rotation = 1;              // key = -x + bias
+    CHECK(manager.Update(nullptr));
+    CHECK((draw.textures == std::vector<int>{5, 3, 1, 2}));
+
+    manager.Shutdown();
+    SetParticlesTextures(nullptr);
+    SetParticlesTerrain(nullptr);
+}
+
 void TestDuplicateBindings() {
     FakeHost host;
     SetEffectsManagerHost(&host);
@@ -1104,6 +1228,7 @@ int main() {
     TestSnowline();
     TestInitShutdownAndTick();
     TestParticlePool();
+    TestUpdateDrawOrder();
     TestDuplicateBindings();
     TestParseEffectsFiles();
     TestCreateEffectCommand();

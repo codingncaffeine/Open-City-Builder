@@ -724,33 +724,67 @@ void cSC4EffectsManager::GetStatsString(cRZString& out) {
                 static_cast<double>(globalParams_.rateScale));
 }
 
-// @ i386 0x00407524 (PARTIAL: the effect-map overlay, the depth sort of the drawn systems, the decal and
-// geometry-sourced pools and the debug bounding boxes are not ported). Every running particle system advances by the
-// time the animation ticks gathered since the last frame; the ones whose bounds are in view are drawn, the rest only
-// simulate. Then the screen flash / lighting tint, the recycling of finished effects, and the tick time restarts.
+// @ i386 0x00407524 (PARTIAL: the effect-map overlay and the debug bounding boxes are not ported). The running particle
+// systems of the three pools are gathered first: those whose bounds are in view (or whose description sets flag 4)
+// with a depth key, the rest in a second list. The visible ones then advance and draw in ascending key order, the others
+// only advance, walked from the back. Gathering first matters: an Update may start new effects, which grows the pools'
+// slot lists, and a system started during this frame first advances on the next one. Then the decals, the screen
+// flash / lighting tint, the recycling of finished effects, and the tick time restarts.
 bool cSC4EffectsManager::Update(SC4DrawContext* context) {
     const float elapsed = elapsedSeconds_;
     IParticlesDrawContext* draw = host_ ? host_->ParticlesDrawContext(context) : nullptr;
     particlesDrawn_ = 0;
-    std::uint32_t systems = 0;
-    auto run = [&](cSC4ParticlesEffect* effect) {
+    // The depth key: the view rotation picks the world axis along which the camera looks and its sign
+    // (rotation 0: +z, 1: -x, 2: -z, 3: +x; kfMaxStoplightDistance = 1, kDriveCommand_INACTIVE = -1 in the original).
+    float sign = 1.0f;
+    int axis = 0;
+    switch (draw ? draw->Rotation() : 0) {
+    case 0: sign = 1.0f; axis = 2; break;
+    case 1: sign = -1.0f; axis = 0; break;
+    case 2: sign = -1.0f; axis = 2; break;
+    case 3: sign = 1.0f; axis = 0; break;
+    default: break;
+    }
+    std::vector<std::pair<float, cSC4ParticlesEffect*>> drawn;   // +0xd98
+    std::vector<cSC4ParticlesEffect*> hidden;                     // +0xda4
+    auto gather = [&](cSC4ParticlesEffect* effect) {
         if (!effect || !effect->IsStarted()) return;
-        const bool visible = draw && host_->IsBoundingBoxInView(effect->BoundingBox());
-        const int before = effect->LiveParticleCount();
-        effect->Update(elapsed, visible ? draw : nullptr);
-        static int traced = 0;
+        const cSC4ParticlesDescription* description = effect->Description();
+        const bool always = description && (description->flags & 0x10u) != 0;
+        if (!draw || (!always && !host_->IsBoundingBoxInView(effect->BoundingBox()))) {
+            hidden.push_back(effect);
+            return;
+        }
+        const cS3DVector3& at = effect->Position();
+        const float along = axis == 0 ? at.x : at.z;
+        const float key = sign * along + (description ? description->value130 : 0.0f);
+        drawn.emplace_back(key, effect);
+    };
+    for (int index : newParticlesEffectSlots_) gather(particlesEffects_[static_cast<std::size_t>(index)].get());
+    for (int index : newModelEffectSlots_) gather(modelEffects_[static_cast<std::size_t>(index)].get());
+    for (int index : newGeometrySlots_) gather(geometryEffects_[static_cast<std::size_t>(index)].get());
+    std::sort(drawn.begin(), drawn.end(),
+              [](const std::pair<float, cSC4ParticlesEffect*>& a, const std::pair<float, cSC4ParticlesEffect*>& b) {
+                  return a.first < b.first;   // tDrawPairSort
+              });
+    static int traced = 0;
+    auto trace = [&](cSC4ParticlesEffect* effect, int before) {
         if (std::getenv("SC4_FXDEBUG") && (std::getenv("SC4_PDRAWDEBUG") || dynamic_cast<cSC4ModelBasedParticlesEffect*>(effect)) && traced++ < 60)
             std::fprintf(stderr, "fx: update %p dt %.3f live %d -> %d started %d delayed %d box %.0f,%.0f,%.0f\n", static_cast<void*>(effect), elapsed, before,
                          effect->LiveParticleCount(), effect->IsStarted() ? 1 : 0, effect->IsInDelayedStop() ? 1 : 0,
                          effect->BoundingBox().min[0], effect->BoundingBox().min[1], effect->BoundingBox().min[2]);
-        if (visible) {
-            ++systems;
-            particlesDrawn_ += static_cast<std::uint32_t>(effect->LiveParticleCount());
-        }
     };
-    for (int index : newParticlesEffectSlots_) run(particlesEffects_[static_cast<std::size_t>(index)].get());
-    for (int index : newModelEffectSlots_) run(modelEffects_[static_cast<std::size_t>(index)].get());
-    for (int index : newGeometrySlots_) run(geometryEffects_[static_cast<std::size_t>(index)].get());
+    for (const auto& pair : drawn) {
+        const int before = pair.second->LiveParticleCount();
+        pair.second->Update(elapsed, draw);
+        trace(pair.second, before);
+        particlesDrawn_ += static_cast<std::uint32_t>(pair.second->LiveParticleCount());
+    }
+    for (auto it = hidden.rbegin(); it != hidden.rend(); ++it) {
+        const int before = (*it)->LiveParticleCount();
+        (*it)->Update(elapsed, nullptr);
+        trace(*it, before);
+    }
     decalCount_ = 0;
     for (int index : newDecalSlots_) {   // i386 0x00407524: every started decal advances (vslot 0x24 Update)
         cSC4DecalEffect* decal = decalEffects_[static_cast<std::size_t>(index)].get();
@@ -758,7 +792,7 @@ bool cSC4EffectsManager::Update(SC4DrawContext* context) {
         decal->Update(elapsed);
         ++decalCount_;
     }
-    particleSystemCount_ = systems;
+    particleSystemCount_ = static_cast<std::uint32_t>(drawn.size());
     if (0.0f < flashInverseDuration_) DrawScreenFlashes(context, elapsed);
     if (0.0f < tintInverseDuration_) UpdateLightingTint(elapsed);
     DeactivateUnusedVisualEffects();
