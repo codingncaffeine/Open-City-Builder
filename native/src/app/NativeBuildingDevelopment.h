@@ -7,13 +7,14 @@
 
 #include "rz/cRZAutoRefCount.h"
 
-namespace sc4 { struct BuildingProfile; class cSC4Demand; struct DemandBuildingProfile; class cISC4BuildingOccupant; class cISC4Occupant; }
+namespace sc4 { class cSC4BuildingDevelopmentSimulator; struct BuildingProfile; class cSC4Demand; struct DemandBuildingProfile; class cISC4BuildingOccupant; class cISC4Occupant; }
 struct cGZPersistResourceKey;
 
 namespace native {
 
 // Replaces the generated neutral host; installed before the city's components Init.
 void InstallBuildingDevelopmentHost();
+sc4::cSC4BuildingDevelopmentSimulator* NativeBuildingDevelopmentSimulator();   // the city's (SL::spBuildingDevelopmentSim), null without a city
 
 // The building development simulator's catalogue for the growth developers' host (NativeGrowthDevelopers.cpp cannot include
 // BuildingDevelopmentSimulator.h: the headers clash). Null / 0 / false without a city or a building development simulator.

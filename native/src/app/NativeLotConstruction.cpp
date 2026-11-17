@@ -458,4 +458,9 @@ void InstallLotConstructionHosts() {
     InstallConstructionOccupantHost();
 }
 
+sc4::cSC4LotConfiguration* NativeLotConfiguration(sc4::cISC4LotConfigurationRef* reference) {
+    sc4::cSC4LotConfigurationManager* manager = LotConfigurations();
+    return reference && manager ? manager->GetLotConfiguration(reference->GetID()) : nullptr;
+}
+
 }  // namespace native

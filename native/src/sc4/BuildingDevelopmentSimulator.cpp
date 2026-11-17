@@ -1,9 +1,12 @@
 #include "sc4/BuildingDevelopmentSimulator.h"
 #include "sc4/BuildingZoneFit.h"
 #include "sc4/DBSegment.h"
+#include "sc4/cSC4SimGrid.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <functional>
 
 #include "sc4/SCPropertyHelp.h"
@@ -479,6 +482,14 @@ bool cSC4BuildingDevelopmentSimulator::Init() {
     } else if (resources_) {
         resources_->Init();
     }
+    // the building map (i386 0x000fafaa): a byte grid of tract size 1, instance 0x49d5b678, unless the city record brought one
+    if (!buildingMap_ && g_host) {
+        buildingMap_ = g_host->CreateByteGrid();
+        if (buildingMap_) {
+            buildingMap_->SetTractSize(1);
+            buildingMap_->SetInstanceID(kBuildingMapInstance);
+        }
+    }
     if (g_host && !messageTargetRegistered_) {
         g_host->RegisterMessageTarget(this);
         messageTargetRegistered_ = true;
@@ -495,9 +506,57 @@ bool cSC4BuildingDevelopmentSimulator::Shutdown() {
     }
     for (cIGZUnknown* occupant : civicOccupants_) if (occupant) occupant->Release();
     civicOccupants_.clear();
+    SetBuildingMap(nullptr);   // i386 0x000f844e releases +0x48
     stage_ = 0;
     idleCursorValid_ = false;
     return true;
+}
+
+void cSC4BuildingDevelopmentSimulator::SetBuildingMap(cSC4SimGrid<std::uint8_t>* map) {
+    if (map) map->AddRef();
+    if (buildingMap_) buildingMap_->Release();
+    buildingMap_ = map;
+}
+
+// i386 0x000f99ca. A lot whose building came (added) or went: its cells in the building map take the key of the building's
+// purpose and the message's wealth (0 when it went). A building that came and whose profile has a purpose and the same wealth
+// may raise the highest stage seen for its developer type; a new highest stage is the city planning advisor's event
+// 0x4a64a9cc. QUIRK KEPT: the original also builds an advice subject (the lot, the stage and type, the position) and
+// releases it unused; the event goes out with a null subject, so the subject is not built here.
+void cSC4BuildingDevelopmentSimulator::DoBuildingChanged(const IBuildingDevelopmentSimHost::ChangedLot& lot, std::int32_t wealth,
+                                                         bool added) {
+    const BuildingProfile& profile = GetBuildingProfile(lot.buildingType);
+    const std::uint8_t key = added ? static_cast<std::uint8_t>(wealth + 1 + static_cast<std::int32_t>(profile.purpose) * 4) : 0;
+    if (buildingMap_) {
+        auto& rows = buildingMap_->GetGridData();
+        for (std::int32_t x = lot.rect[0]; x <= lot.rect[2]; ++x)
+            for (std::int32_t z = lot.rect[1]; z <= lot.rect[3]; ++z)
+                // PORT GUARD: the original indexes without a bounds check (a lot is always inside the city)
+                if (x >= 0 && z >= 0 && static_cast<std::size_t>(x) < rows.size() && static_cast<std::size_t>(z) < rows[x].size())
+                    rows[static_cast<std::size_t>(x)][static_cast<std::size_t>(z)] = key;
+    }
+    static const bool trace = std::getenv("SC4_BUILDINGMAPDEBUG") != nullptr;
+    if (trace)
+        std::fprintf(stderr, "building map: type %08x purpose %u wealth %d %s cells %d,%d..%d,%d -> key %u\n", lot.buildingType,
+                     static_cast<unsigned>(profile.purpose), wealth, added ? "added" : "removed", lot.rect[0], lot.rect[1], lot.rect[2],
+                     lot.rect[3], key);
+    if (!added || profile.purpose == 0 || static_cast<std::int32_t>(profile.wealth) != wealth || !lot.hasConfiguration) return;
+    std::uint32_t developerType = 0;
+    switch (profile.purpose) {
+        case 1: developerType = wealth == 1 ? 0x1010 : wealth == 2 ? 0x1020 : wealth == 3 ? 0x1030 : 0; break;
+        case 2: developerType = wealth == 1 ? 0x3110 : wealth == 2 ? 0x3120 : wealth == 3 ? 0x3130 : 0; break;
+        case 3: developerType = wealth == 2 ? 0x3320 : wealth == 3 ? 0x3330 : 0; break;
+        case 5: developerType = 0x4100; break;
+        case 6: developerType = 0x4200; break;
+        case 7: developerType = 0x4300; break;
+        case 8: developerType = 0x4400; break;
+        default: break;
+    }
+    std::uint8_t& reached = stagesReached_[developerType];
+    if (!(reached < lot.growthStage)) return;
+    reached = lot.growthStage;
+    if (trace) std::fprintf(stderr, "building map: developer %04x reached stage %u\n", developerType, lot.growthStage);
+    if (g_host) g_host->PushAdvisorEvent(kCityPlanningAdvisor, kEventNewHighestStage);
 }
 
 // 0x10014d666: a simulator exemplar (ExemplarType 4) makes or re-initialises the developer it names (property 0x21).
@@ -571,8 +630,7 @@ void cSC4BuildingDevelopmentSimulator::DoTerrainChanged(const std::int32_t rect[
     host->LotsDone();
 }
 
-// 0x10014e84c. PARTIAL: the building-changed (0xe8bda2e7 -> DoBuildingChanged) and PlaceBuilding command (0xb99ae81)
-// branches need functions that are not recovered.
+// 0x10014e84c. PARTIAL: the PlaceBuilding command (0xb99ae81) branch needs functions that are not recovered.
 bool cSC4BuildingDevelopmentSimulator::DoMessage(cIGZMessage2* message) {
     if (!message) return true;
     auto* standard = static_cast<cIGZMessage2Standard*>(message);
@@ -587,6 +645,16 @@ bool cSC4BuildingDevelopmentSimulator::DoMessage(cIGZMessage2* message) {
             if (cityCellsX_ <= rect[2]) rect[2] = cityCellsX_ - 1;
             if (cityCellsZ_ <= rect[3]) rect[3] = cityCellsZ_ - 1;
             DoTerrainChanged(rect, static_cast<std::uint32_t>(standard->GetData4()));
+            break;
+        }
+        case kMessageLotStateChangedForBuildings: {          // a lot's state: data1 old, data2 new, data4 wealth, the lot as the object
+            IBuildingDevelopmentSimHost::ChangedLot lot;
+            if (!g_host || !g_host->MessageLot(standard->GetIGZUnknown(), lot) || lot.buildingType == 0) break;
+            const std::uint32_t oldState = static_cast<std::uint32_t>(standard->GetData1());
+            const std::uint32_t newState = static_cast<std::uint32_t>(standard->GetData2());
+            const bool built = newState - 2u < 2u;              // states 2 and 3 have a building
+            if (built == (oldState - 2u < 2u)) break;
+            DoBuildingChanged(lot, static_cast<std::int32_t>(standard->GetData4()), built);
             break;
         }
         case 0x99ef1142:                                     // an occupant inserted: civic buildings (families 0x150a / 0x150b)
@@ -736,7 +804,11 @@ bool cSC4BuildingDevelopmentSimulator::Write(cIGZOStream& stream) const {
         fileHead_.Replay(stream);
         stream.SetUint32(static_cast<std::uint32_t>(civicOccupants_.size()));
         for (const cIGZUnknown* occupant : civicOccupants_) SC4WriteGZSerializable(stream, occupant);
-        fileMiddle_.Replay(stream);
+        stream.SetUint32(static_cast<std::uint32_t>(stagesReached_.size()));   // developer type -> highest stage
+        for (const auto& [type, stage] : stagesReached_) {
+            stream.SetUint32(type);
+            stream.SetUint8(stage);
+        }
         stream.SetUint32(static_cast<std::uint32_t>(growthMarks_.size()));
         for (const auto& mark : growthMarks_) {
             stream.SetUint32(mark.first);
@@ -792,9 +864,24 @@ bool cSC4BuildingDevelopmentSimulator::ReadCityRecord(cIGZIStream& stream) {
     std::uint8_t u8 = 0;
     cRecordTape& head = fileHead_;   // what the port does not model is kept as read (RecordTape.h) and saved back
     head.Clear();
-    fileMiddle_.Clear();
     fileTail_.Clear();
-    head.Ref(stream);
+    if (cIGZUnknown* object = head.Ref(stream)) {             // the building map (i386 +0x48); the tape keeps the reference it saves
+        void* raw = nullptr;
+        if (object->QueryInterface(kGZIID_cISC4SimGrid, &raw) && raw) {
+            auto* base = static_cast<cISC4SimGridBase*>(raw);
+            SetBuildingMap(dynamic_cast<cSC4SimGrid<std::uint8_t>*>(base));
+            base->Release();
+            if (buildingMap_ && std::getenv("SC4_BUILDINGMAPDEBUG")) {
+                std::map<int, int> keys;
+                for (const auto& column : buildingMap_->GetGridData())
+                    for (std::uint8_t v : column) ++keys[v];
+                std::fprintf(stderr, "building map: read %08x tract %d %dx%d:", buildingMap_->GetInstanceID(), buildingMap_->GetTractSize(),
+                             buildingMap_->GetTractCountX(), buildingMap_->GetTractCountZ());
+                for (const auto& [key, count] : keys) std::fprintf(stderr, " key %d x%d", key, count);
+                std::fprintf(stderr, "\n");
+            }
+        }
+    }
     head.Ref(stream);
     count = head.U32(stream);                                  // the developers by key
     if (count > kMaxCount) return false;
@@ -812,11 +899,16 @@ bool cSC4BuildingDevelopmentSimulator::ReadCityRecord(cIGZIStream& stream) {
         SC4ReadGZSerializable(stream, kGZIID_cISC4Occupant, &raw, false);   // one reference, kept by the list
         if (raw) civicOccupants_.push_back(static_cast<cIGZUnknown*>(raw));
     }
-    cRecordTape& middle = fileMiddle_;
-    middle.Clear();
-    count = middle.U32(stream);                                // developer type -> byte
+    stream.GetUint32(count);                                   // developer type -> the highest stage seen (i386 +0x54)
     if (count > kMaxCount) return false;
-    for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) { middle.U32(stream); middle.U8(stream); }
+    stagesReached_.clear();
+    for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) {
+        std::uint32_t type = 0;
+        std::uint8_t stage = 0;
+        stream.GetUint32(type);
+        stream.GetUint8(stage);
+        stagesReached_[type] = stage;
+    }
     growthMarks_.clear();
     stream.GetUint32(count);                                   // growth marks: key -> set of cells
     if (count > kMaxCount) return false;

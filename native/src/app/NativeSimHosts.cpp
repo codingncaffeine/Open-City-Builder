@@ -22,6 +22,10 @@
 #include "gz/SimHostRegistry.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "rz/cRZMessage2Standard.h"
+#include "app/NativeBuildingDevelopment.h"
+#include "sc4/BuildingDevelopmentSimulator.h"
+#include "sc4/CommercialSimulator.h"
+#include "sc4/MapUtilities.h"
 #include "sc4/Exemplar.h"
 #include "sc4/HistoryWarehouse.h"
 #include "sc4/LandValueSimulator.h"
@@ -123,30 +127,6 @@ void AddHistoryValue(std::uint32_t series, std::int64_t value) {
     if (cSC4HistoryWarehouse* history = History()) history->RecordHistoryData(series, static_cast<int>(value));
 }
 
-// cSC4MapUtilities' Expand (static, 0x0009de12): every cell at distance `distance` lowers its four neighbours (clamped at the edges)
-// to distance + 1; true when a cell changed.
-bool Expand(std::vector<std::vector<std::uint8_t>>& grid, int countX, int countZ, std::uint8_t distance) {
-    const std::uint8_t next = static_cast<std::uint8_t>(distance + 1);
-    bool changed = false;
-    const auto lower = [&](int x, int z) {
-        std::uint8_t& cell = grid[x][z];
-        if (next < cell) {
-            cell = next;
-            changed = true;
-        }
-    };
-    for (int x = 0; x < countX; ++x) {
-        for (int z = 0; z < countZ; ++z) {
-            if (grid[x][z] != distance) continue;
-            lower(x - 1 < 0 ? 0 : x - 1, z);
-            lower(x + 1 >= countX ? countX - 1 : x + 1, z);
-            lower(x, z - 1 < 0 ? 0 : z - 1);
-            lower(x, z + 1 >= countZ ? countZ - 1 : z + 1);
-        }
-    }
-    return changed;
-}
-
 // cSC4MapUtilities::AddDistanceEffect @ 0x0009f556: the cells of `source` equal to `match` are distance 0; every cell nearer than
 // `range` gains near + distance * (far - near) / range, clamped to a byte.
 void AddDistanceEffect(std::vector<std::vector<std::uint8_t>>& grid, int countX, int countZ, const std::vector<std::vector<std::uint8_t>>& source,
@@ -155,7 +135,7 @@ void AddDistanceEffect(std::vector<std::vector<std::uint8_t>>& grid, int countX,
     for (int x = 0; x < countX; ++x)
         for (int z = 0; z < countZ; ++z)
             if (source[x][z] == match) distance[x][z] = 0;
-    for (int d = 0; d < static_cast<int>(range); ++d) Expand(distance, countX, countZ, static_cast<std::uint8_t>(d));
+    for (int d = 0; d < static_cast<int>(range); ++d) cSC4MapUtilities::Expand(distance, countX, countZ, static_cast<std::uint8_t>(d));
     for (int x = 0; x < countX; ++x) {
         for (int z = 0; z < countZ; ++z) {
             const float d = distance[x][z];
@@ -586,7 +566,10 @@ public:
     }
     // PARTIAL: the building development simulator keeps no building map natively, so no proximity tract is seeded (the original's
     // maps differ from that only along the z = 0 edge, residential.md 5.3).
-    const cSC4SimGrid<std::uint8_t>* BuildingMap() override { return nullptr; }
+    const cSC4SimGrid<std::uint8_t>* BuildingMap() override {   // SL::spBuildingDevelopmentSim vslot 0xa4
+        cSC4BuildingDevelopmentSimulator* simulator = NativeBuildingDevelopmentSimulator();
+        return simulator ? simulator->GetBuildingMap() : nullptr;
+    }
     int CurrentMonth() override {
         cSC4Simulator* s = Simulator();
         int month = 0;
@@ -608,6 +591,30 @@ private:
 };
 
 ResidentialHost g_residential;
+
+// cSC4CommercialSimulator's city (i386 0x00170c0a Init, 0x00170976 DoIdle): the simulator agent at kinds 0, 10, 4, 6, the
+// network-change notifications, and its proximity maps flood from the building development simulator's building map.
+class CommercialHost final : public ICommercialHost {
+public:
+    void AddIdleClient(cIGZMessageTarget2* target, int kind, const char* name, int priority) override {
+        AddCitySimulatorAgent(target, kind, name, static_cast<std::uint32_t>(priority));
+    }
+    void RemoveIdleClient(cIGZMessageTarget2* target) override { RemoveCitySimulatorAgent(target); }
+    void AddNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->AddNotification(target, message); }
+    void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->RemoveNotification(target, message); }
+    // The original holds the city, the building development simulator and the city's services 0x3000 / 0x3800; it fails
+    // without the city. The simulator is looked up when a map is filled (the city creates its components in turn).
+    bool AcquireServices() override { return HostCity() != nullptr; }
+    void ReleaseServices() override {}
+    // SL::spBuildingDevelopmentSim: FloodFillDistance(grid, GetBuildingMap() (vslot 0xa4), GetBuildingMapKey(3, kind) (vslot 0xac))
+    void FloodFillDistance(cSC4SimGrid<std::uint8_t>& grid, int sourceKind) override {
+        cSC4BuildingDevelopmentSimulator* simulator = NativeBuildingDevelopmentSimulator();
+        if (!simulator) return;
+        cSC4MapUtilities::FloodFillDistance(&grid, simulator->GetBuildingMap(),
+                                            simulator->GetBuildingMapKey(3u, static_cast<std::uint32_t>(sourceKind)));
+    }
+};
+CommercialHost g_commercial;
 
 cSC4ResidentialSimulator* Residential() {
     return Component<cSC4ResidentialSimulator>(CityComponent::ResidentialSimulator, kGZCLSID_cSC4ResidentialSimulator);
@@ -665,6 +672,7 @@ void InstallNativeSimHosts() {
     InstallCrimeHost();                              // app/NativeCrime.cpp: before the city creates its crime simulator
     hosts.police = &g_police;
     hosts.residential = &g_residential;
+    hosts.commercial = &g_commercial;
     hosts.demolition = NativeDemolitionHost();
     InstallNativeTrafficHost();
     InstallNeighborHosts();

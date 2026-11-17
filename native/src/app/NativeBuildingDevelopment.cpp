@@ -18,12 +18,17 @@
 
 #include "app/NativeCity.h"
 #include "app/NativeGrowthDevelopers.h"
+#include "app/NativeLotConstruction.h"
 #include "app/NativeUi.h"
 #include "gz/CheatCodeManager.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "gz/cIGZPersistResourceKeyList.h"
 #include "platform/Unwired.h"
+#include "sc4/AdvisorSystem.h"
 #include "sc4/BuildingDevelopmentSimulator.h"
+#include "sc4/Lot.h"
+#include "sc4/LotConfiguration.h"
+#include "sc4/cSC4SimGrid.h"
 #include "sc4/BuildingOccupant.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/SCPropertyHelp.h"
@@ -322,6 +327,28 @@ public:
     std::uint32_t RandomBelow(std::uint32_t range) override { static cRZRandom random(0x5eedu); return range ? random.RandomUint32Uniform(range) : 0; }
     std::uint64_t BeginGrowSlice() override { return NowMicros() + 3000; }      // cSC4DynamicLimitTimer: 3 ms
     bool GrowSliceExpired(std::uint64_t slice) override { return NowMicros() >= slice; }
+    cSC4SimGrid<std::uint8_t>* CreateByteGrid() override {
+        auto* grid = new cSC4SimGrid<std::uint8_t>();
+        grid->AddRef();
+        grid->Init();
+        return grid;
+    }
+    // The lot travels as the plain object of the message (NativeZoneDeveloperHost's PostLotMessage).
+    bool MessageLot(cIGZUnknown* object, ChangedLot& out) override {
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(kGZIID_PlainObject, &raw) || !raw) return false;
+        const auto* lot = static_cast<const cSC4Lot*>(raw);
+        out.buildingType = lot->GetBuildingType(false);
+        lot->GetBoundingRect(out.rect);
+        const cSC4LotConfiguration* configuration = NativeLotConfiguration(lot->GetLotConfiguration());
+        out.hasConfiguration = configuration != nullptr;
+        out.growthStage = configuration ? configuration->GetGrowthStage() : 0;
+        return true;
+    }
+    void PushAdvisorEvent(int advisor, std::uint32_t event) override {
+        cSC4AdvisorSystem* system = cSC4AdvisorSystem::Instance();
+        if (cISC4Advisor* target = system ? system->GetAdvisor(advisor) : nullptr) target->PushEvent(static_cast<int>(event), nullptr);
+    }
     static std::uint64_t NowMicros() {
         return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
     }
@@ -348,6 +375,8 @@ cSC4BuildingDevelopmentSimulator* CityBuildingDevelopment() {
     return static_cast<cSC4BuildingDevelopmentSimulator*>(raw);
 }
 }  // namespace
+
+cSC4BuildingDevelopmentSimulator* NativeBuildingDevelopmentSimulator() { return CityBuildingDevelopment(); }
 
 std::vector<void*> CityGrowthDeveloperHandles() {
     std::vector<void*> out;

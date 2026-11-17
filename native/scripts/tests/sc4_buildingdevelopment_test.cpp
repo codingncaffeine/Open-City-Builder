@@ -2,6 +2,7 @@
 #include "rz/PortMemoryStreams.h"
 #include "sc4/BuildingDevelopmentSimulator.h"
 #include "sc4/SCPropertyHelp.h"
+#include "sc4/cSC4SimGrid.h"
 #include "rz/cRZMessage2Standard.h"
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
@@ -50,6 +51,22 @@ public:
     std::uint32_t RandomBelow(std::uint32_t) override { return 0; }
     std::uint64_t BeginGrowSlice() override { return 0; }
     bool GrowSliceExpired(std::uint64_t) override { return false; }
+    cSC4SimGrid<std::uint8_t>* CreateByteGrid() override {
+        auto* grid = new cSC4SimGrid<std::uint8_t>();
+        grid->AddRef();
+        grid->Init();
+        return grid;
+    }
+    ChangedLot lot;
+    bool lotKnown = true;
+    int lotAsks = 0;
+    bool MessageLot(cIGZUnknown*, ChangedLot& out) override {
+        ++lotAsks;
+        out = lot;
+        return lotKnown;
+    }
+    std::vector<std::pair<int, std::uint32_t>> events;
+    void PushAdvisorEvent(int advisor, std::uint32_t event) override { events.emplace_back(advisor, event); }
     void LotConfigurations(std::vector<LotConfigurationInfo>& out) override {
         LotConfigurationInfo c;
         c.sizeX = 2; c.sizeZ = 2;
@@ -148,7 +165,13 @@ struct GrowingDeveloper final : IGrowthDeveloperRef {
 };
 struct Filter final : IBuildingTypeFilter { bool Accepts(std::uint32_t t) override { return t == 0x1002; } };
 }
+int StageReached(const cSC4BuildingDevelopmentSimulator& sim, std::uint32_t type) {
+    auto it = sim.StagesReached().find(type);
+    return it == sim.StagesReached().end() ? -1 : it->second;
+}
+
 int main() {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);   // a crash keeps the failures printed before it
     // developer type / wealth tables
     using S = cSC4BuildingDevelopmentSimulator;
     CHECK(S::GetDeveloperType_Static(1, 1) == 0x1010 && S::GetDeveloperType_Static(1, 3) == 0x1030);
@@ -158,6 +181,13 @@ int main() {
     CHECK(S::GetWealth_Static(0x1010) == 1 && S::GetWealth_Static(0x3320) == 2 && S::GetWealth_Static(0x4400) == 3 &&
           S::GetWealth_Static(0x1234) == 0);
 
+    struct GridCity final : ISimGridCity {
+        std::int32_t CitySizeXInCells() const override { return 8; }
+        std::int32_t CitySizeZInCells() const override { return 8; }
+        float CellSizeXMeters() const override { return 16.0f; }
+        float CellSizeZMeters() const override { return 16.0f; }
+    } gridCity;
+    SetSimGridCity(&gridCity);
     Host host;
     host.exemplars[0x1001] = MakeBuilding(1, 2, 40, 0x500, {16, 10, 16});     // medium-wealth residential, 40 people
     host.exemplars[0x1002] = MakeBuilding(2, 1, 12, 0x500, {80, 10, 80});     // too big for the 2x2 lot
@@ -181,6 +211,70 @@ int main() {
     // zone capacity: the 40-capacity building on a 2x2 lot -> 40/4 + 0.5 = 10.5 -> 10; the big one does not fit
     CHECK(sim->GetMaxCapacity(1, 1, 2) == 10 && sim->GetMaxCapacity(2, 1, 2) == 10);
     CHECK(sim->GetMaxCapacity(1, 2, 1) == 0 && sim->GetMaxCapacity(3, 1, 2) == 0);
+
+    // The building map (i386 0x000fafaa: tract size 1, instance 0x49d5b678) and DoBuildingChanged (0x000f99ca).
+    {
+        cSC4SimGrid<std::uint8_t>* map = sim->GetBuildingMap();
+        CHECK(map && map->GetTractSize() == 1 && map->GetInstanceID() == 0x49d5b678 && map->GetTractCountX() == 8);
+        IBuildingDevelopmentSimHost::ChangedLot lot;
+        lot.buildingType = 0x1001;   // purpose 1, wealth 2
+        lot.rect[0] = 1; lot.rect[1] = 2; lot.rect[2] = 2; lot.rect[3] = 4;
+        lot.growthStage = 3;
+        lot.hasConfiguration = true;
+        sim->DoBuildingChanged(lot, 2, true);
+        CHECK(map->GetTractValue(1, 2) == 7 && map->GetTractValue(2, 4) == 7 && map->GetTractValue(3, 2) == 0 &&
+              map->GetTractValue(1, 1) == 0 && map->GetTractValue(0, 2) == 0 && map->GetTractValue(1, 5) == 0);
+        CHECK(StageReached(*sim, 0x1020) == 3);
+        CHECK(host.events.size() == 1 && host.events[0].first == 23 && host.events[0].second == 0x4a64a9cc);
+        sim->DoBuildingChanged(lot, 2, true);                      // the same stage again: no event
+        lot.growthStage = 2;
+        sim->DoBuildingChanged(lot, 2, true);                      // a lower stage: none either
+        CHECK(host.events.size() == 1 && StageReached(*sim, 0x1020) == 3);
+        lot.growthStage = 5;
+        sim->DoBuildingChanged(lot, 1, true);                      // the message's wealth differs from the profile's: the key
+        CHECK(map->GetTractValue(1, 2) == 6 && host.events.size() == 1 && StageReached(*sim, 0x1010) == -1);   // follows the message
+        lot.hasConfiguration = false;
+        sim->DoBuildingChanged(lot, 2, true);                      // no configuration (the original stops at the null lot pointers)
+        CHECK(host.events.size() == 1);
+        lot.hasConfiguration = true;
+        sim->DoBuildingChanged(lot, 2, true);                      // stage 5 > 3: the next event
+        CHECK(host.events.size() == 2 && StageReached(*sim, 0x1020) == 5);
+        sim->DoBuildingChanged(lot, 2, false);                     // the building went: its cells are 0
+        CHECK(map->GetTractValue(1, 2) == 0 && map->GetTractValue(2, 4) == 0 && host.events.size() == 2);
+        lot.rect[2] = 40;                                          // a rectangle past the map is cut to it
+        sim->DoBuildingChanged(lot, 2, true);
+        CHECK(map->GetTractValue(7, 3) == 7);
+        sim->DoBuildingChanged(lot, 2, false);
+
+        // The lot-state message: a change into or out of the built states (2, 3) only; data4 is the wealth.
+        host.lot = lot;
+        host.lot.rect[2] = 2;
+        cRZMessage2Standard state;
+        state.SetType(0xe8bda2e7);
+        const auto send = [&](std::uint64_t from, std::uint64_t to, std::uint64_t wealth) {
+            state.SetData1(from);
+            state.SetData2(to);
+            state.SetData4(wealth);
+            sim->DoMessage(&state);
+        };
+        send(1, 2, 2);
+        CHECK(map->GetTractValue(1, 2) == 7 && host.lotAsks == 1);
+        send(2, 3, 2);                                             // built to built: nothing changes
+        send(3, 2, 1);
+        CHECK(map->GetTractValue(1, 2) == 7);
+        send(3, 4, 2);                                             // out of the built states: the cells clear
+        CHECK(map->GetTractValue(1, 2) == 0);
+        send(4, 1, 2);                                             // neither built: nothing
+        CHECK(map->GetTractValue(1, 2) == 0);
+        host.lot.buildingType = 0;                                 // a lot without a building type is ignored
+        send(1, 2, 2);
+        CHECK(map->GetTractValue(1, 2) == 0);
+        host.lot.buildingType = 0x1001;
+        host.lotKnown = false;                                     // not a lot
+        send(1, 2, 2);
+        CHECK(map->GetTractValue(1, 2) == 0);
+        host.lotKnown = true;
+    }
 
     // construction resources
     Resources resources;

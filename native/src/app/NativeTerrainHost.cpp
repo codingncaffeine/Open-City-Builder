@@ -1,6 +1,7 @@
 // The terrain model's host on the native application (hand-written from the generated stub; scripts/gen_stub_hosts.py skips it).
 // The city and its components come from the application; the resource-backed readers use the resource manager.
 #include <string>
+#include "sc4/MapUtilities.h"
 #include "sc4/DBSegment.h"
 #include <cstdio>
 #include <cstdlib>
@@ -238,7 +239,10 @@ struct NativeTerrainHost final : ITerrainHost {
     void UnregisterStaticShutdown() override {}
     cIGZPersistResourceManager* AcquireResourceManager() override { return SL::spRM; }
     void ReleaseResourceManager() override {}
-    void FloodFillDistance(std::vector<std::vector<std::uint8_t>>& grid, std::int32_t source, std::int32_t threshold) override {}
+    // cSC4MapUtilities::FloodFillDistance (i386 0x0009f376): the water proximity spreads from the water vertices (byte arguments)
+    void FloodFillDistance(std::vector<std::vector<std::uint8_t>>& grid, std::int32_t source, std::int32_t threshold) override {
+        cSC4MapUtilities::FloodFillDistance(grid, static_cast<std::uint8_t>(source), static_cast<std::uint8_t>(threshold));
+    }
     cISCPropertyHolder* GetPropertyHolder(const cGZPersistResourceKey& key) override {
         void* resource = nullptr;
         if (!SL::spRM || !SL::spRM->GetResource(key, 0xa52160f5, &resource, 0, nullptr) || !resource) return nullptr;

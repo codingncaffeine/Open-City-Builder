@@ -4,6 +4,9 @@
 #include "gz/cIGZOStream.h"
 #include "sc4/DBSegment.h"
 
+#include <cstdio>
+#include <cstdlib>
+
 namespace sc4 {
 
 bool cSC4CommercialSimulator::QueryInterface(std::uint32_t iid, void** out) {
@@ -82,6 +85,31 @@ bool cSC4CommercialSimulator::Read(cIGZIStream& stream) {
     dirty_ = flag != 0;
     SC4ReadGZSerializable(stream, kGZIID_cISC4SimGrid, reinterpret_cast<void**>(&lowGrid_), false);
     SC4ReadGZSerializable(stream, kGZIID_cISC4SimGrid, reinterpret_cast<void**>(&highGrid_), false);
+    if (std::getenv("SC4_COMMERCIALDEBUG")) {   // what the saved proximity maps hold: zeros, the far value, column 0
+        for (const auto* grid : {lowGrid_, highGrid_}) {
+            if (!grid) continue;
+            const auto& data = grid->GetGridData();
+            int zeros = 0, far = 0, column0 = 0, cells = 0, maxValue = 0;
+            for (const auto& column : data)
+                for (std::size_t z = 0; z < column.size(); ++z) {
+                    ++cells;
+                    if (column[z] == 0) { ++zeros; if (z == 0) ++column0; }
+                    if (column[z] == 0xff) ++far;
+                    if (column[z] > maxValue) maxValue = column[z];
+                }
+            std::fprintf(stderr, "commercial: read grid %08x tract %d %dx%d: %d cells, %d zero (%d in row 0), %d at 255, max %d\n",
+                         grid->GetInstanceID(), grid->GetTractSize(), grid->GetTractCountX(), grid->GetTractCountZ(), cells, zeros,
+                         column0, far, maxValue);
+            if (std::getenv("SC4_COMMERCIALDEBUG")[0] == '2') {
+                for (std::size_t x = 0; x < data.size(); x += 4) {
+                    std::fprintf(stderr, "commercial:  x %3zu:", x);
+                    for (std::size_t z = 0; z < data[x].size(); z += 4) std::fprintf(stderr, " %3d", data[x][z]);
+                    std::fprintf(stderr, "\n");
+                }
+            }
+        }
+        std::fprintf(stderr, "commercial: read dirty %d\n", dirty_ ? 1 : 0);
+    }
     return !stream.GetError();
 }
 
@@ -105,7 +133,18 @@ bool cSC4CommercialSimulator::DoMessage(cIGZMessage2* message) {
     return true;
 }
 
+namespace {
+void TraceGrid(const char* what, const cSC4SimGrid<std::uint8_t>* grid) {
+    if (!grid || !std::getenv("SC4_COMMERCIALDEBUG")) return;
+    int zeros = 0, ones = 0, other = 0;
+    for (const auto& column : grid->GetGridData())
+        for (std::uint8_t v : column) (v == 0 ? zeros : v == 1 ? ones : other)++;
+    std::fprintf(stderr, "commercial: %s %08x: %d zero, %d one, %d other\n", what, grid->GetInstanceID(), zeros, ones, other);
+}
+}  // namespace
+
 void cSC4CommercialSimulator::DoIdle() {
+    const int before = state_;
     switch (state_) {
     case 0:
         state_ = 1;
@@ -125,6 +164,8 @@ void cSC4CommercialSimulator::DoIdle() {
         }
         break;
     }
+    if (before != state_ && state_ == 2) TraceGrid("flooded", lowGrid_);
+    if (before != state_ && state_ == 3) TraceGrid("flooded", highGrid_);
 }
 
 cSC4SimGrid<std::uint8_t>* cSC4CommercialSimulator::GetProximityMap(std::uint32_t developerType) const {

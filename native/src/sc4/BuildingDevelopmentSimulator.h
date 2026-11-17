@@ -27,6 +27,13 @@
 
 namespace sc4 {
 
+template <class T> class cSC4SimGrid;
+
+constexpr std::uint32_t kBuildingMapInstance = 0x49d5b678;
+constexpr std::uint32_t kMessageLotStateChangedForBuildings = 0xe8bda2e7;
+constexpr int kCityPlanningAdvisor = 23;                       // 0x17
+constexpr std::uint32_t kEventNewHighestStage = 0x4a64a9cc;
+
 constexpr std::uint32_t kGZCLSID_cSC4BuildingDevelopmentSimulator = 0x8990be7a;
 constexpr std::uint32_t kExemplarTypeBuilding = 2;
 constexpr std::uint32_t kExemplarTypeFoundation = 0x11;
@@ -107,6 +114,24 @@ public:
     virtual std::uint32_t RandomBelow(std::uint32_t range) { (void)range; return 0; }   // sRandom.RandomUint32UniformBelow
     virtual std::uint64_t BeginGrowSlice() { return 0; }                  // cSC4DynamicLimitTimer(3 ms)
     virtual bool GrowSliceExpired(std::uint64_t slice) { (void)slice; return true; }
+    // ---- DoBuildingChanged (i386 0x000f99ca) and the building map (+0x48 on i386)
+    // new cSC4SimGrid<uint8_t> (one reference) + Init; null = no grid
+    virtual cSC4SimGrid<std::uint8_t>* CreateByteGrid() { return nullptr; }
+    // The lot of a lot-state message (its object slot, QueryInterface cISC4Lot): the building type (lot vslot 0xc0
+    // GetBuildingType(false)), the cell rectangle (GetBoundingRect, x0 z0 x1 z1 inclusive) and the growth stage of its
+    // configuration (GetLotConfiguration -> GetGrowthStage). False = not a lot.
+    struct ChangedLot {
+        std::uint32_t buildingType = 0;
+        std::int32_t rect[4] = {0, 0, 0, 0};
+        std::uint8_t growthStage = 0;
+        // The lot has a configuration (lot vslot 0x24). The original also stops without a building (vslot 0xc0); a lot entering
+        // a built state always has one there, and the port's lot copy finds its building through the occupant manager, which
+        // may not hold the new building yet when the message goes out, so that test is not repeated here.
+        bool hasConfiguration = false;
+    };
+    virtual bool MessageLot(cIGZUnknown* object, ChangedLot& out) { (void)object; (void)out; return false; }
+    // SL::spCity vslot 0x144 (the advisor system) -> GetAdvisor(id) -> cISC4Advisor::PushEvent(event, subject)
+    virtual void PushAdvisorEvent(int advisor, std::uint32_t event) { (void)advisor; (void)event; }
 };
 // cISC4BuildingDevelopmentSimulator::ConstructionProfile (the fields IsSuitableForConstruction reads) and its failure codes.
 struct ConstructionProfile {
@@ -374,8 +399,12 @@ public:
     }
     ITractDeveloperRef* GetTractDeveloper() const { return tractDeveloper_; }                   // +0xd0
     void SetTractDeveloper(ITractDeveloperRef* developer) { tractDeveloper_ = developer; }
-    void* GetBuildingMap() const { return buildingMap_; }                                       // +0x80
-    void SetBuildingMap(void* map) { buildingMap_ = map; }
+    // the building map: per city cell, GetBuildingMapKey of the building standing there (0 = none); i386 +0x48
+    cSC4SimGrid<std::uint8_t>* GetBuildingMap() const { return buildingMap_; }
+    void SetBuildingMap(cSC4SimGrid<std::uint8_t>* map);                                        // takes a reference
+    // the highest growth stage seen per developer type (i386 +0x54, saved with the city)
+    const std::map<std::uint32_t, std::uint8_t>& StagesReached() const { return stagesReached_; }
+    void DoBuildingChanged(const IBuildingDevelopmentSimHost::ChangedLot& lot, std::int32_t wealth, bool added);   // i386 0x000f99ca
     void AddDeclineEntry(const DeclineEntry& entry) { declinePlan_.push_back(entry); }          // list at +0x110
     void ExecuteDeclinePlan();                                                                  // @ 0x10015001a
 
@@ -424,7 +453,8 @@ private:
     std::map<std::uint32_t, IGrowthDeveloperRef*> developers_;                  // +0xb8
     std::vector<std::pair<std::uint32_t, cIGZUnknown*>> loadedDevelopers_;     // the record's developers by key until Init adopts them (the tape holds them)
     ITractDeveloperRef* tractDeveloper_ = nullptr;                              // +0xd0
-    void* buildingMap_ = nullptr;                                               // +0x80
+    cSC4SimGrid<std::uint8_t>* buildingMap_ = nullptr;                          // +0x80 (i386 +0x48), one reference
+    std::map<std::uint32_t, std::uint8_t> stagesReached_;                       // i386 +0x54
     std::list<DeclineEntry> declinePlan_;                                       // +0x110
     IConstructionSuitabilityHost* suitability_ = nullptr;                      // +0x48..0x60 (zone, lot, land value, power)
     std::vector<float> stageMultipliers_ = std::vector<float>(8, 1.0f);        // +0x1b0
@@ -432,7 +462,7 @@ private:
     std::map<std::uint32_t, std::set<std::pair<int, int>>> growthMarks_;       // mGrowthMarks
     // the city-file record's tables the port does not model (kept as read, saved back around the growth marks)
     bool fromCityFile_ = false;
-    cRecordTape fileHead_, fileMiddle_, fileTail_;   // around the live civic list and growth marks
+    cRecordTape fileHead_, fileTail_;   // around the live civic list and growth marks
     bool cheatPlumbing_ = false, cheatPower_ = false, cheatCaps_ = false;       // +0x1c9..0x1cb
     bool cheatDebug_ = false, cheatCoffee_ = false;                             // +0x1cc, +0x1cd
     bool plannedGrowth_ = false;                                                // +0x1c8 (never set: Grow, not PlanGrowth)

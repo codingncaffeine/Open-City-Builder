@@ -194,7 +194,9 @@ cIGZSerializable* CreateCityProbeSerializable(std::uint32_t classId) {
             return object;
         }
         case 0x8990c080: {  // cSC4CommercialSimulator(ICommercialHost*)
-            auto* object = new cSC4CommercialSimulator(CityProbeCommercialHost());
+            // the application's installed host (the game's NativeSimHosts.cpp) when there is one, else the probe binding
+            ICommercialHost* host = gzcom::GetSimHosts().commercial;
+            auto* object = new cSC4CommercialSimulator(host ? host : CityProbeCommercialHost());
             object->AddRef();
             return object;
         }
