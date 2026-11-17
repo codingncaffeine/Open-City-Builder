@@ -656,6 +656,7 @@ cSC4SimGrid<float>* NativeResidentialGradeMap(bool school) {
 }
 
 const sc4::cISCPropertyHolder* NativeSimulatorExemplar(std::uint32_t instance) { return SimulatorExemplar(instance); }
+std::uint64_t NativeNowMicroseconds() { return NowMicroseconds(); }
 
 void InstallNativeSimHosts() {
     gzcom::SimHosts& hosts = gzcom::GetSimHosts();

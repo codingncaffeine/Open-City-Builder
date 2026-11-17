@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
@@ -563,6 +564,10 @@ bool cSC4AuraSimulator::Read(cIGZIStream& stream) {
         stream.GetSint32(hotspot.count);
         hotspotList_.push_back(hotspot);
     }
+    if (std::getenv("SC4_AURADEBUG"))
+        std::fprintf(stderr, "aura: read mayor rating %d (best %d at %d,%d, worst %d at %d,%d, %zu hotspots)\n", static_cast<int>(mayorRating_),
+                     static_cast<int>(maxRating_), static_cast<int>(maxRatingX_), static_cast<int>(maxRatingZ_), static_cast<int>(minRating_),
+                     static_cast<int>(minRatingX_), static_cast<int>(minRatingZ_), hotspotList_.size());
     return !stream.GetError();
 }
 
@@ -1003,6 +1008,48 @@ void cSC4AuraSimulator::DoIdle(std::uint32_t budgetMilliseconds) {
         break;
     }
     case 15:
+        if (std::getenv("SC4_AURADEBUG") && g_host) {   // the inputs' averages this cycle
+            const auto mean8 = [](cSC4SimGrid<std::uint8_t>* g) {
+                double sum = 0; long n = 0;
+                if (g) for (const auto& c : g->GetGridData()) for (auto v : c) { sum += v; ++n; }
+                return n ? sum / n : -1.0;
+            };
+            const auto meanF = [](cSC4SimGrid<float>* g) {
+                double sum = 0; long n = 0;
+                if (g) for (const auto& c : g->GetGridData()) for (auto v : c) { sum += v; ++n; }
+                return n ? sum / n : -1.0;
+            };
+            const auto mean16 = [](cSC4SimGrid<std::int16_t>* g) {
+                double sum = 0; long n = 0;
+                if (g) for (const auto& c : g->GetGridData()) for (auto v : c) { sum += v; ++n; }
+                return n ? sum / n : -1.0;
+            };
+            IAuraResidentialApi* r = g_host->Residential();
+            IAuraPollutionApi* p = g_host->Pollution();
+            std::fprintf(stderr, "aura: means school %.2f hospital %.2f trips %.2f congestion %.2f crime %.2f pollution %.2f/%.2f/%.2f/%.2f\n",
+                         r ? meanF(r->EQCandidateMap()) : -1.0, r ? meanF(r->HQCandidateMap()) : -1.0,
+                         g_host->TrafficDensity() ? mean8(g_host->TrafficDensity()->Uint8Map()) : -1.0,
+                         g_host->TrafficCongestion() ? mean8(g_host->TrafficCongestion()->Uint8Map()) : -1.0,
+                         g_host->Crime() ? mean8(g_host->Crime()->Uint8Map()) : -1.0, p ? mean16(p->TypeMap(0)) : -1.0,
+                         p ? mean16(p->TypeMap(1)) : -1.0, p ? mean16(p->TypeMap(2)) : -1.0, p ? mean16(p->TypeMap(3)) : -1.0);
+        }
+        if (static int shown = 0; shown < 2 && std::getenv("SC4_AURADEBUG") && g_host) {   // which inputs this cycle had
+            ++shown;
+            IAuraResidentialApi* r = g_host->Residential();
+            IAuraGridApi* trips = g_host->TrafficDensity();
+            IAuraGridApi* congestion = g_host->TrafficCongestion();
+            IAuraGridApi* crime = g_host->Crime();
+            IAuraPollutionApi* pollution = g_host->Pollution();
+            std::fprintf(stderr, "aura: inputs school %d hospital %d trips %d congestion %d crime %d pollution %d/%d/%d/%d; curves school %d hospital %d "
+                                 "trips %d congestion %d crime %d tax %d pollution %d/%d/%d/%d\n",
+                         r && r->EQCandidateMap() ? 1 : 0, r && r->HQCandidateMap() ? 1 : 0, trips && trips->Uint8Map() ? 1 : 0,
+                         congestion && congestion->Uint8Map() ? 1 : 0, crime && crime->Uint8Map() ? 1 : 0,
+                         pollution && pollution->TypeMap(0) ? 1 : 0, pollution && pollution->TypeMap(1) ? 1 : 0, pollution && pollution->TypeMap(2) ? 1 : 0,
+                         pollution && pollution->TypeMap(3) ? 1 : 0, residentialCurve138_ ? 1 : 0, residentialCurve140_ ? 1 : 0,
+                         trafficTripCurve_ ? 1 : 0, trafficCurve_ ? 1 : 0, crimeCurve_ ? 1 : 0, taxChangeCurve_ ? 1 : 0,
+                         pollutionCurves_.size() > 0 && pollutionCurves_[0] ? 1 : 0, pollutionCurves_.size() > 1 && pollutionCurves_[1] ? 1 : 0,
+                         pollutionCurves_.size() > 2 && pollutionCurves_[2] ? 1 : 0, pollutionCurves_.size() > 3 && pollutionCurves_[3] ? 1 : 0);
+        }
         UpdateAuraGrid();
         idleState_ = 16;
         break;
@@ -1235,6 +1282,11 @@ void cSC4AuraSimulator::UpdateAuraGrid() {
     if (wealth3) wealth3->Release();
 
     mayorRating_ = population > 0 ? weightedSum / population : 0;
+    if (std::getenv("SC4_AURADEBUG"))
+        std::fprintf(stderr, "aura: cycle done, mayor rating %d (population %d, best %d at %d,%d, worst %d at %d,%d, %zu hotspots, ordinance %d)\n",
+                     static_cast<int>(mayorRating_), static_cast<int>(population), static_cast<int>(maxRating_), static_cast<int>(maxRatingX_),
+                     static_cast<int>(maxRatingZ_), static_cast<int>(minRating_), static_cast<int>(minRatingX_), static_cast<int>(minRatingZ_),
+                     hotspots_.size(), static_cast<int>(ordinanceValue_));
     if (IAuraHistoryApi* history = g_host->History()) {
         history->AddHistory(kAuraHistoryMayorRating, mayorRating_);
     }

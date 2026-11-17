@@ -639,6 +639,7 @@ src/app/NativeMiniMap.cpp
 src/app/NativeProps.cpp
 src/app/NativeDemandHost.cpp
 src/app/NativeSimHosts.cpp
+src/app/NativeAura.cpp
 src/app/NativePower.cpp
 src/app/NativePlumbing.cpp
 src/app/NativeLotConfigHost.cpp

@@ -12,6 +12,7 @@ void InstallAircraftStub();
 void InstallAmbienceStateStub();
 void InstallSoundBankStub();
 void InstallAuraStub();
+void InstallAuraHost();   // app/NativeAura.cpp
 void InstallAutomataAttractorStub();
 void InstallAutomataControllerStub();
 void InstallAutomataControllerHost();   // app/NativeAutomataControllerHost.cpp
@@ -128,6 +129,7 @@ void InstallStubHosts() {
     InstallAmbienceStateStub();
     InstallSoundBankStub();
     InstallAuraStub();
+    InstallAuraHost();                    // the mayor rating simulator's real host replaces the stub
     InstallAutomataAttractorStub();
     InstallAutomataControllerStub();
     InstallAutomataControllerHost();   // the native host replaces the stub
