@@ -440,4 +440,7 @@ bool CityComponentInit_cSC4CrimeSimulator(cIGZUnknown* object, bool init) {
     return true;
 }
 
+// The city's crime simulator: a plain class held in its serializable adapter (not a cIGZSerializable itself).
+sc4::cSC4CrimeSimulator* NativeCrimeSimulator() { return Crime(); }
+
 }  // namespace native

@@ -5,6 +5,7 @@
 // PARTIAL: g_road_funding_p / g_masstransit_funding_p / g_power_funding_p (their departments are not named here yet), the HQ occupant minimum-funding / grade locals and tract extremes, the school / health strike chances, the
 // traffic station utilizations and connection congestion, the port counts by size and stage, the neighbour-deal
 // "can buy / sell" proposals, the power-plant / water-building locals and the regional commodity imports / exports.
+#include <cstring>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -37,6 +38,9 @@
 #include "sc4/cSC4Demand.h"
 #include "sc4/cSC4ZoneManager.h"
 
+namespace sc4 { class cSC4CrimeSimulator; }
+namespace native { sc4::cSC4CrimeSimulator* NativeCrimeSimulator(); }   // app/NativeCrime.cpp
+
 namespace native {
 // NativeAdvisors.cpp (the flammability header clashes with the fire headers here): the hotspot and the average.
 bool AdvisorFlammability(std::uint8_t* hotspot, int* x, int* z, std::uint8_t* average);
@@ -55,7 +59,11 @@ template <class T> T* Comp(CityComponent c) {
 }
 
 IAdvisorConcreteHost* H() { return AdvisorConcreteHost(); }
-void G(const char* name, double value) { H()->SetGlobal(name, value); }
+void G(const char* name, double value) {
+    static const char* const trace = std::getenv("SC4_ADVISORSTATDEBUG");   // the named globals as the advisors receive them
+    if (trace && std::strstr(name, trace)) std::fprintf(stderr, "advisor stat: %s = %g\n", name, value);
+    H()->SetGlobal(name, value);
+}
 float X100(float v) { return v * 100.0f; }   // "x100": rounded to float32, then widened (advisors.md 7.1)
 
 // A subject at a city cell (one reference, handed to SetLocal and released here).
@@ -197,7 +205,7 @@ void HQ() {
 void Safety() {
     auto* fire = Comp<cSC4FireProtectionSimulator>(CityComponent::FireProtectionSimulator);
     auto* police = Comp<cSC4PoliceSimulator>(CityComponent::PoliceSimulator);
-    auto* crime = Comp<cSC4CrimeSimulator>(CityComponent::CrimeSimulator);
+    cSC4CrimeSimulator* crime = NativeCrimeSimulator();   // a plain object: a cast from the serializable view never finds it
     auto* res = Comp<cSC4ResidentialSimulator>(CityComponent::ResidentialSimulator);
     if (fire) G("g_fire_strike_chance", X100(fire->GetChanceOfStrike()));
     if (res) G("g_population", res->GetPopulation());
