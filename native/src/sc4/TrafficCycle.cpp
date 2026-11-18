@@ -474,6 +474,7 @@ void cSC4TrafficSimulator::DoConnectionsChanged(int x1, int z1, int x2, int z2) 
 
 namespace {
 constexpr std::uint32_t kPropertySwitchRules = 0xe90e25a1, kPropertySwitchTimeFactor = 0xe90e25a2, kPropertySwitchCapacity = 0xe90e25a3;
+constexpr std::uint32_t kSubwayAccessOccupantType = 0x8a13918a;   // the subway entrance occupant a subway switch is entered at
 constexpr std::uint32_t kPropertySwitchToll = 0x0bfc0a4c, kPropertySwitchIsIntersection = 0x4bfc47b0;
 constexpr int kSwitchRotation[4][4] = {{2, 3, 0, 1}, {1, 2, 3, 0}, {0, 1, 2, 3}, {3, 0, 1, 2}};   // ROT[facing][i] (0x00AB3280)
 
@@ -534,7 +535,7 @@ void cSC4TrafficSimulator::ReadTransitSwitchRules(TransitSwitch& out, const std:
 }
 
 // §4.7.1 steps 1-5: a lot whose building has the rules property becomes a switch over its rectangle.
-//   PARTIAL: a subway switch's access point is the lot's NW cell (the access occupant, type 0x8a13918a, is not looked for).
+// A subway switch's access point is the cell of the first subway entrance occupant (type 0x8a13918a) on the lot, else its NW cell.
 bool cSC4TrafficSimulator::ActivateTransitSwitch(ITrafficLot* lot) {
     const cISCPropertyHolder* building = lot ? host_->LotBuildingProperties(lot) : nullptr;
     std::vector<std::uint8_t> bytes;
@@ -557,8 +558,13 @@ bool cSC4TrafficSimulator::ActivateTransitSwitch(ITrafficLot* lot) {
     ReadTransitSwitchRules(entry, bytes, lot->Facing());
     if (entry.flags & 0x04) {
         entry.hasAccessPoint = true;
-        entry.accessX = std::uint8_t(rect.x0);
-        entry.accessZ = std::uint8_t(rect.z0);
+        int accessX = rect.x0, accessZ = rect.z0;
+        if (!host_->FirstOccupantCellOfType(rect, kSubwayAccessOccupantType, accessX, accessZ)) {
+            accessX = rect.x0;
+            accessZ = rect.z0;
+        }
+        entry.accessX = std::uint8_t(accessX);
+        entry.accessZ = std::uint8_t(accessZ);
     }
     std::uint8_t modes = 0;
     for (const TransitSwitchRule& rule : entry.rules)

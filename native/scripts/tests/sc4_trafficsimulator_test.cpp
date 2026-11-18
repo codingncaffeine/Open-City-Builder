@@ -128,6 +128,17 @@ struct Host : ITrafficHost {
     const sc4::cISCPropertyHolder* lastHolder = nullptr;
     sc4::cISCPropertyHolder* TransitSwitchProperties(void*) override { return &switchHolder; }
     sc4::cISCPropertyHolder* LotBuildingProperties(ITrafficLot*) override { return lotHasBuilding ? &lotHolder : nullptr; }
+    // a subway entrance occupant on the lot (FirstOccupantCellOfType)
+    bool entrance = false;
+    int entranceX = 0, entranceZ = 0;
+    std::uint32_t entranceType = 0;
+    bool FirstOccupantCellOfType(const SC4RectInt32&, std::uint32_t type, int& x, int& z) override {
+        entranceType = type;
+        if (!entrance) return false;
+        x = entranceX;
+        z = entranceZ;
+        return true;
+    }
     bool BudgetItemForPurpose(sc4::cISCPropertyHolder* holder, std::uint32_t purpose, std::uint32_t& department, std::int64_t& cost) override {
         lastHolder = holder; lastPurpose = purpose; department = itemDepartment; cost = itemCost; return itemOk;
     }
@@ -595,6 +606,27 @@ int main() {
         CHECK(net.DeactivateTransitSwitch({4, 4, 4, 4}));
         CHECK(net.SwitchIdAt(4, 4) == 0 && net.SwitchModeMaskAt(4, 4) == 0 && net.TransitSwitches().empty());
         CHECK(!net.DeactivateTransitSwitch({4, 4, 4, 4}));
+        // a subway station (a rule to the subway, flag 4): the access point is the subway entrance's cell, or the lot's NW cell
+        cSCPropertyHelp::SetPropertyValue(&host.lotHolder, 0xe90e25a1u, std::vector<std::uint8_t>{0x81, 0x80, 0x00, 0x06});
+        FakeLot subway;
+        subway.rect = {4, 4, 5, 5};
+        host.entrance = true;
+        host.entranceX = 5;
+        host.entranceZ = 5;
+        CHECK(net.ActivateTransitSwitch(&subway));
+        if (net.TransitSwitches().count(net.SwitchIdAt(4, 4))) {
+            const Switch& made = net.TransitSwitches().at(net.SwitchIdAt(4, 4));
+            CHECK((made.flags & 0x04) && made.hasAccessPoint && made.accessX == 5 && made.accessZ == 5);
+        }
+        CHECK(host.entranceType == 0x8a13918au);
+        CHECK(net.DeactivateTransitSwitch({4, 4, 5, 5}));
+        host.entrance = false;
+        CHECK(net.ActivateTransitSwitch(&subway));
+        if (net.TransitSwitches().count(net.SwitchIdAt(4, 4))) {
+            const Switch& made = net.TransitSwitches().at(net.SwitchIdAt(4, 4));
+            CHECK(made.hasAccessPoint && made.accessX == 4 && made.accessZ == 4);
+        }
+        CHECK(net.DeactivateTransitSwitch({4, 4, 5, 5}));
         host.lotHolder.RemoveProperty(0xe90e25a1u, false);
         host.lotHolder.RemoveProperty(0xe90e25a2u, false);
         host.lotHolder.RemoveProperty(0xe90e25a3u, false);

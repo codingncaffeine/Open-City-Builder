@@ -215,6 +215,10 @@ public:
     virtual cISCPropertyHolder* TransitSwitchProperties(void* occupant) { (void)occupant; return nullptr; }
     // The lot's building (lot vslot 0x180 -> 0x18 -> 0x30): its property holder; null when the lot has none.
     virtual cISCPropertyHolder* LotBuildingProperties(ITrafficLot* lot) { (void)lot; return nullptr; }
+    // The occupant manager's occupants of `type` over the cells of `rect`: the first one's cell (a subway entrance, 0x8a13918a).
+    virtual bool FirstOccupantCellOfType(const SC4RectInt32& rect, std::uint32_t type, int& x, int& z) {
+        (void)rect; (void)type; x = z = 0; return false;
+    }
     // Budget simulator vslot 0x198 GetBudgetItemForPurpose (department id and monthly cost) and 0xd8 -> 0x50 (funding fraction).
     virtual bool BudgetItemForPurpose(cISCPropertyHolder* holder, std::uint32_t purpose, std::uint32_t& department, std::int64_t& cost) {
         (void)holder; (void)purpose; department = 0; cost = 0; return false;

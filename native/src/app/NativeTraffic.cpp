@@ -247,6 +247,20 @@ public:
         building->Release();   // the lot keeps it
         return holder;
     }
+    // occupant manager i386 0x88 GetFirstOccupantByStandardCityCells(rect, type): the occupant's position as a cell
+    bool FirstOccupantCellOfType(const SC4RectInt32& rect, std::uint32_t type, int& x, int& z) override {
+        cISC4OccupantManager* occupants = Occupants();
+        const int a[2] = {rect.x0, rect.z0}, b[2] = {rect.x1, rect.z1};
+        cISC4Occupant* found = nullptr;
+        if (!occupants || !occupants->GetFirstOccupantByStandardCityCells(found, a, b, type) || !found) return false;
+        float p[3] = {};
+        found->GetPosition(p);
+        found->Release();
+        x = int(p[0] / 16.0f);
+        z = int(p[2] / 16.0f);
+        if (std::getenv("SC4_TRAFFICDEBUG")) std::fprintf(stderr, "traffic: subway entrance on the lot at %d,%d\n", x, z);
+        return true;
+    }
     void AllLots(std::vector<std::unique_ptr<ITrafficLot>>& out) override {
         cSC4ZoneDeveloper* developer = ZoneDeveloper();
         if (!developer) return;
