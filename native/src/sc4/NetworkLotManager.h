@@ -62,6 +62,8 @@
 //  * ReadLotConfiguration takes a *second* reference on the configuration it fills (it is handed a
 //    fresh object that already owns one) and releases it before returning; the caller's AddRef +
 //    AddLotConfiguration reference keep the object alive.
+//  * GetWealthForNetwork's mode breaks ties toward the higher wealth and needs a wealth to count at least as many lots
+//    as the lots without one.
 //  * GetWealthForNetwork only looks at diagonal neighbours when no orthogonal neighbour had a lot, and
 //    GetZoneTypeForNetwork only when the best zone so far is 0, 7 or 14 (0x4081).
 //  * A version-1 configuration is written back by ReadLotConfiguration's upgrade path and then appended

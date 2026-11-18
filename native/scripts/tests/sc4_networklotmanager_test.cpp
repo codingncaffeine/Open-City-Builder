@@ -1364,7 +1364,22 @@ int main() {
         FakeLot* west = local.AddLot(1, 2);
         west->livable = false;
         west->wealth = 1;
-        CHECK(thirteen->GetWealthForNetwork(2, 2) == 1);   // tie -> the first maximum
+        CHECK(thirteen->GetWealthForNetwork(2, 2) == 2);   // tie -> the higher wealth (Mac i386 0x0030c880)
+        // A wealth must count at least as many lots as the lots without one: two wealth-0 lots outvote one wealth-1 lot.
+        local.lots.clear();
+        for (int x : {1, 3}) {
+            FakeLot* poor = local.AddLot(x, 2);
+            poor->livable = false;
+            poor->wealth = 0;
+        }
+        FakeLot* one = local.AddLot(2, 1);
+        one->livable = false;
+        one->wealth = 1;
+        CHECK(thirteen->GetWealthForNetwork(2, 2) == 0);
+        FakeLot* another = local.AddLot(2, 3);
+        another->livable = false;
+        another->wealth = 1;
+        CHECK(thirteen->GetWealthForNetwork(2, 2) == 1);   // 2 against 2: the wealth wins the tie
         // A wealth above 3 is counted as 0.
         local.lots.clear();
         FakeLot* big = local.AddLot(2, 1);

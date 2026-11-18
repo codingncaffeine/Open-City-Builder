@@ -942,11 +942,11 @@ std::uint32_t cSC4NetworkLotManager::GetWealthForNetwork(int x, int z) {
         ++counts[wealth];
         if (i < 4) diagonals = false;
     }
+    // Mac i386 0x0030c880: a wealth wins when its count is not below the best so far, which starts at the lots without a
+    // wealth (count[0]); ties go to the higher wealth.
     int best = 0;
-    int maxCount = 0;
     for (int i = 1; i < 4; ++i) {
-        if (counts[i] > maxCount) best = i;
-        if (counts[i] >= maxCount) maxCount = counts[i];
+        if (counts[i] != 0 && counts[best] <= counts[i]) best = i;
     }
     return static_cast<std::uint32_t>(best);
 }
