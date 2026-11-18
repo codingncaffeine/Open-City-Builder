@@ -57,10 +57,9 @@
 // Seams (see docs/SEAMS.md): the terrain (height of a vertex / of a cell), the occupant manager (cell query,
 // add and remove), the resource manager (the tuning property holder), the world cache (already a seam of
 // cSC4NetworkTool, extended with the two entry points this tool calls) and the vertical constraint satisfier
-// (same, extended with the seven calls this tool makes). The four base-class methods the original calls but
-// the port has not recovered yet (InsertOccupantsForSolvedCells 0x10018a13c, InsertRangeConstraintsForCell
-// 0x1001b37e4, ClearCellPreviews 0x10018803e) are seams too. Everything the seams stand for is one original
-// call, noted on the method.
+// (same, extended with the seven calls this tool makes). The base-class InsertRangeConstraintsForCell
+// (0x1001b37e4) is not recovered and stays a seam; InsertOccupantsForSolvedCells and ClearCellPreviews are called on the
+// recovered base. Everything the seams stand for is one original call, noted on the method.
 #pragma once
 #include <cstdint>
 #include <list>
@@ -71,6 +70,7 @@
 #include "sc4/Occupant.h"
 #include "sc4/SCProperty.h"
 #include "sc4/TileNeighborhood.h"
+#include "sc4/UndergroundConnectionOccupant.h"
 #include "sc4/UndergroundOccupant.h"
 
 namespace sc4 {
@@ -101,15 +101,6 @@ constexpr std::uint32_t kUndergroundToolFlagNoPiece = 0x00200000;       // Start
 constexpr std::int32_t kUndergroundNextX[4] = {-1, 0, 1, 0};
 constexpr std::int32_t kUndergroundNextZ[4] = {0, -1, 0, 1};
 
-// cSC4UndergroundConnectionOccupant (unrecovered; iid 0x8a139184) as FindUndergroundConnectionOccupant uses it:
-// it only asks for the network the piece belongs to and drops the reference again.
-class IUndergroundConnectionOccupantInfo {
-public:
-    virtual ~IUndergroundConnectionOccupantInfo() = default;
-    virtual std::uint32_t NetworkGZIID() = 0;   // vslot 0x190
-    virtual std::uint32_t Release() = 0;        // vslot 0x10 (cIGZUnknown)
-};
-
 // Every engine global / unrecovered neighbour the recovered functions reach. One method per original call,
 // with the vtable slot or address in the comment; the test supplies a fake.
 class IUndergroundNetworkToolHost {
@@ -132,16 +123,9 @@ public:
     // four GetPropertyValue calls read. Returned with one reference, or null; the caller Releases it
     // (0x1001a7c7e).
     virtual cISCPropertyHolder* AcquireNetworkTuningProperties(std::uint32_t exemplarId) = 0;
-    // cSC4NetworkTool::InsertOccupantsForSolvedCells @ 0x10018a13c (not recovered): the base insertion pass the
-    // underground tool runs first.
-    virtual void InsertOccupantsForSolvedCellsBase(std::vector<tSolvedCell>& cells,
-                                                   std::list<cSC4NetworkOccupant*>* out, bool preview) = 0;
     // cSC4NetworkTool::InsertRangeConstraintsForCell @ 0x1001b37e4 (not recovered): the base constraint pass a
     // buildable underground cell takes (0x1001a7643).
     virtual void InsertRangeConstraintsForCellBase(std::uint32_t cellKey) = 0;
-    // cSC4NetworkTool::ClearCellPreviews @ 0x10018803e (not recovered): the base preview cleanup
-    // (0x1001a80ec).
-    virtual void ClearCellPreviewsBase() = 0;
 };
 void SetUndergroundNetworkToolHost(IUndergroundNetworkToolHost* host);
 IUndergroundNetworkToolHost* GetUndergroundNetworkToolHost();
@@ -177,6 +161,8 @@ public:
     void StartPlacing() override;                                      // [72] 0x1001a8310
     void CreateCellInfosForCurrentPlacementTiles(std::uint32_t networkType);  // [73] 0x1001a78ee
     virtual float GetNetworkVertexHt(int vertexId) const;              // [75] 0x1001a7c30
+    // The same slot under the base port's name (i386 vslot 0x12c): the base insertion reads the pipe heights through it.
+    float GetNetworkVertexHeight(std::int32_t vertex) override { return GetNetworkVertexHt(vertex); }
     virtual float GetNetworkHeightForTerrainHeight(float terrainHeight) const;   // [76] 0x1001930a0
     void PropagateSolvedCellsForSmoothing() override;                  // [77] 0x1001a932a
     void InsertRangeConstraintsForCell(std::uint32_t cellKey);         // [78] 0x1001a7616
@@ -184,13 +170,19 @@ public:
     void InsertNetworkSpecificConstraintsForCell(std::uint32_t cellKey);   // [80] 0x1001a779a
     void ReloadNetworkSpecificInfo(std::uint32_t exemplarId) override;  // [81] 0x1001a7c7e
     void SetQuadTrianglesToDraw(cSC4NetworkOccupant* occupant, const cSC4TileNeighborhoodCompact& compact);  // [82]
+    // The port's base slot takes the packed neighbourhood; the base insertion reaches the method above through it.
+    void SetQuadTrianglesToDraw(cSC4NetworkOccupant* occupant, std::uint32_t compact) override {
+        SetQuadTrianglesToDraw(occupant, cSC4TileNeighborhoodCompact(compact));
+    }
 
     // --- the rest of the class (not interface slots) ---
     bool CreateNewUndergroundOccupant(cSC4NetworkCellInfo* cell, const tSolvedCell& solved,
                                       cSC4UndergroundOccupant*& out, bool& existing);   // 0x1001a7362
     bool FindUndergroundOccupant(int x, int z, cSC4UndergroundOccupant*& out, std::uint32_t gziid);  // 0x1001a7d3e
+    // The connection piece of the cell whose network occupant id (i386 vslot 0xc8 GetNetworkOccupantGZIID) is `gziid`,
+    // one reference.
     bool FindUndergroundConnectionOccupant(int x, int z, std::uint32_t gziid,
-                                           IUndergroundConnectionOccupantInfo*& out);   // 0x1001a81d6
+                                           cSC4UndergroundConnectionOccupant*& out);   // 0x1001a81d6
     void PropagateFromCell(cSC4NetworkCellInfo* cell, int depth);      // 0x1001a913c
     // PARTIAL: only the three clears are ported. See the .cpp for the reason.
     void UpdateUndergroundOccupantTerrainHeights(std::vector<SC4PointU> cells,

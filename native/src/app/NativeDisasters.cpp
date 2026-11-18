@@ -730,9 +730,10 @@ void NativePipeBurstReport() {
     }
 }
 
-void NativeAttemptDisasterStart(std::uint32_t id, int x, int z) {
+bool NativeAttemptDisasterStart(std::uint32_t id, int x, int z) {
     sc4::cISC4DisasterLayer* layer = Layer();
-    if (sc4::cISC4DisasterManager* manager = layer ? layer->GetDisasterManager(id) : nullptr) manager->AttemptDisasterStart(x, z);
+    sc4::cISC4DisasterManager* manager = layer ? layer->GetDisasterManager(id) : nullptr;
+    return manager && manager->AttemptDisasterStart(x, z);
 }
 
 bool NativeTorchIgnite(int cellX, int cellZ, bool again, bool force, std::uint32_t value) {

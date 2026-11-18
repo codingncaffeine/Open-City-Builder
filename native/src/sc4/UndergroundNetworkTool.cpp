@@ -13,12 +13,6 @@ namespace {
 
 IUndergroundNetworkToolHost* g_undergroundNetworkToolHost = nullptr;
 
-// cSC4NetworkTool::GetCellInfo @ 0x1001b4bc0 as the base port exposes it (the world cache at +0x30).
-cSC4NetworkCellInfo* LookupCell(std::uint32_t cellKey) {
-    INetworkToolHost* host = GetNetworkToolHost();
-    return host != nullptr ? host->GetCellInfo(cellKey) : nullptr;
-}
-
 }  // namespace
 
 void SetUndergroundNetworkToolHost(IUndergroundNetworkToolHost* host) { g_undergroundNetworkToolHost = host; }
@@ -185,7 +179,7 @@ bool cSC4UndergroundNetworkTool::FindUndergroundOccupant(int x, int z, cSC4Under
 
 // 0x1001a81d6
 bool cSC4UndergroundNetworkTool::FindUndergroundConnectionOccupant(
-    int x, int z, std::uint32_t gziid, IUndergroundConnectionOccupantInfo*& out) {
+    int x, int z, std::uint32_t gziid, cSC4UndergroundConnectionOccupant*& out) {
     IUndergroundNetworkToolHost* host = g_undergroundNetworkToolHost;
     std::list<cISC4Occupant*> occupants;
     if (host != nullptr) host->QueryCellOccupants(x, z, occupants);   // SL::spOccupantManager +0x148
@@ -194,8 +188,8 @@ bool cSC4UndergroundNetworkTool::FindUndergroundConnectionOccupant(
     for (cISC4Occupant* occupant : occupants) {
         void* queried = nullptr;
         if (occupant->QueryInterface(kGZIID_cISC4UndergroundConnectionOccupant, &queried)) {
-            auto* connection = static_cast<IUndergroundConnectionOccupantInfo*>(queried);
-            if (connection->NetworkGZIID() == gziid) {   // vslot 0x190
+            auto* connection = static_cast<cSC4UndergroundConnectionOccupant*>(queried);
+            if (connection->GetNetworkOccupantGZIID() == gziid) {   // vslot 0x190
                 if (out != nullptr) out->Release();
                 out = connection;
                 found = true;
@@ -216,7 +210,7 @@ bool cSC4UndergroundNetworkTool::TestForAutoConnectOccupant(int x, int z) {
         underground->Release();
         return true;
     }
-    IUndergroundConnectionOccupantInfo* connection = nullptr;
+    cSC4UndergroundConnectionOccupant* connection = nullptr;
     if (!FindUndergroundConnectionOccupant(x, z, gziid, connection)) return false;
     connection->Release();
     return true;
@@ -278,10 +272,10 @@ void cSC4UndergroundNetworkTool::CreateNetworkOccupant(cSC4NetworkCellInfo* cell
 void cSC4UndergroundNetworkTool::InsertOccupantsForSolvedCells(std::vector<tSolvedCell>& cells,
                                                                std::list<cSC4NetworkOccupant*>* out, bool preview) {
     IUndergroundNetworkToolHost* host = g_undergroundNetworkToolHost;
-    if (host != nullptr) host->InsertOccupantsForSolvedCellsBase(cells, out, preview);   // 0x10018a13c
+    cSC4NetworkTool::InsertOccupantsForSolvedCells(cells, out, preview);   // 0x10018a13c
     if (!unknown98_ && !preview) return;
     for (tSolvedCell& solved : cells) {
-        cSC4NetworkCellInfo* cell = LookupCell(solved.cellKey);
+        cSC4NetworkCellInfo* cell = GetCellInfo(solved.cellKey);
         if (cell == nullptr) continue;   // the original dereferences the result unchecked
         cSC4UndergroundOccupant* occupant = nullptr;
         bool existing = false;
@@ -359,7 +353,7 @@ void cSC4UndergroundNetworkTool::ClearCellPreviews() {
         occupant->Release();
     }
     highlightList_.clear();
-    if (host != nullptr) host->ClearCellPreviewsBase();   // cSC4NetworkTool::ClearCellPreviews 0x10018803e
+    cSC4NetworkTool::ClearCellPreviews();   // 0x10018803e
 }
 
 // ============================================================================================================
@@ -388,7 +382,7 @@ void cSC4UndergroundNetworkTool::PropagateFromCell(cSC4NetworkCellInfo* cell, in
             }
         }
         if (alreadySolved) continue;
-        cSC4NetworkCellInfo* neighbour = LookupCell(neighbourKey);
+        cSC4NetworkCellInfo* neighbour = GetCellInfo(neighbourKey);
         if (neighbour == nullptr || neighbour->occupant == nullptr) continue;
         tSolvedCell solved;
         solved.pieceType = neighbour->occupant->PieceId();                 // +0xb8
@@ -409,7 +403,7 @@ void cSC4UndergroundNetworkTool::PropagateSolvedCellsForSmoothing() {
         // The list may grow while this runs; the original re-reads the begin pointer every iteration and uses
         // the same index, so the new entries are visited too (up to the captured count).
         const std::uint32_t cellKey = solvedCellList_[i].cellKey;
-        cSC4NetworkCellInfo* cell = LookupCell(cellKey);
+        cSC4NetworkCellInfo* cell = GetCellInfo(cellKey);
         if (cell != nullptr) PropagateFromCell(cell, 0);
     }
 }
@@ -420,7 +414,7 @@ void cSC4UndergroundNetworkTool::PropagateSolvedCellsForSmoothing() {
 
 // 0x1001a7616
 void cSC4UndergroundNetworkTool::InsertRangeConstraintsForCell(std::uint32_t cellKey) {
-    cSC4NetworkCellInfo* cell = LookupCell(cellKey);
+    cSC4NetworkCellInfo* cell = GetCellInfo(cellKey);
     if (cell == nullptr) return;
     if (cell->buildable) {
         // 0x1001a7643 tail call: a buildable cell goes through the base tool's constraints instead.
@@ -459,7 +453,7 @@ void cSC4UndergroundNetworkTool::InsertRangeConstraintsForCell(std::uint32_t cel
 
 // 0x1001a779a
 void cSC4UndergroundNetworkTool::InsertNetworkSpecificConstraintsForCell(std::uint32_t cellKey) {
-    cSC4NetworkCellInfo* cell = LookupCell(cellKey);
+    cSC4NetworkCellInfo* cell = GetCellInfo(cellKey);
     if (cell == nullptr) return;
     if (cell->solvedOrImmovable) return;   // +0x5b
     std::uint32_t pieceId = 0;
@@ -525,7 +519,7 @@ void cSC4UndergroundNetworkTool::CreateCellInfosForCurrentPlacementTiles(std::ui
             const int x = static_cast<int>(point.x);
             const int z = static_cast<int>(point.z);
             const std::uint32_t cellKey = static_cast<std::uint32_t>(z * 0x10000 + x);
-            cSC4NetworkCellInfo* cell = LookupCell(cellKey);
+            cSC4NetworkCellInfo* cell = GetCellInfo(cellKey);
             if (cell == nullptr) {
                 cSC4NetworkCellInfo fresh;
                 fresh.x = point.x;

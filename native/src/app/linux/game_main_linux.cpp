@@ -34,6 +34,7 @@
 #include "platform/PointerState.h"
 #include "sc4/Simulator.h"
 #include "sc4/RegionDialogs.h"
+#include "app/NativeUnderground.h"
 #include "app/NativeBudgetUi.h"
 #include "app/NativeAnimationCoordinator.h"
 #include "app/NativeGameData.h"
@@ -1204,6 +1205,10 @@ int RunScenario(const std::string& path) {
             native::NativePipeBurstStart(x, z);
         } else if (command == "pipebursts") {   // pipebursts: every burst's leaking and waiting pipes
             native::NativePipeBurstReport();
+        } else if (command == "pipecells") {   // pipecells X Z: the pipes and network pieces on the 3x3 cells around a cell
+            int x = 0, z = 0;
+            words >> x >> z;
+            native::NativeUndergroundCellsReport(x, z);
         } else if (command == "fires") {   // fires: the fire disaster's state, one line per fire
             native::NativeFireReport();
         } else if (command == "riot") {   // riot X Z: a riot starts on the road nearest to a city cell (what a mayor rating hotspot does)

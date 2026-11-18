@@ -4,6 +4,7 @@
 
 #include "app/NativeDemolition.h"
 #include "gz/cGZPersistResourceManager.h"
+#include "sc4/PipeTool.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/NetworkManager.h"
 #include "sc4/NetworkOccupant.h"
@@ -47,12 +48,24 @@ sc4::INetworkManagerOccupant* NetworkOccupantView(sc4::cISC4Occupant* occupant) 
     return view;
 }
 
-// A road-class network tool for the network manager (Init made none: the city loads before these hosts exist). The
-// tool itself is made on first use, when the view's network tool host is installed.
+// The pipe tool (cSC4PipeTool, network type 4). Its destructor traps as the original's does (the game never destroys a
+// network tool), so one tool serves every city and keeps a reference for the life of the program.
+sc4::cSC4NetworkTool* PipeTool() {
+    static sc4::cSC4PipeTool* tool = [] {
+        auto* made = new sc4::cSC4PipeTool();
+        made->AddRef();
+        return made;
+    }();
+    return tool;
+}
+
+// A network tool for the network manager (Init made none: the city loads before these hosts exist): cSC4NetworkTool for
+// the surface types, the pipe tool for type 4. The tool itself is made on first use, when the view's network tool host
+// is installed.
 class ManagerRoadTool final : public sc4::INetworkManagerTool {
 public:
     explicit ManagerRoadTool(std::uint32_t type) : type_(type) {}
-    ~ManagerRoadTool() { if (tool_) tool_->Release(); }
+    ~ManagerRoadTool() { if (tool_ && type_ != sc4::kPipeNetworkType) tool_->Release(); }
     bool QueryInterface(std::uint32_t, void**) override { return false; }
     std::uint32_t AddRef() override { return ++refs_; }
     std::uint32_t Release() override {
@@ -61,7 +74,9 @@ public:
         return 0;
     }
     bool Init() override {
-        if (!tool_) {
+        if (!tool_ && type_ == sc4::kPipeNetworkType) {
+            tool_ = PipeTool();
+        } else if (!tool_) {
             tool_ = new sc4::cSC4NetworkTool(type_);
             tool_->AddRef();
         }
@@ -113,11 +128,11 @@ void RegisterPathInfoFactory() {
 
 void InstallNetworkManagerTools() {
     RegisterPathInfoFactory();
-    // cSC4NetworkTool for types 0-3, 6, 8-12; the pipe, power line and subway tools are not recovered.
+    // cSC4NetworkTool for types 0-3, 6, 8-12 and the pipe tool for 4; the power line and subway tools are not recovered.
     sc4::SetNetworkOccupantViewProvider(&NetworkOccupantView);
     sc4::cSC4NetworkManager* manager = CityNetworkManager();
     if (!manager) return;
-    for (std::uint32_t type : {0u, 1u, 2u, 3u, 6u, 8u, 9u, 10u, 11u, 12u}) {
+    for (std::uint32_t type : {0u, 1u, 2u, 3u, 4u, 6u, 8u, 9u, 10u, 11u, 12u}) {
         auto* tool = new ManagerRoadTool(type);
         tool->AddRef();
         manager->AdoptNetworkTool(static_cast<sc4::eNetworkType>(type), tool);

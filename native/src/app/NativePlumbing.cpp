@@ -3,9 +3,12 @@
 // and the city file's nested references.
 #include "app/NativePlumbing.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 #include "app/NativeCity.h"
+#include "app/NativeDisasterTools.h"
 #include "app/NativePower.h"
 #include "gz/cIGZIStream.h"
 #include "gz/cIGZOStream.h"
@@ -14,6 +17,7 @@
 #include "sc4/BudgetSimulator.h"
 #include "sc4/BuildingOccupant.h"
 #include "sc4/DBSegment.h"
+#include "sc4/Disaster.h"
 #include "sc4/HistoryWarehouse.h"
 #include "sc4/Lot.h"
 #include "sc4/NeighborConnection.h"
@@ -210,10 +214,16 @@ public:
     }
     void SetPipeWatered(cISC4Occupant* pipe, bool watered) override { if (cSC4PipeOccupant* p = Pipe(pipe)) p->SetWateredState(watered); }
     // ApplyPipeFunding (i386 0x000745e2) starts the pipe-burst manager (0x4a1332e8) at the pipe's cell: AttemptDisasterStart(x, z),
-    // manager slot 18. PARTIAL, not started here yet: the burst works (kit command `pipeburst`) but cannot remove the exploded pipe,
-    // because the network manager has no pipe tool natively (the underground tools are not wired), so the neighbours' bursts
-    // re-leak it and the chain never ends. The pipe's burst flag and the count still follow.
-    void BurstPipeAt(int, int) override {}
+    // manager slot 18. The manager decides (its own chance and the disaster settings); the simulator marks the pipe burst either way.
+    void BurstPipeAt(int x, int z) override {
+        static const bool debug = std::getenv("SC4_PIPEBURSTDEBUG") != nullptr;
+        const bool started = NativeAttemptDisasterStart(sc4::kDisasterManagerIdPipeBurst, x, z);
+        if (debug) {
+            cSC4PlumbingSimulator* simulator = NativePlumbingSimulator();
+            std::printf("plumbing: pipe at %d,%d bursts -> %s (supply %u)\n", x, z, started ? "started" : "not started",
+                        simulator ? unsigned(simulator->GetSupplyValue(x, z)) : 0u);
+        }
+    }
     void Deals(std::uint32_t type, std::vector<cISC4NeighborDeal*>& out) override {
         cSC4NeighborsSimulator* neighbors = Neighbors();
         if (!neighbors) return;

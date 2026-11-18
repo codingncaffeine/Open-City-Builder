@@ -26,7 +26,7 @@ public:
 
 // ---- app/NativeDisasters.cpp
 bool NativeHasDisasterManager(std::uint32_t id);
-void NativeAttemptDisasterStart(std::uint32_t id, int x, int z);
+bool NativeAttemptDisasterStart(std::uint32_t id, int x, int z);
 bool NativeTorchIgnite(int cellX, int cellZ, bool again, bool force, std::uint32_t value);
 void NativeSetFireCause(std::uint32_t cause);
 // The manager's StartDisasterEffect: the instance with one reference, null when the manager runs no effects. The face is

@@ -1,4 +1,5 @@
 // Installs the generated neutral stub hosts (src/app/hosts, scripts/gen_stub_hosts.py).
+#include "app/NativeUnderground.h"
 #include "app/NativeCity.h"
 
 namespace native {
@@ -91,8 +92,6 @@ void InstallToxicStub();
 void InstallTractDeveloperStub();
 void InstallTutorialSystemStub();
 void InstallTutorialTaskStub();
-void InstallUndergroundNetworkToolStub();
-void InstallUndergroundOccupantStub();
 void InstallVertexHtConstraintStub();
 void InstallView3DWinStub();
 void InstallViewInputStub();
@@ -207,8 +206,7 @@ void InstallStubHosts() {
     InstallTractDeveloperStub();
     InstallTutorialSystemStub();
     InstallTutorialTaskStub();
-    InstallUndergroundNetworkToolStub();
-    InstallUndergroundOccupantStub();
+    InstallUndergroundHosts();   // NativeUnderground.cpp
     InstallVertexHtConstraintStub();
     InstallView3DWinStub();
     InstallViewInputStub();

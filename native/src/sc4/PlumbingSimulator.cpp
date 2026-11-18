@@ -223,7 +223,9 @@ bool cSC4PlumbingSimulator::DoMessage(cIGZMessage2* message) {
 void cSC4PlumbingSimulator::DoMonthlySimulation() {
     refresh_ = true;
     ageProducers_ = true;
-    ApplyPipeFunding(SC4Percentage(host_->DepartmentFundingFraction()));
+    // Instrument: SC4_PIPEFUNDING=<fraction> stands in for the funding share of the pipes' condition only (distress and bursts).
+    static const char* forced = std::getenv("SC4_PIPEFUNDING");
+    ApplyPipeFunding(SC4Percentage(forced ? static_cast<float>(std::atof(forced)) : host_->DepartmentFundingFraction()));
 }
 
 void cSC4PlumbingSimulator::DoOccupantInserted(cISC4Occupant* occupant) {

@@ -17,6 +17,7 @@
 #include "sc4/NetworkTool.h"
 #include "sc4/SCProperty.h"
 #include "sc4/SCPropertyHelp.h"
+#include "sc4/PipeTool.h"
 #include "sc4/UndergroundNetworkTool.h"
 
 static int failures = 0;
@@ -163,17 +164,11 @@ struct TestOccupant final : cSC4UndergroundOccupant {
     bool hidden[3] = {false, false, false};
 };
 
-// cSC4UndergroundConnectionOccupant (iid 0x8a139184): a cISC4Occupant that also answers the connection query.
-struct FakeConnectionOccupant final : cSC4Occupant, IUndergroundConnectionOccupantInfo {
-    bool QueryInterface(std::uint32_t iid, void** out) override {
-        if (iid == kGZIID_cISC4UndergroundConnectionOccupant) {
-            AddRef();
-            *out = static_cast<IUndergroundConnectionOccupantInfo*>(this);
-            return true;
-        }
-        return cSC4Occupant::QueryInterface(iid, out);
-    }
-    std::uint32_t NetworkGZIID() override { return network; }
+// A cSC4UndergroundConnectionOccupant (iid 0x8a139184) of a chosen network, with a counted fake reference.
+struct FakeConnectionOccupant final : cSC4UndergroundConnectionOccupant {
+    std::uint32_t GetGZIID() const override { return 0xea0a5acf; }
+    std::uint32_t GetNetworkOccupantGZIID() const override { return network; }
+    std::uint32_t GetNetworkType() const override { return kNetworkPipe; }
     std::uint32_t AddRef() override { return ++fakeRefs; }
     std::uint32_t Release() override {
         ++releaseCalls;
@@ -354,7 +349,18 @@ struct FakeNetworkToolHost final : INetworkToolHost {
         return nullptr;
     }
     bool LoadString(std::uint32_t, std::uint32_t, cIGZString&) override { return false; }
+    // Occupant manager InsertOccupant: the piece lands on `insertKey` of the underground fake's cell map.
+    int InsertNetworkOccupant(cSC4NetworkOccupant* occupant, std::uint32_t) override {
+        ++insertCalls;
+        if (insertedCells == nullptr) return 0;
+        occupant->AddRef();
+        (*insertedCells)[insertKey].push_back(occupant);
+        return 0;
+    }
 
+    std::map<std::uint32_t, std::vector<cISC4Occupant*>>* insertedCells = nullptr;
+    std::uint32_t insertKey = 0;
+    int insertCalls = 0;
     FakeTypeInfo typeInfo;
     FakePreview* preview = nullptr;
     FakeWorldCache* worldCache = nullptr;
@@ -412,17 +418,10 @@ struct FakeUndergroundHost final : IUndergroundNetworkToolHost {
         cSCPropertyHelp::SetPropertyValue(holder, kUndergroundPropTuningFlag, true);
         return holder;
     }
-    void InsertOccupantsForSolvedCellsBase(std::vector<tSolvedCell>& cells,
-                                           std::list<cSC4NetworkOccupant*>*, bool preview) override {
-        ++insertCalls;
-        lastInsertPreview = preview;
-        lastInsertCount = cells.size();
-    }
     void InsertRangeConstraintsForCellBase(std::uint32_t cellKey) override {
         ++rangeBaseCalls;
         lastRangeBaseKey = cellKey;
     }
-    void ClearCellPreviewsBase() override { ++clearPreviewsCalls; }
 
     std::map<std::uint32_t, std::vector<cISC4Occupant*>> cellOccupants;
     std::map<std::uint32_t, float> terrainHeights;
@@ -432,10 +431,9 @@ struct FakeUndergroundHost final : IUndergroundNetworkToolHost {
     std::uint32_t lastQueryKey = 0;
     std::uint32_t tuningExemplar = 0;
     std::uint32_t lastRangeBaseKey = 0;
-    std::size_t lastInsertCount = 0;
-    int queryCalls = 0, addCalls = 0, removeCalls = 0, tuningCalls = 0, insertCalls = 0;
-    int rangeBaseCalls = 0, clearPreviewsCalls = 0;
-    bool lastInsertPreview = false, lastRemoveKeep = true;
+    int queryCalls = 0, addCalls = 0, removeCalls = 0, tuningCalls = 0;
+    int rangeBaseCalls = 0;
+    bool lastRemoveKeep = true;
     int lastAddParam = 0, lastRemoveParam = 0;
 };
 
@@ -452,11 +450,13 @@ struct TestTool final : cSC4UndergroundNetworkTool {
         (void)networkType;
         ++createCalls;
         auto* occupant = new TestOccupant();
+        occupant->hidden[0] = hideFirstTriangle;
         for (int v = 0; v < 4; ++v) heights[v][0] = 0.0f;
         created.push_back(occupant);
         out = occupant;
     }
     std::uint32_t gziid_ = 0;
+    bool hideFirstTriangle = false;
     int createCalls = 0;
     std::vector<TestOccupant*> created;
 };
@@ -593,7 +593,7 @@ void TestOccupantLookups() {
     auto* connection = new FakeConnectionOccupant();
     connection->network = kGZIID_cSC4PipeOccupant;
     f.host.cellOccupants[Key(5, 6)].push_back(connection);
-    IUndergroundConnectionOccupantInfo* foundConnection = nullptr;
+    cSC4UndergroundConnectionOccupant* foundConnection = nullptr;
     CHECK(f.tool->FindUndergroundConnectionOccupant(5, 6, kGZIID_cSC4PipeOccupant, foundConnection));
     CHECK(foundConnection == connection);
     foundConnection->Release();
@@ -700,36 +700,59 @@ void TestInsertOccupantsForSolvedCells() {
     std::vector<tSolvedCell> solved{Solved(key)};
     std::list<cSC4NetworkOccupant*> occupants;
 
-    // The base's +0x98 byte is clear and the call is not a preview: only the base insertion runs.
+    f.host.terrainHeights[20] = 12.0f;
+    f.host.terrainHeights[21] = 13.0f;
+    f.host.terrainHeights[22] = 14.0f;
+    f.host.terrainHeights[23] = 15.0f;
+
+    // The base's +0x98 byte is clear and the call is not a preview: the base insertion (0x10018a13c) previews the cell:
+    // its heights through vslot 0x12c (the underground's: terrain minus the 2.5 depth) and the underground
+    // AddCellPreview (vslot 0xf0), which builds a preview occupant. The underground pass itself does not run.
     CHECK(!NetworkToolTestAccess::Mode98(*f.tool));
     f.tool->InsertOccupantsForSolvedCells(solved, &occupants, false);
-    CHECK(f.host.insertCalls == 1);
-    CHECK(f.host.lastInsertPreview == false);
-    CHECK(f.host.lastInsertCount == 1);
-    CHECK(f.tool->createCalls == 0);
+    CHECK_NEAR(cell.vertexHeights[0], 9.5f);
+    CHECK_NEAR(cell.vertexHeights[3], 12.5f);
+    CHECK(f.tool->createCalls == 1);
+    CHECK(f.tool->PreviewList().size() == 1);
+    CHECK(occupants.empty());
+    f.tool->ClearCellPreviews();
+    f.host.cellOccupants.erase(key);
+    const int addsBefore = f.host.addCalls;
 
-    // With the mode byte set the underground occupants are inserted too.
+    // With the mode byte set the base inserts the piece (its occupant manager puts it on the cell) and the
+    // underground pass finds it again: geometry for an existing piece, the network's edges, usable, not re-added.
+    f.baseHost.insertedCells = &f.host.cellOccupants;
+    f.baseHost.insertKey = key;
+    f.tool->hideFirstTriangle = true;
     NetworkToolTestAccess::SetMode98(*f.tool, true);
     f.tool->InsertOccupantsForSolvedCells(solved, &occupants, false);
-    CHECK(f.tool->createCalls == 1);
+    CHECK(f.tool->createCalls == 2);
     auto* created = f.tool->created.back();
+    CHECK(f.baseHost.insertCalls == 1);
+    CHECK(occupants.size() == 1 && occupants.front() == created);
     CHECK(created->vertexSetCalls == 1);
-    CHECK_NEAR(created->vertexHeights[0], 7.0f);
-    CHECK_NEAR(created->vertexHeights[3], 10.0f);
+    CHECK_NEAR(created->vertexHeights[0], 9.5f);
+    CHECK_NEAR(created->vertexHeights[3], 12.5f);
     CHECK(created->geometryCalls == 1);
-    CHECK(!created->lastGeometryUpdate);   // CreateGeometry(existing = false)
+    CHECK(created->lastGeometryUpdate);    // CreateGeometry(existing = true)
+    CHECK(created->GetEdgeTypesFlag(kNetworkPipe) == 0xbeef);
+    // The base insertion reaches the underground triangle slot: the piece's hidden triangle 0 becomes its flag.
+    CHECK((created->GetNetworkFlag() & kNetworkFlagHideTriangle0) != 0);
     CHECK((created->GetNetworkFlag() & kUndergroundToolFlagUsable) != 0);
     CHECK((created->GetNetworkFlag() & kUndergroundToolFlagTranslucent) == 0);
-    CHECK(f.host.addCalls == 1);
+    CHECK(f.host.addCalls == addsBefore);  // the manager already holds it
+    for (cSC4NetworkOccupant* occupant : occupants) occupant->Release();
+    occupants.clear();
+
+    // A cell the manager does not know yet: the underground pass adds its own piece (handle in the cell's byte).
+    f.baseHost.insertedCells = nullptr;
+    f.host.cellOccupants.erase(key);
+    f.tool->InsertOccupantsForSolvedCells(solved, nullptr, false);
+    CHECK(f.tool->createCalls == 4);       // the base's piece and the underground's own
+    CHECK(f.host.addCalls == addsBefore + 1);
     CHECK(f.host.lastAddParam == NetworkToolTestAccess::Unknown458(*f.tool));
     CHECK(cell.occupantId == static_cast<std::uint8_t>(f.host.nextHandle));
-    CHECK(created->fakeRefs == 0);         // the tool released its reference
-
-    // preview = true inserts even when the mode byte is clear.
-    NetworkToolTestAccess::SetMode98(*f.tool, false);
-    f.host.cellOccupants.erase(key);       // force a fresh occupant
-    f.tool->InsertOccupantsForSolvedCells(solved, &occupants, true);
-    CHECK(f.tool->createCalls == 2);
+    CHECK(!f.tool->created.back()->lastGeometryUpdate);
 }
 
 void TestCellPreviews() {
@@ -786,6 +809,7 @@ void TestCellPreviews() {
     // manager (the original's highlight loop is just SetHighlight(0, 0) + Release -- checked against Ghidra).
     static_cast<cISC4Occupant*>(created)->SetFlag(1);
     static_cast<cISC4Occupant*>(old)->SetFlag(1);
+    const int clearsBefore = f.baseHost.preview->clears;
     f.tool->ClearCellPreviews();
     CHECK(f.tool->PreviewList().empty());
     CHECK(f.tool->HighlightList().empty());
@@ -796,7 +820,7 @@ void TestCellPreviews() {
     CHECK(created->highlightState == 0);
     CHECK(old->highlightState == 0);
     CHECK(created->shutdownCalls == 1);
-    CHECK(f.host.clearPreviewsCalls == 1);
+    CHECK(f.baseHost.preview->clears == clearsBefore + 1);   // the base ClearCellPreviews clears the preview layer
 }
 
 void TestCreateCellInfos() {
@@ -992,6 +1016,7 @@ void TestConstraints() {
 
 void TestPropagation() {
     Fixture f;
+    f.tool->Init();   // the tool's world cache holds the cells
     // (0,0) connects to -x (edge 0) and +z (edge 3).
     const std::uint32_t originKey = Key(0, 0);
     cSC4NetworkCellInfo& origin = f.cache.cells[originKey];
@@ -1172,6 +1197,58 @@ void TestUpdateTerrainHeightsPartial() {
     CHECK(f.cache.clears == 1);
 }
 
+// cSC4PipeTool::CreateNetworkOccupant (i386 0x0012c8a0): a pipe on the cell's corners, the cell's occupant, its network
+// flags, the terrain under its vertices, the pipe edges and the type's demolition cost.
+void TestPipeToolCreatesPipe() {
+    Fixture f;
+    f.baseHost.typeInfo.placement.unknownA8[9] = 125;
+    auto* tool = new cSC4PipeTool();
+    CHECK(tool->Init());
+    CHECK(tool->NetworkGZIID() == kGZCLSID_cSC4PipeOccupant);
+    cSC4NetworkCellInfo cell;
+    cell.x = 3;
+    cell.z = 5;
+    cell.networkFlags = 0x10;
+    cell.tileNeighborhoods[kNetworkPipe] = 0x02000200;
+    cell.tileNeighborhoods[0] = 0x0303;
+    for (int v = 0; v < 4; ++v) {
+        cell.vertexHeights[v] = 100.0f + static_cast<float>(v);
+        cell.vertexBaseHeights[v] = 40 + v;
+        f.host.terrainHeights[static_cast<std::uint32_t>(40 + v)] = 110.0f + static_cast<float>(v);
+    }
+    float corners[4][3] = {};
+    cSC4UndergroundOccupant* made = nullptr;
+    tool->CreateNetworkOccupant(&cell, made, corners, 7);
+    CHECK(made != nullptr);
+    auto* pipe = dynamic_cast<cSC4PipeOccupant*>(made);
+    CHECK(pipe != nullptr);
+    CHECK(cell.occupant == made);
+    CHECK_NEAR(corners[0][0], 48.0f);
+    CHECK_NEAR(corners[0][1], 100.0f);
+    CHECK_NEAR(corners[0][2], 80.0f);
+    CHECK_NEAR(corners[1][2], 96.0f);
+    CHECK_NEAR(corners[1][1], 101.0f);
+    CHECK_NEAR(corners[2][0], 64.0f);
+    CHECK_NEAR(corners[2][2], 96.0f);
+    CHECK_NEAR(corners[3][0], 64.0f);
+    CHECK_NEAR(corners[3][1], 103.0f);
+    CHECK_NEAR(corners[3][2], 80.0f);
+    std::uint32_t cx = 0, cz = 0;
+    made->GetOccupiedCell(cx, cz);
+    CHECK(cx == 3 && cz == 5);
+    CHECK((made->GetNetworkFlag() & 0x10) != 0);
+    CHECK(made->GetEdgeTypesFlag(kNetworkPipe) == 0x02000200);
+    CHECK(made->GetEdgeTypesFlag(0) == 0);   // only the tool's network
+    CHECK(made->GetCostOfDemolition() == 125);
+    float terrain[4] = {};
+    made->GetTerrainHeights(terrain);
+    CHECK_NEAR(terrain[0], 110.0f);
+    CHECK_NEAR(terrain[3], 113.0f);
+    made->Release();
+    tool->Shutdown();
+    // The tool is never destroyed (its destructor is the original's trap).
+}
+
 }  // namespace
 
 int main() {
@@ -1188,6 +1265,7 @@ int main() {
     TestStartPlacing();
     TestSetQuadTrianglesToDraw();
     TestUpdateTerrainHeightsPartial();
+    TestPipeToolCreatesPipe();
     if (failures == 0) {
         std::printf("all cSC4UndergroundNetworkTool tests passed\n");
         return 0;

@@ -528,8 +528,7 @@ src/app/hosts/StubToxic.cpp
 src/app/hosts/StubTractDeveloper.cpp
 src/app/hosts/StubTutorialSystem.cpp
 src/app/hosts/StubTutorialTask.cpp
-src/app/hosts/StubUndergroundNetworkTool.cpp
-src/app/hosts/StubUndergroundOccupant.cpp
+src/app/NativeUnderground.cpp
 src/app/hosts/StubVertexHtConstraint.cpp
 src/app/NativeView3DWinHost.cpp
 src/app/hosts/StubViewInput.cpp
@@ -564,6 +563,7 @@ src/sc4/PropertyView.cpp
 src/sc4/WinResizableOutline.cpp
 src/sc4/ViewInputControlSignTool.cpp
 src/sc4/UndergroundNetworkTool.cpp
+src/sc4/PipeTool.cpp
 src/sc4/UndergroundOccupant.cpp
 src/sc4/VertexHtConstraintSatisfier.cpp
 src/sc4/WinAdviceList.cpp

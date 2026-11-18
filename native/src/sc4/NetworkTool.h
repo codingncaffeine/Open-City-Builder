@@ -815,6 +815,9 @@ private:
     // (the dragged steps +0xa0 and cells +0xb8, the step counters +0xd4..+0xdc, the anchors +0x210, the
     // preview +0x430, the occupant manager +0x88, the network type +0x628 and the +0x98 update flag).
     friend class cSC4PowerLineTool;
+    // The pipe tool (derived through the underground tool) reads the network type +0x628 and the placement block's
+    // demolition cost (i386 +0x36c) when it builds a pipe.
+    friend class cSC4PipeTool;
 };
 
 }  // namespace sc4
