@@ -239,7 +239,10 @@ public:
     void AddRef() override { ++refs_; }
     void Release() override { if (--refs_ <= 0) delete this; }
     void SetFlag(std::uint32_t flag, bool on) override { NativeControllerSetFlag(controller_, flag, on); }
-    void SetEnabled(bool on) override { NativeControllerActivate(controller_, on); }
+    void SetEnabled(bool on) override {
+        if (Trace()) std::fprintf(stderr, "landfill: truck controller %s\n", on ? "on" : "off");
+        NativeControllerActivate(controller_, on);
+    }
     void SetTransform(const float[13]) override {}
     void Start(int) override {}
     void Stop(bool) override {}
