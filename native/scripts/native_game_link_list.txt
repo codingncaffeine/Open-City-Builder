@@ -203,6 +203,7 @@ src/sc4/AutomataScriptSystem.cpp
 src/sc4/AutomataGenerator.cpp
 src/sc4/SpiralIterator.cpp
 src/sc4/ModelMaker.cpp
+src/sc4/FoundationModel.cpp
 src/sc4/ModelMakerUtility.cpp
 src/sc4/CellTextureModel.cpp
 src/sc4/NetworkOccupantModel.cpp

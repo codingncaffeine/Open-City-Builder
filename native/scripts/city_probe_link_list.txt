@@ -259,6 +259,7 @@ src/sc4/LandfillDeveloper.cpp
 src/sc4/LandfillOccupant.cpp
 src/sc4/LotBaseTextureOccupant.cpp
 src/sc4/ModelMaker.cpp
+src/sc4/FoundationModel.cpp
 src/sc4/MySimBalloonAdvice.cpp
 src/sc4/NetworkLotManager.cpp
 src/sc4/NetworkManager.cpp
