@@ -1,14 +1,15 @@
 // The landfill developer's and its zones' city services (sc4::ILandfillDeveloperHost / sc4::ILandfillZoneHost): the city's cells,
 // the terrain, the pollution simulator's garbage, the sanitation department's budget, the zone manager, the traffic simulator's
 // subnetworks, the landfill tile and base texture occupants, the unconnected-zone marker prop and the simulator agent.
-// Each method names the original call it stands for. PARTIAL: the garbage truck generator / attractor and the seagull flock
-// (effect manager and ambient effects) are not made yet, so a landfill has no trucks or gulls.
+// Each method names the original call it stands for. The garbage trucks' generator and attractor are automata controllers, the
+// seagull flock a visual effect.
 #include <cfloat>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
 
 #include "app/NativeCity.h"
+#include "app/NativeEffects.h"
 #include "gz/cIGZIStream.h"
 #include "gz/cIGZOStream.h"
 #include "sc4/Budget.h"
@@ -27,6 +28,7 @@
 #include "sc4/PropOccupant.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/TrafficNetworkMap.h"
+#include "sc4/VisualEffect.h"
 #include "sc4/TrafficSimulator.h"
 #include "tools/city_probe_plain.h"
 #include "sc4/cSC4City.h"
@@ -36,6 +38,10 @@
 
 namespace native {
 int NativeCurrentViewLevel();   // app/NativeCitySystems.cpp
+cIGZUnknown* NativeAddControllerAt(const char* templateName, const float position[3]);   // app/NativeAutomataControllerHost.cpp
+void NativeControllerSetFlag(cIGZUnknown* controller, std::uint32_t flag, bool on);
+void NativeControllerActivate(cIGZUnknown* controller, bool on);
+void NativeRemoveController(cIGZUnknown* controller);
 
 namespace {
 using namespace sc4;
@@ -226,6 +232,54 @@ private:
     int count_ = 1;
 };
 
+// A garbage truck controller (cSC4AutomataController) as the zone uses it: SetFlag (vslot 0x78) and Activate (vslot 0xa0).
+class ControllerEffect final : public ILandfillEffect {
+public:
+    explicit ControllerEffect(cIGZUnknown* controller) : controller_(controller) {}
+    void AddRef() override { ++refs_; }
+    void Release() override { if (--refs_ <= 0) delete this; }
+    void SetFlag(std::uint32_t flag, bool on) override { NativeControllerSetFlag(controller_, flag, on); }
+    void SetEnabled(bool on) override { NativeControllerActivate(controller_, on); }
+    void SetTransform(const float[13]) override {}
+    void Start(int) override {}
+    void Stop(bool) override {}
+    cIGZUnknown* Controller() const { return controller_; }
+private:
+    cIGZUnknown* controller_;
+    int refs_ = 0;
+};
+
+// The seagull flock: a visual effect placed by its transform (3x3 rotation, position, scale), started and stopped.
+class VisualEffectView final : public ILandfillEffect {
+public:
+    explicit VisualEffectView(cSC4VisualEffect* effect) : effect_(effect) {}
+    void AddRef() override { ++refs_; }
+    void Release() override {
+        if (--refs_ > 0) return;
+        effect_->Release();
+        delete this;
+    }
+    void SetFlag(std::uint32_t, bool) override {}
+    void SetEnabled(bool) override {}
+    void SetTransform(const float matrix[13]) override {
+        cS3DTransform transform;
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 3; ++c) transform.rotation[r][c] = matrix[r * 3 + c];
+        transform.translation[0] = matrix[9];
+        transform.translation[1] = matrix[10];
+        transform.translation[2] = matrix[11];
+        transform.flags |= 1;
+        transform.changeCounter = static_cast<std::uint8_t>(transform.changeCounter + 1);
+        effect_->SetSourceTransform(transform);
+    }
+    void Start(int mode) override { effect_->Start(mode); }
+    void Stop(bool immediate) override { effect_->Stop(immediate ? 1 : 0); }
+    bool IsRunning() override { return effect_->IsStarted(); }
+private:
+    cSC4VisualEffect* effect_;
+    int refs_ = 1;   // CreateAmbientEffect hands the zone one reference (it does not AddRef the flock)
+};
+
 class ZoneHost final : public ILandfillZoneHost {
 public:
     const LandfillTunables& Tunables() override { return LandfillDeveloperTunables(); }
@@ -388,10 +442,22 @@ public:
         if (!prop) { static_cast<cISC4Occupant*>(raw)->Release(); return nullptr; }
         return new ZotProp(prop);
     }
-    // PARTIAL: the garbage trucks' generator / attractor (effect manager vslot 0x28) and the seagull flock (ambient effects 0x30)
-    ILandfillEffect* CreateEffect(const char*, const float[3]) override { return nullptr; }
-    void RemoveEffect(ILandfillEffect*) override {}
-    ILandfillEffect* CreateAmbientEffect(const char*) override { return nullptr; }
+    // The garbage trucks' generator and attractor: automata controllers from their templates at the zone's road cell (i386: the
+    // city's controller manager, vslot 0x14 AddControllerFromTemplateName(null, name, position)); one reference for the zone's AddRef.
+    ILandfillEffect* CreateEffect(const char* name, const float position[3]) override {
+        cIGZUnknown* controller = name && *name ? NativeAddControllerAt(name, position) : nullptr;
+        if (Trace()) std::fprintf(stderr, "landfill: controller %s at %.0f,%.0f -> %s\n", name ? name : "", position[0], position[2], controller ? "made" : "none");
+        return controller ? new ControllerEffect(controller) : nullptr;
+    }
+    void RemoveEffect(ILandfillEffect* effect) override {   // controller manager vslot 0x20 RemoveController
+        if (auto* controller = dynamic_cast<ControllerEffect*>(effect)) NativeRemoveController(controller->Controller());
+    }
+    // The seagulls: the effects manager's visual effect by name (i386 +0x58 vslot 0x18 CreateVisualEffect); one reference.
+    ILandfillEffect* CreateAmbientEffect(const char* name) override {
+        cSC4VisualEffect* effect = CreateNamedEffect(name);
+        if (Trace()) std::fprintf(stderr, "landfill: effect %s -> %s\n", name, effect ? "made" : "none");
+        return effect ? new VisualEffectView(effect) : nullptr;
+    }
     int Rand() override { return std::rand(); }
 private:
     std::vector<ILandfillOccupantRef*> List(int x, int z, std::uint32_t type) {   // occupant manager i386 0xa0 by type

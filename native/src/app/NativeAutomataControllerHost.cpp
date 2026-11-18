@@ -117,6 +117,18 @@ cIGZUnknown* NativeAddController(sc4::cISC4Occupant* occupant, const char* templ
     auto* manager = CityComponentAs<cSC4AutomataControllerManager>(CityComponent::AutomataControllerManager);
     return manager ? manager->AddControllerFromTemplateName(occupant, cRZString(templateName), nullptr) : nullptr;
 }
+// cSC4AutomataControllerManager::AddControllerFromTemplateName(null, name, position): a controller standing at a position
+// (the landfill's garbage truck generator and attractor). Not referenced; null when the template is unknown.
+cIGZUnknown* NativeAddControllerAt(const char* templateName, const float position[3]) {
+    auto* manager = CityComponentAs<cSC4AutomataControllerManager>(CityComponent::AutomataControllerManager);
+    return manager ? manager->AddControllerFromTemplateName(nullptr, cRZString(templateName), position) : nullptr;
+}
+void NativeControllerSetFlag(cIGZUnknown* controller, std::uint32_t flag, bool on) {
+    if (controller) static_cast<cSC4AutomataController*>(controller)->SetFlag(flag, on);
+}
+void NativeControllerActivate(cIGZUnknown* controller, bool on) {
+    if (controller) static_cast<cSC4AutomataController*>(controller)->Activate(on);
+}
 void NativeRemoveController(cIGZUnknown* controller) {
     auto* manager = CityComponentAs<cSC4AutomataControllerManager>(CityComponent::AutomataControllerManager);
     if (manager && controller) manager->RemoveController(static_cast<cSC4AutomataController*>(controller));

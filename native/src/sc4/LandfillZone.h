@@ -66,9 +66,10 @@ struct LandfillTunables {   // cSC4LandfillDeveloper statics (0x100afdff0..0x100
     std::int64_t defaultLandfillTileCost = 0;        // 0x100b214f8 kDefaultLandfillTileCost   property 0x4a677e5f
     float costPerCellHeightChange = 0.0f;            // 0x100afe008 kCostPerCellHeightChange  property 0x2aa00fe7
     bool moveWithTerrain = false;                    // 0x100afe004 kbMoveWithTerrain        property 0x4a677e5d
-    // Not developer statics: the two effect names the zone asks the effect manager for.
-    const char* garbageTruckGeneratorName = "";
-    const char* garbageTruckAttractorName = "";
+    // Not developer statics: the zone's two automata controller templates (_kGarbageTruckGeneratorName / _kGarbageTruckAttractorName,
+    // the strings next to "flock_of_seagulls" in the executable): the garbage trucks leave from and return to the zone's road cell.
+    const char* garbageTruckGeneratorName = "garbage_out";
+    const char* garbageTruckAttractorName = "garbage_attract";
 };
 
 class ILandfillOccupantRef {   // a cISC4Occupant the zone found; Release() drops the reference
