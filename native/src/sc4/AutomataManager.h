@@ -376,11 +376,8 @@ public:
 
 // cSC4ViewFilterInformation (only the "does this filter include the group" call is used; the original takes the first
 // member of the record and calls its vslot 0x18 with the automaton's group).
-class IAutomataViewFilterInformation {
-public:
-    virtual ~IAutomataViewFilterInformation() = default;
-    virtual bool Includes(std::uint32_t group) const = 0;                       // vslot 0x18
-};
+// cSC4ViewFilterInformation (the view's filter message pointers): the counted occupant filter at +0. The manager hands
+// it to its host, which asks the filter about the automaton's occupant.
 
 // The player drive view input control (spPlayerDriveView, 0x1000ff652 creates it).
 class IAutomataPlayerDriveControl : public cIGZUnknown {
@@ -492,6 +489,12 @@ public:
     virtual ~IAutomataManagerHost() = default;
     // ---- framework
     virtual cIGZMessageServer2* MessageServer() = 0;                                  // SL::spMS2 (borrowed)
+    // HandleViewFilterChanged's test (i386 0x000bd0ae): the filter at the front of a cSC4ViewFilterInformation (vslot
+    // 0xc IsOccupantIncluded) asked about the automaton's occupant (automaton vslot 0x18 AsOccupant). True when the
+    // information or its filter is null.
+    virtual bool ViewFilterIncludes(const void* filterInformation, IAutomataAutomaton* automaton) {
+        (void)filterInformation; (void)automaton; return true;
+    }
     virtual void AddTickNotification(cIGZMessageTarget2* target, int channel) = 0;    // SL::ATM() vslot 0x28
     virtual void RemoveTickNotification(cIGZMessageTarget2* target, int channel) = 0; // vslot 0x30
     virtual bool CheatManagerAvailable() = 0;                                         // SL::spCCM != 0
@@ -632,8 +635,8 @@ public:
     virtual bool AdjustCountForAutomaton(std::uint8_t priority) = 0;                            // 0x1a8 @0x100100b3a
     virtual void HandleViewChanged() = 0;                                                       // 0x1b0 @0x1000ffba0
     virtual bool HandleViewZoomChanged(int oldZoom, int newZoom) = 0;                            // 0x1b8 @0x1000ffbf0
-    virtual bool HandleViewFilterChanged(const IAutomataViewFilterInformation* oldFilter,
-                                        const IAutomataViewFilterInformation* newFilter) = 0;   // 0x1c0 @0x10010027a
+    virtual bool HandleViewFilterChanged(const void* newInformation,
+                                        const void* oldInformation) = 0;   // 0x1c0 @0x10010027a
     virtual bool HandleInsertNetworkOccupant(IAutomataNetworkOccupant* occupant) = 0;            // 0x1c8 @0x100100340
     virtual bool HandleRemoveNetworkOccupant(IAutomataNetworkOccupant* occupant) = 0;            // 0x1d0 @0x100100348
     virtual bool HandleNewBuilding(IAutomataBuildingOccupant* building) = 0;                     // 0x1d8 @0x100100350
@@ -719,8 +722,8 @@ public:
     bool ChaseAutomaton(std::uint32_t group, float radius, IAutomataAutomaton* target, bool all) override;   // @ 0x10010127c
     void HandleViewChanged() override;                                        // @ 0x1000ffba0
     bool HandleViewZoomChanged(int oldZoom, int newZoom) override;            // @ 0x1000ffbf0
-    bool HandleViewFilterChanged(const IAutomataViewFilterInformation* oldFilter,
-                                 const IAutomataViewFilterInformation* newFilter) override;   // @ 0x10010027a
+    bool HandleViewFilterChanged(const void* newInformation,
+                                 const void* oldInformation) override;   // @ 0x10010027a
     void UpdateZoomAndRotation() override;                                    // @ 0x10010019c
     void SetCameraFollow(IAutomataAutomaton* automaton) override;             // @ 0x100101e44
     bool IsCameraFollowUpdating() override;                                   // @ 0x100101e38

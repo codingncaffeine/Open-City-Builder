@@ -33,6 +33,8 @@
 #include "sc4/cSC424HourClock.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
+#include "sc4/Automaton.h"
+#include "sc4/OccupantManager.h"
 
 namespace native {
 int NativeResidentialPopulation();              // app/NativeSimHosts.cpp
@@ -224,6 +226,14 @@ class Host final : public IVehicleManagerHost {
 public:
     // ---- framework
     cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
+    // The view filter at the front of the information (cSC4ViewFilterInformation) asked about the automaton itself.
+    bool ViewFilterIncludes(const void* filterInformation, IAutomataAutomaton* automaton) override {
+        if (!filterInformation) return true;
+        cIGZUnknown* stored = *static_cast<cIGZUnknown* const*>(filterInformation);
+        sc4::cSC4Automaton* occupant = AutomatonOf(automaton);
+        if (!stored || !occupant) return true;
+        return static_cast<sc4::cISC4OccupantFilter*>(stored)->IsOccupantIncluded(occupant);
+    }
     void AddTickNotification(cIGZMessageTarget2* target, int channel) override {
         if (cSC4AnimationTickManager* atm = AnimationTickManager()) atm->AddTickableObject(target, std::uint32_t(channel));
     }

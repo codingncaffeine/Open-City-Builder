@@ -344,11 +344,6 @@ struct FakeMessageServer final : cIGZMessageServer2 {
     bool CreateMessage(std::uint32_t, std::uint32_t, void**) override { return false; }
 };
 
-struct FakeFilter final : IAutomataViewFilterInformation {
-    std::uint32_t onlyGroup = 0;
-    bool limited = false;
-    bool Includes(std::uint32_t group) const override { return !limited || group == onlyGroup; }
-};
 
 // ---- exemplar + property holder --------------------------------------------------------------------------------------------
 struct FakeExemplar final : cISCResExemplar {
@@ -373,6 +368,11 @@ struct FakeExemplar final : cISCResExemplar {
 
 // ---- host ------------------------------------------------------------------------------------------------------------------
 struct FakeHost final : IAutomataManagerHost {
+    const void* filterInformation = nullptr;
+    std::uint32_t filterOnlyGroup = 0;
+    bool ViewFilterIncludes(const void* information, IAutomataAutomaton* automaton) override {
+        return information != filterInformation || automaton->GetAutomataGroup() == filterOnlyGroup;
+    }
     FakeMessageServer messages;
     cIGZMessageServer2* server = &messages;
     std::vector<std::uint32_t> registeredMessages, removedMessages, ticksAdded, ticksRemoved;
@@ -989,11 +989,13 @@ int main() {
         message->SetType(kMsgRenderPropertiesChanged);
         CHECK(manager->DoMessage(message));
         message->SetType(kMsgViewFilterChanged);
-        FakeFilter filter;
-        filter.limited = true;
-        filter.onlyGroup = 0x1402;
-        message->SetVoid1(&filter);
-        message->SetVoid2(nullptr);
+        // The new filter information is the message's second pointer (the first is the old filter); the host's
+        // filter keeps group 0x1402 only.
+        int filterInformation = 0, oldFilter = 0;
+        host.filterInformation = &filterInformation;
+        host.filterOnlyGroup = 0x1402;
+        message->SetVoid1(&oldFilter);
+        message->SetVoid2(&filterInformation);
         FakeAutomaton filtered;
         filtered.group = 0x9999;
         manager->AddAutomaton(&filtered);
@@ -1325,8 +1327,8 @@ int main() {
         CHECK(manager->IsActive());
         manager->HandleViewChanged();
         CHECK(manager->ViewRect(0) == host.view.rect[0] - 64.0f);
-        FakeFilter filter;
-        manager->HandleViewFilterChanged(nullptr, &filter);
+        const void* filterInformation = &host;   // any non-null information: the host decides
+        manager->HandleViewFilterChanged(filterInformation, nullptr);
         CHECK(manager->IsActive());
         IAutomataPathView* pathView = cSC4AutomataManager::PathView();
         CHECK(pathView == nullptr);

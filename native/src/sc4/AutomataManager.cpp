@@ -457,9 +457,10 @@ bool cSC4AutomataManager::HandleViewZoomChanged(int oldZoom, int newZoom) {
     return true;
 }
 
-bool cSC4AutomataManager::HandleViewFilterChanged(const IAutomataViewFilterInformation* oldFilter,
-                                                 const IAutomataViewFilterInformation* newFilter) {
-    (void)oldFilter;   // the original only uses the second filter
+// i386 0x000bd0ae. DoMessage hands over (void2, void1) of the view's filter message: the new cSC4ViewFilterInformation
+// first, then the old filter pointer; only the new one is read.
+bool cSC4AutomataManager::HandleViewFilterChanged(const void* newInformation, const void* oldInformation) {
+    (void)oldInformation;
     int zoom = 0, rotation = 0;
     if (g_host)
         if (IAutomataViewUtilities* view = g_host->ViewUtilities()) view->GetZoomAndRotation(zoom, rotation);
@@ -467,7 +468,7 @@ bool cSC4AutomataManager::HandleViewFilterChanged(const IAutomataViewFilterInfor
     for (IAutomataAutomaton* automaton : automata_) {
         if (!automaton) continue;
         bool visible = active_;
-        if (newFilter && !newFilter->Includes(automaton->GetAutomataGroup())) visible = false;
+        if (newInformation && g_host && !g_host->ViewFilterIncludes(newInformation, automaton)) visible = false;
         automaton->SetVisible(visible);
     }
     return true;
@@ -1553,8 +1554,7 @@ bool cSC4AutomataManager::DoMessage(cIGZMessage2* message) {
             break;
         }
         case kMsgViewFilterChanged:
-            HandleViewFilterChanged(static_cast<const IAutomataViewFilterInformation*>(standard->GetVoid2()),
-                                    static_cast<const IAutomataViewFilterInformation*>(standard->GetVoid1()));
+            HandleViewFilterChanged(standard->GetVoid2(), standard->GetVoid1());   // i386: (void2, void1)
             break;
         case kMsgQueuePointsInvalid:
             if (standard->GetIGZUnknown() && standard->GetData1() != 0)

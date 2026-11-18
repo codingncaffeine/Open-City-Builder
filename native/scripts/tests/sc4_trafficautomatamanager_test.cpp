@@ -400,11 +400,6 @@ struct FakeMessageServer final : cIGZMessageServer2 {
     bool CreateMessage(std::uint32_t, std::uint32_t, void**) override { return false; }
 };
 
-struct FakeFilter final : IAutomataViewFilterInformation {
-    std::uint32_t onlyGroup = 0;
-    bool limited = false;
-    bool Includes(std::uint32_t group) const override { return !limited || group == onlyGroup; }
-};
 
 // ---- exemplar + property holder --------------------------------------------------------------------------------------------
 struct FakeExemplar final : cISCResExemplar {
