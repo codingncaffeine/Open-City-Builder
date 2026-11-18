@@ -446,16 +446,17 @@ struct TestTool final : cSC4UndergroundNetworkTool {
     std::uint32_t NetworkGZIID() override { return gziid_; }
     void CreateNetworkOccupant(cSC4NetworkCellInfo* cell, cSC4UndergroundOccupant*& out, float (*heights)[3],
                                std::uint32_t networkType) override {
-        (void)cell;
         (void)networkType;
         ++createCalls;
         auto* occupant = new TestOccupant();
         occupant->hidden[0] = hideFirstTriangle;
         for (int v = 0; v < 4; ++v) heights[v][0] = 0.0f;
         created.push_back(occupant);
+        if (assignCell) cell->occupant = occupant;   // as cSC4PipeTool does (the port's cell keeps a bare pointer)
         out = occupant;
     }
     std::uint32_t gziid_ = 0;
+    bool assignCell = false;
     bool hideFirstTriangle = false;
     int createCalls = 0;
     std::vector<TestOccupant*> created;
@@ -753,6 +754,31 @@ void TestInsertOccupantsForSolvedCells() {
     CHECK(f.host.lastAddParam == NetworkToolTestAccess::Unknown458(*f.tool));
     CHECK(cell.occupantId == static_cast<std::uint8_t>(f.host.nextHandle));
     CHECK(!f.tool->created.back()->lastGeometryUpdate);
+}
+
+// A concrete tool that puts the new piece into the cell record (cSC4PipeTool): the preview keeps its one reference. The stack copy
+// AddCellPreview makes gives back only the reference it took on the cell's previous occupant.
+void TestCellPreviewReferences() {
+    Fixture f;
+    f.tool->Init();
+    f.tool->assignCell = true;
+    cSC4NetworkCellInfo cell;
+    cell.x = 5;
+    cell.z = 5;
+    cell.status = 1;
+    auto* previous = new TestOccupant();
+    previous->AddRef();
+    cell.occupant = previous;
+    f.tool->AddCellPreview(cell, Solved(Key(5, 5)));
+    CHECK(f.tool->PreviewList().size() == 1);
+    if (!f.tool->created.empty()) {
+        TestOccupant* made = f.tool->created.back();
+        CHECK(made->AddRef() == 2);   // the preview list's reference (the one CreateNetworkOccupant handed back), plus this one
+        made->Release();
+    }
+    CHECK(previous->AddRef() == 3);   // (test occupants start at one) the cell's previous occupant got its reference back
+    previous->Release();
+    previous->Release();
 }
 
 void TestCellPreviews() {
@@ -1259,6 +1285,7 @@ int main() {
     TestCreateNetworkOccupantWrapper();
     TestInsertOccupantsForSolvedCells();
     TestCellPreviews();
+    TestCellPreviewReferences();
     TestCreateCellInfos();
     TestConstraints();
     TestPropagation();

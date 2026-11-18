@@ -303,7 +303,11 @@ void cSC4UndergroundNetworkTool::InsertOccupantsForSolvedCells(std::vector<tSolv
 void cSC4UndergroundNetworkTool::AddCellPreview(cSC4NetworkCellInfo& cell, const tSolvedCell& solved) {
     if (cell.status == 0) return;
     cSC4NetworkCellInfo copy = cell;   // the original rebuilds the record on the stack, keeping the occupant
-    if (copy.occupant != nullptr) copy.occupant->AddRef();
+    // The stack copy's counted occupant (cRZAutoRefCount in the original). The concrete tool's CreateNetworkOccupant assigns the new
+    // piece to the copy; in the original that assignment releases this one and counts the piece, which the copy's destructor then
+    // releases again. The port's cell keeps a bare pointer, so only the reference taken here is given back.
+    cSC4NetworkOccupant* held = copy.occupant;
+    if (held != nullptr) held->AddRef();
     IUndergroundNetworkToolHost* host = g_undergroundNetworkToolHost;
     for (int v = 0; v < 4; ++v) {
         const float height = host != nullptr
@@ -328,7 +332,7 @@ void cSC4UndergroundNetworkTool::AddCellPreview(cSC4NetworkCellInfo& cell, const
         }
     }
     if (occupant != nullptr) occupant->SetHighlight(1, false);   // vslot 0x288
-    if (copy.occupant != nullptr) copy.occupant->Release();
+    if (held != nullptr) held->Release();
 }
 
 // 0x1001a80ec
