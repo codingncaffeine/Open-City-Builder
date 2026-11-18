@@ -854,15 +854,16 @@ void SC4DrawContext::SetModelTransform(const cS3DTransform& transform) {
 void SC4DrawContext::SetModelTransform(const cS3DMatrix4& transform) {
     if (!modelViewValid_) UpdateViewTransformFromCamera();
     const cS3DTransform& view = viewTransform_;
-    // Unlike the cS3DTransform overload this one builds the rotation as stored and puts the translation in
-    // m[3], m[7], m[11], then post-multiplies the caller's matrix (quirk, kept). m[13] is uninitialised in the
-    // original (a stack slot); it is zero here.
+    // The view as a row-major cS3DMatrix4 (cS3DTransform::GetMatrix4: the rotation as stored, the translation in
+    // m[3], m[7], m[11]) times the caller's matrix, copied transposed into the GL (column-major) matrix as
+    // i386 0x0051299a does.
     float matrix[16] = {view.rotation[0][0], view.rotation[0][1], view.rotation[0][2], view.translation[0],
                         view.rotation[1][0], view.rotation[1][1], view.rotation[1][2], view.translation[1],
                         view.rotation[2][0], view.rotation[2][1], view.rotation[2][2], view.translation[2],
                         0.0f,                0.0f,                0.0f,                1.0f};
     MultiplyMatrix4(matrix, transform);
-    std::memcpy(modelViewMatrix_, matrix, sizeof modelViewMatrix_);
+    for (int row = 0; row < 4; ++row)
+        for (int col = 0; col < 4; ++col) modelViewMatrix_[col * 4 + row] = matrix[row * 4 + col];
     driver_->LoadMatrix(modelViewMatrix_);
     modelViewValid_ = false;
 }

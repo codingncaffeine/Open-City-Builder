@@ -812,15 +812,20 @@ int main() {
         CHECK(Near(local.matrices[0][12], 4.0f) && Near(local.matrices[0][13], 5.0f) && Near(local.matrices[0][14], 6.0f));
         CHECK(dc.ModelTransform().translation[0] == 4.0f && dc.ModelTransform().flags == nS3D::kTransformTranslation);
         CHECK(dc.ModelTransform().changeCounter == 1);
+        // Row-major cS3DMatrix4 (translation in m[i][3]); i386 0x0051299a hands the GL driver its transpose.
         cS3DMatrix4 matrix;
-        std::memcpy(&matrix.m[0][0], model.rotation, 9 * sizeof(float));
-        matrix.m[3][0] = 1.0f;
-        matrix.m[3][1] = 2.0f;
-        matrix.m[3][2] = 3.0f;
+        for (int r = 0; r < 4; ++r)
+            for (int c = 0; c < 4; ++c) matrix.m[r][c] = r == c ? 1.0f : 0.0f;
+        matrix.m[0][1] = 0.5f;
+        matrix.m[0][3] = 1.0f;
+        matrix.m[1][3] = 2.0f;
+        matrix.m[2][3] = 3.0f;
         local.Reset();
         dc.SetModelTransform(matrix);
         CHECK(local.matrices.size() == 1);
         CHECK(Near(local.matrices[0][12], 1.0f) && Near(local.matrices[0][13], 2.0f) && Near(local.matrices[0][14], 3.0f));
+        CHECK(Near(local.matrices[0][3], 0.0f) && Near(local.matrices[0][7], 0.0f) && Near(local.matrices[0][11], 0.0f));
+        CHECK(Near(local.matrices[0][4], 0.5f) && Near(local.matrices[0][1], 0.0f) && Near(local.matrices[0][15], 1.0f));
         CHECK(dc.ModelTransform().translation[0] == 4.0f);   // the matrix overload keeps the stored transform
     }
 

@@ -40,9 +40,6 @@
 //  * SetIndexBuffer stores the pointer and ignores the count.
 //  * SetTexEnvMode / SetTexCombiner only touch texture stage 0 unless cSC4RenderProperties::kUseSecondStage is set.
 //  * SetTexTransform4 stores the matrix only for stage 1 (stage 0 still gets TexStageMatrix).
-//  * The two SetModelTransform overloads disagree on the matrix convention: the cS3DTransform one builds the
-//    rotation transposed with the translation in the last column (like ResetModelViewTransform), the cS3DMatrix4
-//    one builds the rotation as stored with the translation in m[3], m[7], m[11]. Kept as is.
 //  * Init takes the stage count from the *video mode* record (dword +0x24 of the 0x34-byte mode), which is 0 in
 //    this build, so the count is clamped up to 2. Bytes +0x29 / +0x2a of the same record land in +0xd0 / +0xd1.
 //  * RenderModelInstance's small-model cull scans four floats starting at the z extent; two of them are other
