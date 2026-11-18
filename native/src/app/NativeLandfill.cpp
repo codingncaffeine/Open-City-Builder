@@ -233,9 +233,12 @@ private:
 };
 
 // A garbage truck controller (cSC4AutomataController) as the zone uses it: SetFlag (vslot 0x78) and Activate (vslot 0xa0).
+// The zone holds a reference on the controller itself (the original AddRefs it), so the controller outlives the controller
+// manager's shutdown when the city closes the manager first; a shut-down controller ignores Activate.
 class ControllerEffect final : public ILandfillEffect {
 public:
-    explicit ControllerEffect(cIGZUnknown* controller) : controller_(controller) {}
+    explicit ControllerEffect(cIGZUnknown* controller) : controller_(controller) { if (controller_) controller_->AddRef(); }
+    ~ControllerEffect() { if (controller_) controller_->Release(); }
     void AddRef() override { ++refs_; }
     void Release() override { if (--refs_ <= 0) delete this; }
     void SetFlag(std::uint32_t flag, bool on) override { NativeControllerSetFlag(controller_, flag, on); }
