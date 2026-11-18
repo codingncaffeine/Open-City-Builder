@@ -175,7 +175,10 @@ public:
     // ---- IVolcanoLava (what the disaster instance drives)
     void StartLavaFlow(float x, float z, float ventRadius, bool burn) override {
         if (detached_ || !lava_.IsInitialized()) return;
+        ventX_ = x;
+        ventZ_ = z;
         lava_.StartLavaFlow(x, z, ventRadius, burn);
+        if (Debug()) ReportVentTerrain("flow start");
         if (Debug())
             std::fprintf(stderr, "lava: flow started at (%.0f, %.0f) radius %.0f: vent vertices %d,%d..%d,%d, renderer %d, ticks %d\n", x, z, ventRadius,
                          lava_.StartRect().left, lava_.StartRect().top, lava_.StartRect().right, lava_.StartRect().bottom, int(lava_.Registered()),
@@ -319,12 +322,19 @@ public:
     // ---- ILavaHost: fire
     bool IsCellFlammable(std::int32_t x, std::int32_t z) override {
         sc4::cSC4FlammabilitySimulator* flammability = Flammability();
-        return flammability && flammability->IsCellFlammable(x, z);
+        const bool yes = flammability && flammability->IsCellFlammable(x, z);
+        ++flammableAsked_;
+        if (yes) ++flammableYes_;
+        if (!flammability) ++noFlammability_;
+        return yes;
     }
     void IgniteCell(std::int32_t x, std::int32_t z) override {
         if (sc4::cSC4DisasterManagerFire* fire = sc4::cSC4DisasterManagerFire::Instance()) {
             const bool lit = fire->IgniteCell(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z), false, true, 0);
             if (lit) ++ignited_;
+            else ++igniteRefused_;
+        } else {
+            ++noFireManager_;
         }
     }
     void QuickBurnCell(std::int32_t x, std::int32_t z) override {
@@ -393,15 +403,28 @@ private:
             ++ticks_;
             lava_.DoMessage(type, 0, MessageData(message, 2));
             if (Debug() && ticks_ % 150 == 0) {
+                int cityFlammable = 0, rectFlammable = 0;   // the flammability grid itself: the whole city, and the lava's rect
+                if (sc4::cSC4FlammabilitySimulator* flammability = Flammability()) {
+                    for (int z = 0; z < 256; ++z)
+                        for (int x = 0; x < 256; ++x)
+                            if (flammability->IsCellFlammable(x, z)) {
+                                ++cityFlammable;
+                                if (x >= lava_.Bounds().left && x <= lava_.Bounds().right && z >= lava_.Bounds().top && z <= lava_.Bounds().bottom)
+                                    ++rectFlammable;
+                            }
+                }
+                std::fprintf(stderr, "lava: flammability grid: %d cells in the city, %d in the lava's rect\n", cityFlammable, rectFlammable);
+                ReportVentTerrain("tick");
                 float deepest = 0.0f;
                 int holding = 0;
                 for (float depth : lava_.LavaDepth()) {
                     if (0.0f < depth) ++holding;
                     if (deepest < depth) deepest = depth;
                 }
-                std::fprintf(stderr, "lava: tick %d: rates %.3g / %.3g, %d vertices hold lava, deepest %.2f, active %d,%d..%d,%d, %zu steam, %zu decals, lit %d, burned down %d\n",
+                std::fprintf(stderr, "lava: tick %d: rates %.3g / %.3g, %d vertices hold lava, deepest %.2f, active %d,%d..%d,%d, %zu steam, %zu decals, lit %d, burned down %d; flammable %d of %d asked (no simulator %d), ignitions refused %d, no fire manager %d\n",
                              ticks_, lava_.LavaProductionRate(), lava_.SolidificationRate(), holding, deepest, lava_.Bounds().left, lava_.Bounds().top,
-                             lava_.Bounds().right, lava_.Bounds().bottom, lava_.SteamCount(), lava_.DecalCount(), ignited_, quickBurned_);
+                             lava_.Bounds().right, lava_.Bounds().bottom, lava_.SteamCount(), lava_.DecalCount(), ignited_, quickBurned_,
+                             flammableYes_, flammableAsked_, noFlammability_, igniteRefused_, noFireManager_);
             }
         } else if (type == sc4::kLavaMessageSteamEnded) {
             lava_.DoMessage(type, MessageData(message, 1), 0);
@@ -423,6 +446,17 @@ private:
     cSC4PackedRenderState state_;                 // sPackedRenderState
     bool stateReady_ = false;
     int ticks_ = 0, draws_ = 0, ignited_ = 0, quickBurned_ = 0, decalsMade_ = 0;
+    int flammableAsked_ = 0, flammableYes_ = 0, noFlammability_ = 0, igniteRefused_ = 0, noFireManager_ = 0;
+    float ventX_ = 0.0f, ventZ_ = 0.0f;
+    // The ground under the vent and 5 cells out on each side (the cone the volcano's brush raises holds or sheds the lava).
+    void ReportVentTerrain(const char* when) {
+        sc4::cSTETerrain* terrain = Terrain();
+        if (!terrain) return;
+        const float d = 80.0f;
+        std::fprintf(stderr, "lava: ground at %s: vent %.1f, west %.1f, east %.1f, north %.1f, south %.1f\n", when,
+                     terrain->GetAltitude(ventX_, ventZ_), terrain->GetAltitude(ventX_ - d, ventZ_), terrain->GetAltitude(ventX_ + d, ventZ_),
+                     terrain->GetAltitude(ventX_, ventZ_ - d), terrain->GetAltitude(ventX_, ventZ_ + d));
+    }
 };
 
 }  // namespace
