@@ -37,6 +37,8 @@
 #include "sc4/CommonIIDs.h"
 #include "sc4/FloraSimulator.h"
 #include "sc4/PortDeveloper.h"
+#include "sc4/FoundationOccupant.h"
+#include "sc4/ZoneDeveloper.h"
 #include "sc4/Exemplar.h"
 #include "sc4/Lot.h"
 #include "sc4/LotConfiguration.h"
@@ -49,6 +51,12 @@
 #include "sc4/ServiceLocator.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
+
+namespace native {
+void NativeAddRetainingWallOccupant(sc4::cSC4Lot* lot);           // app/NativeLotWalls.cpp
+void NativeUpdateSurroundingRetainingWalls(sc4::cSC4Lot* lot);
+bool NativeAddNewFoundationOccupant(std::uint32_t type, int usage, float position[3], float width, float depth, int rotation, float bottom);
+}  // namespace native
 
 namespace native {
 namespace {
@@ -293,6 +301,50 @@ public:
         if (cISC4OccupantManager* occupants = Occupants()) occupants->RemoveOccupant(occupant, true, flags);
     }
     void DeleteLot(cSC4Lot* lot) override { NativeDeleteLot(lot); }
+    // ---- foundations
+    bool AddNewFoundationOccupant(std::uint32_t type, int usage, float position[3], float width, float depth, int rotation,
+                                  float bottom) override {
+        const bool added = NativeAddNewFoundationOccupant(type, usage, position, width, depth, rotation, bottom);   // app/NativeBuildingDevelopment.cpp
+        static const bool trace = std::getenv("SC4_WALLDEBUG") != nullptr;
+        if (trace) std::fprintf(stderr, "foundations: new %08x usage %d at %.0f,%.1f,%.0f %.0fx%.0f bottom %.1f -> %d\n", type, usage, position[0],
+                                position[1], position[2], width, depth, bottom, added ? 1 : 0);
+        return added;
+    }
+    cISC4Occupant* FoundationAt(int usage, int x, int z) override {   // GetFoundationByStandardCityCell: type 0x68fd0c69 of a usage
+        cISC4OccupantManager* occupants = Occupants();
+        if (!occupants) return nullptr;
+        const int cell[2] = {x, z};
+        OccupantList list;
+        cISC4Occupant* found = nullptr;
+        if (occupants->GetOccupantsByStandardCityCells(list, cell, cell, sc4::kOccupantTypeFoundation, 0xffffffffu)) {
+            for (cISC4Occupant* occupant : list) {
+                auto* foundation = dynamic_cast<sc4::cSC4FoundationOccupant*>(occupant);
+                if (!found && foundation && foundation->GetUsage() == usage) found = occupant;
+            }
+        }
+        occupants->ReleaseOccupantList(list);   // the city keeps the occupant: the answer is borrowed
+        return found;
+    }
+    std::uint32_t FoundationTypeOf(cISC4Occupant* foundation) override {
+        auto* f = dynamic_cast<sc4::cSC4FoundationOccupant*>(foundation);
+        return f ? f->GetFoundationType() : 0;
+    }
+    void RemoveFoundation(cISC4Occupant* foundation) override { if (cISC4OccupantManager* o = Occupants()) o->RemoveOccupant(foundation, true, 0); }
+    void LotsAround(cSC4Lot* lot, std::vector<cSC4Lot*>& out) override {
+        cSC4City* city = HostCity();
+        auto* lots = city ? dynamic_cast<sc4::cSC4ZoneDeveloper*>(city->GetComponent(sc4::CityComponent::ZoneDeveloper)) : nullptr;
+        std::list<cRZAutoRefCount<cSC4Lot>> around;
+        if (!lots || !lot || lots->GetLotsSurroundingLot(lot, around, 0xf) <= 0) return;
+        for (auto& other : around) out.push_back(other.get());   // the lot manager keeps them: borrowed
+    }
+    bool CellHasWater(int x, int z) override { cSTETerrain* t = Terrain(); return t && t->CellHasWater(std::uint32_t(x), std::uint32_t(z)); }
+    float WaterLevelAt(float x, float z) override { cSTETerrain* t = Terrain(); return t ? t->GetWaterLevel(x, z) : 0.0f; }
+    void CellCenterToPosition(int cellX, int cellZ, float& x, float& z) override {
+        if (cSC4City* city = HostCity()) city->CellCenterToPosition(cellX, cellZ, x, z);
+        else { x = float(cellX) * 16.0f + 8.0f; z = float(cellZ) * 16.0f + 8.0f; }
+    }
+    void AddRetainingWallOccupant(cSC4Lot* lot) override { NativeAddRetainingWallOccupant(lot); }   // app/NativeLotWalls.cpp
+    void UpdateSurroundingRetainingWalls(cSC4Lot* lot) override { NativeUpdateSurroundingRetainingWalls(lot); }
     void MoveOccupant(cISC4Occupant* occupant, bool post) override {
         if (cISC4OccupantManager* occupants = Occupants()) occupants->MoveOccupant(occupant, post);
         static const bool trace = std::getenv("SC4_TERRAINLOTDEBUG") != nullptr;

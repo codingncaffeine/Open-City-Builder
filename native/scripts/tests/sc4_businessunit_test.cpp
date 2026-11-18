@@ -86,6 +86,20 @@ public:
     std::vector<cISC4Occupant*> moved;
     float TerrainAltitude(float, float) override { return ground; }
     void MoveOccupant(cISC4Occupant* occupant, bool post) override { if (post) moved.push_back(occupant); }
+    // foundations: what AddNewFoundationOccupant was asked
+    std::uint32_t foundationType = 0;
+    int foundationUsage = -1, foundationCalls = 0, wallCalls = 0;
+    float foundationWidth = 0.0f, foundationDepth = 0.0f, foundationTop = 0.0f;
+    bool AddNewFoundationOccupant(std::uint32_t type, int usage, float position[3], float width, float depth, int, float) override {
+        ++foundationCalls;
+        foundationType = type;
+        foundationUsage = usage;
+        foundationWidth = width;
+        foundationDepth = depth;
+        foundationTop = position[1];
+        return true;
+    }
+    void AddRetainingWallOccupant(cSC4Lot*) override { ++wallCalls; }
 };
 
 // An occupant of a given type standing at a position (the refit test).
@@ -149,6 +163,23 @@ int main() {
         CHECK(construction.moved.size() == 2);
         host.lotOccupants.clear();
         construction.moved.clear();
+        lot->Release();
+    }
+
+    {   // a lot foundation (i386 0x000f363a): usage 2 over the whole lot (cells * 16 + 16), at the lot's altitude when fixed; the lot
+        // becomes fixed (flag bits 0..1, bit 2 cleared). The configuration overload falls back to the tunable default type.
+        auto* lot = new cSC4Lot(10, 10, 2, 3, 0);
+        lot->AddRef();
+        lot->Init();
+        lot->SetAltitude(12.0f);
+        lot->SetFlags(4);
+        CHECK(dev.AddLotFoundation(lot, 0x1234u, true, false, false));
+        CHECK(construction.foundationCalls == 1 && construction.foundationType == 0x1234u && construction.foundationUsage == 2);
+        CHECK(construction.foundationWidth == 2 * 16.0f && construction.foundationDepth == 3 * 16.0f);
+        CHECK(construction.foundationTop == 12.0f);
+        CHECK((lot->GetFlags() & 7u) == 3u);
+        CHECK(construction.wallCalls == 0);
+        CHECK(!dev.AddLotFoundation(lot, static_cast<sc4::cSC4LotConfiguration*>(nullptr), true, false, false));   // no configuration
         lot->Release();
     }
 

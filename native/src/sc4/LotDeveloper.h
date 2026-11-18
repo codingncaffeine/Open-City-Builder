@@ -41,8 +41,8 @@ constexpr std::uint32_t kLotDevPropConditionThreshold = 0x47e2c400;    // u16 ->
 constexpr std::uint32_t kLotDevPropConditionRatios = 0x47e2c401;       // float[3] -> +0x124, +0x120, +0x11c
 constexpr std::uint32_t kLotDevPropFlatTolerance = 0xe900ea24;         // -> +0x128
 constexpr std::uint32_t kLotDevPropFloat12c = 0xe900ea25;
-constexpr std::uint32_t kLotDevPropU32_130 = 0xe900ea26;
-constexpr std::uint32_t kLotDevPropU32_134 = 0x6916516b;
+constexpr std::uint32_t kLotDevPropU32_130 = 0xe900ea26;   // the default lot foundation type
+constexpr std::uint32_t kLotDevPropU32_134 = 0x6916516b;   // the default building foundation type
 constexpr std::uint32_t kLotDevPropBool138 = 0xe900ea27;
 constexpr std::uint32_t kLotDevPropBool139 = 0xe900ea28;
 constexpr std::uint32_t kLotDevPropLevelTolerance = 0xe900ea29;        // -> +0x13c
@@ -63,7 +63,8 @@ struct LotDeveloperTunables {
     float ratioA = 0.2f;                    // +0x124
     float flatTolerance = 0;                // +0x128
     float value12c = 0;                     // +0x12c
-    std::uint32_t value130 = 0, value134 = 0;
+    std::uint32_t lotFoundationType = 0;      // +0x130 (i386 +0xd8): the foundation of a steep lot, unless its configuration names one
+    std::uint32_t buildingFoundationType = 0; // +0x134 (i386 +0xdc): the foundation of a steep building, unless it names one
     bool flag138 = false, flag139 = false;
     float levelTolerance = 0;               // +0x13c
     float maxLevelling = 0;                 // +0x140
@@ -206,6 +207,29 @@ public:
     virtual void RemoveOccupant(cISC4Occupant* occupant, std::uint32_t flags) { (void)occupant; (void)flags; }   // +0x28 slot 21 (o, 1, flags)
     virtual void DeleteLot(cSC4Lot* lot) { (void)lot; }                                        // +0x24 lot manager slot 24
     virtual void MoveOccupant(cISC4Occupant* occupant, bool post) { (void)occupant; (void)post; }   // +0x28 slot 24 MoveOccupant
+    // ---- the foundations (lot-developer foundation routines)
+    // +0x18 BDS vslot 0x5c AddNewFoundationOccupant(type, usage, position, width, depth, rotation, bottom)
+    virtual bool AddNewFoundationOccupant(std::uint32_t type, int usage, float position[3], float width, float depth, int rotation,
+                                          float bottom) {
+        (void)type; (void)usage; (void)position; (void)width; (void)depth; (void)rotation; (void)bottom;
+        return false;
+    }
+    // GetFoundationByStandardCityCell(usage, x, z) (vslot 0xc4): the foundation occupant (type 0x68fd0c69) of a usage on a cell
+    // (1 building, 2 lot, 3 prop, 4 flora), borrowed; null without one
+    virtual cISC4Occupant* FoundationAt(int usage, int x, int z) { (void)usage; (void)x; (void)z; return nullptr; }
+    virtual std::uint32_t FoundationTypeOf(cISC4Occupant* foundation) { (void)foundation; return 0; }   // foundation vslot 0x10
+    virtual void RemoveFoundation(cISC4Occupant* foundation) { (void)foundation; }   // +0x28 vslot 0x54 (occupant, true, 0)
+    // +0x24 vslot 0x20 GetLotsSurroundingLot(lot, list, 0xf): the lots touching `lot`, borrowed
+    virtual void LotsAround(cSC4Lot* lot, std::vector<cSC4Lot*>& out) { (void)lot; (void)out; }
+    virtual bool CellHasWater(int x, int z) { (void)x; (void)z; return false; }        // spTerrain vslot 0x88
+    virtual float WaterLevelAt(float x, float z) { (void)x; (void)z; return 0.0f; }    // spTerrain vslot 0x7c
+    virtual void CellCenterToPosition(int cellX, int cellZ, float& x, float& z) {     // +0x1c vslot 0x184
+        x = static_cast<float>(cellX) * 16.0f + 8.0f;
+        z = static_cast<float>(cellZ) * 16.0f + 8.0f;
+    }
+    // cSC4LotRetainingWallOccupant::AddRetainingWallOccupant(lot, true) / UpdateSurroundingRetainingWalls(lot)
+    virtual void AddRetainingWallOccupant(cSC4Lot* lot) { (void)lot; }
+    virtual void UpdateSurroundingRetainingWalls(cSC4Lot* lot) { (void)lot; }
 };
 
 // The lot developer's own interface (class id 0xa990bfe0, iid 0x4818e5d2). Only the COM identity is
@@ -332,9 +356,21 @@ public:
                                               std::int32_t& rotation);                                                // vslot 0x9c
 
 
+    // ---- foundations
+    bool AddLotFoundation(cSC4Lot* lot, cSC4LotConfiguration* configuration, bool fixedAltitude, bool level, bool walls);   // vslot 0xdc @ i386 0x000ef2d0
+    bool AddLotFoundation(cSC4Lot* lot, std::uint32_t type, bool fixedAltitude, bool level, bool walls);   // vslot 0xd8 @ i386 0x000f363a
+    bool AddBuildingFoundation(cISC4BuildingOccupant* building, cSC4LotConfiguration* configuration);   // vslot 0xec @ i386 0x000ecdc2
+    bool AddBuildingFoundation(cISC4BuildingOccupant* building, std::uint32_t type);                 // vslot 0xe8 @ i386 0x000eccde
+    cISC4Occupant* GetLotFoundation(cSC4Lot* lot);                     // vslot 0xcc @ i386 0x000ec8da (borrowed)
+    bool RemoveLotFoundation(int x, int z);                            // vslot 0xd4 @ i386 0x000ecaca
+    bool RemoveLotFoundation(cSC4Lot* lot);                            // @ i386 0x000ecb8c
+    void UpdateLotFoundation(cSC4Lot* lot);                            // vslot 0xf4 @ i386 0x000ecbee
+    void UpdateSurroundingLotFoundations(cSC4Lot* lot);                // @ i386 0x000f2e7c
+    float GetLotFoundationBottomAltitude(cSC4Lot* lot);                // @ i386 0x000f34de
+    float PickLotFoundationAltitude(cSC4Lot* lot, const float corners[4]);   // @ i386 (the bottom / highest arguments are unused)
+    void GetCornerAltitudes(const LotCellRect& rect, float out[4], bool includeWater) const;   // @ i386 GetCornerAltitudes
+
 private:
-    bool AddLotFoundation(cSC4Lot* lot, cSC4LotConfiguration* configuration);                    // vslot 0xdc (PARTIAL)
-    void AddBuildingFoundation(cISC4BuildingOccupant* building, cSC4LotConfiguration* configuration);   // vslot 0xec (PARTIAL)
     IBaseLotDeveloperHost* host_;
     ILotGateServices* gates_ = nullptr;
     std::uint32_t refCount_ = 0;               // COM refcount (shared by the three sub-objects)

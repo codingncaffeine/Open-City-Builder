@@ -310,6 +310,10 @@ void NativeWallReport() {
     o->ReleaseOccupantList(foundations);
 }
 
+// The lot developer's foundations ask for a lot's retaining walls and for its neighbours' (cSC4LotDeveloper::AddLotFoundation).
+void NativeAddRetainingWallOccupant(sc4::cSC4Lot* lot) { cSC4LotRetainingWallOccupant::AddRetainingWallOccupant(lot, true); }
+void NativeUpdateSurroundingRetainingWalls(sc4::cSC4Lot* lot) { cSC4LotRetainingWallOccupant::UpdateSurroundingRetainingWalls(lot); }
+
 // The model maker's retaining wall case (cSC4ModelMaker::AddModels, i386 0x0024aee0).
 bool NativeAddRetainingWallModels(sc4::cISC4Occupant* occupant, bool create, bool addToRenderer) {
     return cSC4LotRetainingWallOccupant::AddRetainingWallModels(occupant, create, addToRenderer);

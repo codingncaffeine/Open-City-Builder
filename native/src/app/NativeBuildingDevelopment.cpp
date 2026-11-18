@@ -35,6 +35,8 @@
 #include "sc4/cSTETerrain.h"
 #include "sc4/DemandSimulator.h"
 #include "sc4/Exemplar.h"
+#include "sc4/FoundationOccupant.h"
+#include "sc4/LotDeveloper.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/Simulator.h"
 #include "sc4/cSC4City.h"
@@ -179,6 +181,39 @@ public:
     bool inserted = false;
 };
 
+sc4::cSC4LotDeveloper* LotDeveloperOf() {
+    sc4::cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::LotDeveloper) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(0xe4fda3d4, &raw) || !raw) return nullptr;
+    auto* serializable = static_cast<cIGZSerializable*>(raw);
+    auto* developer = serializable->GetGZCLSID() == sc4::kGZCLSID_cSC4LotDeveloper ? static_cast<sc4::cSC4LotDeveloper*>(serializable) : nullptr;
+    serializable->Release();
+    return developer;
+}
+
+// A foundation occupant being placed (cSC4BuildingDevelopmentSimulator::AddNewFoundationOccupant): the recovered occupant, its
+// cISC4FoundationOccupant calls mapped onto it (i386 slots in the comments).
+class PlacedFoundation final : public IPlacedFoundation {
+public:
+    PlacedFoundation() : occupant(new sc4::cSC4FoundationOccupant()) { occupant->AddRef(); }   // operator new + vslot 0x4
+    cISCPropertyHolder* PropertyHolder() override { return occupant->AsPropertyHolder(); }
+    std::uint32_t FoundationType() override { return occupant->GetFoundationType(); }                  // 0x10
+    void SetFoundationType(std::uint32_t type) override { occupant->SetFoundationType(type); }        // 0x14
+    void SetHeight(float height) override { occupant->SetMaxHeight(height); }                         // 0x1c
+    void SetSize(const float size[3]) override { occupant->SetSize(size); }                           // 0x20
+    void SetStyle(int style) override { occupant->SetUsage(style); }                                  // 0x28
+    void SetRotation(int rotation) override { occupant->SetOrientation(rotation); }                   // 0x30
+    void SetPosition(const float position[3]) override { occupant->SetPosition(position); }           // 0x4c
+    // the 0xac2b5f7 view, vslot 0x18: the foundation exemplar (the holder of a resource exemplar) becomes the default one
+    void ApplyExemplar(cISCPropertyHolder* exemplar) override {
+        if (auto* resource = dynamic_cast<cISCResExemplar*>(exemplar)) occupant->SetDefaultExemplar(resource);
+    }
+    void FinishPlacement() override { occupant->Init(); }
+    sc4::cSC4FoundationOccupant* occupant;
+    bool inserted = false;
+};
+
 // IBuildingPlacementServices: the growth developers, and the building occupants AddNewBuildingOccupant places.
 class PlacementServices final : public IBuildingPlacementServices {
 public:
@@ -189,9 +224,18 @@ public:
         if (!placed->inserted) delete placed;
         occupant->Release();
     }
-    IPlacedFoundation* CreateFoundation() override { SC4_UNWIRED("IBuildingPlacementServices::CreateFoundation (layer 4)"); return nullptr; }
-    void ReleaseFoundation(IPlacedFoundation*) override {}
-    float FoundationSurfaceHeight(const int*, int) override { return 0.0f; }
+    IPlacedFoundation* CreateFoundation() override { return new PlacedFoundation(); }
+    void ReleaseFoundation(IPlacedFoundation* foundation) override {
+        auto* placed = static_cast<PlacedFoundation*>(foundation);
+        sc4::cSC4FoundationOccupant* occupant = placed->occupant;
+        delete placed;
+        occupant->Release();
+    }
+    // the lot developer's GetLowestOrHighestAreaAltitude(cells, which == 1 (lowest), include water): BDS +0xd8 vslot 0x80
+    float FoundationSurfaceHeight(const int* cells, int which) override {
+        sc4::cSC4LotDeveloper* developer = LotDeveloperOf();
+        return developer ? developer->GetLowestOrHighestAreaAltitude(sc4::LotCellRect{cells[0], cells[1], cells[2], cells[3]}, which != 0, true) : 0.0f;
+    }
     // @ i386 0x000fc808: the building's exemplar becomes the occupant's default exemplar (the 0xac2b5f7 view, vslot 0xc), and its
     // size (0x27812810) the bounding box from the origin.
     void LoadBuildingProperties(IPlacedBuilding& building, std::uint32_t type) override {
@@ -240,8 +284,12 @@ public:
     }
     // BDS vslot 0x18 (i386 0x000f6ed8): occupant manager vslot 0x50 InsertOccupant(building, 0).
     bool AddOccupant(IPlacedOccupant* occupant, bool) override {
-        auto* placed = static_cast<PlacedBuilding*>(occupant);
         sc4::cISC4OccupantManager* occupants = Occupants();
+        if (auto* foundation = dynamic_cast<PlacedFoundation*>(occupant)) {
+            foundation->inserted = occupants && occupants->InsertOccupant(foundation->occupant->AsOccupant(), 0);
+            return foundation->inserted;
+        }
+        auto* placed = static_cast<PlacedBuilding*>(occupant);
         placed->inserted = occupants && occupants->InsertOccupant(placed->occupant->AsOccupant(), 0);
         return placed->inserted;
     }
@@ -377,6 +425,11 @@ cSC4BuildingDevelopmentSimulator* CityBuildingDevelopment() {
 }  // namespace
 
 cSC4BuildingDevelopmentSimulator* NativeBuildingDevelopmentSimulator() { return CityBuildingDevelopment(); }
+// cSC4BuildingDevelopmentSimulator::AddNewFoundationOccupant for the lot developer's foundations (app/NativeLotConstruction.cpp).
+bool NativeAddNewFoundationOccupant(std::uint32_t type, int usage, float position[3], float width, float depth, int rotation, float bottom) {
+    cSC4BuildingDevelopmentSimulator* bds = CityBuildingDevelopment();
+    return bds && bds->AddNewFoundationOccupant(type, usage, position, width, depth, rotation, bottom);
+}
 
 std::vector<void*> CityGrowthDeveloperHandles() {
     std::vector<void*> out;
