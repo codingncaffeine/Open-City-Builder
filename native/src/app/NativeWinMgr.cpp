@@ -45,6 +45,7 @@ void WinMgr::PostWinMessage(std::uint32_t type, std::uint64_t p1, std::uint64_t 
 
 std::uint64_t WinMgr::RunModalLoop(cIGZWin* window, cIGZFrameWork*, std::uint32_t noResult, std::uint32_t abortCode) {
     if (!modalPump) return abortCode;   // nothing can end the dialog
+    ++modalCount;
     ModalFrame frame;
     frame.window = window;
     frame.result = noResult;

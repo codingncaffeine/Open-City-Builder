@@ -386,7 +386,7 @@ public:
     std::uint32_t OccupantType() override { return kOccupantTypeBuilding; }
     void Position(float xyz[3]) override { xyz[0] = xyz[1] = xyz[2] = 0.0f; }
     cISCPropertyHolder* PropertyHolder() override { return holder_; }
-    bool UsesDepartmentBudget() override { return false; }
+    bool IsPropOccupant() override { return false; }
     bool IsInGroup(std::uint32_t group) override {
         std::vector<std::uint32_t> groups;
         return cSCPropertyHelp::GetPropertyValue(holder_, kPropOccupantGroups, groups) && std::find(groups.begin(), groups.end(), group) != groups.end();

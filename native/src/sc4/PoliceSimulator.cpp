@@ -280,7 +280,7 @@ bool cSC4PoliceSimulator::ProtectionGetStationEffect(IPoliceOccupant* station, P
     effect.z = position[2];
     effect.capacity = effect.peak;
     float factor;
-    if (station->UsesDepartmentBudget())
+    if (station->IsPropOccupant())
         factor = stationEfficiency_.GetOutputValue(host_->DepartmentBudgetFraction() * 100.0f) / 100.0f;
     else
         factor = GetStationEfficiency(station);

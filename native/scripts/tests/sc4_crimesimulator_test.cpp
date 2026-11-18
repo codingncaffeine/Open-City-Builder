@@ -64,7 +64,7 @@ struct FakeOccupant : ICrimeOccupant {
     std::uint32_t OccupantType() override { return type; }
     cISCPropertyHolder* PropertyHolder() override { return &props; }
     void Position(float xyz[3]) override { for (int i = 0; i < 3; ++i) xyz[i] = pos[i]; }
-    bool IsAvailableDepartmentBuilding() override { return department; }
+    bool IsIdlePropOccupant() override { return department; }
     bool IsCrimeResponder() override { return responder; }
     bool HasFlags(std::uint32_t f) override { return (flags & f) == f; }
 };

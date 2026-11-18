@@ -44,7 +44,12 @@ bool cSC4PropOccupant::QueryInterface(std::uint32_t iid, void** out) {
         AddRef();
         return true;
     }
-    return cSC4Occupant::QueryInterface(iid, out);   // (the original also answers 0x2977aa47 / 0xe9793a65)
+    if (iid == kGZIID_cISC4PropOccupant || iid == kGZCLSID_cSC4PropOccupant) {
+        *out = static_cast<cISC4PropOccupant*>(this);
+        AddRef();
+        return true;
+    }
+    return cSC4Occupant::QueryInterface(iid, out);
 }
 
 bool cSC4PropOccupant::DoMessage(cIGZMessage2* message) {
@@ -244,9 +249,9 @@ void cSC4PropOccupant::TickSimulatorDate(const cIGZDate& today) {
     }
 }
 
-void cSC4PropOccupant::SetPropTimerState(std::uint8_t mask, bool on) {
+void cSC4PropOccupant::SetPropTimerState(std::uint32_t mask, bool on) {
     const std::uint8_t before = timerBits_;
-    timerBits_ = on ? (before | mask) : (before & ~mask);
+    timerBits_ = static_cast<std::uint8_t>(on ? (before | mask) : (before & ~mask));
     const bool wasAll = (before & 0xf) == 0xf, isAll = (timerBits_ & 0xf) == 0xf;
     if (wasAll == isAll) return;
     if (isAll) {

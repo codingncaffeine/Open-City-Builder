@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <ctime>
 
 #include "gz/cGZMessageServer.h"
@@ -421,6 +423,7 @@ bool cSC4ConstructionOccupant::Read(cIGZIStream& stream) {
     cranePosition_[2] = cranePosition.z;
     std::uint32_t count = 0;
     stream.GetUint32(count);
+    const std::uint32_t groundCount = count;
     for (std::uint32_t i = 0; i < count; ++i) {
         cIGZUnknown* raw = nullptr;
         ReadSerializable(stream, kGZIID_cISC4PropOccupant, &raw);
@@ -430,6 +433,7 @@ bool cSC4ConstructionOccupant::Read(cIGZIStream& stream) {
         }
     }
     stream.GetUint32(count);
+    const std::uint32_t roofCount = count;
     for (std::uint32_t i = 0; i < count; ++i) {
         cIGZUnknown* raw = nullptr;
         ReadSerializable(stream, kGZIID_cISC4PropOccupant, &raw);
@@ -438,6 +442,9 @@ bool cSC4ConstructionOccupant::Read(cIGZIStream& stream) {
             raw->Release();
         }
     }
+    if (std::getenv("SC4_CONSTRUCTIONDEBUG"))
+        std::fprintf(stderr, "construction: read ground props %u -> %zu kept, roof props %u -> %zu kept\n", groundCount,
+                     groundProps_.size(), roofCount, roofProps_.size());
     stream.GetUint32(count);
     sparks_.reserve(count);
     for (std::uint32_t i = 0; i < count; ++i) {

@@ -81,7 +81,7 @@ public:
     virtual void SetTextHeight(float height) = 0;                              // [6]
     virtual void SetDynamic(bool dynamic) = 0;                                 // [7]
     virtual void SetTextColor(const float* rgb) = 0;                           // [8]
-    virtual void SetOrientation(std::int32_t orientation) = 0;                 // [9]
+    virtual bool SetOrientation(std::int32_t orientation) = 0;                 // [9]
     virtual void SetAlpha(float alpha) = 0;                                    // [10]
 };
 
@@ -110,7 +110,9 @@ public:
     void SetTextHeight(float height) override;           // only 0 < h < 8 is accepted
     void SetDynamic(bool dynamic) override;
     void SetTextColor(const float* rgb) override;
-    void SetOrientation(std::int32_t orientation) override;
+    // One override for this interface and the prop interface's slot 0x50 (same signature in C++); NOT checked against the
+    // original's prop table for this class. Text decal props are not created natively yet.
+    bool SetOrientation(std::int32_t orientation) override;
     void SetAlpha(float alpha) override;
 
     void UpdateOverlayManager();

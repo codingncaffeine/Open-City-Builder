@@ -25,6 +25,7 @@ public:
 
     void Pump() { ProcessPostedMessages(); }
     std::function<void()> modalPump;   // keeps the host painting and pumping events while a modal window is up
+    int modalCount = -1;               // the 0-based number of the dialog running now (RunModalLoop entries; test kits)
     bool modalDialogs = false;         // SC4GetPopupModalDialogsEnabled / Safe: true once modalPump can run a dialog
 
 private:

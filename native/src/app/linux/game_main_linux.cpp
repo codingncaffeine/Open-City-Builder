@@ -1467,31 +1467,42 @@ int main(int argc, char** argv) {
             // each item fires once: a dialog's own popup (a combo's list) runs a nested modal loop that re-enters this pump at
             // the same frame, and a re-posted click would land outside the popup
             static std::set<std::string> fired;
+            // "N@FRAME:..." items fire only in the N-th dialog of the run (0-based) and count FRAME from that dialog's start
+            static int lastOrdinal = -1, dialogFrame = 0;
+            if (gMgr->modalCount != lastOrdinal) { lastOrdinal = gMgr->modalCount; dialogFrame = 0; std::printf("modal: dialog %d begins\n", lastOrdinal); }
+            ++dialogFrame;
             if (const char* input = std::getenv("SC4_MODALINPUT")) {
                 std::stringstream list(input);
-                std::string item;
-                while (std::getline(list, item, ',')) {
-                    if (fired.count(item)) continue;
+                std::string entry;
+                while (std::getline(list, entry, ',')) {
+                    if (fired.count(entry)) continue;
+                    std::string item = entry;
+                    int current = frame + 1;   // plain items: the frame count since the last dialog that ran its full length
+                    if (const std::size_t atSign = entry.find('@'); atSign != std::string::npos) {
+                        if (std::atoi(entry.c_str()) != lastOrdinal) continue;
+                        item = entry.substr(atSign + 1);
+                        current = dialogFrame;
+                    }
                     int at = -1, x = 0, y = 0;
                     char text[128] = {};
                     // "FRAME:type:TEXT" types the characters, "FRAME:key:VK" presses and releases one virtual key
                     if (std::sscanf(item.c_str(), "%d:type:%127[^,]", &at, text) == 2) {
-                        if (at != frame + 1) continue;
-                        fired.insert(item);
+                        if (at != current) continue;
+                        fired.insert(entry);
                         for (const char* c = text; *c; ++c) gMgr->GZWinMsgPost_Keyboard(kGZMsgCharacter, std::uint32_t(*c), 0);
                         std::printf("modal input: type \"%s\" at frame %d\n", text, at);
                         continue;
                     }
                     if (std::sscanf(item.c_str(), "%d:key:%d", &at, &x) == 2) {
-                        if (at != frame + 1) continue;
-                        fired.insert(item);
+                        if (at != current) continue;
+                        fired.insert(entry);
                         gMgr->GZWinMsgPost_Keyboard(kGZMsgKeyDown, std::uint32_t(x), 0);
                         gMgr->GZWinMsgPost_Keyboard(kGZMsgKeyUp, std::uint32_t(x), 0);
                         std::printf("modal input: key %d at frame %d\n", x, at);
                         continue;
                     }
-                    if (std::sscanf(item.c_str(), "%d:%d:%d", &at, &x, &y) == 3 && at == frame + 1) {
-                        fired.insert(item);
+                    if (std::sscanf(item.c_str(), "%d:%d:%d", &at, &x, &y) == 3 && at == current) {
+                        fired.insert(entry);
                         gMgr->GZWinMsgPost_Mouse(kGZMsgMouseMove, x, y, 0);
                         gMgr->GZWinMsgPost_Mouse(kGZMsgMouseDownL, x, y, 0);
                         gMgr->GZWinMsgPost_Mouse(kGZMsgMouseUpL, x, y, 0);

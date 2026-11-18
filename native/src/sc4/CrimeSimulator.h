@@ -84,7 +84,7 @@ public:
     virtual std::uint32_t OccupantType() = 0;                 // vslot 0x38
     virtual cISCPropertyHolder* PropertyHolder() = 0;         // vslot 0x30
     virtual void Position(float xyz[3]) = 0;                  // vslot 0x40
-    virtual bool IsAvailableDepartmentBuilding() = 0;         // QueryInterface(0xe9793a65) succeeds and its vslot 0x60 == 0
+    virtual bool IsIdlePropOccupant() = 0;         // QueryInterface(0xe9793a65) succeeds and its vslot 0x60 == 0
     virtual bool IsCrimeResponder() = 0;                      // QueryInterface(0xa9b40f05) succeeds
     virtual bool HasFlags(std::uint32_t flags) = 0;           // vslot 0xb0
 };

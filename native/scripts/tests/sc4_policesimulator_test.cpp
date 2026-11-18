@@ -28,7 +28,7 @@ struct Building : IPoliceOccupant {
     std::uint32_t OccupantType() override { return kProtectionBuildingOccupantType; }
     void Position(float p[3]) override { p[0] = x; p[1] = 0; p[2] = z; }
     cISCPropertyHolder* PropertyHolder() override { return &props; }
-    bool UsesDepartmentBudget() override { return budget; }
+    bool IsPropOccupant() override { return budget; }
 };
 
 struct Host : IPoliceHost {

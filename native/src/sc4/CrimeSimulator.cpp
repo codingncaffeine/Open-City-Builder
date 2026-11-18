@@ -631,7 +631,7 @@ ICrimeOccupant* cSC4CrimeSimulator::GetNearestCrimeProp(const float position[3],
         float p[3];
         occupant->Position(p);
         const float distance = Distance3(p, position);
-        if (distance < limit && occupant->IsAvailableDepartmentBuilding()) {
+        if (distance < limit && occupant->IsIdlePropOccupant()) {
             limit = distance;
             best = occupant;
         }

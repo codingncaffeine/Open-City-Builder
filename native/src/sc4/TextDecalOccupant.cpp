@@ -286,10 +286,11 @@ void cSC4TextDecalOccupant::SetAlpha(float alpha) {
 }
 
 // 0x100712270
-void cSC4TextDecalOccupant::SetOrientation(std::int32_t orientation) {
-    if (orientation_ == orientation) return;
+bool cSC4TextDecalOccupant::SetOrientation(std::int32_t orientation) {
+    if (orientation_ == orientation) return true;
     orientation_ = orientation;
     UpdateDecal();
+    return true;
 }
 
 // 0x10071228a (thunk 0x100712352)

@@ -364,7 +364,7 @@ bool cSC4FireProtectionSimulator::ProtectionGetStationEffect(IFireOccupant* stat
     effect.capacity = effect.peak;
     if (!hasPeak || !hasRadius) return false;
     float factor;
-    if (station->UsesDepartmentBudget())
+    if (station->IsPropOccupant())
         factor = stationEfficiency_.GetOutputValue(host_->DepartmentBudgetFraction() * 100.0f) / 100.0f;
     else
         factor = GetStationEfficiency(station);

@@ -324,7 +324,7 @@ public:
     std::uint32_t OccupantType() override { return occupant_->GetType(); }
     void Position(float xyz[3]) override { occupant_->GetPosition(xyz); }
     cISCPropertyHolder* PropertyHolder() override { return occupant_->AsPropertyHolder(); }
-    bool UsesDepartmentBudget() override {
+    bool IsPropOccupant() override {
         void* raw = nullptr;
         if (!occupant_->QueryInterface(0xe9793a65, &raw) || !raw) return false;
         static_cast<cIGZUnknown*>(raw)->Release();
@@ -395,7 +395,7 @@ public:
     std::uint32_t OccupantType() override { return occupant_->GetType(); }
     void Position(float xyz[3]) override { occupant_->GetPosition(xyz); }
     cISCPropertyHolder* PropertyHolder() override { return occupant_->AsPropertyHolder(); }
-    bool UsesDepartmentBudget() override {
+    bool IsPropOccupant() override {
         void* raw = nullptr;
         if (!occupant_->QueryInterface(0xe9793a65, &raw) || !raw) return false;
         static_cast<cIGZUnknown*>(raw)->Release();

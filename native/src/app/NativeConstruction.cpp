@@ -312,8 +312,11 @@ public:
         if (!object || !object->QueryInterface(kGZIID_PlainObject, &raw) || !raw) return nullptr;
         return new ConstructionLot(static_cast<cSC4Lot*>(raw));
     }
+    // `object` is the cISC4PropOccupant view the city file's record was read through (iid 0xe9793a65).
     IConstructionProp* AdoptProp(cIGZUnknown* object) override {
         auto* prop = dynamic_cast<cSC4PropOccupant*>(object);
+        if (std::getenv("SC4_CONSTRUCTIONDEBUG"))
+            std::fprintf(stderr, "construction: adopt prop %p -> %s\n", static_cast<void*>(object), prop ? "kept" : "refused");
         if (!prop) return nullptr;
         prop->AddRef();
         return new Prop(prop);

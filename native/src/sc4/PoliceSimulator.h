@@ -58,7 +58,7 @@ constexpr std::uint32_t kPoliceHistoryPercentCoverage = 0x4a11d354, kPoliceHisto
 class IPoliceOccupant : public IProtectionStation {
 public:
     virtual cISCPropertyHolder* PropertyHolder() = 0;      // vslot 0x30
-    virtual bool UsesDepartmentBudget() = 0;               // QueryInterface(0xe9793a65)
+    virtual bool IsPropOccupant() = 0;                     // QueryInterface(0xe9793a65) succeeds (cISC4PropOccupant)
 };
 
 class IPoliceHost {

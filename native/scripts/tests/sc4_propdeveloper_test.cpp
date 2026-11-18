@@ -78,7 +78,7 @@ struct FakeProp final : cISC4PropOccupant {
     std::uint32_t GetPropType() const override { return propType; }
     void SetPropType(std::uint32_t type) override { propType = type; }
     std::int32_t GetOrientation() const override { return 0; }
-    void SetOrientation(std::int32_t) override {}
+    bool SetOrientation(std::int32_t) override { return true; }
     void SetState(std::uint32_t value) override { state = value; }
     std::uint32_t GetState() const override { return state; }
     void SetTimeOfDayRange(float start, float end) override { timeStart = start; timeEnd = end; }

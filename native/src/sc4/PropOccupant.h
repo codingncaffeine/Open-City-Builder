@@ -9,6 +9,7 @@
 
 #include "gz/cGZDate.h"
 #include "sc4/OccupantManager.h"
+#include "sc4/PropOccupantInterface.h"
 
 namespace sc4 {
 
@@ -37,9 +38,10 @@ public:
 IPropHost* PropHost();
 void SetPropHost(IPropHost* host);
 
-// The original's views: the prop interface, cIGZMessageTarget2 at +8 (the animation coordinator registers a prop with the
-// animation tick manager through it), the occupant base.
-class cSC4PropOccupant : public cSC4Occupant, public cIGZMessageTarget2 {
+// The original's views: the prop interface (cISC4PropOccupant, iid 0xe9793a65), cIGZMessageTarget2 at +8 (the animation
+// coordinator registers a prop with the animation tick manager through it), the occupant base. The occupant methods the
+// prop interface repeats (Init .. SetLotTag) are one override each, shared by both tables as in the original.
+class cSC4PropOccupant : public cSC4Occupant, public cIGZMessageTarget2, public cISC4PropOccupant {
 public:
     cSC4PropOccupant() { type_ = kOccupantTypeProp; }
 
@@ -63,27 +65,31 @@ public:
     std::uint32_t GetGZCLSID() const override { return kGZCLSID_cSC4PropOccupant; }
 
     // cISC4PropOccupant
-    void SetBoundingBox(const float* min, const float* max);
-    std::uint32_t GetPropType() const { return GetPropTypeFromIndex(propTypeIndex_); }
-    void SetPropType(std::uint32_t type) { propTypeIndex_ = GetPropTypeIndex(type); }
-    std::int32_t GetOrientation() const { return orientation_; }
-    bool SetOrientation(std::int32_t orientation);
-    void SetState(std::uint32_t state);
+    cISC4Occupant* AsOccupant() override { return static_cast<cISC4Occupant*>(this); }
+    void SetBoundingBox(const float* min, const float* max) override;
+    // i386 0x0065e524 returns 0 and 0x00102764 does nothing: a prop keeps no placement properties.
+    void* GetPropPlacementProperties() override { return nullptr; }
+    void SetPropPlacementProperties(void*) override {}
+    std::uint32_t GetPropType() const override { return GetPropTypeFromIndex(propTypeIndex_); }
+    void SetPropType(std::uint32_t type) override { propTypeIndex_ = GetPropTypeIndex(type); }
+    std::int32_t GetOrientation() const override { return orientation_; }
+    bool SetOrientation(std::int32_t orientation) override;
+    void SetState(std::uint32_t state) override;
     // Raw state byte: no change message and no model notification. cSC4PropOccupantVisualEffect::SetState
     // (@ 0x100161482) writes prop +0x9b directly and restarts its effect instead of going through SetState.
     void SetStateRaw(std::uint8_t state) { state_ = state; }
-    std::uint32_t GetState() const { return state_; }
-    void SetTimeOfDayRange(float start, float end);
-    void GetTimeOfDayRange(float& start, float& end) const;
-    void SetSimulatorDateRange(std::uint32_t period, std::uint32_t span, std::uint8_t month, std::uint8_t day);
-    void TickSimulatorDate(const cIGZDate& today);
-    void SetRandomChance(std::uint8_t percent) { randomChance_ = percent; }
-    std::uint8_t GetRandomChance() const { return randomChance_; }
-    std::uint8_t GetPropTimerBitfield() const { return timerBits_; }
-    bool GetPropTimerState(std::uint8_t mask) const { return (timerBits_ & mask) != 0; }
-    void SetPropTimerState(std::uint8_t mask, bool on);
-    std::uint8_t GetPropUsage() const { return usage_; }
-    void SetPropUsage(std::uint8_t usage) { usage_ = usage; }
+    std::uint32_t GetState() const override { return state_; }
+    void SetTimeOfDayRange(float start, float end) override;
+    void GetTimeOfDayRange(float& start, float& end) const override;
+    void SetSimulatorDateRange(std::uint32_t period, std::uint32_t span, std::uint8_t month, std::uint8_t day) override;
+    void TickSimulatorDate(const cIGZDate& today) override;
+    void SetRandomChance(std::uint8_t percent) override { randomChance_ = percent; }
+    std::uint8_t GetRandomChance() const override { return randomChance_; }
+    std::uint8_t GetPropTimerBitfield() const override { return timerBits_; }
+    bool GetPropTimerState(std::uint32_t mask) const override { return (timerBits_ & mask) != 0; }
+    void SetPropTimerState(std::uint32_t mask, bool on) override;
+    std::uint8_t GetPropUsage() const override { return usage_; }
+    void SetPropUsage(std::uint8_t usage) override { usage_ = usage; }
     bool PlaceInOccupantManager(bool place);
     bool PlaceInRenderer(bool place);
     // true when a date range is attached (the range's own state lives in the record)

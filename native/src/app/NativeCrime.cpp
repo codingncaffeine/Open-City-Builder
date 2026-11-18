@@ -26,6 +26,7 @@
 #include "sc4/Ordinance.h"
 #include "sc4/PoliceSimulator.h"
 #include "sc4/PropManager.h"
+#include "sc4/PropOccupant.h"
 #include "sc4/ResidentialSimulator.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/TrafficAutomataManager.h"
@@ -126,11 +127,13 @@ public:
     std::uint32_t OccupantType() override { return occupant_->GetType(); }
     cISCPropertyHolder* PropertyHolder() override { return occupant_->AsPropertyHolder(); }
     void Position(float xyz[3]) override { occupant_->GetPosition(xyz); }
-    bool IsAvailableDepartmentBuilding() override {
+    bool IsIdlePropOccupant() override {
         void* raw = nullptr;
-        if (!occupant_->QueryInterface(0xe9793a65, &raw) || !raw) return false;
-        static_cast<cIGZUnknown*>(raw)->Release();
-        return true;
+        if (!occupant_->QueryInterface(kGZIID_cISC4PropOccupant, &raw) || !raw) return false;
+        auto* prop = static_cast<cISC4PropOccupant*>(raw);
+        const bool idle = prop->GetState() == 0;   // i386 GetNearestCrimeProp: prop vslot 0x30 (GetState) == 0
+        prop->Release();
+        return idle;
     }
     bool IsCrimeResponder() override {
         void* raw = nullptr;
