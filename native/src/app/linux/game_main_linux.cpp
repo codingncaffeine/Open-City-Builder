@@ -34,6 +34,7 @@
 #include "platform/PointerState.h"
 #include "sc4/Simulator.h"
 #include "sc4/RegionDialogs.h"
+#include "app/NativeNetworkLots.h"
 #include "app/NativeUnderground.h"
 #include "app/NativeBudgetUi.h"
 #include "app/NativeAnimationCoordinator.h"
@@ -1218,6 +1219,16 @@ int RunScenario(const std::string& path) {
             native::NativeLandfillReport();
         } else if (command == "pipebursts") {   // pipebursts: every burst's leaking and waiting pipes
             native::NativePipeBurstReport();
+        } else if (command == "netlotpothole") {   // netlotpothole X Z [0|1]: the pothole message's handler on a cell
+            int x = 0, z = 0, damaged = 1;
+            words >> x >> z >> damaged;
+            native::NativeNetworkLotPothole(x, z, damaged != 0);
+        } else if (command == "netlotsverify") {   // netlotsverify: restyle every piece and compare with the saved style
+            native::NativeNetworkLotVerify();
+        } else if (command == "netlots") {   // netlots X Z [R]: the network lot manager and the pieces around a cell
+            int x = 0, z = 0, r = 1;
+            words >> x >> z >> r;
+            native::NativeNetworkLotReport(x, z, r);
         } else if (command == "pipecells") {   // pipecells X Z: the pipes and network pieces on the 3x3 cells around a cell
             int x = 0, z = 0;
             words >> x >> z;

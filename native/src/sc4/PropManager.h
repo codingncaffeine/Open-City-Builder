@@ -147,7 +147,7 @@ public:
     bool RemoveCityProps(const float rect[4]);
     bool GetStreetProps(OccupantList& out, int x, int z);
     bool GetStreetProps(OccupantList& out, const int rect[4]);
-    bool AddStreetProp(std::uint32_t type, const float* position, int orientation);
+    cSC4PropOccupant* AddStreetProp(std::uint32_t type, const float* position, int orientation);
     void RemoveStreetPropsFromTile(int x, int z);
     bool GetLotProps(OccupantList& out, cSC4Lot* lot);
     bool GetLotProps(OccupantList& out, int x, int z);

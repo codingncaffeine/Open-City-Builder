@@ -563,3 +563,28 @@ bool cSC4FloraSimulator::KillFloraOccupant(cISC4Occupant* occupant) {
     return killed;
 }
 }  // namespace sc4
+
+namespace sc4 {
+// Mac i386 0x00089bfc (vslot 0x4c): the occupant manager removes the plant and shuts it down; the int is unused.
+bool cSC4FloraSimulator::DemolishFloraOccupant(cISC4Occupant* occupant, int) {
+    cISC4OccupantManager* occupants = g_host ? g_host->OccupantManager() : nullptr;
+    return occupants && occupants->RemoveOccupant(occupant, true, 0);   // manager vslot 0x54
+}
+
+// Mac i386 0x0008a9d2 (vslot 0x50): every flora occupant on the inclusive cell rect {x0, z0, x1, z1} is demolished; false
+// when one of them could not be. The int is unused.
+bool cSC4FloraSimulator::DemolishFloraInCellArea(const std::int32_t rect[4], int) {
+    cISC4OccupantManager* occupants = g_host ? g_host->OccupantManager() : nullptr;
+    if (!occupants) return true;
+    OccupantList found;
+    const int a[2] = {rect[0], rect[1]}, b[2] = {rect[2], rect[3]};
+    if (!occupants->GetOccupantsByStandardCityCells(found, a, b, kOccupantTypeFlora, 0xffffffffu)) return true;   // vslot 0xa0
+    bool all = true;
+    for (cISC4Occupant* occupant : found) {
+        if (!DemolishFloraOccupant(occupant, 0)) all = false;
+        occupant->Release();
+    }
+    found.clear();
+    return all;
+}
+}  // namespace sc4

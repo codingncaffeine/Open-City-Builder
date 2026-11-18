@@ -68,6 +68,7 @@ void InstallNeighborDealStub();
 void InstallNetworkLotManagerStub();
 void InstallNetworkManagerStub();
 void InstallNetworkOccupantStub();
+void InstallNetworkLotHosts();   // NativeNetworkLots.cpp
 void InstallPreBuiltModelOccupantStub();
 void InstallNetworkToolStub();
 void InstallOccupantGroupStub();
@@ -185,6 +186,7 @@ void InstallStubHosts() {
     InstallNetworkLotManagerStub();
     InstallNetworkManagerStub();
     InstallNetworkOccupantStub();
+    InstallNetworkLotHosts();             // the lot manager's and the pieces' real hosts replace the two stubs
     InstallPreBuiltModelOccupantStub();
     InstallNetworkToolStub();
     InstallOccupantGroupStub();

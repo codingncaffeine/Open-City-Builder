@@ -380,11 +380,12 @@ bool cSC4PropManager::AddCityProp(cISC4Occupant* occupant) {
     return true;
 }
 
-bool cSC4PropManager::AddStreetProp(std::uint32_t type, const float* position, int orientation) {
+// Mac i386 0x0012f0a0: returns the street prop it placed (borrowed: the occupant manager holds it), or null.
+cSC4PropOccupant* cSC4PropManager::AddStreetProp(std::uint32_t type, const float* position, int orientation) {
     cSC4PropOccupant* prop = AddPropWithUsage(type, position, orientation, 4);
-    if (!prop) return false;
+    if (!prop) return nullptr;
     prop->Release();
-    return true;
+    return prop;
 }
 
 cSC4PropOccupant* cSC4PropManager::AddLotProp(std::uint32_t type, const float* position, int orientation) {

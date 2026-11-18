@@ -97,6 +97,7 @@
 #include "gz/cIGZOStream.h"
 #include "rz/cRZRandomSuper.h"
 #include "sc4/LotConfiguration.h"
+#include "sc4/PropOccupantVisualEffectIds.h"
 #include "sc4/SCProperty.h"
 #include "sc4/TileNeighborhood.h"
 
@@ -108,8 +109,6 @@ constexpr std::uint32_t kGZIID_cISC4NetworkLotManager = 0x89a5ba3f;
 constexpr std::uint32_t kGZCLSID_cSC4NetworkLotManager = 0xe9a6cd3b;
 constexpr std::uint32_t kGZIID_cISC4NetworkOccupant = 0xa821ef94;
 constexpr std::uint32_t kGZIID_cISC4LotNetworkLot = 0xe818fced;   // cISC4Lot (sc4/Lot.h)
-constexpr std::uint32_t kGZCLSID_cSC4PropOccupantVisualEffect = 0x2977aa49;
-constexpr std::uint32_t kGZIID_cISC4PropOccupantVisualEffect = 0x09820792;
 constexpr std::uint32_t kGZIID_cIGZMessageTarget2NetworkLot = 0x452294aa;
 constexpr std::uint32_t kGZIID_cIGZSerializableNetworkLot = 0xe4fda3d4;
 
@@ -336,6 +335,20 @@ public:
                                INetworkLotDBSegment* segment) = 0;
     virtual bool WriteGZSerializable(cIGZOStream& stream, const cIGZUnknown* object) = 0;   // 0x1000435e3
     virtual bool ReadGZSerializable(cIGZIStream& stream, std::uint32_t iid, void** out) = 0;  // 0x100043267
+
+    // PORT: the message objects' views. The original QueryInterfaces the message's object for cISC4NetworkOccupant
+    // (0xa821ef94) or cISC4Lot (0xe818fced) and calls their tables directly; the port's network pieces and lots answer
+    // neither (other seams read those ids), so a host may hand out its own views. One reference each, or null.
+    virtual INetworkLotNetworkOccupant* NetworkOccupantOf(cIGZUnknown* object) {
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(kGZIID_cISC4NetworkOccupant, &raw)) return nullptr;
+        return static_cast<INetworkLotNetworkOccupant*>(raw);
+    }
+    virtual INetworkLot* LotOf(cIGZUnknown* object) {
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(kGZIID_cISC4LotNetworkLot, &raw)) return nullptr;
+        return static_cast<INetworkLot*>(raw);
+    }
 };
 
 void SetNetworkLotManagerHost(INetworkLotManagerHost* host);

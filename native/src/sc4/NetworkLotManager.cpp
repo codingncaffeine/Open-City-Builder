@@ -447,9 +447,8 @@ bool cSC4NetworkLotManager::DoMessage(cIGZMessage2* message) {
         case 0x89d3e9f3: {   // network occupant usable changed
             cIGZUnknown* unknown = standard->GetIGZUnknown();   // slot 0x100
             if (!unknown) break;
-            void* raw = nullptr;
-            if (!unknown->QueryInterface(kGZIID_cISC4NetworkOccupant, &raw)) break;
-            auto* occupant = static_cast<INetworkLotNetworkOccupant*>(raw);
+            INetworkLotNetworkOccupant* occupant = Host().NetworkOccupantOf(unknown);   // QI 0xa821ef94
+            if (!occupant) break;
             if (occupant->HasAnyNetworkFlag(kNetworkLotOccupantFlagMask) &&
                 !occupant->HasNetworkFlag(kNetworkLotRailFlag)) {
                 if (standard->GetData1() == 0) {
@@ -468,9 +467,8 @@ bool cSC4NetworkLotManager::DoMessage(cIGZMessage2* message) {
         case 0x99ef1143: {   // occupant removed
             auto* unknown = static_cast<cIGZUnknown*>(standard->GetVoid1());   // slot 0x50
             if (!unknown) break;
-            void* raw = nullptr;
-            if (!unknown->QueryInterface(kGZIID_cISC4NetworkOccupant, &raw)) break;
-            auto* occupant = static_cast<INetworkLotNetworkOccupant*>(raw);
+            INetworkLotNetworkOccupant* occupant = Host().NetworkOccupantOf(unknown);   // QI 0xa821ef94
+            if (!occupant) break;
             if (occupant->HasAnyNetworkFlag(kNetworkLotOccupantFlagMask) &&
                 !occupant->HasNetworkFlag(kNetworkLotRailFlag)) {
                 DoNetworkOccupantRemoved(occupant);
@@ -505,9 +503,8 @@ bool cSC4NetworkLotManager::DoMessage(cIGZMessage2* message) {
         case 0xe8bda2e7: {   // lot state changed: mark the border cells around the lot
             cIGZUnknown* unknown = standard->GetIGZUnknown();   // slot 0x100
             if (!unknown) break;
-            void* raw = nullptr;
-            if (!unknown->QueryInterface(kGZIID_cISC4LotNetworkLot, &raw)) break;
-            auto* lot = static_cast<INetworkLot*>(raw);
+            INetworkLot* lot = Host().LotOf(unknown);   // QI 0xe818fced
+            if (!lot) break;
             std::int32_t rect[4] = {0, 0, 0, 0};
             lot->GetBoundingRect(rect);
             rect[0] -= 1;

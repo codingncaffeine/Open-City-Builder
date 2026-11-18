@@ -122,6 +122,8 @@ public:
     // Flora burnt by a fire (vslot 0x5c, Mac i386 0x0008ad00): the plant becomes the burnt type 0x29cff3cb in state 3 and joins
     // the dead list; false when the occupant is not flora in the city.
     bool KillFloraOccupant(cISC4Occupant* occupant);
+    bool DemolishFloraOccupant(cISC4Occupant* occupant, int unused);              // vslot 0x4c (Mac i386 0x00089bfc)
+    bool DemolishFloraInCellArea(const std::int32_t rect[4], int unused);         // vslot 0x50 (Mac i386 0x0008a9d2)
     const std::list<cISC4Occupant*>& DeadFlora() const { return dead_; }
     static std::uint32_t NextClusterType(std::uint32_t type);
     static std::uint32_t AdvanceClusterType(std::uint32_t a, std::uint32_t b);

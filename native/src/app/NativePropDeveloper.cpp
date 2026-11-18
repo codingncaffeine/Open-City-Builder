@@ -3,8 +3,7 @@
 // through its SL:: global; the slot comments are the developer's (64-bit vtable byte offsets = i386 slot x 8, checked
 // against re/names/mac/vtables.tsv).
 //
-// PARTIAL (named): a network lot's props are created by the network lot manager, whose own host is still the neutral one
-// (app/hosts/StubNetworkLotManager.cpp: AddStreetProp makes nothing), so the developer places no optional street props yet.
+// A network lot's optional street props are created by the network lot manager (its host: app/NativeNetworkLots.cpp).
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -146,7 +145,7 @@ public:
     sc4::cISC4Occupant* CreateProp(cSC4NetworkLot* lot, int objectIndex, std::uint32_t propType) override {   // vslot 0x40
         cSC4NetworkLotManager* m = NetworkLots();
         INetworkLotPropOccupant* prop = m ? m->CreateProp(lot, static_cast<std::uint32_t>(objectIndex), propType) : nullptr;
-        if (Trace()) std::fprintf(stderr, "prop developer: optional street prop %08x for object %d -> %s\n", propType, objectIndex, prop ? "made" : "none (PARTIAL)");
+        if (Trace()) std::fprintf(stderr, "prop developer: optional street prop %08x for object %d -> %s\n", propType, objectIndex, prop ? "made" : "none");
         if (!prop) return nullptr;
         void* raw = nullptr;
         sc4::cISC4Occupant* occupant = prop->QueryInterface(kGZIID_cISC4Occupant, &raw) && raw ? static_cast<sc4::cISC4Occupant*>(raw) : nullptr;

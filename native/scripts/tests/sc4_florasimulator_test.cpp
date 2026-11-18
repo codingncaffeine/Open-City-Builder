@@ -6,6 +6,7 @@
 
 #include "sc4/DBSegment.h"
 #include "sc4/FloraSimulator.h"
+#include "sc4/NetworkOccupant.h"
 #include "sc4/SCPropertyHelp.h"
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
@@ -23,7 +24,8 @@ public:
     float TerrainHeight(float, float) override { return height; }
     int TerrainClass(float, float) override { return terrainClass; }
     // planting a new flora occupant is not exercised here: no occupant manager, flat open ground, a 1 km city
-    cISC4OccupantManager* OccupantManager() override { return nullptr; }
+    cISC4OccupantManager* occupants = nullptr;   // the demolish check sets a real manager
+    cISC4OccupantManager* OccupantManager() override { return occupants; }
     float GroundHeight(float, float, bool& onLot) override { onLot = false; return height; }
     float TerrainNormalY(float, float) override { return 1.0f; }
     void CitySizeMeters(float& x, float& z) override { x = z = 1024.0f; }
@@ -169,6 +171,50 @@ int main() {
         CHECK(host.posted == before + 1);
     }
     b->Release();
+    {   // DemolishFloraInCellArea (Mac i386 0x0008a9d2): the flora on the inclusive cell rect leaves the occupant manager; a
+        // plant outside the rect and a network piece inside it stay
+        auto* manager = new cSC4OccupantManager();
+        manager->AddRef();
+        manager->SetCitySize(1024, 1024);
+        manager->Init();
+        host.occupants = manager;
+        const auto plant = [manager](float x, float z) {
+            auto* flora = new cSC4FloraOccupant();
+            flora->AddRef();
+            const float xyz[3] = {x, 100.0f, z};
+            flora->SetPosition(xyz);
+            CHECK(manager->InsertOccupant(flora, 0));
+            flora->Release();   // the manager keeps it
+        };
+        plant(2 * 16 + 4, 3 * 16 + 4);    // cell 2,3
+        plant(3 * 16 + 12, 4 * 16 + 8);   // cell 3,4
+        plant(6 * 16 + 8, 6 * 16 + 8);    // cell 6,6: outside
+        auto* piece = new cSC4NetworkOccupant();
+        piece->AddRef();
+        const float corners[4][3] = {{32, 100, 48}, {48, 100, 48}, {48, 100, 64}, {32, 100, 64}};   // cell 2,3
+        piece->Init(corners);
+        CHECK(manager->InsertOccupant(piece, 0));
+        const auto count = [manager](std::uint32_t type, int x0, int z0, int x1, int z1) {
+            OccupantList found;
+            const int a[2] = {x0, z0}, b2[2] = {x1, z1};
+            manager->GetOccupantsByStandardCityCells(found, a, b2, type, 0xffffffffu);
+            const int n = static_cast<int>(found.size());
+            for (cISC4Occupant* occupant : found) occupant->Release();
+            return n;
+        };
+        CHECK(count(kOccupantTypeFlora, 0, 0, 63, 63) == 3);
+        CHECK(count(kOccupantTypeNetwork, 2, 3, 2, 3) == 1);
+        const std::int32_t rect[4] = {2, 3, 3, 4};
+        CHECK(sim.DemolishFloraInCellArea(rect, 0));
+        CHECK(count(kOccupantTypeFlora, 2, 3, 3, 4) == 0);
+        CHECK(count(kOccupantTypeFlora, 6, 6, 6, 6) == 1);
+        CHECK(count(kOccupantTypeNetwork, 2, 3, 2, 3) == 1);
+        manager->RemoveOccupant(piece, true, 0);
+        piece->Release();
+        host.occupants = nullptr;
+        manager->Shutdown();
+        manager->Release();
+    }
     std::printf(failures ? "FAILED\n" : "sc4_floraSimulator: all passed\n");
     return failures ? 1 : 0;
 }

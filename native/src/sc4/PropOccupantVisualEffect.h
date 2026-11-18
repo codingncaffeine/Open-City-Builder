@@ -62,11 +62,10 @@
 #include "rz/cRZString.h"
 #include "sc4/PropOccupant.h"
 #include "sc4/VisualEffect.h"
+#include "sc4/PropOccupantVisualEffectIds.h"
 
 namespace sc4 {
 
-constexpr std::uint32_t kGZCLSID_cSC4PropOccupantVisualEffect = 0x2977aa49;
-constexpr std::uint32_t kGZIID_cISC4PropOccupantVisualEffect = 0x09820792;
 constexpr std::uint32_t kPropertyPropEffectBoxSize = 0x27812810;
 constexpr std::uint32_t kPropertyPropEffectName = 0xc98204b8;
 constexpr std::uint32_t kPropertyPropEffectType = 0x2a6def88;
