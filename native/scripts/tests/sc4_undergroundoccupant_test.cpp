@@ -648,7 +648,8 @@ int main() {
         driver.draws.clear();
         CHECK(occupant->Draw(&context, true) == 1);
         CHECK(driver.draws.empty());
-        // pass 1: the piece model (mesh and material list) through the seam
+        // pass 1: the junction model CreateUndergroundModel loaded (the custom model, i386 +0x240), its meshes through the seam
+        CHECK(occupant->CustomModel() != nullptr);
         FakeModelInstance instance;
         occupant->SetModelInstance(&instance);
         s3d::SC4DrawAttributes attributes;

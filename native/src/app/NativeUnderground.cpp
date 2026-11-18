@@ -9,6 +9,7 @@
 #include "app/NativeUnderground.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <list>
 
 #include "app/NativeCity.h"
@@ -28,6 +29,9 @@
 #include "sc4/UndergroundOccupant.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
+#include "s3d/MeshAndMaterial.h"
+#include "sc4/DrawContext.h"
+#include "s3d/ModelInstance.h"
 
 namespace native {
 namespace {
@@ -151,7 +155,20 @@ public:
     }
     void PrepareRenderer() override {}
     void AddModelInstanceToRenderer(s3d::cIS3DModelInstance*, int) override {}
-    s3d::cIS3DModelInstance* CreateCustomModel(std::uint32_t) override { return nullptr; }
+    // A junction piece's model: SL::spRM GetResource({0x5ad0e817, 0xbadb57f1, network | piece}, cIS3DResModel 0x9ad0e7e3) and its
+    // CreateModelInstance(0, &model); one reference for the caller.
+    s3d::cIS3DModelInstance* CreateCustomModel(std::uint32_t instance) override {
+        void* resource = nullptr;
+        const cGZPersistResourceKey key{0x5ad0e817, 0xbadb57f1, instance};
+        if (!SL::spRM || !SL::spRM->GetResource(key, 0x9ad0e7e3, &resource, 0, nullptr) || !resource) return nullptr;
+        auto* model = static_cast<s3d::cIS3DResModel*>(resource);
+        s3d::cIS3DModelInstance* made = nullptr;
+        const bool ok = model->CreateModelInstance(0, &made);
+        model->Release();
+        static const bool trace = std::getenv("SC4_NETDEBUG") != nullptr;
+        if (trace) std::fprintf(stderr, "underground: junction model %08x -> %s\n", instance, ok && made ? "made" : "none");
+        return ok ? made : nullptr;
+    }
     // cSC4UndergroundNetworkTool::FindUndergroundOccupant: the last occupant of the cell answering `gziid`.
     cSC4UndergroundOccupant* FindUndergroundOccupant(int cellX, int cellZ, std::uint32_t gziid) override {
         std::list<cISC4Occupant*> occupants;
@@ -189,7 +206,35 @@ public:
         out = found ? new ConnectionRef(found) : nullptr;
         return found != nullptr;
     }
-    IUndergroundModelMeshes* ModelMeshes(s3d::cIS3DModelInstance*) override { return nullptr; }
+    // The model's cIS3DMeshAndMaterial view (QueryInterface 0x26a68448): its meshes and materials, one reference until Release.
+    IUndergroundModelMeshes* ModelMeshes(s3d::cIS3DModelInstance* instance) override {
+        void* raw = nullptr;
+        if (!instance || !instance->QueryInterface(s3d::kGZIID_cIS3DMeshAndMaterial, &raw) || !raw) return nullptr;
+        auto* list = static_cast<s3d::cS3DMeshAndMaterial*>(raw);
+        static const bool trace = std::getenv("SC4_NETDEBUG") != nullptr;
+        static int shown = 0;
+        if (trace && shown < 12) {
+            ++shown;
+            const auto* material = list->Materials().empty() ? nullptr : reinterpret_cast<const s3d::cS3DMaterial*>(list->Materials()[0].data());
+            std::fprintf(stderr, "underground: junction draw, %zu meshes %zu materials, first texture %p\n", list->Meshes().size(), list->Materials().size(),
+                         material ? reinterpret_cast<const void*>(material->layers[0].texture) : nullptr);
+        }
+        return new Meshes(list);
+    }
+private:
+    class Meshes final : public IUndergroundModelMeshes {
+    public:
+        explicit Meshes(s3d::cS3DMeshAndMaterial* list) : list_(list) {}
+        int Count() override { return static_cast<int>(list_->Meshes().size()); }
+        const SC4Mesh* Mesh(int index) override { return reinterpret_cast<const SC4Mesh*>(list_->Meshes()[std::size_t(index)].data()); }
+        s3d::cS3DMaterial* Material(int index) override { return reinterpret_cast<s3d::cS3DMaterial*>(list_->Materials()[std::size_t(index)].data()); }
+        void Release() override {
+            list_->Release();
+            delete this;
+        }
+    private:
+        s3d::cS3DMeshAndMaterial* list_;
+    };
 };
 
 // The data views' filter asks for the state of the lot under a lot texture (spLotManager GetLot(x, z, false), vslot 0x84).

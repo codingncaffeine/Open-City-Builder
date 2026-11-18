@@ -1271,10 +1271,11 @@ int cSC4UndergroundOccupant::Draw(SC4DrawContext* context, bool highlight) {
                 context->DrawPrims(1, 0x0a, static_cast<int>(piece2_.size()), piece2_.data());
             }
         }
-        if (modelInstance_) {
+        // The junction model CreateUndergroundModel loads (i386 +0x240, the same member it stores the custom model in).
+        if (customModel_) {
             context->SetModelTransform(modelMatrix_);
-            const s3d::SC4DrawAttributes attributes = modelInstance_->GetDrawAttributes();
-            IUndergroundModelMeshes* meshes = g_host ? g_host->ModelMeshes(modelInstance_) : nullptr;
+            const s3d::SC4DrawAttributes attributes = customModel_->GetDrawAttributes();
+            IUndergroundModelMeshes* meshes = g_host ? g_host->ModelMeshes(customModel_) : nullptr;
             if (meshes) {
                 const int count = meshes->Count();
                 for (int i = 0; i < count; ++i) {
