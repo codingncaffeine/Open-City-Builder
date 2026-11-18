@@ -45,7 +45,7 @@ class PipeOccupant final : public cSC4Occupant {
 public:
     PipeOccupant(std::uint32_t x, std::uint32_t z) { type_ = kOccupantTypeNetworkOccupant; view.cx = x; view.cz = z; view.occupant = this; }
     bool QueryInterface(std::uint32_t iid, void** out) override {
-        if (iid == kGZIID_cISC4PipeOccupant) { *out = static_cast<cISC4PipeOccupantView*>(&view); view.AddRef(); return true; }
+        if (iid == kGZIID_PortPipeOccupantView) { *out = static_cast<cISC4PipeOccupantView*>(&view); view.AddRef(); return true; }
         return cSC4Occupant::QueryInterface(iid, out);
     }
     void GetBoundingBox(float* lo, float* hi) override {
@@ -237,7 +237,7 @@ int main() {
     auto tick = [&](std::uint32_t ms) {
         auto* message = new cRZMessage2Standard();
         message->AddRef();
-        message->SetType(kMessageAnimationTick);
+        message->SetType(kPipeBurstMessageAnimationTick);
         message->SetData2(ms);
         instance->DoMessage(message);
         message->Release();
@@ -248,7 +248,7 @@ int main() {
     {
         auto* message = new cRZMessage2Standard();
         message->AddRef();
-        message->SetType(kMessageViewLevelChanged);
+        message->SetType(kPipeBurstMessageViewLevelChanged);
         int level = 3;
         message->SetVoid2(&level);
         instance->DoMessage(message);

@@ -226,6 +226,10 @@ void* NativeCreateEffectWithFinishMessage(const char* name, const float xyz[3], 
 
 void NativeStopEffectHandle(void* handle) { NativeEndEffectHandle(handle, 1); }
 
+void NativeStopEffectOnly(void* handle, int stopTransition) {
+    if (auto* effect = static_cast<cSC4VisualEffect*>(handle)) effect->Stop(stopTransition);
+}
+
 void NativeEndEffectHandle(void* handle, int stopTransition) {
     auto* effect = static_cast<cSC4VisualEffect*>(handle);
     if (!effect) return;

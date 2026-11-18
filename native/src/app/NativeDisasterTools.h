@@ -45,6 +45,8 @@ void* NativeCreateEffectWithFinishMessage(const char* name, const float xyz[3], 
 void NativeStopEffectHandle(void* effect);
 // Stop(stopTransition) unless it is negative, then the handle's reference goes.
 void NativeEndEffectHandle(void* effect, int stopTransition);
+// Stop(stopTransition); the handle keeps its reference.
+void NativeStopEffectOnly(void* effect, int stopTransition);
 // cSC4View3DWin::InvokeDisaster: the menu item's tool becomes the view's current one.
 void InvokeDisasterTool(sc4::cSC4View3DWin& view, std::uint32_t id);
 // Kit command `disasters`: every disaster exemplar with its effect and manager.

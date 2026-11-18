@@ -10,6 +10,7 @@
 #include "app/NativeAnimationTicks.h"
 #include "app/NativeCity.h"
 #include "app/NativeDemolition.h"
+#include "app/NativeEffects.h"
 #include "app/NativePlumbing.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "rz/cRZMessage2Standard.h"
@@ -27,6 +28,8 @@
 #include "sc4/Exemplar.h"
 #include "sc4/FireProtectionSimulator.h"
 #include "sc4/HistoryWarehouse.h"
+#include "sc4/PipeBurstInstance.h"
+#include "sc4/PlumbingSimulator.h"
 #include "sc4/Lot.h"
 #include "sc4/Ordinance.h"
 #include "sc4/PoliceSimulator.h"
@@ -104,6 +107,8 @@ void PostCityMessage(std::uint32_t type) {
 class DisasterHostImpl final : public IDisasterHost {
 public:
     cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
+    // SL::ATM(): the pipe burst (priority 0xc0) and the toxic cloud (0xff) take their ticks from the animation tick manager.
+    cIGZMessageServer2* NotificationServer() override { return AnimationTickServerView(); }
     cISC4DisasterLayer* DisasterLayer() override { return Layer(); }
     cISC4OccupantManager* Occupants() override { return OccupantManager(); }
     // The automata are not in the native occupant manager: one that still has its in-city flag counts.
@@ -288,6 +293,139 @@ public:
 };
 VolcanoHostImpl g_volcanoHost;
 
+// ------------------------------------------------------------------------------------------ pipe bursts
+
+// The city's watered cells as the burst's pipe filter reads them (city vslot 0x200 = the plumbing simulator, IsCellWatered at
+// i386 +0x2c). The simulator is looked up per question, so the view outlives a city change safely.
+class PlumbingGridView final : public IPlumbingGrid {
+public:
+    bool QueryInterface(std::uint32_t, void** out) override { *out = nullptr; return false; }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override {
+        if (refs_ > 1) return --refs_;
+        delete this;
+        return 0;
+    }
+    bool IsWatered(int x, int z) override {
+        cSC4PlumbingSimulator* plumbing = NativePlumbingSimulator();
+        return plumbing && plumbing->IsCellWatered(x, z);
+    }
+private:
+    std::uint32_t refs_ = 1;
+};
+
+// A named effect as the burst holds it: made when the instance starts it, at the place SetTransform gave (translation in
+// matrix[9..11]). The effect itself lives behind app/NativeDisasterTools.h's handle (sc4/VisualEffect.h cannot be included here).
+class PipeEffect final : public sc4::cISC4VisualEffect {
+public:
+    explicit PipeEffect(const char* name) : name_(name) {}
+    bool QueryInterface(std::uint32_t, void** out) override { *out = nullptr; return false; }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override {
+        if (refs_ > 1) return --refs_;
+        NativeReleaseEffectHandle(handle_);
+        delete this;
+        return 0;
+    }
+    void SetTransform(const float* matrix) override {
+        position_[0] = matrix[9]; position_[1] = matrix[10]; position_[2] = matrix[11];
+        if (handle_) NativeMoveEffectTo(handle_, position_);
+    }
+    void Start(int) override {
+        if (!handle_) handle_ = NativeCreateEffectAtPoint(name_, position_);
+    }
+    void Stop(int flags) override { NativeStopEffectOnly(handle_, flags); }
+    bool IsPlaying() override { return handle_ != nullptr; }
+    void SetCompletionMessage(std::uint32_t, std::uint32_t) override {}
+    void SetIntParameter(int, const void*, int) override {}
+    void SetPointerParameter(int, const void*, int) override {}
+private:
+    const char* name_;   // the instance's string literals
+    void* handle_ = nullptr;
+    float position_[3] = {0.0f, 0.0f, 0.0f};
+    std::uint32_t refs_ = 1;
+};
+
+// cSC4DisasterInstancePipeBurst's city (Mac i386 0x00340ec0..0x003422ce).
+class PipeBurstHostImpl final : public IPipeBurstHost {
+public:
+    // city vslot 0x154 = the effects manager, its vslot 0x18 by name
+    bool CreateEffect(const char* name, cISC4VisualEffect** out) override {
+        *out = nullptr;
+        if (!name || !HasNamedEffect(name)) return false;
+        *out = new PipeEffect(name);
+        if (QuakeTrace()) std::fprintf(stderr, "pipe burst: effect \"%s\" -> made\n", name);
+        return true;
+    }
+    float TerrainCellSize() override { return cSTETerrain::CellWidth(); }   // terrain i386 +0x18
+    // 0x003414b4: a tBrushParameters at the cell's corner (previous = current), zoom 0, valid, scales 1, redisplay flags 3,
+    // then terrain i386 +0xe4 ApplyBrush(0x14, params).
+    void AddSinkHole(int brush, const SinkHoleDesc& desc) override {
+        cSTETerrain* terrain = Terrain();
+        if (!terrain) return;
+        TerrainBrushParameters p;
+        p.previousX = p.currentX = desc.x;
+        p.previousZ = p.currentZ = desc.z;
+        p.zoom = 0;
+        p.valid = desc.flag;
+        p.strengthScale = desc.scaleX;
+        p.radiusScale = desc.scaleZ;
+        p.redisplayFlags = static_cast<std::uint32_t>(desc.mode);
+        p.levelAltitude = desc.strength;
+        const float before = terrain->GetAltitude(desc.x, desc.z);
+        const bool applied = terrain->ApplyBrush(static_cast<std::uint32_t>(brush), p);
+        if (QuakeTrace())
+            std::fprintf(stderr, "pipe burst: sink hole %#x at (%.0f, %.0f) -> %s, altitude %.2f -> %.2f\n", brush, desc.x, desc.z,
+                         applied ? "applied" : "refused", before, terrain->GetAltitude(desc.x, desc.z));
+    }
+    bool HasDemolition() override { return NativeHasDemolition(); }
+    // SL::spDemolition i386 +0x20: DemolishOccupant(commit, occupant, privilege 0, flags 0x302, no cost, false, no list)
+    void DemolishPipe(cISC4Occupant* occupant) override {
+        const std::uint32_t flags = occupant ? occupant->GetFlags() : 0;
+        const bool removal = occupant && occupant->IsFlagSet(1);
+        float position[3] = {0.0f, 0.0f, 0.0f};
+        if (occupant) occupant->GetPosition(position);
+        const bool done = DemolishOccupant(true, occupant, 0x302, nullptr);
+        if (QuakeTrace()) {
+            struct PipesOnly final : cSC4OccupantFilter {
+                bool IsOccupantIncluded(cISC4Occupant* o) override {
+                    void* view = nullptr;
+                    if (!o->QueryInterface(kGZIID_PortPipeOccupantView, &view) || !view) return false;
+                    static_cast<cIGZUnknown*>(view)->Release();
+                    return true;
+                }
+            };
+            auto* pipes = new PipesOnly();
+            pipes->AddRef();
+            int left = 0;
+            if (cISC4OccupantManager* occupants = OccupantManager()) {
+                cISC4Occupant* found = nullptr;
+                if (occupants->GetFirstOccupantByStandardCityCell(found, int(position[0] / 16.0f), int(position[2] / 16.0f), pipes) && found) {
+                    left = 1;
+                    found->Release();
+                }
+            }
+            pipes->Release();
+            std::fprintf(stderr, "pipe burst: demolish pipe (flags %#x, removal flag %d) -> %d, a pipe still in its cell %d\n", flags,
+                         removal ? 1 : 0, done ? 1 : 0, left);
+        }
+    }
+    int ViewLevel() override { return NativeCurrentViewLevel(); }   // SL::spView3D i386 +0x58
+    // 0x00340fb0: the disaster tuning exemplar {0x6534284a, 0x29b6c670, 3}: leak seconds before the burst (min, max) and the zoom
+    bool ReadTuning(float& minSeconds, float& maxSeconds, int& goToZoomLevel) override {
+        const cISCPropertyHolder* tuning = HeldExemplar(cGZPersistResourceKey{0x6534284a, 0x29b6c670, 3});
+        if (!tuning) return false;
+        cSCPropertyHelp::GetPropertyValue(tuning, 0x4a08c600, minSeconds);
+        cSCPropertyHelp::GetPropertyValue(tuning, 0x4a08c601, maxSeconds);
+        std::int32_t zoom = goToZoomLevel;
+        cSCPropertyHelp::GetPropertyValue(tuning, 0xca821b8c, zoom);
+        goToZoomLevel = zoom;
+        if (QuakeTrace()) std::fprintf(stderr, "pipe burst: tuning %.1f..%.1f s, zoom %d\n", minSeconds, maxSeconds, goToZoomLevel);
+        return true;
+    }
+};
+PipeBurstHostImpl g_pipeBurstHost;
+
 // ------------------------------------------------------------------------------------------ the instance factory
 
 class InstanceFactory final : public IDisasterInstanceFactory {
@@ -295,9 +433,9 @@ public:
     cISC4DisasterInstanceFire* CreateFire() override { return new cSC4DisasterInstanceFire(); }
     cISC4DisasterInstanceVolcano* CreateVolcano() override { return new cSC4DisasterInstanceVolcano(); }
     cISC4DisasterInstanceRiot* CreateRiot() override { return new cSC4DisasterInstanceRiot(); }
-    cISC4DisasterInstancePipeBurst* CreatePipeBurst() override { return nullptr; }
+    cISC4DisasterInstancePipeBurst* CreatePipeBurst() override { return new cSC4DisasterInstancePipeBurst(); }
     cISC4DisasterInstanceEarthquake* CreateEarthquake() override { return new cSC4DisasterInstanceEarthquake(); }
-    IPlumbingGrid* PlumbingGrid() override { return nullptr; }
+    IPlumbingGrid* PlumbingGrid() override { return new PlumbingGridView(); }   // one reference
     // Mac i386 0x0033a55c: how many riots may run at once and how many leaders one may have
     bool ReadRiotTuning(int& maxInstances, int& maxLeaders) override {
         const cISCPropertyHolder* tuning = HeldExemplar(cGZPersistResourceKey{0x6534284a, kRiotTuningGroup, kRiotTuningInstance});
@@ -423,6 +561,7 @@ void InstallDisasterHosts() {
     InstallRiotHost();
     sc4::SetEarthquakeHost(&g_earthquakeHost);
     sc4::SetVolcanoHost(&g_volcanoHost);
+    sc4::SetPipeBurstHost(&g_pipeBurstHost);
 }
 
 // ---- what the flammability simulator's host (app/NativeFlammabilityHost.cpp) asks of the city: its header cannot be combined with
@@ -566,6 +705,29 @@ sc4::cISC4DisasterManagerFire* FireManagerFace() {   // one reference, or null
 bool NativeHasDisasterManager(std::uint32_t id) {
     sc4::cISC4DisasterLayer* layer = Layer();
     return layer && layer->GetDisasterManager(id) != nullptr;
+}
+
+void NativePipeBurstStart(int x, int z) {
+    sc4::cISC4DisasterLayer* layer = Layer();
+    sc4::cISC4DisasterManager* manager = layer ? layer->GetDisasterManager(sc4::kDisasterManagerIdPipeBurst) : nullptr;
+    const bool started = manager && (x < 0 ? manager->AttemptDisasterStart() : manager->AttemptDisasterStart(x, z));
+    std::printf("pipe burst: start at %d,%d -> %s\n", x, z, !manager ? "no manager" : started ? "started" : "no watered pipe");
+}
+
+void NativePipeBurstReport() {
+    sc4::cISC4DisasterLayer* layer = Layer();
+    sc4::cISC4DisasterManager* manager = layer ? layer->GetDisasterManager(sc4::kDisasterManagerIdPipeBurst) : nullptr;
+    if (!manager) { std::printf("pipe bursts: no manager\n"); return; }
+    std::printf("pipe bursts: %zu instances\n", manager->GetInstances().size());
+    for (sc4::cISC4DisasterInstance* instance : manager->GetInstances()) {
+        auto* burst = dynamic_cast<sc4::cSC4DisasterInstancePipeBurst*>(instance);
+        if (!burst) continue;
+        std::printf("pipe bursts:   %zu leaking, %zu waiting, view level %d\n", burst->Leaks().size(), burst->Waiting().size(),
+                    burst->ViewLevelValue());
+        for (const auto& leak : burst->Leaks())
+            std::printf("pipe bursts:     leak at %d,%d, %u of %u us, effect %s\n", leak.cellX, leak.cellZ, leak.elapsed, leak.burstTime,
+                        leak.effect ? "yes" : "none");
+    }
 }
 
 void NativeAttemptDisasterStart(std::uint32_t id, int x, int z) {

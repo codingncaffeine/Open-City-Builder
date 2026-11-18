@@ -98,7 +98,7 @@ bool cSC4DisasterInstancePipeBurst::Init(cIGZUnknown* pipeOccupant) {
     manager_->AddInstanceToList(this);
 
     if (cIGZMessageServer2* server = host->MessageServer()) {
-        server->AddNotification(static_cast<cIGZMessageTarget2*>(this), kMessageViewLevelChanged);
+        server->AddNotification(static_cast<cIGZMessageTarget2*>(this), kPipeBurstMessageViewLevelChanged);
         server->AddNotification(static_cast<cIGZMessageTarget2*>(this), kMessageOccupantInserted);
         server->AddNotification(static_cast<cIGZMessageTarget2*>(this), kMessagePipeOccupantRemoved);
     }
@@ -126,7 +126,7 @@ bool cSC4DisasterInstancePipeBurst::Shutdown() {
         if (cIGZMessageServer2* notifications = host->NotificationServer())
             notifications->RemoveNotification(static_cast<cIGZMessageTarget2*>(this), kNotificationCityTick);
         if (cIGZMessageServer2* server = host->MessageServer()) {
-            server->RemoveNotification(static_cast<cIGZMessageTarget2*>(this), kMessageViewLevelChanged);
+            server->RemoveNotification(static_cast<cIGZMessageTarget2*>(this), kPipeBurstMessageViewLevelChanged);
             server->RemoveNotification(static_cast<cIGZMessageTarget2*>(this), kMessageOccupantInserted);
             server->RemoveNotification(static_cast<cIGZMessageTarget2*>(this), kMessagePipeOccupantRemoved);
         }
@@ -147,7 +147,7 @@ bool cSC4DisasterInstancePipeBurst::Shutdown() {
 bool cSC4DisasterInstancePipeBurst::DoMessage(cIGZMessage2* message) {
     auto* standard = static_cast<cIGZMessage2Standard*>(message);
     switch (message->GetType()) {
-        case kMessageAnimationTick:
+        case kPipeBurstMessageAnimationTick:
             DoAnimationTick(static_cast<std::uint32_t>(standard->GetData2()));
             break;
         case kMessageOccupantInserted: {
@@ -159,7 +159,7 @@ bool cSC4DisasterInstancePipeBurst::DoMessage(cIGZMessage2* message) {
         case kMessagePipeOccupantRemoved:
             DoOccupantRemoved(static_cast<cISC4Occupant*>(standard->GetVoid1()));
             break;
-        case kMessageViewLevelChanged:
+        case kPipeBurstMessageViewLevelChanged:
             DoViewLevelChange(*static_cast<int*>(standard->GetVoid2()));
             break;
         default: break;
@@ -176,7 +176,7 @@ void cSC4DisasterInstancePipeBurst::DoViewLevelChange(int level) {
 void cSC4DisasterInstancePipeBurst::DoOccupantInserted(cISC4Occupant* occupant) {
     if (occupant->GetType() != kOccupantTypeNetworkOccupant) return;
     cISC4PipeOccupantView* pipe = nullptr;
-    if (!occupant->QueryInterface(kGZIID_cISC4PipeOccupant, reinterpret_cast<void**>(&pipe))) return;
+    if (!occupant->QueryInterface(kGZIID_PortPipeOccupantView, reinterpret_cast<void**>(&pipe))) return;
     std::uint32_t x = 0, z = 0;
     pipe->GetCell(x, z);
     StopLeakAtCell(static_cast<int>(x), static_cast<int>(z));
@@ -298,7 +298,7 @@ cISC4PipeOccupantView* cSC4DisasterInstancePipeBurst::GetPipeAtLocation(int x, i
     cISC4Occupant* occupant = nullptr;
     if (!DisasterHost()->Occupants()->GetFirstOccupantByStandardCityCell(occupant, x, z, filter_)) return nullptr;
     cISC4PipeOccupantView* pipe = nullptr;
-    occupant->QueryInterface(kGZIID_cISC4PipeOccupant, reinterpret_cast<void**>(&pipe));
+    occupant->QueryInterface(kGZIID_PortPipeOccupantView, reinterpret_cast<void**>(&pipe));
     occupant->Release();
     return pipe;
 }

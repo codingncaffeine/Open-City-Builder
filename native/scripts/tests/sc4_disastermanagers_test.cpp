@@ -144,7 +144,7 @@ class PipeOccupant final : public cSC4Occupant {
 public:
     PipeOccupant(std::uint32_t t, std::uint32_t x, std::uint32_t z) { type_ = t; pipe.cx = x; pipe.cz = z; }
     bool QueryInterface(std::uint32_t iid, void** out) override {
-        if (iid == kGZIID_cISC4PipeOccupant) { *out = &pipe; pipe.AddRef(); return true; }
+        if (iid == kGZIID_PortPipeOccupantView) { *out = &pipe; pipe.AddRef(); return true; }
         return cSC4Occupant::QueryInterface(iid, out);
     }
     void GetBoundingBox(float* lo, float* hi) override {

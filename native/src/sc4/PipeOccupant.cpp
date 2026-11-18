@@ -19,6 +19,11 @@ bool cSC4PipeOccupant::StaticInit() {
 }
 
 bool cSC4PipeOccupant::QueryInterface(std::uint32_t iid, void** out) {
+    if (iid == kGZIID_PortPipeOccupantView) {   // port-only: see sc4/PipeOccupantView.h
+        *out = static_cast<cISC4PipeOccupantView*>(&burstView_);
+        AddRef();
+        return true;
+    }
     if (iid != kGZIID_cISC4PipeOccupantView && iid != kGZCLSID_cSC4PipeOccupant)
         return cSC4UndergroundOccupant::QueryInterface(iid, out);
     *out = static_cast<cSC4PipeOccupant*>(this);

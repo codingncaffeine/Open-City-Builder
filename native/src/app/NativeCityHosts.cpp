@@ -72,7 +72,6 @@ void InstallOrdinanceStub();
 void InstallOrdinanceHost();   // app/NativeOrdinance.cpp
 void InstallOrdinanceSimStub();
 void InstallOverlayStub();
-void InstallPipeBurstStub();
 void InstallPlaceableStub();
 void InstallPortDeveloperStub();
 void InstallPowerLineToolStub();
@@ -188,7 +187,6 @@ void InstallStubHosts() {
     InstallOrdinanceHost();               // the real ordinance host replaces the stub above
     InstallOrdinanceSimStub();
     InstallOverlayStub();
-    InstallPipeBurstStub();
     InstallPlaceableStub();
     InstallPortDeveloperStub();
     InstallPowerLineToolStub();

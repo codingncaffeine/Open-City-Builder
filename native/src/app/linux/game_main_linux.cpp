@@ -1198,6 +1198,12 @@ int RunScenario(const std::string& path) {
             std::string force;
             words >> x >> z >> force;
             native::NativeIgniteCell(x, z, force == "force");
+        } else if (command == "pipeburst") {   // pipeburst X Z: the pipe-burst manager starts at a cell (-1 -1: its own search)
+            int x = -1, z = -1;
+            words >> x >> z;
+            native::NativePipeBurstStart(x, z);
+        } else if (command == "pipebursts") {   // pipebursts: every burst's leaking and waiting pipes
+            native::NativePipeBurstReport();
         } else if (command == "fires") {   // fires: the fire disaster's state, one line per fire
             native::NativeFireReport();
         } else if (command == "riot") {   // riot X Z: a riot starts on the road nearest to a city cell (what a mayor rating hotspot does)

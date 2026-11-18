@@ -209,8 +209,10 @@ public:
         z = int(cz);
     }
     void SetPipeWatered(cISC4Occupant* pipe, bool watered) override { if (cSC4PipeOccupant* p = Pipe(pipe)) p->SetWateredState(watered); }
-    // PARTIAL: the pipe-burst disaster (disaster layer 0x4a1332e8, the leak effect at the cell) is not started natively; the pipe's
-    // burst flag and the count still follow.
+    // ApplyPipeFunding (i386 0x000745e2) starts the pipe-burst manager (0x4a1332e8) at the pipe's cell: AttemptDisasterStart(x, z),
+    // manager slot 18. PARTIAL, not started here yet: the burst works (kit command `pipeburst`) but cannot remove the exploded pipe,
+    // because the network manager has no pipe tool natively (the underground tools are not wired), so the neighbours' bursts
+    // re-leak it and the chain never ends. The pipe's burst flag and the count still follow.
     void BurstPipeAt(int, int) override {}
     void Deals(std::uint32_t type, std::vector<cISC4NeighborDeal*>& out) override {
         cSC4NeighborsSimulator* neighbors = Neighbors();

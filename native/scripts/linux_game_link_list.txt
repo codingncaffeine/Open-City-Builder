@@ -502,7 +502,6 @@ src/app/hosts/StubOccupantGroup.cpp
 src/app/hosts/StubOrdinance.cpp
 src/app/hosts/StubOrdinanceSim.cpp
 src/app/hosts/StubOverlay.cpp
-src/app/hosts/StubPipeBurst.cpp
 src/app/hosts/StubPlaceLot.cpp
 src/app/hosts/StubPlaceable.cpp
 src/app/hosts/StubPortDeveloper.cpp

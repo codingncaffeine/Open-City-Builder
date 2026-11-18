@@ -6,6 +6,7 @@
 // tables sCustomGeometryInfo) are not recovered; the geometry info is an empty table, so a pipe loads, saves and answers
 // its interfaces but builds no model.
 #pragma once
+#include "sc4/PipeOccupantView.h"
 #include "sc4/UndergroundOccupant.h"
 
 namespace sc4 {
@@ -39,7 +40,26 @@ public:
     static bool StaticInit();                                            // 0x1001a106a (PARTIAL)
 
 private:
+    // The pipe-burst disaster's view of this pipe (kGZIID_PortPipeOccupantView): shares the pipe's count.
+    class BurstView final : public cISC4PipeOccupantView {
+    public:
+        explicit BurstView(cSC4PipeOccupant* pipe) : pipe_(pipe) {}
+        bool QueryInterface(std::uint32_t iid, void** out) override { return pipe_->QueryInterface(iid, out); }
+        std::uint32_t AddRef() override { return pipe_->AddRef(); }
+        std::uint32_t Release() override { return pipe_->Release(); }
+        void GetCell(std::uint32_t& x, std::uint32_t& z) override { pipe_->GetOccupiedCell(x, z); }   // i386 +0xec
+        void GetCenter(float* xyz) override { pipe_->GetPosition(xyz); }                              // i386 +0x148
+        bool IsConnected(int direction, int kind) override {                                         // i386 +0xbc
+            return pipe_->ConnectsToNeighbor(direction, static_cast<std::uint8_t>(kind));
+        }
+        cISC4Occupant* AsOccupant() override { return pipe_; }
+
+    private:
+        cSC4PipeOccupant* pipe_;
+    };
+
     std::int32_t wateredState_ = 0;   // +0x358
+    BurstView burstView_{this};
 };
 
 }  // namespace sc4

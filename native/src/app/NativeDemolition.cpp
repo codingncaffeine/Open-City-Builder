@@ -457,6 +457,8 @@ bool DemolishRegion(bool commit, const DemolitionRegion& region, int privilege, 
     return ok;
 }
 
+bool NativeHasDemolition() { return Service() != nullptr; }
+
 bool DemolishOccupant(bool commit, cISC4Occupant* occupant, std::uint32_t flags, std::int64_t* cost) {
     cSC4Demolition* demolition = Service();
     if (!demolition || !occupant) return false;

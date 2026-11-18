@@ -17,9 +17,9 @@
 namespace sc4 {
 
 constexpr std::uint32_t kMessagePipeBurstCell = 0xea1f0dcd;       // x, z of the exploded pipe
-constexpr std::uint32_t kMessageAnimationTick = 0x86ad10ee;       // data 2 = elapsed milliseconds
+constexpr std::uint32_t kPipeBurstMessageAnimationTick = 0x86ad10ee;       // data 2 = elapsed milliseconds
 constexpr std::uint32_t kMessagePipeOccupantRemoved = 0x99ef1143;   // (kMessageOccupantInserted = 0x99ef1142 is in Occupant.h)
-constexpr std::uint32_t kMessageViewLevelChanged = 0xc6cdbf1a;
+constexpr std::uint32_t kPipeBurstMessageViewLevelChanged = 0xc6cdbf1a;
 constexpr std::uint32_t kNotificationCityTick = 0xc0;
 constexpr std::uint32_t kPropertyLeaveAloneOccupant = 0x029244db;   // occupants with this property are ignored when inserted
 

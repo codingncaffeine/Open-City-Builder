@@ -25,7 +25,7 @@ void cSC4WateredPipeFilter::SetGrid(IPlumbingGrid* grid) {
 bool cSC4WateredPipeFilter::IsOccupantIncluded(cISC4Occupant* occupant) {
     if (occupant->GetType() != kOccupantTypeNetworkOccupant) return false;
     cISC4PipeOccupantView* view = nullptr;
-    occupant->QueryInterface(kGZIID_cISC4PipeOccupant, reinterpret_cast<void**>(&view));
+    occupant->QueryInterface(kGZIID_PortPipeOccupantView, reinterpret_cast<void**>(&view));
     if (!view) return false;
     std::uint32_t x = 0, z = 0;
     view->GetCell(x, z);
@@ -277,7 +277,7 @@ cISC4DisasterInstance* cSC4DisasterManagerPipeBurst::CreateDisasterInstance(cISC
     cISC4DisasterInstancePipeBurst* instance = factory->CreatePipeBurst();
     instance->AddRef();
     cIGZUnknown* pipe = nullptr;
-    occupant->QueryInterface(kGZIID_cISC4PipeOccupant, reinterpret_cast<void**>(&pipe));
+    occupant->QueryInterface(kGZIID_PortPipeOccupantView, reinterpret_cast<void**>(&pipe));
     const bool ok = instance->Init(pipe);
     cISC4DisasterInstance* result = ok ? instance : nullptr;
     instance->Release();

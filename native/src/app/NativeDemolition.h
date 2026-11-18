@@ -16,6 +16,7 @@ bool DemolishRegion(bool commit, const sc4::DemolitionRegion& region, int privil
                     std::int64_t* cost, sc4::cISC4Occupant* clicked = nullptr, int viewX = 0, int viewY = 0,
                     sc4::IDemolishFilter* filter = nullptr);
 bool DemolishOccupant(bool commit, sc4::cISC4Occupant* occupant, std::uint32_t flags, std::int64_t* cost);
+bool NativeHasDemolition();   // SL::spDemolition is up
 // The city occupant behind an occupant a caller's filter is asked about.
 sc4::cISC4Occupant* DemolitionOccupant(sc4::IDemolishable* occupant);
 sc4::cSC4NetworkManager* CityNetworkManager();   // the city's network manager, or null

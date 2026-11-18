@@ -14,6 +14,7 @@
 
 #include "rz/cRZRandom.h"
 #include "sc4/Disaster.h"
+#include "sc4/PipeOccupantView.h"
 #include "sc4/SpiralIterator.h"
 
 namespace sc4 {
@@ -76,15 +77,7 @@ class IPlumbingGrid : public cIGZUnknown {
 public:
     virtual bool IsWatered(int x, int z) = 0;            // slot 0x58
 };
-// The network occupant interface the pipe filter reads (iid 0x49c05b9f): the cell it sits on.
-class cISC4PipeOccupantView : public cIGZUnknown {
-public:
-    virtual void GetCell(std::uint32_t& x, std::uint32_t& z) = 0;   // slot 0x1d8
-    // What the burst effect needs of a pipe (defaults answer "nothing").
-    virtual void GetCenter(float* xyz) { xyz[0] = xyz[1] = xyz[2] = 0.0f; }   // slot 0x290
-    virtual bool IsConnected(int direction, int kind) { (void)direction; (void)kind; return false; }   // slot 0x178
-    virtual cISC4Occupant* AsOccupant() { return nullptr; }                  // the occupant sub-object (+8)
-};
+// The pipe view the filter and the burst read: sc4/PipeOccupantView.h (asked for with kGZIID_PortPipeOccupantView).
 
 // What the managers need that is not in IDisasterHost.
 class IDisasterInstanceFactory {
