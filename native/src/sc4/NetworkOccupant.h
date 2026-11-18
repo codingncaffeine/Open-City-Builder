@@ -15,6 +15,7 @@
 
 #include "gz/StreamOps.h"
 #include "gz/cGZPersistResourceKey.h"
+#include "s3d/ModelInstance.h"
 #include "sc4/Occupant.h"
 
 namespace sc4 {
@@ -227,6 +228,10 @@ public:
     void SetCostOfDemolition(std::int64_t cost) { costOfDemolition_ = cost; }
     const std::vector<SC4AddOnPart>& AddOnParts() const { return parts_; }
     const SC4TileCorner& Corner(int i) const { return corners_[i]; }
+    // The draw attributes of the occupant's own model instance (the original's occupant is a cS3DModelInstanceBasic at
+    // i386 +0x38; vslots 0x3c / 0x40): SetTranslucency sets flag 2 and the alpha in shade[3], which the renderer reads to
+    // draw a translucent piece in the back-to-front list, after the static view.
+    const s3d::SC4DrawAttributes& ModelDrawAttributes() const { return drawAttributes_; }
 
     static std::uint32_t FlagForNetworkType(std::uint32_t networkType);
     static std::uint32_t HasConnectionOnEdge(std::uint32_t config, int edge);
@@ -258,7 +263,8 @@ protected:
     std::uint32_t pathOverride_ = 0;             // +0x1b8
     std::int64_t costOfDemolition_ = 0;          // +0x1c8
     std::uint32_t modelStateFlags_ = 0;          // +0x84 (inside the +0x68 cS3DModelInstanceBasic)
-    std::uint8_t modelFlags_ = 0;                // +0x88 model instance flags (bit 1 = translucent)
+    std::uint8_t modelFlags_ = 0;                // +0x88 model instance word
+    s3d::SC4DrawAttributes drawAttributes_;      // the model instance's draw attributes (flag 2 = translucent)
 };
 
 }  // namespace sc4

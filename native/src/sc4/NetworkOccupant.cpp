@@ -426,14 +426,16 @@ void cSC4NetworkOccupant::SetLit(bool lit) {
     }
 }
 
+// i386 0x001331b0: the model's draw attributes take flag 2 and the alpha (shade[3]); the corners take the alpha.
 void cSC4NetworkOccupant::SetTranslucency(bool on, std::uint8_t alpha) {
     if (on) {
-        modelFlags_ |= 2;
+        drawAttributes_.flags |= 2u;
     } else {
-        modelFlags_ &= ~2;
+        drawAttributes_.flags &= ~2u;
         alpha = 0xff;
     }
     for (auto& corner : corners_) corner.color[3] = alpha;
+    drawAttributes_.shade[3] = static_cast<float>(corners_[0].color[3]) * (1.0f / 255.0f);
     PostOccupantMessage(kMessageOccupantChanged, 0);
 }
 
@@ -731,9 +733,11 @@ bool cSC4NetworkOccupant::Read(cIGZIStream& stream) {
         }
         if (g_host) g_host->ReadPersistRef(stream, 0xa9667793, persistRef_);
         stream.GetSint64(costOfDemolition_);
-        if (corners_[0].color[3] != 0xff || (modelFlags_ & 2)) {
-            modelFlags_ &= ~2;
+        // i386 Read: a piece saved translucent comes back opaque (draw attributes flag 2 cleared, alpha 1).
+        if (corners_[0].color[3] != 0xff || (drawAttributes_.flags & 2u) != 0) {
+            drawAttributes_.flags &= ~2u;
             for (auto& corner : corners_) corner.color[3] = 0xff;
+            drawAttributes_.shade[3] = 1.0f;
         }
     }
     return !stream.GetError();

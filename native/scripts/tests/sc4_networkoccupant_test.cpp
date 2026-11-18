@@ -117,6 +117,16 @@ int main() {
     r->Release();
     n->SetPathIDOverride(0x1234);
     CHECK(n->GetPathIDOverride() == 0x1234);
+    // translucency lives in the model's draw attributes (i386 0x001331b0): flag 2 and the alpha in shade[3], which the
+    // renderer reads to draw the piece after the static view
+    CHECK((n->ModelDrawAttributes().flags & 2u) == 0);
+    n->SetTranslucency(true, 0x40);
+    CHECK((n->ModelDrawAttributes().flags & 2u) != 0);
+    CHECK(n->ModelDrawAttributes().shade[3] > 0.25f && n->ModelDrawAttributes().shade[3] < 0.252f);
+    CHECK(n->Corner(0).color[3] == 0x40 && n->Corner(3).color[3] == 0x40);
+    n->SetTranslucency(false, 0x40);
+    CHECK((n->ModelDrawAttributes().flags & 2u) == 0 && n->ModelDrawAttributes().shade[3] == 1.0f);
+    CHECK(n->Corner(0).color[3] == 0xff);
     n->Release();
     std::puts(failures ? "sc4_networkoccupant: FAILED" : "sc4_networkoccupant ok");
     return failures != 0;

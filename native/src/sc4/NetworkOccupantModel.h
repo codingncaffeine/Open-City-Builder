@@ -33,6 +33,15 @@ public:
     void GetTransform(cS3DTransform& out) override;
     int Draw(SC4DrawContext* context, bool highlight) override;  // 0x10019e09a
     void GetSortValue(std::uint32_t& out) const override;        // 0x10019ed38
+    // The occupant's translucency (flag 2 and the alpha) over this model's own attributes: in the original they are one
+    // record, the occupant's model instance.
+    s3d::SC4DrawAttributes GetDrawAttributes() const override {
+        s3d::SC4DrawAttributes attributes = cS3DModelInstanceBasic::GetDrawAttributes();
+        const s3d::SC4DrawAttributes& own = occupant_.ModelDrawAttributes();
+        attributes.flags = (attributes.flags & ~2u) | (own.flags & 2u);
+        attributes.shade[3] = own.shade[3];
+        return attributes;
+    }
 
     // GetTexture (0x10019d976): the texture for `id` (plus the zoom when its low nibble is free), else `fallback`.
     static std::uint32_t GetTexture(std::uint32_t id, std::uint32_t fallback, int zoom);
