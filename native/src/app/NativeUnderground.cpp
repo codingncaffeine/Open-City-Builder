@@ -271,6 +271,7 @@ void NativeUndergroundCellsReport(int x, int z) {
             CellOccupants(x + dx, z + dz, occupants);
             int pipes = 0, others = 0;
             std::uint32_t edges = 0, flags = 0;
+            bool h0 = false, h1 = false, h2 = false;
             for (cISC4Occupant* occupant : occupants) {
                 void* raw = nullptr;
                 if (occupant->QueryInterface(kGZCLSID_cSC4PipeOccupant, &raw) && raw) {
@@ -278,14 +279,19 @@ void NativeUndergroundCellsReport(int x, int z) {
                     ++pipes;
                     edges = pipe->GetEdgeTypesFlag(static_cast<std::uint8_t>(kPipeNetworkType));
                     flags = pipe->GetNetworkFlag();
+                    pipe->GetHiddenTriangles(h0, h1, h2);
                     pipe->Release();
                 } else if (occupant->GetType() == 0xc772bf98u) {
                     ++others;
                 }
                 occupant->Release();
             }
-            std::printf("pipe cells: %d,%d pipes %d edges %08x flags %08x, other network pieces %d\n", x + dx, z + dz, pipes,
-                        edges, flags, others);
+            const cSTETerrain* terrain = Terrain();
+            const std::uint32_t cx = std::uint32_t(x + dx), cz = std::uint32_t(z + dz);
+            std::printf("pipe cells: %d,%d pipes %d edges %08x flags %08x hidden %d%d%d, other network pieces %d; terrain even %d odd %d flipped %d\n",
+                        x + dx, z + dz, pipes, edges, flags, int(h0), int(h1), int(h2), others,
+                        terrain ? int(terrain->IsEvenTriangleHidden(cx, cz)) : -1, terrain ? int(terrain->IsOddTriangleHidden(cx, cz)) : -1,
+                        terrain ? int(terrain->IsTriangulationFlipped(cx, cz)) : -1);
         }
     }
 }
