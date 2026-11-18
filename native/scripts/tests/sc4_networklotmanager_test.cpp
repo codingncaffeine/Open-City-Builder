@@ -568,6 +568,7 @@ int main() {
     Host host;
     SetNetworkLotManagerHost(&host);
     auto* manager = new cSC4NetworkLotManager();
+#if defined(_LIBCPP_VERSION)   // the game's library: the members' containers have the Mac build's sizes only under libc++
     const A::Offsets offsets = A::Get(*manager);
     CHECK(offsets.lots == cSC4NetworkLotManager::kOffsetLots);
     CHECK(offsets.configurations == cSC4NetworkLotManager::kOffsetConfigurations);
@@ -581,6 +582,7 @@ int main() {
     CHECK(offsets.inited == cSC4NetworkLotManager::kOffsetInited);
     CHECK(offsets.updateCells == cSC4NetworkLotManager::kOffsetUpdateCells);
     CHECK(sizeof(cSC4NetworkLotManager) <= cSC4NetworkLotManager::kClassSize);
+#endif
 
     CHECK(A::RefCount(*manager) == 0);                    // quirk: a fresh object counts 0
     CHECK(A::Reserved7c(*manager) == 1);
