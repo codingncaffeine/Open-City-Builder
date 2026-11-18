@@ -262,6 +262,7 @@ void ProbeBuildingsAt(float x, float z, float radius) {
 
 sc4::cSC43DRender* g_cityRender = nullptr;
 sc4::cSC43DRender* CityRenderer() { return g_cityRender; }
+bool CityRendererChangeModel(s3d::cIS3DModelInstance* model, int change) { return g_cityRender && g_cityRender->ChangeModel(model, change); }
 
 // The saved camera. cSC4View3DWin::DoLoad (i386 0x0052272c) reads record (0xa9c8647c, 0xe9c8647e, 1), versions below 5: the
 // camera control, the 3D render, the model maker and the simulator as serializables, then the view filter map, into the view's

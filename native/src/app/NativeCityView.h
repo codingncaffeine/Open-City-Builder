@@ -6,6 +6,7 @@
 
 namespace gd { class cIGZGDriver; }
 namespace gz { class cIGZDrawContext; }
+namespace s3d { class cIS3DModelInstance; }
 namespace sc4 { class cSC4View3DWin; class cSC43DRender; class cISC4Occupant; }
 class cISC4City;
 
@@ -13,6 +14,8 @@ namespace native {
 
 // The city view's renderer (null before the city view exists).
 sc4::cSC43DRender* CityRenderer();
+// The renderer's ChangeModel(model, change) (vslot 0xf8); false without a city view.
+bool CityRendererChangeModel(s3d::cIS3DModelInstance* model, int change);
 // Listen for the next city load's saved camera (the view state record) and open the city there; call before LoadCity.
 void ListenForSavedView();
 // Its view utilities' eye position (+0x44, three floats; zeros without a view) and zoom (+0x14): NativeCityViewQueries.cpp.

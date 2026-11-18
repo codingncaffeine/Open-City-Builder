@@ -1105,7 +1105,7 @@ void cSC4UndergroundOccupant::ModelStateChanged(bool updateNeighbors) {
     modelDirty_ = true;
     needsModelCreate_ = true;
     ComputeBoundingBox(Bounds(), Bounds() + 3);
-    if ((GetFlags() & 2) != 0 && g_host) g_host->AddModelInstanceToRenderer(modelInstance_, 3);
+    if ((GetFlags() & 2) != 0 && g_host) g_host->ChangeModelInRenderer(this, modelInstance_, 3);
     if (!updateNeighbors || !g_host) return;
     for (int edge = 0; edge < 4; ++edge) {
         if (!ConnectsToNeighbor(edge, GetNetworkType())) continue;

@@ -191,7 +191,7 @@ struct PieceHost final : IUndergroundOccupantHost {
     }
     bool IsCellInCity(int, int) override { return true; }
     void PrepareRenderer() override {}
-    void AddModelInstanceToRenderer(s3d::cIS3DModelInstance*, int) override {}
+    void ChangeModelInRenderer(cSC4UndergroundOccupant*, s3d::cIS3DModelInstance*, int) override {}
     s3d::cIS3DModelInstance* CreateCustomModel(std::uint32_t instance) override {
         customAsked = instance;
         return nullptr;

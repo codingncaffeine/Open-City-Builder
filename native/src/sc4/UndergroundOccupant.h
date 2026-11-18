@@ -190,8 +190,10 @@ public:
     virtual bool IsCellInCity(int cellX, int cellZ) = 0;
     // SL::spRenderer (0x100b214d0) vslot 0x50: the call at the start of SetupPackedRenderState.
     virtual void PrepareRenderer() = 0;
-    // SL::spRenderer vslot 0xf8(model instance, 3): ModelStateChanged registers the piece with the renderer.
-    virtual void AddModelInstanceToRenderer(s3d::cIS3DModelInstance* instance, int layer) = 0;
+    // SL::spRenderer vslot 0xf8 (i386 0x7c) ChangeModel(model instance, 3): ModelStateChanged tells the renderer the
+    // piece's model changed, so its part of the static view is redrawn. The original's piece is its own model instance;
+    // the port's piece hands itself over too (its models are the placeable object's) along with the instance it holds.
+    virtual void ChangeModelInRenderer(cSC4UndergroundOccupant* piece, s3d::cIS3DModelInstance* instance, int change) = 0;
     // SL::spRM vslot 0x18({0x5ad0e817, 0xbadb57f1, networkType | pieceId}, 0x9ad0e7e3, &exemplar) followed by
     // cISCResExemplar vslot 0x20(0, &model). Returns one reference (the caller owns it) or null.
     virtual s3d::cIS3DModelInstance* CreateCustomModel(std::uint32_t instance) = 0;

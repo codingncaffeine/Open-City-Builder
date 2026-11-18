@@ -88,6 +88,7 @@ struct Host final : IUndergroundOccupantHost {
     FakeMeshes meshes;
     FakeModelInstance* createdModel = nullptr;
     std::vector<std::pair<s3d::cIS3DModelInstance*, int>> rendererAdds;
+    std::vector<cSC4UndergroundOccupant*> changedPieces;
 
     ~Host() override {
         for (auto* binding : bindings) delete binding;
@@ -108,8 +109,9 @@ struct Host final : IUndergroundOccupantHost {
     }
     bool IsCellInCity(int, int) override { return inCity; }
     void PrepareRenderer() override { ++prepared; }
-    void AddModelInstanceToRenderer(s3d::cIS3DModelInstance* instance, int layer) override {
-        rendererAdds.push_back({instance, layer});
+    void ChangeModelInRenderer(cSC4UndergroundOccupant* piece, s3d::cIS3DModelInstance* instance, int change) override {
+        rendererAdds.push_back({instance, change});
+        changedPieces.push_back(piece);
     }
     s3d::cIS3DModelInstance* CreateCustomModel(std::uint32_t) override {
         if (!createdModel) {
@@ -457,6 +459,7 @@ int main() {
         CHECK(other->ModelDirty());
         CHECK(host.rendererAdds.size() == 1);
         CHECK(host.rendererAdds[0].first == nullptr && host.rendererAdds[0].second == 3);
+        CHECK(host.changedPieces.size() == 1 && host.changedPieces[0] == occupant);
         occupant->ModelStateChanged(true);   // already dirty: nothing happens
         CHECK(host.rendererAdds.size() == 1);
         occupant->ClearNetworkFlag(1u << 4);

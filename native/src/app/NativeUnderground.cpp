@@ -11,8 +11,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <list>
+#include <vector>
 
 #include "app/NativeCity.h"
+#include "app/NativeCityView.h"
 #include "app/NativeModelMaker.h"
 #include "gz/cGZPersistResourceKey.h"
 #include "gz/cGZPersistResourceManager.h"
@@ -154,7 +156,20 @@ public:
         return city && city->CellIsInBounds(cellX, cellZ);
     }
     void PrepareRenderer() override {}
-    void AddModelInstanceToRenderer(s3d::cIS3DModelInstance*, int) override {}
+    // SL::spRenderer ChangeModel(model, change) for every model of the piece's placeable object (the original's piece is
+    // its one model instance).
+    void ChangeModelInRenderer(cSC4UndergroundOccupant* piece, s3d::cIS3DModelInstance* instance, int change) override {
+        if (!CityRenderer()) return;
+        if (instance) CityRendererChangeModel(instance, change);
+        cISC43DPlaceableObject* placeable = piece ? static_cast<cISC4Occupant*>(piece)->GetPlaceableObject() : nullptr;
+        if (!placeable) return;
+        std::uint32_t count = static_cast<std::uint32_t>(placeable->GetModelCount());
+        if (count == 0) return;
+        std::vector<sc4::cIS3DModelInstance*> models(count, nullptr);
+        placeable->GetModels(models.data(), count);   // borrowed
+        for (std::uint32_t i = 0; i < count; ++i)
+            if (models[i]) CityRendererChangeModel(reinterpret_cast<s3d::cIS3DModelInstance*>(models[i]), change);
+    }
     // A junction piece's model: SL::spRM GetResource({0x5ad0e817, 0xbadb57f1, network | piece}, cIS3DResModel 0x9ad0e7e3) and its
     // CreateModelInstance(0, &model); one reference for the caller.
     s3d::cIS3DModelInstance* CreateCustomModel(std::uint32_t instance) override {
