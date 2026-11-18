@@ -115,7 +115,7 @@ static_assert(sizeof(UndergroundTextureRecord) == 0x14, "texture record stride")
 
 // The per-network geometry table the derived occupants hand to Init: cSC4PipeOccupant::sCustomGeometryInfo @
 // 0x100b01b58 and cSC4SubwayOccupant::sCustomGeometryInfo @ 0x100b02748. The named fields are the ones the recovered
-// functions read; the per-piece vertex arrays at +0x00..+0x40 are only used by CreateUndergroundModel (not recovered)
+// functions read; the per-piece vertex arrays at +0x00..+0x40 are only used by CreateUndergroundModel
 // and keep their raw slots. Sizes verified against both statics.
 struct tCustomGeometryInfo {
     const void* pieceArrays[9];                  // +0x00 .. +0x40 (per-piece vertex / index pointers)
@@ -280,9 +280,8 @@ public:
                                     const float* hookupScale);               // 0x1001ac31c
     bool IsImaginaryConnection(int edge);                                    // 0x1001ada00
 
-    // Not recovered yet: builds the model and the six texture bindings of one piece from the tCustomGeometryInfo
-    // piece tables. See UndergroundOccupant.cpp for the reason.
-    virtual void CreateUndergroundModel(int rotation, bool flip, bool update);   // 0x1001acae0 (vslot 0x350) PARTIAL
+    // The model and the six texture bindings of one piece from the tCustomGeometryInfo piece tables.
+    virtual void CreateUndergroundModel(int rotation, bool flip, bool update);   // 0x1001acae0 (i386 0x0013fe30)
 
     // static state the original keeps in cSC4UndergroundOccupant / cSC4NetworkOccupant statics
     static bool StaticInit();                                   // 0x1001aa79a

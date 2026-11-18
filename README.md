@@ -17,8 +17,8 @@ Still missing:
 
 - **Simulation:** subway stations, arrests, lots refitted to moved ground, and the landfill, port and toxic waste
   services.
-- **Screens:** graphs, cheats, tutorials, the personal-sim and driving modes, the snapshot album, and drawing pipes
-  in the underground view.
+- **Screens:** graphs, cheats, tutorials, the personal-sim and driving modes, the snapshot album, the subway view,
+  laying new pipes, and pipe junctions in the underground view (the other pipe pieces show).
 
 There is no release yet.
 

@@ -14,6 +14,7 @@
 #include "app/NativeCity.h"
 #include "app/NativeCitySystems.h"
 #include "app/NativeCityView.h"
+#include "app/NativeDemolition.h"
 #include "app/NativeEffects.h"
 #include "app/NativePower.h"
 #include "app/NativeZoneDeveloperHost.h"
@@ -45,6 +46,8 @@
 #include "sc4/WinMiniMap.h"
 #include "sc4/PowerSimulator.h"
 #include "sc4/cSC4City.h"
+#include "sc4/NetworkManager.h"
+#include "sc4/OccupantManager.h"
 #include "sc4/cSTETerrain.h"
 
 namespace native {
@@ -405,6 +408,29 @@ public:
         return ok;
     }
     const cISC4GrowthDeveloper* GrowthDeveloper(std::uint32_t type) override { return GrowthDeveloperInterfaceOfType(type); }
+    void SetViewFilter(sc4::cISC4OccupantFilter* filter) override {
+        if (cSC4View3DWin* view = CityView3DWin()) {
+            cSC4ViewFilterInformation info;
+            info.filter = filter;
+            view->SetCurrentViewFilterInfo(info);
+        }
+    }
+    void SetViewLevel(std::uint32_t level) override {
+        static const bool debug = std::getenv("SC4_VIEWDEBUG") != nullptr;   // instrument: the data views' 3D side
+        if (debug) std::printf("map view: view level %u\n", level);
+        if (cSC4View3DWin* view = CityView3DWin()) view->SetCurrentViewLevel(level);
+    }
+    void SetTerrainDisplay(bool plumbingInfo, bool waterSurface) override {
+        if (cSTETerrain* terrain = CityTerrainOf(HostCity())) {
+            terrain->SetPlumbingInfoDisplayState(plumbingInfo);
+            terrain->SetWaterSurfaceDisplayState(waterSurface);
+        }
+    }
+    sc4::cISC4OccupantFilter* NetworkOccupantFilter(bool subway) override {
+        cSC4NetworkManager* manager = CityNetworkManager();
+        if (!manager) return nullptr;
+        return subway ? manager->GetSubwayOccupantFilter() : manager->GetWaterOccupantFilter();
+    }
     void CityLots(std::vector<WinMapLot>& out) override {
         cSC4City* city = HostCity();
         auto* lots = city ? dynamic_cast<cSC4ZoneDeveloper*>(city->GetComponent(CityComponent::ZoneDeveloper)) : nullptr;

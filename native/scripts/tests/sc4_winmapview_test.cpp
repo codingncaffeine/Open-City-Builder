@@ -16,6 +16,8 @@
 #include "gz/WinText.h"
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/WinMapView.h"
+#include "sc4/UndergroundCustomView.h"
+#include "sc4/ComplexViewOccupantFilter.h"
 #include "gz/Buffer.h"
 #include "sc4/GrowthDeveloper.h"
 #include "sc4/cSC4SimGrid.h"
@@ -123,6 +125,25 @@ struct FakeColorSink final : IWinMapViewColorSink {
 };
 
 struct FakeHost final : IWinMapViewHost {
+    // SetDataView's 3D side
+    std::vector<std::uint32_t> levels;
+    std::vector<std::pair<bool, bool>> terrainDisplays;
+    cISC4OccupantFilter* viewFilter = nullptr;   // the last one set (one reference)
+    int waterFilterAsks = 0;
+    void SetViewFilter(cISC4OccupantFilter* filter) override {
+        if (filter) filter->AddRef();
+        if (viewFilter) viewFilter->Release();
+        viewFilter = filter;
+    }
+    void SetViewLevel(std::uint32_t level) override { levels.push_back(level); }
+    void SetTerrainDisplay(bool plumbing, bool water) override { terrainDisplays.emplace_back(plumbing, water); }
+    cISC4OccupantFilter* NetworkOccupantFilter(bool subway) override {
+        if (subway) return nullptr;
+        ++waterFilterAsks;
+        auto* filter = new cSC4WaterOccupantFilter();
+        filter->AddRef();
+        return filter;
+    }
     FakeMessageServer server;
     bool noServer = false;
     FakeColorSink sink;
@@ -1038,6 +1059,38 @@ void TestHighlightEffect() {
     f.view->SetDataView(0);
 }
 
+// SetDataView's 3D side: the pipe view (underground mode 1) sets level 3, the plumbing overlay without water, a complex
+// filter with the water filter forced in, and starts the pipe custom view; view 0 brings back level 1 and the default filter.
+void TestUndergroundView() {
+    Fixture f;
+    f.view->Init();
+    auto* activate = new cRZMessage2Standard();
+    activate->SetType(kWinMapMsgViewActivate);
+    f.view->DoMessage(static_cast<cIGZMessage2*>(activate));
+    f.host.cityX = f.host.cityZ = 4;
+    f.host.sink.width = f.host.sink.height = 16;
+    f.host.hasExemplar = true;
+    f.host.exemplar.hasUnderground = true;
+    f.host.exemplar.underground = 1;
+    f.host.exemplar.hasCustomView = true;
+    f.host.exemplar.customView = kGZCLSID_cSC4PipeCustomView;
+    CHECK(f.view->SetDataView(0xf0));
+    CHECK(!f.host.levels.empty() && f.host.levels.back() == 3);
+    CHECK(!f.host.terrainDisplays.empty() && f.host.terrainDisplays.back() == std::make_pair(true, false));
+    CHECK(f.host.waterFilterAsks == 1);
+    CHECK(dynamic_cast<cSC4ComplexViewOccupantFilter*>(f.host.viewFilter) != nullptr);
+    f.host.exemplar.underground = 2;   // the subway view: level 2, the water stays off, no water filter
+    CHECK(f.view->SetDataView(0xf1));
+    CHECK(f.host.levels.back() == 2);
+    CHECK(f.host.terrainDisplays.back() == std::make_pair(false, false));
+    CHECK(f.host.waterFilterAsks == 1);
+    CHECK(f.view->SetDataView(0));
+    CHECK(f.host.levels.back() == 1);
+    CHECK(f.host.terrainDisplays.back() == std::make_pair(false, true));
+    CHECK(dynamic_cast<cSC4DefaultOccupantFilter*>(f.host.viewFilter) != nullptr);
+    f.host.SetViewFilter(nullptr);
+}
+
 int main() {
     TestConstructionAndQueryInterface();
     TestInitAndShutdown();
@@ -1055,6 +1108,7 @@ int main() {
     TestDataViewImage();
     TestHighlightOverlay();
     TestHighlightEffect();
+    TestUndergroundView();
     if (g_failures == 0) std::printf("sc4_winmapview_test: all checks passed\n");
     return g_failures == 0 ? 0 : 1;
 }

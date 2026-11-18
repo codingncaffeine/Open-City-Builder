@@ -25,6 +25,11 @@
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/cSTETerrain.h"
 #include "sc4/cSTETerrainView3D.h"
+#include "app/NativePlumbing.h"
+#include "sc4/OccupantManager.h"
+#include "sc4/PipeConnectionOccupant.h"
+#include "sc4/PipeOccupant.h"
+#include "sc4/PlumbingSimulator.h"
 
 namespace native {
 extern sc4::cSTETerrainView3D* g_terrainView;
@@ -111,6 +116,24 @@ private:
     int w_ = 0, h_ = 0;
 };
 
+// The occupants of a city cell (occupant manager GetOccupantsByStandardCityCells, every type), borrowed for the call;
+// false when the query fails.
+template <typename Fn>
+bool ForCellOccupants(int x, int z, Fn&& fn) {
+    sc4::cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::OccupantManager) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(sc4::kGZIID_cISC4OccupantManager, &raw) || !raw) return false;
+    auto* manager = static_cast<sc4::cISC4OccupantManager*>(raw);
+    const int cell[2] = {x, z};
+    sc4::OccupantList list;
+    const bool ok = manager->GetOccupantsByStandardCityCells(list, cell, cell, 0u, 0xffffffffu);
+    for (sc4::cISC4Occupant* occupant : list) fn(occupant);
+    manager->ReleaseOccupantList(list);
+    manager->Release();
+    return ok;
+}
+
 class ViewHost final : public sc4::ITerrainViewHost {
 public:
     std::shared_ptr<sc4::TerrainTextureBinding> LoadWaterTexture(int zoom, bool polluted) override {
@@ -125,6 +148,48 @@ public:
         return buffer->Valid() ? buffer : nullptr;
     }
     void SetTerrain(sc4::cSTETerrain* terrain) { terrain_ = terrain; }
+    // The pipe view's overlay (DrawPlumbingInfo): the plumbing simulator's watered grid (i386 vslot 0x1c, the cell value),
+    // IsCellWatered (0x2c) and AreWateredBuildingsInCell (0x20).
+    std::uint8_t PlumbingCellFlags(int x, int z) const override {
+        const sc4::cSC4PlumbingSimulator* plumbing = NativePlumbingSimulator();
+        return plumbing ? plumbing->GetSupplyValue(x, z) : 0;
+    }
+    bool PlumbingQuery58(int x, int z) const override {
+        const sc4::cSC4PlumbingSimulator* plumbing = NativePlumbingSimulator();
+        return plumbing && plumbing->IsCellWatered(x, z);
+    }
+    bool PlumbingQuery40(int x, int z) const override {
+        const sc4::cSC4PlumbingSimulator* plumbing = NativePlumbingSimulator();
+        return plumbing && plumbing->AreWateredBuildingsInCell(x, z);
+    }
+    // The network manager's FindPipeOccupant (vslot 0x28), else FindPipeConnectionOccupant (0x2c): the piece's hidden
+    // triangles (pipe vslot 0x1bc).
+    bool NetworkHiddenTriangles(int x, int z, bool& first, bool& even, bool& odd) const override {
+        bool found = false;
+        ForCellOccupants(x, z, [&](sc4::cISC4Occupant* occupant) {
+            if (found) return;
+            if (auto* pipe = dynamic_cast<sc4::cSC4PipeOccupant*>(occupant)) {
+                pipe->GetHiddenTriangles(first, even, odd);
+                found = true;
+            }
+        });
+        if (found) return true;
+        ForCellOccupants(x, z, [&](sc4::cISC4Occupant* occupant) {
+            if (found) return;
+            if (auto* connection = dynamic_cast<sc4::cSC4PipeConnectionOccupant*>(occupant)) {
+                connection->GetHiddenTriangles(first, even, odd);
+                found = true;
+            }
+        });
+        return found;
+    }
+    bool CellHasOccupantType(int x, int z, std::uint32_t type, bool& listOk) const override {
+        bool has = false;
+        listOk = ForCellOccupants(x, z, [&](sc4::cISC4Occupant* occupant) { if (occupant->GetType() == type) has = true; });
+        return has;
+    }
+    bool GetBoolPlumbingDisplay() const override { return terrain_ && terrain_->GetPlumbingInfoDisplayState(); }
+    bool WaterSurfaceDisplayState() const override { return !terrain_ || terrain_->GetWaterSurfaceDisplayState(); }
     void ApplyTerrainLighting(const sc4::TerrainRect& rect) override { if (terrain_) terrain_->DoLighting(rect); }
     void RegisterMessage(std::uint32_t type) override { if (SL::spMS2) SL::spMS2->AddNotification(&g_viewMessages, type); }
     void UnregisterMessage(std::uint32_t type) override { if (SL::spMS2) SL::spMS2->RemoveNotification(&g_viewMessages, type); }

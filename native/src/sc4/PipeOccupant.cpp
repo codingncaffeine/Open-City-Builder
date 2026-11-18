@@ -1,19 +1,38 @@
 #include "sc4/PipeOccupant.h"
 
+#include <cmath>
+
 
 namespace sc4 {
 
 namespace {
 bool sbPipesInited = false;
-tCustomGeometryInfo sCustomGeometryInfo = {};   // PARTIAL: the piece tables are not recovered
 // sWateredStateRGBs @ 0x100b017f0: dry, watered
 const float kWateredStateRGBs[2][3] = {{0.8f, 0.23f, 0.23f}, {1.0f, 1.0f, 1.0f}};
 }  // namespace
 
 cSC4PipeOccupant::cSC4PipeOccupant() = default;
 
+// 0x001368d8: the diagonal piece's edge distances. Each of its five edge vertices is measured (x, z) to its hinge
+// vertex; the piece's share for vertex u (1..4) is d[u] / (d[u] + d[5 - u]) and the cap's table holds the same shares
+// in reverse order; both tables are 1 at their open end. The underground statics follow.
 bool cSC4PipeOccupant::StaticInit() {
     if (sbPipesInited) return false;
+    tCustomGeometryInfo& info = sCustomGeometryInfo;
+    float distance[5];
+    for (int i = 0; i < 5; ++i) {
+        const UndergroundVertex& edge = info.vertices[info.edge0VertIndices[i]];
+        const UndergroundVertex& hinge = info.vertices[info.hingeVertIndices[i]];
+        const float dx = edge.x - hinge.x, dz = edge.z - hinge.z;
+        distance[i] = std::sqrt(dx * dx + dz * dz);
+    }
+    sDiagonalPieceEdgeDistancePercentages[0] = 1.0f;
+    sDiagonalCapEdgeDistancePercentages[4] = 1.0f;
+    for (int u = 1; u < 5; ++u) {
+        const float share = distance[u] / (distance[u] + distance[5 - u]);
+        sDiagonalPieceEdgeDistancePercentages[u] = share;
+        sDiagonalCapEdgeDistancePercentages[4 - u] = share;
+    }
     sbPipesInited = true;
     return cSC4UndergroundOccupant::StaticInit();
 }

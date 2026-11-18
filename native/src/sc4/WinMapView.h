@@ -75,6 +75,9 @@ struct cRZRect;
 
 namespace sc4 {
 
+class cISC4CustomView;
+class cISC4OccupantFilter;
+
 class cISC4GrowthDeveloper;   // sc4/GrowthDeveloper.h
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -262,6 +265,14 @@ public:
     virtual void CityLots(std::vector<struct WinMapLot>& out) { (void)out; }
     // spBuildingDevelopmentSim vslot 0x84: the growth developer of a developer type (borrowed), or null.
     virtual const cISC4GrowthDeveloper* GrowthDeveloper(std::uint32_t type) { (void)type; return nullptr; }
+    // SetDataView's 3D side. spView3D vslot 0x4c SetCurrentViewFilterInfo (the view takes its own reference) and vslot
+    // 0x5c SetCurrentViewLevel (1 normal, 2 subway, 3 pipes).
+    virtual void SetViewFilter(cISC4OccupantFilter* filter) { (void)filter; }
+    virtual void SetViewLevel(std::uint32_t level) { (void)level; }
+    // spTerrain vslot 0x158 SetPlumbingInfoDisplayState / 0x150 SetWaterSurfaceDisplayState.
+    virtual void SetTerrainDisplay(bool plumbingInfo, bool waterSurface) { (void)plumbingInfo; (void)waterSurface; }
+    // SL::NetworkManager() vslot 0x48 GetWaterOccupantFilter / 0x4c GetSubwayOccupantFilter: one reference, or null.
+    virtual cISC4OccupantFilter* NetworkOccupantFilter(bool subway) { (void)subway; return nullptr; }
 };
 
 // One data view's exemplar (the properties SetDataView reads; `has*` = the property exists).
@@ -474,6 +485,7 @@ private:
     std::vector<std::uint32_t> watchedMessages_;   // +0xaa0
     std::list<std::uint32_t> viewStack_;       // +0xab8 (+0xac8 size)
     std::uint32_t cachedViewKey_ = 0;          // +0xad0
+    cISC4CustomView* customView_ = nullptr;   // i386 +0x9fc (counted): the pipe / subway view's custom view
     cIGZUnknown* viewExemplar_ = nullptr;      // +0xad8
     std::uint32_t baseView_ = 0;               // +0xae0
     bool shown_ = false;                       // +0xae4

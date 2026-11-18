@@ -564,6 +564,8 @@ src/sc4/WinResizableOutline.cpp
 src/sc4/ViewInputControlSignTool.cpp
 src/sc4/UndergroundNetworkTool.cpp
 src/sc4/PipeTool.cpp
+src/sc4/ComplexViewOccupantFilter.cpp
+src/sc4/UndergroundCustomView.cpp
 src/sc4/UndergroundOccupant.cpp
 src/sc4/VertexHtConstraintSatisfier.cpp
 src/sc4/WinAdviceList.cpp
@@ -592,6 +594,7 @@ src/gz/gzcom_creators/cSC4MyStreetSim.cpp
 src/gz/gzcom_creators/cSC4AdvisorCitySituations.cpp
 src/tools/city_probe_creators6.cpp
 src/sc4/PipeOccupant.cpp
+src/sc4/PipeOccupantGeometry.cpp
 src/sc4/PowerPoleOccupant.cpp
 src/sc4/CityDetailManager.cpp
 src/sc4/MyStreetSim.cpp

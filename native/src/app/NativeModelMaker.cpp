@@ -1,3 +1,6 @@
+#include "app/NativeCitySystems.h"
+#include "sc4/View3DWin.h"
+#include "sc4/UndergroundOccupant.h"
 #include "app/NativeModelMaker.h"
 
 #include <cstdio>
@@ -465,6 +468,27 @@ sc4::cSTETerrain* Terrain() {
 // cISC4LightingManager for network pieces: the terrain's shade under a corner (TerrainShade below), a fixed sun for
 // the add-on parts.
 std::uint8_t TerrainShade(int x, int z);
+// An underground piece's model: in the original the piece is its own model instance; here the model forwards to it
+// (bounds, position, sort value and its two-pass Draw: trench and walls, then the piece).
+class UndergroundPieceModel final : public s3d::cS3DModelInstanceBasic {
+public:
+    explicit UndergroundPieceModel(sc4::cSC4UndergroundOccupant& piece) : piece_(piece) {
+        SetOwner(static_cast<sc4::cISC4Occupant*>(&piece));
+    }
+    void GetWorldBounds(cS3DBoundingBox& out) override { piece_.GetBoundingBox(out.min, out.max); }
+    void GetTransform(cS3DTransform& out) override {
+        cS3DModelInstanceBasic::GetTransform(out);
+        float position[3];
+        piece_.GetPosition(position);
+        for (int i = 0; i < 3; ++i) out.translation[i] = position[i];
+    }
+    int Draw(SC4DrawContext* context, bool highlight) override { return context ? piece_.Draw(context, highlight) : 1; }
+    void GetSortValue(std::uint32_t& out) const override { piece_.GetSortValue(out); }
+
+private:
+    sc4::cSC4UndergroundOccupant& piece_;   // the piece's placeable object owns this model
+};
+
 class NetworkLighting final : public sc4::INetworkOccupantLighting {
 public:
     void TerrainLighting(const float p[3], std::uint8_t& r, std::uint8_t& g, std::uint8_t& b) override {
@@ -574,8 +598,14 @@ public:
     float ShadowViewScale() override { return 1.0f; }
     sc4::IShadowOverlay* ShadowOverlay(int) override { return native::TheShadowOverlay(); }
     sc4::cISC4OccupantFilter* CurrentViewFilter() override {
-        // The normal view's filter (cSC4DefaultOccupantFilter): everything but the underground pieces and the few props
-        // marked for other views. There is no pipe or subway view natively yet, the views that swap another filter in.
+        // The view's current filter (cSC4View3DWin +0x58, set by the data views: the pipe view's keeps the pipes), or
+        // the normal view's cSC4DefaultOccupantFilter: everything but the underground pieces and the few props marked
+        // for other views. One reference.
+        if (sc4::cSC4View3DWin* view = CityView3DWin()) {
+            sc4::cSC4ViewFilterInformation info;
+            view->GetCurrentViewFilterInfo(info);
+            if (info.filter) return static_cast<sc4::cISC4OccupantFilter*>(info.filter);
+        }
         auto* filter = new sc4::cSC4DefaultOccupantFilter();
         filter->AddRef();
         return filter;
@@ -772,6 +802,11 @@ bool AttachModelMaker(sc4::cSC43DRender& render, sc4::cSC4City& city) {
     static NetworkModelHost networkModelHost;
     sc4::SetNetworkModelHost(&networkModelHost);
     sc4::SetNetworkModelFactory([](sc4::cISC4Occupant* occupant) -> s3d::cIS3DModelInstance* {
+        if (auto* underground = dynamic_cast<sc4::cSC4UndergroundOccupant*>(occupant)) {   // pipes and subway pieces
+            auto* model = new UndergroundPieceModel(*underground);
+            model->AddRef();
+            return model;
+        }
         auto* network = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);
         if (!network) return nullptr;
         // The lighting manager lights a network piece when it enters the city (cSC4NetworkOccupant::UpdateLighting).

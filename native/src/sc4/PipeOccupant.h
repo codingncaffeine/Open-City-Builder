@@ -2,9 +2,8 @@
 // (network type 4, model instance offset 0x6000000) that adds one field: the watered state at +0x358 (0 dry, 1 watered;
 // the draw colour is looked up by it). Recovered from SimCity 4 Deluxe Edition 1.2.1 (0x1001a0ec8..0x1001a14c6).
 //
-// PARTIAL: the pipe statics (the diagonal-piece edge distances computed by StaticInit and the tCustomGeometryInfo piece
-// tables sCustomGeometryInfo) are not recovered; the geometry info is an empty table, so a pipe loads, saves and answers
-// its interfaces but builds no model.
+// The piece tables (sCustomGeometryInfo) are in PipeOccupantGeometry.cpp; StaticInit fills the two diagonal distance
+// tables.
 #pragma once
 #include "sc4/PipeOccupantView.h"
 #include "sc4/UndergroundOccupant.h"
@@ -37,7 +36,10 @@ public:
     void SetWateredState(bool watered);                                  // 0x1001a1404
     std::int32_t WateredState() const { return wateredState_; }
 
-    static bool StaticInit();                                            // 0x1001a106a (PARTIAL)
+    static bool StaticInit();                                            // 0x1001a106a (i386 0x001368d8)
+    static tCustomGeometryInfo sCustomGeometryInfo;                      // i386 0x00ab7a20
+    static float sDiagonalPieceEdgeDistancePercentages[5];              // i386 0x00bfa834
+    static float sDiagonalCapEdgeDistancePercentages[5];                // i386 0x00bfa820
 
 private:
     // The pipe-burst disaster's view of this pipe (kGZIID_PortPipeOccupantView): shares the pipe's count.

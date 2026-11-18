@@ -937,9 +937,159 @@ void cSC4UndergroundOccupant::CreateGeometry(bool update) {
     CreateFloor(update);
 }
 
-// PARTIAL: see the note at the definition below.
-void cSC4UndergroundOccupant::CreateUndergroundModel(int, bool, bool) {
-    // No-op (see UNDERGROUND-1): the piece model builder needs the derived statics' per-piece tables.
+// i386 0x0013fe30 (x64 0x1001acae0): the piece model of the solved piece. The six piece bindings (group 0x1abe787d,
+// instances from the geometry table's texture records) and the two vertex lists come from the piece tables:
+//   0xa00 / 0x800 / 0x1400 / 0x14e00  the diagonal piece (0x14e00 adds a second half turned by two)
+//   0x300                             the straight cap (cap top, then cap end)
+//   0x200                             the diagonal cap (cap top, then cap end)
+//   0x4b00                            the straight piece; a subway zipper uses the zipper tables
+// A piece without a model gets the custom model of exemplar {0x5ad0e817, 0xbadb57f1, offset | piece}. Then the wall
+// and trench bindings are made again, and the model is marked dirty.
+void cSC4UndergroundOccupant::CreateUndergroundModel(int rotation, bool flip, bool update) {
+    const std::uint8_t startRotation = GetRotation();   // vslot 0x60, before the rotation below
+    piece_.clear();
+    piece2_.clear();
+    for (auto*& binding : pieceTextures_) {
+        if (binding) binding->Release();
+        binding = nullptr;
+    }
+    if (customModel_) {
+        customModel_->Release();
+        customModel_ = nullptr;
+    }
+    const tCustomGeometryInfo* info = geometryInfo_;   // +0x268
+    const auto bind = [&](int slot, int record) {
+        if (g_host && info) pieceTextures_[slot] = g_host->CreateTextureBinding(kTextureBindingGroupZoom, info->textureRecords[record].instance);
+    };
+    const auto verts = [&](int index) { return static_cast<const UndergroundVertex*>(info->pieceArrays[index]); };
+    const auto indices = [&](int index) { return static_cast<const std::int32_t*>(info->pieceArrays[index]); };
+    const auto floats = [&](int index) { return static_cast<const float*>(info->pieceArrays[index]); };
+    const std::uint8_t flipBit = flip ? 0x80 : 0;
+    SetRotationAndFlip(static_cast<std::uint8_t>(flipBit | (rotation & 0xff)));   // vslot 0x140
+    // The edge each piece end meets: the turn after the rotation, and across for a flipped odd rotation.
+    const auto edgeAfter = [flip](int turn, int by) {
+        int edge = (turn + by) & 3;
+        if (flip && (turn == 1 || turn == 3)) edge = (edge + 2) & 3;
+        return edge;
+    };
+    const auto edgeAcross = [flip](int turn) {
+        const int edge = (turn + 2) & 3;
+        return (!flip || (turn != 0 && turn != 2)) ? edge : (edge + 2) & 3;
+    };
+    int edgeA = edgeAfter(rotation, 3);
+    int edgeB = edgeA;
+    const std::uint32_t piece = PieceId();   // +0xf8
+    if (info) {
+        switch (piece) {
+            case 0xa00: case 0x800: case 0x1400: case 0x14e00: {
+                bind(0, 14);
+                bind(2, 15);
+                bind(4, 16);
+                const int turned = (rotation + 2) & 3;
+                edgeB = edgeAcross(rotation);
+                MakeCustomUndergroundPiece(false, false, piece_, info->vertices, info->countB0, info->edge0VertIndices,
+                                           info->percentageCount, edgeA, info->edge1VertIndices, info->percentageCount,
+                                           edgeB, info->edgeDistancePercentages);
+                if (piece == 0x14e00) {   // the second half, turned by two
+                    SetRotationAndFlip(static_cast<std::uint8_t>(flipBit | turned));
+                    CreateTransformationMatrix();   // vslot 0x1a0
+                    const int secondA = edgeAfter(turned, 3);
+                    const int secondB = edgeAcross(turned);
+                    bind(1, 14);
+                    bind(3, 15);
+                    bind(5, 16);
+                    MakeCustomUndergroundPiece(false, false, piece2_, info->vertices, info->countB0, info->edge0VertIndices,
+                                               info->percentageCount, secondA, info->edge1VertIndices,
+                                               info->percentageCount, secondB, info->edgeDistancePercentages);
+                    SetRotationAndFlip(static_cast<std::uint8_t>(flipBit | ((turned + 2) & 3)));
+                    CreateTransformationMatrix();
+                }
+                break;
+            }
+            case 0x300:   // the straight cap
+                bind(0, 2);
+                bind(1, 2);
+                bind(2, 3);
+                bind(4, 4);
+                MakeCustomUndergroundPiece(false, false, piece_, verts(6), info->counts[2], indices(3), info->counts[1], edgeA,
+                                           nullptr, 0, 0, floats(5));
+                MakeCustomUndergroundPiece(false, false, piece2_, verts(7), info->counts[3], nullptr, 0, 0, nullptr, 0, 0, nullptr);
+                break;
+            case 0x200:   // the diagonal cap
+                bind(0, 14);
+                bind(1, 14);
+                bind(2, 15);
+                bind(4, 16);
+                MakeCustomUndergroundPiece(true, false, piece_, info->pieceVertices, info->countB8, info->pieceIndices,
+                                           info->countC0, edgeA, nullptr, 0, 0, info->hingeDistancePercentages);
+                MakeCustomUndergroundPiece(true, false, piece2_, info->pieceVertices2, info->countBC, nullptr, 0, 0, nullptr, 0,
+                                           0, nullptr);
+                break;
+            case 0x4b00: {   // the straight piece (a zipper where a subway changes depth)
+                const int edgeC = edgeAfter(rotation, 1);
+                bool zipperDirection = false;
+                const int zipper = GetZipperPieceType(zipperDirection);   // vslot 0x1d8
+                const UndergroundVertex* first = nullptr;
+                const UndergroundVertex* second = nullptr;
+                bool turn = false;
+                if (zipper == 1) {
+                    first = verts(2);
+                    second = verts(1);
+                    turn = zipperDirection && (startRotation == 0 || startRotation == 3);
+                    bind(0, 11);
+                    bind(1, 8);
+                    bind(2, 12);
+                    bind(3, 9);
+                    bind(4, 13);
+                    bind(5, 10);
+                } else if (zipper == 2) {
+                    first = verts(2);
+                    bind(0, 5);
+                    bind(2, 6);
+                    bind(4, 7);
+                } else {
+                    first = verts(0);
+                    bind(0, 2);
+                    bind(2, 3);
+                    bind(4, 4);
+                }
+                if (!pieceTextures_[0]) bind(0, 2);
+                if (!pieceTextures_[2]) bind(2, 3);
+                if (!pieceTextures_[4]) bind(4, 4);
+                if (turn) {
+                    SetRotationAndFlip(static_cast<std::uint8_t>(((GetRotation() + 2) & 3) | (GetRotationAndFlip() & 0x80)));
+                    CreateTransformationMatrix();
+                    edgeA = edgeC;
+                } else {
+                    edgeB = edgeC;
+                }
+                MakeCustomUndergroundPiece(false, false, piece_, first, info->counts[0], indices(3), info->counts[1], edgeA,
+                                           indices(4), info->counts[1], edgeB, floats(5));
+                if (second)
+                    MakeCustomUndergroundPiece(false, false, piece2_, second, info->counts[0], indices(3), info->counts[1],
+                                               edgeA, indices(4), info->counts[1], edgeB, floats(5));
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    if ((!pieceTextures_[0] || piece_.empty()) && g_host)   // spResMan vslot 0xc, exemplar 0x9ad0e7e3, vslot 0x10
+        customModel_ = g_host->CreateCustomModel(static_cast<std::uint32_t>(GetModelInstanceOffset()) | piece);
+    if (trenchTexture_) {
+        trenchTexture_->Release();
+        trenchTexture_ = nullptr;
+    }
+    if (pieceTexture_) {
+        pieceTexture_->Release();
+        pieceTexture_ = nullptr;
+    }
+    if (g_host && info) {
+        trenchTexture_ = g_host->CreateTextureBinding(kTextureBindingGroupPiece, info->textureRecords[1].instance);   // +0x8c
+        pieceTexture_ = g_host->CreateTextureBinding(kTextureBindingGroupPiece, info->textureRecords[0].instance);    // +0x78
+    }
+    if (update) ModelStateChanged(true);   // vslot 0x1dc
+    modelDirty_ = true;                    // +0x25e
 }
 
 // 0x1001ae37e: the piece became visible (or a neighbour did). Rebuilds the bounds and registers the model with the

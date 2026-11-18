@@ -29,6 +29,7 @@
 #include "sc4/Render3D.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/View3DWin.h"
+#include "sc4/WinMapView.h"
 #include "sc4/ViewInputControlNetworkTool.h"
 #include "sc4/ViewUtilities.h"
 #include "sc4/cSC4City.h"
@@ -301,13 +302,23 @@ public:
 
 };
 
+// The 3D view's view manager (the map view, iid 0x67c5bede), for one call.
+template <typename Fn>
+void WithViewManager(Fn&& fn) {
+    cIGZUnknown* unknown = g_view ? g_view->GetViewManager() : nullptr;
+    if (!unknown) return;
+    fn(static_cast<sc4::cISC4ViewManager*>(unknown));
+    unknown->Release();
+}
+
 class UIHost final : public sc4::INetworkToolUIHost {
 public:
     void PlaySound(std::uint32_t id) override { PlayGameSound(id); }
     void StartTick(cIGZMessageTarget2* target) override { StartToolTick(target, 0xff); }
     void StopTick(cIGZMessageTarget2* target) override { StopToolTick(target); }
-    void EnterToolView(std::uint32_t) override {}   // the pipe / subway views (SL::ViewManager) are not ported
-    void LeaveToolView(std::uint32_t) override {}
+    // SL::ViewManager() vslot 0x10 / 0x14: the map view's PushView / PopView (the pipe tool's view 0xf0 is the pipe view).
+    void EnterToolView(std::uint32_t view) override { WithViewManager([view](sc4::cISC4ViewManager* m) { m->PushView(view); }); }
+    void LeaveToolView(std::uint32_t view) override { WithViewManager([view](sc4::cISC4ViewManager* m) { m->PopView(view); }); }
     bool SetGridShown(bool shown) override { const bool old = g_gridShown; g_gridShown = shown; return old; }
     void ClearTerrainHighlight() override {}
     void BeginNetworkDrag() override {}
@@ -344,8 +355,9 @@ public:
 class InputHost final : public sc4::INetworkInputToolHost {
 public:
     sc4::cISC4View3DWin* View() override { return g_view; }
+    // GetNetworkTool(type, true): cSC4NetworkTool for the surface types, the pipe tool for type 4 (shared, never destroyed).
     sc4::cISC4NetworkTool* CreateNetworkTool(std::uint32_t type) override {
-        auto* tool = new sc4::cSC4NetworkTool(type);
+        sc4::cSC4NetworkTool* tool = type == 4 ? NativePipeTool() : new sc4::cSC4NetworkTool(type);
         tool->AddRef();
         return tool;
     }

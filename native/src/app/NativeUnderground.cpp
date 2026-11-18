@@ -2,8 +2,8 @@
 // (pipes and subway pieces) reach through engine globals in the original. The tool's hosts are the terrain, the occupant
 // manager and the resource manager; the occupant's are the city's cell mapping and the cell queries.
 //
-// PARTIAL: the occupant's drawing services (texture bindings, the renderer, custom piece models, mesh access) answer
-// nothing, as before: the underground view is not drawn natively. The base InsertRangeConstraintsForCell the tool's
+// PARTIAL: the occupant's custom piece models, mesh access and renderer registration answer nothing (the model maker
+// draws the pieces). The base InsertRangeConstraintsForCell the tool's
 // drag reaches (i386 0x1001b37e4) is not recovered, so dragging pipes is not wired either; the tool serves the network
 // manager's demolition and re-solve of pipes.
 #include "app/NativeUnderground.h"
@@ -12,9 +12,14 @@
 #include <list>
 
 #include "app/NativeCity.h"
+#include "app/NativeModelMaker.h"
 #include "gz/cGZPersistResourceKey.h"
 #include "gz/cGZPersistResourceManager.h"
+#include "sc4/ComplexViewOccupantFilter.h"
 #include "sc4/Exemplar.h"
+#include "sc4/Lot.h"
+#include "sc4/ZoneDeveloper.h"
+#include "sc4/UndergroundCustomView.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/PipeOccupant.h"
 #include "sc4/ServiceLocator.h"
@@ -112,10 +117,26 @@ private:
     cSC4UndergroundConnectionOccupant* connection_;
 };
 
+// cS3DTextureBinding as the pieces use it: the first word is the texture id (here the renderer's FSH texture).
+class TextureBinding final : public IUndergroundTextureBinding {
+public:
+    explicit TextureBinding(std::uint32_t id) : id_(id) {}
+    const std::uint32_t* TextureIds() override { return &id_; }
+    void Release() override { delete this; }
+
+private:
+    std::uint32_t id_;
+};
+
 class UndergroundOccupantHost final : public IUndergroundOccupantHost {
 public:
     void InitNetworkOccupantStatics() override {}
-    IUndergroundTextureBinding* CreateTextureBinding(std::uint32_t, std::uint32_t) override { return nullptr; }
+    // The texture binding factory (service 0xfac0e219) with key {0x7ab50e44, group, instance}: null when the game data
+    // has no such texture.
+    IUndergroundTextureBinding* CreateTextureBinding(std::uint32_t group, std::uint32_t instance) override {
+        const std::uint32_t id = instance ? FshTextureId(group, instance) : 0;
+        return id ? new TextureBinding(id) : nullptr;
+    }
     void PositionToCell(float x, float z, int& cellX, int& cellZ) override {   // SL::spCity vslot 0x2f8
         if (cSC4City* city = HostCity()) {
             city->PositionToCell(x, z, cellX, cellZ);
@@ -171,6 +192,31 @@ public:
     IUndergroundModelMeshes* ModelMeshes(s3d::cIS3DModelInstance*) override { return nullptr; }
 };
 
+// The data views' filter asks for the state of the lot under a lot texture (spLotManager GetLot(x, z, false), vslot 0x84).
+class ViewFilterHost final : public IComplexViewFilterHost {
+public:
+    int LotStateAt(int x, int z) override {
+        cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(CityComponent::ZoneDeveloper) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(0xe4fda3d4, &raw) || !raw) return -1;
+        auto* serializable = static_cast<cIGZSerializable*>(raw);
+        auto* lots = serializable->GetGZCLSID() == cSC4ZoneDeveloper::kZoneDeveloperClassId ? dynamic_cast<cSC4ZoneDeveloper*>(serializable) : nullptr;
+        serializable->Release();
+        cSC4Lot* lot = lots ? lots->GetLot(x, z, false) : nullptr;
+        return lot ? static_cast<int>(lot->GetState()) : -1;
+    }
+};
+
+// The pipe view's custom view: the city's size, its cells' occupants and the message server.
+class CustomViewHost final : public IUndergroundCustomViewHost {
+public:
+    int CityCellCountX() override { cSTETerrain* t = Terrain(); return t ? static_cast<int>(t->CellCountX()) : 0; }
+    int CityCellCountZ() override { cSTETerrain* t = Terrain(); return t ? static_cast<int>(t->CellCountZ()) : 0; }
+    void CellOccupants(int x, int z, std::list<cISC4Occupant*>& out) override { native::CellOccupants(x, z, out); }
+    cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
+};
+
 }  // namespace
 
 void NativeUndergroundCellsReport(int x, int z) {
@@ -204,6 +250,10 @@ void InstallUndergroundHosts() {
     static UndergroundOccupantHost occupant;
     SetUndergroundNetworkToolHost(&tool);
     SetUndergroundOccupantHost(&occupant);
+    static ViewFilterHost filter;
+    static CustomViewHost customView;
+    SetComplexViewFilterHost(&filter);
+    SetUndergroundCustomViewHost(&customView);
 }
 
 }  // namespace native

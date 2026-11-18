@@ -376,6 +376,7 @@ src/sc4/SubwayConnectionOccupant.cpp
 src/gz/gzcom_creators/cSC4SubwayOccupant.cpp
 src/gz/gzcom_creators/cSC4SubwayConnectionOccupant.cpp
 src/sc4/PipeOccupant.cpp
+src/sc4/PipeOccupantGeometry.cpp
 src/sc4/PowerPoleOccupant.cpp
 src/sc4/UndergroundConnectionOccupant.cpp
 src/sc4/UndergroundOccupant.cpp

@@ -17,8 +17,10 @@
 #include "gz/WinText.h"
 #include "gz/WinUtils.h"
 #include "gz/cIGZMessage2.h"
+#include "sc4/ComplexViewOccupantFilter.h"
 #include "sc4/GrowthDeveloper.h"
 #include "sc4/SimGridOps.h"
+#include "sc4/UndergroundCustomView.h"
 
 namespace sc4 {
 
@@ -178,6 +180,10 @@ cSC4WinMapView::~cSC4WinMapView() {   // 0x100349726
     if (viewExemplar_) {
         viewExemplar_->Release();
         viewExemplar_ = nullptr;
+    }
+    if (customView_) {   // the cRZAutoRefCount at +0x9fc
+        customView_->Release();
+        customView_ = nullptr;
     }
 }
 
@@ -1232,10 +1238,10 @@ void cSC4WinMapView::UpdateOccupancyMap(const cISC4GrowthDeveloper* developer) {
 // ---------------------------------------------------------------------------------------------------------------
 // SetDataView (0x100351858; i386 0x0027fc98): load the view's exemplar {0x6534284a, 0x690f693f, view + 0x4a0b6800}
 // and configure the map from it (data view, palettes, grid handling, highlights), then draw it.
-//   PARTIAL: the 3D side is not applied: the cSC4ComplexViewOccupantFilter (0x4a0b47e0/e1/e2, the network list
-//   0x4a0b47f1 and the pipe/subway inclusion), spView3D vslot 0x5c (underground mode 0x4a0b47e3) and 0x4c (filter),
-//   spTerrain 0x158/0x150, the zone manager's display (0x4a0b47e6), the building development view (0x4a0b47f0) and the
-//   custom view (GZCOM class 0x4a0b47eb, iid 0x8a175d6b).
+//   The 3D side: the view's cSC4ComplexViewOccupantFilter (0x4a0b47e0/e1/e2, the network list 0x4a0b47f1 and the
+//   pipe/subway inclusion) goes to spView3D vslot 0x4c, the underground mode (0x4a0b47e3) to vslot 0x5c and the terrain's
+//   plumbing / water display, and the custom view (class 0x4a0b47eb) starts.
+//   PARTIAL: the zone manager's display (0x4a0b47e6) and the building development view (0x4a0b47f0) are not applied.
 // ---------------------------------------------------------------------------------------------------------------
 bool cSC4WinMapView::SetDataView(std::uint32_t view) {
     if (!viewActive_) return false;
@@ -1245,8 +1251,19 @@ bool cSC4WinMapView::SetDataView(std::uint32_t view) {
         viewExemplar_->Release();
         viewExemplar_ = nullptr;
     }
+    if (customView_) {   // +0x9fc: the previous view's custom view ends (vslot 0x10)
+        customView_->ShutdownCustomView();
+        customView_->Release();
+        customView_ = nullptr;
+    }
     removeWatchedNotifications();   // UnhookUpdateMessages
     if (key == 0) {
+        auto* normal = new cSC4DefaultOccupantFilter();   // the normal view: level 1, water shown, the default filter
+        normal->AddRef();
+        g_host->SetViewLevel(1);
+        g_host->SetTerrainDisplay(false, true);
+        g_host->SetViewFilter(normal);
+        normal->Release();
         if (markedCells_) markedCells_->ClearMarkedCells();
         dataView_ = 0;
         clampGridToCity_ = false;
@@ -1266,6 +1283,43 @@ bool cSC4WinMapView::SetDataView(std::uint32_t view) {
     WinMapViewExemplar exemplar;
     if (!g_host->LoadDataViewExemplar(key, exemplar)) return false;
 
+    // The view's occupant filter: its occupant types (all others when it lists none, flipped by 0x4a0b47e1), plain lots
+    // unless 0x4a0b47e2, and the network types of its underground mode.
+    auto* filter = new cSC4ComplexViewOccupantFilter();
+    filter->AddRef();
+    bool includeUnlisted = true;
+    if (exemplar.hasOccupantGroups) {
+        for (std::uint32_t type : exemplar.occupantGroups)
+            if (type != 0) filter->OccupantTypes().push_back(type);
+        includeUnlisted = false;
+    }
+    if (exemplar.hasInvertGroups) includeUnlisted = exemplar.invertGroups;
+    filter->SetIncludeUnlistedTypes(includeUnlisted);
+    filter->SetIncludePlainLots(!(exemplar.hasHidePlain && exemplar.hidePlain));
+    std::uint32_t level = 1;   // 0x4a0b47e3: 1 = the pipes (level 3), 2 = the subway (level 2)
+    if (exemplar.hasUnderground) level = exemplar.underground == 1 ? 3 : exemplar.underground == 2 ? 2 : 1;
+    g_host->SetViewLevel(level);
+    g_host->SetTerrainDisplay(level == 3, level == 1);
+    // The network list (0x4a0b47f1, else the level): 0 shows every network but pipes and subways, 1 the pipes (every
+    // network but subways, the water filter forced in), 2 the subways (every network but pipes, the subway filter in).
+    int networks = level == 3 ? 1 : level == 2 ? 2 : level == 1 ? 0 : -1;
+    if (exemplar.hasNetworkList && exemplar.networkList <= 2) networks = static_cast<int>(exemplar.networkList);
+    if (networks >= 0) filter->SetIncludeUnlistedNetworks(true);
+    if (networks == 0) {
+        filter->NetworkTypes().push_back(4);
+        filter->NetworkTypes().push_back(7);
+    } else if (networks == 1) {
+        filter->NetworkTypes().push_back(7);
+        cISC4OccupantFilter* water = g_host->NetworkOccupantFilter(false);
+        filter->SetForceIncludePipeOccupants(water);
+        if (water) water->Release();
+    } else if (networks == 2) {
+        filter->NetworkTypes().push_back(4);
+        cISC4OccupantFilter* subway = g_host->NetworkOccupantFilter(true);
+        filter->SetForceIncludeSubwayOccupants(subway);
+        if (subway) subway->Release();
+    }
+
     if (exemplar.hasNetworkTypes) {   // 0x6b7c5cdd, at most 8
         networkTypeCount_ = static_cast<std::uint8_t>(std::min<std::size_t>(exemplar.networkTypes.size(), 8));
         for (int i = 0; i < networkTypeCount_; ++i) networkTypes_[i] = static_cast<std::uint8_t>(exemplar.networkTypes[i]);
@@ -1284,6 +1338,8 @@ bool cSC4WinMapView::SetDataView(std::uint32_t view) {
             }
         }
     }
+    g_host->SetViewFilter(filter);   // spView3D vslot 0x4c
+    filter->Release();
     if (markedCells_) markedCells_->ClearMarkedCells();
     dataView_ = exemplar.hasDataView ? exemplar.dataView : 0;
     if (markedCells_) markedCells_->SetShouldUseNetworkAltitude(dataView_ == 9 || dataView_ == kWinMapViewTraffic);
@@ -1306,6 +1362,10 @@ bool cSC4WinMapView::SetDataView(std::uint32_t view) {
     effectName_ = exemplar.hasEffectName ? exemplar.effectName : cRZString();
     lotShadeColor_ = exemplar.hasLotShadeColor ? exemplar.lotShadeColor : 0;
     circleColor_ = exemplar.hasCircleColor ? exemplar.circleColor : 0;
+    if (exemplar.hasCustomView) {   // GZCOM()->CreateInstance(class, 0x8a175d6b), then InitCustomView (vslot 0xc)
+        customView_ = CreateCustomView(exemplar.customView);
+        if (customView_) customView_->InitCustomView();
+    }
     UpdateHighlights();
     Update();
     if (IWinMapViewColorSink* map = g_host->ViewColorSink(parentWin())) {

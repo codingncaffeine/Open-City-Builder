@@ -366,6 +366,8 @@ void ListenForSavedView() {
 }
 
 bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* cityInterface, gd::cIGZGDriver* driver, gz::cIGZDrawContext* screen, int width, int height) {
+    // The city's view from here on: the model maker built below asks it for its filter (the previous city's view is gone).
+    native::SetCityView3DWin(&view);
     sc4::cSTETerrain* terrain = nullptr;
     if (auto* city = dynamic_cast<sc4::cSC4City*>(cityInterface)) {
         cIGZUnknown* terrainObject = city->GetComponent(sc4::CityComponent::Terrain);

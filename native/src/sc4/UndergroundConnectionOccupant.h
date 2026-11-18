@@ -48,6 +48,8 @@ public:
     void GetBoundingBox(float* minXyz, float* maxXyz) override;   // 0x1002f1154
     bool DoMessage(cIGZMessage2* message) override;            // 0x1002f25ea (PARTIAL)
     void GetWorldBounds(cS3DBoundingBox& out) override;        // 0x1002f246a
+    // i386 0x0022f440: a connection piece hides both triangles of its cell (the first answer is always false).
+    void GetHiddenTriangles(bool& first, bool& even, bool& odd) const { first = false; even = true; odd = true; }
 
     // the pure virtuals the pipe / subway connection classes answer
     virtual std::uint32_t GetGZIID() const = 0;                // slot of the derived class id
