@@ -314,9 +314,11 @@ public:
         return SC4WriteGZSerializable(stream, view ? LotSerializable(view->Lot()) : nullptr);
     }
     // The lot comes in its serializable adapter (the reader's reference stays with the adapter table: the lot outlives the event).
+    // SC4ReadGZSerializable(stream, 0xe818fced): the plain lot's adapter answers its serializable view (0xe4fda3d4) and the plain
+    // object, not the cISC4Lot id, so the read asks for the former (with 0xe818fced every saved incident lost its lot).
     ICrimeLot* ReadLot(cIGZIStream& stream) override {
         cIGZUnknown* adapter = nullptr;
-        SC4ReadGZSerializable(stream, 0xe818fced, reinterpret_cast<void**>(&adapter), false);
+        SC4ReadGZSerializable(stream, 0xe4fda3d4, reinterpret_cast<void**>(&adapter), false);
         void* plain = nullptr;
         if (!adapter || !adapter->QueryInterface(kGZIID_PlainObject, &plain) || !plain) return nullptr;
         auto* lot = static_cast<cSC4Lot*>(plain);
