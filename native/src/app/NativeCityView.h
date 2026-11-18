@@ -36,6 +36,7 @@ void NativeIgniteCell(int x, int z, bool force);   // kit command `ignite` (app/
 void NativeFireReport();                          // kit command `fires`
 void NativePipeBurstStart(int x, int z);           // kit command `pipeburst X Z` (-1 -1: the manager's own search)
 void NativePipeBurstReport();                      // kit command `pipebursts`
+void NativeLandfillReport();                        // kit command `landfill` (app/NativeLandfill.cpp)
 void NativeStartRiot(int cellX, int cellZ);       // kit command `riot` (app/NativeRiot.cpp)
 void NativeRiotReport();                          // kit command `riots`
 void NativeQueryReport(std::uint32_t skipUi, int limit);   // the query tool's buildings (querylist kit command; app/NativeQuery.cpp)

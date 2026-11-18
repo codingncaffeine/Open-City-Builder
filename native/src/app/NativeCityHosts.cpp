@@ -48,6 +48,7 @@ void InstallGraphsViewStub();
 void InstallGrowthDeveloperStub();
 void InstallHelicopterStub();
 void InstallLandfillDeveloperStub();
+void InstallLandfillDeveloperHost();   // NativeLandfill.cpp
 void InstallLightingManagerStub();
 void InstallLocalGridStub();
 void InstallLotStub();
@@ -161,6 +162,7 @@ void InstallStubHosts() {
     InstallGrowthDeveloperStub();
     InstallHelicopterStub();
     InstallLandfillDeveloperStub();
+    InstallLandfillDeveloperHost();       // the landfill developer's real host replaces the stub above
     InstallLightingManagerStub();
     InstallLocalGridStub();
     InstallLotStub();

@@ -1204,6 +1204,8 @@ int RunScenario(const std::string& path) {
             int x = -1, z = -1;
             words >> x >> z;
             native::NativePipeBurstStart(x, z);
+        } else if (command == "landfill") {   // landfill: the landfill zones, their garbage and tiles, and the city's garbage figures
+            native::NativeLandfillReport();
         } else if (command == "pipebursts") {   // pipebursts: every burst's leaking and waiting pipes
             native::NativePipeBurstReport();
         } else if (command == "pipecells") {   // pipecells X Z: the pipes and network pieces on the 3x3 cells around a cell

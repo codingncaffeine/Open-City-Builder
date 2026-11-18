@@ -49,6 +49,8 @@ class IPedestrianHost;
 extern IPedestrianHost* g_loadPedestrianHost;
 }
 namespace native {
+void NativeLandfillUsage(int& used, int& capacity);   // app/NativeLandfill.cpp
+int NativeLandfillTileCount();
 sc4::ITrafficAutomatonHost* NativeVehicleTrafficHost();   // app/NativeTrafficAutomata.cpp
 sc4::IVehicleHost* NativeVehicleHost();
 sc4::IPedestrianHost* NativePedestrianHost();
@@ -219,9 +221,9 @@ public:
         cSC4DepartmentBudget* department = budget ? budget->GetDepartmentBudget(0x6a42a8f5) : nullptr;
         return department ? department->GetFundingPercentage() : 1.0f;
     }
-    // PARTIAL: no landfill developer natively (no landfill zones yet): no free landfill space, no transport load.
-    void LandfillRange(int& low, int& high) override { low = high = 0; }
-    int LandfillTransportLoad() override { return 0; }
+    // The landfill developer (app/NativeLandfill.cpp): vslot 0x50 GetLandfillUsage (used, capacity), vslot 0x58 GetLandfillTileCount.
+    void LandfillRange(int& low, int& high) override { NativeLandfillUsage(low, high); }
+    int LandfillTransportLoad() override { return NativeLandfillTileCount(); }
     void PostMessage(std::uint32_t message, std::uint32_t arg) override {
         if (!SL::spMS2) return;
         auto* m = new cRZMessage2Standard();

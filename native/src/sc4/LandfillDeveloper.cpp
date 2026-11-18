@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "rz/cRZMessage2Standard.h"
+#include "sc4/ZoneDeveloper.h"
 #include "sc4/SCPropertyHelp.h"
 
 namespace sc4 {
@@ -229,8 +230,16 @@ bool cSC4LandfillDeveloper::DoMessage(cIGZMessage2* message) {
             }
         }
     } else if (type == kLandfillMessageZoneChange) {            // 0x07699455
-        auto* region = static_cast<const LandfillCellRegion*>(standard->GetVoid2());
-        DoZoneChange(region, static_cast<std::uint32_t>(standard->GetData3()));
+        // void2 is the zone manager's SC4CellRegion<int>; it becomes the landfill's own region type.
+        const auto* changed = static_cast<const SC4CellRegion<int>*>(standard->GetVoid2());
+        if (!changed) return true;
+        LandfillCellRegion region;
+        region.bounds = LandfillRect{changed->bounds.x0, changed->bounds.z0, changed->bounds.x1, changed->bounds.z1};
+        region.rowCount = changed->rowCount;
+        region.bitCount = changed->bitCount;
+        region.wordCount = changed->wordCount;
+        region.rows = changed->rows;
+        DoZoneChange(&region, static_cast<std::uint32_t>(standard->GetData3()));
     } else if (type == kLandfillMessageFundsChanged) {          // 0x0772fad4
         if (!department_) return true;
         const float funding = department_->GetFundingPercentage();   // read once, before the loop

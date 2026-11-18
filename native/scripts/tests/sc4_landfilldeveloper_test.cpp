@@ -29,6 +29,7 @@
 
 #include "rz/PortMemoryStreams.h"
 #include "rz/cRZMessage2Standard.h"
+#include "sc4/ZoneDeveloper.h"
 #include "sc4/SCProperty.h"
 
 namespace {
@@ -425,10 +426,17 @@ LandfillCellRegion MakeRegion(int x0, int z0, int x1, int z1) {
     return LandfillCellRegion::Make(x0, z0, x1, z1, true);
 }
 
+// The zone manager's message carries its own SC4CellRegion<int> (cSC4ZoneManager::PlaceZone), as in the game.
 void SendZoneChange(cSC4LandfillDeveloper* dev, LandfillCellRegion& region, std::uint32_t zoneType) {
+    SC4CellRegion<int> changed;
+    changed.bounds = SC4Rect<int>{region.bounds.x0, region.bounds.z0, region.bounds.x1, region.bounds.z1};
+    changed.rowCount = region.rowCount;
+    changed.bitCount = region.bitCount;
+    changed.wordCount = region.wordCount;
+    changed.rows = region.rows;
     cRZMessage2Standard message;
     message.SetType(kLandfillMessageZoneChange);
-    message.SetVoid2(&region);
+    message.SetVoid2(&changed);
     message.SetData3(zoneType);
     CHECK(dev->DoMessage(&message));
 }
