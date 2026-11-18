@@ -1196,6 +1196,12 @@ int RunScenario(const std::string& path) {
                 simulator->SetSimSpeed(speed);
                 std::printf("simspeed %d\n", speed);
             }
+        } else if (command == "simpause" || command == "simresume") {   // the simulator's pause count (a check that compares with the save)
+            if (sc4::cSC4Simulator* simulator = native::CitySimulatorObject()) {
+                if (command == "simpause") simulator->Pause();
+                else simulator->Resume();
+                std::printf("%s: paused %d\n", command.c_str(), simulator->IsPaused() ? 1 : 0);
+            }
         } else if (command == "ignite") {   // ignite X Z [force]: sets the occupants of a city cell alight (the torch's call)
             int x = 0, z = 0;
             std::string force;
