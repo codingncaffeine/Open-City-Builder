@@ -971,6 +971,7 @@ void TestDataViewImage() {
 // Update's lot shading and coverage circles over the active highlights: the occupant's cells scaled to the map, blended in the
 // lot colour; a 2 px ring at the coverage radius in the circle colour, nothing at the centre.
 void TestHighlightOverlay() {
+    FakeOccupant occupant;   // outlives the view, which releases its highlights when it is destroyed
     Fixture f;
     f.view->Init();
     auto* activate = new cRZMessage2Standard();
@@ -988,7 +989,6 @@ void TestHighlightOverlay() {
     f.host.exemplar.hasCircleColor = true;
     f.host.exemplar.circleColor = 0xffff0000u;     // opaque red
     f.host.grid8.assign(4, std::vector<std::uint8_t>(4, 0));
-    FakeOccupant occupant;
     occupant.cells = SC4CellRect{0, 0, 0, 0};       // cell (0, 0) -> pixels 0..16
     occupant.position[0] = 32.0f;                   // the ring's centre (x, z) = (32, 32)
     occupant.position[2] = 32.0f;
@@ -1011,6 +1011,7 @@ void TestHighlightOverlay() {
 
 // ActivateHighlight: the effect it makes is kept by the active record and outlives the call that made it.
 void TestHighlightEffect() {
+    FakeOccupant occupant;   // outlives the view, which releases its highlights when it is destroyed
     Fixture f;
     f.view->Init();
     auto* activate = new cRZMessage2Standard();
@@ -1026,7 +1027,6 @@ void TestHighlightEffect() {
     f.host.exemplar.hasEffectName = true;
     f.host.exemplar.effectName = cRZString("PlopMode_Education_Existing");
     f.host.grid8.assign(4, std::vector<std::uint8_t>(4, 0));
-    FakeOccupant occupant;
     f.host.highlights = {WinMapHighlight{&occupant, 10.0f}};
     CHECK(f.view->SetDataView(7));
     FakeEffect* effect = f.host.lastEffect;
