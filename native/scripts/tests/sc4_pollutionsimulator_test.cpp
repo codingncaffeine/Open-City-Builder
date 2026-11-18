@@ -35,6 +35,18 @@ public:
     int LandfillTransportLoad() override { return load; }
     void PostMessage(std::uint32_t m, std::uint32_t a) override { messages.push_back({m, a}); }
     void AddHistory(std::uint32_t id, std::int64_t v) override { history.push_back({id, v}); }
+    void AddAgent(cIGZMessageTarget2*, int, const char*, std::uint32_t) override {}
+    void RemoveAgent(cIGZMessageTarget2*) override {}
+    void AddNotification(cIGZMessageTarget2*, std::uint32_t) override {}
+    void RemoveNotification(cIGZMessageTarget2*, std::uint32_t) override {}
+    const cISCPropertyHolder* SimulatorExemplar() override { return nullptr; }
+    void CreateHistory(std::uint32_t, std::uint32_t) override {}
+    float OrdinanceFactor(std::uint32_t, std::uint32_t) override { return 0.0f; }
+    int ZoneTypeAt(int, int) override { return 0; }
+    std::uint8_t TrafficAirAt(int, int) override { return 0; }
+    void GarbageDeals(std::uint32_t, std::vector<IPollutionDeal*>&) override {}
+    void SetSanitationLineItemCost(int, std::int64_t) override {}
+    bool OccupantFootprint(void*, PollutionOccupantFootprint&) override { return false; }
 };
 }  // namespace
 
