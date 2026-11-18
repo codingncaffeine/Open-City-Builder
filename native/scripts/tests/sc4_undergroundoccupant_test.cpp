@@ -381,12 +381,12 @@ int main() {
         CHECK(!host.connections.empty() && host.connections.back()->releases == 1);
         host.connectionPresent = false;
 
-        // a real neighbour connection on edge 3 (+x) removes that wall
+        // a real neighbour connection on edge 3 (+z) removes that wall
         auto* neighbour = new TestOccupant();
         neighbour->AddRef();
         CHECK(neighbour->Init(kCorners, kGZIID_cSC4PipeOccupant, &neighbour->info));
         neighbour->SetQuadDraw(kUndergroundPieceStraight, 0x00);
-        host.cells[{2, 2}] = neighbour;
+        host.cells[{1, 3}] = neighbour;
         occupant->SetEdgeType(4, 3, 1);
         occupant->SetNetworkFlag(1u << 4);
         occupant->SetQuadDraw(kUndergroundPieceStraight, 0x00);
@@ -442,13 +442,13 @@ int main() {
         host.inCity = true;
         host.rendererAdds.clear();
         occupant->SetFlag(2);
-        // a neighbour on edge 3 (+x) is told to rebuild
+        // a neighbour on edge 2 (+x) is told to rebuild
         auto* other = new TestOccupant();
         other->AddRef();
         CHECK(other->Init(kCorners, kGZIID_cSC4PipeOccupant, &other->info));
         other->SetQuadDraw(kUndergroundPieceStraight, 0x00);
         host.cells[{2, 2}] = other;
-        occupant->SetEdgeType(4, 3, 1);
+        occupant->SetEdgeType(4, 2, 1);
         occupant->SetNetworkFlag(1u << 4);
         occupant->SetQuadDraw(kUndergroundPieceStraight, 0x00);
         CHECK(!other->ModelDirty());
@@ -564,6 +564,19 @@ int main() {
         occupant->MakeCustomUndergroundPiece(false, false, piece, source, 3, hookup, 1, 0, nullptr, 0, 0, nullptr);
         CHECK(piece.size() == 3);
         CHECK_NEAR(piece[1].y, 17.5f);   // the model y minus (model y - the neighbour's hookup height)
+        // edgeToCellOffset (i386 0x00bfb1a0): edge 2 is +x and edge 3 is +z, so both ends of a run find their neighbour
+        host.cells.clear();
+        host.cells[{2, 2}] = crossing;   // edge 2 = +x; the crossing reports its edge 0 -> (5 + 6) / 2 + 10 = 15.5
+        occupant->MakeCustomUndergroundPiece(false, false, piece, source, 3, nullptr, 0, 0, hookup, 1, 2, nullptr);
+        CHECK_NEAR(piece[1].y, 15.5f);
+        host.cells.clear();
+        host.cells[{1, 3}] = crossing;   // edge 3 = +z; the crossing reports its edge 1
+        float edge1 = 0.0f;
+        bool edge1Valid = false;
+        crossing->GetHookupData(edge1, edge1Valid, 1);
+        occupant->MakeCustomUndergroundPiece(false, false, piece, source, 3, nullptr, 0, 0, hookup, 1, 3, nullptr);
+        CHECK(edge1Valid);
+        CHECK_NEAR(piece[1].y, edge1);
         host.cells.clear();
         crossing->Release();
     }
@@ -580,7 +593,7 @@ int main() {
         for (TestOccupant* p : {subway, p1, p2, p3, p4}) p->AddRef();
         CHECK(subway->Init(subwayCorners, kGZIID_cSC4SubwayOccupant, &subway->info));
         subway->SetQuadDraw(kUndergroundPiecePipe, 0x00);
-        const int cellXY[4][2] = {{1, 1}, {1, 0}, {1, -1}, {2, 2}};
+        const int cellXY[4][2] = {{1, 1}, {1, 0}, {1, -1}, {1, 3}};
         TestOccupant* chain[4] = {p1, p2, p3, p4};
         for (int i = 0; i < 4; ++i) {
             float corners[4][3];
@@ -593,9 +606,9 @@ int main() {
         host.cells[{1, 1}] = p1;
         host.cells[{1, 0}] = p2;
         host.cells[{1, -1}] = p3;
-        host.cells[{2, 2}] = p4;
+        host.cells[{1, 3}] = p4;
         CHECK(subway->GetZipperCandidateCount(p1, 1, 4) == 3);   // p1 -> p2 -> p3
-        // rotation 0: edge 3 (+x) has one candidate, edge 1 (-z) has three -> the zipper faces +x
+        // rotation 0: edge 3 (+z) has one candidate, edge 1 (-z) has three -> the zipper faces +z
         bool param = false;
         CHECK(subway->GetZipperPieceType(param) == 1);
         CHECK(param == true);

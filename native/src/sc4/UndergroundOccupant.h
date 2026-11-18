@@ -207,8 +207,9 @@ public:
 IUndergroundOccupantHost* UndergroundOccupantHost();
 void SetUndergroundOccupantHost(IUndergroundOccupantHost* host);
 
-// the cell offset of each edge (0 = -x, 1 = -z, 2 = +z, 3 = +x); edgeToCellOffset @ 0x100a1a290
-constexpr std::int32_t kEdgeCellOffset[4][2] = {{-1, 0}, {0, -1}, {0, 1}, {1, 0}};
+// the cell offset of each edge (0 = -x, 1 = -z, 2 = +x, 3 = +z); edgeToCellOffset, i386 0x00bfb1a0 (filled by the
+// static initializer at 0x00a808ca)
+constexpr std::int32_t kEdgeCellOffset[4][2] = {{-1, 0}, {0, -1}, {1, 0}, {0, 1}};
 
 // ---- the occupant -------------------------------------------------------------------------------------------
 // The methods that are vtable slots in the original are virtual here even where the recovered base class has a
