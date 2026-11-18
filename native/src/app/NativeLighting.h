@@ -24,6 +24,8 @@ void ShutdownCityLighting();
 // The city's 24-hour clock (a plain cSC424HourClock; null: fall back to the simulator's counters). Its visual time is the sun's.
 void SetLightingClock(sc4::cSC424HourClock* clock);
 sc4::cSC4LightingManager* LightingManager();
+void NativeSetClockHour(int hour);   // the kit's `hour N`: the city clock jumps to the hour (SetHour, its messages included)
+int NativeClockHour();               // the city clock's hour (-1 without a clock)
 // The day / night menu (cSC4View3DWin::DoDayNightMenu through the host): the clock's visual time mode (0 cycle, 1 day, 2 night; -1 keeps it).
 void SetCityDayNightMode(int mode);
 

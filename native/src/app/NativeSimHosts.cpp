@@ -60,7 +60,7 @@ void NativeRegisterDispatchSource(std::uint32_t type, bool add);
 void InstallNativeDispatchHost();
 }
 namespace sc4 { class IFlammabilityHost; }
-namespace native { sc4::IFlammabilityHost* NativeFlammabilityHost(); void InstallCrimeHost(); }
+namespace native { sc4::IFlammabilityHost* NativeFlammabilityHost(); void InstallCrimeHost(); void InstallClockHost(); }
 #include "sc4/PoliceSimulator.h"
 #include "sc4/ResidentialSimulator.h"
 #include "sc4/Simulator.h"
@@ -671,6 +671,7 @@ void InstallNativeSimHosts() {
     hosts.fire = &g_fire;
     hosts.flammability = NativeFlammabilityHost();   // app/NativeDisasters.cpp
     InstallCrimeHost();                              // app/NativeCrime.cpp: before the city creates its crime simulator
+    InstallClockHost();                              // app/NativeLighting.cpp: before the city creates its 24-hour clock
     hosts.police = &g_police;
     hosts.residential = &g_residential;
     hosts.commercial = &g_commercial;

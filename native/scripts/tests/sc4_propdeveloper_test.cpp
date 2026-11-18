@@ -287,7 +287,7 @@ struct FakePropManager final : IPropManagerApi {
     int refs = 0, releases = 0;
     void AddRef() override { ++refs; }
     void Release() override { ++releases; }
-    bool IsPropFamilyTypeValid(std::uint32_t type) override { return families.count(type) != 0; }
+    bool IsPropTypeValid(std::uint32_t type) override { return profiles.count(type) != 0; }
     int GetPropTypesByFamily(std::vector<std::uint32_t>& out, std::uint32_t family) override {
         const auto it = families.find(family);
         if (it == families.end()) return 0;
@@ -1368,11 +1368,19 @@ void TestGlobalEffectAndTerrainMessages() {
     CHECK(sign->position[1] == 7.5f);
     // Day/night message with a pinned clock.
     fixture.host.clock.mode = 2;   // midnight
+    const int callsBefore = fixture.host.power.calls;
     message = cRZMessage2Standard();
     message.SetType(kPropMessageDayNightChanged);
-    message.SetData1(0);           // day, but the view is pinned to midnight
+    message.SetData1(0);           // the clock posts the flag in data2 (i386 0x00122002): data1 is not read
+    message.SetData2(1);           // night: nothing to switch while pinned to midnight
     CHECK(developer->DoMessage(&message));
-    CHECK(fixture.host.power.calls > 0);
+    CHECK(fixture.host.power.calls == callsBefore);
+    message = cRZMessage2Standard();
+    message.SetType(kPropMessageDayNightChanged);
+    message.SetData1(1);
+    message.SetData2(0);           // day, but the view is pinned to midnight
+    CHECK(developer->DoMessage(&message));
+    CHECK(fixture.host.power.calls > callsBefore);
     // City init re-reads the lighting manager.
     fixture.host.lighting.night = true;
     message = cRZMessage2Standard();
@@ -1434,9 +1442,9 @@ std::vector<unsigned char> MakeReadStream() {
     };
     u16(5);   // version
     u8(2);    // phase
-    u8(0);    // scan cursor: state
-    u32(0); u32(0); u32(0);                                      // x, z, remaining
-    u32(0x80000000u); u32(0x7fffffffu); u32(0x80000000u); u32(0x7fffffffu);   // the cursor's rectangle
+    u8(1);    // scan cursor: state
+    u32(6); u32(4); u32(1);                                      // x, z, step
+    u32(0); u32(0); u32(15); u32(9);                             // the tract rectangle x0, z0, x1, z1
     u8(0);    // requester created
     u32(0);   // requesters
     u32(3);   // animation index
@@ -1464,9 +1472,9 @@ void TestStreams() {
         const std::vector<unsigned char> expected = {
             5, 0,           // version
             1,              // phase
-            0,              // scan cursor: state
-            0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,                // x, z, remaining
-            0, 0, 0, 0x80,  0xff, 0xff, 0xff, 0x7f,  0, 0, 0, 0x80,  0xff, 0xff, 0xff, 0x7f,   // rectangle
+            0,              // scan cursor: state (i386 0x000d76c4 streams the whole iterator)
+            0, 0, 0, 0,  0, 0, 0, 0,  1, 0, 0, 0,                // x, z, step
+            0, 0, 0, 0,  0, 0, 0, 0,  1, 0, 0, 0,  1, 0, 0, 0,   // the tract rectangle Init made for the fixture city: 0,0..1,1
             1,              // requester created
             1, 0, 0, 0,     // one requester (its own bytes are skipped on a plain stream)
             0, 0, 0, 0,     // animation index
@@ -1489,6 +1497,9 @@ void TestStreams() {
         PortMemoryIStream stream(bytes.data(), bytes.size());
         CHECK(developer->Read(stream));
         CHECK(developer->Phase() == 2);
+        CHECK(developer->CursorState() == 1 && developer->CursorX() == 6 && developer->CursorZ() == 4);
+        CHECK(developer->TractRect().x0 == 0 && developer->TractRect().z0 == 0);
+        CHECK(developer->TractRect().x1 == 15 && developer->TractRect().z1 == 9);
         CHECK(developer->AnimationMode() == 1);
         CHECK(developer->AnimationBatch() == 2);
         CHECK(developer->IsNight());

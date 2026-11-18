@@ -8,19 +8,24 @@
 #include <memory>
 #include <vector>
 
+#include "app/NativeCity.h"
 #include "app/NativeUi.h"
 #include "rz/cRZMessage2Standard.h"
 #include "gz/Buffer.h"
 #include "gz/cGZPersistResourceManager.h"
+#include "sc4/CommonIIDs.h"
 #include "sc4/Exemplar.h"
 #include "sc4/LightingManager.h"
 #include "sc4/cSC424HourClock.h"
+#include "sc4/cSC4City.h"
 #include "sc4/Render3D.h"
 #include "sc4/RenderProperties.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/Simulator.h"
 #include "sc4/ViewUtilities.h"
 #include "sc4/cSTETerrain.h"
+
+namespace sc4 { void SetCityProbeClockHost(IClockHost* host); }   // tools/city_probe_bindings.cpp
 
 namespace native {
 namespace {
@@ -35,10 +40,25 @@ bool g_relight = false;
 float g_lastHour = -1.0f;
 sc4::cSC424HourClock* g_clock = nullptr;
 
+// cSC424HourClock::PostMessageServerMessage (i386 0x00122002): a posted standard message with the clock as void1 and as the
+// message object, the two values in data2 and data3 (the prop developer, the city view, the vehicles and the controllers read them).
 class ClockHost final : public sc4::IClockHost {
 public:
-    void PostMessage(std::uint32_t, std::uint32_t, std::uint32_t) override {}   // nobody listens to the hour messages natively yet
-};
+    void PostMessage(std::uint32_t type, std::uint32_t data2, std::uint32_t data3) override {
+        if (!SL::spMS2) return;
+        sc4::cSC4City* city = HostCity();
+        cIGZUnknown* clock = city ? city->GetComponent(sc4::CityComponent::Clock24Hour) : nullptr;
+        auto* message = new cRZMessage2Standard();
+        message->AddRef();
+        message->SetType(type);
+        message->SetVoid1(clock);
+        message->SetIGZUnknown(clock);
+        message->SetData2(data2);
+        message->SetData3(data3);
+        SL::spMS2->MessagePost(message, false);
+        message->Release();
+    }
+} g_clockHost;
 
 // The hour the sun is at: the clock's visual time (hours, fractional), else the simulator's hour and minute counters.
 float SunHour() {
@@ -175,6 +195,9 @@ void SetCityDayNightMode(int mode) {
     if (mode >= 0) g_clock->SetVisualTimeMode(static_cast<sc4::cSC424HourClock::VisualTimeMode>(mode));
 }
 
+// The city's 24-hour clock is made by the city's class factory with this host (its messages reach the message server).
+void InstallClockHost() { sc4::SetCityProbeClockHost(&g_clockHost); }
+
 void SetLightingClock(sc4::cSC424HourClock* clock) {
     g_clock = clock;
     if (clock && std::getenv("SC4_DEBUG")) std::fprintf(stderr, "clock: game %u:%02u visual %u:%02u mode %d paused %d\n", clock->GetHour(), clock->GetMinute(), clock->GetVisualHour(), clock->GetVisualMinute(), int(clock->GetVisualTimeMode()), clock->IsPaused());
@@ -190,8 +213,7 @@ void InitCityLighting(sc4::cSTETerrain* terrain, sc4::cSC43DRender* render, sc4:
     g_inited = true;
     g_manager->Init();
     if (!g_clock) {   // the city carries no clock component natively: run the recovered 24-hour clock ourselves, starting at the HUD's 10:00
-        static ClockHost clockHost;
-        static sc4::cSC424HourClock ownClock(&clockHost);
+        static sc4::cSC424HourClock ownClock(&g_clockHost);
         ownClock.Init();
         ownClock.SetHour(10);
         ownClock.SetMinute(0);
@@ -252,6 +274,23 @@ void TickLighting() {
         // store was lit for the old time of day
         if (g_render) g_render->ForceFullRedraw();
     }
+}
+
+void NativeSetClockHour(int hour) {
+    sc4::cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::Clock24Hour) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(kGZIID_PlainObject, &raw) || !raw) { std::printf("hour: no clock\n"); return; }
+    static_cast<sc4::cSC424HourClock*>(raw)->SetHour(static_cast<std::uint32_t>(hour));
+    std::printf("hour: clock set to %d\n", hour);
+}
+
+int NativeClockHour() {
+    sc4::cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::Clock24Hour) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(kGZIID_PlainObject, &raw) || !raw) return -1;
+    return static_cast<int>(static_cast<sc4::cSC424HourClock*>(raw)->GetHour());
 }
 
 }  // namespace native

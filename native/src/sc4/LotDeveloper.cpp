@@ -1034,6 +1034,24 @@ cISC4Occupant* cSC4LotDeveloper::SelectAndCreateLotProp(cSC4Lot* lot, std::uint3
     return prop;
 }
 
+// @ i386 0x000ee79c (vslot 0x1f8, the prop developer's call): the prop of one configuration object with the type the caller chose,
+// at the object's place on the lot, tagged with the object's id. The original does not check the object index.
+cISC4Occupant* cSC4LotDeveloper::CreateLotProp(cSC4Lot* lot, std::uint32_t objectIndex, std::uint32_t propType) {
+    if (!lot || !g_construction) return nullptr;
+    cSC4LotConfiguration* configuration = g_construction->Configuration(lot->GetLotConfiguration());   // lot vslot 0x24
+    if (!configuration) return nullptr;
+    const std::vector<cSC4LotConfigurationObject>& objects = configuration->GetLotConfigurationObjectArray();
+    if (objectIndex >= objects.size()) return nullptr;                              // (port guard: an index past the end)
+    const cSC4LotConfigurationObject& object = objects[objectIndex];
+    float position[3] = {0.0f, 0.0f, 0.0f};
+    std::int32_t rotation = 0;
+    GetPositionForLotConfigurationObject(lot, configuration, &object, position, rotation);   // vslot 0x9c
+    if (propType == 0) return nullptr;
+    cISC4Occupant* prop = g_construction->AddLotProp(propType, position, rotation);   // prop manager slot 25
+    if (prop) prop->SetLotTag(object.id);                                           // occupant vslot 0x70
+    return prop;
+}
+
 // @ i386 0x000f2172. One texture per base-texture object (type 2) of the configuration, at the cell the object lands on, turned
 // with the lot, picked for the lot's wealth and condition; the lot's texture occupant takes them (inserted, or moved and
 // announced when it is already in). With forced empty textures a lot outside zones 0, 11, 12 and 15 shows its zone instead.

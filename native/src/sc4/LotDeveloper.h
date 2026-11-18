@@ -315,6 +315,7 @@ public:
     void SetNormalLotBaseTexture(cSC4Lot* lot, cSC4LotConfiguration* configuration);                                 // vslot 0xb0
     void AddLotProps(cSC4Lot* lot, cSC4LotConfiguration* configuration);                                             // i386 0x000ef4c0
     cISC4Occupant* SelectAndCreateLotProp(cSC4Lot* lot, std::uint32_t objectIndex);                                 // i386 0x000ef38a
+    cISC4Occupant* CreateLotProp(cSC4Lot* lot, std::uint32_t objectIndex, std::uint32_t propType);                 // i386 0x000ee79c (slot 63)
     void AddLotFlora(cSC4Lot* lot, cSC4LotConfiguration* configuration);                                             // i386 0x000f2ffe
     std::uint32_t PickFloraTypeForLot(const std::vector<std::uint32_t>& types);                                      // i386 0x000f2efa
     std::uint32_t PickLotBaseTextureForLot(cSC4Lot* lot, const std::vector<std::uint32_t>& textures);               // i386 0x000ef182

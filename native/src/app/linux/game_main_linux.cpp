@@ -1177,6 +1177,11 @@ int RunScenario(const std::string& path) {
             DumpTree(gMgr->GetMainWindow(), 0, depth);
         } else if (command == "registry") {   // registry: the game-data registry's entry tree
             native::NativeRegistryReport();
+        } else if (command == "hour") {   // hour N: the city clock jumps to hour N (its hour, minute and day/night messages)
+            int hour = 12; words >> hour;
+            native::NativeSetClockHour(hour);
+        } else if (command == "propdev") {   // propdev: the prop developer's lists (night lights, timed, seasonal, power, signs)
+            native::NativePropDeveloperReport();
         } else if (command == "animated") {   // animated [N]: the animation coordinator and the first N ticking props' frames
             int limit = 8;
             words >> limit;

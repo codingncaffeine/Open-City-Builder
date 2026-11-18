@@ -219,7 +219,7 @@ public:
 
 class IPropManagerApi : public IPropDeveloperService {
 public:
-    virtual bool IsPropFamilyTypeValid(std::uint32_t type) = 0;                                  // vslot 0x40
+    virtual bool IsPropTypeValid(std::uint32_t type) = 0;                                        // vslot 0x40 (i386 0x20)
     virtual int GetPropTypesByFamily(std::vector<std::uint32_t>& out, std::uint32_t family) = 0;  // vslot 0x48
     // vslot 0x68: the prop record of a type. Only +0x10 (valueA, property 0x49a1e05a) is read: it is the
     // satisfaction id of the requester the prop was made for.
@@ -420,6 +420,11 @@ public:
     std::uint32_t AnimationBatch() const { return animationBatch_; }
     std::uint32_t ReferenceCount() const { return refCount_; }
     const std::vector<cISC4PropRequester*>& Requesters() const { return requesters_; }
+    // Instrument (not in the original): what the tract walk has seen and done since the developer was made.
+    struct WalkStats {
+        std::int64_t tracts = 0, lotsFound = 0, lotsLivable = 0, networkLots = 0, tractsWithLots = 0, noShare = 0, slots = 0, kept = 0, removed = 0, createCalls = 0, created = 0;
+    };
+    const WalkStats& Stats() const { return stats_; }
     const std::vector<cISC4PropOccupant*>& StateProps() const { return stateProps_; }
     const std::list<cISC4PropOccupant*>& TimeProps() const { return timeProps_; }
     const std::list<cISC4PropOccupant*>& DateProps() const { return dateProps_; }
@@ -473,6 +478,7 @@ private:
     IPropPowerApi* powerSimulator_ = nullptr;       // +0xa48
     IPropNetworkLotManagerApi* networkLotManager_ = nullptr;   // +0xa50
     // +0xa58
+    WalkStats stats_;
     std::vector<cISC4PropOccupant*> stateProps_;
     // +0xa70
     std::uint32_t animationIndex_ = 0;

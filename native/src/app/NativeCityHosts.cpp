@@ -13,6 +13,7 @@ void InstallAmbienceStateStub();
 void InstallSoundBankStub();
 void InstallAuraStub();
 void InstallAuraHost();   // app/NativeAura.cpp
+void InstallPropDeveloperHost();   // app/NativePropDeveloper.cpp
 void InstallAutomataAttractorStub();
 void InstallAutomataControllerStub();
 void InstallAutomataControllerHost();   // app/NativeAutomataControllerHost.cpp
@@ -192,6 +193,7 @@ void InstallStubHosts() {
     InstallPortDeveloperStub();
     InstallPowerLineToolStub();
     InstallPropDeveloperStub();
+    InstallPropDeveloperHost();   // the prop developer's real host replaces the stub
     InstallPropManagerStub();
     InstallPropStub();
     InstallPropControllerStub();

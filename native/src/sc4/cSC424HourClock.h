@@ -26,7 +26,8 @@
 
 namespace sc4 {
 
-// Message ids posted by the clock (target: the clock itself; data1/data2 as listed).
+// Message ids posted by the clock. The host posts them with the clock as void1 and object and the two values in data2 and data3
+// (i386 PostMessageServerMessage 0x00122002); "data1/data2" below name the two values in that order.
 enum ClockMessage : std::uint32_t {
     kMsgHourChanged = 0x44778230,        // data1 = hour
     kMsgMinuteChanged = 0x44778231,      // data1 = hour, data2 = minute (5-minute steps)

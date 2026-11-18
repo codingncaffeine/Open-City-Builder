@@ -630,13 +630,18 @@ namespace { ICrimeHost* g_crimeHostOverride = nullptr; }
 // The native game's crime host (app/NativeCrime.cpp) replaces the neutral one for the simulators created after this call.
 void SetCityProbeCrimeHost(ICrimeHost* host) { g_crimeHostOverride = host; }
 ICrimeHost* CityProbeCrimeHost() { return g_crimeHostOverride ? g_crimeHostOverride : &g_ICrimeHost; }
-IWealthHost* CityProbeWealthHost() { return &g_IWealthHost; }
+namespace { IWealthHost* g_wealthHostOverride = nullptr; IClockHost* g_clockHostOverride = nullptr; }
+// The native game's wealth host (app/NativePropDeveloper.cpp) and clock host (app/NativeLighting.cpp) replace the neutral ones
+// for the objects created after these calls (saved prop requesters, the city's 24-hour clock).
+void SetCityProbeWealthHost(IWealthHost* host) { g_wealthHostOverride = host; }
+void SetCityProbeClockHost(IClockHost* host) { g_clockHostOverride = host; }
+IWealthHost* CityProbeWealthHost() { return g_wealthHostOverride ? g_wealthHostOverride : &g_IWealthHost; }
 INeighborsHost* CityProbeNeighborsHost() { return &g_INeighborsHost; }
 IWeatherHost* CityProbeWeatherHost() { return &g_IWeatherHost; }
 ICommercialHost* CityProbeCommercialHost() { return &g_ICommercialHost; }
 ILandValueHost* CityProbeLandValueHost() { return &g_ILandValueHost; }
 IDemandHost* CityProbeDemandHost() { return &g_IDemandHost; }
-IClockHost* CityProbeClockHost() { return &g_IClockHost; }
+IClockHost* CityProbeClockHost() { return g_clockHostOverride ? g_clockHostOverride : &g_IClockHost; }
 }  // namespace sc4
 
 void InstallCityProbeBindings() {

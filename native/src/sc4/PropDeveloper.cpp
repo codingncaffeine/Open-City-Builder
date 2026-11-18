@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -286,9 +287,13 @@ bool cSC4PropDeveloper::Write(cIGZOStream& stream) const {
     stream.SetUint16(5);
     stream.SetSint8(static_cast<std::int8_t>(phase_));
     {
-        ScanningIterator cursor;             // +0x24: the original streams its scan cursor (the port keeps only its state byte)
+        // +0x24: the tract walk's scanning iterator, streamed whole (state, x, z, step, the tract rectangle in memory order)
+        ScanningIterator cursor;
         cursor.state = static_cast<std::int8_t>(cursorState_);
-        cursor.rect = cRZRect{static_cast<std::int32_t>(0x80000000u), 0x7fffffff, static_cast<std::int32_t>(0x80000000u), 0x7fffffff};
+        cursor.x = cursorX_;
+        cursor.z = cursorZ_;
+        cursor.remaining = static_cast<std::uint32_t>(step_);
+        cursor.rect = cRZRect{tractRect_.x0, tractRect_.z0, tractRect_.x1, tractRect_.z1};
         stream << cursor;
     }
     stream.SetUint8(requesterCreated_ ? 1 : 0);
@@ -350,9 +355,16 @@ bool cSC4PropDeveloper::Read(cIGZIStream& stream) {
     std::int8_t phase = 0;
     if (!stream.GetSint8(phase)) return false;
     phase_ = static_cast<std::uint8_t>(phase);
-    ScanningIterator cursor;                                  // +0x24: the original streams its scan cursor here
+    ScanningIterator cursor;                                  // +0x24: the tract walk's scanning iterator
     stream >> cursor;
     cursorState_ = static_cast<std::uint8_t>(cursor.state);
+    cursorX_ = cursor.x;
+    cursorZ_ = cursor.z;
+    step_ = static_cast<std::int32_t>(cursor.remaining);
+    tractRect_ = SC4Rect<int>(cursor.rect.left, cursor.rect.top, cursor.rect.right, cursor.rect.bottom);
+    if (std::getenv("SC4_PROPDEVDEBUG"))
+        std::fprintf(stderr, "prop developer: read phase %d, walk state %d at %d,%d step %d, tracts %d,%d..%d,%d\n", phase_,
+                     cursorState_, cursorX_, cursorZ_, step_, tractRect_.x0, tractRect_.z0, tractRect_.x1, tractRect_.z1);
     std::uint8_t created = 0;
     if (!stream.GetUint8(created)) return false;
     requesterCreated_ = created != 0;
@@ -461,7 +473,16 @@ bool cSC4PropDeveloper::DoMessage(cIGZMessage2* message) {
     const std::uint32_t type = message->GetType();            // slot 0x20
     cIGZMessage2Standard& payload = StandardMessage(message);
 
+    static const bool trace = std::getenv("SC4_PROPDEVDEBUG") != nullptr;
+    if (trace && type != kPropMessageAnimationTick && type != kPropMessageOccupantInserted && type != kPropMessageOccupantRemoved &&
+        type != kPropMessageIdleTime)
+        std::fprintf(stderr, "prop developer: message %08x data1 %llu data2 %llu (mode %d, night %d)\n", type,
+                     static_cast<unsigned long long>(payload.GetData1()), static_cast<unsigned long long>(payload.GetData2()),
+                     animationMode_, night_ ? 1 : 0);
     if (type == kPropMessageAnimationTick) {
+        if (trace && animationMode_ != 0)
+            std::fprintf(stderr, "prop developer: tick %llu us, mode %d, index %u of %zu\n",
+                         static_cast<unsigned long long>(payload.GetData2()), animationMode_, animationIndex_, stateProps_.size());
         if (animationMode_ == 0) return false;
         // slot 0x70 = data2, the elapsed milliseconds; the original divides by 1000.
         const std::uint32_t elapsed = static_cast<std::uint32_t>(payload.GetData2());
@@ -552,7 +573,7 @@ bool cSC4PropDeveloper::DoMessage(cIGZMessage2* message) {
     }
     if (type == kPropMessageDayNightChanged) {
         if (!g_host || !g_host->Clock()) return true;
-        const std::uint32_t night = static_cast<std::uint32_t>(payload.GetData1());
+        const std::uint32_t night = static_cast<std::uint32_t>(payload.GetData2());   // i386 0x000d9f9e: message slot 14 GetData2
         const int mode = g_host->Clock()->VisualTimeMode();   // clock vslot 0x30
         if (night == 1) {
             if (mode == 1) SwitchNightChangeProps(false);      // pinned to noon
@@ -891,6 +912,7 @@ void cSC4PropDeveloper::UpdateTract(int tractX, int tractZ) {
                              tractX * kPropTractCells + kPropTractCells - 1,
                              tractZ * kPropTractCells + kPropTractCells - 1};
 
+    ++stats_.tracts;
     std::vector<std::list<PropSlot>> pending(requesterCount);
     std::list<PropSlot> unslotted;
     std::vector<std::uint32_t> wanted(requesterCount, 0);
@@ -911,7 +933,9 @@ void cSC4PropDeveloper::UpdateTract(int tractX, int tractZ) {
             cSC4Lot* lot = g_host->LotManager()->GetLot(cellX, cellZ, true);   // lot manager vslot 0x28
             const std::vector<cSC4LotConfigurationObject>* objects = nullptr;
             if (lot) {
+                ++stats_.lotsFound;
                 if (lot->IsInLivableState() && lot->GetBuildingType(false) != 0) {
+                    ++stats_.lotsLivable;
                     occupancySum += lot->GetOccupancy();   // lot vslot 0x1e8 (a float)
                     ++lotCount;
                     objects = g_host->LotConfigurationObjects(lot);   // lot 0x48 -> config 0xb8
@@ -920,6 +944,7 @@ void cSC4PropDeveloper::UpdateTract(int tractX, int tractZ) {
             } else {
                 cSC4NetworkLot* networkLot = g_host->NetworkLotManager()->GetNetworkLot(cellX, cellZ);
                 if (!networkLot) continue;
+                ++stats_.networkLots;
                 objects = &networkLot->GetLotConfigurationObjectArray();   // network lot vslot 0x28
             }
 
@@ -1024,8 +1049,12 @@ void cSC4PropDeveloper::UpdateTract(int tractX, int tractZ) {
     }
 
     if (lotCount != 0) {
+        ++stats_.tractsWithLots;
+        stats_.slots += static_cast<std::int32_t>(slotTotal);   // the original's counts can go below zero
+        stats_.kept += static_cast<std::int32_t>(createdTotal);
         const float averageOccupancy = occupancySum / static_cast<float>(lotCount);
         if (totalWanted == 0) {
+            ++stats_.noShare;
             // The original divides by zero here when every requester asks for nothing (0x1001255ea).
             // The port skips the distribution instead of trapping.
         } else {
@@ -1061,6 +1090,7 @@ void cSC4PropDeveloper::UpdateTract(int tractX, int tractZ) {
                 copy.occupant = nullptr;
                 unslotted.push_back(copy);
                 ++removed;
+                ++stats_.removed;
             }
 
             std::int32_t available = static_cast<std::int32_t>(slotTotal + removed - createdTotal);
@@ -1072,6 +1102,8 @@ void cSC4PropDeveloper::UpdateTract(int tractX, int tractZ) {
                     std::advance(node, pick < static_cast<std::int32_t>(unslotted.size()) ? pick
                                                                                           : static_cast<std::int32_t>(unslotted.size()) - 1);
                     const std::uint32_t created = SelectAndCreateProp(&*node, static_cast<std::uint32_t>(r));
+                    ++stats_.createCalls;
+                    if (created != 0) ++stats_.created;
                     unslotted.erase(node);
                     need -= created != 0 ? 1 : 0;
                     --available;
@@ -1102,7 +1134,8 @@ std::uint32_t cSC4PropDeveloper::SelectAndCreateProp(PropSlot* slot, std::uint32
 
     std::vector<std::uint32_t> candidates;
     for (std::uint32_t id : object.extra) {
-        if (g_host->PropManager()->IsPropFamilyTypeValid(id)) {      // prop manager vslot 0x40
+        // i386 0x000d79fc: an id that is not a valid prop type is expanded as a family (prop manager i386 slot 8 = IsPropTypeValid)
+        if (!g_host->PropManager()->IsPropTypeValid(id)) {           // prop manager vslot 0x40
             std::vector<std::uint32_t> members;
             if (g_host->PropManager()->GetPropTypesByFamily(members, id) <= 0) continue;   // vslot 0x48
             for (std::uint32_t member : members) {

@@ -12,5 +12,6 @@ namespace native {
 sc4::IModelAnimationCoordinator* NativeCreateAnimationCoordinator();                  // one reference, not initialised
 s3d::cIS3DModelInstanceAnimated* NativeCreateAnimatedModel(const cGZPersistResourceKey& key);   // one reference or null
 void NativeAnimationReport(int limit);   // the kit's `animated [N]`
+void NativePropDeveloperReport();        // the kit's `propdev` (app/NativePropDeveloper.cpp)
 
 }  // namespace native
