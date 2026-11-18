@@ -39,6 +39,7 @@ namespace sc4 { void SetCityProbeCrimeHost(ICrimeHost* host); }   // tools/city_
 
 namespace native {
 void NativeStartArson(sc4::cISC4Occupant* building);   // app/NativeDisasters.cpp
+void NativePedestriansInBox(const float* lo, const float* hi, std::vector<sc4::cISC4Occupant*>& out);   // app/NativeTrafficAutomata.cpp
 
 namespace {
 using namespace sc4;
@@ -127,21 +128,21 @@ public:
     std::uint32_t OccupantType() override { return occupant_->GetType(); }
     cISCPropertyHolder* PropertyHolder() override { return occupant_->AsPropertyHolder(); }
     void Position(float xyz[3]) override { occupant_->GetPosition(xyz); }
-    bool IsIdlePropOccupant() override {
+    void* IdlePropOccupant() override {
         void* raw = nullptr;
-        if (!occupant_->QueryInterface(kGZIID_cISC4PropOccupant, &raw) || !raw) return false;
+        if (!occupant_->QueryInterface(kGZIID_cISC4PropOccupant, &raw) || !raw) return nullptr;
         auto* prop = static_cast<cISC4PropOccupant*>(raw);
         const bool idle = prop->GetState() == 0;   // i386 GetNearestCrimeProp: prop vslot 0x30 (GetState) == 0
         prop->Release();
-        return idle;
+        return idle ? raw : nullptr;
     }
-    bool IsCrimeResponder() override {
+    void* CrimeAutomaton() override {
         void* raw = nullptr;
-        if (!occupant_->QueryInterface(0xa9b40f05, &raw) || !raw) return false;
+        if (!occupant_->QueryInterface(0xa9b40f05, &raw) || !raw) return nullptr;
         static_cast<cIGZUnknown*>(raw)->Release();
-        return true;
+        return raw;
     }
-    bool HasFlags(std::uint32_t flags) override { return occupant_->IsFlagSet(flags); }
+    bool IsOccupantGroup(std::uint32_t group) override { return occupant_->IsOccupantGroup(group); }
     cISC4Occupant* Occupant() const { return occupant_; }
 private:
     cISC4Occupant* occupant_;
@@ -337,6 +338,10 @@ public:
         OccupantList list;
         manager->GetOccupantsByBBox(list, min, max, static_cast<std::uint32_t>(0), 0xffffffffu);
         for (cISC4Occupant* occupant : list) out.push_back(new CrimeOccupant(occupant));   // the list's reference stays with the view
+        // The native automata are not in the occupant manager: the crime figures (pedestrians) come from their manager.
+        std::vector<cISC4Occupant*> figures;
+        NativePedestriansInBox(min, max, figures);
+        for (cISC4Occupant* occupant : figures) out.push_back(new CrimeOccupant(occupant));
         return out;
     }
     void ReleaseOccupants(std::vector<ICrimeOccupant*>& list) override {

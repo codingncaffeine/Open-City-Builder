@@ -58,6 +58,7 @@ constexpr std::uint32_t kCrimeBuildingEffectProperty = 0xca5b9306;   // uint8 {s
 constexpr std::uint32_t kCrimeNonCrimeOccupantProperty = 0x029244db; // occupants with it are ignored by DoMessage
 constexpr std::uint32_t kCrimePropFilterProperty = 0x8aa864d5;
 constexpr std::uint32_t kCrimePropOccupantType = 0xa823821e, kCrimeSimOccupantType = 0x496e5783;
+constexpr std::uint32_t kCrimeSimOccupantGroup = 0x4102;   // tCrimeSimOccupantFilter: the occupant group of the crime figures
 
 // A lot as the crime simulator sees it (cISC4Lot vslots 0x70, 0xa8, 0x118, 0x180). Events hold a reference.
 class ICrimeBuilding {
@@ -84,9 +85,11 @@ public:
     virtual std::uint32_t OccupantType() = 0;                 // vslot 0x38
     virtual cISCPropertyHolder* PropertyHolder() = 0;         // vslot 0x30
     virtual void Position(float xyz[3]) = 0;                  // vslot 0x40
-    virtual bool IsIdlePropOccupant() = 0;         // QueryInterface(0xe9793a65) succeeds and its vslot 0x60 == 0
-    virtual bool IsCrimeResponder() = 0;                      // QueryInterface(0xa9b40f05) succeeds
-    virtual bool HasFlags(std::uint32_t flags) = 0;           // vslot 0xb0
+    // The occupant's cISC4PropOccupant answer (QueryInterface 0xe9793a65) when its state (vslot 0x60) is 0, else null; the
+    // answer's reference is already released, as in the original (the occupant keeps the prop alive).
+    virtual void* IdlePropOccupant() = 0;
+    virtual void* CrimeAutomaton() = 0;                       // the cISC4Automaton answer (0xa9b40f05), released likewise; null if none
+    virtual bool IsOccupantGroup(std::uint32_t group) = 0;    // vslot 0xb0 (i386 0x58)
 };
 
 // One of the residential grids used by the census (cISC4SimGrid vslots 0x60/0x68/0xd8).
@@ -243,8 +246,9 @@ public:
     bool GetCrimeIncidentArray(std::vector<CrimeIncident>& out) const;
     bool SetVisualsCreated(std::uint32_t index, bool created);
     bool GetVisualsCreated(std::uint32_t index) const;
-    ICrimeOccupant* GetNearestCrimeProp(const float position[3], float radius);
-    ICrimeOccupant* GetNearestCrimeSim(const float position[3], float radius);
+    // i386 vslots 0x28 / 0x24: the nearest idle crime prop (a cISC4PropOccupant*) and crime figure (a cISC4Automaton*), unreferenced
+    void* GetNearestCrimeProp(const float position[3], float radius);
+    void* GetNearestCrimeSim(const float position[3], float radius);
     const cSC4SimGrid<std::uint8_t>* GetCrimeGrid() const { return crimeGrid_; }
     const cSC4SimGrid<std::uint8_t>* GetCrimeEffectGrid() const { return effectGrid_; }
     Step CurrentStep() const { return step_; }

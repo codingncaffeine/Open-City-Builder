@@ -61,13 +61,13 @@ struct FakeOccupant : ICrimeOccupant {
     cSCPropertyHolder props;
     float pos[3] = {0, 0, 0};
     bool department = false, responder = false;
-    std::uint32_t flags = 0;
+    std::uint32_t groups = 0;
     std::uint32_t OccupantType() override { return type; }
     cISCPropertyHolder* PropertyHolder() override { return &props; }
     void Position(float xyz[3]) override { for (int i = 0; i < 3; ++i) xyz[i] = pos[i]; }
-    bool IsIdlePropOccupant() override { return department; }
-    bool IsCrimeResponder() override { return responder; }
-    bool HasFlags(std::uint32_t f) override { return (flags & f) == f; }
+    void* IdlePropOccupant() override { return department ? static_cast<void*>(this) : nullptr; }
+    void* CrimeAutomaton() override { return responder ? static_cast<void*>(this) : nullptr; }
+    bool IsOccupantGroup(std::uint32_t g) override { return groups == g; }
 };
 
 // a plain serializable that is not a requester: its adapter must not answer 0x89c498be
@@ -424,16 +424,16 @@ int main() {
     cSCPropertyHelp::SetPropertyValue(&far1.props, kCrimePropFilterProperty, std::uint32_t(1));
     host.box = {&near1, &near2, &far1};
     const float origin[3] = {0, 0, 0};
-    CHECK(sim.GetNearestCrimeProp(origin, 100.0f) == &near2);
+    CHECK(sim.GetNearestCrimeProp(origin, 100.0f) == static_cast<void*>(&near2));
     near2.department = false;   // not available any more
-    CHECK(sim.GetNearestCrimeProp(origin, 100.0f) == &near1);
+    CHECK(sim.GetNearestCrimeProp(origin, 100.0f) == static_cast<void*>(&near1));
     CHECK(sim.GetNearestCrimeProp(origin, 5.0f) == nullptr);
     FakeOccupant s1;
-    s1.type = kCrimeSimOccupantType; s1.flags = 0x4102; s1.responder = true; s1.pos[0] = 20;
+    s1.type = kCrimeSimOccupantType; s1.groups = 0x4102; s1.responder = true; s1.pos[0] = 20;
     FakeOccupant s2;
-    s2.type = kCrimeSimOccupantType; s2.flags = 0x0102; s2.responder = true; s2.pos[0] = 1;   // wrong flags
+    s2.type = kCrimeSimOccupantType; s2.groups = 0x0102; s2.responder = true; s2.pos[0] = 1;   // wrong group
     host.box = {&s1, &s2};
-    CHECK(sim.GetNearestCrimeSim(origin, 100.0f) == &s1);
+    CHECK(sim.GetNearestCrimeSim(origin, 100.0f) == static_cast<void*>(&s1));
     CHECK(IsCrimeSimOccupant(&s1) && !IsCrimeSimOccupant(&s2) && !IsCrimePropOccupant(&s1));
 
     // streams: scalar state round-trips (a plain memory stream skips the nested grids, as for the other simulators)

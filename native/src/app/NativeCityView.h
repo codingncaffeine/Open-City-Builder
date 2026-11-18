@@ -2,10 +2,11 @@
 // city comes up (the camera, the camera control and the 3D renderer) and the window attaches them.
 #pragma once
 #include <cstdint>
+#include <vector>
 
 namespace gd { class cIGZGDriver; }
 namespace gz { class cIGZDrawContext; }
-namespace sc4 { class cSC4View3DWin; class cSC43DRender; }
+namespace sc4 { class cSC4View3DWin; class cSC43DRender; class cISC4Occupant; }
 class cISC4City;
 
 namespace native {
@@ -27,6 +28,7 @@ void PrintOccupantCensus(cISC4City* city, const char* label);
 void ProbeBuildingsAt(float x, float z, float radius);
 // app/NativeDispatch.cpp: the dispatch tool's drop without a call box (police 0, fire 1) at a world position; the dispatch id or 0.
 std::uint32_t NativeDispatchAt(std::uint32_t type, float x, float z);
+void NativePedestriansInBox(const float* lo, const float* hi, std::vector<sc4::cISC4Occupant*>& out);   // app/NativeTrafficAutomata.cpp: the pedestrians in a box (one reference each)
 void NativeDispatchReport();   // every dispatch record, its vehicle and state
 void NativeGeneratorReport();  // every automaton an automata generator made and still holds (app/NativeAutomataGenerator.cpp)
 void NativePedestrianReport(int limit);  // the pedestrian manager's count and the first `limit` on screen (app/NativeAutomataManagerHost.cpp)

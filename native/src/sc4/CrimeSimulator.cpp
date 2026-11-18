@@ -616,46 +616,48 @@ bool IsCrimePropOccupant(ICrimeOccupant* occupant) {
 
 bool IsCrimeSimOccupant(ICrimeOccupant* occupant) {
     // tCrimeSimOccupantFilter::IsOccupantIncluded @ 0x1001fff82
-    return occupant->OccupantType() == kCrimeSimOccupantType && occupant->HasFlags(0x4102);
+    return occupant->OccupantType() == kCrimeSimOccupantType && occupant->IsOccupantGroup(kCrimeSimOccupantGroup);
 }
 
-ICrimeOccupant* cSC4CrimeSimulator::GetNearestCrimeProp(const float position[3], float radius) {
+void* cSC4CrimeSimulator::GetNearestCrimeProp(const float position[3], float radius) {
     // @ 0x1001ff8f6: occupants in the box +-radius (y unbounded) that are available department buildings (the
     // tCrimePropOccupantFilter lets through props with property 0x8aa864d5); the nearest within `radius` wins.
     const float lo[3] = {position[0] - radius, -3.4028235e+38f, position[2] - radius};
     const float hi[3] = {position[0] + radius, 3.4028235e+38f, position[2] + radius};
     std::vector<ICrimeOccupant*> found = host_->OccupantsInBox(lo, hi);
-    ICrimeOccupant* best = nullptr;
+    void* best = nullptr;
     float limit = radius;
     for (ICrimeOccupant* occupant : found) {
         if (!IsCrimePropOccupant(occupant)) continue;
         float p[3];
         occupant->Position(p);
         const float distance = Distance3(p, position);
-        if (distance < limit && occupant->IsIdlePropOccupant()) {
+        if (distance >= limit) continue;
+        if (void* prop = occupant->IdlePropOccupant()) {
             limit = distance;
-            best = occupant;
+            best = prop;
         }
     }
     host_->ReleaseOccupants(found);
     return best;
 }
 
-ICrimeOccupant* cSC4CrimeSimulator::GetNearestCrimeSim(const float position[3], float radius) {
+void* cSC4CrimeSimulator::GetNearestCrimeSim(const float position[3], float radius) {
     // @ 0x1001ffbd4: same search for sim occupants that answer interface 0xa9b40f05 (the first one found within the
     // shrinking radius wins, so the last closer candidate is kept).
     const float lo[3] = {position[0] - radius, -3.4028235e+38f, position[2] - radius};
     const float hi[3] = {position[0] + radius, 3.4028235e+38f, position[2] + radius};
     std::vector<ICrimeOccupant*> found = host_->OccupantsInBox(lo, hi);
-    ICrimeOccupant* best = nullptr;
+    void* best = nullptr;
     float limit = radius;
     for (ICrimeOccupant* occupant : found) {
         if (!IsCrimeSimOccupant(occupant)) continue;
         float p[3];
         occupant->Position(p);
         const float distance = Distance3(p, position);
-        if (distance < limit && occupant->IsCrimeResponder()) {
-            best = occupant;
+        if (distance >= limit) continue;
+        if (void* automaton = occupant->CrimeAutomaton()) {
+            best = automaton;
             limit = distance;
         }
     }

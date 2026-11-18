@@ -1237,6 +1237,25 @@ int RunScenario(const std::string& path) {
                 std::printf("dispatchat %u %d,%d = %.0f,%.0f: id %u\n", type, px, py, hit[0], hit[2], native::NativeDispatchAt(type, hit[0], hit[2]));
             else
                 std::printf("dispatchat %u %d,%d: no ground\n", type, px, py);
+        } else if (command == "dispatchfigure") {   // dispatchfigure N [DX DZ]: police to the Nth crime figure (group 0x4102), offset by DX,DZ
+            int n = 0;
+            float dx = 0.0f, dz = 0.0f;
+            words >> n >> dx >> dz;
+            const float lo[3] = {-3.4e38f, -3.4e38f, -3.4e38f}, hi[3] = {3.4e38f, 3.4e38f, 3.4e38f};
+            std::vector<sc4::cISC4Occupant*> all;
+            native::NativePedestriansInBox(lo, hi, all);
+            int seen = 0;
+            bool sent = false;
+            for (sc4::cISC4Occupant* o : all) {
+                if (!sent && o->IsOccupantGroup(0x4102) && seen++ == n) {
+                    float p[3] = {};
+                    o->GetPosition(p);
+                    std::printf("dispatchfigure %d at %.0f,%.0f: id %u\n", n, p[0], p[2], native::NativeDispatchAt(0, p[0] + dx, p[2] + dz));
+                    sent = true;
+                }
+                o->Release();
+            }
+            if (!sent) std::printf("dispatchfigure %d: no such figure (%d)\n", n, seen);
         } else if (command == "dispatch") {   // dispatch TYPE X Z: send a unit (0 police car, 1 fire engine) to a world position
             std::uint32_t type = 0;
             float x = 0.0f, z = 0.0f;

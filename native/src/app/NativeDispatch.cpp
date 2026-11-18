@@ -21,7 +21,9 @@
 #include "sc4/FireProtectionSimulator.h"
 #include "sc4/FireTruck.h"
 #include "sc4/PatrolCar.h"
+#include "sc4/CrimeSimulator.h"
 #include "sc4/PoliceSimulator.h"
+#include "sc4/PropOccupantInterface.h"
 #include "sc4/PylonOccupant.h"
 #include "sc4/SCPropertyHelp.h"
 #include "sc4/ServiceLocator.h"
@@ -49,6 +51,9 @@ void NativeSetupFireCrew(cIGZUnknown* crew);
 void NativeRemoveFireCrew(cIGZUnknown* crew);
 int NativeFireCount();
 void InstallFireCrewHost();
+sc4::cSC4CrimeSimulator* NativeCrimeSimulator();   // app/NativeCrime.cpp
+void NativePedestriansInBox(const float* lo, const float* hi, std::vector<sc4::cISC4Occupant*>& out);   // app/NativeTrafficAutomata.cpp
+
 // app/NativeRiotPolice.cpp: the figures of the patrol cars' host
 bool NativeDisasterOngoing();
 cIGZUnknown* NativeNewRiotPolice(sc4::cSC4PatrolCar& car);
@@ -492,8 +497,17 @@ public:
     float MaxStreamDistance() override { return AutomataTuning().f21a18; }
 } g_fireTruck;
 
-// PARTIAL: arrests are not native yet (the crime simulator's street figures are not looked up): without a disaster a patrol car
-// drives to the call and goes home.
+// A crime prop the car arrests: cISC4PropOccupant::SetState (i386 vslot 0x2c) on the crime simulator's answer.
+class ArrestedProp final : public ICrimeParticipant {
+public:
+    void Set(cISC4PropOccupant* prop) { prop_ = prop; }
+    void Arrest(bool on) override { if (prop_) prop_->SetState(on ? 1u : 0u); }
+private:
+    cISC4PropOccupant* prop_ = nullptr;
+};
+
+bool ArrestTrace() { static const bool on = std::getenv("SC4_CRIMEDEBUG") != nullptr; return on; }
+
 class PatrolCarHost final : public IPatrolCarHost {
 public:
     bool RiotInProgress() override { return NativeDisasterOngoing(); }
@@ -509,12 +523,46 @@ public:
         cISC4Occupant* station = AsOccupant(source);
         return police && station && police->GetStationDispatchRadius(NativePoliceStation(station), radius);
     }
-    cSC4Automaton* FindCrimeAutomaton(const cS3DVector3&, float) override { return nullptr; }
-    ICrimeParticipant* FindCrimeParticipant(const cS3DVector3&, float) override { return nullptr; }
+    // spCrimeSim vslot 0x24 (i386): the nearest crime figure; its cISC4Automaton answer is the automaton's primary pointer.
+    cSC4Automaton* FindCrimeAutomaton(const cS3DVector3& position, float radius) override {
+        cSC4CrimeSimulator* crime = NativeCrimeSimulator();
+        const float at[3] = {position.x, position.y, position.z};
+        void* found = crime ? crime->GetNearestCrimeSim(at, radius) : nullptr;
+        if (ArrestTrace()) {
+            std::fprintf(stderr, "arrest: crime figure near %.0f,%.0f -> %s\n", at[0], at[2], found ? "found" : "none");
+            const float lo[3] = {at[0] - 60.0f, -3.4e38f, at[2] - 60.0f}, hi[3] = {at[0] + 60.0f, 3.4e38f, at[2] + 60.0f};
+            std::vector<cISC4Occupant*> near;
+            NativePedestriansInBox(lo, hi, near);
+            for (cISC4Occupant* o : near) {
+                float p[3] = {};
+                o->GetPosition(p);
+                std::fprintf(stderr, "arrest:   pedestrian at %.0f,%.0f,%.0f type %08x group 4102 %d\n", p[0], p[1], p[2], o->GetType(), o->IsOccupantGroup(0x4102));
+                o->Release();
+            }
+        }
+        return static_cast<cSC4Automaton*>(found);
+    }
+    // spCrimeSim vslot 0x28: the nearest idle crime prop.
+    ICrimeParticipant* FindCrimeParticipant(const cS3DVector3& position, float radius) override {
+        cSC4CrimeSimulator* crime = NativeCrimeSimulator();
+        const float at[3] = {position.x, position.y, position.z};
+        auto* prop = static_cast<cISC4PropOccupant*>(crime ? crime->GetNearestCrimeProp(at, radius) : nullptr);
+        if (ArrestTrace()) std::fprintf(stderr, "arrest: crime prop near %.0f,%.0f -> %s\n", at[0], at[2], prop ? "found" : "none");
+        if (!prop) return nullptr;
+        arrested_.Set(prop);
+        return &arrested_;
+    }
     cIGZUnknown* NewRiotPolice(cSC4PatrolCar& car) override { return NativeNewRiotPolice(car); }
     void SetupRiotPolice(cIGZUnknown* riot, float competence) override { NativeSetupRiotPolice(riot, competence); }
     void RemoveRiotPolice(cIGZUnknown* riot) override { NativeRemoveRiotPolice(riot); }
-    void ReplaceArrestModel(cSC4PatrolCar&, const cGZPersistResourceKey&) override {}
+    // cSC4Automaton::ReplaceModelInstance(first model, key), then the new instance's SetPlayMode(1) (i386 0x8c).
+    void ReplaceArrestModel(cSC4PatrolCar& car, const cGZPersistResourceKey& key) override {
+        car.PlayAnim(key);
+        if (!car.Models().empty() && car.Models().front()) car.Models().front()->SetPlayMode(static_cast<s3d::PlayMode>(1));
+        if (ArrestTrace()) std::fprintf(stderr, "arrest: patrol car plays %08x\n", key.instance);
+    }
+private:
+    ArrestedProp arrested_;
 } g_patrolCar;
 
 }  // namespace

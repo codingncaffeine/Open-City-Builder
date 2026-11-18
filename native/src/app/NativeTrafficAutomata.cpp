@@ -348,6 +348,9 @@ PedestrianHost g_pedestrians;
 
 }  // namespace
 
+// The pedestrians inside a box for the other hosts (the crime simulator's figures are pedestrians); one reference each.
+void NativePedestriansInBox(const float* lo, const float* hi, std::vector<cISC4Occupant*>& out) { PedestriansInBox(lo, hi, -1, out); }
+
 sc4::ITrafficAutomatonHost* NativeVehicleTrafficHost() { return &g_vehicles; }
 sc4::IVehicleHost* NativeVehicleHost() { return &g_vehicleHost; }
 sc4::ITrafficSimulatorApi* NativeTrafficSimulatorApi() { return &g_simulatorApi; }
