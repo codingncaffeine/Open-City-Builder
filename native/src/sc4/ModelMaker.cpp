@@ -4,6 +4,8 @@
 // cIGZSerializable view with the three thunks and Write / Read / GetGZCLSID.
 #include "sc4/ModelMaker.h"
 
+#include "sc4/FoundationModel.h"
+
 #include <map>
 #include "platform/PerfLog.h"
 
@@ -1277,14 +1279,40 @@ bool cSC4ModelMaker::LoadModelsCommon(cISC4Occupant* occupant, int zoom, int rot
     return result;
 }
 
+// i386 0x00249518. A foundation drawn with building-style models goes the common way; any other gets a cSC4FoundationModel: the
+// exemplar's side (0x68fcff37) and top (0x68fcff38) texture ids, five per zoom level, and their texture world sizes (0xc911eda0 /
+// 0xc911eda1, 16 by default), the occupant's box with its top raised by 0.2, reaching down to the ground; it joins the occupant's
+// placeable object. (The original also reads 0x88fcc3e3 into a local it never uses.)
 bool cSC4ModelMaker::LoadFoundationModels(cISC4Occupant* occupant, int zoom, int rotation, std::uint32_t type) {
-    // PARTIAL: the original builds a cSC4FoundationModel (0x10035f09c, not recovered) from the foundation's
-    // texture ids and world bounds and adds that as the occupant's model; only the building-style fallback is
-    // recovered here.
+    if (!occupant) return false;
     if (g_utility && g_utility->FoundationOccupantUsesBuildingStyleModels(occupant)) {
         return LoadModelsCommon(occupant, zoom, rotation, type);
     }
-    return false;
+    cISCPropertyHolder* holder = occupant->AsPropertyHolder();   // occupant vslot 0x18
+    float sideSize = 16.0f, topSize = 16.0f;
+    std::vector<std::uint32_t> sideIds, topIds;
+    if (holder) {
+        cSCPropertyHelp::GetPropertyValue(holder, 0x68fcff37u, sideIds);
+        cSCPropertyHelp::GetPropertyValue(holder, 0xc911eda0u, sideSize);
+        cSCPropertyHelp::GetPropertyValue(holder, 0x68fcff38u, topIds);
+        cSCPropertyHelp::GetPropertyValue(holder, 0xc911eda1u, topSize);
+    }
+    if (!sideIds.empty()) sideIds.resize(5, 0u);   // the original reads five entries from the property's array
+    if (!topIds.empty()) topIds.resize(5, 0u);
+    auto* model = new cSC4FoundationModel();
+    model->AddRef();
+    model->SetTextureIDs(sideIds.empty() ? nullptr : sideIds.data(), topIds.empty() ? nullptr : topIds.data());
+    model->SetTextureWorldSize(sideSize, topSize);
+    cS3DBoundingBox box;
+    occupant->GetBoundingBox(box.min, box.max);   // occupant vslot 0x28
+    box.max[1] += 0.2f;                           // 0x00a707b8
+    model->SetWorldBounds(box);
+    model->AdjustHeightToTerrain(true);
+    model->SetOwner(occupant);
+    if (cISC43DPlaceableObject* placeable = occupant->GetPlaceableObject())   // occupant vslot 0x4c
+        placeable->AddModel(reinterpret_cast<cIS3DModelInstance*>(static_cast<s3d::cIS3DModelInstance*>(model)));
+    model->Release();
+    return true;
 }
 
 bool cSC4ModelMaker::LoadLotBaseTextureModels(cISC4Occupant* occupant, int zoom, int rotation, std::uint32_t type) {

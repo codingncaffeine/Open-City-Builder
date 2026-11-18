@@ -18,6 +18,7 @@
 #include "sc4/BuildingDevelopmentSimulator.h"
 #include "sc4/DBSegment.h"
 #include "sc4/Exemplar.h"
+#include "sc4/FoundationModel.h"
 #include "sc4/LightingManager.h"
 #include "sc4/LotConfiguration.h"
 #include "sc4/LotRetainingWallModel.h"
@@ -227,6 +228,36 @@ public:
     void GetVectorForEdge(float* v, int edge) override { SC4ViewUtilities::GetVectorForEdge(v, edge); }
 } g_wallModelHost;
 
+// ---- the foundation model's services (sc4::IFoundationModelHost) ------------------------------------------------------------
+class FoundationTexture final : public IFoundationTextureBinding {
+public:
+    explicit FoundationTexture(std::uint32_t id) : id_(id) {}
+    std::uint32_t TextureId() const override { return id_; }
+    void Release() override { delete this; }
+private:
+    std::uint32_t id_;
+};
+
+class FoundationModelHost final : public IFoundationModelHost {
+public:
+    // cS3DTextureBindingFactory::GetBinding(instance): {0x7ab50e44, 0x1abe787d, instance}
+    IFoundationTextureBinding* GetBinding(std::uint32_t instance) override {
+        const std::uint32_t id = FshTextureId(0x1abe787d, instance);
+        if (Trace()) std::fprintf(stderr, "foundations: texture %08x -> %u\n", instance, id);
+        return id ? new FoundationTexture(id) : nullptr;
+    }
+    void VisibleEdges(int& edgeA, int& edgeB) override {
+        cSC43DRender* render = CityRenderer();
+        if (const SC4ViewUtilities* view = render ? render->GetViewUtilities() : nullptr) view->GetVisibleEdges(edgeA, edgeB);
+    }
+    void LightColor(const float normal[3], std::uint8_t& r, std::uint8_t& g, std::uint8_t& b) override {
+        g_wallLighting.GetColor(cS3DVector3{}, cS3DVector3{normal[0], normal[1], normal[2]}, r, g, b);
+    }
+    int TerrainCellCountX() override { cSTETerrain* t = TerrainOf(); return t ? static_cast<int>(t->CellCountX()) : 0; }
+    float TerrainAltitude(int vertex) override { cSTETerrain* t = TerrainOf(); return t ? t->GetAltitude(vertex) : 0.0f; }
+    float TerrainWaterLevel(int vertex) override { cSTETerrain* t = TerrainOf(); return t ? t->GetWaterLevel(vertex) : 0.0f; }
+} g_foundationModelHost;
+
 }  // namespace
 
 // Kit command `walls`: the retaining wall occupants, the edges they wall and the models their placeable objects hold.
@@ -261,6 +292,22 @@ void NativeWallReport() {
     }
     std::printf("walls: %zu occupants, %d with a lot, %d walled edges, %d models\n", list.size(), withLot, edges, models);
     o->ReleaseOccupantList(list);
+    // the foundations (occupant type 0x68fd0c69) and their models
+    OccupantList foundations;
+    o->GetOccupantsByStandardCityCells(foundations, lo, hi, 0x68fd0c69u, 0xffffffffu);
+    int foundationModels = 0, firstShown = 0;
+    for (cISC4Occupant* occupant : foundations) {
+        cISC43DPlaceableObject* placeable = occupant->GetPlaceableObject();
+        const int count = placeable ? placeable->GetModelCount() : 0;
+        foundationModels += count;
+        if (firstShown++ < 3) {
+            float mn[3] = {}, mx[3] = {};
+            occupant->GetBoundingBox(mn, mx);
+            std::printf("foundations: box %.0f,%.1f,%.0f..%.0f,%.1f,%.0f models %d\n", mn[0], mn[1], mn[2], mx[0], mx[1], mx[2], count);
+        }
+    }
+    std::printf("foundations: %zu occupants, %d models\n", foundations.size(), foundationModels);
+    o->ReleaseOccupantList(foundations);
 }
 
 // The model maker's retaining wall case (cSC4ModelMaker::AddModels, i386 0x0024aee0).
@@ -272,6 +319,7 @@ bool NativeAddRetainingWallModels(sc4::cISC4Occupant* occupant, bool create, boo
 void InstallLotRetainingWallHosts() {
     SetLotRetainingWallHost(&g_wallHost);
     SetLotRetainingWallModelHost(&g_wallModelHost);
+    SetFoundationModelHost(&g_foundationModelHost);
 }
 
 }  // namespace native

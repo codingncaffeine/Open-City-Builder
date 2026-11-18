@@ -2,6 +2,7 @@
 // The seams are faked: the view/renderer/lighting/terrain/city host, the model-maker utility
 // (cSC4ModelMakerUtility), the resource manager + the S3D resource, and the two helper objects. The occupant, the
 // placeable object, the model instance and the two managers are scripted fakes so the tests can watch every call.
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -1229,6 +1230,26 @@ int main() {
             CHECK(host.wallModelCalls == before + 1);
             CHECK(host.lastWallCreate && !host.lastWallAddToRenderer);
             CHECK(resource->created == 1);   // no exemplar models were made for it
+        }
+        {   // a foundation that is not drawn building-style gets one cSC4FoundationModel: the occupant's box, its top raised by 0.2
+            auto* foundationPlaceable = new FakePlaceable();
+            auto* foundation = new FakeOccupant();
+            foundation->type = sc4::kModelOccupantTypeFoundation;
+            foundation->placeable = foundationPlaceable;
+            foundation->cells = SC4CellRect{30, 40, 30, 40};
+            foundation->position[0] = 480.0f;
+            foundation->position[1] = 10.0f;
+            foundation->position[2] = 640.0f;
+            foundation->flags = sc4::kOccupantFlagVisible;
+            utility.foundationUsesBuildingStyle = false;
+            maker->AddModels(foundation, 2, 1, sc4::kModelOccupantTypeFoundation, false);
+            CHECK(foundationPlaceable->models.size() == 1);
+            CHECK(resource->created == 1);   // not from an exemplar
+            if (!foundationPlaceable->models.empty()) {
+                cS3DBoundingBox box;
+                reinterpret_cast<s3d::cIS3DModelInstance*>(foundationPlaceable->models[0])->GetWorldBounds(box);
+                CHECK(std::fabs(box.max[1] - 11.2f) < 1e-5f && box.min[0] == 479.0f && box.max[2] == 641.0f);
+            }
         }
         if (!placeable->models.empty()) {
             auto* model = static_cast<FakeModel*>(placeable->models[0]);
