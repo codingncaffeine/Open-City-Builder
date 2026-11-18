@@ -36,6 +36,7 @@
 #include "sc4/FloraOccupant.h"
 #include "sc4/CommonIIDs.h"
 #include "sc4/FloraSimulator.h"
+#include "sc4/PortDeveloper.h"
 #include "sc4/Exemplar.h"
 #include "sc4/Lot.h"
 #include "sc4/LotConfiguration.h"
@@ -102,13 +103,25 @@ template <class T> bool CellInBounds(const cSC4SimGrid<T>& map, int x, int z) {
     return x >= 0 && z >= 0 && map.TractIsInBounds(x >> shift, z >> shift);
 }
 
-class ConfigurationRef final : public cISC4LotConfigurationRef {
+// The reference a lot keeps for its configuration; the port developers ask it the configuration's growth stage (vslot 0x58) and
+// zone compatibility (vslot 0x78) too.
+class ConfigurationRef final : public IPortLotConfiguration {
 public:
     explicit ConfigurationRef(std::uint32_t id) : id_(id) {}
     bool QueryInterface(std::uint32_t, void**) override { return false; }
     std::uint32_t AddRef() override { return ++refs_; }
     std::uint32_t Release() override { return refs_ ? --refs_ : 0; }
     std::uint32_t GetID() const override { return id_; }
+    int GetGrowthStage() const override {
+        cSC4LotConfigurationManager* manager = LotConfigurations();
+        cSC4LotConfiguration* configuration = manager ? manager->GetLotConfiguration(id_) : nullptr;
+        return configuration ? configuration->GetGrowthStage() : 0;
+    }
+    bool IsCompatibleWithZoneType(int zoneType) const override {
+        cSC4LotConfigurationManager* manager = LotConfigurations();
+        cSC4LotConfiguration* configuration = manager ? manager->GetLotConfiguration(id_) : nullptr;
+        return configuration && configuration->IsCompatibleWithZoneType(zoneType);
+    }
 private:
     std::uint32_t id_;
     std::uint32_t refs_ = 1;
@@ -430,7 +443,8 @@ public:
 
 }  // namespace
 
-cISC4LotConfigurationRef* NativeLotConfigurationRef(std::uint32_t id) {
+cISC4LotConfigurationRef* NativeLotConfigurationRef(std::uint32_t id) { return NativePortLotConfiguration(id); }
+sc4::IPortLotConfiguration* NativePortLotConfiguration(std::uint32_t id) {
     if (id == 0) return nullptr;
     auto it = g_references.find(id);
     if (it == g_references.end()) it = g_references.emplace(id, std::make_unique<ConfigurationRef>(id)).first;

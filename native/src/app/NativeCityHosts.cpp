@@ -76,6 +76,7 @@ void InstallOrdinanceSimStub();
 void InstallOverlayStub();
 void InstallPlaceableStub();
 void InstallPortDeveloperStub();
+void InstallPortDeveloperHosts();   // NativePorts.cpp
 void InstallPowerLineToolStub();
 void InstallPropDeveloperStub();
 void InstallPropManagerStub();
@@ -191,6 +192,7 @@ void InstallStubHosts() {
     InstallOverlayStub();
     InstallPlaceableStub();
     InstallPortDeveloperStub();
+    InstallPortDeveloperHosts();          // the airport and seaport developers' real hosts replace the stub above
     InstallPowerLineToolStub();
     InstallPropDeveloperStub();
     InstallPropDeveloperHost();   // the prop developer's real host replaces the stub

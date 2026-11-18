@@ -39,6 +39,7 @@ void NativePipeBurstReport();                      // kit command `pipebursts`
 void NativeLandfillReport();                        // kit command `landfill` (app/NativeLandfill.cpp)
 void NativeToxicStart(int cellX, int cellZ);         // kit command `toxic` (app/NativeToxic.cpp)
 void NativeToxicReport();                          // kit command `toxics`
+void NativePortReport();                           // kit command `ports` (app/NativePorts.cpp)
 void NativeStartRiot(int cellX, int cellZ);       // kit command `riot` (app/NativeRiot.cpp)
 void NativeRiotReport();                          // kit command `riots`
 void NativeQueryReport(std::uint32_t skipUi, int limit);   // the query tool's buildings (querylist kit command; app/NativeQuery.cpp)
