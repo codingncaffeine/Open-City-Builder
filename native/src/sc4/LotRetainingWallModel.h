@@ -53,6 +53,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "sc4/Occupant.h"
 #include "sc4/PackedRenderState.h"
 #include "s3d/ModelInstance.h"
 
@@ -95,6 +96,13 @@ constexpr float kRetainingWallUvScale = 0.0625f;
 class cISC4LotRetainingWallModel : public cIGZUnknown {
 public:
     virtual cISC4LotRetainingWallModel* GetWallModel() = 0;   // [3] 0x18 @ 0x100168850
+    // PORT-ONLY: the parts of cSC4LotRetainingWallModel the wall occupant (cSC4LotRetainingWallOccupant) calls on the
+    // model it finds through this interface; the original calls the concrete class directly.
+    virtual std::int8_t WallEdge() const = 0;                                               // +0x84
+    virtual void SetTextureData(const std::uint32_t* textureIds, float scale) = 0;          // @ 0x100168808
+    virtual bool Init(const cS3DBoundingBox& bounds, int wallEdge, bool& builtOut) = 0;     // @ 0x1001686d4
+    // the base at +8, as the placeable object and the occupant manager see a model (sc4::cIS3DModelInstance)
+    virtual sc4::cIS3DModelInstance* AsModelInstance() = 0;
 };
 
 // sVF_V3F_C4UB_T2F, 0x18 bytes: Draw submits it as the interleaved format 10 (V3F_C4UB_T2F).
@@ -197,7 +205,7 @@ public:
 
     // ---- the wall itself
     // 0x1001686d4: store the edge, work out the wall's cell span and build the geometry.
-    bool Init(const cS3DBoundingBox& bounds, int wallEdge, bool& changed);
+    bool Init(const cS3DBoundingBox& bounds, int wallEdge, bool& changed) override;
     // 0x10016872a: bbox + edge -> the wall's start and end cell
     static void SetupVerticesFromBBoxAndWallEdge(const cS3DBoundingBox& bounds, int wallEdge, SC4PointInt& start,
                                                  SC4PointInt& end);
@@ -211,7 +219,7 @@ public:
     bool SegmentIsAdjacentToFlatLot(int x, int z, ILotRetainingWallLotManager* lotManager,
                                     ILotRetainingWallTerrain* terrain);
     // 0x100168808: five texture ids and the texture scale (float)
-    void SetTextureData(const std::uint32_t* textureIds, float scale);
+    void SetTextureData(const std::uint32_t* textureIds, float scale) override;
     // 0x10016762a: zoom level -> per-zoom texture binding (and the one-shot render state on the first call)
     void DoZoomChange(int oldZoom, int newZoom);
     // 0x1001676f8: bind the texture of the new zoom level
@@ -222,8 +230,10 @@ public:
     // ---- what the recovered neighbours (cSC4LotRetainingWallOccupant) read
     // PORT-ONLY: the cIS3DModelInstance subobject of the cS3DModelInstanceBasic base (the occupant's
     // ILotRetainingWallModel::AsModelInstance). The original reaches it through the base at +8.
-    cIS3DModelInstance* AsModelInstance() { return static_cast<cIS3DModelInstance*>(this); }
-    std::int8_t WallEdge() const { return wallEdge_; }              // +0x84
+    sc4::cIS3DModelInstance* AsModelInstance() override {
+        return reinterpret_cast<sc4::cIS3DModelInstance*>(static_cast<s3d::cIS3DModelInstance*>(this));
+    }
+    std::int8_t WallEdge() const override { return wallEdge_; }     // +0x84
     std::uint32_t TextureId() const;                                // the binding's texture id, 0 without a binding
     const std::vector<LotRetainingWallVertex>& Vertices() const { return vertices_; }   // +0xb0
     std::uint8_t SegmentsBuilt() const { return segmentsBuilt_; }   // +0x72

@@ -274,6 +274,12 @@ public:
     virtual bool UndergroundHiddenTriangles(cISC4Occupant* occupant, bool& even, bool& odd) { (void)occupant; even = odd = false; return false; }
     // cISC4FoundationOccupant (0xc8fce101) vslot 0x24 GetUsage; -1 = not a foundation
     virtual int FoundationUsage(cISC4Occupant* occupant) { (void)occupant; return -1; }
+    // cSC4LotRetainingWallOccupant::AddRetainingWallModels(occupant, create, addToRenderer) (sc4/LotRetainingWallOccupant.h): a
+    // retaining wall builds its own models. False without a wall implementation.
+    virtual bool AddRetainingWallModels(cISC4Occupant* occupant, bool create, bool addToRenderer) {
+        (void)occupant; (void)create; (void)addToRenderer;
+        return false;
+    }
     // the lot manager's GetLot(x, z, false) and that lot's GetFlags (vslot 0x30); false = no lot there
     virtual bool LotFlagsAt(int x, int z, std::uint32_t& flags) { (void)x; (void)z; flags = 0; return false; }
     // cISC4LotBaseTextureOccupant (0x097f6d98) vslot 0x1c IsCellCovered(x, z, &covered); false = not a base texture

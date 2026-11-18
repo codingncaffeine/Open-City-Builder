@@ -1210,6 +1210,8 @@ int RunScenario(const std::string& path) {
             native::NativeToxicStart(x, z);
         } else if (command == "toxics") {   // toxics: the toxic waste occupants
             native::NativeToxicReport();
+        } else if (command == "walls") {   // walls: the lot retaining walls and their models
+            native::NativeWallReport();
         } else if (command == "ports") {   // ports: the airport and seaport developers' ports
             native::NativePortReport();
         } else if (command == "landfill") {   // landfill: the landfill zones, their garbage and tiles, and the city's garbage figures

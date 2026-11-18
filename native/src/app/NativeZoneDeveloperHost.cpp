@@ -556,6 +556,13 @@ float NativeAreaSlope(const std::int32_t rect[4], bool includeWater) {
 }
 
 bool InstallZoneDeveloperHost(sc4::cSC4City* city) {
+    // Once per city: the city view brings the lot manager up before the model maker builds the loaded occupants (the retaining
+    // walls look their lots up), and the zone tool asks again later.
+    static sc4::cSC4City* installedFor = nullptr;
+    static bool installedOk = false;
+    if (city && city == installedFor && installedOk) return true;
+    installedFor = city;
+    installedOk = false;
     g_city = city;
     sc4::SetZoneDeveloperHost(&g_host);
     sc4::SetLotHost(&g_lotHost);
@@ -570,6 +577,7 @@ bool InstallZoneDeveloperHost(sc4::cSC4City* city) {
     });
     if (cSC4LotDeveloper* lots = LotDeveloper()) AddCitySimulatorAgent(static_cast<cIGZMessageTarget2*>(lots), 4, "cSC4LotDeveloper", 2);
     std::printf("city view: zone developer %s (lot developer %s)\n", ok ? "up" : "NOT initialised", LotDeveloper() ? "found" : "MISSING");
+    installedOk = ok;
     return ok;
 }
 

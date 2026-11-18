@@ -25,6 +25,7 @@
 #include "sc4/CameraControl.h"
 #include "app/NativeTerrainView.h"
 #include "app/NativeCity.h"
+#include "app/NativeZoneDeveloperHost.h"
 #include "app/NativeModelMaker.h"
 #include "app/NativeZoneTool.h"
 #include "app/NativePlaceLot.h"
@@ -447,6 +448,10 @@ bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* cityInterface, g
     }
     if (auto* city = dynamic_cast<sc4::cSC4City*>(cityInterface); city && ok) {
         native::InstallModelResources(driver);
+        // The lot manager (the zone developer) is initialised before the model maker's pass, as at the original's city init: the
+        // retaining walls of a city file look their lots up while their models are built.
+        native::BindSimGridCity(cityInterface);
+        native::InstallZoneDeveloperHost(city);
         native::AttachModelMaker(*render, *city);
         // Occupant messages (inserted / shown / changed / removed: cSC4Occupant::PostOccupantMessage) go to SL::spMS2. Bound only
         // now: the model maker has just built every loaded occupant itself, so announcing them during the load would double them.

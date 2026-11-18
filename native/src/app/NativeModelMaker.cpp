@@ -41,6 +41,10 @@
 #include "sc4/cSTETerrain.h"
 
 namespace native {
+bool NativeAddRetainingWallModels(sc4::cISC4Occupant* occupant, bool create, bool addToRenderer);   // app/NativeLotWalls.cpp
+}  // namespace native
+
+namespace native {
 // app/NativeTerrainHiding.cpp: the occupant side of the model maker's terrain hiding
 bool TerrainHidingNetworkFlags(sc4::cISC4Occupant* occupant, std::uint32_t mask, std::uint32_t& flags);
 bool TerrainHidingUndergroundTriangles(sc4::cISC4Occupant* occupant, bool& even, bool& odd);
@@ -671,6 +675,9 @@ public:
     bool NetworkPieceFlags(sc4::cISC4Occupant* occupant, std::uint32_t mask, std::uint32_t& flags) override { return TerrainHidingNetworkFlags(occupant, mask, flags); }
     bool UndergroundHiddenTriangles(sc4::cISC4Occupant* occupant, bool& even, bool& odd) override { return TerrainHidingUndergroundTriangles(occupant, even, odd); }
     int FoundationUsage(sc4::cISC4Occupant* occupant) override { return TerrainHidingFoundationUsage(occupant); }
+    bool AddRetainingWallModels(sc4::cISC4Occupant* occupant, bool create, bool addToRenderer) override {
+        return NativeAddRetainingWallModels(occupant, create, addToRenderer);   // app/NativeLotWalls.cpp
+    }
     bool LotFlagsAt(int x, int z, std::uint32_t& flags) override { return TerrainHidingLotFlagsAt(x, z, flags); }
     bool BaseTextureCellCovered(sc4::cISC4Occupant* occupant, int x, int z, bool& covered) override {
         covered = false;

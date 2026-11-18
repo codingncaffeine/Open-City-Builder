@@ -1082,7 +1082,8 @@ bool cSC4ModelMaker::AddModels(cISC4Occupant* occupant, int zoom, int rotation, 
     bool result = false;
     switch (type) {
         case kModelOccupantTypeRetainingWall:
-            result = LoadModelsCommon(occupant, zoom, rotation, type);   // cSC4LotRetainingWallOccupant::AddRetainingWallModels
+            // i386 0x0024aee0: cSC4LotRetainingWallOccupant::AddRetainingWallModels(occupant, true, false)
+            result = g_host && g_host->AddRetainingWallModels(occupant, true, false);
             zoomMask = static_cast<int>(zoomMask_);
             rotationMask = static_cast<int>(rotationMask_);
             break;

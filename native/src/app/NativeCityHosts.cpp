@@ -57,6 +57,7 @@ void InstallLotConfigurationStub();
 void InstallLotConfigurationManagerStub();
 void InstallLotRetainingWallModelStub();
 void InstallLotRetainingWallStub();
+void InstallLotRetainingWallHosts();   // NativeLotWalls.cpp
 void InstallModelMakerStub();
 void InstallMySimStub();
 void InstallMySimAdviceStub();
@@ -173,6 +174,7 @@ void InstallStubHosts() {
     InstallLotConfigurationManagerStub();
     InstallLotRetainingWallModelStub();
     InstallLotRetainingWallStub();
+    InstallLotRetainingWallHosts();       // the walls' and their models' real hosts replace the two stubs above
     InstallModelMakerStub();
     InstallMySimStub();
     InstallMySimAdviceStub();

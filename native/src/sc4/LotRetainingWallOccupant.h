@@ -33,13 +33,13 @@
 #include "rz/cRZAutoRefCount.h"
 #include "sc4/Exemplar.h"
 #include "sc4/Lot.h"
+#include "sc4/LotRetainingWallModel.h"
 #include "sc4/Occupant.h"
 
 namespace sc4 {
 
 constexpr std::uint32_t kGZCLSID_cSC4LotRetainingWallOccupant = 0x49c05c9f;
 constexpr std::uint32_t kGZIID_cISC4LotRetainingWallOccupant = 0x295d1162;
-constexpr std::uint32_t kGZIID_cISC4LotRetainingWallModel = 0xa9e2831e;
 constexpr std::uint32_t kOccupantTypeLotRetainingWall = 0x895d1169;
 
 // lot flag bit the occupant uses to mark a lot whose retaining wall it built (cSC4Lot's +0xcd byte)
@@ -66,22 +66,9 @@ public:
     virtual void SetRetainingWallType(std::uint32_t type) = 0;          // [12] 0x60
 };
 
-// cSC4LotRetainingWallModel is not recovered yet. This is the cISC4LotRetainingWallModel interface (iid
-// 0xa9e2831e) plus the parts of the class the occupant calls; the real class must implement it.
-class ILotRetainingWallModel : public cIGZUnknown {
-public:
-    // cISC4LotRetainingWallModel vslot 0x18 = cSC4LotRetainingWallModel::GetWallModel @ 0x100168850
-    virtual ILotRetainingWallModel* GetWallModel() = 0;
-    // model +0x84: the lot edge (0..3) the model was built for, read by FindRetainingWallModel
-    virtual std::int8_t WallEdge() const = 0;
-    // cSC4LotRetainingWallModel::SetTextureData @ 0x100168808: five texture ids (+0x90) and the scale (+0x88)
-    virtual void SetTextureData(const std::uint32_t* textureIds, float scale) = 0;
-    // cSC4LotRetainingWallModel::Init @ 0x1001686d4: build the vertices for `bounds` on `wallEdge`;
-    // `builtOut` is the model's +0x3c flag (false = the wall segment could not be built)
-    virtual bool Init(const cS3DBoundingBox& bounds, int wallEdge, bool& builtOut) = 0;
-    // the cS3DModelInstanceBasic subobject at +8 (the original adds the SI adjustor *(int*)(*(void**)model - 0x18))
-    virtual cIS3DModelInstance* AsModelInstance() = 0;
-};
+// The model the occupant builds and finds is the recovered cSC4LotRetainingWallModel, through its cISC4LotRetainingWallModel
+// interface (iid 0xa9e2831e) with the calls the occupant makes (sc4/LotRetainingWallModel.h).
+using ILotRetainingWallModel = cISC4LotRetainingWallModel;
 
 // The engine services of the original. Every method mirrors exactly one original call; the slot / address of
 // that call is in the comment.

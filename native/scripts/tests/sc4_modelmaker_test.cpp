@@ -722,6 +722,14 @@ struct FakeHost final : sc4::IModelMakerHost {
         odd = found != undergroundTriangles.end() && found->second.second;
         return found != undergroundTriangles.end();
     }
+    int wallModelCalls = 0;
+    bool lastWallCreate = false, lastWallAddToRenderer = true;
+    bool AddRetainingWallModels(cISC4Occupant*, bool create, bool addToRenderer) override {
+        ++wallModelCalls;
+        lastWallCreate = create;
+        lastWallAddToRenderer = addToRenderer;
+        return true;
+    }
     int FoundationUsage(cISC4Occupant* occupant) override {
         const auto found = foundationUsage.find(occupant);
         return found == foundationUsage.end() ? -1 : found->second;
@@ -1209,6 +1217,19 @@ int main() {
         CHECK(placeable->models.size() == 1);
         CHECK(placeable->zooms == (1u << 2));
         CHECK(placeable->rotations == (1u << 1));
+        {   // a retaining wall builds its own models: cSC4LotRetainingWallOccupant::AddRetainingWallModels(occupant, true, false)
+            auto* wallPlaceable = new FakePlaceable();
+            auto* wall = new FakeOccupant();
+            wall->type = sc4::kModelOccupantTypeRetainingWall;
+            wall->placeable = wallPlaceable;
+            wall->cells = SC4CellRect{30, 40, 30, 40};
+            wall->flags = sc4::kOccupantFlagVisible;
+            const int before = host.wallModelCalls;
+            maker->AddModels(wall, 2, 1, sc4::kModelOccupantTypeRetainingWall, false);
+            CHECK(host.wallModelCalls == before + 1);
+            CHECK(host.lastWallCreate && !host.lastWallAddToRenderer);
+            CHECK(resource->created == 1);   // no exemplar models were made for it
+        }
         if (!placeable->models.empty()) {
             auto* model = static_cast<FakeModel*>(placeable->models[0]);
             CHECK(model->owner == occupant);
