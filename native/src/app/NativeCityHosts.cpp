@@ -90,6 +90,7 @@ void InstallSignpostStub();
 void InstallSimulatorStub();
 void InstallTextDecalStub();
 void InstallToxicStub();
+void InstallToxicHost();   // NativeToxic.cpp
 void InstallTractDeveloperStub();
 void InstallTutorialSystemStub();
 void InstallTutorialTaskStub();
@@ -205,6 +206,7 @@ void InstallStubHosts() {
     InstallSimulatorStub();
     InstallTextDecalStub();
     InstallToxicStub();
+    InstallToxicHost();                   // the toxic waste occupants' real host replaces the stub above
     InstallTractDeveloperStub();
     InstallTutorialSystemStub();
     InstallTutorialTaskStub();

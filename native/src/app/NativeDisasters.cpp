@@ -812,4 +812,13 @@ void NativeFireReport() {
     view->Release();
 }
 
+// Kit command `toxic X Z`: the toxic disaster manager starts a spill at a cell (what a crashed toxic truck's scrubber asks for).
+void NativeToxicStart(int cellX, int cellZ) {
+    cSC4City* city = HostCity();
+    auto* layer = city ? dynamic_cast<cISC4DisasterLayer*>(city->GetComponent(CityComponent::DisasterLayer)) : nullptr;
+    cISC4DisasterManager* toxic = layer ? layer->GetDisasterManager(kDisasterManagerIdToxic) : nullptr;
+    const bool started = toxic && toxic->AttemptDisasterStart(cellX, cellZ);
+    std::printf("toxic %d,%d: %s\n", cellX, cellZ, !toxic ? "no manager" : started ? "started" : "refused");
+}
+
 }  // namespace native

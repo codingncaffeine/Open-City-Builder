@@ -636,6 +636,7 @@ src/app/NativeGrowthMaps.cpp
 src/app/NativeTractDevelopment.cpp
 src/app/NativeLotConstruction.cpp
 src/app/NativeLandfill.cpp
+src/app/NativeToxic.cpp
 src/app/NativeConstruction.cpp
 src/app/NativeConstructionCrew.cpp
 src/app/NativeMiniMap.cpp

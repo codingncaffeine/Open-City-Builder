@@ -1204,6 +1204,12 @@ int RunScenario(const std::string& path) {
             int x = -1, z = -1;
             words >> x >> z;
             native::NativePipeBurstStart(x, z);
+        } else if (command == "toxic") {   // toxic X Z: a toxic spill starts at a city cell
+            int x = 0, z = 0;
+            words >> x >> z;
+            native::NativeToxicStart(x, z);
+        } else if (command == "toxics") {   // toxics: the toxic waste occupants
+            native::NativeToxicReport();
         } else if (command == "landfill") {   // landfill: the landfill zones, their garbage and tiles, and the city's garbage figures
             native::NativeLandfillReport();
         } else if (command == "pipebursts") {   // pipebursts: every burst's leaking and waiting pipes
