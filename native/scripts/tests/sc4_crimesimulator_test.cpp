@@ -65,7 +65,8 @@ struct FakeOccupant : ICrimeOccupant {
     std::uint32_t OccupantType() override { return type; }
     cISCPropertyHolder* PropertyHolder() override { return &props; }
     void Position(float xyz[3]) override { for (int i = 0; i < 3; ++i) xyz[i] = pos[i]; }
-    void* IdlePropOccupant() override { return department ? static_cast<void*>(this) : nullptr; }
+    int propView = 0;   // the prop interface answer stands apart from the occupant (as the original's QueryInterface does)
+    void* IdlePropOccupant() override { return department ? static_cast<void*>(&propView) : nullptr; }
     void* CrimeAutomaton() override { return responder ? static_cast<void*>(this) : nullptr; }
     bool IsOccupantGroup(std::uint32_t g) override { return groups == g; }
 };
@@ -424,9 +425,9 @@ int main() {
     cSCPropertyHelp::SetPropertyValue(&far1.props, kCrimePropFilterProperty, std::uint32_t(1));
     host.box = {&near1, &near2, &far1};
     const float origin[3] = {0, 0, 0};
-    CHECK(sim.GetNearestCrimeProp(origin, 100.0f) == static_cast<void*>(&near2));
+    CHECK(sim.GetNearestCrimeProp(origin, 100.0f) == static_cast<void*>(&near2.propView));
     near2.department = false;   // not available any more
-    CHECK(sim.GetNearestCrimeProp(origin, 100.0f) == static_cast<void*>(&near1));
+    CHECK(sim.GetNearestCrimeProp(origin, 100.0f) == static_cast<void*>(&near1.propView));
     CHECK(sim.GetNearestCrimeProp(origin, 5.0f) == nullptr);
     FakeOccupant s1;
     s1.type = kCrimeSimOccupantType; s1.groups = 0x4102; s1.responder = true; s1.pos[0] = 20;

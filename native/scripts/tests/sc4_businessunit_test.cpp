@@ -138,8 +138,8 @@ int main() {
     {   // the refit after a terrain change (i386 0x000f28ce): buildings, props and flora off the ground by more than 0.1 move to it
         // (an occupant that is no configuration object keeps x / z and takes the terrain); others and other types stay
         cSC4Lot* lot = MakeLot(5, kFactory, 0);
-        Standing prop(0xa823821eu, 88.0f, 10.0f, 8.0f), close(0x278128a0u, 90.0f, 12.05f, 8.0f), flora(0x74758926u, 91.0f, 3.0f, 9.0f),
-            other(0x12345678u, 92.0f, 0.0f, 9.0f);
+        Standing prop(0xa823821eu, 88.0f, 10.0f, 8.0f), close(0x278128a0u, 90.0f, 12.05f, 8.0f), flora(0x74758926u, 91.0f, 11.5f, 9.0f),
+            other(0x12345678u, 92.0f, 0.0f, 9.0f);   // (the flora is half a metre off: past the 0.1 tolerance)
         host.lotOccupants = {static_cast<cISC4Occupant*>(&prop), static_cast<cISC4Occupant*>(&close), static_cast<cISC4Occupant*>(&flora),
                              static_cast<cISC4Occupant*>(&other)};
         construction.ground = 12.0f;
