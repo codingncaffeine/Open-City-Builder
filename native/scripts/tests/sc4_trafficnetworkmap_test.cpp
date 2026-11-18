@@ -6,6 +6,7 @@
 #include <set>
 #include <vector>
 
+#include "rz/cRZMessage2Standard.h"
 #include "sc4/TrafficNetworkMap.h"
 
 static int failures = 0;
@@ -198,6 +199,11 @@ struct Host : ITrafficNetworkMapHost {
 };
 
 bool FakeBase::QueryInterface(std::uint32_t iid, void** out) {
+    if (iid == 0x26bb767eu) {   // cISC4Occupant: the occupant itself
+        *out = static_cast<cISC4Occupant*>(this);
+        AddRef();
+        return true;
+    }
     if (!owner || iid != 0xa821ef94u) return 0;
     *out = owner;
     owner->AddRef();
@@ -462,6 +468,38 @@ int main() {
     CHECK(map.TileCount() == 1);   // street2 remains
     CHECK(map.GetIntersectionMap().count(&street) == 0);
     CHECK(map.UnusableRoads().empty());
+
+    // ---- usable-changed (0x89d3e9f3): a piece that becomes usable leaves the unusable list for the tiles, through the
+    // map's network filter (any of the network flags 0x1fcf); data1 0 and pieces outside the filter are ignored ----
+    {
+        FakeOccupant fresh;
+        InitStreet(fresh, 6, 1);
+        CHECK(map.HandleInsertNetworkOccupant(&fresh));
+        CHECK(map.FindNetworkOccupant(6, 1) == nullptr);
+        CHECK(map.FindNetworkOccupant(6, 1, 0x1u, true) == &fresh);   // only in the unusable list
+        const auto send = [&map](cISC4Occupant* occupant, std::uint32_t usable) {
+            auto* message = new cRZMessage2Standard();
+            message->AddRef();
+            message->SetType(0x89d3e9f3);
+            message->SetIGZUnknown(occupant);
+            message->SetData1(usable);
+            map.DoMessage(static_cast<cIGZMessage2*>(message));
+            message->Release();
+        };
+        send(&fresh.base, 0);
+        CHECK(map.FindNetworkOccupant(6, 1) == nullptr);
+        fresh.flags = 0x10000000u;   // usable, but no road / rail / transit flag
+        send(&fresh.base, 1);
+        CHECK(map.FindNetworkOccupant(6, 1) == nullptr);
+        fresh.flags = 0x10000001u;
+        send(&fresh.base, 1);
+        CHECK(map.FindNetworkOccupant(6, 1) == &fresh);
+        CHECK(map.FindNetworkOccupant(6, 1, 0x1u, false) == &fresh);
+        const auto unusable = map.UnusableRoads().find((6u << 16) | 1u);
+        CHECK(unusable == map.UnusableRoads().end() || unusable->second.empty());
+        CHECK(map.HandleRemoveNetworkOccupant(&fresh));   // the fake leaves the map before it goes out of scope
+        CHECK(map.FindNetworkOccupant(6, 1) == nullptr);
+    }
 
     // ---- shutdown ----
     CHECK(map.Shutdown());

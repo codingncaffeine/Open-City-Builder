@@ -197,7 +197,7 @@ bool cSC4TrafficNetworkMap::DoMessage(::cGZMessage&) {
 // @ i386 0x001ecbd6. Network pieces inserted / removed reach the tiles (a subway or tunnel piece as usable-changed), the
 // city's post-init builds the intersections, 0x69247dc7 marks the tile occupancy dirty and the camera's move refreshes the
 // intersections in view.
-//   PARTIAL: 0x86ad10ee (vslot 0xe4), 0x89d3e9f3 (usable-changed through the network filter), a removed train leaving the
+//   PARTIAL: 0x86ad10ee (vslot 0xe4), a removed train leaving the
 //   intersections' train lists and the stoplight props' update on a prop insert are not ported; the scroll granularity test
 //   is reduced to "not while scrolling".
 bool cSC4TrafficNetworkMap::DoMessage(cIGZMessage2* message) {
@@ -224,6 +224,21 @@ bool cSC4TrafficNetworkMap::DoMessage(cIGZMessage2* message) {
         } else {
             HandleRemoveNetworkOccupant(network);
         }
+        network->Release();
+        break;
+    }
+    case kTrafficMessageNetworkUsableChanged: {
+        // A piece became usable (data1 1; 0 is ignored): when the map's network filter (cTrafficNetworkFilter_NetworkMap,
+        // +0xa4c: any of the network flags 0x1fcf) takes it, it leaves the unusable list for the tiles (vslot 0xd8).
+        auto* unknown = static_cast<cIGZUnknown*>(standard->GetIGZUnknown());
+        if (!unknown || standard->GetData1() == 0 || !host_) break;
+        void* raw = nullptr;
+        if (!unknown->QueryInterface(0x26bb767e, &raw) || !raw) break;   // cISC4Occupant
+        auto* occupant = static_cast<cISC4Occupant*>(raw);
+        ITrafficNetworkMapOccupant* network = host_->AsMapOccupant(occupant);
+        occupant->Release();
+        if (!network) break;
+        if (network->HasAnyNetworkFlag(0x1fcf)) HandleNetworkOccupantUsable(network, true);
         network->Release();
         break;
     }
