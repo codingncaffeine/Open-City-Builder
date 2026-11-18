@@ -111,7 +111,9 @@ int main() {
     // The original object is 0xe8 bytes with the effect name at +0xb0; the port's prop base carries the original's
     // cIGZMessageTarget2 and cISC4PropOccupant views as C++ bases: two vptrs, 16 more bytes ahead of the members.
     constexpr std::size_t kTargetView = 16;
+#if defined(_LIBCPP_VERSION)   // the game's library: the size holds with libc++'s 24-byte std::string
     CHECK(sizeof(cSC4PropOccupantVisualEffect) == 0xe8 + kTargetView);
+#endif
     CHECK(object->GetGZCLSID() == 0x2977aa49);
     CHECK(object->AsOccupant() == static_cast<cISC4Occupant*>(object->AsPropOccupant()));
     CHECK(reinterpret_cast<const char*>(object->AsPropOccupant()) - reinterpret_cast<const char*>(object) == 0x08);

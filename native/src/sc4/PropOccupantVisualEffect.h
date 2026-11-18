@@ -170,8 +170,10 @@ private:
 
 // The original object is 0xe8 bytes; the port's is 16 more: the prop base carries the original's cIGZMessageTarget2 and
 // cISC4PropOccupant views as C++ bases after the occupant: two vptrs ahead of the prop's members. The member offsets above
-// are the original's.
+// are the original's. The sizes hold with libc++ (the game's library; its std::string is 24 bytes, libstdc++'s 32).
+#if defined(_LIBCPP_VERSION)
 static_assert(sizeof(cSC4PropOccupantVisualEffect) == 0xe8 + 16,
               "cSC4PropOccupantVisualEffect layout: the 0xe8-byte original object + the prop's two interface vptrs");
+#endif
 
 }  // namespace sc4
