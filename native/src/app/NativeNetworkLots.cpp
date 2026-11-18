@@ -451,7 +451,7 @@ public:
         m->Release();
     }
     void RegisterWithNetworkManager(cISC4Occupant*) override {}
-    bool IntersectionPieceId(std::uint32_t) override { return false; }   // PARTIAL: sAvenueIntersectionPieceIds is not filled
+    bool IntersectionPieceId(std::uint32_t pieceId) override { return cSC4NetworkOccupant::IsAvenueIntersectionPieceId(pieceId); }
     void ReadPersistRef(cIGZIStream& stream, std::uint32_t clsid, cIGZUnknown*& out) override {
         void* raw = nullptr;
         SC4ReadGZPersistRef(stream, clsid, &raw);

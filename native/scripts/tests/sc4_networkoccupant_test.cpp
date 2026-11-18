@@ -72,6 +72,16 @@ int main() {
     CHECK(n->PieceId() == 67122432 && n->GetRotation() == 1 && n->GetFlip() == 1);
     n->SetNetworkFlag(kNetworkFlagPiece);
     CHECK(n->IsIntersection());
+    // sAvenueIntersectionPieceIds: the 13 ids of the original's table (Mac i386 0x00844f80)
+    {
+        const std::uint32_t ids[13] = {0x04003500, 0x04003600, 0x04005200, 0x04005300, 0x04005400, 0x04006900, 0x04007100,
+                                       0x04007400, 0x04007500, 0x04008500, 0x04009000, 0x04009300, 0x04009400};
+        int found = 0;
+        for (std::uint32_t id : ids) found += cSC4NetworkOccupant::IsAvenueIntersectionPieceId(id) ? 1 : 0;
+        CHECK(found == 13);
+        CHECK(!cSC4NetworkOccupant::IsAvenueIntersectionPieceId(0x04003501));
+        CHECK(!cSC4NetworkOccupant::IsAvenueIntersectionPieceId(0x00004b00));
+    }
     n->SetEdgeType(1, 1, 3);
     CHECK((n->GetEdgeTypesFlag(1) >> 8 & 0xff) == 3);
     n->SetEdgeTypesFlag(1, 0x00000103);

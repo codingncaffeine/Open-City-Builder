@@ -199,6 +199,7 @@ public:
     void SetLit(bool lit);
     bool IsSupportPylonPresent() const { return HasNetworkFlag(kNetworkFlagSupportPylon); }
     bool IsIntersection() const;
+    static bool IsAvenueIntersectionPieceId(std::uint32_t pieceId);   // the 13 avenue intersection pieces
     bool IsPartOfTheSameStructure(cSC4NetworkOccupant& other);
     bool GetPassageCeiling(float& ceiling);
     void SetPassageCeiling(float ceiling);

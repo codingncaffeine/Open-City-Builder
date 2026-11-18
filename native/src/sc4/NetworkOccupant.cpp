@@ -400,9 +400,12 @@ bool cSC4NetworkOccupant::IsPartOfTheSameStructure(cSC4NetworkOccupant& other) {
 
 bool cSC4NetworkOccupant::IsIntersection() const {
     if (!HasNetworkFlag(kNetworkFlagPiece)) return false;
-    return g_host ? g_host->IntersectionPieceId(pieceId_)
-                  : std::find(std::begin(kAvenueIntersections), std::end(kAvenueIntersections), pieceId_) !=
-                        std::end(kAvenueIntersections);
+    return g_host ? g_host->IntersectionPieceId(pieceId_) : IsAvenueIntersectionPieceId(pieceId_);
+}
+
+// sAvenueIntersectionPieceIds, filled by StaticInit from kAvenueIntersections (Mac i386 0x0013486e, table 0x00844f80).
+bool cSC4NetworkOccupant::IsAvenueIntersectionPieceId(std::uint32_t pieceId) {
+    return std::find(std::begin(kAvenueIntersections), std::end(kAvenueIntersections), pieceId) != std::end(kAvenueIntersections);
 }
 
 // ------------------------------------------------------------------------------------- appearance
