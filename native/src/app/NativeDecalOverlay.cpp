@@ -134,6 +134,19 @@ public:
                     std::fprintf(stderr, "decal overlay m%d #%u rect %d,%d..%d,%d alpha %.2f rgb %.2f %.2f %.2f mode %u flags %llx tex %d\n", index, i,
                                  overlay.rect.left, overlay.rect.top, overlay.rect.right, overlay.rect.bottom, overlay.alpha, overlay.color[0], overlay.color[1],
                                  overlay.color[2], overlay.drawMode, static_cast<unsigned long long>(overlay.flags), overlay.texture->GlTextureId());
+                if (Debug() && std::getenv("SC4_DECALDEBUG")[0] == '2' && listed < 400) {   // the texture coordinates at the rect's corners
+                    const cS3DMatrix4& m = overlay.texMatrix;
+                    for (int r = 0; r < 4; ++r)
+                        std::fprintf(stderr, "decal matrix row %d: %.5f %.5f %.5f %.5f\n", r, m.m[r][0], m.m[r][1], m.m[r][2], m.m[r][3]);
+                    for (int corner = 0; corner < 4; ++corner) {
+                        const float wx = static_cast<float>((corner & 1) ? overlay.rect.right + 1 : overlay.rect.left) * 16.0f;
+                        const float wz = static_cast<float>((corner & 2) ? overlay.rect.bottom + 1 : overlay.rect.top) * 16.0f;
+                        const float wy = g_terrain->GetAltitudeAtVertex(static_cast<int>(wx / 16.0f), static_cast<int>(wz / 16.0f));
+                        std::fprintf(stderr, "decal uv %d: world %.0f,%.0f -> %.3f,%.3f\n", corner, wx, wz,
+                                     wx * m.m[0][0] + wy * m.m[1][0] + wz * m.m[2][0] + m.m[3][0],
+                                     wx * m.m[0][1] + wy * m.m[1][1] + wz * m.m[2][1] + m.m[3][1]);
+                    }
+                }
                 if (x1 <= x0 || z1 <= z0) continue;
                 const std::uint8_t rgba[4] = {Byte(overlay.color[0]), Byte(overlay.color[1]), Byte(overlay.color[2]), Byte(overlay.alpha)};
                 if (rgba[3] == 0) continue;

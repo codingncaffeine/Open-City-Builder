@@ -603,7 +603,10 @@ void cSTEOverlayManager::UpdateDecal(const cDecal& decal, bool staticOnly) {
         rot.m[3][0] = decal.z * s + decal.x * (1.0f - c);
         rot.m[3][2] = decal.z * (1.0f - c) - decal.x * s;
         rot.m[3][3] = 1.0f;
-        m = m * rot;   // see the PARTIAL note: the Ghidra listing drops one operand of operator* here
+        // Mac i386 0x004d97a0: operator*(result, rot, m): the point turns about the decal center first, then maps to the
+        // texture (row vectors: p * rot * m). The other order put the turn's world-space translation into the texture
+        // coordinates and every turned decal sampled far outside its texture.
+        m = rot * m;
         if (decal.uRepeat == 1.0f && decal.vRepeat == 1.0f) {
             // Axis-aligned bounds of the rotated quad: |cos| and |cos| + |sin| times the two half extents.
             const float absCos = std::fabs(c);

@@ -552,6 +552,29 @@ static void TestDecals(FakeHost& host) {
     plain.vRepeat = 1.0f;
     manager.UpdateDecalInfo(id, plain);
     CHECK((manager.Overlays()[0].flags & kOverlayFlagTransformed) == 0);
+    // A turned decal still maps its own square onto the texture (Mac i386 0x004d97a0: the turn about the center comes
+    // first, then the texture mapping): the center samples (0.5, 0.5), the four corners of the turned square stay in 0..1.
+    {
+        cDecalInfo turned = plain;
+        turned.turns = 0.125f;   // 45 degrees
+        manager.UpdateDecalInfo(id, turned);
+        const cS3DMatrix4& m = manager.Overlays()[0].texMatrix;
+        const auto uv = [&m](float x, float z, float& u, float& v) {   // row vector (x, 0, z, 1) * m
+            u = x * m.m[0][0] + z * m.m[2][0] + m.m[3][0];
+            v = x * m.m[0][1] + z * m.m[2][1] + m.m[3][1];
+        };
+        float u = 0, v = 0;
+        uv(turned.x, turned.z, u, v);
+        CHECK(Near(u, 0.5f + turned.uvOffset) && Near(v, 0.5f + turned.uvOffset));
+        const float half = turned.width * 0.5f * 1.41421356f;   // the turned square's corners lie on the axes
+        const float offsets[4][2] = {{half, 0}, {-half, 0}, {0, half}, {0, -half}};
+        for (const auto& d : offsets) {
+            uv(turned.x + d[0], turned.z + d[1], u, v);
+            CHECK(u > -0.01f + turned.uvOffset && u < 1.01f + turned.uvOffset && v > -0.01f + turned.uvOffset &&
+                  v < 1.01f + turned.uvOffset);
+        }
+        manager.UpdateDecalInfo(id, plain);
+    }
 
     // ---- a text decal uses the cached string texture's size --------------------------------------------------
     auto* text = new FakeStringTexture(21, 128, 64);   // refs = 1: the caller's reference
