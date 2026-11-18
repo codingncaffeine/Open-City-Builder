@@ -10,20 +10,12 @@
 
 #include "gz/cIGZSerializable.h"
 #include "rz/cRZRandom.h"
+#include "sc4/PropRequesterInterface.h"
 
 namespace sc4 {
 
 constexpr std::uint32_t kGZCLSID_cSC4WealthRequester = 0x89c49986;
-constexpr std::uint32_t kGZIID_cISC4PropRequester = 0x89c498be;
 constexpr std::uint32_t kWealthRequesterSatisfactionId = 0x49a1e995;
-
-class cISC4PropRequester : public cIGZUnknown {
-public:
-    virtual std::uint32_t SelectProp(const std::vector<std::uint32_t>& candidates, int x, int z) = 0;
-    virtual int GetRequestedShare(const void* rect) const = 0;
-    virtual std::uint32_t GetRequesterSatisfactionId() const = 0;
-    virtual bool UsesCustomPropSelector() const = 0;
-};
 
 class IWealthHost {
 public:

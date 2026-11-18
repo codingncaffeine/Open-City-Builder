@@ -171,6 +171,11 @@ private:
 
 class CrimeHost final : public ICrimeHost {
 public:
+    // The requester view is on the crime simulator's adapter (the city component), not on the plain simulator.
+    void RegisterPropRequester() override {
+        cSC4City* city = HostCity();
+        NativeAddPropRequester(city ? city->GetComponent(CityComponent::CrimeSimulator) : nullptr);
+    }
     ICrimeLot* RandomLot() override {
         auto* lots = CityAs<cSC4ZoneDeveloper>(CityComponent::ZoneDeveloper);
         return LotView(lots ? lots->GetRandomLot() : nullptr);

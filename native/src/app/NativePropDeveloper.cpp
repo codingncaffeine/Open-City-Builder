@@ -299,6 +299,25 @@ private:
 
 }  // namespace
 
+bool NativeAddPropRequester(cIGZUnknown* requester) {
+    cIGZUnknown* object = Component(CityComponent::PropDeveloper);
+    void* developerRaw = nullptr;
+    void* requesterRaw = nullptr;
+    if (!object || !requester || !object->QueryInterface(kGZIID_cISC4PropDeveloper, &developerRaw) || !developerRaw) return false;
+    auto* developer = static_cast<cISC4PropDeveloper*>(developerRaw);
+    const bool ok = requester->QueryInterface(kGZIID_cISC4PropRequester, &requesterRaw) && requesterRaw;
+    if (ok) {
+        auto* view = static_cast<cISC4PropRequester*>(requesterRaw);
+        developer->AddPropRequester(view);   // takes its own reference
+        view->Release();
+    }
+    developer->Release();
+    if (std::getenv("SC4_PROPDEVDEBUG"))
+        std::fprintf(stderr, "prop developer: add requester %08x -> %s\n",
+                     ok ? static_cast<cISC4PropRequester*>(requesterRaw)->GetRequesterSatisfactionId() : 0u, ok ? "added" : "not a requester");
+    return ok;
+}
+
 void InstallPropDeveloperHost() {
     sc4::SetPropDeveloperHost(&g_host);
     sc4::SetCityProbeWealthHost(&g_wealth);

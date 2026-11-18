@@ -9,6 +9,7 @@
 #include "rz/PortMemoryStreams.h"
 #include "rz/cRZString.h"
 #include "sc4/CrimeSimulator.h"
+#include "tools/city_probe_plain.h"
 
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
@@ -69,7 +70,16 @@ struct FakeOccupant : ICrimeOccupant {
     bool HasFlags(std::uint32_t f) override { return (flags & f) == f; }
 };
 
+// a plain serializable that is not a requester: its adapter must not answer 0x89c498be
+struct PlainNoRequester {
+    bool Write(cIGZOStream&) const { return true; }
+    bool Read(cIGZIStream&) { return true; }
+    std::uint32_t GetGZCLSID() const { return 0x12345678; }
+};
+
 struct Host : ICrimeHost {
+    int requesterRegistrations = 0;
+    void RegisterPropRequester() override { ++requesterRegistrations; }
     FakeLot* lot = nullptr;
     std::map<std::pair<int, int>, int> zones;
     int jailPopulation = 0, unjailed = 0, statsCalls = 0, updated = 0;
@@ -208,6 +218,7 @@ int main() {
     // Init: tract size 2 for the rest of the test; crime types are loaded once
     CHECK(sim.Init(nullptr));
     CHECK(!sim.Init(nullptr));
+    CHECK(host.requesterRegistrations == 1);   // a new city: the requester view joins the prop developer once
     CHECK(registry.Types().size() == 2);
     CHECK(registry.Types()[0]->id == 0xA1 && registry.Types()[0]->name == "Pickpocket");   // localized string wins
     CHECK(registry.Types()[1]->name == "Mugging" && registry.Types()[1]->arson);          // property fallback
@@ -437,10 +448,43 @@ int main() {
     CHECK(other.GetMonthlyCrimeCount() == 0 && other.Events().size() == 2);
     CHECK(other.Events()[0]->typeId == 0xA1 && other.Events()[0]->description == "Pickpocket");
     CHECKF(other.CrimeMultiplier(), sim.CrimeMultiplier());
+    CHECK(other.Init(nullptr) && host.requesterRegistrations == 1);   // a loaded city keeps the saved requester list
     std::uint8_t bad[] = {5, 0};
     PortMemoryIStream badStream(bad, sizeof bad);
     cSC4CrimeSimulator third(&host, &registry);
     CHECK(!third.Read(badStream));
+
+    // the plain simulator's adapter answers the prop requester interface (+8, 0x89c498be) with a view that shares its
+    // count and passes the rectangle through (the original averages x0..x1-1, z0..z1-1: width x1 - x0)
+    {
+        cSCPropertyHolder shareTunables;
+        cSCPropertyHelp::SetPropertyValue(&shareTunables, 0x49a34301, std::vector<float>{0.0f, 0.0f, 1.0f, 100.0f});
+        auto* plain = new cSC4CrimeSimulator(&host, &registry);
+        CHECK(plain->Init(&shareTunables) && host.requesterRegistrations == 2);
+        cIGZSerializable* adapter = WrapPlain(plain);
+        void* raw = nullptr;
+        CHECK(adapter->QueryInterface(kGZIID_cISC4PropRequester, &raw) && raw);
+        auto* view = static_cast<cISC4PropRequester*>(raw);
+        CHECK(view->GetRequesterSatisfactionId() == 0x49a1e996 && view->UsesCustomPropSelector());
+        auto& cells = const_cast<cSC4SimGrid<std::uint8_t>*>(plain->GetCrimeGrid())->GetGridData();
+        cells[1][1] = 255;   // tract size 2 (the tunables' default): cells 2..3
+        const std::int32_t hit[4] = {2, 2, 4, 4}, miss[4] = {4, 4, 6, 6};
+        CHECK(view->GetRequestedShare(hit) == plain->GetRequestedShare(2, 2, 4, 4) && view->GetRequestedShare(hit) > 0);
+        CHECK(view->GetRequestedShare(miss) == 0);
+        void* back = nullptr;
+        CHECK(view->QueryInterface(kGZIID_cIGZSerializable, &back) && back == adapter);
+        if (back) static_cast<cIGZSerializable*>(back)->Release();
+        view->AddRef();       // the prop developer's reference (AddPropRequester) counts on the adapter
+        adapter->Release();
+        view->Release();
+        view->Release();      // the last reference: deletes the adapter and the simulator
+    }
+    void* none = nullptr;
+    {
+        cIGZSerializable* plainOther = WrapPlain(new PlainNoRequester());
+        CHECK(!plainOther->QueryInterface(kGZIID_cISC4PropRequester, &none) && !none);
+        plainOther->Release();
+    }
 
     // shutdown frees everything; events release their lots
     sim.Shutdown();

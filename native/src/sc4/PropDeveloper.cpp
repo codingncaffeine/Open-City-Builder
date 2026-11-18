@@ -376,6 +376,9 @@ bool cSC4PropDeveloper::Read(cIGZIStream& stream) {
         void* raw = nullptr;
         SC4ReadGZSerializable(stream, kGZIID_cISC4PropRequester, &raw, false);
         requesters_[i] = static_cast<cISC4PropRequester*>(raw);
+        if (std::getenv("SC4_PROPDEVDEBUG"))
+            std::fprintf(stderr, "prop developer: read requester %u of %u -> %08x\n", i, count,
+                         raw ? requesters_[i]->GetRequesterSatisfactionId() : 0u);
     }
     if (g_host) {
         lotManager_ = static_cast<IPropLotManagerApi*>(g_host->ReadService(stream, 0x681905bd));
@@ -993,7 +996,9 @@ void cSC4PropDeveloper::UpdateTract(int tractX, int tractZ) {
                         keep = true;
                     } else if (requesterIndex < requesterCount) {
                         cISC4PropRequester* requester = requesters_[requesterIndex];
-                        if (!requester->UsesCustomPropSelector()) {        // requester vslot 0x28
+                        // Port: a saved requester whose class does not resolve reads as null (kept in place: props
+                        // store requester indices); the original never meets one.
+                        if (!requester || !requester->UsesCustomPropSelector()) {   // requester vslot 0x28
                             keep = true;
                         } else {
                             cISC4PropOccupant* prop = nullptr;

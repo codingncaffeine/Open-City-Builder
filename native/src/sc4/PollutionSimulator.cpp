@@ -51,6 +51,7 @@ cSC4PollutionSimulator::cSC4PollutionSimulator(IPollutionHost* host) : host_(hos
 bool cSC4PollutionSimulator::QueryInterface(std::uint32_t iid, void** out) {
     if (iid == 0xe4fda3d4) *out = static_cast<cIGZSerializable*>(this);
     else if (iid == 0x452294aa) *out = static_cast<cIGZMessageTarget2*>(this);
+    else if (iid == kGZIID_cISC4PropRequester) *out = static_cast<cISC4PropRequester*>(this);
     else if (iid == 1 || iid == 0x877181ec || iid == kGZCLSID_cSC4PollutionSimulator)
         *out = static_cast<cIGZSerializable*>(this);
     else return false;
@@ -947,8 +948,8 @@ void cSC4PollutionSimulator::AddRadiationToCity(const float position[3], float a
 
 // @ 0x0006f836. StaticInit's curves are members here and the update period a constant. A loaded city (Read set this[0x11]) keeps its
 // grids, sweep position and counters; a new one starts them. Every time: the tunables, the daily and monthly agents, the notifications
-// and the total-pollution history length. PARTIAL: the per-8x8-block visual-effect slots (UpdatePollutionVisualEffect), the prop
-// developer's requester registration and the sanitation department's line items 10 / 20 / 30 are not set up (no native counterparts).
+// and the total-pollution history length. PARTIAL: the per-8x8-block visual-effect slots (UpdatePollutionVisualEffect) and the
+// sanitation department's line items 10 / 20 / 30 are not set up (no native counterparts).
 bool cSC4PollutionSimulator::Init() {
     if (!loaded_) {
         loaded_ = true;
@@ -981,6 +982,7 @@ bool cSC4PollutionSimulator::Init() {
         cellX_ = static_cast<std::uint32_t>(a * 2);
         cellZ_ = static_cast<std::uint32_t>(b * 2);
         dirtyRadiation = dirtyAir = dirtyWater = dirtyGarbage = false;
+        host_->AddPropRequester(this);   // spPropDeveloper vslot 0x14 (this + 8)
     }
     if (!running_) {
         running_ = true;

@@ -139,6 +139,9 @@ public:
     virtual double RandomDouble() = 0;                                       // sRandom.RandomDoubleUniform
     virtual double RandomDoubleRange(double lo, double hi) = 0;              // sRandom.RandomDoubleRangeUniform
     virtual std::uint32_t RandomUint32(std::uint32_t bound) = 0;             // sRandom.RandomUint32Uniform
+    // A new city: the simulator's requester view (0x89c498be, +8) joins the prop developer (spPropDeveloper vslot 0x14).
+    // The view lives on the simulator's COM adapter, so the host finds it. A loaded city gets it back from the save.
+    virtual void RegisterPropRequester() {}
 };
 
 // One crime type (tCrimeType, 0x58 bytes). Filter masks accept a lot when (mask & lotBits) != 0 for all four.

@@ -213,6 +213,7 @@ public:
     bool PowerAvailable() override { return true; }
     bool OccupantPowered(IPollutionOccupant*) override { return true; }
     // The sanitation department (0x6a42a8f5): its funding share; full funding while the department does not exist.
+    void AddPropRequester(cISC4PropRequester* requester) override { NativeAddPropRequester(requester); }
     float SanitationFunding() override {
         auto* budget = Component<cSC4BudgetSimulator>(CityComponent::BudgetSimulator, kGZCLSID_cSC4BudgetSimulator);
         cSC4DepartmentBudget* department = budget ? budget->GetDepartmentBudget(0x6a42a8f5) : nullptr;

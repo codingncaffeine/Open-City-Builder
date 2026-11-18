@@ -57,4 +57,8 @@ sc4::cSC4City* HostCity();   // the city being loaded or played (NativeCity.cpp)
 cIGZSerializable* NativeCreateSerializable(std::uint32_t classId);   // a new object of a city class, one reference (NativeCity.cpp)
 void RunCityComponentLifecycle(sc4::CityComponent component, cIGZUnknown* object, bool init);
 
+// The city's prop developer takes `requester` (a cISC4PropRequester view; spPropDeveloper vslot 0x14). Returns false when
+// the city has no prop developer or the object is not a requester. app/NativePropDeveloper.cpp.
+bool NativeAddPropRequester(cIGZUnknown* requester);
+
 }  // namespace native

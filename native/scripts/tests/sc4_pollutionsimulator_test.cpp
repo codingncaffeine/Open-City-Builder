@@ -39,7 +39,10 @@ public:
     void RemoveAgent(cIGZMessageTarget2*) override {}
     void AddNotification(cIGZMessageTarget2*, std::uint32_t) override {}
     void RemoveNotification(cIGZMessageTarget2*, std::uint32_t) override {}
-    const cISCPropertyHolder* SimulatorExemplar() override { return nullptr; }
+    const cISCPropertyHolder* exemplar = nullptr;
+    std::vector<cISC4PropRequester*> requesters;
+    const cISCPropertyHolder* SimulatorExemplar() override { return exemplar; }
+    void AddPropRequester(cISC4PropRequester* requester) override { requesters.push_back(requester); }
     void CreateHistory(std::uint32_t, std::uint32_t) override {}
     float OrdinanceFactor(std::uint32_t, std::uint32_t) override { return 0.0f; }
     int ZoneTypeAt(int, int) override { return 0; }
@@ -251,6 +254,30 @@ int main() {
         CHECK(visual == 1 && host.messages.size() == 1 && host.messages[0].first == 0xda6dd35d);
         CHECK(sim.IsRadioactive(8, 8));
         sim.SetServices(nullptr);
+    }
+    // the prop requester (+8, iid 0x89c498be): a new city joins the prop developer once; the interface reads the
+    // garbage grid over the rectangle it is given (inclusive), through the prop request curve
+    {
+        cSCPropertyHolder exemplar;
+        cSCPropertyHelp::SetPropertyValue(&exemplar, 0x69a437f6, std::vector<float>{0.0f, 0.0f, 1.0f, 100.0f});
+        Host h2;
+        h2.exemplar = &exemplar;
+        auto* fresh = new cSC4PollutionSimulator(&h2);
+        fresh->AddRef();
+        CHECK(fresh->Init());
+        CHECK(h2.requesters.size() == 1 && h2.requesters[0] == static_cast<cISC4PropRequester*>(fresh));
+        CHECK(fresh->Init() && h2.requesters.size() == 1);
+        void* raw = nullptr;
+        CHECK(fresh->QueryInterface(kGZIID_cISC4PropRequester, &raw) && raw == static_cast<cISC4PropRequester*>(fresh));
+        auto* view = static_cast<cISC4PropRequester*>(raw);
+        fresh->SetGarbageValue(9, 9, 30000);
+        const std::int32_t hit[4] = {8, 8, 9, 9}, miss[4] = {0, 0, 7, 7}, edge[4] = {6, 6, 9, 9};
+        CHECK(view->GetRequestedShare(hit) == fresh->GetRequestedShare(8, 8, 9, 9) && view->GetRequestedShare(hit) > 0);
+        CHECK(view->GetRequestedShare(miss) == 0);
+        CHECK(view->GetRequestedShare(edge) == fresh->GetRequestedShare(6, 6, 9, 9) && view->GetRequestedShare(edge) < view->GetRequestedShare(hit));
+        CHECK(!view->UsesCustomPropSelector() && view->SelectProp({1, 2}, 0, 0) == 0 && view->GetRequesterSatisfactionId() == 0xe9a4300b);
+        view->Release();
+        fresh->Release();
     }
     std::printf(failures ? "FAILED\n" : "sc4_pollutionsimulator: all passed\n");
     return failures ? 1 : 0;

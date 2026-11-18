@@ -181,6 +181,7 @@ bool cSC4CrimeSimulator::Init(const cISCPropertyHolder* tunables) {
     if (!loaded_) {
         const int countX = crimeGrid_->GetTractCountX(), countZ = crimeGrid_->GetTractCountZ();
         iterator_.SetRect(0, 0, countX < 1 ? 0 : countX - 1, countZ < 1 ? 0 : countZ - 1);
+        host_->RegisterPropRequester();   // @ 0x00173b20: spPropDeveloper vslot 0x14 (this + 8)
     }
     hotspotX_ = hotspotZ_ = 0;
     hotspotValue_ = 0;

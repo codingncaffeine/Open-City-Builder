@@ -21,6 +21,7 @@
 #include "gz/cIGZMessage2.h"
 #include "gz/cIGZIStream.h"
 #include "gz/cIGZOStream.h"
+#include "sc4/PropRequesterInterface.h"
 #include "sc4/RetainedReference.h"
 #include "sc4/RandomIterator.h"
 #include "sc4/SCPropertyHelp.h"
@@ -161,9 +162,11 @@ public:
     virtual void PostMessage(std::uint32_t message, std::uint32_t arg) = 0;   // SC4PostMessage2
     virtual void AddHistory(std::uint32_t historyId, std::int64_t value) = 0; // history warehouse vslot 0x60
     virtual float RecyclingCapacitySlots() = 0;                        // this+0x50 vslot 0x80
+    // A new city: the simulator joins the prop developer's requesters (spPropDeveloper vslot 0x14, this + 8).
+    virtual void AddPropRequester(cISC4PropRequester* /*requester*/) {}
 };
 
-class cSC4PollutionSimulator final : public cIGZSerializable, public cIGZMessageTarget2 {
+class cSC4PollutionSimulator final : public cIGZSerializable, public cIGZMessageTarget2, public cISC4PropRequester {
 public:
     explicit cSC4PollutionSimulator(IPollutionHost* host);
     ~cSC4PollutionSimulator() = default;
@@ -247,8 +250,14 @@ public:
     std::uint32_t GetMaxWaterPollutionLevelForUI() const { return tunables_.maxWaterForUI; }
     std::uint32_t GetMaxGarbagePollutionLevelForUI() const { return tunables_.maxGarbageForUI; }
     std::uint32_t GetMaxRadiationPollutionLevelForUI() const { return tunables_.maxRadiationForUI; }
-    std::uint32_t GetRequesterSatisfactionId() const { return kPollutionRequesterSatisfactionId; }
-    bool UsesCustomPropSelector() const { return false; }
+    // cISC4PropRequester (+8 in the original): garbage asks for props; the selector is the developer's own.
+    std::uint32_t GetRequesterSatisfactionId() const override { return kPollutionRequesterSatisfactionId; }
+    bool UsesCustomPropSelector() const override { return false; }
+    std::uint32_t SelectProp(const std::vector<std::uint32_t>&, int, int) override { return 0; }   // @ 0x0061a10e
+    int GetRequestedShare(const void* rect) const override {   // rect: SC4Rect<int> x0, z0, x1, z1 (inclusive)
+        const auto* r = static_cast<const std::int32_t*>(rect);
+        return GetRequestedShare(r[0], r[1], r[2], r[3]);
+    }
     int GetRequestedShare(int x0, int z0, int x1, int z1) const;
 
     // worst tracts (x, z, value)
