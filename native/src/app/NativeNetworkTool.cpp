@@ -155,6 +155,22 @@ struct DemolishByNetworksFilter final : sc4::IDemolishFilter {
     bool IsOccupantTypeIncluded(std::uint32_t) override { return true; }
 } g_byNetworks;
 
+// Every network occupant on cell (x, z) whose network flags meet `typeMask` (what the tool's cSC4NetworkORFilter takes,
+// i386 0x002eee88), borrowed for the call.
+template <typename Fn>
+void ForCellNetworkOccupants(std::uint32_t x, std::uint32_t z, std::uint32_t typeMask, Fn&& fn) {
+    sc4::cISC4OccupantManager* occupants = Occupants();
+    if (!occupants) return;
+    const int cell[2] = {static_cast<int>(x), static_cast<int>(z)};
+    sc4::OccupantList list;
+    if (!occupants->GetOccupantsByStandardCityCells(list, cell, cell, 0xc772bf98u, 0xffffffffu)) return;
+    for (sc4::cISC4Occupant* occupant : list) {
+        auto* network = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);
+        if (network && (network->GetNetworkFlag() & typeMask) != 0) fn(network);
+    }
+    occupants->ReleaseOccupantList(list);
+}
+
 class ToolHost final : public sc4::INetworkToolHost {
 public:
     void RegisterShutdownCallback(bool (*)(void*), void*) override {}
@@ -193,15 +209,16 @@ public:
     sc4::cSC4NetworkCellInfo* GetCellInfo(std::uint32_t) override { return nullptr; }
     cIGZUnknown* GetTuningProperty(std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t) override { return nullptr; }
     bool LoadString(std::uint32_t, std::uint32_t, cIGZString&) override { return false; }
-    sc4::cSC4NetworkOccupant* NetworkOccupantAt(std::uint32_t x, std::uint32_t z, std::uint32_t) override {
-        sc4::cISC4OccupantManager* occupants = Occupants();
-        sc4::cISC4Occupant* occupant = nullptr;
-        if (!occupants || !occupants->GetFirstOccupantByStandardCityCell(occupant, static_cast<int>(x), static_cast<int>(z), 0xc772bf98u) || !occupant) return nullptr;
-        // The original QIs 0xa821ef94; the port's network occupant does not answer that iid (other seams cast the
-        // result to their own interfaces), so the object is taken directly and keeps the lookup's reference.
-        auto* network = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);
-        if (!network) occupant->Release();
-        return network;
+    // GetNetworkOccupant (i386 0x00126b82): the first occupant of the cell the tool's cSC4NetworkORFilter takes (a network
+    // occupant with one of the tool's network flags), one reference.
+    sc4::cSC4NetworkOccupant* NetworkOccupantAt(std::uint32_t x, std::uint32_t z, std::uint32_t typeMask) override {
+        sc4::cSC4NetworkOccupant* found = nullptr;
+        ForCellNetworkOccupants(x, z, typeMask, [&found](sc4::cSC4NetworkOccupant* network) {
+            if (found) return;
+            network->AddRef();
+            found = network;
+        });
+        return found;
     }
     // DestroyOccupantsAndResolve's outside calls (network-tools.md §10).
     void SendOccupantDemolished(sc4::cSC4NetworkOccupant* occupant) override {
@@ -231,18 +248,24 @@ public:
         sc4::cISC4OccupantManager* occupants = Occupants();
         return occupants && occupants->InsertOccupant(static_cast<sc4::cISC4Occupant*>(occupant), data) ? 1 : 0;
     }
-    // The network occupants of the cell leave the manager, and a flora occupant on the cell is demolished (i386 0x00125444:
-    // DemolishOccupant(true, flora, privilege 1, 0x2001, null, false, null)).
-    void ClearCellForNetwork(std::uint32_t x, std::uint32_t z, std::uint32_t, std::uint32_t) override {
+    // ClearNetworkOccsFromCell (i386 0x00125444): the occupants of the cell the tool's network filter takes leave the manager;
+    // for a surface network (not pipe, rail-underground or subway: types 4, 5, 7) a flora occupant on the cell is demolished
+    // (DemolishOccupant(true, flora, privilege 1, 0x2001, null, false, null)).
+    void ClearCellForNetwork(std::uint32_t x, std::uint32_t z, std::uint32_t typeMask, std::uint32_t networkType) override {
         sc4::cISC4OccupantManager* occupants = Occupants();
-        for (int guard = 0; occupants && guard < 8; ++guard) {
-            sc4::cISC4Occupant* occupant = nullptr;
-            if (!occupants->GetFirstOccupantByStandardCityCell(occupant, static_cast<int>(x), static_cast<int>(z), 0xc772bf98u) || !occupant) break;
-            occupants->RemoveOccupant(occupant, true, 0);
-            occupant->Release();
+        if (!occupants) return;
+        std::vector<sc4::cSC4NetworkOccupant*> matches;
+        ForCellNetworkOccupants(x, z, typeMask, [&matches](sc4::cSC4NetworkOccupant* network) {
+            network->AddRef();
+            matches.push_back(network);
+        });
+        for (sc4::cSC4NetworkOccupant* network : matches) {
+            occupants->RemoveOccupant(network, true, 0);
+            network->Release();
         }
+        if (networkType == 4 || networkType == 5 || networkType == 7) return;
         sc4::cISC4Occupant* flora = nullptr;
-        if (occupants && occupants->GetFirstOccupantByStandardCityCell(flora, static_cast<int>(x), static_cast<int>(z), sc4::kOccupantTypeFlora) && flora) {
+        if (occupants->GetFirstOccupantByStandardCityCell(flora, static_cast<int>(x), static_cast<int>(z), sc4::kOccupantTypeFlora) && flora) {
             native::DemolishOccupant(true, flora, 0x2001, nullptr);
             flora->Release();
         }
