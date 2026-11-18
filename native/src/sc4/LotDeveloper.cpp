@@ -1141,6 +1141,82 @@ std::uint32_t cSC4LotDeveloper::PickLotBaseTextureForLot(cSC4Lot* lot, const std
     return base;
 }
 
+// @ i386 0x000f2b1c. Only developed lots (state 2 and up). A lot at a fixed altitude (flag bits 0..1) has its foundation and
+// retaining walls updated; any other lot, unless the reason is 5, takes its new slope: past the configuration's maximum slope it
+// needs a foundation, and a slope past 0.25 moves its buildings, props and flora to the new ground. The base texture follows the
+// ground either way and the lot keeps the new slope.
+// PARTIAL: the foundation calls (AddLotFoundation, UpdateLotFoundation; UpdateLotRetainingWalls is empty in the original) wait for
+// the foundation model (cSC4FoundationModel, not recovered).
+bool cSC4LotDeveloper::UpdateLotElements(cSC4Lot* lot, std::uint32_t reason) {
+    if (!lot || lot->GetState() < 2) return true;                                  // lot vslot 0x84
+    bool needsFoundation = false;
+    if ((lot->GetFlags() & 3) == 0) {                                              // lot vslot 0x30
+        cSC4LotConfiguration* configuration = (reason != 5 && g_construction) ? g_construction->Configuration(lot->GetLotConfiguration()) : nullptr;
+        if (configuration) {
+            const float slope = GetLotSlope(*lot, configuration->IsCompatibleWithWater());   // vslot 0x78 (configuration vslot 0x38)
+            needsFoundation = configuration->GetMaximumSlopeBeforeFoundation() < slope;    // configuration vslot 0x28
+            if (needsFoundation) AddLotFoundation(lot, configuration);              // vslot 0xdc (.., HasObjectsOfType(7), false, true)
+            if (0.25f < std::fabs(slope)) UpdateLotObjectAltitudes(lot);           // 0x00a70780 = 0.25f
+        }
+    }
+    // (flag bits 0..1 set: vslot 0xf4 UpdateLotFoundation and vslot 0xf8 UpdateLotRetainingWalls; see PARTIAL above)
+    UpdateLotBaseTextureOccupant(lot, needsFoundation);                            // vslot 0xb4
+    lot->UpdateSlope();                                                            // lot vslot 0x50
+    return true;
+}
+
+// @ i386 0x000f28ce. The lot's buildings (0x278128a0), props (0xa823821e) and flora (0x74758926) stand where their configuration
+// object puts them on the new ground (an occupant that is no configuration object keeps x / z and takes the terrain under it); one
+// that is off by more than 0.1 in height is moved there and the occupant manager is told.
+// PARTIAL: a moved building that needs a foundation and has none gets one (vslots 0xc0 / 0xe4 / 0xec): the foundations wait for the
+// foundation model.
+void cSC4LotDeveloper::UpdateLotObjectAltitudes(cSC4Lot* lot) {
+    if (!lot || !g_construction) return;
+    cSC4LotConfiguration* configuration = g_construction->Configuration(lot->GetLotConfiguration());   // lot vslot 0x24
+    std::vector<cIGZUnknown*> objects;
+    lot->GetLotOccupants(objects);                                                 // lot vslot 0xc4 (borrowed)
+    for (cIGZUnknown* object : objects) {
+        auto* occupant = static_cast<cISC4Occupant*>(object);
+        const std::uint32_t type = occupant->GetType();
+        if (type != 0x278128a0u && type != 0xa823821eu && type != 0x74758926u) continue;
+        float position[3] = {};
+        occupant->GetPosition(position);
+        float target[3] = {position[0], 0.0f, position[2]};
+        const cSC4LotConfigurationObject* placed = configuration ? LotConfigurationObjectOf(lot, configuration, occupant) : nullptr;   // lot vslot 0x2c
+        if (!placed) {
+            target[1] = g_construction->TerrainAltitude(position[0], position[2]);
+        } else {
+            std::int32_t rotation = 0;
+            GetPositionForLotConfigurationObject(lot, configuration, placed, target, rotation);   // vslot 0x9c
+        }
+        if (std::fabs(position[1] - target[1]) <= 0.1f) continue;                  // kMaxSedimentToDeposit, shared constant
+        position[1] = target[1];
+        occupant->SetPosition(position);                                           // occupant vslot 0x24
+        g_construction->MoveOccupant(occupant, true);                              // +0x28 vslot 0x60
+    }
+}
+
+// @ i386 0x000ecfd0: the lot's base texture (when it has one) takes the ground's new altitudes.
+void cSC4LotDeveloper::UpdateLotBaseTextureOccupant(cSC4Lot* lot, bool force) {
+    cISC4LotBaseTextureOccupant* texture = nullptr;
+    if (!GetLotBaseTextureOccupant(lot, texture, false) || !texture) return;       // vslot 0xa4 (create false)
+    texture->UpdateVertexAltitudes(true, force, nullptr);                          // vslot 0x24 (1, force, 0)
+    texture->Release();
+}
+
+const cSC4LotConfigurationObject* cSC4LotDeveloper::LotConfigurationObjectOf(cSC4Lot* lot, cSC4LotConfiguration* configuration, cISC4Occupant* occupant) {
+    if (!lot || !configuration || !occupant) return nullptr;
+    float position[3] = {};
+    occupant->GetPosition(position);                                               // occupant vslot 0x20
+    for (const cSC4LotConfigurationObject& object : configuration->GetLotConfigurationObjectArray()) {
+        float at[3] = {};
+        std::int32_t rotation = 0;
+        GetPositionForLotConfigurationObject(lot, configuration, &object, at, rotation);
+        if (std::fabs(at[0] - position[0]) < 0.1f && std::fabs(at[2] - position[2]) < 0.1f) return &object;
+    }
+    return nullptr;
+}
+
 // PARTIAL: AddLotFoundation (vslot 0xdc, i386 0x000ef2d0 -> 0x000f363a) needs the foundation occupant; no foundation is made.
 bool cSC4LotDeveloper::AddLotFoundation(cSC4Lot*, cSC4LotConfiguration*) { return false; }
 // PARTIAL: AddBuildingFoundation (vslot 0xec, i386 0x000ecdc2) likewise.

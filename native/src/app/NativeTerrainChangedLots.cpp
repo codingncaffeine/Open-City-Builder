@@ -81,10 +81,11 @@ public:
     float TerrainAltitude(float x, float z) override { cSTETerrain* terrain = Terrain(); return terrain ? terrain->GetAltitude(x, z) : 0.0f; }
     float LotSlope(ITerrainChangedLot* lot) override { cSC4LotDeveloper* developer = LotDeveloper(); return developer ? developer->GetLotSlope(*Raw(lot), false) : 0.0f; }
     float CellWidthX() override { cSC4City* city = HostCity(); return city ? city->CellWidthX() : 16.0f; }
-    // PARTIAL: cSC4LotDeveloper::UpdateLotElements (i386 0x000f2b1c) also refits the lot's foundation, retaining walls and
-    // base texture, which the port does not make yet; a developed lot takes the new slope as its own (the original's last step).
-    void UpdateLotElements(ITerrainChangedLot* lot, std::uint32_t) override {
-        if (Raw(lot)->GetState() >= 2) Raw(lot)->UpdateSlope();
+    // the lot developer vslot 0x94 UpdateLotElements(lot, reason)
+    void UpdateLotElements(ITerrainChangedLot* lot, std::uint32_t reason) override {
+        cSC4LotDeveloper* developer = LotDeveloper();
+        if (developer) developer->UpdateLotElements(Raw(lot), reason);
+        else if (Raw(lot)->GetState() >= 2) Raw(lot)->UpdateSlope();
     }
     void ClearZone(const std::int32_t rect[4], bool mayorPays) override {
         cSC4ZoneManager* zones = Zones();

@@ -280,6 +280,15 @@ public:
         if (cISC4OccupantManager* occupants = Occupants()) occupants->RemoveOccupant(occupant, true, flags);
     }
     void DeleteLot(cSC4Lot* lot) override { NativeDeleteLot(lot); }
+    void MoveOccupant(cISC4Occupant* occupant, bool post) override {
+        if (cISC4OccupantManager* occupants = Occupants()) occupants->MoveOccupant(occupant, post);
+        static const bool trace = std::getenv("SC4_TERRAINLOTDEBUG") != nullptr;
+        if (trace && occupant) {
+            float p[3] = {};
+            occupant->GetPosition(p);
+            std::fprintf(stderr, "terrain lots: occupant %08x moved to %.1f,%.2f,%.1f\n", occupant->GetType(), p[0], p[1], p[2]);
+        }
+    }
 } g_services;
 
 // The building profiles the lot developer's tests read (BDS vslot 0x9c).

@@ -205,6 +205,7 @@ public:
     virtual void RemoveLotFlora(cSC4Lot* lot) { (void)lot; }                                   // flora slot 20 DemolishFloraInCellArea(rect, 0)
     virtual void RemoveOccupant(cISC4Occupant* occupant, std::uint32_t flags) { (void)occupant; (void)flags; }   // +0x28 slot 21 (o, 1, flags)
     virtual void DeleteLot(cSC4Lot* lot) { (void)lot; }                                        // +0x24 lot manager slot 24
+    virtual void MoveOccupant(cISC4Occupant* occupant, bool post) { (void)occupant; (void)post; }   // +0x28 slot 24 MoveOccupant
 };
 
 // The lot developer's own interface (class id 0xa990bfe0, iid 0x4818e5d2). Only the COM identity is
@@ -287,6 +288,12 @@ public:
     // ---- lot base textures (0x100145e4c..0x100148ec2)
     static void SetBaseTextureServices(ILotBaseTextureServices* services);
     bool GetLotBaseTextureOccupant(cSC4Lot* lot, cISC4LotBaseTextureOccupant*& out, bool create);   // @ 0x100145e4c
+    // The terrain under a developed lot changed (the building development simulator's DoTerrainChanged): the lot is refitted.
+    bool UpdateLotElements(cSC4Lot* lot, std::uint32_t reason);                      // vslot 0x94 @ i386 0x000f2b1c
+    void UpdateLotObjectAltitudes(cSC4Lot* lot);                                    // @ i386 0x000f28ce ("Alitudes" in the original)
+    void UpdateLotBaseTextureOccupant(cSC4Lot* lot, bool force);                     // vslot 0xb4 @ i386 0x000ecfd0
+    // cSC4Lot::GetLotConfigurationObject (i386 0x0011e53e): the configuration object whose position is the occupant's (x, z within 0.1).
+    const cSC4LotConfigurationObject* LotConfigurationObjectOf(cSC4Lot* lot, cSC4LotConfiguration* configuration, cISC4Occupant* occupant);
     void SetEmptyLotBaseTexture(cSC4Lot* lot);                                                    // @ 0x100146066
     void RemoveLotBaseTexture(cSC4Lot* lot);                                                      // @ 0x10014652e
     // Demolition (lot-developer.md §7; i386 0x000f1b84 / 0x000f392c / 0x000ec5f6 / 0x000f12cc / 0x000f385c).

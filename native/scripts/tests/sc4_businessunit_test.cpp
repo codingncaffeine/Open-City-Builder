@@ -53,7 +53,8 @@ public:
     void NeighborLots(const cSC4Lot& lot, int edge, std::vector<cSC4Lot*>& out) override {
         for (cSC4Lot* n : neighbours[&lot][edge]) out.push_back(n);
     }
-    void GetLotOccupants(const cSC4Lot&, std::vector<cIGZUnknown*>&) override {}
+    std::vector<cIGZUnknown*> lotOccupants;   // what every lot holds (the refit test)
+    void GetLotOccupants(const cSC4Lot&, std::vector<cIGZUnknown*>& out) override { out = lotOccupants; }
     bool RoadAccessCells(const cSC4Lot& lot, int) override { return road.count(&lot) != 0; }
     bool IsFerryTerminal(const cSC4Lot&) override { return false; }
     bool FerryTerminalRoadAccess(const cSC4Lot&) override { return false; }
@@ -71,7 +72,6 @@ public:
     std::uint32_t BuildingWealth(std::uint32_t) override { return 1; }
     cISC4BuildingOccupant* AddNewBuildingOccupant(std::uint32_t, float[3], int) override { return nullptr; }
     void CellCornerToPosition(int, int, float&, float&) override {}
-    float TerrainAltitude(float, float) override { return 0.0f; }
     void DemolishBlockingOccupants(const float[3], const float[3]) override {}
     void StartConstructionOccupant(cSC4Lot*) override {}
     cSC4Lot* LotAt(int, int) override { return nullptr; }
@@ -82,6 +82,21 @@ public:
     bool FloraTypeValid(std::uint32_t) override { return false; }
     void FloraTypesInFamily(std::vector<std::uint32_t>&, std::uint32_t) override {}
     cISC4Occupant* AddFlora(std::uint32_t, float[3]) override { return nullptr; }
+    float ground = 0.0f;
+    std::vector<cISC4Occupant*> moved;
+    float TerrainAltitude(float, float) override { return ground; }
+    void MoveOccupant(cISC4Occupant* occupant, bool post) override { if (post) moved.push_back(occupant); }
+};
+
+// An occupant of a given type standing at a position (the refit test).
+class Standing final : public cSC4Occupant {
+public:
+    Standing(std::uint32_t type, float x, float y, float z) : at_{x, y, z} { type_ = type; }
+    void GetPosition(float* xyz) override { for (int i = 0; i < 3; ++i) xyz[i] = at_[i]; }
+    void SetPosition(const float* xyz) override { for (int i = 0; i < 3; ++i) at_[i] = xyz[i]; }
+    float Height() const { return at_[1]; }
+private:
+    float at_[3];
 };
 
 class DeveloperHost final : public IBaseLotDeveloperHost {
@@ -119,6 +134,23 @@ int main() {
     cSC4LotDeveloper::SetConstructionServices(&construction);
     DeveloperHost devHost;
     cSC4LotDeveloper dev(&devHost);
+
+    {   // the refit after a terrain change (i386 0x000f28ce): buildings, props and flora off the ground by more than 0.1 move to it
+        // (an occupant that is no configuration object keeps x / z and takes the terrain); others and other types stay
+        cSC4Lot* lot = MakeLot(5, kFactory, 0);
+        Standing prop(0xa823821eu, 88.0f, 10.0f, 8.0f), close(0x278128a0u, 90.0f, 12.05f, 8.0f), flora(0x74758926u, 91.0f, 3.0f, 9.0f),
+            other(0x12345678u, 92.0f, 0.0f, 9.0f);
+        host.lotOccupants = {static_cast<cISC4Occupant*>(&prop), static_cast<cISC4Occupant*>(&close), static_cast<cISC4Occupant*>(&flora),
+                             static_cast<cISC4Occupant*>(&other)};
+        construction.ground = 12.0f;
+        dev.UpdateLotObjectAltitudes(lot);
+        CHECK(prop.Height() == 12.0f && flora.Height() == 12.0f);
+        CHECK(close.Height() == 12.05f && other.Height() == 0.0f);
+        CHECK(construction.moved.size() == 2);
+        host.lotOccupants.clear();
+        construction.moved.clear();
+        lot->Release();
+    }
 
     {   // the unit's own bookkeeping: one membership per lot, the lot's unit in step, removal drops the designate
         cSC4Lot* a = MakeLot(0, kFactory, 0);
