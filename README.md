@@ -8,17 +8,17 @@ and becomes easy to mod.
 **Status:** playable, not finished. The native Linux build plays the intro, the region view and its cities. It loads
 the original's saved cities, plays them and saves them back. Running natively:
 
-- **The city:** growth, traffic with cars, trains, buses and working stations, power and water, the budget and
-  taxes, advisors, the news ticker, data views, query dialogs and neighbor deals.
-- **Events:** fires, crime and riots, a mayor rating that follows the city, night lights, and every disaster on the
-  menu, including pipe bursts.
+- **The city:** growth, traffic with cars, trains, buses and working stations, subway stations, power, water with
+  pipes you can lay and see underground, landfills, airports and seaports, street props and sidewalks on new roads,
+  the budget and taxes, advisors, the news ticker, data views, query dialogs, the city graphs and neighbor deals.
+- **Events:** fires, crime with arrests and riots, toxic spills and potholes, a mayor rating that follows the city,
+  night lights, and every disaster on the menu, including pipe bursts.
 
 Still missing:
 
-- **Simulation:** subway stations, arrests, lots refitted to moved ground, and the landfill, port and toxic waste
-  services.
-- **Screens:** graphs, cheats, tutorials, the personal-sim and driving modes, the snapshot album, the subway view,
-  laying new pipes, and pipe junctions in the underground view (the other pipe pieces show).
+- **Screens:** cheats, tutorials, the personal-sim and driving modes, the snapshot album, the subway view and the
+  budget window of a single building.
+- **Display:** text is soft at fractional interface scales.
 
 There is no release yet.
 
@@ -38,8 +38,8 @@ native/scripts/build_linux_game.sh          # incremental; installs bin/open-cit
 bin/open-city-builder /path/to/game/folder   # the install folder: its .dat files, Fonts/, Regions/ ...
 ```
 
-`native/scripts/build_linux_game.sh debug` builds with AddressSanitizer. The unit tests run with
-`native/scripts/run_tests.sh`.
+`native/scripts/build_linux_game.sh debug` builds with AddressSanitizer. `native/scripts/run_tests.sh` builds and
+runs every unit test (about three minutes; `run_tests.sh NAME...` runs some).
 
 ## How it works
 
@@ -48,15 +48,16 @@ address it came from in a comment. The original's object layouts, quirks and bug
 reached into its Windows or Mac platform layer, a small native host stands in: SDL3 for the window, input and audio,
 and OpenGL 3.3 for drawing.
 
-Every ported piece has a unit test, built with AddressSanitizer and UndefinedBehaviorSanitizer. Scripted runs of the
-real game check it against the original's own saved cities. Where behavior is in doubt, the original is the
+Every ported piece has a unit test, built with AddressSanitizer, UndefinedBehaviorSanitizer and leak detection: a
+leak fails its test like a wrong value. Scripted runs of the real game check it against the original's own saved
+cities. Where behavior is in doubt, the original is the
 reference.
 
 ## Layout
 
 - `native/`: the playable native build. It is based on [DeSCAi4](https://github.com/CadenKalez/DeSCAi4) by
   CadenKalez and contributors, a C++20 decompilation of the later Mac release (GPLv3). On top of it are our Linux
-  host, the game loop, and the systems ported since. Its own README and notes are kept as they were upstream.
+  host, the game loop, and the systems ported since. Upstream's README is kept as `native/UPSTREAM-README.md`.
 - `src/`, `hook/`, `tools/`: the first route, a byte-exact rewrite of the PC release that a loader swapped into the
   original program. It was retired in favor of playability; the compare and inventory tools are still used.
 - `third_party/`: the open-source libraries the original was built with (STLport 4.6, Lua 5.0.2), each under its own
