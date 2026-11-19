@@ -78,7 +78,8 @@ RZFileFindData* RZFileFindFirst(const cRZString& search) {
     data->dir = dir;
     ReadMatches(*dir, data->pattern);
     if (RZFileFindNext(data)) return data;
-    // No match: the data is released but the directory handle is left open (as in the original).
+    // No match: the data is released and the directory closed (the original leaves the handle open).
+    ::closedir(dir->handle);
     delete data->dir;
     delete data;
     return nullptr;
