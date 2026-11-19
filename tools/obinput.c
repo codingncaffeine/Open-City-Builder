@@ -1,6 +1,7 @@
 /* tools/obinput.c: test-bed input for the original program, run in its Wine prefix by tools/original-session.sh (OB_ACTIONS).
    Build: i686-w64-mingw32-gcc -O2 -o scratch/obinput.exe tools/obinput.c -luser32
    obinput click X Y | rclick X Y | drag X0 Y0 X1 Y1 | rdrag X0 Y0 X1 Y1 | move X Y | wheel N | key VK | info
+           chord VK... (every key down in order, then up in reverse: chord 0x11 0x58 = Ctrl+X) | text STRING (typed)
    Coordinates are client coordinates of the game's main window (the largest visible top-level window). */
 #include <windows.h>
 #include <stdio.h>
@@ -26,5 +27,14 @@ int main(int argc,char**argv){
   else if(!strcmp(argv[1],"wheel")) mouse(MOUSEEVENTF_WHEEL, atoi(argv[2])*WHEEL_DELTA);
   else if(!strcmp(argv[1],"key")){ INPUT i={0}; i.type=INPUT_KEYBOARD; i.ki.wVk=(WORD)strtol(argv[2],0,0); SendInput(1,&i,sizeof i);
     Sleep(60); i.ki.dwFlags=KEYEVENTF_KEYUP; SendInput(1,&i,sizeof i); }
+  else if(!strcmp(argv[1],"chord")){ INPUT i={0}; int k; i.type=INPUT_KEYBOARD;
+    for(k=2;k<argc;k++){ i.ki.wVk=(WORD)strtol(argv[k],0,0); i.ki.dwFlags=0; SendInput(1,&i,sizeof i); Sleep(40); }
+    for(k=argc-1;k>=2;k--){ i.ki.wVk=(WORD)strtol(argv[k],0,0); i.ki.dwFlags=KEYEVENTF_KEYUP; SendInput(1,&i,sizeof i); Sleep(40); } }
+  else if(!strcmp(argv[1],"text")&&argc>2){ const char*c; INPUT i={0}; i.type=INPUT_KEYBOARD;
+    for(c=argv[2];*c;c++){ SHORT v=VkKeyScanA(*c); int shift=(v>>8)&1;
+      if(shift){ i.ki.wVk=VK_SHIFT; i.ki.dwFlags=0; SendInput(1,&i,sizeof i); }
+      i.ki.wVk=(WORD)(v&0xff); i.ki.dwFlags=0; SendInput(1,&i,sizeof i); Sleep(30);
+      i.ki.dwFlags=KEYEVENTF_KEYUP; SendInput(1,&i,sizeof i);
+      if(shift){ i.ki.wVk=VK_SHIFT; SendInput(1,&i,sizeof i); } Sleep(30); } }
   else if(!strcmp(argv[1],"info")){ RECT r; GetClientRect(best,&r); char t[256]; GetWindowTextA(best,t,256); printf("%p '%s' %ldx%ld\n",best,t,r.right,r.bottom); }
   return 0; }
