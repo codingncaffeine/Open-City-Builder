@@ -62,7 +62,8 @@ IDirectSound_Mac::~IDirectSound_Mac() {
     for (void*& queue : s_audioQueueBank) {
         if (queue && g_queueApi) g_queueApi->Dispose(queue);
     }
-    listener_ = nullptr;   // never freed by the original
+    delete listener_;   // (never freed by the original)
+    listener_ = nullptr;
     s_directSound = nullptr;
 }
 
