@@ -108,7 +108,8 @@ struct QueryView final : IQueryView {
     cSC4ViewInputControl* TopControl() override { cSC4View3DWin* v = View(); return v ? v->GetCurrentViewInputControl() : nullptr; }
     cIGZWin* ViewWindow() override { return View(); }
     bool PickTerrain(int x, int y, float out[3], bool flag) override { cSC4View3DWin* v = View(); return v && v->PickTerrain(x, y, out, flag); }
-    bool ShowCoordinates() override { return false; }
+    // cISC4View3DWin 0x138 GetTerrainQueryEnabled: the TerrainQuery cheat makes the tool show the cell under the pointer.
+    bool ShowCoordinates() override { cSC4View3DWin* v = View(); return v && v->GetTerrainQueryEnabled(); }
     // cISC4View3DWin 0x140 / 0x148: the tool's hover text goes into the view's cursor text box.
     void SetTip(std::uint32_t id, int order, const cIGZString* title, const cIGZString* text, int icon) override {
         if (cSC4View3DWin* v = View()) v->SetCursorText(id, static_cast<std::uint32_t>(order), title, text, icon);

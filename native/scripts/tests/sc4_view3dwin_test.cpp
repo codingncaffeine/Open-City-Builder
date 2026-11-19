@@ -1800,15 +1800,27 @@ int main() {
         view->ProcessViewCommand(0x6a935e39u, true);
         CHECK(host.regionRequests == 1);
 
-        // The cheat-code message hands the command line of the string in param2 to the cheat handler.
-        cRZString cheatText("GOL");
-        message = cGZMessage{};
-        message.type = kMsgViewCheatCode;
-        message.param1 = 0x8973a69c;
-        message.param2 = reinterpret_cast<std::uint64_t>(static_cast<cIGZString*>(&cheatText));
-        CHECK(view->DoMessage(message));
-        CHECK(host.cheatRuns.size() == 1 && host.cheatRuns[0] == 0x8973a69c);
-        CHECK(host.cheatTexts.size() == 1 && host.cheatTexts[0] == "GOL");
+        // The cheat-code message: the string in param2 split into a command line for ProcessCheatCode; the answer is
+        // whether the view took the cheat.
+        auto cheat = [&](std::uint32_t id, const char* text) {
+            cRZString cheatText(text);
+            message = cGZMessage{};
+            message.type = kMsgViewCheatCode;
+            message.param1 = id;
+            message.param2 = reinterpret_cast<std::uint64_t>(static_cast<cIGZString*>(&cheatText));
+            return view->DoMessage(message);
+        };
+        CHECK(!cheat(0x8973a69c, "GOL"));                       // the Game of Life control is not ported: not taken
+        CHECK(host.cheatRuns.empty());
+        CHECK(cheat(0x4a82253e, "You don't deserve it"));       // the reward menus' flag lives in the host
+        CHECK(host.cheatRuns.size() == 1 && host.cheatRuns[0] == 0x4a82253e);
+        CHECK(!view->GetTerrainQueryEnabled());
+        CHECK(cheat(0x8ab730ae, "TerrainQuery") && view->GetTerrainQueryEnabled());
+        CHECK(cheat(0x8ab730ae, "terrainquery OFF") && !view->GetTerrainQueryEnabled());
+        CHECK(cheat(0x8ab730ae, "TerrainQuery on") && view->GetTerrainQueryEnabled());
+        CHECK(!cheat(0xca7bc5b5, "SizeOf"));                    // no factor: not taken
+        CHECK(!cheat(0x88f3d4bb, "RenderProp"));                // no property name: not taken
+        CHECK(!cheat(0x12345678, "nothing"));                   // not one of the view's cheats
 
         // The key message: param2 selects down / down-with-modifier / up, param3 points at the key record.
         std::uint32_t keyRecord[5] = {0, 0, 0x51, 0, 0x2};
@@ -1847,9 +1859,10 @@ int main() {
         }
         host.urlHandles = 0;
         host.urlResult = false;
+        cRZString linkText("GOL");
         message = cGZMessage{};
         message.type = kMsgViewHtmlLink;
-        message.param2 = reinterpret_cast<std::uint64_t>(static_cast<cIGZString*>(&cheatText));
+        message.param2 = reinterpret_cast<std::uint64_t>(static_cast<cIGZString*>(&linkText));
         CHECK(view->DoMessage(message));                           // DoURL returned false -> handled
         CHECK(host.urlHandles == 1);
         host.urlResult = true;

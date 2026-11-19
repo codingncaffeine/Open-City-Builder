@@ -19,6 +19,7 @@
 #include "sc4/SLBuffer.h"
 #include "sc4/WinCatalogView.h"
 #include "sc4/WinTertiaryMenuFrame.h"
+#include "rz/cRZCmdLine.h"
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/SCResParser.h"
 #include "s3d/ModelInstance.h"
@@ -3204,11 +3205,12 @@ bool cSC4View3DWin::DoMessage(cGZMessage& message) {                         // 
             return true;
         }
     } else if (message.type == kMsgViewCheatCode) {          // 0x230e27ac
-        // vslot 0x38 of the object in param2 is cIGZString::ToChar (0x100784d5e).
+        // vslot 0x38 of the object in param2 is cIGZString::ToChar (0x100784d5e); the line is split into a command line
+        // (argument 0 is the cheat word) and the answer is whether the cheat was taken.
         const char* text = nullptr;
         if (message.param2) text = reinterpret_cast<cIGZString*>(message.param2)->ToChar();
-        if (host_) host_->ProcessCheatCode(static_cast<std::uint32_t>(message.param1), text ? text : "");
-        return true;
+        const cRZCmdLine line(text ? text : "");
+        return ProcessCheatCode(static_cast<std::uint32_t>(message.param1), line);
     }
     return cGZWin::DoMessage(message);
 }
@@ -3218,6 +3220,47 @@ bool cSC4View3DWin::DoMessage(cGZMessage& message) {                         // 
 // DoMessage(cIGZMessage2*) (0x100785a5e): the view's message-server handler. A command (a message answering the command-message
 // interface 0x4b99446a, sent by the command dispatcher) runs ProcessCommand with its parameter sets; the city's life cycle, load / save,
 // the clock, the simulation, the budget, the alerts and the mission messages update the windows.
+// What the view's own cheats do (Mac 0x10078526a, PC 0x007f3510). The answer is the cheat message's: false for an id the
+// view does not know, and (quirk kept) for the two view filter cheats although they act.
+bool cSC4View3DWin::ProcessCheatCode(std::uint32_t id, const cRZCmdLine& line) {
+    const int argc = line.argc();
+    switch (id) {
+    case kCheatMagnifyView: {   // "SizeOf <factor>": the camera's custom magnification, clamped to [0.9, 64]
+        if (argc < 2) return false;
+        float factor = static_cast<float>(std::atof(line[1].ToChar()));   // RZAtofA
+        if (factor < 0.9f) factor = 0.9f;
+        else if (factor > 64.0f) factor = 64.0f;
+        if (cameraControl_) cameraControl_->SetCustomMagnification(factor);
+        return true;
+    }
+    case kCheatTerrainQuery: {   // "TerrainQuery [off]": the query tool also reports the terrain
+        terrainQueryEnabled_ = true;
+        if (argc >= 2) {
+            cRZString word(line[1]);
+            word.MakeLower();
+            if (std::strcmp(word.ToChar(), "off") == 0) terrainQueryEnabled_ = false;
+        }
+        return true;
+    }
+    case kCheatSetRenderProperty:
+    case kCheatSetRenderProperty2:   // "RenderProp <name> [value]": a value parsed, or a boolean toggled without one
+        // Without a name the original shows its usage line through an empty stub, so nothing is shown.
+        if (argc < 2) return false;
+        SetRenderProperties(line[1], argc >= 3 ? line[2] : cRZString(""));
+        return true;
+    case kCheatEnableAnimationStepping:   // "WatchMeMove": the pause / step animation keys work from now on
+        unknown1c8_ = static_cast<std::uint16_t>((unknown1c8_ & 0xff00u) | 1u);
+        return true;
+    case kCheatJackpot:   // "You don't deserve it": every reward building in the menus (the host keeps the menus' flag)
+        if (host_) host_->ProcessCheatCode(id, line.argc() > 0 ? line[0].ToChar() : "");
+        return true;
+    default:
+        // GOL (cSC4ViewInputControlGameOfLife), TastyZots / Zoneria (cSC4RealisticOccupantFilter's flags), Recorder
+        // (cSC4WinAnimationRecorder) and the debug-only LotPlop / BuildingPlop / toll are not ported yet.
+        return false;
+    }
+}
+
 bool cSC4View3DWin::DoMessage(cIGZMessage2* message) {
     auto* standard = static_cast<cIGZMessage2Standard*>(message);
     const std::uint32_t type = message->GetType();
