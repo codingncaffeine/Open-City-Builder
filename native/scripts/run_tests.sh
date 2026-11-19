@@ -81,6 +81,7 @@ declare -a TESTS=(
  "gz_dbrecordbitmapres:$T/gz_dbrecordbitmapres_test.cpp $S/gz/cGZDBRecordBitmapRes.cpp $S/gz/cGZPersistDBSerialRecord.cpp $S/rz/cRZString.cpp $S/rz/cRZVariant.cpp $S/rz/CharLength.cpp $S/rz/RZConvert.cpp $S/rz/cRZUnknownList.cpp"
  "sc4_slstring:$T/sc4_slstring_test.cpp $S/sc4/SLString.cpp $S/sc4/StringDetokenizer.cpp $S/rz/cRZString.cpp $S/rz/CharLength.cpp $S/rz/RZConvert.cpp $S/rz/cRZSysServPtr.cpp -I$T"
  "gz_winkeyaccelerator:$T/gz_winkeyaccelerator_test.cpp $S/gz/WinKeyAccelerator.cpp $S/rz/cRZSysServPtr.cpp"
+ "gz_winkeyacceleratorres:$T/gz_winkeyacceleratorres_test.cpp $S/gz/WinKeyAcceleratorRes.cpp $S/gz/WinKeyAccelerator.cpp $S/rz/cRZSysServPtr.cpp"
  "gz_winutils:$T/gz_winutils_test.cpp $S/gz/WinUtils.cpp $S/gz/WinBtn.cpp $S/gz/RZDraw.cpp $S/gz/Buffer.cpp $S/gz/Win.cpp $S/gz/DrawContext.cpp $S/rz/cRZCallbackTimer.cpp $S/rz/cRZString.cpp $S/rz/cRZVariant.cpp -I$T"
  "gz_cursor:$T/gz_cursor_test.cpp $S/gz/Cursor.cpp $S/gz/Buffer.cpp $S/rz/cRZFile.cpp $S/rz/cRZString.cpp $S/rz/cRZVariant.cpp -I$T"
  "sc4_winauraalert:$T/sc4_winauraalert_test.cpp $S/sc4/WinAuraAlert.cpp $S/gz/RZDraw.cpp $S/gz/Buffer.cpp $S/gz/Win.cpp $S/gz/DrawContext.cpp $S/rz/cRZString.cpp $S/rz/cRZVariant.cpp -I$T"
