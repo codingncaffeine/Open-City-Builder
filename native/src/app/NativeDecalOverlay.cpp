@@ -125,7 +125,10 @@ public:
             auto& slots = manager->Overlays();
             for (std::uint32_t i = 0; i < slots.size(); ++i) {
                 const cOverlay& overlay = slots[i];
-                if (overlay.freeLink != -1 || (overlay.flags & 0x11u) != 0x11u || !overlay.texture) continue;   // DrawDecals' mask without smoothing
+                if (overlay.freeLink != -1 || (overlay.flags & 0x11u) != 0x11u) continue;   // DrawDecals' mask without smoothing
+                // the decal's texture, or the rendered text of a label (cISC4CachedStringTexture, DrawDecals 0x10072aa56)
+                const int textureId = overlay.texture ? overlay.texture->GlTextureId() : overlay.stringTexture ? overlay.stringTexture->GlTextureId() : 0;
+                if (!textureId) continue;
                 const int x0 = std::max(0, overlay.rect.left), z0 = std::max(0, overlay.rect.top);
                 // DrawRect (0x10072b342) hands the terrain view the rect with right / bottom + 1: the stored edges are inclusive cells
                 const int x1 = std::min(maxX, overlay.rect.right + 1), z1 = std::min(maxZ, overlay.rect.bottom + 1);
@@ -133,7 +136,7 @@ public:
                 if (Debug() && std::getenv("SC4_DECALDEBUG")[0] == '2' && listed++ < 400)
                     std::fprintf(stderr, "decal overlay m%d #%u rect %d,%d..%d,%d alpha %.2f rgb %.2f %.2f %.2f mode %u flags %llx tex %d\n", index, i,
                                  overlay.rect.left, overlay.rect.top, overlay.rect.right, overlay.rect.bottom, overlay.alpha, overlay.color[0], overlay.color[1],
-                                 overlay.color[2], overlay.drawMode, static_cast<unsigned long long>(overlay.flags), overlay.texture->GlTextureId());
+                                 overlay.color[2], overlay.drawMode, static_cast<unsigned long long>(overlay.flags), textureId);
                 if (Debug() && std::getenv("SC4_DECALDEBUG")[0] == '2' && listed < 400) {   // the texture coordinates at the rect's corners
                     const cS3DMatrix4& m = overlay.texMatrix;
                     for (int r = 0; r < 4; ++r)
@@ -163,16 +166,22 @@ public:
                 triangles.clear();
                 for (int z = z0; z < z1; ++z)
                     for (int x = x0; x < x1; ++x) {
+                        // a water manager's decal lies on the water surface: on a cell that is land at all four corners the
+                        // original's water pass is under the terrain (a label goes to a land and a water manager both)
+                        if (water && g_terrain->GetAltitudeAtVertex(x, z) >= sea && g_terrain->GetAltitudeAtVertex(x + 1, z) >= sea &&
+                            g_terrain->GetAltitudeAtVertex(x, z + 1) >= sea && g_terrain->GetAltitudeAtVertex(x + 1, z + 1) >= sea)
+                            continue;
                         const Vertex a = vertex(x, z), b = vertex(x + 1, z), c = vertex(x, z + 1), d = vertex(x + 1, z + 1);
                         triangles.insert(triangles.end(), {a, b, c, b, d, c});
                     }
+                if (triangles.empty()) continue;
                 if (!begun) {
                     context.ResetModelViewTransform();
                     context.SetDepthOffset(2);
                     begun = true;
                 }
                 context.SetRenderState(manager->RenderStates()[overlay.drawMode < 5 ? overlay.drawMode : 0]);
-                context.SetTexture(overlay.texture->GlTextureId(), 0);
+                context.SetTexture(textureId, 0);
                 context.SetTexFiltering(1, 1, 0);
                 const int wrap = (overlay.flags & (kOverlayFlagHeightMap | kOverlayFlagTransformed)) ? 3 : 2;   // GD 2 clamp, 3 repeat
                 context.SetTexWrapModes(wrap, (overlay.flags & kOverlayFlagHeightMap) ? 2 : wrap, 0);
