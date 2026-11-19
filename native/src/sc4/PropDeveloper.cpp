@@ -371,6 +371,9 @@ bool cSC4PropDeveloper::Read(cIGZIStream& stream) {
 
     std::uint32_t count = 0;
     if (!stream.GetUint32(count)) return false;
+    for (cISC4PropRequester* requester : requesters_)   // the saved ones replace Init's (the original drops them unreleased)
+        if (requester) requester->Release();
+    requesters_.clear();
     requesters_.resize(count);
     for (std::uint32_t i = 0; i < count; ++i) {
         void* raw = nullptr;
