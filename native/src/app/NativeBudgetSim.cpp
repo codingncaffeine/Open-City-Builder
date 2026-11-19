@@ -72,7 +72,9 @@ public:
             auto* s = static_cast<cIGZMessage2Standard*>(standard);
             m.data1 = static_cast<std::int64_t>(s->GetData1());
             cIGZString* text = nullptr;
-            if (s->GetString(kGZIID_cIGZString, reinterpret_cast<void**>(&text)) && text) {
+            if (m.type == 0x230e27ac) {   // a cheat: the cheat code manager hands the typed line over in void2 (borrowed)
+                if (auto* typed = static_cast<cIGZString*>(s->GetVoid2())) m.text = typed->ToChar();
+            } else if (s->GetString(kGZIID_cIGZString, reinterpret_cast<void**>(&text)) && text) {
                 m.text = text->ToChar();
                 text->Release();
             }
