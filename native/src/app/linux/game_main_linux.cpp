@@ -885,6 +885,20 @@ void HandleEvent(const SDL_Event& e) {
         // game's own shortcut tables, NativeKeyboard.cpp) turn the keys nobody takes into commands.
         if (const std::uint32_t vk = VirtualKey(e.key.key))
             gMgr->GZWinMsgPost_Keyboard(down ? kGZMsgKeyDown : kGZMsgKeyUp, vk, KeyModifierWord(e.key.mod));
+        // Windows' TranslateMessage follows these keys' WM_KEYDOWN (and each repeat) with a WM_CHAR of their control
+        // character, which the game reads: Enter finishes a sign and the establish-city dialog, Tab moves between its fields,
+        // Backspace deletes in the sign tool. SDL sends no text event for them.
+        if (down) {
+            std::uint32_t control = 0;
+            switch (e.key.key) {
+                case SDLK_RETURN: case SDLK_KP_ENTER: control = 0x0d; break;
+                case SDLK_BACKSPACE: control = 0x08; break;
+                case SDLK_TAB: control = 0x09; break;
+                case SDLK_ESCAPE: control = 0x1b; break;
+                default: break;
+            }
+            if (control) gMgr->GZWinMsgPost_Keyboard(kGZMsgCharacter, control, 0);
+        }
         break;
     }
     case SDL_EVENT_TEXT_INPUT:
