@@ -847,3 +847,15 @@ src/app/NativeMarkedCells.cpp
 src/sc4/SubBudgetWindow.cpp
 src/app/NativeOrdinance.cpp
 src/app/NativeQuery.cpp
+src/app/NativeKeyboard.cpp
+src/gz/WinKeyAcceleratorRes.cpp
+src/gz/WinKeyAccelerator.cpp
+src/gz/CommandServer.cpp
+src/gz/StringCommandGenerator.cpp
+src/sc4/CheatCodeEntryDialog.cpp
+src/app/NativeCheats.cpp
+src/gz/WinGenDlg.cpp
+src/gz/ScatterGraph.cpp
+src/gz/WinCtrlMgr.cpp
+src/app/NativeWinControls.cpp
+src/gz/WinOptGrp.cpp

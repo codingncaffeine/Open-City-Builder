@@ -11,6 +11,7 @@
 #include "sc4/DBSegment.h"
 #include "platform/GameDataPath.h"
 #include "app/NativeBoot.h"
+#include "gz/CommandServer.h"
 #include "gz/GZFramework.h"
 #include "lua/SCLuaInstance.h"
 #include "rz/COMDirectors.h"
@@ -141,6 +142,9 @@ bool RunBoot(bool verbose, bool keepAlive, gd::cIGZGDriver* driver, const std::f
         }
         return g_detokenizer;
     });
+    // The framework command server (0xeb903a32): the keyboard shortcuts and the cheat code dialog run commands through it,
+    // and its dispatcher sends each one as a message on message server 2 to the windows that listen for it.
+    app->SetServiceFactory("cGZCommandServer", []() -> cIGZUnknown* { return static_cast<cIGZCommandServer*>(new cGZCommandServer()); });
     cRZCmdLine line("sc4");
     framework->SetCommandLine(line);
 
@@ -148,6 +152,16 @@ bool RunBoot(bool verbose, bool keepAlive, gd::cIGZGDriver* driver, const std::f
     gz::RegisterDirectorMaker("cSCLua", +[]() -> cIGZUnknown* { return lua5::MakeSCLuaObject(); });
     if (beforeInit) beforeInit(*framework, *app);
     Step("PreFrameWorkInit", app->PreFrameWorkInit());
+    // The framework's PreAppInit starts the services of priority -1999999 and up. The native boot runs the application's
+    // steps itself, so it starts the command server (priority -1000000: its message dispatcher and string generator) here.
+    {
+        void* found = nullptr;
+        if (framework->GetSystemService(kGZSID_cGZCommandServer, kGZIID_cIGZCommandServer, &found) && found) {
+            auto* commands = static_cast<cIGZCommandServer*>(found);
+            commands->Init();
+            commands->Release();
+        }
+    }
     Step("Init", app->Init());
     Step("PostFrameWorkInit", app->PostFrameWorkInit());
     std::printf("  resource segments: %u\n", static_cast<unsigned>(resources->GetSegmentCount()));

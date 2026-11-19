@@ -1,5 +1,7 @@
 #include "app/NativeJobs.h"
 #include "app/NativeRegionScreen.h"
+#include "app/NativeKeyboard.h"
+#include "gz/WinKeyAcceleratorRes.h"
 #include "app/NativeAnimationTicks.h"
 
 #include <algorithm>
@@ -368,7 +370,7 @@ private:
 class ScreenHost final : public IRegionScreenHost {
 public:
     cIGZMessageServer2* MessageServer2() override { return SL::spMS2; }
-    cIGZCommandServer* CommandServer() override { return nullptr; }
+    cIGZCommandServer* CommandServer() override { return native::GameCommandServer(); }   // the region keys' commands
     std::uint8_t* Preferences() override { return g_services.app->GetPreferences(); }
     void SavePreferences() override { g_services.app->SavePreferences(); }
     int DoubleClickTimeMs() override { return 500; }
@@ -383,7 +385,7 @@ public:
     IRegionRenderer* CreateRenderer() override { return &renderer_; }
     IRegionFrameService* CreateFrameService() override { return &frame_; }
     IEffectsManager* CreateEffectsManager() override { return &effects_; }
-    cIGZWinKeyAccelerator* CreateKeyAccelerator() override { return nullptr; }
+    cIGZWinKeyAccelerator* CreateKeyAccelerator() override { return native::CreateGameKeyAccelerator(gz::kKeyAcceleratorRegionView); }
     INotificationHelper* CreateNotificationHelper() override { return &notifications_; }
     cIGZMessage2Standard* CreateStandardMessage() override { auto* m = new cRZMessage2Standard(); m->AddRef(); return m; }
     void PostEngineMessage(std::uint32_t type) override {

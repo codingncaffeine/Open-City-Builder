@@ -312,20 +312,24 @@ bool cSC4App::OnTick(std::uint32_t) { return true; }
 
 // ---- window control manager ---------------------------------------------------------------------------------
 
-// The default control colours (id -> r, g, b), then the fonts / bitmaps (host hook: the font system, the font-style
+// The default control colors (id -> r, g, b), then the fonts / bitmaps (host hook: the font system, the font-style
 // script and the resource bitmaps are not recovered).
 void cSC4App::SetupWinCtrlMgr() {
     gz::cIGZWinCtrlMgr* controls = RZ::WCM();
+    ApplyControlColors(controls);
+    if (startupHooks_.setupWinCtrlResources) startupHooks_.setupWinCtrlResources(controls);
+}
+
+void cSC4App::ApplyControlColors(gz::cIGZWinCtrlMgr* controls) {
     if (controls) {
-        struct Colour { int id; std::uint8_t r, g, b; };
-        static constexpr Colour kColours[] = {
+        struct Color { int id; std::uint8_t r, g, b; };
+        static constexpr Color kColors[] = {
             {0x08963f6c, 0xff, 0x00, 0xff}, {0x68963f6f, 0xbd, 0xbc, 0xbc}, {static_cast<int>(0xc8963f7a), 0xff, 0xff, 0xff},
             {0x68963f7d, 0, 0, 0}, {0x28963fc5, 0x80, 0, 0}, {static_cast<int>(0xa8963f82), 0, 0x80, 0}, {0x48963f84, 0x80, 0x80, 0x40},
             {0x68963f8a, 0, 0, 0x80}, {static_cast<int>(0xa8963f8c), 0x80, 0, 0x80}, {0x68963f8f, 0, 0x80, 0x80}, {0x08963f91, 0x80, 0x80, 0x80},
             {0x28963f93, 0xc0, 0xc0, 0xc0}, {static_cast<int>(0xe8963f95), 0xff, 0, 0}, {0x28963f98, 0, 0xff, 0}, {static_cast<int>(0xe8963f9a), 0xff, 0xff, 0},
             {static_cast<int>(0xc8963fa2), 0, 0, 0xff}, {0x08963fa5, 0, 0xff, 0xff}, {0x28963fa8, 0xff, 0xff, 0xff}, {static_cast<int>(0xbb5b2ec6), 0x7c, 0x90, 0xff},
         };
-        for (const Colour& c : kColours) controls->SetDefaultColor(c.id, c.r, c.g, c.b);
+        for (const Color& c : kColors) controls->SetDefaultColor(c.id, c.r, c.g, c.b);
     }
-    if (startupHooks_.setupWinCtrlResources) startupHooks_.setupWinCtrlResources(controls);
 }

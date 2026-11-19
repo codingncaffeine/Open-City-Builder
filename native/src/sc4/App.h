@@ -361,6 +361,8 @@ public:
     bool WindowSetup();                                            // @ 0x1000121fa
     bool WindowShutdown();                                         // @ 0x10001226e
     void SetupWinCtrlMgr();                                        // @ 0x10000b128
+    // SetupWinCtrlMgr's color table (the control colors the application sets over the manager's own defaults).
+    static void ApplyControlColors(gz::cIGZWinCtrlMgr* controls);
     void ShutdownWinCtrlMgr();                                     // @ 0x10000c7ca
     void SetupFontSet();                                           // @ 0x10000c7d0
     // the two callbacks of SetupWinCtrlMgr's [Font Aliases] / [Font Styles] sections (context = the application)

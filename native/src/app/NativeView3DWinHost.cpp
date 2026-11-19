@@ -7,6 +7,9 @@
 #include <string>
 #include <vector>
 #include "sc4/View3DWin.h"
+#include "app/NativeCheats.h"
+#include "app/NativeKeyboard.h"
+#include "gz/WinKeyAcceleratorRes.h"
 #include "sc4/StringDetokenizer.h"
 #include "sc4/AdvisorPopupTracker.h"
 #include "sc4/AdvisorUIImageWinProc.h"
@@ -170,13 +173,14 @@ struct StubView3DWin final : IView3DWinHost {
     INotificationHelper3D* NotificationHelper() override { return &notifications_; }
     void RegisterCommandTable() override {}
     void UnregisterCommandTable() override {}
-    void AddCheatCodeTarget(cIGZWin* target) override {}
-    void RemoveCheatCodeTarget(cIGZWin* target) override {}
-    bool RegisterCheatCode(std::uint32_t id, const char* text) override { return {}; }
-    bool UnregisterCheatCode(std::uint32_t id) override { return {}; }
-    bool CheatCodeManagerPresent() override { return {}; }
-    bool LotPlopCheatsEnabled() override { return {}; }
-    cIGZWinKeyAccelerator* CreateKeyAccelerator() override { return {}; }
+    // SL::spCCM vslots 0x28 / 0x30 (window, 0): the window's third slot is DoMessage(cGZMessage&), the old target's call.
+    void AddCheatCodeTarget(cIGZWin* target) override { native::AddGameCheatListener(reinterpret_cast<cIGZMessageTarget*>(target), 0); }
+    void RemoveCheatCodeTarget(cIGZWin* target) override { native::RemoveGameCheatListener(reinterpret_cast<cIGZMessageTarget*>(target), 0); }
+    bool RegisterCheatCode(std::uint32_t id, const char* text) override { return native::RegisterGameCheat(id, text); }
+    bool UnregisterCheatCode(std::uint32_t id) override { native::UnregisterGameCheat(id); return true; }
+    bool CheatCodeManagerPresent() override { return native::GameCheatCodeManager() != nullptr; }
+    bool LotPlopCheatsEnabled() override { return native::GameDebugMode(); }
+    cIGZWinKeyAccelerator* CreateKeyAccelerator() override { return native::CreateGameKeyAccelerator(gz::kKeyAcceleratorCityView); }
     cSC4RenderProperties* GlobalRenderProperties() override { return {}; }
     cSC4RenderProperties* AppRenderProperties() override { return {}; }
     void SetScrollLightingHighlight() override {}
@@ -367,7 +371,7 @@ struct StubView3DWin final : IView3DWinHost {
         native::AddBuildingsToItemList(include, exclude, rewardsUnlocked_, items);
     }
     void InvokeCatalogItemCommand(std::uint32_t, std::uint32_t, bool) override {}   // unused: the view's InvokeCatalogItemCommand is whole
-    void ExecuteAcceleratorCommand(std::uint32_t command) override {}
+    void ExecuteAcceleratorCommand(std::uint32_t command) override { native::ExecuteGameCommand(command); }
     void Update24HourClockHover() override {}
     void UpdateCursorTextPositions(int x, int y) override {}
     void SetDrawContextFrameMarker(void* drawContext, std::uint32_t frame) override {}

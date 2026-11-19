@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <string>
 
+#include "app/NativeCheats.h"
 #include "app/NativeCity.h"
 #include "app/NativeUi.h"
 #include "gz/cGZPersistResourceManager.h"
@@ -83,6 +84,9 @@ public:
         const bool handled = simulator->DoMessage(m);
         if (m.type == 0x26d31ec4 && std::getenv("SC4_DEBUG"))   // the city was established: its starting funds
             std::fprintf(stderr, "budget: city established, funds %lld\n", static_cast<long long>(simulator->GetTotalFunds()));
+        if (m.type == 0x230e27ac && std::getenv("SC4_DEBUG"))   // a cheat the budget hears: the funds after it
+            std::fprintf(stderr, "budget: cheat %08llx \"%s\" %s, funds %lld\n", static_cast<unsigned long long>(m.data1), m.text.c_str(),
+                         handled ? "handled" : "ignored", static_cast<long long>(simulator->GetTotalFunds()));
         return handled;
     }
     cSC4BudgetSimulator* simulator = nullptr;
@@ -90,6 +94,9 @@ private:
     std::uint32_t refs_ = 1;
 };
 BudgetTarget g_target;
+
+struct BudgetCheat { std::uint32_t id; const char* text; bool debugOnly; };
+constexpr BudgetCheat kBudgetCheats[] = {{0xcbf31943, "RiskyMoney", false}, {0x4ab87766, "WeaknessPays", false}, {0x493f4fe6, "Moolah", true}};
 
 // The departments' host while a city loads (before the budget simulator registers and becomes their host): the generated
 // stub answered every string empty, so the departments read from a save lost their names (cSC4DepartmentBudget::Read
@@ -143,12 +150,27 @@ struct BudgetServices final : sc4::IBudgetSimServices {
     void UnsubscribeMessage(std::uint32_t message) override { if (SL::spMS2) SL::spMS2->RemoveNotification(&g_target, message); }
     void AcquireServices() override {}   // the city, land value, ordinance simulators and MS2 are reached through the city here
     void ReleaseServices() override {}
-    void RegisterCheatCodes() override {}   // no cheat code manager natively (see ISimulatorHost::RegisterCheat)
-    void UnregisterCheatCodes() override {}
+    // RiskyMoney and WeaknessPays, and Moolah in debug mode, each registered and heard by the simulator.
+    void RegisterCheatCodes() override {
+        for (const auto& [id, text, debugOnly] : kBudgetCheats) {
+            if (debugOnly && !native::GameDebugMode()) continue;
+            native::RegisterGameCheat(id, text);
+            native::AddGameCheatListener(static_cast<cIGZMessageTarget2*>(&g_target), id);
+        }
+    }
+    void UnregisterCheatCodes() override {
+        for (const auto& [id, text, debugOnly] : kBudgetCheats) {
+            native::RemoveGameCheatListener(static_cast<cIGZMessageTarget2*>(&g_target), id);
+            native::UnregisterGameCheat(id);
+        }
+    }
     void RegisterGameDataNodes(cSC4BudgetSimulator*) override {}   // cISC4GameDataRegistry is not recovered (MySim Lua)
     void UnregisterGameDataNodes(cSC4BudgetSimulator*) override {}
     void ResetHistory(std::uint32_t id, std::uint32_t days) override { if (auto* h = History()) h->SetHistoryDataQueueLength(id, days); }
-    bool CityCheatsEnabled() override { return false; }
+    bool CityCheatsEnabled() override {   // city vslot 0xb0: RiskyMoney works in an established city only
+        sc4::cSC4City* city = HostCity();
+        return city && city->GetEstablished();
+    }
     double RandomDouble() override { static cRZRandom random(0x5eedu); return random.RandomDoubleUniform(); }
     void CityCellSize(float& x, float& z) override {
         sc4::cSC4City* city = HostCity();

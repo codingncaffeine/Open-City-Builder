@@ -249,6 +249,25 @@ bool LoadExemplarString(cIGZString& out, sc4::cISCPropertyHolder* holder, std::u
 // RZ::WCM()'s control entries for the composite controls (the grid's and list box's scroll bars, the option groups'
 // children) and its stock images: built from the recovered classes. Nothing answered them natively, so a grid never got
 // its scroll bar.
+
+// The stock images cSC4App::SetupWinCtrlMgr (Mac i386 0x0000d190) registers under the window control manager's ids: UI art
+// {0x856ddbac, 0x46a006b0, instance}. {instance, stock id}.
+constexpr std::pair<std::uint32_t, std::uint32_t> kStock[] = {
+    {0x46a006a2, 0xa8963eb8}, {0x46a006a2, 0xe8963ef1}, {0x144161ea, 0x68963ebe}, {0x144161ea, 0xa8963ef3},
+    {0x0000000a, 0xc8963ef6}, {0x82b99d9d, 0x68963ed6}, {0x62b99d31, 0x68963ed8}, {0x42e55fd4, 0x48963eee},
+    {0xe78ffc90, 0xe8963edf}, {0xc2b66daa, 0xe8963ee5}, {0x46a006a4, 0xc8963ed3}, {0x46a006a6, 0xe8963ec7},
+    {0x46a006a7, 0x88963ec1}, {0x46a006a8, 0xa8963ec4}, {0x46a006a5, 0xa8963eea}, {0xe2b14588, 0xe2b14588},
+    {0x62b19ce9, 0xe2b14589}};
+
+void ForEachStockControlImage(const std::function<void(std::uint32_t stockId, cGZBuffer* image)>& use) {
+    for (const auto& [instance, stock] : kStock) {
+        cGZBuffer* image = LoadBitmapResource(0x46a006b0, instance);   // one reference
+        if (!image) continue;
+        use(stock, image);
+        image->Release();
+    }
+}
+
 class CtrlFactory final : public gz::IWinCtrlFactory {
 public:
     bool CreateCtrl(std::uint32_t classId, std::uint32_t iid, void** out) override {
@@ -275,12 +294,6 @@ public:
     // The stock images cSC4App::SetupWinCtrlMgr (Mac i386 0x0000d190) registers: UI art {0x856ddbac, 0x46a006b0, instance}
     // under the window control manager's ids. Loaded on first use, kept for the session (borrowed pointers).
     cIGZBuffer* Image(std::uint32_t id) override {
-        static constexpr std::pair<std::uint32_t, std::uint32_t> kStock[] = {   // {instance, stock id}
-            {0x46a006a2, 0xa8963eb8}, {0x46a006a2, 0xe8963ef1}, {0x144161ea, 0x68963ebe}, {0x144161ea, 0xa8963ef3},
-            {0x0000000a, 0xc8963ef6}, {0x82b99d9d, 0x68963ed6}, {0x62b99d31, 0x68963ed8}, {0x42e55fd4, 0x48963eee},
-            {0xe78ffc90, 0xe8963edf}, {0xc2b66daa, 0xe8963ee5}, {0x46a006a4, 0xc8963ed3}, {0x46a006a6, 0xe8963ec7},
-            {0x46a006a7, 0x88963ec1}, {0x46a006a8, 0xa8963ec4}, {0x46a006a5, 0xa8963eea}, {0xe2b14588, 0xe2b14588},
-            {0x62b19ce9, 0xe2b14589}};
         auto cached = images_.find(id);
         if (cached != images_.end()) return cached->second;
         cIGZBuffer* image = nullptr;

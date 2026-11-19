@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <vector>
 
+#include "app/NativeCheats.h"
 #include "app/NativeBoot.h"
 #include "gz/GZFramework.h"
 #include "gz/cGZPersistResourceManager.h"
@@ -42,10 +43,10 @@ struct NativeSimulatorHost final : ISimulatorHost {
     }
     // The cheat code manager and the command server are not recovered: the simulator's "FPS" / "SimDate" cheats and the
     // GetSimulationDate command are not reachable.
-    void RegisterCheat(std::uint32_t, const char*) override { SC4_UNWIRED("ISimulatorHost::RegisterCheat (cheat code manager)"); }
-    void UnregisterCheat(std::uint32_t) override {}
-    void AddCheatNotification(cIGZMessageTarget2*, std::uint32_t) override {}
-    void RemoveCheatNotification(cIGZMessageTarget2*, std::uint32_t) override {}
+    void RegisterCheat(std::uint32_t id, const char* text) override { native::RegisterGameCheat(id, text); }
+    void UnregisterCheat(std::uint32_t id) override { native::UnregisterGameCheat(id); }
+    void AddCheatNotification(cIGZMessageTarget2* target, std::uint32_t id) override { native::AddGameCheatListener(target, id); }
+    void RemoveCheatNotification(cIGZMessageTarget2* target, std::uint32_t id) override { native::RemoveGameCheatListener(target, id); }
     void RegisterCommand(std::uint32_t, const char*) override { SC4_UNWIRED("ISimulatorHost::RegisterCommand (command server)"); }
     void UnregisterCommand(std::uint32_t) override {}
     bool DebugFunctionalityEnabled() override { return false; }   // the retail build's SL::spSC4 vslot 0xa8

@@ -7,6 +7,7 @@
 // back to 2x2 lots and no building is ever proposed), the lot configuration manager queries, and the terrain view's highlight textures (the drag preview stays the native
 // overlay's).
 #include "sc4/DemandSimulator.h"
+#include "app/NativeCheats.h"
 #include "app/NativeCity.h"
 #include "app/NativeSimHosts.h"
 #include "app/NativeTraffic.h"
@@ -312,9 +313,12 @@ struct ZoneDeveloperHost final : IZoneDeveloperHost {
     void LotConfigurationForBuildingType(cSC4LotConfiguration*& out, std::uint32_t) override { out = nullptr; }
     bool LotConfigurationCompatibleWithZone(cISC4LotConfigurationRef*, int) override { return false; }
     void DemolishRegion(const SC4CellRegion<int>&, int, std::uint32_t) override { SC4_UNWIRED("IZoneDeveloperHost::DemolishRegion (demolition utility)"); }
-    bool CheatCodesEnabled() override { return false; }
-    void RegisterCheatCode(const char*, std::uint32_t, cIGZMessageTarget2*) override {}
-    void UnregisterCheatCode(std::uint32_t) override {}
+    bool CheatCodesEnabled() override { return native::GameCheatCodeManager() && native::GameDebugMode(); }
+    void RegisterCheatCode(const char* text, std::uint32_t id, cIGZMessageTarget2* target) override {
+        native::RegisterGameCheat(id, text);
+        native::AddGameCheatListener(target, id);
+    }
+    void UnregisterCheatCode(std::uint32_t id) override { native::UnregisterGameCheat(id); }
     std::uint32_t RandomBelow(std::uint32_t range) override {
         static cRZRandom random(0x5c4u);
         return range ? random.RandomUint32Uniform(range) : 0;

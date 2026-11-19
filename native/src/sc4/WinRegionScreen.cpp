@@ -219,6 +219,8 @@ bool cSC4WinRegionScreen::DoMessage(cIGZWin*, cGZMessage&) {   // @ 0x10023a65c
 bool cSC4WinRegionScreen::ProcessCommand(std::uint32_t command, cIGZCommandParameterSet* input,
                                         cIGZCommandParameterSet* output) {   // @ 0x10023a1fc
     IRegionScreenHost* host = RegionScreenHost();
+    static const bool keyDebug = std::getenv("SC4_KEYDEBUG") != nullptr;   // dev: the commands the region screen runs
+    if (keyDebug) std::printf("keys: region screen command %08x (scroll %p)\n", command, static_cast<void*>(scroll_));
     switch (command) {
     case kCmdRegionBitmapLoad:
         MakeWholeRegion();

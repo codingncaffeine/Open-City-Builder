@@ -32,6 +32,9 @@ bool LoadLocalizedString(std::uint32_t group, std::uint32_t instance, cIGZString
 bool LoadExemplarString(cIGZString& out, sc4::cISCPropertyHolder* holder, std::uint32_t property,
                         sc4::cSCStringDetokenizer* detokenizer = nullptr);
 cGZBuffer* LoadBitmapResource(std::uint32_t group, std::uint32_t instance);
+// cSC4App::SetupWinCtrlMgr's stock images (the dialog background, button, slider and scroll bar art) registered with the
+// window control manager (SetSystemBMP): each image is loaded and handed to `use`, which takes its own reference.
+void ForEachStockControlImage(const std::function<void(std::uint32_t stockId, cGZBuffer* image)>& use);
 PngDecoder DecodeFunction();
 
 // Registers the makers, seams and the script service. Needs RunBoot(.., keepAlive = true) to have run (GZCOM, the

@@ -48,7 +48,8 @@ struct FakeMgr final : cIGZWinMgr {
     cIGZCursorManager* GetCursorManager() override { return cursors; }
     cIGZWin* GZGetFocus() override { return focus; }
     void GZSetFocus(cIGZWin* w) override { focus = w; }
-    cIGZKeyboard* GetKeyboard() override { return nullptr; }
+    cIGZKeyboard* keyboard = nullptr;   // windows made on this manager take it (cGZWin's constructor)
+    cIGZKeyboard* GetKeyboard() override { return keyboard; }
     int popupAnswer = -1, popups = 0;
     int RunPopup(cIGZWin*) override { ++popups; return popupAnswer; }
     // Window manager GZMsgBox (vslot 0x160): answers `msgBoxAnswer` and records what was asked.

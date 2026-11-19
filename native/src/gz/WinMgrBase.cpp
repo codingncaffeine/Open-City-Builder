@@ -1,6 +1,8 @@
 #include "gz/WinMgrBase.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 #include "gz/Cursor.h"
@@ -232,6 +234,16 @@ bool cGZWinMgrBase::ProcessKeyboardMessage(cGZMessage& message) {
     else return false;
     if (!target) return false;
 
+    static const bool keyDebug = std::getenv("SC4_KEYDEBUG") != nullptr;   // dev: where each key goes
+    if (keyDebug && message.type != kGZMsgCharacter)
+        std::printf("keys: %s %02x mod %x -> window %08x (focus %08x, modal %08x)\n", message.type == kGZMsgKeyDown ? "down" : "up",
+                    unsigned(message.param1), unsigned(message.param2), target->GetID(), focus_ ? focus_->GetID() : 0u,
+                    modal_ ? modal_->GetID() : 0u);
+    if (keyDebug && message.type == kGZMsgKeyDown) {
+        std::printf("keys:   chain");
+        for (cIGZWin* w = target; w; w = w->GetParentWin()) std::printf(" %08x%s", w->GetID(), w->IsVisible() ? "" : "(hidden)");
+        std::printf("\n");
+    }
     cGZMessage preview;
     preview.type = kWinMgrMsgKeyPreview;
     preview.param1 = std::uint64_t(reinterpret_cast<std::uintptr_t>(target));

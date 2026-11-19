@@ -4,6 +4,7 @@
 // view utilities.
 #include <cstdio>
 
+#include "app/NativeCheats.h"
 #include "app/NativeAnimationTicks.h"
 #include "app/NativeCity.h"
 #include "app/NativeCityView.h"
@@ -66,12 +67,12 @@ struct NativeControllerManagerHost final : IControllerManagerHost {
     // SL::ATM() vslots 0x28 / 0x30 with the channel as the priority
     void AddTickNotification(cIGZMessageTarget2* target, int channel) override { AnimationTickServerView()->AddNotification(target, static_cast<std::uint32_t>(channel)); }
     void RemoveTickNotification(cIGZMessageTarget2* target, int channel) override { AnimationTickServerView()->RemoveNotification(target, static_cast<std::uint32_t>(channel)); }
-    bool CheatManagerAvailable() override { return false; }   // the cheat code manager is not recovered
-    bool DebugFunctionalityEnabled() override { return false; }
-    void RegisterCheat(std::uint32_t, const char*) override {}
-    void UnregisterCheat(std::uint32_t) override {}
-    void AddCheatListener(cIGZMessageTarget*) override {}
-    void RemoveCheatListener(cIGZMessageTarget*) override {}
+    bool CheatManagerAvailable() override { return native::GameCheatCodeManager() != nullptr; }
+    bool DebugFunctionalityEnabled() override { return native::GameDebugMode(); }
+    void RegisterCheat(std::uint32_t id, const char* name) override { native::RegisterGameCheat(id, name); }
+    void UnregisterCheat(std::uint32_t id) override { native::UnregisterGameCheat(id); }
+    void AddCheatListener(cIGZMessageTarget* target) override { native::AddGameCheatListener(target, 0); }
+    void RemoveCheatListener(cIGZMessageTarget* target) override { native::RemoveGameCheatListener(target, 0); }
     // the vehicle or the pedestrian layer is active (city vslots 0x158 / 0x160, cSC4AutomataManager::IsActive vslot 0x30)
     bool AutomataLayersRunning() override { return CityAutomataLayersActive(); }
     const float* ViewPosition() override { return CityViewEye(); }   // SL::spViewUtilities + 0x44

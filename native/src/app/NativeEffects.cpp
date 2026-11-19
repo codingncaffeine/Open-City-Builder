@@ -5,6 +5,7 @@
 // The original's manager Init reaches the renderer (vslot 0x100: AddViewObject(manager, list 5, priority 0x76c)), the
 // animation tick manager (AddTickableObject(manager, 0xc0)) and the message server; here the city view attaches it once
 // its renderer exists (AttachEffects) and detaches it when the renderer shuts down (DetachEffects).
+#include "app/NativeCheats.h"
 #include "app/NativeEffects.h"
 #include "app/NativeEffectComponents.h"
 #include "sc4/NetworkOccupant.h"
@@ -210,11 +211,12 @@ public:
     }
     void RegisterMessageHandler(std::uint32_t message) override { if (SL::spMS2) SL::spMS2->AddNotification(&g_target, message); }
     void UnregisterMessageHandler(std::uint32_t message) override { if (SL::spMS2) SL::spMS2->RemoveNotification(&g_target, message); }
-    void AddCheatHandler(cIGZUnknown*) override {}
-    void RemoveCheatHandler(cIGZUnknown*) override {}
-    void RegisterCheatCode(std::uint32_t, const char*) override {}
-    void UnregisterCheatCode(std::uint32_t) override {}
-    bool CheatsEnabled() override { return false; }
+    // SL::spCCM vslots 0x38 / 0x40 (listener, 0): the manager hears every cheat.
+    void AddCheatHandler(cIGZUnknown* listener) override { native::AddGameCheatListener(dynamic_cast<cIGZMessageTarget2*>(listener), 0); }
+    void RemoveCheatHandler(cIGZUnknown* listener) override { native::RemoveGameCheatListener(dynamic_cast<cIGZMessageTarget2*>(listener), 0); }
+    void RegisterCheatCode(std::uint32_t id, const char* text) override { native::RegisterGameCheat(id, text); }
+    void UnregisterCheatCode(std::uint32_t id) override { native::UnregisterGameCheat(id); }
+    bool CheatsEnabled() override { return native::GameDebugMode(); }
     void AddTickNotification(cIGZUnknown*) override {
         if (sc4::cSC4AnimationTickManager* atm = AnimationTickManager()) atm->AddTickableObject(&g_target, 0xc0);
     }

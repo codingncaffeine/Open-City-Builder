@@ -9,6 +9,7 @@
 #include <list>
 #include <vector>
 
+#include "app/NativeCheats.h"
 #include "app/NativeAnimationTicks.h"
 #include <algorithm>
 #include <cmath>
@@ -240,12 +241,12 @@ public:
     void RemoveTickNotification(cIGZMessageTarget2* target, int channel) override {
         if (cSC4AnimationTickManager* atm = AnimationTickManager()) atm->RemoveTickableObject(target, std::uint32_t(channel));
     }
-    bool CheatManagerAvailable() override { return false; }
-    bool DebugFunctionalityEnabled() override { return false; }
-    void RegisterCheat(std::uint32_t, const char*) override {}
-    void UnregisterCheat(std::uint32_t) override {}
-    void AddCheatListener(cIGZMessageTarget*) override {}
-    void RemoveCheatListener(cIGZMessageTarget*) override {}
+    bool CheatManagerAvailable() override { return native::GameCheatCodeManager() != nullptr; }
+    bool DebugFunctionalityEnabled() override { return native::GameDebugMode(); }
+    void RegisterCheat(std::uint32_t id, const char* name) override { native::RegisterGameCheat(id, name); }
+    void UnregisterCheat(std::uint32_t id) override { native::UnregisterGameCheat(id); }
+    void AddCheatListener(cIGZMessageTarget* target) override { native::AddGameCheatListener(target, 0); }
+    void RemoveCheatListener(cIGZMessageTarget* target) override { native::RemoveGameCheatListener(target, 0); }
     void PostMessage(cIGZMessage2* message, bool front) override { if (SL::spMS2 && message) SL::spMS2->MessagePost(message, front); }
     // ---- city
     IAutomataNetworkManager* NetworkManager() override { return nullptr; }

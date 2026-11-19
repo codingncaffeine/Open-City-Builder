@@ -34,6 +34,8 @@
 #include "platform/PointerState.h"
 #include "sc4/Simulator.h"
 #include "sc4/RegionDialogs.h"
+#include "app/NativeCheats.h"
+#include "app/NativeWinControls.h"
 #include "app/NativeNetworkLots.h"
 #include "app/NativeUnderground.h"
 #include "app/NativeBudgetUi.h"
@@ -716,6 +718,9 @@ bool Boot() {
         gMessages2 = messages2;
         static native::HostWinSC4App host(&framework);
         gAppHost = &host;
+        // The app window subscribes in its Init (the cheat code box command 0x2a9496c9, the focus change forward), so the
+        // server is there before the window is made, as SL::spMS2 is in the original.
+        host.SetMessageServer(messages2);
         if (!gIntroSwitch.empty()) host.SetIntroSwitch(gIntroSwitch);
         native::SetIntroServices({[] { gSplashHost.DestroyCurrentScreen(); }, [] { gSplashHost.CreateRegionScreen(); },
                                   [] { if (gAppWindow) gAppWindow->CreateSplashScreen(); }, [] { gSplashHost.ClearScreenToBlack(); }});
@@ -724,6 +729,8 @@ bool Boot() {
         app.StartupHooks().configureResourceCache = [] {
             std::printf("ui scripts: %s\n", native::InitUiScripts(gMgr.get()) ? "service ready" : "NOT available");
         };
+        // cSC4App::SetupWinCtrlMgr's stock images and captions; the generic dialogs (the cheat code box) need them.
+        app.StartupHooks().setupWinCtrlResources = [](gz::cIGZWinCtrlMgr* controls) { native::InstallWindowControlManager(gMgr.get(), controls); };
         app.StartupHooks().createApplicationWindow = [&](cSC4App& a) -> sc4::AppStartupHooks::ApplicationWindow {
             sc4::SetSplashScreenHost(&gSplashHost);
             auto* window = new sc4::cWinSC4App(&a, gMgr.get(), &host);
@@ -777,7 +784,6 @@ bool Boot() {
         std::printf("nation: regions dir \"%s\"\n", cSC4Nation::msRegionDirectory.ToChar());
         std::printf("nation: %u regions, active %d\n", nation->GetRegionCount(), nation->GetActiveRegionIndex());
     }
-    if (gAppHost) gAppHost->SetMessageServer(SL::spMS2);
     gMgr->GetMainWindow()->SetBufferToDrawToRecursive();
     gMgr->GetMainWindow()->InvalidateSelf();
     return ok;
@@ -829,44 +835,22 @@ std::uint32_t VirtualKey(SDL_Keycode k) {
     case SDLK_LSHIFT: case SDLK_RSHIFT: return 0x10; case SDLK_LCTRL: case SDLK_RCTRL: return 0x11; case SDLK_LALT: case SDLK_RALT: return 0x12;
     case SDLK_KP_PLUS: return 0x6b; case SDLK_KP_MINUS: return 0x6d; case SDLK_EQUALS: return 0xbb; case SDLK_MINUS: return 0xbd;
     case SDLK_COMMA: return 0xbc; case SDLK_PERIOD: return 0xbe;
+    case SDLK_SLASH: return 0xbf; case SDLK_GRAVE: return 0xc0; case SDLK_SEMICOLON: return 0xba; case SDLK_APOSTROPHE: return 0xde;
+    case SDLK_LEFTBRACKET: return 0xdb; case SDLK_RIGHTBRACKET: return 0xdd; case SDLK_BACKSLASH: return 0xdc;
+    case SDLK_KP_MULTIPLY: return 0x6a; case SDLK_KP_PERIOD: return 0x6e; case SDLK_KP_DIVIDE: return 0x6f;
+    case SDLK_NUMLOCKCLEAR: return 0x90; case SDLK_CAPSLOCK: return 0x14; case SDLK_SCROLLLOCK: return 0x91;
+    case SDLK_PAUSE: return 0x13; case SDLK_PRINTSCREEN: return 0x2c;
     default: break;
     }
+    if (k >= SDLK_KP_1 && k <= SDLK_KP_9) return std::uint32_t(0x61 + (k - SDLK_KP_1));
+    if (k == SDLK_KP_0) return 0x60;
     if (k >= SDLK_F1 && k <= SDLK_F12) return std::uint32_t(0x70 + (k - SDLK_F1));
     return 0;
 }
 
-// The city view's keys: what the game's key accelerator (the keyboard shortcut table, not loaded natively yet) turns
-// into cSC4View3DWin commands - arrows scroll, +/- and Page Up/Down zoom, comma/period rotate.
-bool CityViewKey(SDL_Keycode key, bool down, bool repeat) {
-    sc4::cSC4View3DWin* view = gAppWindow ? gAppWindow->View3D() : nullptr;
-    if (!view) {   // the region screen: the arrow keys scroll the map
-        cIGZWin* screen = gAppWindow ? gAppWindow->CurrentScreen() : nullptr;
-        if (!screen || screen->GetID() != 0xea659793) return false;
-        std::uint32_t command = 0;
-        switch (key) {
-            case SDLK_LEFT: command = down ? sc4::kCmdRegionScrollLeft : sc4::kCmdRegionScrollLeftStop; break;
-            case SDLK_RIGHT: command = down ? sc4::kCmdRegionScrollRight : sc4::kCmdRegionScrollRightStop; break;
-            case SDLK_UP: command = down ? sc4::kCmdRegionScrollUp : sc4::kCmdRegionScrollUpStop; break;
-            case SDLK_DOWN: command = down ? sc4::kCmdRegionScrollDown : sc4::kCmdRegionScrollDownStop; break;
-            default: return false;
-        }
-        if (!(down && repeat)) static_cast<sc4::cSC4WinRegionScreen*>(screen)->ProcessCommand(command, nullptr, nullptr);
-        return true;
-    }
-    std::uint32_t command = 0;
-    switch (key) {
-        case SDLK_LEFT: command = down ? 0x6a935cd8 : 0x2a94826b; break;
-        case SDLK_RIGHT: command = down ? 0x6a935ce0 : 0x2a94826e; break;
-        case SDLK_UP: command = down ? 0x6a935cdd : 0x2a948272; break;
-        case SDLK_DOWN: command = down ? 0x6a935ce2 : 0x2a948275; break;
-        case SDLK_EQUALS: case SDLK_KP_PLUS: case SDLK_PAGEUP: command = down ? 0x6a935cb7 : 0; break;     // zoom in
-        case SDLK_MINUS: case SDLK_KP_MINUS: case SDLK_PAGEDOWN: command = down ? 0x6a935cba : 0; break;  // zoom out
-        case SDLK_COMMA: command = down ? 0x6a935cc9 : 0; break;                                           // rotate left
-        case SDLK_PERIOD: command = down ? 0x6a935ccc : 0; break;                                          // rotate right
-        default: return false;
-    }
-    if (command && !(down && repeat)) view->ProcessViewCommand(command);
-    return true;
+// The GZ key modifier word of a key event: 1 shift, 2 control, 4 alt (what the game's key accelerators test).
+std::uint32_t KeyModifierWord(SDL_Keymod mod) {
+    return ((mod & SDL_KMOD_SHIFT) ? 1u : 0u) | ((mod & SDL_KMOD_CTRL) ? 2u : 0u) | ((mod & SDL_KMOD_ALT) ? 4u : 0u);
 }
 
 double gWheel = 0;
@@ -893,8 +877,10 @@ void HandleEvent(const SDL_Event& e) {
     }
     case SDL_EVENT_KEY_DOWN: case SDL_EVENT_KEY_UP: {
         const bool down = e.type == SDL_EVENT_KEY_DOWN;
-        if (CityViewKey(e.key.key, down, e.key.repeat)) break;
-        if (const std::uint32_t vk = VirtualKey(e.key.key)) gMgr->GZWinMsgPost_Keyboard(down ? kGZMsgKeyDown : kGZMsgKeyUp, vk, 0);
+        // Every key goes to the window manager as the game's key message; the windows' keyboard accelerators (the
+        // game's own shortcut tables, NativeKeyboard.cpp) turn the keys nobody takes into commands.
+        if (const std::uint32_t vk = VirtualKey(e.key.key))
+            gMgr->GZWinMsgPost_Keyboard(down ? kGZMsgKeyDown : kGZMsgKeyUp, vk, KeyModifierWord(e.key.mod));
         break;
     }
     case SDL_EVENT_TEXT_INPUT:
@@ -1388,6 +1374,42 @@ int RunScenario(const std::string& path) {
             native::NativeAdviceLinkProbe(advisor, code.c_str() + (code.empty() ? 0 : 1));
         } else if (command == "advwin") {   // the advisor window's state
             native::NativeAdvisorWindowReport();
+        } else if (command == "key") {
+            // key [ctrl+][shift+][alt+]NAME [FRAMES]: a key press and release as SDL events through the player's key path
+            // (NAME as SDL names keys: X, Left, F1, Escape, /, Keypad 8 ...; "Keypad 8" is written Keypad_8), the key held
+            // down for FRAMES frames (default 1).
+            std::string spec; words >> spec;
+            int hold = 1; words >> hold;
+            SDL_Keymod mod = SDL_KMOD_NONE;
+            for (std::size_t plus; (plus = spec.find('+')) != std::string::npos && plus + 1 < spec.size();) {
+                const std::string word = spec.substr(0, plus);
+                if (word == "ctrl") mod |= SDL_KMOD_LCTRL;
+                else if (word == "shift") mod |= SDL_KMOD_LSHIFT;
+                else if (word == "alt") mod |= SDL_KMOD_LALT;
+                else break;
+                spec.erase(0, plus + 1);
+            }
+            for (char& c : spec) if (c == '_') c = ' ';
+            const SDL_Keycode keycode = SDL_GetKeyFromName(spec.c_str());
+            std::printf("key %s (mod %04x): keycode %08x\n", spec.c_str(), unsigned(mod), unsigned(keycode));
+            for (const SDL_EventType type : {SDL_EVENT_KEY_DOWN, SDL_EVENT_KEY_UP}) {
+                SDL_Event k{};
+                k.type = type; k.key.windowID = SDL_GetWindowID(gWindow); k.key.key = keycode; k.key.mod = mod;
+                k.key.down = type == SDL_EVENT_KEY_DOWN;
+                SDL_PushEvent(&k); PumpEvents(); Frame(); Nap();
+                for (int i = 1; k.key.down && i < hold; ++i) { PumpEvents(); Frame(); Nap(); }
+            }
+            for (int i = 0; i < 5; ++i) { PumpEvents(); Frame(); Nap(); }
+        } else if (command == "cheats") {   // every registered cheat string, as the cheat code box's list has them
+            auto* cheats = native::GameCheatCodeManager();
+            std::uint32_t none = 0;
+            const std::uint32_t count = cheats ? cheats->GetListOfAllCheatStrings(nullptr, none) : 0;
+            std::vector<const cIGZString*> names(count);
+            std::uint32_t got = count;
+            if (count) cheats->GetListOfAllCheatStrings(names.data(), got);
+            std::printf("cheats: %u registered:", count);
+            for (std::uint32_t i = 0; i < got && i < count; ++i) std::printf(" \"%s\"", names[i]->ToChar());
+            std::printf("\n");
         } else if (command == "cheat") {   // cheat TEXT: what the cheat box does with its text on Enter
             std::string text; words >> text;
             auto* cheats = dynamic_cast<cGZCheatCodeManager*>(SL::spCCM);
@@ -1527,7 +1549,8 @@ int main(int argc, char** argv) {
         gMgr->Plot();
         gGraphics->Services().Tick();
         Present();
-        // debug: SC4_MODALINPUT="FRAME:X:Y,..." clicks inside the dialog at those frames of it (FRAME:type:TEXT, FRAME:key:VK type); SC4_MODALFRAMES its length (30)
+        // debug: SC4_MODALINPUT="FRAME:X:Y,..." clicks inside the dialog at those frames of it (FRAME:type:TEXT, FRAME:key:VK type,
+        // FRAME:shot:NAME photographs it); SC4_MODALFRAMES its length (30)
         if (!interactive) {
             // each item fires once: a dialog's own popup (a combo's list) runs a nested modal loop that re-enters this pump at
             // the same frame, and a re-posted click would land outside the popup
@@ -1556,6 +1579,12 @@ int main(int argc, char** argv) {
                         fired.insert(entry);
                         for (const char* c = text; *c; ++c) gMgr->GZWinMsgPost_Keyboard(kGZMsgCharacter, std::uint32_t(*c), 0);
                         std::printf("modal input: type \"%s\" at frame %d\n", text, at);
+                        continue;
+                    }
+                    if (std::sscanf(item.c_str(), "%d:shot:%127[^,]", &at, text) == 2) {   // FRAME:shot:NAME writes work/shots/NAME.png
+                        if (at != current) continue;
+                        fired.insert(entry);
+                        WritePng(std::string("work/shots/") + text + ".png");
                         continue;
                     }
                     if (std::sscanf(item.c_str(), "%d:key:%d", &at, &x) == 2) {

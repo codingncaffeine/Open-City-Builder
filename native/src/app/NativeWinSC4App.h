@@ -8,7 +8,10 @@
 #pragma once
 #include <string>
 
+#include "app/NativeCheats.h"
 #include "app/NativeIntro.h"
+#include "app/NativeKeyboard.h"
+#include "gz/WinKeyAcceleratorRes.h"
 #include "sc4/WinSC4App.h"
 
 namespace native {
@@ -30,20 +33,20 @@ public:
     cIGZMessageServer2* MessageServer2() override { return messageServer_; }
     void SetMessageServer(cIGZMessageServer2* server) { messageServer_ = server; }
 
-    // The cheat-code manager, the command server, the preferences and the cheat dialog are engine objects the host does
-    // not build yet; the window skips those paths when they are absent.
-    cGZCheatCodeManager* CheatCodeManager() override { return nullptr; }
-    void ExecuteCommand(std::uint32_t) override {}
+    // The application's cheat code manager, the framework command server and the cheat code box (Ctrl+X). The clock
+    // preference and its window are not built yet; the window skips that path.
+    cGZCheatCodeManager* CheatCodeManager() override { return native::GameCheatCodeManager(); }
+    void ExecuteCommand(std::uint32_t command) override { native::ExecuteGameCommand(command); }
     bool ClockWindowPreference() override { return false; }
     void DoModelessClockWindow() override {}
-    cIGZWin* CreateCheatCodeEntryDialog() override { return nullptr; }
+    cIGZWin* CreateCheatCodeEntryDialog() override { return native::CreateCheatCodeEntryDialog(); }
     void AppFocus(bool) override {}
 
     // _sReadyToHearMusic = 1 at the end of CreateRegionScreen. The host records it so a caller can see the region screen
     // got far enough to ask for its music, which is the signal the audio path keys off.
-    // The keyboard accelerator the key-unhandled path uses (resource {a2e3d533, 6a231eaa, 6a9362f1} then a GZCOM
-    // object). The host has neither, so the path is skipped - the window checks for null.
-    cIGZWinKeyAccelerator* CreateKeyAccelerator() override { return nullptr; }
+    // The keyboard accelerator the key-unhandled path uses: the general table {a2e3d533, 6a231eaa, 6a9362f1} (Ctrl+X
+    // opens the cheat code dialog).
+    cIGZWinKeyAccelerator* CreateKeyAccelerator() override { return native::CreateGameKeyAccelerator(gz::kKeyAcceleratorGeneral); }
 
     void ReadyToHearMusic() override { readyToHearMusic_ = true; }
 
