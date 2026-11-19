@@ -485,8 +485,10 @@ void TestDefaultEventHandler() {
     assert(h->QueryInterface(0xbb523bb2, &p) && !h->QueryInterface(2, &p));
     h->Release();
 
-    const auto event = [](std::uint32_t id, std::uint32_t d1, std::uint32_t d2 = 0, std::uint32_t d3 = 0) {
+    std::vector<fakes::FakeEvent*> events;   // the handler only borrows events; the test owns them
+    const auto event = [&events](std::uint32_t id, std::uint32_t d1, std::uint32_t d2 = 0, std::uint32_t d3 = 0) {
         auto* e = new fakes::FakeEvent();
+        events.push_back(e);
         e->id = id;
         e->message.SetData1(d1); e->message.SetData2(d2); e->message.SetData3(d3);
         return e;
@@ -518,6 +520,7 @@ void TestDefaultEventHandler() {
     assert(!sys->GetSndPropertyCache()->HasGlobalProperty(5));
     assert(!h->DoEvent(event(0x1234, 5)));
     assert(h->Release() == 0);
+    for (fakes::FakeEvent* ev : events) delete ev;
     sys->Shutdown();
     Audio::SetSoundManagerService(nullptr);
     Audio::SetSoundSystem(nullptr);

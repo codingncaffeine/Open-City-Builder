@@ -36,6 +36,7 @@ struct Creator final : cIGZSoundCreator {
     bool CreateSound(std::uint32_t id, std::uint32_t, cIGZVariant*, std::uint32_t iid, void** out) override {
         ++calls;
         if (id != acceptId) return false;
+        delete made;   // a later call replaces the previous sound
         made = new fakes::FakeSnd();
         made->refs = 1;
         return made->QueryInterface(iid, out);

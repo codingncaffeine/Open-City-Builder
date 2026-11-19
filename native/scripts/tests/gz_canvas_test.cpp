@@ -126,6 +126,7 @@ int main() {
     server.sent.clear();
     CHECK(canvas->Shutdown() && !canvas->IsInitialized());
     CHECK(server.sent.size() == 2 && server.sent[0].event == 1 && server.sent[1].event == 9 && graphics.driver.mode == -1);
+    canvas->Release();
     std::printf(failures ? "FAILED\n" : "OK\n");
     return failures ? 1 : 0;
 }

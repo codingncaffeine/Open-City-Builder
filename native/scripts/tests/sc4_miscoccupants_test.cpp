@@ -83,7 +83,7 @@ int main() {
         CHECK(g->GetFoundationType() == 77 && g->GetMaxHeight() == 4.5f);
         void* iface = nullptr;
         CHECK(g->QueryInterface(kGZIID_cISC4FoundationOccupant, &iface) && iface == g);
-        g->Release();
+        g->Release(); g->Release();   // the query above took one
         // wrong version
         const std::uint8_t bad[] = {1, 0};
         PortMemoryIStream is(bad, sizeof bad);

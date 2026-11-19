@@ -211,6 +211,7 @@ struct FakeHost final : IAmbienceLayerHost {
     std::map<std::uint32_t, std::function<cIGZUnknown*()>> factories;   // class id -> new object (refs 0)
     FakePlayer player;
     std::vector<FakePlayer*> players;
+    ~FakeHost() { for (FakePlayer* p : players) delete p; }   // the fake players count references only
     int quality = 0;
     int residential = 0;
     std::uint32_t industrial = 0;
@@ -276,6 +277,14 @@ static sc4::cISCPropertyHolder* NewHolder(std::function<void(cSCPropertyHolder*)
 static std::vector<FakeStateFilter*> g_stateFilters;
 static std::vector<FakeCellFilter*> g_cellFilters;
 static std::vector<FakeOccFilter*> g_occFilters;
+
+// The filter fakes count references only; the registries own them, so they are freed when a test starts over.
+static void FreeFilters() {
+    for (auto* p : g_stateFilters) delete p;
+    for (auto* p : g_cellFilters) delete p;
+    for (auto* p : g_occFilters) delete p;
+    g_stateFilters.clear(); g_cellFilters.clear(); g_occFilters.clear();
+}
 
 template <class T> static void AddFilterFactory(FakeHost& host, std::uint32_t id, std::vector<T*>& registry, bool value) {
     host.factories[id] = [&registry, value]() -> cIGZUnknown* { auto* f = new T(); f->d.value = value; registry.push_back(f); return f; };
@@ -348,7 +357,7 @@ static sc4::cISCPropertyHolder* FullTuning() {
 }
 
 static void StdFilters(FakeHost& host, bool a, bool b, bool c1, bool c2) {
-    g_stateFilters.clear(); g_cellFilters.clear(); g_occFilters.clear();
+    FreeFilters();
     AddFilterFactory<FakeStateFilter>(host, 0xA1, g_stateFilters, a);
     AddFilterFactory<FakeStateFilter>(host, 0xB1, g_stateFilters, b);
     AddFilterFactory<FakeStateFilter>(host, 0xC1, g_stateFilters, c1);
@@ -509,7 +518,7 @@ static sc4::cISCPropertyHolder* OccupantTuning(int mode, int source) {
 }
 
 static void OccupantFilters(FakeHost& host) {
-    g_stateFilters.clear(); g_cellFilters.clear(); g_occFilters.clear();
+    FreeFilters();
     AddFilterFactory<FakeStateFilter>(host, 0xA1, g_stateFilters, true);
     AddFilterFactory<FakeOccFilter>(host, 0xD1, g_occFilters, true);
     AddFilterFactory<FakeCellFilter>(host, 0xE1, g_cellFilters, true);
@@ -965,6 +974,7 @@ int main() {
     TestAmountSources();
     TestQualityScaling();
     TestDoMessageAndDisabled();
+    FreeFilters();
     std::printf("ok\n");
     return 0;
 }

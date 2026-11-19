@@ -63,6 +63,9 @@ int main() {
         CHECK(l == 0xff000000u && bb == 0xff000000u);
         flatRect->Release();
     }
+    // the test's own AddRef, refsBefore, the CHECK AddRef and the two successful queries: five references in all
+    for (int i = 0; i < 5; ++i) view->Release();
+    SetWinGraphics(nullptr);
     std::printf(g_fail ? "FAILED %d\n" : "sc4_scentryview OK\n", g_fail);
     return g_fail ? 1 : 0;
 }

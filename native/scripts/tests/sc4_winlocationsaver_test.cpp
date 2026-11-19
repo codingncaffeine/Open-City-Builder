@@ -87,6 +87,7 @@ int main() {
     std::memcpy(out, prefs.data() + 0x4f0, sizeof out);
     CHECK(out[0][0] == 0x05 && out[0][1] == 7 && out[0][2] == 8 && out[1][0] == 0x10 && out[1][1] == 300 && out[2][0] == 0x20 && out[3][0] == 0 && out[3][1] == 0);
     saver->Release();
+    rootWin->Release();   // deletes the window tree (the children hold the only other references)
     std::printf(failures ? "FAILED\n" : "OK\n");
     return failures ? 1 : 0;
 }

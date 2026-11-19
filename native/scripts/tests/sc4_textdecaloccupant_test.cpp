@@ -73,6 +73,7 @@ struct Host final : ITextDecalHost {
     Overlay overlays[4];
     ViewSet view;
     Texture* lastTexture = nullptr;
+    std::vector<Texture*> made;                 // every texture handed out; the test frees them at the end
     bool allow = true;
     int rotation = 1;
     std::vector<std::uint32_t> overlayRequests;
@@ -82,7 +83,7 @@ struct Host final : ITextDecalHost {
     ITextDecalViewSet* AcquireViewSet() override { view.AddRef(); return &view; }
     bool PropDeveloperAllowsDecals() override { return allow; }
     ITextDecalOverlay* OverlayManager(std::uint32_t i) override { overlayRequests.push_back(i); return &overlays[i]; }
-    bool CreateTextTexture(const cRZString&, ITextTexture*& out) override { out = lastTexture = new Texture; ++textures; return true; }
+    bool CreateTextTexture(const cRZString&, ITextTexture*& out) override { out = lastTexture = new Texture; made.push_back(lastTexture); ++textures; return true; }
     float TerrainHeight(float x, float) override { return 50.0f + x; }
     int ViewRotation() override { return rotation; }
     void PositionToCell(float, float, int& a, int& b) override { a = b = 0; }
@@ -272,6 +273,7 @@ int main() {
 
     r->Release();
     d->Release();
+    for (Texture* t : host.made) { CHECK(t->refs == 0); delete t; }   // the occupant released each one
     std::puts(failures ? "sc4_textdecaloccupant: FAILED" : "ok");
     return failures != 0;
 }

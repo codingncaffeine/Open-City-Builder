@@ -39,6 +39,7 @@ int main() {
     command.param2 = 0x8a5b9959;
     dialog->DoWinProcMessage(nullptr, command);
     CHECK(dialog->ok == 1);
+    dialog->Release();                                       // the query above took one
     dialog->Release();                                       // count 1 -> deleted
 
     auto* credits = new cSC4CreditsWinProc;

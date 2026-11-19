@@ -454,6 +454,7 @@ int main() {
         CHECK(holder == region->GetCity(0, 0) && holder->get() == replacement);
         CHECK(oldCity->shutdowns == 1);
         CHECK(std::strcmp(replacement->savePath.ToChar(), oldCity->savePath.ToChar()) == 0);
+        region->RemoveCity(holder);   // frees the holder the region allocated
         region->Release();
         oldCity->Release();
         replacement->Release();
@@ -504,6 +505,7 @@ int main() {
         CHECK(!region->ResetTutorialCity(-1));
         CHECK(!region->ResetTutorialCity(1234));
 
+        if (auto* h = region->GetCity(2, 2)) region->RemoveCity(h);   // frees the holder the region allocated
         region->Release();
         city->Release();
     }

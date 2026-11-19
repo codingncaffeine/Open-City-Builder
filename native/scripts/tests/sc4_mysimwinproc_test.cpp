@@ -597,6 +597,7 @@ FakeWindow* BuildTree(FakeMgr2& mgr, FakeGen*& panel) {
         window->AddRef();
         window->SetID(id);
         controls->ChildAdd(window);
+        window->Release();   // the parent's list now owns it
         return window;
     };
     // page frames
@@ -614,6 +615,7 @@ FakeWindow* BuildTree(FakeMgr2& mgr, FakeGen*& panel) {
         child->AddRef();
         child->SetID(id);
         page->ChildAdd(child);
+        child->Release();   // the parent's list now owns it
     };
     addPageChild(controls->GetChildWindowFromIDRecursive(kMySimDialogMain), 0x500);
     addPageChild(controls->GetChildWindowFromIDRecursive(kMySimDialogStat), 0x501);
@@ -625,22 +627,26 @@ FakeWindow* BuildTree(FakeMgr2& mgr, FakeGen*& panel) {
     smallBody->AddRef();
     smallBody->SetID(kMySimBodySmall);
     small->ChildAdd(smallBody);
+    smallBody->Release();   // the parent's list now owns it
     auto* largeBody = new FakeAdviceWin(&mgr);
     largeBody->AddRef();
     largeBody->SetID(kMySimBodyLarge);
     large->ChildAdd(largeBody);
+    largeBody->Release();   // the parent's list now owns it
     // the five slot portraits / name texts / buttons and their three variants
     for (int slot = 0; slot < 5; ++slot) {
         auto* bmp = new FakeBmpWin(&mgr);
         bmp->AddRef();
         bmp->SetID(kMySimNameBitmapBase + static_cast<std::uint32_t>(slot));
         controls->ChildAdd(bmp);
+        bmp->Release();   // the parent's list now owns it
         addWindow(kMySimNameTexts[slot]);
         for (std::uint32_t id : {kMySimNameButtons[slot], kMySimNameButtonsNew[slot], kMySimNameButtonsEmpty[slot]}) {
             auto* button = new FakeBtnWin(&mgr);
             button->AddRef();
             button->SetID(id);
             controls->ChildAdd(button);
+            button->Release();   // the parent's list now owns it
         }
     }
     // the stat page captions, the wealth pips and the bio
@@ -654,12 +660,14 @@ FakeWindow* BuildTree(FakeMgr2& mgr, FakeGen*& panel) {
     portrait->AddRef();
     portrait->SetID(kMySimPortrait);
     controls->ChildAdd(portrait);
+    portrait->Release();   // the parent's list now owns it
     // the two transport button images
     for (std::uint32_t id : {kMySimTransportCarBmp, kMySimTransportCarBmp + 8}) {
         auto* bmp = new FakeBmpWin(&mgr);
         bmp->AddRef();
         bmp->SetID(id);
         controls->ChildAdd(bmp);
+        bmp->Release();   // the parent's list now owns it
     }
     return controls;
 }
@@ -673,12 +681,14 @@ FakeWindow* BuildDialog(FakeMgr2& mgr, FakeGen& gen) {
         button->AddRef();
         button->SetID(id);
         dialog->ChildAdd(button);
+        button->Release();   // the parent's list now owns it
     };
     auto addBitmap = [&](std::uint32_t id) {
         auto* bmp = new FakeBmpWin(&mgr);
         bmp->AddRef();
         bmp->SetID(id);
         dialog->ChildAdd(bmp);
+        bmp->Release();   // the parent's list now owns it
     };
     for (std::uint32_t i = 0; i < 28; ++i) {
         addButton(kMySimIconButtonBase + i);
@@ -734,6 +744,7 @@ int main() {
     CHECK(proc->QueryInterface(1, &out));
     CHECK(out != nullptr);
     CHECK(!proc->QueryInterface(0x12345678, &out));
+    for (int i = 0; i < 3; ++i) proc->Release();   // the references the three successful queries took
 
     // ---- Init: six notifications, the seven page targets and the game-data entries ----
     proc->Init();
@@ -939,6 +950,7 @@ int main() {
     CHECK(!icon2->GetFlag(kWinVisible));
     CHECK(icon0->GetFlag(kWinVisible));
     CHECK(icon0->AsIGZWin()->GetParam(kMySimExemplarParam, reinterpret_cast<cIGZVariant**>(&out)));
+    if (out) static_cast<cIGZVariant*>(out)->Release();   // GetParam counts the variant it hands back
     // the six page buttons are captioned 1..6 and the first one is selected
     CHECK_EQ(static_cast<FakeWindow*>(dialog->GetChildWindowFromIDRecursive(kMySimPageButtonBase + 1))
                  ->GetCaption().ToChar(),
@@ -1102,6 +1114,15 @@ int main() {
     SetMySimWinProcHost(nullptr);
     registry->Release();
     controls->Release();
+    // The doubles are counted by hand and never delete themselves: free them once nothing can reference them.
+    delete panel;   // after the panel procedure and the container: its window outlives both
+    for (FakePickSim* pick : host.picks) delete pick;
+    // the dialog's icon buttons keep their exemplars in a variant param: close the dialog before freeing the exemplars
+    if (dialogGen.window_) dialogGen.window_->Release();
+    dialogGen.window_ = nullptr;
+    for (FakeExemplar* model : {car1, car2, car3, ped1, ped2}) delete model;
+    sim2.advisor.advices.clear();   // the advisor's map holds references to them
+    for (FakeAdvice* advice : {adviceHigh, adviceExpired, adviceSpecial, foreign}) delete advice;
     if (failures == 0) std::puts("sc4_mysimwinproc: all passed");
     return failures ? 1 : 0;
 }

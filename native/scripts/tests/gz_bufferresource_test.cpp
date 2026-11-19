@@ -90,6 +90,12 @@ int main() {
 
     void* iface = nullptr;
     CHECK(bitmap->QueryInterface(kGZIID_cIGZBufferResource, &iface) && iface);
+    if (iface) static_cast<cIGZBufferResource*>(iface)->Release();
+    for (cIGZBuffer* b : {buffer, result, image})
+        if (b) b->Release();
+    source->Release();
+    loaded->Release();
+    bitmap->Release();
     if (failures == 0) std::puts("gz_bufferresource: all passed");
     return failures ? 1 : 0;
 }

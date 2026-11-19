@@ -84,6 +84,7 @@ cS3DTransform At(float x, float z, float scale) {
 }
 
 int main() {
+    FakeTexture texture;   // outlives the overlay manager: a freed decal slot keeps its texture pointer
     Host host;
     DecalHost decals;
     for (int i = 0; i < 4; ++i) {
@@ -137,7 +138,6 @@ int main() {
         water.Stop(0);
     }
     {   // a texture handed over as void parameter 6 replaces the instance
-        FakeTexture texture;
         cSC4DecalEffect e;
         e.SetDescription(Trace(0));
         void* values[1] = {&texture};
@@ -199,6 +199,7 @@ int main() {
     }
 
     SetDecalEffectHost(nullptr);
+    for (cSTEOverlayManager* m : decals.managers) { m->Shutdown(); delete m; }   // created with a count of 0: Release would underflow
     if (failures) {
         std::printf("FAILED (%d)\n", failures);
         return 1;

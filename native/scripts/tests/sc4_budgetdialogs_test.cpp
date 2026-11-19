@@ -57,6 +57,7 @@ int main() {
     cSC4BudgetUIExpenseWinProc* expense = nullptr;
     (void)expense;
     for (int i = 0; i < 7; ++i) CHECK(expected[i] != 0);
+    sim->Release();
     if (failures == 0) std::puts("sc4_budgetdialogs: all passed");
     return failures ? 1 : 0;
 }

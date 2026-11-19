@@ -188,6 +188,7 @@ int main() {
 
     window->Release();
     dialog->Destroy();
+    window->Shutdown();   // the fake window manager only records EndDialog; the destroyed message drops the dialog's references
     dialog->Release();
     view->Release();
     budget->Release();

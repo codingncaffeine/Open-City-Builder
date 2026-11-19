@@ -27,6 +27,7 @@ int main() {
     CHECK(features->GetCurrentExpansionPack() == 12);
     CHECK(features->QueryInterface(0xb562673, &raw) && !features->QueryInterface(4, &raw));
     features->Release();
+    features->Release();   // the successful QueryInterface took a second reference
     CHECK(cSC4FeatureManager::StaticShutdown());
     cSC4FeatureManager again;
     CHECK(!again.IsFeatureEnabled(10) && again.GetCurrentExpansionPack() == 0);

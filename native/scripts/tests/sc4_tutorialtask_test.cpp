@@ -316,8 +316,8 @@ struct FakeLayer final : cISC4DisasterLayer {
     bool DisastersEnabled() const override { return true; }
     cISC4DisasterManager* GetDisasterManager(std::uint32_t id) const override {
         ++log->managerLookups;
+        // borrowed, like the real layer's lookup: the game takes its own reference
         if (id != kDisasterManagerIdFire) return nullptr;
-        manager->AddRef();
         return manager;
     }
     void DisasterHasBegun(cISC4DisasterInstance*) override {}

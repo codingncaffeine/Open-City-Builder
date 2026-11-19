@@ -37,6 +37,7 @@ using sc4::cSCPropertyHolder;
 // The fakes below count references and are never freed (the "objects" stay reachable from these lists),
 // so LeakSanitizer stays quiet like in the other audio tests.
 static std::vector<void*> g_keepAlive;
+static std::vector<struct FakeFilter*> g_ownedFilters;   // heap filters, freed at the end of main
 
 // ---------------------------------------------------------------- messages / events
 struct FakeMessage : cIGZMessage2Standard {
@@ -672,6 +673,7 @@ struct Fixture {
         auto* filter = new FakeFilter();
         filter->AddRef();
         g_keepAlive.push_back(filter);
+        g_ownedFilters.push_back(filter);
         filters.push_back(filter);
         layerHost.filters[0xA1] = filter;
 
@@ -1588,6 +1590,7 @@ int main() {
     TestDoEvent();
     TestDoMessageDispatch();
     TestDestructorWithoutShutdown();
+    for (FakeFilter* filter : g_ownedFilters) delete filter;
     std::printf("ok\n");
     return 0;
 }

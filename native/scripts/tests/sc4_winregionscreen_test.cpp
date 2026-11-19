@@ -853,6 +853,8 @@ int main() {
     // --- clean-up (the screen's child list, then the remaining references)
     screen->ChildDelete(populationWindow);
     populationWindow->Release();
+    panel0->Release();
+    panelButton->Release();
     delete snapshot;
     delete mask;
     delete small;

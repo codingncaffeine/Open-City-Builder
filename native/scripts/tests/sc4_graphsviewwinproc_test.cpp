@@ -382,6 +382,7 @@ int main() {
         static_cast<gz::cIGZWinProc*>(out)->Release();
         CHECK(proc->QueryInterface(0x452294aa, &out));
         CHECK(out == static_cast<cIGZMessageTarget2*>(proc));
+        static_cast<cIGZMessageTarget2*>(out)->Release();
         CHECK(proc->QueryInterface(0x1234, &out) == false);
     }
 

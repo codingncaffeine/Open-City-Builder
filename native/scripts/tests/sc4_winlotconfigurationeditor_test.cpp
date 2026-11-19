@@ -285,6 +285,7 @@ void TestLifecycle() {
     CHECK(editor->QueryInterface(gz::kGZIID_cIGZWinGen, reinterpret_cast<void**>(&unknown)));
     CHECK(unknown == static_cast<gz::cIGZWinGen*>(editor));
     CHECK(!editor->QueryInterface(0x12345678, reinterpret_cast<void**>(&unknown)));
+    for (int i = 0; i < 3; ++i) editor->Release();   // the three successful QueryInterface calls
 
     // Init twice is a no-op; the static init ran once.
     const std::size_t cursorCount = host.cursorRequests.size();
@@ -738,6 +739,7 @@ void TestSaveCloseAndPaths() {
     sc4::cSC4LotConfigurationObject* hit = nullptr;
     f.editor->SetSelectedLotConfigurationObject(nullptr);
     CHECK(f.editor->DoHitTest(8, 8, 0, &hit) == 100);
+    loaded->Release();   // the test's own reference
     CHECK(hit != nullptr);
 }
 

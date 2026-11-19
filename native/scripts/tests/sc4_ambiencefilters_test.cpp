@@ -78,6 +78,9 @@ int main() {
     CHECK(bus->QueryInterface(kGZIID_cIAmbienceOccupantFilter, &raw));
     static_cast<cIAmbienceOccupantFilter*>(raw)->Release();
     CHECK(!bus->QueryInterface(0x1234, &raw));
+    for (cIAmbienceOccupantFilter* f : std::initializer_list<cIAmbienceOccupantFilter*>{bus, taxi, traffic, fresh, aband, high, low, powered, distressed, comm, res, building}) f->Release();
+    b->Release();
+    o->Release();
     std::puts(failures ? "sc4_ambiencefilters: FAILED" : "sc4_ambiencefilters: ok");
     return failures != 0;
 }

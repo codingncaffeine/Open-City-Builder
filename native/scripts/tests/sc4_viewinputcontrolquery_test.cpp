@@ -286,11 +286,15 @@ struct FakeRenderer final : IQueryRenderer {
     cIGZUnknown* nextObject = nullptr;
     int picks = 0, filters = 0, layersAdded = 0, layersRemoved = 0;
     Filter* lastFilter = nullptr;
+    std::vector<Filter*> madeFilters;
+    std::vector<PickResult*> madeResults;
+    ~FakeRenderer() { for (auto* f : madeFilters) delete f; for (auto* r : madeResults) delete r; }
     int lastX = 0, lastY = 0;
     IOccupantFilter* CreateFilter(int kind) override {
         ++filters;
         auto* f = new Filter();
         f->kind = kind;
+        madeFilters.push_back(f);
         lastFilter = f;
         return f;
     }
@@ -301,6 +305,7 @@ struct FakeRenderer final : IQueryRenderer {
         if (!nextObject) return nullptr;
         auto* r = new PickResult();
         r->object = nextObject;
+        madeResults.push_back(r);
         return r;
     }
     void AddLayer(cIGZUnknown*) override { ++layersAdded; }
@@ -770,10 +775,12 @@ int main() {
     Formatter formatter;
     SetLanguageFormatter(&formatter);
     Host host;
+    cGZWin* viewWin2_ = nullptr;
     auto* viewWin = new cGZWin(&host.mgr);
     host.view.window = viewWin;
     auto* calloutWin = new cGZWin(&host.mgr);
     auto callout = new Callout();
+    auto* callout1_ = callout;
     callout->win = calloutWin;
     host.callout = callout;
     SetViewInputHost(&host);
@@ -1103,7 +1110,8 @@ int main() {
 
     // --- L: the network flavour -----------------------------------------------------------------------------
     {
-        auto* viewWin2 = new cGZWin(&host.mgr);
+        viewWin2_ = new cGZWin(&host.mgr);
+        auto* viewWin2 = viewWin2_;
         host.view.window = viewWin2;
         // the previous tool's Shutdown deleted its callout window, so build a fresh one
         callout = new Callout();
@@ -1129,9 +1137,10 @@ int main() {
         net->SetLegendMinimized(false);
         CHECK(minimised->IsVisible() && expanded->IsVisible());
         CHECK(net->ShouldStack() == false);
+        net->Shutdown();
         net->Release();
         host.legendParent = nullptr;
-        delete legendParent;   // owns both legend children
+        // legendParent is a child of the view window now and dies with it (owns both legend children)
     }
 
     // --- M: fire / police / jail / park / occupant-cost rows ------------------------------------------------
@@ -2145,7 +2154,11 @@ int main() {
         dialog->Release();
     }
 
-    // window 0/1 of the tool may already be gone; the view windows are still alive
+    // the host fake owns the view windows the tools only borrowed
+    delete viewWin;
+    delete viewWin2_;
+    delete callout1_;
+    delete callout;
     std::printf(failures ? "FAILED (%d)\n" : "sc4_viewinputcontrolquery ok\n", failures);
     return failures ? 1 : 0;
 }

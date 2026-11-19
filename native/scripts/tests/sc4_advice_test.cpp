@@ -132,6 +132,7 @@ int main() {
     host.lua.SetTop(0);
 
     // ---- Init
+    a->Release();
     a = new cSC4Advice();
     a->AddRef();
     CHECK(a->Init(2));

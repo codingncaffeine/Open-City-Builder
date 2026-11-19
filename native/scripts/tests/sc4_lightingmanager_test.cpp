@@ -178,6 +178,14 @@ struct FakeHost final : ILightingHost {
     bool networkFlag = false;
     int networkQueries = 0;
 
+    // The host owns what the scenarios plug in; every scenario declares it before the manager, so it outlives the manager.
+    ~FakeHost() override {
+        if (holder) holder->Release();   // the test's reference from MakeExemplar
+        delete terrainMap;
+        if (terrain != terrainMap) delete terrain;
+        for (FakeColorMap* map : maps) delete map;
+    }
+
     cISCPropertyHolder* LightingProperties() override { return holder; }
     cIGZMessageServer2* MessageServer() override { return &server; }
     ILightingTerrain* TerrainMap() override { return terrainMap; }
@@ -773,6 +781,7 @@ void TestExemplarRelease() {
         CHECK(holder->RefCount() == 1);
     }
     holder->Release();                  // the test's reference deletes it
+    host.holder = nullptr;              // already released here
 }
 
 }  // namespace

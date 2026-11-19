@@ -135,6 +135,7 @@ int main() {
         CHECK(root->child->value == leafId && root->child->weight == 0.5f);
         CHECK(g_created == 2);   // references resolved to the already-created objects
         CHECK(!seg->LoadClassObjects(0x48));  // only once
+        if (root && root->child) root->child->Release();   // Read() took a reference to the child
         if (root) root->Release();
         CHECK(seg->Close());
         seg->Release();

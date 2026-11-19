@@ -467,6 +467,7 @@ struct FakeHost final : IPlaceLotHost, IViewInputHost {
     FakeLocalGrid localGrid;
     FakeChooser chooser;
     FakeFilter* lastFilter = nullptr;
+    std::vector<FakeFilter*> allFilters;   // every filter handed out; the test frees them at the end
     std::unordered_set<std::uint32_t> filterIds;
     std::map<std::uint32_t, cSC4LotConfiguration*> configurations;
     std::vector<cSC4LotConfigurationObject*> primaryObjects;
@@ -510,6 +511,7 @@ struct FakeHost final : IPlaceLotHost, IViewInputHost {
     }
     IPlaceLotFilter* CreatePlopFilter(bool, std::uint32_t) override {
         lastFilter = new FakeFilter();
+        allFilters.push_back(lastFilter);
         return lastFilter;
     }
     void GetObjectIDArray(const cSC4LotConfigurationObject*, std::vector<std::uint32_t>& out) override {
@@ -992,6 +994,8 @@ int main() {
 
     delete configuration;
     delete second;
+    delete third;
+    for (FakeFilter* filter : host.allFilters) { CHECK(filter->refs == 0); delete filter; }
 
     SetPlaceLotHost(nullptr);
     SetViewInputHost(nullptr);

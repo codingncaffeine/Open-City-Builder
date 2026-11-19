@@ -131,6 +131,11 @@ int main() {
     cIGZBuffer* none = nullptr;
     CHECK(!f->LoadFromFile(missing, &none, false, {kBufferColorRGB565, 16}, false) && none == nullptr);
 
+    for (cIGZBuffer* b : {got, back, fromFile, src}) if (b) b->Release();
+    for (cIGZBufferResource* r : {res}) r->Release();
+    resource->Release(); wrongType->Release(); target->Release();
+    f->Release();
+
     if (failures == 0) std::printf("gz_bufferresourcefactory OK\n");
     return failures == 0 ? 0 : 1;
 }

@@ -67,6 +67,10 @@ int main() {
 
     // no disc
     CHECK(!fs->FindCDDrive() && std::string(fs->CDAppDrive()).empty());
+    fs->Release(); fs->Release();   // the two successful QueryInterface calls
+    fs->Release();
+    bundled->Release();
+    custom->Release();
     if (failures == 0) std::puts("gz_filesystem: all passed");
     return failures ? 1 : 0;
 }

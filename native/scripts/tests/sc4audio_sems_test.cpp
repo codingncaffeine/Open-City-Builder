@@ -68,6 +68,7 @@ int main() {
     assert(m2->ConfigureChannel(&src, &ch) && ch.v[0x13] == 5 && ch.lastSuppress[0x13]);
     m2->Shutdown();
     assert(m2->UpdateVolPan(&src, &ch) && ch.v[0x15] == 0);          // no sound manager -> master 0
+    m2->Release();
 
     // ---- 3D ----
     SC4Audio::ZoomDistances()[4] = 50.0f;

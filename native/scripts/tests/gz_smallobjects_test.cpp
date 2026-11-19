@@ -63,6 +63,7 @@ int main() {
     dlg->GZEndDialog(42);
     CHECK(mgr.dialogs.size() == 1 && mgr.dialogs[0].code == 0xf && mgr.dialogs[0].window == dlg && mgr.dialogs[0].result == 42);
     CHECK(dlg->QueryInterface(0xc12e57e2, &out) && dlg->QueryInterface(0x22ba0121, &out) && !dlg->QueryInterface(9, &out));
+    dlg->Release(); dlg->Release();   // the two successful QueryInterface calls
     child->Release();
     dlg->Release();
 
@@ -76,7 +77,7 @@ int main() {
     filter->Detach();
     CHECK(!filter->DoMessage(watched, probe) && spy.seen == 1);
     CHECK(filter->QueryInterface(0xc6ae7085, &out) && !filter->QueryInterface(5, &out));
-    filter->Release();
+    filter->Release(); filter->Release();   // plus the successful QueryInterface
     watched->Release();
 
     auto* parentWindow = new Recorder(&mgr);

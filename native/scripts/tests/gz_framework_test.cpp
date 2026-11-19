@@ -103,6 +103,7 @@ int main() {
         f->SetOnIdleInterval(-3); CHECK(f->GetOnIdleInterval() == 1);
         f->SetOnIdleInterval(6); CHECK(f->GetOnIdleInterval() == 6);
         CHECK(f->GetState() == 0 && !f->IsInstall() && f->GetDebugLevel() == 2);
+        delete f;   // Release never destroys the framework; the service table drops dup
     }
 
     // ---- start-up / run / hooks
@@ -152,6 +153,12 @@ int main() {
         CHECK(Joined() == "post.shutdown mid.shutdown app.shutdown pre.shutdown high.shutdown ");
         CHECK(!post->IsServiceRunning() && !high->IsServiceRunning());
         cGZFramework::SetPlatform(nullptr);
+        // The framework's tables hold the services and hooks; the test owns the hooks and the application (framework + sSetApplication refs).
+        f->COM().AddRef();   // the member COM service sits in the service table: keep the table from deleting it
+        delete f;
+        CHECK(hooks->refs == 1);
+        delete hooks;
+        app->Release();
     }
 
     // ---- application failing to start aborts with return code -1; other failures are tolerated
@@ -169,7 +176,11 @@ int main() {
         CHECK(f->GetState() == cGZFramework::kStateAppInit);
         CHECK(!bad->IsServiceRunning());               // the app (-2000000) starts first, fails and aborts the pass
         CHECK(Joined().find("app.init") != std::string::npos);
+        f->COM().AddRef();   // the member COM service sits in the service table: keep the table from deleting it
+        delete f;
+        app->Release();
     }
+    delete processDirector;
     std::printf(failures ? "FAILED\n" : "OK\n");
     return failures ? 1 : 0;
 }

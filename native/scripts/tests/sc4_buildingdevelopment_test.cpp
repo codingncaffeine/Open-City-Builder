@@ -301,6 +301,7 @@ int main() {
     back->Release();
 
     // reloading a changed exemplar replaces its profile and family membership
+    host.exemplars[0x1001]->Release();   // the host map owned the replaced exemplar
     host.exemplars[0x1001] = MakeBuilding(5, 0, 7, 0x600, {1, 1, 1});
     cISCPropertyHolder* changed = host.exemplars[0x1001];
     S::LoadBuildingProperties(*changed, 0x1001, false);
@@ -529,6 +530,7 @@ int main() {
         growth->SetPlacementServices(nullptr);
         growth->SetConstructionResources(nullptr);
         host.exemplars.erase(0x7777);
+        simulatorExemplar->Release();
         growth->Release();
     }
     // ---- Grow (0x10014fb24): the first unmarked tract of the drawn developer goes to the tract developer
@@ -673,6 +675,7 @@ int main() {
         growth->Release();
     }
     S::StaticShutdown();
+    for (auto& kv : host.exemplars) kv.second->Release();   // the host map owns the exemplars the test made
     std::puts(failures ? "sc4_buildingdevelopment: FAILED" : "sc4_buildingdevelopment ok");
     return failures != 0;
 }

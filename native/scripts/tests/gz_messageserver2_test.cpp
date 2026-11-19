@@ -35,6 +35,12 @@ static cRZMessage2Standard* Msg(std::uint32_t type) {
     return m;
 }
 
+// The queue takes its own reference: drop the one Msg() made.
+static void Post(cGZMessageServer2* server, cRZMessage2Standard* message, bool toFront) {
+    server->MessagePost(message, toFront);
+    message->Release();
+}
+
 int main() {
     Framework framework;
     SetMessageServerFramework(&framework);
@@ -54,8 +60,8 @@ int main() {
     CHECK(a.got.size() == 1 && everything.got.size() == 2);
 
     // posting is deferred to the tick; front posts jump the queue
-    server->MessagePost(Msg(10), false);
-    server->MessagePost(Msg(11), true);
+    Post(server, Msg(10), false);
+    Post(server, Msg(11), true);
     CHECK(server->GetMessageQueueSize() == 2);
     a.got.clear();
     everything.got.clear();
@@ -63,16 +69,16 @@ int main() {
     CHECK(server->GetMessageQueueSize() == 0 && everything.got == (std::vector<std::uint32_t>{11, 10}) && a.got == std::vector<std::uint32_t>{10});
 
     // a message posted from inside a handler is delivered in the same tick when the queue is always cleared
-    b.onMessage = [&] { server->MessagePost(Msg(11), false); b.onMessage = nullptr; };
+    b.onMessage = [&] { Post(server, Msg(11), false); b.onMessage = nullptr; };
     everything.got.clear();
-    server->MessagePost(Msg(10), false);
+    Post(server, Msg(10), false);
     server->OnTick(16);
     CHECK(everything.got == (std::vector<std::uint32_t>{10, 11}));
     // ... and only on the next tick when it is not
     server->SetAlwaysClearQueueOnTick(false);
-    b.onMessage = [&] { server->MessagePost(Msg(11), false); b.onMessage = nullptr; };
+    b.onMessage = [&] { Post(server, Msg(11), false); b.onMessage = nullptr; };
     everything.got.clear();
-    server->MessagePost(Msg(10), false);
+    Post(server, Msg(10), false);
     server->OnTick(16);
     CHECK(everything.got == std::vector<std::uint32_t>{10} && server->GetMessageQueueSize() == 1);
     server->OnTick(16);
@@ -110,6 +116,7 @@ int main() {
     CHECK(server->QueryInterface(0x652294c7, &raw) && server->QueryInterface(0x287fb697, &raw) && !server->QueryInterface(5, &raw));
     ten->Release();
     eleven->Release();
+    for (int i = 0; i < 3; ++i) server->Release();   // the two QueryInterface calls above took a reference each
     SetMessageServerFramework(nullptr);
     std::printf(failures ? "FAILED\n" : "OK\n");
     return failures != 0;

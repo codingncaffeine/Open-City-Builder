@@ -189,6 +189,12 @@ struct BufferOp {
     cRZRect dest;
 };
 
+struct FakeBuffer;
+std::vector<FakeBuffer*>& AllBuffers() {
+    static std::vector<FakeBuffer*> all;   // every buffer made; freed at the end of main
+    return all;
+}
+
 struct FakeBuffer final : cIGZBuffer {
     int refs = 0;
     std::uint32_t width = 0;
@@ -203,7 +209,7 @@ struct FakeBuffer final : cIGZBuffer {
     FakeDrawTarget target;
     Ctx* targetContext = nullptr;   // when set, the buffer advertises the draw-target interface
 
-    FakeBuffer() { target.buffer = this; }
+    FakeBuffer() { target.buffer = this; AllBuffers().push_back(this); }
     bool QueryInterface(std::uint32_t iid, void** out) override {
         if (iid == kGZIID_cIGZBufferDrawTarget && targetContext) {
             target.context = targetContext;
@@ -483,6 +489,7 @@ int main() {
         CHECK(parent->ChildRemove(box));          // the child's reference
         CHECK_EQ(meter->refs, 2);
         box->Release();                           // destructor
+        parent->Release();
         CHECK_EQ(meter->refs, 1);                 // only the test's reference is left
         CHECK_EQ(background->refs, 1);
         CHECK_EQ(background2->refs, 1);
@@ -526,6 +533,7 @@ int main() {
         box2->Release();
         parent->ChildRemove(box);
         box->Release();
+        parent->Release();
         SetWinGraphics(nullptr);
         SetWinFontSource(nullptr);
     }
@@ -636,6 +644,7 @@ int main() {
 
         parent->ChildRemove(box);
         box->Release();
+        parent->Release();
         SetCalloutBoxServices(nullptr);
         SetWinGraphics(nullptr);
         SetWinFontSource(nullptr);
@@ -808,6 +817,7 @@ int main() {
 
         parent->ChildRemove(box);
         box->Release();
+        parent->Release();
         CHECK_EQ(meter->refs, 1);            // the destructor released the meter image
         CHECK_EQ(icon->refs, 1);
         CHECK_EQ(background->refs, 1);
@@ -815,6 +825,8 @@ int main() {
         SetWinGraphics(nullptr);
         SetWinFontSource(nullptr);
     }
+
+    for (FakeBuffer* buffer : AllBuffers()) delete buffer;
 
     if (failures == 0) std::printf("sc4_wincalloutbox_test: ok\n");
     else std::printf("sc4_wincalloutbox_test: %d failure(s)\n", failures);

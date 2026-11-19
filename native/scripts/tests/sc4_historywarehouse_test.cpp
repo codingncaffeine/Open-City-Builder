@@ -76,6 +76,7 @@ int main() {
     // disposing a series empties it
     CHECK(c->Dispose(3) && c->AllSeries().at(3).nodes.empty());
     CHECK(w->Shutdown() && env.agents == 0);
+    w->Release(); copy->Release(); c->Release();
     if (failures == 0) std::puts("sc4_historywarehouse: all passed");
     return failures ? 1 : 0;
 }

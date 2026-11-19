@@ -176,6 +176,7 @@ struct FakeLot final : IConstructionLot {
 
 struct FakeProp final : IConstructionProp {
     FakeOccupant* occupant = nullptr;
+    ~FakeProp() { if (occupant) occupant->Release(); }
     std::uint32_t refs = 1;
     std::int32_t orientation = -1;
 
@@ -197,6 +198,7 @@ struct FakeProp final : IConstructionProp {
 
 struct FakeEffect final : IConstructionEffect {
     FakeOccupant* occupant = nullptr;
+    ~FakeEffect() { if (occupant) occupant->Release(); }
     std::uint32_t refs = 1;
     std::string name;
     float position[3] = {0, 0, 0};
@@ -270,6 +272,7 @@ struct FakeTexture final : IConstructionTexture {
 
 struct FakeTileOccupant final : cISC4LotBaseTextureOccupant {
     FakeOccupant* occupant = nullptr;
+    ~FakeTileOccupant() { if (occupant) occupant->Release(); }
     std::uint32_t refs = 1;
     std::vector<LotBaseTextureSpecification> specs;
 
@@ -392,6 +395,21 @@ struct FakeHost final : IConstructionOccupantHost {
     std::vector<FakeEffect*> effects;
     std::vector<FakeProp*> props;
     std::vector<FakeAutomaton*> automata;
+
+    // The host kept one reference to everything it handed out; the game has dropped its own by teardown.
+    void ReleaseCreated() {
+        for (auto* p : models) p->Release();
+        for (auto* p : textures) p->Release();
+        for (auto* p : effects) p->Release();
+        for (auto* p : props) p->Release();
+        for (auto* p : automata) p->Release();
+        for (auto* p : tiles) p->Release();
+        models.clear(); textures.clear(); effects.clear(); props.clear(); automata.clear(); tiles.clear();
+        if (lot) lot->Release();
+        if (building) building->Release();
+        lot = nullptr;
+        building = nullptr;
+    }
     std::vector<FakeTileOccupant*> tiles;
     sc4::PropProfile profiles[8];
     std::vector<std::uint32_t> profileTypes;
@@ -574,6 +592,7 @@ cSC4ConstructionOccupant* MakeOccupant() {
 
 void ReleaseOccupant(cSC4ConstructionOccupant*& occupant) {
     if (occupant) {
+        occupant->Shutdown();   // drops the references that tie it to its crane model and props; a no-op when never initialized
         occupant->Release();
         occupant = nullptr;
     }
@@ -645,6 +664,7 @@ int main() {
         CHECK(occupant->GetOwner() == static_cast<cIGZUnknown*>(static_cast<cISC4Occupant*>(occupant)));
         void* raw = nullptr;
         CHECK(occupant->QueryInterface(kGZIID_cISC4ConstructionOccupant, &raw) && raw != nullptr);
+        occupant->Release();   // the QueryInterface reference
         // SetPosition is a no-op and GetPosition is the box centre.
         const float position[3] = {7, 8, 9};
         occupant->SetPosition(position);
@@ -991,9 +1011,8 @@ int main() {
     ReleaseOccupant(occupant);
     SetConstructionOccupantHost(nullptr);
     host.filter = nullptr;
+    host.ReleaseCreated();
     delete buildingOccupant;
-    // The building and the lot were released through the occupant's references; the fakes are leaked here on
-    // purpose (they are small and the test process is about to exit).
 
     if (g_failures != 0) {
         std::fprintf(stderr, "%d CHECK(s) failed\n", g_failures);

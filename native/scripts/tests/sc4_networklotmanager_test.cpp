@@ -95,6 +95,8 @@ struct NetworkLotManagerTestAccess {
         auto it = m.networkLots_.find(key);
         return it == m.networkLots_.end() ? nullptr : it->second;
     }
+    // Shutdown releases lots and configurations only once the manager is initialized; tests that never call Init arm it here.
+    static void MarkInited(cSC4NetworkLotManager& m) { m.inited_ = true; }
     static void AddUpdateCell(cSC4NetworkLotManager& m, std::uint16_t key) { m.updateCells_.insert(key); }
 };
 }  // namespace sc4
@@ -171,6 +173,7 @@ struct FakeNetworkOccupant final : INetworkLotNetworkOccupant {
 
 struct FakeProp final : INetworkLotPropOccupant {
     int refs = 0;
+    bool destroyed = false;
     std::uint32_t lotTag = 0xffffffffu;
     std::uint32_t flag = 0;
     bool QueryInterface(std::uint32_t iid, void** out) override {
@@ -181,7 +184,7 @@ struct FakeProp final : INetworkLotPropOccupant {
     }
     std::uint32_t AddRef() override { return static_cast<std::uint32_t>(++refs); }
     std::uint32_t Release() override {
-        if (--refs <= 0) { delete this; return 0; }
+        if (--refs <= 0) { destroyed = true; return 0; }   // the host frees it
         return static_cast<std::uint32_t>(refs);
     }
     void SetLotTag(std::uint32_t tag) override { lotTag = tag; }
@@ -189,6 +192,7 @@ struct FakeProp final : INetworkLotPropOccupant {
 };
 
 struct FakeEffect final : INetworkLotVisualEffect {
+    ~FakeEffect() { delete object; }   // the game never releases the effect's occupant object
     int refs = 0;                 // the original factory leaves a fresh object at 0
     bool destroyed = false;
     std::string effectName;
@@ -292,6 +296,11 @@ struct Host final : INetworkLotManagerHost {
         for (auto& entry : exemplars) entry.second->Release();
         for (auto& entry : ownedOccupants) delete entry;
         for (auto& entry : ownedLots) delete entry;
+        for (auto* effect : effects) delete effect;
+        for (auto* filter : filters) delete filter;
+        for (auto* prop : props) delete static_cast<FakeProp*>(prop);
+        for (auto* enumerator : enumerators) delete enumerator;
+        for (auto& entry : segments) delete entry.second;
     }
 
     FakeMessages messages;
@@ -310,6 +319,8 @@ struct Host final : INetworkLotManagerHost {
     bool storeResult = true;
     std::vector<FakeNetworkOccupant*> ownedOccupants;
     std::vector<FakeLot*> ownedLots;
+    std::vector<FakeEffect*> effects;               // handed out by CreateVisualEffect; freed with the host
+    std::vector<FakeEnumerator*> enumerators;
 
     std::map<const cIGZUnknown*, std::uint32_t> tags;
     std::map<std::uint32_t, cIGZUnknown*> readByTag;
@@ -430,12 +441,14 @@ struct Host final : INetworkLotManagerHost {
         ++createVisualEffectCalls;
         auto* effect = new FakeEffect();
         effect->object = new FakeOccupantObject();
+        effects.push_back(effect);
         return effect;
     }
     bool HasResourceManager() override { return hasResourceManager; }
     INetworkLotResourceEnumerator* GetExemplarEnumerator(std::uint32_t) override {
         auto* enumerator = new FakeEnumerator();
         enumerator->keys = enumeratorKeys;
+        enumerators.push_back(enumerator);
         return enumerator;
     }
     cISCPropertyHolder* AcquireExemplar(const cGZPersistResourceKey& key, std::uint32_t) override {
@@ -817,12 +830,15 @@ int main() {
         six->GetNetworkLotConfigurationSet(configurations);
         CHECK(configurations.size() == 3);
         CHECK(configurations.count(a) && configurations.count(b) && configurations.count(c));
+        for (cSC4NetworkLotConfiguration* configuration : configurations) configuration->Release();   // the set's references; a second call only clears
         six->GetNetworkLotConfigurationSet(configurations);   // clears first
         CHECK(configurations.size() == 3);
         for (cSC4NetworkLotConfiguration* configuration : configurations) configuration->Release();
         a->Release();
         b->Release();
         c->Release();
+        six->Init();   // Shutdown releases the lots only once initialized
+        six->Shutdown();
         six->Release();
         SetNetworkLotManagerHost(&host);
     }
@@ -896,6 +912,8 @@ int main() {
         secondStyle->Release();
         replacement->Release();
         configuration->Release();
+        seven->Init();   // Shutdown releases the lots only once initialized
+        seven->Shutdown();
         seven->Release();
         SetNetworkLotManagerHost(&host);
     }
@@ -952,6 +970,8 @@ int main() {
         CHECK(A::NextConfiguration(*eight) == nullptr);
         forced->Release();
         configuration->Release();
+        eight->Init();   // Shutdown releases the lots only once initialized
+        eight->Shutdown();
         eight->Release();
         SetNetworkLotManagerHost(&host);
     }
@@ -1015,8 +1035,13 @@ int main() {
         const unsigned char badVersion[2] = {3, 0};
         PortMemoryIStream bad(badVersion, sizeof badVersion);
         CHECK(!third->Read(bad));
+        A::MarkInited(*third);
+        third->Shutdown();
         third->Release();
+        A::MarkInited(*reader);
+        reader->Shutdown();
         reader->Release();
+        A::MarkInited(*nine);
         nine->Shutdown();
         nine->Release();
         configuration->Release();
@@ -1072,6 +1097,8 @@ int main() {
         CHECK(!ten->IsLotCompatible(configuration, 0, 0, 1, 0, 0, false));
         CHECK(!ten->IsLotCompatible(nullptr, 0, 0, 1, 0, 0, false));
         configuration->Release();
+        ten->Init();   // Shutdown releases the lots only once initialized
+        ten->Shutdown();
         ten->Release();
         SetNetworkLotManagerHost(&host);
     }
@@ -1201,7 +1228,10 @@ int main() {
         CHECK(local.floraCreates.size() == 1);
         builder->Release();
         configuration->Release();
+        A::MarkInited(*eleven);
+        eleven->Shutdown();
         eleven->Release();
+        delete builderOccupantObject;
         SetNetworkLotManagerHost(&host);
     }
 
@@ -1320,6 +1350,8 @@ int main() {
         }
         forcedLot->Release();
         configuration->Release();
+        A::MarkInited(*twelve);
+        twelve->Shutdown();
         twelve->Release();
         SetNetworkLotManagerHost(&host);
     }
@@ -1406,6 +1438,8 @@ int main() {
         orthogonal->livable = false;
         orthogonal->wealth = 0;
         CHECK(thirteen->GetWealthForNetwork(2, 2) == 0);
+        thirteen->Init();   // Shutdown releases the lots only once initialized
+        thirteen->Shutdown();
         thirteen->Release();
         SetNetworkLotManagerHost(&host);
     }
@@ -1450,6 +1484,8 @@ int main() {
         CHECK(pieceMiddle->underTexture == underTexture);
         CHECK(pieceEast->underTexture == underTexture);
         pieceWest->intersection = false;
+        fourteen->Init();   // Shutdown releases the lots only once initialized
+        fourteen->Shutdown();
         fourteen->Release();
         SetNetworkLotManagerHost(&host);
     }
@@ -1603,6 +1639,7 @@ int main() {
         CHECK(A::Potholes(*fifteen) == 0);
         damage->Release();
 
+        A::MarkInited(*fifteen);
         fifteen->Shutdown();
         fifteen->Release();
         objectConfiguration->Release();
@@ -1677,6 +1714,8 @@ int main() {
         CHECK(A::Potholes(*sixteen) == 0);
         sixteen->DoRoadDamageChange(6, 3, false);             // no pothole: no-op
         CHECK(local.removed.size() == 2);
+        sixteen->Init();   // Shutdown releases the lots only once initialized
+        sixteen->Shutdown();
         sixteen->Release();
         SetNetworkLotManagerHost(&host);
     }
@@ -1768,6 +1807,9 @@ int main() {
         lot->Release();
         configuration->Release();
     }
+
+    manager->Shutdown();
+    manager->Release();
 
     std::printf("sc4_networklotmanager: %s\n", g_fail == 0 ? "ok" : "FAILED");
     return g_fail == 0 ? 0 : 1;

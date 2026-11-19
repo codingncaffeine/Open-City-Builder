@@ -356,6 +356,7 @@ int main() {
     FakeHost host;
     SetUpHost(host, mgr, dataDir);
     SetResourceCatalogHost(&host);
+    std::vector<FakeWindow*> extraWindows;
 
     // ---- object layout and construction ----------------------------------------------------------------
     CHECK_EQ(sizeof(cSCResourceCatalogView), static_cast<std::size_t>(0x1b8));
@@ -702,6 +703,7 @@ int main() {
         }
         // "Done" answers false and posts a delete-child message to the parent (not modal).
         FakeWindow* parent = MakeChild(mgr, 10, 10);
+        extraWindows.push_back(parent);
         parent->ChildAdd(view);
         mgr.posted.clear();
         const int prompts = host.views[1]->prompts;
@@ -728,6 +730,7 @@ int main() {
     // ---- keyboard forwarding, painting and dragging ------------------------------------------------------
     {
         FakeWindow* target = MakeChild(mgr, 10, 10);
+        extraWindows.push_back(target);
         view->SetNotificationTarget(target);
         CHECK_EQ(view->GZOnKeyDown(0x41, 2), true);
         CHECK_EQ(target->messages, 1);
@@ -868,6 +871,14 @@ int main() {
         host.dataDir = dataDir;
     }
 
+    // The windows MakeChild made carry one reference of their own; the fake controls own them and are freed last.
+    for (FakeWindow* window : extraWindows) window->Release();
+    for (FakeLabel* x : host.labels) { x->win->Release(); delete x; }
+    for (FakeButton* x : host.buttons) { x->win->Release(); delete x; }
+    for (FakeCombo* x : host.combos) { x->win->Release(); delete x; }
+    for (FakeBackdrop* x : host.backdrops) { x->win->Release(); delete x; }
+    for (FakeGrid* x : host.grids) { x->win->Release(); delete x; }
+    for (FakeView* x : host.views) { x->win->Release(); delete x; }
     SetResourceCatalogHost(nullptr);
     SetWinGraphics(nullptr);
     std::remove((dataDir + "/Sys/Ingred.ini").c_str());

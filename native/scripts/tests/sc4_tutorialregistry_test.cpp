@@ -117,8 +117,10 @@ int main() {
         CHECK(!registry.Init(empty, nullptr));
         CHECK(empty->GetTop() == 0);
         CHECK(registry.GetNextActive("timbuktu", AllCities) == nullptr);
+        empty->Release();
     }
 
+    lua->Release();
     std::printf(failures ? "FAILED\n" : "sc4_tutorialregistry ok\n");
     return failures != 0;
 }

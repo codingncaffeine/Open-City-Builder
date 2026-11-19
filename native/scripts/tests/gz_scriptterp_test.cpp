@@ -524,6 +524,7 @@ void TestContext() {
     CHECK_EQ(kept->AddRef(), 3u);   // still 2 before this AddRef: the interpreter did not release it
     kept->Release();
     kept->Release();
+    kept->Release();   // the count was 1 after the two above: the test's own reference
 }
 
 // ---------------------------------------------------------------------------------------------------------

@@ -230,6 +230,7 @@ int main() {
         CHECK(!list->QueryInterface(0x12345678u, &out));
         // the advice-list view and AsIGZWin agree
         CHECK(static_cast<sc4::cIGZWinAdviceList*>(list)->AsIGZWin() == static_cast<cIGZWin*>(list));
+        list->Release(); list->Release(); list->Release();   // the three successful queries
         list->Release();
         sc4::SetWinAdviceListHost(nullptr);
     }

@@ -96,6 +96,21 @@ struct FakeZoneManager final : IPortZoneManagerApi {
     void ClearZone(const PortCellRegion&) override { ++clearCalls; }
 };
 
+// Every lot the fakes create starts with two references (the caller's and the lot list's); the fixture
+// drops whatever is left of them when it goes away.
+std::vector<cSC4Lot*> g_testLots;
+// Shutdown (the owner of the port lots and configurations) does nothing on a developer that was only Read.
+void FreeReadState(cSC4PortDeveloper* d) {
+    for (cPortLot* port : d->PortLots()) delete port;
+    for (cPortTypeConfig* config : d->Configurations()) delete config;
+}
+void ReleaseTestLots() {
+    for (cSC4Lot* lot : g_testLots) {
+        for (std::uint32_t n = lot->AddRef(); n > 0; --n) lot->Release();   // the last Release deletes the lot
+    }
+    g_testLots.clear();
+}
+
 struct FakeLotManager final : IPortLotManagerApi {
     int refs = 0;
     void AddRef() override { ++refs; }
@@ -116,6 +131,7 @@ struct FakeLotManager final : IPortLotManagerApi {
     bool CreateLot(int x, int z, int sizeX, int sizeZ, int facing, cSC4Lot** out) override {
         createCalls.push_back({x, z, sizeX, sizeZ, facing});
         auto* lot = new cSC4Lot(x, z, sizeX, sizeZ, facing);
+        g_testLots.push_back(lot);
         lot->AddRef();
         lot->AddRef();
         created.push_back(lot);
@@ -430,9 +446,12 @@ struct Fixture {
     ~Fixture() {
         if (developer) {
             if (developer->IsInitialized()) developer->Shutdown();
+            for (cPortLot* port : developer->PortLots()) delete port;   // Read without Init: Shutdown never ran
+            for (cPortTypeConfig* config : developer->Configurations()) delete config;
             delete developer;
             developer = nullptr;
         }
+        ReleaseTestLots();
         budgetSimulator.RemoveDepartmentBudget(kAirportAdvisorEventId);
         SetAirportDeveloperHost(nullptr);
         SetPortDeveloperHost(nullptr);
@@ -511,6 +530,7 @@ struct Fixture {
     // A 1x1 lot at cell (x, z); two references like CreateLot (the caller's and the lot list's).
     static cSC4Lot* MakeLot(int x, int z, int facing = 0) {
         auto* lot = new cSC4Lot(x, z, 1, 1, facing);
+        g_testLots.push_back(lot);
         lot->AddRef();
         lot->AddRef();
         return lot;
@@ -849,6 +869,7 @@ void TestStreams() {
     CHECK(reader->Configurations().size() == 4);
     CHECK(reader->PortLots().front()->X() == 10);   // Read push_fronts, so the file's order is reversed
     CHECK(reader->PortLots().front()->LotIsStale());
+    FreeReadState(reader);
     delete reader;
 
     // A stream whose airport version is not 2 is rejected before the base header is read.
@@ -986,6 +1007,7 @@ void TestDoMonthlyTick() {
     CHECK(stale->PortLots().front()->LotIsStale());
     stale->DoMonthlyTick();
     CHECK(stale->GetNumAirportTrips() == 0);
+    FreeReadState(stale);
     delete stale;
 
     // An empty port list returns immediately.

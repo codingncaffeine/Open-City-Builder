@@ -30,6 +30,9 @@ struct FakeAutomaton : IAutomaton {
 
 struct FakeManager : IAutomatonManager {
     std::vector<FakeAutomaton*> made;
+    std::vector<FakeAutomaton*> retired;   // dropped from `made` by a test step, still owned here
+    void Retire() { retired.insert(retired.end(), made.begin(), made.end()); made.clear(); }
+    ~FakeManager() { for (FakeAutomaton* a : retired) delete a; }
     std::vector<std::uint32_t> groups;
     std::uint8_t lastArg = 0;
     IAutomaton* CreateAutomaton(std::uint32_t group, const float position[3], std::uint32_t flags, const float zero[3], std::uint32_t,
@@ -313,7 +316,7 @@ void TestPolarSpawn() {
     for (auto* a : h2.manager.made) { CHECKF(a->pos[1], 33.0f); CHECK(a->startBehavior == 1 && a->startDefault == 0); }
     // no intersection: the base point is the origin position
     h2.intersects = false;
-    h2.manager.made.clear();
+    h2.manager.Retire();
     g2->TriggerGenerator(1.0f);
     CHECK(h2.manager.made.size() == 1);
     {
@@ -324,7 +327,7 @@ void TestPolarSpawn() {
     }
     // missing manager stops the loop; missing clock/template do nothing
     h2.managerPresent = false;
-    h2.manager.made.clear();
+    h2.manager.Retire();
     g2->TriggerGenerator(3.0f);
     CHECK(h2.manager.made.empty());
 
@@ -370,7 +373,7 @@ void TestModes() {
     g->TriggerGenerator(0.0f);
     CHECK(host.manager.made.size() == 2);
     // mode 1: not a building -> nothing
-    host.manager.made.clear();
+    host.manager.Retire();
     t.countMode = 1;
     t.countScale = 0.3f;
     host.occType = 1;
@@ -381,18 +384,18 @@ void TestModes() {
     g->TriggerGenerator(0.0f);
     CHECK(host.manager.made.size() == 2);
     // flag 0x1503 uses measure A (4 * 0.3 = 1.2 -> 1)
-    host.manager.made.clear();
+    host.manager.Retire();
     host.occFlags.insert(0x1503);
     g->TriggerGenerator(0.0f);
     CHECK(host.manager.made.size() == 1);
     // flag 0x1507 uses measure B (6 * 0.3 = 1.8 -> 2) once 0x1503/0x1504 are absent
-    host.manager.made.clear();
+    host.manager.Retire();
     host.occFlags.clear();
     host.occFlags.insert(0x1507);
     g->TriggerGenerator(0.0f);
     CHECK(host.manager.made.size() == 2);
     // no lot: nothing
-    host.manager.made.clear();
+    host.manager.Retire();
     host.occFlags.clear();
     host.lotPresent = false;
     g->TriggerGenerator(0.0f);
@@ -431,7 +434,7 @@ void TestRingSpawn() {
         CHECK(a->pos[0] > -100 && a->pos[0] < 200 && a->pos[2] > -100 && a->pos[2] < 200);
     }
     // a rejected position never spawns
-    host.manager.made.clear();
+    host.manager.Retire();
     host.networkOk = false;
     g->TriggerGenerator(3.0f);
     CHECK(host.manager.made.empty());

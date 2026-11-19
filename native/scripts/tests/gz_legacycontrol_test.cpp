@@ -161,7 +161,11 @@ struct FakeGen final : gz::cIGZWinGen {
     std::uint32_t GetCLSID() const override { return gz::kGZCLSID_cGZWinGen; }
     bool GetWinGenFlag(int) const override { return false; }
     bool SetWinGenFlag(int, bool) override { return false; }
-    bool SetWinProc(gz::cIGZWinProc* p) override { proc = p; return true; }
+    bool SetWinProc(gz::cIGZWinProc* p) override {
+        if (proc && proc != p) proc->Release();   // the previous procedure (the adapter's dummy) is dropped
+        proc = p;
+        return true;
+    }
     gz::cIGZWinProc* GetWinProc() const override { return proc; }
     bool GetWinProcAs(std::uint32_t, void** out) const override { (void)out; return false; }
     bool GetUserArea(cRZRect& out) const override { out = cRZRect{}; return true; }
@@ -1108,6 +1112,7 @@ int main() {
     CHECK(genWindow->gen.proc == genProc);
     CHECK_EQ(genProc->refs, 1u);   // the adapter released its reference
     CHECK_EQ(genProc->released, 1);
+    genWindow->Init();
     withProc->Release();           // the generic window dies with the control
     delete genProc;
 
@@ -1158,6 +1163,7 @@ int main() {
     CHECK(!direct->GetFlag(0x20000u));
     CHECK(!direct->GetFlag(0x40000u));
     CHECK(!direct->GetFlag(0x100000u));
+    direct->Init();   // Shutdown (which drops the window's parameters) only runs on an initialized window
     direct->Release();
 
     // The flat-rect interpreter needs a flat window; pos/size are ignored because "area" is present.
@@ -1184,6 +1190,7 @@ int main() {
     CHECK_EQ(outlineWindow->outline.releases, 1);
     cGZLegacyControl::InterpretPropertiesGZWinOutline(outlineWindow, outlineParams.list, false);   // no-op
     CHECK_EQ(outlineWindow->outline.releases, 2);
+    outlineWindow->Init();   // Shutdown (which drops the window's parameters) only runs on an initialized window
     outlineWindow->Release();
 
     // The slider interpreter: min/max, direction, image resource and the post-init initial value.
@@ -1209,6 +1216,7 @@ int main() {
     cGZLegacyControl::InterpretPropertiesGZWinSlider(sliderWindow, sliderParams.list, false);
     CHECK_EQ(sliderWindow->slider.value, 7);
     CHECK_EQ(sliderWindow->slider.releases, 2);
+    sliderWindow->Init();   // Shutdown (which drops the window's parameters) only runs on an initialized window
     sliderWindow->Release();
 
     // The scrollbar interpreter: min/max, orientation, page/line sizes, line/page count and the initial value.
@@ -1263,6 +1271,7 @@ int main() {
     CHECK_EQ(bmpWindow->bmp.imageArea.right, 30);
     CHECK_EQ(bmpWindow->bmp.flags, 3 | 0x10);
     CHECK_EQ(bmpWindow->bmp.releases, 2);
+    bmpWindow->Init();   // Shutdown (which drops the window's parameters) only runs on an initialized window
     bmpWindow->Release();
 
     // The generic-window interpreter (SC3WinGen): flag keywords (title bar / fill / outline / paint are inverted),
@@ -1310,6 +1319,8 @@ int main() {
         CHECK(genWindow->gen.bars.size() == 1 && genWindow->gen.bars[0].id == 9 && genWindow->gen.bars[0].area.right == 300 && genWindow->gen.bars[0].area.bottom == 40);
         CHECK(genWindow->gen.bars[0].sizeMode == 0 && genWindow->gen.bars[0].outline == 0);
         CHECK_EQ(genWindow->gen.releases, 2);
+        genWindow->gen.proc->Release();   // the reference the fake took in SetWinProc
+        genWindow->Init();   // Shutdown (which drops the window's parameters) only runs on an initialized window
         genWindow->Release();
     }
 
@@ -1362,6 +1373,7 @@ int main() {
         Params none;
         cGZLegacyControl::InterpretPropertiesGZWinText(textWindow, none.list, true);
         CHECK(t.gutterX == 0 && t.gutterY == 0);
+        textWindow->Init();   // Shutdown (which drops the window's parameters) only runs on an initialized window
         textWindow->Release();
         SetWinGraphics(nullptr);
     }
@@ -1413,6 +1425,7 @@ int main() {
         Params second; second.Uint(0xa02u, 1u);
         cGZLegacyControl::InterpretPropertiesGZWinBtn(btnWindow, second.list, false);
         CHECK(b.flags.at(4));
+        btnWindow->Init();   // Shutdown (which drops the window's parameters) only runs on an initialized window
         btnWindow->Release();
         SetWinGraphics(nullptr);
     }
@@ -1458,6 +1471,7 @@ int main() {
         Params none;
         cGZLegacyControl::InterpretPropertiesGZWinTextEdit(editWindow, none.list, false);
         CHECK(e.resizes == 1);
+        editWindow->Init();   // Shutdown (which drops the window's parameters) only runs on an initialized window
         editWindow->Release();
         SetWinGraphics(nullptr);
     }
@@ -1558,6 +1572,7 @@ int main() {
     SetGZWinFont(nullptr, 1u, 0);          // null-safe
     SetGZWinFont(nullptr, cRZString("x"), 0);
     SetResourceKeyParam(nullptr, 1u, cGZPersistResourceKey{});
+    helperWindow->Init();   // Shutdown (which drops the window's parameters) only runs on an initialized window
     helperWindow->Release();
 
     // -----------------------------------------------------------------------------------------------------

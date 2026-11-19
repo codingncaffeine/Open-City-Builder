@@ -1014,6 +1014,9 @@ void TestStreams() {
 
     CHECK(dev->Shutdown());
     dev->Release();
+    // A zone only frees its region in Shutdown once it was initialised, which the city-init message does.
+    SendType(loaded, kLandfillMessageCityInit);
+    SendType(partial, kLandfillMessageCityInit);
     for (cSC4LandfillDeveloper* other : {loaded, rejected, partial, sat, over}) {
         CHECK(other->Init());       // Shutdown only releases the zones once the object is initialised
         CHECK(other->Shutdown());

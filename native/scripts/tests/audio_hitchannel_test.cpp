@@ -98,6 +98,8 @@ struct FakeSnd final : cIGZSnd {
 struct Services final : Hit::cIHitManServices {
     FakeSnd* snd = nullptr;
     bool last3D = false;
+    std::vector<FakeSnd*> created;   // every sound handed out, freed with the fake host
+    ~Services() { for (FakeSnd* s : created) delete s; }
     std::map<std::uint32_t, cGZPropertySet*> propertySets;   // by instance
     bool HasSoundSystem() const override { return true; }
     void EnumerateUpdateTargets(EnumCallback, std::uint32_t, void*) override {}
@@ -119,6 +121,7 @@ struct Services final : Hit::cIHitManServices {
     bool GetDefaultSndPlayerClassId(bool is3D, std::uint32_t& id) override { last3D = is3D; id = is3D ? 0x33 : 0x22; return true; }
     bool CreateComInstance(std::uint32_t, std::uint32_t, void** out) override {
         snd = new FakeSnd();
+        created.push_back(snd);
         snd->AddRef();
         *out = static_cast<cIGZSnd*>(snd);
         return true;
@@ -244,7 +247,8 @@ int main() {
     assert(child->GetRegisterValue(static_cast<std::int32_t>(kPan)) == 222);
     child->SetRegisterValue(static_cast<std::int32_t>(kVol), 5, true);           // writes go to the own layer
     assert(child->GetRegisterValue(static_cast<std::int32_t>(kVol)) == 5);
-    assert(parent.Value(kVol, new AnyUint32()) == true);                          // parent untouched (leak ok in test)
+    AnyUint32 probe;
+    assert(parent.Value(kVol, &probe) == true);                                   // parent untouched
     // a cyclic parent chain is cut (the binary would loop forever)
     parent.SetValue(kParentLink, AnyUint32(0x2001));
     child->SetRegisterValue(static_cast<std::int32_t>(kParentLink), 0x2001, false);

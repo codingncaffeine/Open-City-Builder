@@ -773,6 +773,7 @@ int main() {
         CHECK(occupant->QueryInterface(kGZIID_cISC4Occupant, &out) && out != nullptr);
         out = nullptr;
         CHECK(!occupant->QueryInterface(0x12345678, &out));
+        occupant->Release(); occupant->Release(); occupant->Release();   // the three successful queries
         // the no-op overrides
         occupant->AddModel(nullptr, nullptr, 0);
         occupant->CreateHighlight(true);

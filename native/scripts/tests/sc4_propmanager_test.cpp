@@ -194,6 +194,7 @@ int main() {
         CHECK(second.refs == 0);
     }
     mgr->Release();
+    host.manager.ReleaseOccupantList(host.manager.items);   // the fake manager holds one reference per inserted prop
     cSC4PropManager::StaticShutdown();
     std::puts(failures ? "sc4_propmanager: FAILED" : "sc4_propmanager ok");
     return failures != 0;

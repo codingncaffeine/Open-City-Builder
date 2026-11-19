@@ -185,6 +185,7 @@ int main() {
     CHECK(seen == 5);
     a->SetParam(5, nullptr);
     v->Release();
+    got->Release();  // GetParam hands out a reference
 
     // messages: routing, filters, accelerator
     Filter filter;

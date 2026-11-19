@@ -303,6 +303,10 @@ struct FakeHost : INetworkToolHost, IPowerLineToolHost {
         if (!iniPath.empty()) ::unlink(iniPath.c_str());
         delete preview;
         delete worldCache;
+        delete terrain;
+        delete occupantsManager;
+        delete cityViewModel;
+        delete orFilter;
     }
 
     // --- INetworkToolHost ---

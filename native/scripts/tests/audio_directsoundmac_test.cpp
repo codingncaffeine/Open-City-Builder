@@ -207,6 +207,7 @@ int main() {
     CHECK(GetXZAngle({0, 0, 1}) == 0.0f && GetXZAngle({1, 0, 0}) == 0.0f);
     CHECK(Near(GetXZAngle({1, 0, 1}), 0.7853982f + 3.1415927f) && Near(GetXZAngle({-1, 0, -1}), 0.7853982f) && Near(GetXZAngle({-1, 0, 1}), std::atan(-1.0f) + 6.2831855f));
 
+    dup->Release();
     buf->Release();
     ds->Release();
     SetAudioQueueApi(nullptr);

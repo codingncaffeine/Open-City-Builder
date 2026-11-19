@@ -458,6 +458,10 @@ void TestWindow() {
 
     for (FakeAdvice* a : {&alarm, &good, &plain}) CHECK_EQ(a->refs, 1);   // only the advisor's map holds them now
     for (auto& advisor : host.advisors) advisor.advices.clear();   // the advices are locals that die before the host
+    // FakeAdviceList::Release only counts, so the lists the host made are freed here (their pages are already gone).
+    delete host.smallList;
+    delete host.largeList;
+    host.main->Release();   // the main window and the view window under it
     SetAdvisorUIAdvisorHost(nullptr);
     SetAdvisorUIImageHost(nullptr);
 }

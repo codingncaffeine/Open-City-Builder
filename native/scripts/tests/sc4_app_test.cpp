@@ -198,8 +198,14 @@ int main() {
         a->AddCOMDirectors();
         a->AddSystemServices();
         void* out = nullptr;
-        for (auto& fake : fakes) CHECK(f->GetSystemService(fake.id, kGZIID_cIGZSystemService, &out));
+        for (auto& fake : fakes) {
+            CHECK(f->GetSystemService(fake.id, kGZIID_cIGZSystemService, &out));
+            if (out) static_cast<cIGZSystemService*>(out)->Release();   // GetSystemService hands out a reference
+            out = nullptr;
+        }
         CHECK(!f->GetSystemService(0x99, kGZIID_cIGZSystemService, &out));
+        a->Release();
+        delete f;
     }
 
 
@@ -275,6 +281,7 @@ int main() {
         CHECK(!graphics.windowed);                                        // 1280x1024 does not fit the 1440x900 desktop -> full screen
         CHECK(a->GetRenderProperties() != nullptr);
         a->Release();
+        delete f;
         std::string cleanup = "rm -rf " + root; std::system(cleanup.c_str());
     }
 
@@ -350,7 +357,15 @@ int main() {
         CHECK(a->GetCheatCodeManager() != nullptr && SL::spSC4 == static_cast<cISC4App*>(a));
         CHECK(resources->GetSegmentCount() >= 3);
         CHECK(initialized.size() >= 5);
+        for (std::uint32_t i = 0; i < resources->GetSegmentCount(); ++i) {   // Init opened these; close them before the manager lets go
+            cIGZPersistDBSegment* segment = resources->GetSegmentByIndex(i);
+            segment->Close();
+            segment->Shutdown();
+        }
+        resources->Shutdown();
         std::string cleanup = "rm -rf " + root; std::system(cleanup.c_str());
+        a->Release();
+        delete f;
     }
 
     // ---- the app's remaining work: saving, obliteration, the registry, the fonts, the exception uploader
@@ -410,7 +425,7 @@ int main() {
             Fonts() : cRZSystemService(kGZFontSysDefaultServiceID, 100) {}
             std::vector<std::string> directories, aliases, removed;
             bool QueryInterface(std::uint32_t iid, void** out) override {
-                if (iid == kGZIID_cIGZFontSys) { *out = static_cast<cIGZFontSys*>(this); return true; }
+                if (iid == kGZIID_cIGZFontSys) { *out = static_cast<cIGZFontSys*>(this); AddRef(); return true; }
                 return cRZSystemService::QueryInterface(iid, out);
             }
             std::uint32_t AddRef() override { return cRZSystemService::AddRef(); }
@@ -592,6 +607,10 @@ int main() {
         SL::spViewUtilities = nullptr;
         SL::spView3D = nullptr;
         std::string cleanup = "rm -rf " + root; std::system(cleanup.c_str());
+        a->Release();
+        delete created;   // the city mocks refcount down without freeing
+        delete f;   // Release never destroys the framework
+        delete city;
     }
 
     // preferences blob defaults
@@ -605,6 +624,7 @@ int main() {
     CHECK(p.Get<std::uint32_t>(sc4::prefs::kVideoWidth) == 1024 && p.Get<std::uint32_t>(sc4::prefs::kVideoHeight) == 768);
     CHECK(p.Get<std::uint8_t>(0xf28) == 3 && p.Get<std::uint16_t>(0xf16) == 0x103);
 
+    for (int i = 0; i < 4; ++i) app->Release();   // the successful QueryInterface calls above
     app->Release(); app->Release();
     std::printf(failures ? "FAILED\n" : "OK\n");
     return failures ? 1 : 0;

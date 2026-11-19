@@ -88,6 +88,7 @@ int main() {
     manager->Release();
     manager->Release();
     SetClipboardMessageServer(nullptr);
+    second->Release(); second->Release();  // plus the QueryInterface reference
     server.RemoveNotification(&listener, kMessageClipboardChanged);
     std::printf(failures ? "FAILED\n" : "OK\n");
     return failures != 0;

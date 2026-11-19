@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 #include "audio/HitClassIds.h"
@@ -34,6 +35,7 @@ struct Services final : Hit::cIHitManServices {
 };
 
 std::vector<std::string> g_errors;
+std::vector<std::unique_ptr<std::uint8_t[]>> g_programBytes;
 void RecordError(cIHitTrackPlayer*, const char* message) { g_errors.emplace_back(message); }
 
 struct Program {
@@ -47,7 +49,9 @@ constexpr std::uint32_t kRegEntry = 0xff5f15e1;
 
 // Registers a block holding `program` in the manager and returns a player pointing at it.
 cHitTrackPlayer* MakePlayer(cHitMan& hm, const Program& program) {
-    auto* data = new std::uint8_t[program.bytes.size()];
+    // The block only points at the bytes; the test owns them until the manager is gone.
+    g_programBytes.emplace_back(new std::uint8_t[program.bytes.size()]);
+    std::uint8_t* data = g_programBytes.back().get();
     std::memcpy(data, program.bytes.data(), program.bytes.size());
     auto* block = new cHitTrackDataBlock();
     block->AddRef();

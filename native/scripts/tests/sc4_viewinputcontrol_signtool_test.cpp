@@ -328,6 +328,7 @@ int main() {
     CHECK(tool->Shutdown());   // idempotent
     tool->Release();
 
+    for (FakeSign* s : host.created) { CHECK(s->refs == 0); delete s; }   // Release only counts down
     SetSignToolHost(nullptr);
     SetViewInputHost(nullptr);
     std::printf(failures ? "viewinputcontrol_signtool: %d FAILURES\n" : "viewinputcontrol_signtool: ok\n", failures);

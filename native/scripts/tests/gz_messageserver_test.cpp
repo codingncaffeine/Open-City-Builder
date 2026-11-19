@@ -73,6 +73,7 @@ int main() {
     size_t lateBefore = late.got.size();
     iface->OnTick(16);
     CHECK(solo.got == (std::vector<std::uint32_t>{10, 11}) && late.got.size() == lateBefore);
+    server->Release();   // the two successful QueryInterface calls above each took a reference
     server->Release();
     server->Release();
     std::printf(failures ? "FAILED\n" : "OK\n");

@@ -209,7 +209,7 @@ int main() {
 
     SetWinCtrlMgr(nullptr);
     desktop->Release();
-    okText->Release();
+    okText->Release(); okText->Release();  // plus the reference SetDefaultText keeps
     m->Release();
     std::printf(failures ? "FAILED (%d)\n" : "OK\n", failures);
     return failures ? 1 : 0;

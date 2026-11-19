@@ -66,6 +66,7 @@ int main() {
     r->AddRef();
     cIGZFont* font = reinterpret_cast<cIGZFont*>(0x1000);
     cIGZFont* font2 = reinterpret_cast<cIGZFont*>(0x2000);
+    fake_dc::Ctx* heapCtx = nullptr;
 
     // texture pages: coverage -> white with the alpha nibble
     r->CreateTexturePages();
@@ -115,6 +116,7 @@ int main() {
     // context mode (the renderer keeps a counted reference to the context: heap allocated)
     {
         fake_dc::Ctx& ctx = *new fake_dc::Ctx;
+        heapCtx = &ctx;
         ctx.lockResult = false;
         FakeTarget tgt;
         tgt.ctx = &ctx;
@@ -185,6 +187,9 @@ int main() {
     void* q = nullptr;
     CHECK(r->QueryInterface(0xa8bc2a75, &q) && q == r && !r->QueryInterface(2, &q));
     CHECK(r->Release() == 1 && r->Release() == 0);
+    plain->Release();
+    delete heapCtx;   // the renderer only held a counted reference
+    delete host.inner;
     if (failures == 0) std::printf("gz_drawfontrenderer OK\n");
     return failures == 0 ? 0 : 1;
 }

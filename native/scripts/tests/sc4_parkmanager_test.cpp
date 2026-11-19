@@ -97,6 +97,7 @@ int main() {
     manager->Shutdown();
     CHECK(env.removed == 1);
 
+    manager->Release();
     // without one: tracking and the monthly switch
     env.budget = nullptr;
     auto* m2 = new cSC4ParkManager;
@@ -121,6 +122,7 @@ int main() {
     CHECK(m2->Parks().size() == 1 && parkA.refs == 1);
     m2->Shutdown();
     CHECK(parkB.refs == 1 && zoo.refs == 1 && m2->Parks().empty());
+    m2->Release();
     {   // the lot lookup goes through the environment; without one there is no lot
         struct LotEnv final : IParkEnvironment {
             int lot = 0;
@@ -140,6 +142,7 @@ int main() {
         CHECK(pm.GetLotWhereOccupantResides(nullptr) == &lotEnv.lot);
         SetParkEnvironment(previous);
     }
+    sim->Release();
     if (failures == 0) std::puts("sc4_parkmanager: all passed");
     return failures ? 1 : 0;
 }

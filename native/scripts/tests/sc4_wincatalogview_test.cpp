@@ -231,8 +231,10 @@ int main() {
 
     v->SetCalloutBox(nullptr);
     CHECK(callout.refs == 1);
+    cw->Release();   // the test's own reference; the view dropped its child reference
     v->Clear();
     CHECK(v->GetItemCount() == 0);
+    for (auto* it : items) it->Release();   // the reference MakeItem took; AddItem took its own
     v->Shutdown();
     CHECK(fonts.font.refs == 1);
     parent->Release();

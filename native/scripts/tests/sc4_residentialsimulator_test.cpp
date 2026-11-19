@@ -138,6 +138,7 @@ struct World {
         sim->AddRef();
         sim->Init();
     }
+    ~World() { host.budget->Release(); }   // the test owns the budget simulator it created
 };
 
 void TestTuning() {
@@ -431,6 +432,7 @@ void TestAverageGrids() {
     cSC4SimGrid<float>* hq = sim.GetAverageHQGrid(nullptr, nullptr);
     CHECK(hq != nullptr && hq->GetTractValue(1, 1) == 20.0f);   // 50*80 / 200
     if (hq) hq->Release();
+    sim.Release();
 }
 
 int main() {

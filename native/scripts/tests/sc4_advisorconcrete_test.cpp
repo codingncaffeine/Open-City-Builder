@@ -147,7 +147,8 @@ struct ConcreteHost final : IAdvisorConcreteHost {
     void SetGlobal(const char* name, double value) override { globals[name] = value; }
     void SetLocal(const char* name, double value, cISC4AdviceSubject* subject) override { locals.emplace_back(name, value, subject); }
     bool PushEvent(int eventId, cISC4AdviceSubject* subject) override { pushedEvents.emplace_back(eventId, subject); return true; }
-    bool CreateAdviceSubject(cISC4AdviceSubject** out) override { auto* s = new FakeSubject(); *out = s; return true; }
+    std::vector<FakeSubject*> made;   // every subject handed out; the game must have released its reference by the end
+    bool CreateAdviceSubject(cISC4AdviceSubject** out) override { auto* s = new FakeSubject(); made.push_back(s); *out = s; return true; }
     std::int64_t BudgetInt(std::uint32_t vslot) override { auto it = budgetInts.find(vslot); return it == budgetInts.end() ? 0 : it->second; }
     float BudgetTaxRate(int index) override { return index >= 0 && static_cast<std::size_t>(index) < taxRates.size() ? taxRates[index] : 0.0f; }
     float BudgetLineItemFunding(std::uint32_t id) override { auto it = lineItems.find(id); return it == lineItems.end() ? 0.0f : it->second; }
@@ -453,6 +454,7 @@ int main() {
         CHECK(a->GetLandmarkCount(0x55) == 0 && a->HasLandmark(0x55));   // still present
         a->Shutdown();
         a->Release();
+        a->Release();   // the construction reference (the pair above covered the QueryInterface and the re-acquire)
     }
     // CityPlanning Write/Read (fresh object, built through DoMessage).
     {
@@ -477,6 +479,8 @@ int main() {
         a->Shutdown();
         a->Release();
     }
+
+    for (FakeSubject* s : concrete.made) { CHECK(s->refs == 0); delete s; }
 
     std::printf(failures ? "FAILED (%d)\n" : "sc4_advisorconcrete OK\n", failures);
     return failures ? 1 : 0;

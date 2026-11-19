@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <functional>
 #include <vector>
 
 #include "sc4/DisasterManagers.h"
@@ -175,11 +176,13 @@ public:
     Grid grid;
     int tuneInstances = 2, tuneLeaders = 9;
     bool tuneOk = true;
-    cISC4DisasterInstanceFire* CreateFire() override { fire = new FakeFire(); fire->manager = fireManager; return fire; }
-    cISC4DisasterInstanceVolcano* CreateVolcano() override { volcano = new FakeVolcano(); return volcano; }
-    cISC4DisasterInstanceRiot* CreateRiot() override { riot = new FakeRiot(); return riot; }
-    cISC4DisasterInstancePipeBurst* CreatePipeBurst() override { burst = new FakePipeBurst(); return burst; }
-    cISC4DisasterInstanceEarthquake* CreateEarthquake() override { quake = new FakeQuake(); return quake; }
+    std::vector<std::function<void()>> cleanups;   // frees every instance handed out; run at the end of main
+    template <class T> T* Track(T* p) { cleanups.push_back([p] { CHECK(p->refs == 0); delete p; }); return p; }
+    cISC4DisasterInstanceFire* CreateFire() override { fire = Track(new FakeFire()); fire->manager = fireManager; return fire; }
+    cISC4DisasterInstanceVolcano* CreateVolcano() override { volcano = Track(new FakeVolcano()); return volcano; }
+    cISC4DisasterInstanceRiot* CreateRiot() override { riot = Track(new FakeRiot()); return riot; }
+    cISC4DisasterInstancePipeBurst* CreatePipeBurst() override { burst = Track(new FakePipeBurst()); return burst; }
+    cISC4DisasterInstanceEarthquake* CreateEarthquake() override { quake = Track(new FakeQuake()); return quake; }
     IPlumbingGrid* PlumbingGrid() override { grid.AddRef(); return &grid; }
     bool ReadRiotTuning(int& a, int& b) override { if (!tuneOk) return false; a = tuneInstances; b = tuneLeaders; return true; }
 };
@@ -343,6 +346,7 @@ int main() {
         m->Shutdown();
         CHECK(m->Filter() == nullptr && factory.grid.refs == 0);
         m->Release();
+        water->Release(); dry->Release(); other->Release();   // the test's references; the occupant manager keeps its own
     }
 
     // ---- earthquakes
@@ -398,6 +402,8 @@ int main() {
         quake->Release();
     }
 
+    for (auto& cleanup : factory.cleanups) cleanup();
+    occupants->Release();
     SetDisasterInstanceFactory(nullptr);
     if (failures == 0) std::printf("sc4_disastermanagers: all passed\n");
     return failures == 0 ? 0 : 1;

@@ -117,6 +117,7 @@ struct Host : ILandfillZoneHost {
     bool HasBaseTexture(int x, int z) override { return baseTextures.count({x, z}) != 0; }
     std::vector<ILandfillOccupantRef*> ListBaseTextures(int, int) override { return {baseTexList.begin(), baseTexList.end()}; }
     std::vector<ILandfillOccupantRef*> ListIncompatibleOccupants(int, int) override { return {incompatible.begin(), incompatible.end()}; }
+    ~Host() { for (FakeTile* t : allTiles) delete t; }
     ILandfillTile* LoadLandfillTile(std::uint32_t id, int o) override {
         auto* t = new FakeTile();
         t->id = id;
@@ -132,6 +133,7 @@ struct Host : ILandfillZoneHost {
     void PlaceEmptyCellTexture(int x, int z) override { emptyTextures.push_back({x, z}); }
     ILandfillProp* CreateZotProp(const float p[3]) override {
         prop = new FakeProp();
+        gDeferredProps.push_back(prop);
         for (int i = 0; i < 3; ++i) prop->pos[i] = p[i];
         return prop;
     }
@@ -142,6 +144,7 @@ struct Host : ILandfillZoneHost {
         s.GetUint8(present);
         if (!present) return nullptr;
         prop = new FakeProp();
+        gDeferredProps.push_back(prop);
         return prop;
     }
     ILandfillEffect* CreateEffect(const char* name, const float p[3]) override {
@@ -159,6 +162,13 @@ struct Host : ILandfillZoneHost {
 };
 
 LandfillCellRegion FullRegion(int x0, int z0, int x1, int z1) { return LandfillCellRegion::Make(x0, z0, x1, z1, true); }
+
+// The zone destructor does not free its region; Shutdown does, once the zone was initialised.
+struct ZoneRetire {
+    cSC4LandfillZone* zone;
+    explicit ZoneRetire(cSC4LandfillZone* z) : zone(z) {}
+    ~ZoneRetire() { zone->Init(); zone->Shutdown(); }
+};
 
 void TestRegion() {
     LandfillCellRegion r = LandfillCellRegion::Make(2, 3, 4, 5, false);
@@ -227,6 +237,7 @@ void TestHeapStream() {
 void TestConstructionAndCapacity() {
     Host host;
     cSC4LandfillZone zone(&host, FullRegion(10, 20, 13, 22));   // 4 x 3 cells
+    ZoneRetire retire_zone(&zone);
     CHECK(zone.HeapColumns() == 3 && zone.HeapRows() == 2 && zone.Heaps().size() == 6);
     CHECK(zone.Heaps()[4].x == 1 && zone.Heaps()[4].z == 1 && zone.Heaps()[4].id == 1);
     CHECK(zone.GetCellCount() == 12);
@@ -270,6 +281,7 @@ void TestUpdateZone() {
     host.networkIds = {0, 1};
     host.flagsByType[0x4400] = {0, 1};   // the last developer type answers for network 1
     cSC4LandfillZone zone(&host, FullRegion(10, 20, 12, 22));   // 3x3 cells, 2x2 heaps
+    ZoneRetire retire_zone(&zone);
     CHECK(zone.IsZoneConnected());
     host.flagsByType[0x4400] = {0, 0};
     CHECK(!zone.IsZoneConnected());
@@ -312,6 +324,7 @@ void TestUpdateZone() {
     {
         Host hostE;
         cSC4LandfillZone isolated(&hostE, FullRegion(0, 0, 3, 3));
+        ZoneRetire retire_isolated(&isolated);
         isolated.UpdateSurroundingTiles(isolated.Heaps()[0]);
         CHECK(hostE.emptyTextures.size() == 4 && hostE.created.empty());
     }
@@ -325,6 +338,7 @@ void TestUpdateZone() {
 void TestSurroundingTiles() {
     Host host;
     cSC4LandfillZone zone(&host, FullRegion(10, 20, 13, 22));   // 3x2 heaps
+    ZoneRetire retire_zone(&zone);
     zone.Heaps()[1].hasGarbage = true;   // heap (1,0)
     zone.UpdateSurroundingTiles(zone.Heaps()[1]);
     // cells: A (11,20) mask = self<<2 = 4 -> table[4] = 0x34e0000 o1; B (12,20) mask = self<<1 = 2 -> 0x34e0000 o2;
@@ -353,6 +367,7 @@ void TestSurroundingTiles() {
     CHECK(host.created[3].second == std::make_pair(0x02f90000u, 0));
     // all-neighbour tile re-randomises: heap (1,1) with all four heaps lit -> cell D of... use heap (1,0) region
     cSC4LandfillZone big(&host, FullRegion(0, 0, 4, 4));   // 4x4 heaps
+    ZoneRetire retire_big(&big);
     for (auto& h : big.Heaps()) h.hasGarbage = true;
     host.created.clear();
     host.nextRand = 7;   // 7 & 3 = 3 -> orientation 6
@@ -373,6 +388,7 @@ void TestSurroundingTiles() {
 void TestEmptyTileAndMissingExemplar() {
     Host host;
     cSC4LandfillZone zone(&host, FullRegion(10, 20, 13, 22));
+    ZoneRetire retire_zone(&zone);
     // lone heap state false everywhere: cell mask 0 is the empty tile id -> empty texture placed when none exists
     zone.UpdateSurroundingTiles(zone.Heaps()[0]);   // hasGarbage false: masks all 0
     CHECK(host.emptyTextures.size() == 4 && host.created.empty());
@@ -385,12 +401,14 @@ void TestEmptyTileAndMissingExemplar() {
 void TestEdges() {
     Host host;
     cSC4LandfillZone zone(&host, FullRegion(10, 20, 13, 22));
+    ZoneRetire retire_zone(&zone);
     // invalidation: cell (11, 21) -> heaps (1,1) (1,0) (0,1) (0,0)
     zone.InvalidateSurroundingHeaps(11, 21);
     CHECK(!zone.Heaps()[4].valid && !zone.Heaps()[1].valid && !zone.Heaps()[3].valid && !zone.Heaps()[0].valid);
     CHECK(zone.Heaps()[2].valid && zone.Heaps()[5].valid);
     // the last column (13): hx = 3 = columns -> only (hx-1, ...) heaps
     cSC4LandfillZone z2(&host, FullRegion(10, 20, 13, 22));
+    ZoneRetire retire_z2(&z2);
     z2.InvalidateSurroundingHeaps(13, 22);   // hx = 3, hz = 2 = rows: (hx-1, hz-1) = (2,1)
     int invalid = 0;
     for (auto& h : z2.Heaps()) invalid += h.valid ? 0 : 1;
@@ -458,7 +476,6 @@ void TestInitShutdown() {
     CHECK(!host.generator.enabled && !host.attractor.enabled && host.removedEffects == 2);
     CHECK(host.generator.refs == 1 && host.attractor.refs == 1);
     CHECK(host.removedProps == 1 && prop->refs == 0);
-    delete prop;
 
     // no seagull effect available
     Host h2;
@@ -475,6 +492,7 @@ void TestZotSpiral() {
     LandfillCellRegion r = LandfillCellRegion::Make(10, 20, 14, 24, false);
     r.SetBit(12, 24, true);
     cSC4LandfillZone zone(&host, r);
+    ZoneRetire retire_zone(&zone);
     zone.AddZot();
     CHECK(zone.Zot() != nullptr);
     CHECKF(host.prop->pos[0], 12 * 16.0f);
@@ -483,18 +501,18 @@ void TestZotSpiral() {
     Host h2;
     LandfillCellRegion e = LandfillCellRegion::Make(10, 20, 14, 24, false);
     cSC4LandfillZone ez(&h2, e);
+    ZoneRetire retire_ez(&ez);
     ez.AddZot();
     CHECKF(h2.prop->pos[0], 12 * 16.0f);
     CHECKF(h2.prop->pos[2], 22 * 16.0f);
     // the zones still hold a reference to their props: free the props only after the zones are gone
-    gDeferredProps.push_back(host.prop);
-    gDeferredProps.push_back(h2.prop);
 }
 
 void TestCostsAndTerrain() {
     Host host;
     host.tunables.defaultLandfillTileCost = 7;
     cSC4LandfillZone zone(&host, FullRegion(10, 20, 11, 21));   // 4 cells
+    ZoneRetire retire_zone(&zone);
     CHECK(zone.GetLandfillTileCost(10, 20) == 7);
     FakeTile tile;
     cSCPropertyHelp::SetPropertyValue(&tile.props, kLandfillTileCostProperty, std::int64_t(50));
@@ -544,6 +562,7 @@ void TestCostsAndTerrain() {
 void TestLevelAndPopulate() {
     Host host;
     cSC4LandfillZone zone(&host, FullRegion(10, 20, 12, 22));
+    ZoneRetire retire_zone(&zone);
     zone.LevelRect({-3, 5, 100, 100}, 12.5f, true);
     CHECKF(zone.LevelHeight(), 12.5f);
     CHECK(host.lastLevel.x0 == 0 && host.lastLevel.z0 == 5 && host.lastLevel.x1 == 64 && host.lastLevel.z1 == 64);
@@ -573,6 +592,7 @@ void TestLevelAndPopulate() {
     CHECK(host.emptyTextures.empty());
     // a set cell with zone type 0xe, no network, no tile and no base texture gets the empty cell texture and keeps its bit
     cSC4LandfillZone single(&host, FullRegion(12, 21, 12, 21));
+    ZoneRetire retire_single(&single);
     single.PopulateZone();
     CHECK(single.Region()->Test(12, 21) == true);
     CHECK(host.emptyTextures.size() == 1 && host.emptyTextures[0] == std::make_pair(12, 21));
@@ -581,6 +601,7 @@ void TestLevelAndPopulate() {
 void TestAddRegion() {
     Host host;
     cSC4LandfillZone zone(&host, FullRegion(10, 20, 12, 22));   // 2x2 heaps
+    ZoneRetire retire_zone(&zone);
     zone.SetLevelHeight(9.0f);
     zone.Heaps()[3].garbage = 77;
     zone.Heaps()[3].hasGarbage = true;
@@ -612,6 +633,7 @@ void TestStream() {
     r.SetBit(13, 22, false);   // last row/column: not stored, reloaded as set
     r.SetBit(10, 22, false);   // last column of the first row: not stored either
     cSC4LandfillZone zone(&host, r);
+    ZoneRetire retire_zone(&zone);
     zone.Heaps()[2].garbage = 12;
     zone.Heaps()[2].capacity = 40;
     zone.Heaps()[2].hasGarbage = true;
@@ -630,6 +652,7 @@ void TestStream() {
 
     Host host2;
     cSC4LandfillZone loaded(&host2);
+    ZoneRetire retire_loaded(&loaded);
     PortMemoryIStream in(out.bytes().data(), out.bytes().size());
     CHECK(loaded.Read(in));
     CHECK(loaded.Region()->bounds.x0 == 10 && loaded.Region()->bounds.z1 == 22);
@@ -640,8 +663,6 @@ void TestStream() {
     CHECK(!loaded.Heaps()[5].valid && loaded.Heaps()[4].valid);
     CHECK(loaded.Heaps()[4].id == 4);
     CHECK(!loaded.Connected() && loaded.Zot() != nullptr);
-    gDeferredProps.push_back(host.prop);
-    gDeferredProps.push_back(host2.prop);
 
     // version 3 stream: connected flag byte only
     PortMemoryOStream v3;
@@ -655,6 +676,7 @@ void TestStream() {
     PortMemoryIStream v3in(v3.bytes().data(), v3.bytes().size());
     Host host3;
     cSC4LandfillZone old(&host3);
+    ZoneRetire retire_old(&old);
     CHECK(old.Read(v3in) && old.Connected() && old.Zot() == nullptr);
 }
 

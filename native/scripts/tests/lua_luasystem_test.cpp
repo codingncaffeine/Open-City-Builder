@@ -224,7 +224,7 @@ int main() {
         sc->SetTop(0);
         CHECK(sc->Close() && !sc->IsOpen() && host.unregistered == 1 && ParamSet::live == 0);
         CHECK(sc->CallParameters() == nullptr);
-        sc->Release();
+        sc->Release(); sc->Release(); sc->Release();  // plus the two QueryInterface references
         SetLuaApi(&api);
     }
     if (!g_fail) std::printf("lua_luasystem ok\n");

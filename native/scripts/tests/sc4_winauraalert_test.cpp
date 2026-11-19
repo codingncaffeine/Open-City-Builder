@@ -148,8 +148,9 @@ int main() {
     ctx.log.clear();
     border->GZPaint();
     CHECK(ctx.log.empty());
-    border->Release();
+    parent->Release();   // deletes the tree (bar and border: the parent holds their only references)
     CHECK(properties.refs == 0);
+    frame->Release();
     SetWinRenderProperties(nullptr);
     std::printf(failures ? "FAILED\n" : "sc4_winauraalert ok\n");
     return failures != 0;

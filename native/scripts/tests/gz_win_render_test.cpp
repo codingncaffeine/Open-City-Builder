@@ -163,6 +163,9 @@ struct FakeBuffer final : IWinBuffer {
 struct FakeGfx final : IWinGraphics {
     bool drawSystem = false;
     std::vector<FakeBuffer*> created;
+    std::vector<FakeBuffer*> retired;   // buffers of finished blocks, freed with the fake
+    void Retire() { retired.insert(retired.end(), created.begin(), created.end()); created.clear(); }
+    ~FakeGfx() { Retire(); for (FakeBuffer* b : retired) delete b; }
     FakeBuffer* primary = nullptr;
     bool initOk = true, keyAvailable = true;
     std::uint32_t MakeNativeColor(std::uint8_t, std::uint8_t, std::uint8_t) override { return 0; }
@@ -219,6 +222,18 @@ struct Filter final : cIGZWinMessageFilter {
     bool DoMessage(cIGZWin*, cGZMessage& m) override { ++seen; lastType = m.type; return consume; }
 };
 
+// Releases a root window made with AddRef: removing a child drops the list's reference (the last one for these
+// windows), so the root can then be destroyed without the fake manager having to.
+void Dispose(cGZWin* root) {
+    std::vector<cIGZWin*> kids;
+    root->EnumChildren(kGZIID_cIGZWin, [](cIGZWin*, std::uint32_t, void* child, void* ctx) {
+        static_cast<std::vector<cIGZWin*>*>(ctx)->push_back(static_cast<cIGZWin*>(child));
+        return true;
+    }, &kids);
+    for (cIGZWin* k : kids) root->ChildRemove(k);
+    root->Release();
+}
+
 }  // namespace
 
 int main() {
@@ -258,7 +273,7 @@ int main() {
         gfx.drawSystem = false;
         CHECK(!w->create_private_buffer(-5, 0));
         w->Release();
-        gfx.created.clear();
+        gfx.Retire();
     }
 
     // ---- PrivateBuffer enable / disable ----
@@ -270,7 +285,7 @@ int main() {
         w->SetArea(10, 10, 110, 60);
         root->ChildAdd(w);
         g_log.clear();
-        gfx.created.clear();
+        gfx.Retire();
         CHECK(w->PrivateBuffer(true));
         CHECK(w->GetFlag(kWinPrivateBuffer) && gfx.created.size() == 1);
         FakeBuffer* b = gfx.created[0];
@@ -293,7 +308,7 @@ int main() {
         int before = b2->shutdowns;
         CHECK(w->PrivateBuffer(false) && b2->shutdowns == before && b2->refs == 0);
         // invisible ancestor: reports success, makes no buffer, drops an existing one
-        gfx.created.clear();
+        gfx.Retire();
         root->SetFlag(kWinVisible, false);
         CHECK(w->PrivateBuffer(true));
         CHECK(w->GetPrivateBuffer() == nullptr && gfx.created.empty());
@@ -304,7 +319,8 @@ int main() {
         w->SetFlag(kWinPrivateBufferTransparent, false);
         CHECK(!w->PrivateBuffer(true) && w->GetFlag(kWinPrivateBuffer));
         gfx.initOk = true;
-        gfx.created.clear();
+        gfx.Retire();
+        Dispose(root);
     }
 
     // ---- transparency helpers ----
@@ -347,6 +363,8 @@ int main() {
         w->InjectBuffer(nullptr);
         CHECK(!w->fill_private_buffer_with_transparent_color());
         b->Release();
+        w->Release();
+        delete b;
     }
 
     // ---- fade effect ----
@@ -382,6 +400,10 @@ int main() {
         w->fade_advance();                                       // below 0: alpha 0 and the fade ends
         CHECK(b->fadeAlpha == 0 && !w->fade_in_progress());
         b->Release();
+        w->InjectBuffer(nullptr);
+        w->Init();   // so the destructor's Shutdown frees the fade parameters the window stores
+        w->Release();
+        delete b;
     }
 
     // ---- fade-out hands the buffer to a temporary window ----
@@ -436,7 +458,8 @@ int main() {
             CHECK(tmp->Plot());                                  // fade over: asks the manager to destroy it
             CHECK(mgr.destroyed.size() == 1 && mgr.destroyed[0] == tmp);
         }
-        gfx.created.clear();
+        gfx.Retire();
+        Dispose(root);
     }
 
     // ---- fade-out without a parent attaches to the main window ----
@@ -456,6 +479,15 @@ int main() {
         w->SetFlag(kWinPrivateBuffer, false);   // PrivateBuffer(false) through the flag path
         CHECK(main->GetChildCount() == 1);
         mgr.mainWin = nullptr;
+        cIGZWin* fadeTmp = nullptr;   // the temporary fade window ended up as the main window's child
+        main->EnumChildren(kGZIID_cIGZWin, [](cIGZWin*, std::uint32_t, void* child, void* ctx) {
+            *static_cast<cIGZWin**>(ctx) = static_cast<cIGZWin*>(child);
+            return true;
+        }, &fadeTmp);
+        if (fadeTmp) main->ChildRemove(fadeTmp);   // the list held its last reference
+        w->Release();
+        main->Release();
+        delete b;
     }
 
     // ---- PlotComposite ----
@@ -553,6 +585,8 @@ int main() {
         CHECK(Joined() == "Lock8001;Fillabcdef(0,0,10,10);Unlock8001;paint20;");
         kb->Release();
         kid->InjectBuffer(nullptr);
+        Dispose(root);
+        delete kb;
     }
 
     // ---- PlotPresent ----
@@ -608,6 +642,10 @@ int main() {
         (void)plots;
         screen->drawTarget = nullptr;
         own->Release(); screen->Release();
+        plain->Release();
+        Dispose(root);
+        gfx.primary = nullptr;
+        delete own; delete screen;
     }
 
     SetWinGraphics(nullptr);

@@ -249,6 +249,7 @@ int main() {
         CHECK(r.refs == 2 && a.refs == 1);                                        // the surveyor holds references
         s->Release();
         CHECK(r.refs == 0 && a.refs == 0 && b.refs == 0 && d.refs == 0);
+        sink->Release();
     }
 
     // ---- the binary writer
@@ -310,6 +311,9 @@ int main() {
         CHECK(host.diagnostics.size() == 1 && host.diagnostics[0].find("Cannot load dependent resource") == 0);
         CHECK(b2.link == nullptr);
         rd->Release();
+        inPtr->Release();
+        again->Release();
+        missing->Release();
     }
 
     // ---- scalar / array / string / object API of the binary writer and reader
@@ -380,6 +384,8 @@ int main() {
         rd->ReadRoot(&solo, inPtr2);
         CHECK(in.RemainingBytes() == 0);
         rd->Release();
+        inPtr2->Release();
+        outPtr->Release();
     }
 
     // ---- an object written through WriteObject, and one that is null
@@ -399,6 +405,7 @@ int main() {
         CHECK(out->bytes().size() > 0);
         w->Release();
         s->Release();
+        out->Release();
     }
 
     // ---- the ASCII writer
@@ -483,6 +490,7 @@ int main() {
         w2->Release();
     }
 
+    streamPtr->Release();
     SetPersistHost(nullptr);
     SetRZServiceResolver(nullptr);
     std::printf(failures ? "FAILED (%d)\n" : "OK\n", failures);

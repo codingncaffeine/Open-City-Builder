@@ -761,6 +761,9 @@ struct Rig {
         imageWindow.window = &dialog;
         scriptWindow.window = &dialog;
     }
+    // The window keeps the advice variant it was given as a parameter; a window that was never initialized does not
+    // release it on shutdown.
+    ~Rig() { dialog.SetParam(kAdvisorPopupParamAdvice, nullptr); }
 };
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -871,6 +874,7 @@ void TestShowDialog() {
     CHECK(host.images[0]->refs == 0);
     CHECK(host.images[1]->refs == 0);
     CHECK(tracker.ImageWinProc() == host.images[2].get());
+    rig.dialog.SetParam(kAdvisorPopupParamAdvice, nullptr);   // while the advice objects are still alive
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -923,6 +927,8 @@ void TestSetupDialog() {
     // Null arguments are ignored.
     tracker.SetupDialog(nullptr, &advice);
     tracker.SetupDialog(&rig.dialog, nullptr);
+    orphan.SetParam(kAdvisorPopupParamAdvice, nullptr);
+    rig.dialog.SetParam(kAdvisorPopupParamAdvice, nullptr);
 }
 
 // ---------------------------------------------------------------------------------------------------------------

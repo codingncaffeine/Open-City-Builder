@@ -67,6 +67,7 @@ int main() {
     flame.active = true;
     flame.Shutdown();
     CHECK(!flame.active && !flame.effect);
+    for (Effect* e : effects) { CHECK(e->refs == 0); delete e; }   // the flames released what the fake created
     if (failures == 0) std::puts("sc4_fireoccupant: all passed");
     return failures ? 1 : 0;
 }

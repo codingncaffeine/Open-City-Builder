@@ -306,6 +306,7 @@ struct FakeDepartment final : ISeaportDepartmentBudgetApi {
     std::uint32_t nameGroup = 0, nameInstance = 0;
     float maxFunding = 0.0f;
     int nameCalls = 0, maxFundingCalls = 0, getLineItemCalls = 0;
+    ~FakeDepartment() { for (auto& entry : lineItems) delete entry.second; }
     std::map<std::uint32_t, FakeLineItem*> lineItems;
     void AddRef() override { ++refs; }
     void Release() override { --refs; }
@@ -332,6 +333,7 @@ struct FakeDepartment final : ISeaportDepartmentBudgetApi {
 };
 
 struct FakeBudgetSim final : ISeaportBudgetSimApi {
+    ~FakeBudgetSim() { for (auto& entry : departments) delete entry.second; }
     std::map<std::uint32_t, FakeDepartment*> departments;
     int getCalls = 0, createCalls = 0;
     ISeaportDepartmentBudgetApi* CreateDepartmentBudget(std::uint32_t id, std::uint32_t group) override {
@@ -601,9 +603,14 @@ struct Fixture {
         SetSeaportHost(&host);
     }
     ~Fixture() {
+        if (developer) developer->Shutdown();   // frees the port lots and type configurations Init/Read created
         SetSeaportHost(nullptr);
         SetPortDeveloperHost(nullptr);
         delete developer;
+        for (auto& entry : lotManager.lots) {   // the lots this fixture built hold the test's and the manager's reference
+            entry.second->Release();
+            entry.second->Release();
+        }
     }
 
     // The developer exemplar (instance = the seaport developer id) lists one port type; that type has two

@@ -1034,6 +1034,12 @@ void TestUpdateDrawOrder() {
     CHECK(manager.Update(nullptr));
     CHECK((draw.textures == std::vector<int>{5, 3, 1, 2}));
 
+    // The particles the test added belong to their systems; Stop(false) frees them (an unstarted system must start first).
+    for (cSC4ParticlesEffect* effect : effects) {
+        if (!effect->IsStarted()) effect->Start(0);
+        effect->Stop(false, false);
+    }
+
     manager.Shutdown();
     SetParticlesTextures(nullptr);
     SetParticlesTerrain(nullptr);

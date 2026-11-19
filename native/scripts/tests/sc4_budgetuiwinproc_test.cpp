@@ -356,7 +356,6 @@ struct TestHost final : sc4::IBudgetUIWinProcHost {
     }
     sc4::ISubBudgetWindow* CreateSubBudgetWindow() override {
         auto* sub = new FakeSubBudget(subLog, mgr, view);
-        sub->AddRef();
         return sub;
     }
 };
@@ -1017,6 +1016,7 @@ int main() {
               host.mgr->destroyed.end());
     }
 
+    rig.view->Release();   // the view window owns every script window and control added under it
     budget->Release();
     sc4::cSC4BudgetSimulator::SetEnvironment(nullptr);
     sc4::SetLanguageFormatter(nullptr);

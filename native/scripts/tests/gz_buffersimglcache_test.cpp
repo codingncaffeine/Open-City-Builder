@@ -173,6 +173,7 @@ int main() {
         for (int i = 0; i < 8; ++i) zero = zero && z[i] == 0;
         CHECK(zero);
         c3->Release();
+        k565->Release();
     }
 
     // no driver: refresh still succeeds and clears the flag
@@ -191,6 +192,7 @@ int main() {
     CHECK(host.unregisters == 1);
     cache->Release();
     CHECK(host.unregisters == 2 || host.unregisters == 1);   // the destructor shuts down again
+    buffer->Release();
     if (failures == 0) std::printf("gz_buffersimglcache OK\n");
     return failures == 0 ? 0 : 1;
 }

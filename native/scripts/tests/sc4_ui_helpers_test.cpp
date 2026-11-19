@@ -337,6 +337,7 @@ static void TestWindowSets() {
     nSC4UI::ClearAcceptFocusFlagRecursive(parent);
     CHECK(!parent->GetFlag(0x8000) && !first->GetFlag(0x8000) && !second->GetFlag(0x8000) &&
           !grandchild->GetFlag(0x8000));
+    parent->Release();   // deletes the tree: the children hold the only other references
 }
 
 static void TestCursorHitTest() {
@@ -377,6 +378,7 @@ static void TestCursorHitTest() {
     CHECK_EQ(nSC4UI::GetChildWindowForCursorPosRecursive(parent, 30, 30), nested);
     CHECK_EQ(nSC4UI::GetChildWindowForCursorPos(parent, 150, 150), nullptr);
     CHECK_EQ(nSC4UI::GetChildWindowForCursorPosRecursive(parent, 150, 150), nullptr);
+    parent->Release();   // deletes the tree
 }
 
 static void TestAlignment() {
@@ -459,6 +461,7 @@ static void TestAlignment() {
 
     // Passing a null parent uses the host's main window.
     CHECK(nSC4UI::AlignWindowToWindow(0x11, 0xaaaa, 0, nullptr));
+    main->Release();   // deletes the tree
     nSC4UI::SetHost(nullptr);
 }
 
@@ -559,6 +562,7 @@ static void TestDialogs() {
     CHECK_EQ(nSC4UI::DoScriptedModalDialog(0x2a5cfb2c, 0x98765432), 0x1234u);
     CHECK_EQ(mgr.popups, 4);
     nSC4UI::SetHost(nullptr);
+    mgr.mainWin->Release();   // deletes the tree: nothing else holds the root
 }
 
 // ---- the news ticker ----------------------------------------------------------------------------------
@@ -732,6 +736,10 @@ static void TestTicker() {
     CHECK(proc->AdviceList() == nullptr && proc->FlipperList() == nullptr);
     CHECK(proc->Window() == nullptr);
     CHECK(proc->Release() == 0u);   // count 1 -> destroyed
+    tree.main->Release();   // deletes the tree
+    // The fake advice lists count references in their own counter, so the tree never deletes them.
+    delete tree.body;
+    delete tree.flipper;
 }
 
 int main() {

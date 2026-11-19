@@ -2,6 +2,7 @@
 #include "gz/StreamOps.h"
 #include "sc4/QuadGrid.h"
 #include <cstdio>
+#include <vector>
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); return 1; } } while (0)
 int main() {
     cGroupLayer* l = new cGroupLayer(5.0f);
@@ -37,6 +38,15 @@ int main() {
     CHECK(out->groups.size() == 1);
     out->Shutdown();
     CHECK(out->groups.empty());
+    // Founding instances are in no group's list, so Shutdown cannot reach them: remove them through the public API.
+    std::vector<std::uint32_t> ids;
+    for (const auto& entry : l->instances) ids.push_back(entry.first);
+    for (std::uint32_t id : ids) l->RemoveInstance(id);
+    l->Shutdown();
+    m->Shutdown();
+    l->Release();
+    m->Release();
+    out->Release();
     std::puts("OK");
     return 0;
 }

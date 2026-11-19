@@ -670,6 +670,7 @@ int main() {
     // clear the exemplar reference before the objects go away
     static_cast<cSCExemplarPropertyHolder*>(occ->AsPropertyHolder())->SetDefaultExemplar(nullptr);
     exemplar->Release();
+    for (int i = 0; i < 3; ++i) occ->Release();   // the three QueryInterface calls above each returned an AddRef'd occ
     occ->Release();
     for (FakeOccupantModel* created : host.created) delete created;
     for (FakeResModel* resource : host.resources) delete resource;

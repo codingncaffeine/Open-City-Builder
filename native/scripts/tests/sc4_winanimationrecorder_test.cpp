@@ -323,6 +323,7 @@ struct Fixture {
         SetWinAnimationRecorderHost(&host);
     }
     ~Fixture() {
+        for (FakeFrameBuffer* frame : host.created) delete frame;   // Release never deletes a fake buffer
         SetWinAnimationRecorderHost(nullptr);
         SetWinGraphics(nullptr);
         gz::SetWinFontSource(nullptr);

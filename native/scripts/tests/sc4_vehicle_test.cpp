@@ -38,6 +38,16 @@ using namespace sc4;
 
 namespace {
 
+// Fakes the code under test never deletes (their Release only counts); freed at the end of main.
+std::vector<std::function<void()>>& FakeCleanups() {
+    static std::vector<std::function<void()>> cleanups;
+    return cleanups;
+}
+template <class T> T* Own(T* p) {
+    FakeCleanups().push_back([p] { delete p; });
+    return p;
+}
+
 constexpr std::uint32_t kOccupantIid = 0x26bb767e;
 constexpr std::uint32_t kNetworkOccupantIid = 0xa821ef94;
 constexpr std::uint32_t kSerializableIid = 0xe4fda3d4;
@@ -216,7 +226,7 @@ struct FakeAutomatonHost final : IAutomatonHost {
     IAutomatonModel* CreateModel(const cGZPersistResourceKey& key) override {
         createdInstances.push_back(key.instance);
         ++modelsCreated;
-        auto* model = new FakeModel();
+        auto* model = Own(new FakeModel());
         createdRefs = model->refs;
         lastModel = model;
         return model;
@@ -534,7 +544,7 @@ void TestTrailerVehicle() {
     // a road along x; the lead stands at x = 60 heading +x
     cSC4PathInfo* info = MakePathInfo();
     const std::uint32_t key = AddPath(info, 1, 0, 2, {Vec(0, 0, 50), Vec(100, 0, 50)});
-    FakeOccupant* road = MakeOccupant(info);
+    FakeOccupant* road = Own(MakeOccupant(info));
     const tPath* stored = info->GetPath(key, nullptr);
     CHECK(stored != nullptr);
     if (stored) {
@@ -593,7 +603,7 @@ void TestTrailerVehicle() {
         cSC4PathInfo* nextInfo = MakePathInfo();
         const std::uint32_t nextKey = AddPath(nextInfo, 1, 2, 0, {Vec(100, 0, 50), Vec(200, 0, 50)});
         CHECK(nextKey != key);
-        FakeOccupant* nextRoad = MakeOccupant(nextInfo);
+        FakeOccupant* nextRoad = Own(MakeOccupant(nextInfo));
         const tPath* nextStored = nextInfo->GetPath(nextKey, nullptr);
         CHECK(nextStored != nullptr);
         if (nextStored) {
@@ -709,7 +719,7 @@ void TestTrain() {
     // a rail along x; the engine's nose at x = 60, its radius 8
     cSC4PathInfo* info = MakePathInfo();
     const std::uint32_t key = AddPath(info, 3, 0, 2, {Vec(0, 0, 50), Vec(100, 0, 50)});
-    FakeOccupant* rail = MakeOccupant(info);
+    FakeOccupant* rail = Own(MakeOccupant(info));
     rail->cellX = 3;
     rail->cellZ = 3;
     const tPath* stored = info->GetPath(key, nullptr);
@@ -972,6 +982,7 @@ void TestConstructionAndQueries() {
     CHECK_NEAR(vehicle->GetPathOffset(), 2.0f);
     CHECK(vehicle->Shutdown());
     CHECK(!vehicle->IsInitialized());
+    for (int i = 0; i < 7; ++i) vehicle->Release();   // the references the seven successful queries took
     vehicle->Release();
 }
 
@@ -1634,7 +1645,7 @@ void TestEmergencyVehicle() {
     emergencyHost.lookups = 0;
     CHECK(!ev->ValidateNetworkOccupant() && emergencyHost.lookups == 1);   // nothing under the car yet
     cSC4PathInfo* info = MakePathInfo();
-    FakeOccupant* road = MakeOccupant(info);
+    FakeOccupant* road = Own(MakeOccupant(info));
     emergencyHost.occupantAt = road;
     CHECK(ev->ValidateNetworkOccupant());                                    // attached now
     const int blockedBefore = emergencyHost.blocked;
@@ -1683,7 +1694,7 @@ void TestEmergencyVehicle() {
         auto makeHomeBound = [&](float sourceX) {
             auto* car = new TestEmergencyCar(&world.host, &world.automatonHost, nullptr, &emergencyHost);
             car->AddRef();
-            auto* source = new FakeBaseOccupant();
+            auto* source = Own(new FakeBaseOccupant());
             source->position[0] = sourceX;
             car->SetDispatchSource(source);
             source->refs--;                                                       // the car holds the only reference
@@ -1712,7 +1723,7 @@ void TestEmergencyVehicle() {
     {
         auto* car = new TestEmergencyCar(&world.host, &world.automatonHost, nullptr, &emergencyHost);
         car->AddRef();
-        auto* sender = new FakeBaseOccupant();
+        auto* sender = Own(new FakeBaseOccupant());
         const int sendersBefore = sender->refs;
         car->SetAutomataFlag(0x400, true);
         car->HandleDispatched(Vec(7.0f, 8.0f, 9.0f), sender);
@@ -1886,7 +1897,7 @@ void TestPatrolCar() {
     car->AddRef();
     CHECK(car->GetGZCLSID() == 0x4a222b98 && car->GetDispatchType() == 0);
     CHECK(car->GetEffectiveRadius() == 16.0f);                       // no dispatch source: the default reach
-    auto* source = new FakeBaseOccupant();
+    auto* source = Own(new FakeBaseOccupant());
     car->SetDispatchSource(source);
     source->refs--;
     CHECK(car->GetEffectiveRadius() == 40.0f);
@@ -2022,7 +2033,7 @@ void TestFireTruck() {
     CHECK(truck->GetGZCLSID() == 0xaa222b83 && truck->GetDispatchType() == 1);
     CHECK(truck->FireFilter() == &fire.fireFilter && truck->SpillFilter() == &fire.spillFilter && fire.fireFilter.refs == 1);
     CHECK(truck->GetEffectiveRadius() == 16.0f);
-    auto* source = new FakeBaseOccupant();
+    auto* source = Own(new FakeBaseOccupant());
     truck->SetDispatchSource(source);
     source->refs--;
     CHECK(truck->GetEffectiveRadius() == 32.0f);
@@ -2094,7 +2105,8 @@ void TestFireTruck() {
     fire.picked = Vec(100.0f, 5.0f, 230.0f);
     truck->TranslatePlayerDriveCommands(&drive, 1.0f);
     CHECK(std::fabs(drive.effectPosition248.z - 210.0f) < 1e-3f && drive.effectPosition248.x == 100.0f);   // 30 away, reach 10
-    CHECK(!truck->GetStreamTargetPoint(*new cS3DVector3()));            // no player-drive state on the truck
+    cS3DVector3 streamTarget;
+    CHECK(!truck->GetStreamTargetPoint(streamTarget));            // no player-drive state on the truck
 
     // the stream: version 2, the emergency vehicle's record, the crew (null here)
     PortMemoryOStream out;
@@ -2349,6 +2361,7 @@ void TestPedestrian() {
     }
 
     other->Release();
+    for (int i = 0; i < 2; ++i) pedestrian->Release();   // the two successful queries took references
     pedestrian->Release();
     SetAutomatonHost(nullptr);
 }
@@ -2375,6 +2388,8 @@ int main() {
     TestTrailerVehicle();
     TestTrain();
     TestMayorLimo();
+    for (auto& cleanup : FakeCleanups()) cleanup();
+
     if (failures == 0) {
         std::printf("sc4_vehicle: ok\n");
         return 0;

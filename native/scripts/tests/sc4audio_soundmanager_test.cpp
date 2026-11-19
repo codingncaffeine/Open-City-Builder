@@ -65,7 +65,8 @@ struct Rig {
 
 void TestResponseCurve() {
     cSC4ResponseCurve c;
-    assert(c.GetOutputValue(5.0f) == 0.0f && !c.GetMaxInputValue(*new float));   // empty
+    float unused = 0.0f;
+    assert(c.GetOutputValue(5.0f) == 0.0f && !c.GetMaxInputValue(unused));   // empty
     c.SetResponseCurveData(std::vector<SC4Point>{{0, 1024}});
     assert(c.GetOutputValue(-5) == 1024 && c.GetOutputValue(0) == 1024 && c.GetOutputValue(99) == 1024);
     const float values[] = {1, 1000, 2, 800, 4, 400, 5, 400};

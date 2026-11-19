@@ -89,6 +89,7 @@ struct FakeTextures final : sc4::ILotRetainingWallTextures {
     std::size_t next = 0;
     std::uint32_t failFirstId = 0;   // when non-zero, the first key with this instance fails
     bool failed = false;
+    ~FakeTextures() { for (FakeBinding* b : bindings) delete b; }   // Release only counts
 
     sc4::ILotRetainingWallTextureBinding* CreateTexture(const sc4::SC4TextureBindingKey& key) override {
         keys.push_back(key);

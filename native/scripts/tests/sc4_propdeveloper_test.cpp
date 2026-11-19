@@ -635,6 +635,7 @@ struct Fixture {
     }
     void Drop(cSC4PropDeveloper*& developer) {
         if (!developer) return;
+        developer->Shutdown();   // releases the default requester Init created
         developer->Release();
         developer = nullptr;
     }

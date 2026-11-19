@@ -210,6 +210,7 @@ int main() {
     ctx.log.clear();
     CHECK(tiled->GZPaint());
     CHECK(!ctx.log.empty() && ctx.log[0].rfind("blt", 0) == 0);
+    tiled->Shutdown();   // drops the background reference the destructor leaves alone
     tiled->Release();
     auto* filled = new Dlg(&mgr, kWindowBackgroundFilled);
     filled->AddRef();
@@ -223,11 +224,17 @@ int main() {
     CHECK(!bare->Init());
     bare->Release();
 
+    // The manager's Create* calls hand out a reference the dialog's child list does not own; the combo never became a
+    // child, so the test holds its only reference.
+    for (cIGZWin* w : {btn, check, label, slider, bar, spinner, group, input, bmp}) w->Release();
+    combo->Release();
     dlg->Shutdown();
     CHECK(dlg->Background() == nullptr && dlg->ControlFont() == nullptr);
     desktop->Release();
+    dlg->Release();
     SetWinCtrlMgr(nullptr);
     edge->Release();
+    m->Shutdown();   // drops the manager's font and bitmap references; its destructor does not
     m->Release();
     std::printf(failures ? "FAILED (%d)\n" : "OK\n", failures);
     return failures ? 1 : 0;

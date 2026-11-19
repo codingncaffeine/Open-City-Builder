@@ -87,9 +87,11 @@ struct FakeStation final : cIGZRadioStation {
 
 struct FakeStationHost final : IRadioStationHost {
     std::vector<FakeStation*> created;
+    std::vector<FakeStation*> all;   // every station ever created (created is cleared mid-test); main deletes them at the end
     cIGZRadioStation* CreateDiskStation() override {
         auto* station = new FakeStation();
         created.push_back(station);
+        all.push_back(station);
         return station;
     }
     cRZString& StationDirectory(cIGZRadioStation* s) override { return static_cast<FakeStation*>(s)->stationDirectory; }
@@ -259,6 +261,7 @@ struct FakeCom final : cIGZCOM {
     std::uint32_t refs = 1;
     std::uint32_t requestedClass = 0, requestedIid = 0;
     int createCalls = 0;
+    std::vector<FakeSnd*> allSounds;   // the fake never frees what it creates; main deletes them at the end
     FakeSnd* sound = nullptr;
     bool CreateInstance(std::uint32_t clsid, std::uint32_t iid, void** out) override {
         ++createCalls;
@@ -266,6 +269,7 @@ struct FakeCom final : cIGZCOM {
         requestedIid = iid;
         if (iid != kGZIID_cIGZSnd) return false;
         sound = new FakeSnd();
+        allSounds.push_back(sound);
         *out = static_cast<cIGZSnd*>(sound);
         return true;
     }
@@ -613,6 +617,9 @@ void TestStationList() {
     CHECK(radio->RemoveStation("ROCK", true) && c->releases == 1 && radio->GetStationCount() == 0);
     CHECK(!radio->RemoveAllStations(true));   // always false
     radio->Release();
+    delete a;   // the radio dropped its references; the fake stations never delete themselves
+    delete b;
+    delete c;
 }
 
 void TestTurnOnAndIdle() {
@@ -653,6 +660,7 @@ void TestTurnOnAndIdle() {
     CHECK(radio->TurnOn(false) && !radio->IsOn());
     CHECK(g_sndSys.events.empty());
     radio->Release();
+    delete station;
 }
 
 void TestDiskStations() {
@@ -969,6 +977,8 @@ int main() {
     TestQueryInterfaceAndRefCount();
     TestFactoryAndDestruction();
 
+    for (FakeStation* station : g_stationHost.all) delete station;
+    for (FakeSnd* sound : g_com.allSounds) delete sound;
     RemoveTree(g_root);
     std::printf(failures ? "FAILED\n" : "rz_radio ok\n");
     return failures ? 1 : 0;

@@ -12,9 +12,13 @@ static int failures = 0;
 
 namespace {
 
+// Every buffer made here is released at the end of main, after the engines that draw into them.
+std::vector<cGZBuffer*> g_buffers;
+
 cGZBuffer* Make(std::uint32_t w, std::uint32_t h, std::int32_t type, std::uint32_t bits) {
     auto* b = new cGZBuffer();
     b->AddRef();
+    g_buffers.push_back(b);
     CHECK(b->Init(w, h, {type, bits}));
     b->Fill(0, nullptr);
     return b;
@@ -216,6 +220,7 @@ int main() {
         e->Release();
     }
 
+    for (cGZBuffer* b : g_buffers) b->Release();
     if (failures == 0) std::printf("gz_drawcontextrendertobuffer OK\n");
     return failures == 0 ? 0 : 1;
 }

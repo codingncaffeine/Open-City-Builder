@@ -432,6 +432,7 @@ struct TestHost final : sc4::INeighborsHost {
     std::vector<cISC4Occupant*> deletedProps;
     std::vector<cISC4Occupant*> deactivated;
     std::vector<FakeProp*> props;
+    ~TestHost() { for (FakeProp* p : props) delete p; }
     std::vector<void*> finishedProps, releasedProps;
     int createdProps = 0;
     bool createPropSucceeds = true;
@@ -497,7 +498,9 @@ cRZAutoRefCount<sc4::cISC4NeighborDeal> MakeDeal(std::uint32_t type, int cityX, 
     deal->SetRegionCellOnCitySideOfConnection(cityX, cityZ);
     deal->SetRegionCellOnOtherSideOfConnection(otherX, otherZ);
     deal->SetAmount(amount);
-    return cRZAutoRefCount<sc4::cISC4NeighborDeal>(deal);
+    cRZAutoRefCount<sc4::cISC4NeighborDeal> owned(deal);
+    deal->Release();   // drop the constructor's count; the smart pointer holds the only reference
+    return owned;
 }
 
 std::unique_ptr<cRZMessage2Standard> MakeMessage(std::uint32_t type, std::uint64_t data1 = 0,

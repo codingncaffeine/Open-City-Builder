@@ -1295,7 +1295,7 @@ int main() {
     {
         manager->SetMaxCount(12);
         manager->DestroyAutomata();
-        CHECK(manager->Write(*new PortMemoryOStream()));   // never leaks in the test; keeps the API honest
+        { PortMemoryOStream scratch; CHECK(manager->Write(scratch)); }   // keeps the API honest
         PortMemoryOStream os;
         CHECK(manager->Write(os));
         PortMemoryIStream is(os.bytes().data(), os.bytes().size());

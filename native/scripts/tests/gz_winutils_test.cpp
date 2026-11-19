@@ -111,6 +111,7 @@ int main() {
     CHECK(!buttons[0]->IsOn() && !buttons[1]->IsOn() && buttons[2]->IsOn());
     nsGZWinUtils::ExcludeButtonByRange(root, 10, 0, 12);                          // an empty range touches nothing
     CHECK(buttons[2]->IsOn());
+    root->Release();   // deletes the tree: the children hold the only other references
     std::printf(failures ? "FAILED\n" : "gz_winutils ok\n");
     return failures != 0;
 }

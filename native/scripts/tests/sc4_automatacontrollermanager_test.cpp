@@ -218,7 +218,8 @@ int main() {
     auto* c1 = new Ctl(); c1->AddRef();
     auto* occ1 = NewOcc(100, 100);
     c1->SetOccupant(occ1);
-    c1->SetTemplate(NewTemplate("a"));
+    tControllerTemplate* templateA = NewTemplate("a");
+    c1->SetTemplate(templateA);
     float lo[3], hi[3];
     c1->GetBoundingBox(lo, hi);     // occupant box +-8 + radius 20: 72..128
     grid.AddController(c1);
@@ -538,6 +539,7 @@ int main() {
     CHECK(mgr->Release() == 3 && mgr->Release() == 2 && mgr->Release() == 1);
     mgr->Release();   // final release
     for (Occ* o : {b1, b2, b3, shopper, shopOcc, occ1}) o->Release();
+    for (tControllerTemplate* t : {templateA, shop, park, lure, static_cast<tControllerTemplate*>(att)}) delete t;   // the controllers only point at them
     std::printf(failures ? "FAILED\n" : "sc4_automatacontrollermanager OK\n");
     return failures ? 1 : 0;
 }

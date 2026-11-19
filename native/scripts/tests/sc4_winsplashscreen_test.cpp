@@ -213,6 +213,10 @@ int main() {
     lone->Init();
     CHECK(lone->GraphicSystem() != nullptr);
 
+    catcher->Release();   // deletes its child list reference to lone first
+    lone->Release();
+    desktop->Release();   // releases the splash it holds
+    splash->Release();
     SetSplashScreenHost(nullptr);
     std::printf(failures ? "sc4_winsplashscreen: %d FAILED\n" : "sc4_winsplashscreen: all passed\n", failures);
     return failures ? 1 : 0;

@@ -771,7 +771,7 @@ struct FakeHost final : sc4::IModelMakerHost {
     sc4::IModelBackgroundLoader* CreateBackgroundLoader() override { return loader; }
     sc4::IModelAnimationCoordinator* CreateAnimationCoordinator() override { return coordinator; }
     cISC4OccupantFilter* CreateZoomRotationModelChangeOccupantFilter() override {
-        if (zoomFilter) zoomFilter->AddRef();
+        // returned like the other Create calls: the maker adds the reference it keeps
         return zoomFilter;
     }
     void SetZoomRotationFilter(cISC4OccupantFilter*, int zoom, int rotation) override {
@@ -1158,6 +1158,7 @@ int main() {
 
         maker->Shutdown();
         maker->Release();
+        coordinator->Release();
         occupant->Release();
         placeable->Release();
         viewFilter->Release();   // the maker released its own reference in Shutdown
@@ -1230,6 +1231,8 @@ int main() {
             CHECK(host.wallModelCalls == before + 1);
             CHECK(host.lastWallCreate && !host.lastWallAddToRenderer);
             CHECK(resource->created == 1);   // no exemplar models were made for it
+            wall->Release();
+            wallPlaceable->Release();
         }
         {   // a foundation that is not drawn building-style gets one cSC4FoundationModel: the occupant's box, its top raised by 0.2
             auto* foundationPlaceable = new FakePlaceable();
@@ -1250,6 +1253,8 @@ int main() {
                 reinterpret_cast<s3d::cIS3DModelInstance*>(foundationPlaceable->models[0])->GetWorldBounds(box);
                 CHECK(std::fabs(box.max[1] - 11.2f) < 1e-5f && box.min[0] == 479.0f && box.max[2] == 641.0f);
             }
+            foundation->Release();
+            foundationPlaceable->Release();
         }
         if (!placeable->models.empty()) {
             auto* model = static_cast<FakeModel*>(placeable->models[0]);
@@ -1379,6 +1384,7 @@ int main() {
         placeable->Release();
         maker->Shutdown();
         maker->Release();
+        coordinator->Release();   // the maker AddRef-ed it; this is the creation reference
         occupant->Release();
         sc4::SetModelMakerHost(nullptr);
         viewFilter->Release();   // the maker dropped its own reference in Shutdown
@@ -1458,6 +1464,8 @@ int main() {
         placeable->Release();
         sc4::SetModelMakerHost(nullptr);
         zoomFilter->Release();
+        viewFilter->Release();   // the test's own references (the maker took its own)
+        loader->Release();
     }
 
     // ---- 9. FindModelTransform ------------------------------------------------------------------------------

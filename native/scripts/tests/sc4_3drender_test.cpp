@@ -506,6 +506,7 @@ int main() {
         b->Release();
         c->Release();
         CHECK(gLiveViewObjects == 0);
+        delete a; delete b; delete c;   // Release only counts down
         CHECK(render->Release() == 0);
     }
 

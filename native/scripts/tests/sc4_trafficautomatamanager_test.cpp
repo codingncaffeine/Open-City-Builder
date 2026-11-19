@@ -1254,9 +1254,12 @@ int main() {
         delete exemplar;
         delete requester;
         delete cityOccupant;
+        // the fake automata keep a refcount that never deletes; the test owns them
+        for (FakeTrafficAutomaton* candidate : {matching, inRect, special, outside, follower, newLeader}) delete candidate;
         CHECK(cSC4AutomataManager::StaticInstanceCount() == 0);
     }
 
+    host.tuningHolder->Release();   // the test's own reference taken at the start
     std::printf("%s\n", failures == 0 ? "ok" : "FAILED");
     return failures == 0 ? 0 : 1;
 }

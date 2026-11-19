@@ -126,6 +126,7 @@ struct FakeColorSink final : IWinMapViewColorSink {
 
 struct FakeHost final : IWinMapViewHost {
     // SetDataView's 3D side
+    ~FakeHost() { SetViewFilter(nullptr); }   // drop the reference to the last filter
     std::vector<std::uint32_t> levels;
     std::vector<std::pair<bool, bool>> terrainDisplays;
     cISC4OccupantFilter* viewFilter = nullptr;   // the last one set (one reference)
@@ -427,6 +428,7 @@ struct Fixture {
     cGZWin* parent = nullptr;
     cSC4WinMapView* view = nullptr;
     std::vector<gz::cGZWinText*> texts;
+    std::vector<cGZWin*> owned;   // children carrying the fixture's own reference
     std::vector<gz::cGZWinFlatRect*> flats;
     std::vector<gz::cGZWinBtn*> buttons;
 
@@ -441,17 +443,20 @@ struct Fixture {
             child->SetID(id);
             child->AddRef();   // the parent's reference (the controls are released by ChildDeleteAll)
             parent->ChildAdd(child);
+            owned.push_back(child);
         }
         auto* title = new gz::cGZWinText(&mgr);
         title->SetID(0x8a909d6a);
         title->AddRef();
         parent->ChildAdd(title);
+        owned.push_back(title);
         texts.push_back(title);
         for (std::uint32_t id : {0x8a909e00u, 0x8a909e01u}) {
             auto* text = new gz::cGZWinText(&mgr);
             text->SetID(id);
             text->AddRef();
             parent->ChildAdd(text);
+            owned.push_back(text);
             texts.push_back(text);
         }
         for (std::uint32_t id : {0x8a909e10u, 0x8a909e11u}) {
@@ -459,6 +464,7 @@ struct Fixture {
             flat->SetID(id);
             flat->AddRef();
             parent->ChildAdd(flat);
+            owned.push_back(flat);
             flats.push_back(flat);
         }
         for (std::uint32_t id : {0x5001u, 0x6001u, 0x8001u, 0x8100u, 0x8003u}) {
@@ -466,6 +472,7 @@ struct Fixture {
             button->SetID(id);
             button->AddRef();
             parent->ChildAdd(button);
+            owned.push_back(button);
             buttons.push_back(button);
         }
         host.marked = new FakeMarkedCells();
@@ -483,6 +490,7 @@ struct Fixture {
         delete view;
         // ChildDeleteAll releases every remaining child (a cGZWin has no outstanding reference, so it is deleted).
         parent->ChildDeleteAll();
+        for (cGZWin* child : owned) child->Release();   // drop the AddRef taken when each child was made
         delete parent;
         // The view owns the marked-cell view (created through the host) and deletes it in Shutdown.
         SetWinMapViewHost(nullptr);
@@ -938,6 +946,7 @@ void TestDataViewImage() {
     auto* activate = new cRZMessage2Standard();
     activate->SetType(kWinMapMsgViewActivate);
     f.view->DoMessage(static_cast<cIGZMessage2*>(activate));
+    activate->Release();
     f.host.sink.width = 16;   // a 4-cell grid -> blocks of 4
     f.host.sink.height = 16;
     f.host.hasExemplar = true;
@@ -998,6 +1007,7 @@ void TestHighlightOverlay() {
     auto* activate = new cRZMessage2Standard();
     activate->SetType(kWinMapMsgViewActivate);
     f.view->DoMessage(static_cast<cIGZMessage2*>(activate));
+    activate->Release();
     f.host.cityX = f.host.cityZ = 4;   // 64 m city on a 64 px map: one pixel per metre
     f.host.sink.width = f.host.sink.height = 64;
     f.host.hasExemplar = true;
@@ -1038,6 +1048,7 @@ void TestHighlightEffect() {
     auto* activate = new cRZMessage2Standard();
     activate->SetType(kWinMapMsgViewActivate);
     f.view->DoMessage(static_cast<cIGZMessage2*>(activate));
+    activate->Release();
     f.host.cityX = f.host.cityZ = 4;
     f.host.sink.width = f.host.sink.height = 16;
     f.host.hasExemplar = true;
@@ -1067,6 +1078,7 @@ void TestUndergroundView() {
     auto* activate = new cRZMessage2Standard();
     activate->SetType(kWinMapMsgViewActivate);
     f.view->DoMessage(static_cast<cIGZMessage2*>(activate));
+    activate->Release();
     f.host.cityX = f.host.cityZ = 4;
     f.host.sink.width = f.host.sink.height = 16;
     f.host.hasExemplar = true;

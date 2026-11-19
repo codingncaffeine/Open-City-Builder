@@ -1342,6 +1342,7 @@ int main() {
             local.Pop(1);
         }
         other->SetLua(nullptr);
+        other->ClearTemplates();   // Shutdown leaves the controller templates to their owner
         other->Shutdown();
         CHECK_EQ(other->Release(), 0u);   // FinalRelease deletes it
         SetAutomataScriptHost(&host);

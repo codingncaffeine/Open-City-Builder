@@ -207,6 +207,7 @@ int main() {
         std::uint32_t p2[256] = {}; p2[0xff] = 0x1234;
         r.DrawChar(nullptr, bm, &d3, cv, &s3, 1, cIGZFontRenderer::kPalette, p2, nullptr);
         CHECK(bm->GetPixel(0, 0) == 0x1234);
+        for (cGZBuffer* buf : {b32, b565, b1555, b4444, bm}) buf->Release();
     }
 
     // ---- style flags helper ----
@@ -619,6 +620,7 @@ int main() {
         f->DrawTextParagraph(b, wide, copy, 24, 0, 0, 0, nullptr, nullptr);
         CHECK(std::strcmp(copy, "(c) 2014 Electronic Arts") == 0);
         f->Release();
+        b->Release();
     }
     // 8 bit palette mode draws through SetCurrentPalette
     {
@@ -630,6 +632,7 @@ int main() {
         CHECK(f->DrawTextLine(b, 0, 0, "a", 1, 0xf800, kFontDefaultColor, nullptr, nullptr));
         CHECK(f->PaletteCacheSize() == 1);
         f->Release();
+        b->Release();
     }
 
     // ---- renderer swapping ----

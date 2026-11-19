@@ -452,6 +452,7 @@ public:
 // ---------------------------------------------------------------------------- fake terrain host
 class FakeHost final : public ITerrainHost {
 public:
+    ~FakeHost() override { for (FakeTerrainEffect* effect : effectsCreated) delete effect; }   // the terrain only releases (counts), the host owns them
     struct LightRow {
         std::int32_t z, x, endX, normalStride, colourStride;
         float* normals;

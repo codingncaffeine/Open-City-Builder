@@ -200,6 +200,7 @@ int main() {
         CHECK(!f->LoadFromFile(missing, &none, false, {kBufferColorARGB8888, 32}, false) && none == nullptr);
         CHECK(!f->SaveToFile(p, &none) && !f->LoadFromResourceId(1, &none, false, {1, 0}, false));
     }
+    f->Release();
     if (failures == 0) std::printf("gz_persistbufferresourcefactory OK\n");
     return failures == 0 ? 0 : 1;
 }

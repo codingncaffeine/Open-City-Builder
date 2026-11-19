@@ -41,6 +41,7 @@ int main() {
     CHECK(!writer->BeginWrite(0x31u, 0) && !writer->BeginWrite(".bmp", 0));
     CHECK(!writer->PutFramePixels(nullptr, nullptr, 0) && !writer->EndWrite());
     CHECK(writer->QueryInterface(kGZIID_cIGZGimexWriter, &iface));
+    writer->Release(); writer->Release(); reader->Release(); reader->Release();  // plus the QueryInterface references
     if (failures == 0) std::puts("gz_gimexreaderwriter: all passed");
     return failures ? 1 : 0;
 }

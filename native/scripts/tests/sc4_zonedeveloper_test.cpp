@@ -473,6 +473,9 @@ struct FakeSimGridCity : ISimGridCity {
     float CellSizeZMeters() const override { return 16.0f; }
 };
 
+// Lots handed out with a reference the test owns; released once the developer is gone.
+std::vector<cSC4Lot*> g_callerRefs;
+
 struct FakeHost : IZoneDeveloperHost {
     FakeHost() { buildingDevelopment.lotDeveloper = &lotDeveloper; }
 
@@ -575,6 +578,7 @@ struct FakeHost : IZoneDeveloperHost {
         auto* lot = new cSC4Lot(0, 0, 1, 1, 0);
         lot->AddRef();
         lot->AddRef();   // the stream and the lot list both reference the object, like CreateLot
+        g_callerRefs.push_back(lot);
         return lot;
     }
 };
@@ -669,9 +673,22 @@ struct FakeIStream : cIGZIStream {
 
 //----------------------------------------------------------------------------------------------- helpers
 
+
+
+bool TrackedCreateLot(cSC4ZoneDeveloper* developer, int x, int z, int sizeX, int sizeZ, int facing, cSC4Lot*& out) {
+    const bool ok = developer->CreateLot(x, z, sizeX, sizeZ, facing, out);
+    if (out) g_callerRefs.push_back(out);
+    return ok;
+}
+
+void ReleaseCallerRefs() {
+    for (cSC4Lot* lot : g_callerRefs) lot->Release();
+    g_callerRefs.clear();
+}
+
 cSC4Lot* CreateLotChecked(cSC4ZoneDeveloper* developer, int x, int z, int sizeX, int sizeZ, int facing) {
     cSC4Lot* lot = nullptr;
-    CHECK(developer->CreateLot(x, z, sizeX, sizeZ, facing, lot));
+    CHECK(TrackedCreateLot(developer, x, z, sizeX, sizeZ, facing, lot));
     CHECK(lot != nullptr);
     return lot;
 }
@@ -946,6 +963,7 @@ void TestLotCreationAndQueries() {
     // --- create-lot-if-possible ----------------------------------------------------------------
     cSC4Lot* placed = nullptr;
     CHECK(developer->CreateLotIfPossible(9, 9, 1, 1, 0, placed, true, true, nullptr));
+    if (placed) g_callerRefs.push_back(placed);
     CHECK(placed != nullptr);
     CHECK(developer->GetLot(9, 9, false) == placed);
     CHECK(developer->GetLotCount() == 4);
@@ -953,7 +971,7 @@ void TestLotCreationAndQueries() {
     CHECK(placed == nullptr);
 
     cSC4Lot* shared = nullptr;
-    CHECK(developer->CreateLot(10, 10, 1, 1, 0, shared));
+    CHECK(TrackedCreateLot(developer, 10, 10, 1, 1, 0, shared));
     CHECK(host.useSafeList == false);
     CHECK(host.lotDeveloper.emptyTextured.back() == shared);
 
@@ -1071,7 +1089,7 @@ void TestNetworkAndOccupantSeams() {
     CHECK(developer->CanCreateLot(0, 0, 2, 2, true, true, nullptr) == 8);
     CHECK(developer->CanCreateLot(2, 8, 1, 1, true, false, nullptr) == 1);
     cSC4Lot* lot = nullptr;
-    CHECK(developer->CreateLot(1, 1, 1, 1, 0, lot));
+    CHECK(TrackedCreateLot(developer, 1, 1, 1, 1, 0, lot));
     CHECK(developer->CanCreateLotOnCell(1, 1, false, true) == 7);
     CHECK(developer->CanCreateLotOnCell(3, 3, false, true) == 8);
     CHECK(developer->CanCreateLot(1, 1, 1, 1, true, true, nullptr) == 7);
@@ -1146,7 +1164,7 @@ void TestDeferAndMessages() {
     // The occupant-removed message deletes the lot under the occupant and stops (the remnant/connection
     // passes are not recovered).
     cSC4Lot* lot = nullptr;
-    CHECK(developer->CreateLot(4, 4, 1, 1, 0, lot));
+    CHECK(TrackedCreateLot(developer, 4, 4, 1, 1, 0, lot));
     FakeOccupant occupant;
     occupant.position[0] = 4 * 16.0f + 8.0f;
     occupant.position[2] = 4 * 16.0f + 8.0f;
@@ -1161,7 +1179,7 @@ void TestDeferAndMessages() {
 
     // The network-occupant skip flag leaves the lot alone.
     cSC4Lot* kept = nullptr;
-    CHECK(developer->CreateLot(4, 4, 1, 1, 0, kept));
+    CHECK(TrackedCreateLot(developer, 4, 4, 1, 1, 0, kept));
     FakeNetworkOccupant skipView;
     skipView.flags = 0x80200090;
     occupant.network = &skipView;
@@ -1186,7 +1204,7 @@ void TestSerialization() {
     developer->AddRef();
     CHECK(developer->Init());
     cSC4Lot* lot = nullptr;
-    CHECK(developer->CreateLot(2, 2, 1, 1, 0, lot));
+    CHECK(TrackedCreateLot(developer, 2, 2, 1, 1, 0, lot));
 
     FakeOStream out;
     CHECK(developer->Write(out));
@@ -1266,7 +1284,7 @@ void TestParcellizableRegionAndCompression() {
 
     // A lot that the host's configuration check rejects is deleted, its cell becomes parcellizable.
     cSC4Lot* lot = nullptr;
-    CHECK(developer->CreateLot(3, 3, 1, 1, 0, lot));
+    CHECK(TrackedCreateLot(developer, 3, 3, 1, 1, 0, lot));
     host.configurationCompatibleWithZone = false;
     parcellizable = developer->CreateParcellizableRegion(&region);
     CHECK(parcellizable->Test(3, 3));
@@ -1275,7 +1293,7 @@ void TestParcellizableRegionAndCompression() {
 
     // A lot without a configuration object only survives when both zone types are in 1..6: with
     // currentZoneType_ 0 the fallback deletes it and its cell becomes parcellizable.
-    CHECK(developer->CreateLot(3, 3, 1, 1, 0, lot));
+    CHECK(TrackedCreateLot(developer, 3, 3, 1, 1, 0, lot));
     host.configurationCompatibleWithZone = true;
     parcellizable = developer->CreateParcellizableRegion(&region);
     CHECK(parcellizable->Test(3, 3));
@@ -1288,6 +1306,7 @@ void TestParcellizableRegionAndCompression() {
     host.zoneManager.zones[{6, 6}] = 1;
     cSC4Lot* randomFacing = nullptr;
     CHECK(developer->CreateLotIfPossible(6, 6, 1, 1, -1, randomFacing, false, false, nullptr));
+    if (randomFacing) g_callerRefs.push_back(randomFacing);
     CHECK(randomFacing != nullptr);
     if (randomFacing) CHECK(randomFacing->GetFacing() == 2);
     host.randomValues.clear();
@@ -1393,7 +1412,7 @@ void TestUpdateZoneTypeAndHighlightTextures() {
 
     SC4CellRegion<int> region = SC4CellRegion<int>::Make({1, 1, 3, 3}, true);
     cSC4Lot* lot = nullptr;
-    CHECK(developer->CreateLot(1, 1, 1, 1, 0, lot));
+    CHECK(TrackedCreateLot(developer, 1, 1, 1, 1, 0, lot));
 
     // UpdateZoneType marks the cells that hold no lot for the zone manager and leaves the lot's cell.
     developer->UpdateZoneType(&region);
@@ -1721,13 +1740,13 @@ void TestOnDezoneAndRemnants() {
     // (a plopped building's footprint stayed blocked by them), and the cells of the lot that keep their zone get the remnants.
     {
         cSC4Lot* cleared = nullptr;
-        CHECK(developer->CreateLot(2, 2, 2, 2, 0, cleared));
+        CHECK(TrackedCreateLot(developer, 2, 2, 2, 2, 0, cleared));
         cleared->UpdateZoneType();   // zone type 2 from the lot host
         SC4CellRegion<int> all = SC4CellRegion<int>::Make({2, 2, 3, 3}, true);
         developer->OnDezone(&all, false);
         CHECK(developer->GetLotCount() == 0);
         CHECK(developer->GetLot(2, 2, false) == nullptr && developer->GetLot(3, 3, false) == nullptr);
-        CHECK(developer->CreateLot(2, 2, 2, 2, 0, cleared));
+        CHECK(TrackedCreateLot(developer, 2, 2, 2, 2, 0, cleared));
         cleared->UpdateZoneType();
         host.zoneManager.zones[{2, 2}] = 2;   // the west column keeps its zone
         host.zoneManager.zones[{2, 3}] = 2;
@@ -1741,7 +1760,7 @@ void TestOnDezoneAndRemnants() {
     }
     host.zoneManager.defaultZone = 2;
     cSC4Lot* lot = nullptr;
-    CHECK(developer->CreateLot(2, 2, 2, 2, 0, lot));
+    CHECK(TrackedCreateLot(developer, 2, 2, 2, 2, 0, lot));
     lot->UpdateZoneType();   // zone type 2 from the lot host
     CHECK(developer->GetLotCount() == 1);
     // An orphaned rail piece inside the region is handed to the demolition service.
@@ -1911,7 +1930,7 @@ void TestCanCreatePloppedLot() {
     CHECK(developer->CanCreatePloppedLot(rect, 2, configuration) == 8);
     // Existing lots are not consulted.
     cSC4Lot* lot = nullptr;
-    CHECK(developer->CreateLot(4, 4, 1, 1, 0, lot));
+    CHECK(TrackedCreateLot(developer, 4, 4, 1, 1, 0, lot));
     CHECK(developer->CanCreatePloppedLot(rect, 2, configuration) == 8);
 
     // A street piece at (4, 4) blocks, unless the lot's network object sits there with matching edges.
@@ -1966,25 +1985,25 @@ int main() {
     FakeSimGridCity simGridCity;
     SetSimGridCity(&simGridCity);
 
-    TestLayoutAndCom();
-    TestInitShutdown();
-    TestBoundaryRules();
-    TestLotCreationAndQueries();
-    TestNetworkAndOccupantSeams();
-    TestDeferAndMessages();
-    TestSerialization();
-    TestParcellizableRegionAndCompression();
-    TestExtractAndSubdivide();
-    TestUpdateZoneTypeAndHighlightTextures();
-    TestStreetDrawingAndJogStreets();
-    TestExamineBoundariesAndOnZone();
-    TestExamineBoundariesOrientations();
-    TestDetermineLotSizeWithDeveloper();
-    TestParcellizeLayout();
-    TestOnDezoneAndRemnants();
-    TestConnectionFixups();
-    TestPlopAllLotTypes();
-    TestCanCreatePloppedLot();
+    TestLayoutAndCom(); ReleaseCallerRefs();
+    TestInitShutdown(); ReleaseCallerRefs();
+    TestBoundaryRules(); ReleaseCallerRefs();
+    TestLotCreationAndQueries(); ReleaseCallerRefs();
+    TestNetworkAndOccupantSeams(); ReleaseCallerRefs();
+    TestDeferAndMessages(); ReleaseCallerRefs();
+    TestSerialization(); ReleaseCallerRefs();
+    TestParcellizableRegionAndCompression(); ReleaseCallerRefs();
+    TestExtractAndSubdivide(); ReleaseCallerRefs();
+    TestUpdateZoneTypeAndHighlightTextures(); ReleaseCallerRefs();
+    TestStreetDrawingAndJogStreets(); ReleaseCallerRefs();
+    TestExamineBoundariesAndOnZone(); ReleaseCallerRefs();
+    TestExamineBoundariesOrientations(); ReleaseCallerRefs();
+    TestDetermineLotSizeWithDeveloper(); ReleaseCallerRefs();
+    TestParcellizeLayout(); ReleaseCallerRefs();
+    TestOnDezoneAndRemnants(); ReleaseCallerRefs();
+    TestConnectionFixups(); ReleaseCallerRefs();
+    TestPlopAllLotTypes(); ReleaseCallerRefs();
+    TestCanCreatePloppedLot(); ReleaseCallerRefs();
 
     if (g_failures != 0) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);

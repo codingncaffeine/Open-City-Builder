@@ -32,7 +32,8 @@ static std::size_t BucketSize(const std::forward_list<std::uint32_t>& list) {
 struct FakeTexture : IOverlayTexture {
     int id;
     int refs = 1;
-    explicit FakeTexture(int id_) : id(id_) {}
+    explicit FakeTexture(int id_) : id(id_) { Textures().push_back(this); }
+    static std::vector<FakeTexture*>& Textures() { static std::vector<FakeTexture*> v; return v; }
     void AddRef() override { ++refs; }
     void Release() override { --refs; }
     int GlTextureId() const override { return id; }
@@ -42,7 +43,8 @@ struct FakeStringTexture : IOverlayStringTexture {
     int id;
     std::int32_t width, height;
     int refs = 1;
-    FakeStringTexture(int id_, std::int32_t w, std::int32_t h) : id(id_), width(w), height(h) {}
+    FakeStringTexture(int id_, std::int32_t w, std::int32_t h) : id(id_), width(w), height(h) { Strings().push_back(this); }
+    static std::vector<FakeStringTexture*>& Strings() { static std::vector<FakeStringTexture*> v; return v; }
     void AddRef() override { ++refs; }
     void Release() override { --refs; }
     void GetSize(std::int32_t& w, std::int32_t& h) const override { w = width; h = height; }
@@ -309,7 +311,7 @@ static void TestRecordsAndSlots() {
         CHECK(texture->refs == 3);
     }
     CHECK(texture->refs == 1);
-    delete texture;
+    // the texture is freed with the others at the end of main
 
     // The slot pool: append, free-list push (tail chain), reuse in LIFO order, and the chain reset when the last slot
     // is reused. cDecal is the POD instantiation.
@@ -1047,6 +1049,9 @@ int main() {
     TestSpatialIndexAndStaticRects(host);
     TestDrawPass(host);
     TestCofactors();
+    // every fake texture was created by the test or its fake factory; the game only held references
+    for (auto* t : FakeTexture::Textures()) delete t;
+    for (auto* t : FakeStringTexture::Strings()) delete t;
     std::printf(failures ? "sc4_overlaymanager: %d FAILED\n" : "sc4_overlaymanager: all ok\n", failures);
     return failures ? 1 : 0;
 }

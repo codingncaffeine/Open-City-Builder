@@ -75,7 +75,8 @@ int main() {
     bool confirmAnswer = false;
     int modalAnswer = 0;
     sc4::AppCityHooks& hooks = app->CityHooks();
-    hooks.createCity = [&]() -> cISC4City* { city = new City; return city; };
+    std::vector<City*> madeCities;   // City::Release never deletes, so the test frees them
+    hooks.createCity = [&]() -> cISC4City* { city = new City; madeCities.push_back(city); return city; };
     hooks.destroyCurrentScreen = [&] { screens.push_back("destroy"); };
     hooks.createCityScreen = [&] { screens.push_back("city"); };
     hooks.createRegionScreen = [&] { screens.push_back("region"); };
@@ -156,6 +157,7 @@ int main() {
 
     SL::spMS2 = nullptr;
     app->Release();
+    for (City* c : madeCities) delete c;
     if (failures == 0) std::puts("sc4_appcity: all passed");
     return failures ? 1 : 0;
 }

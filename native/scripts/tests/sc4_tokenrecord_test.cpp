@@ -51,7 +51,8 @@ public:
         ok &= r->SetFieldUint32(kUint32Def, b, 1);
         cRZString s("hello");
         ok &= r->SetFieldString(kStringDef, s, 0);
-        r->SetTokenString(kStringDef, *new cRZString("Greeting"));
+        cRZString greeting("Greeting");
+        r->SetTokenString(kStringDef, greeting);
         float f[3] = {1.5f, -2.25f, 100.0f};
         for (std::uint32_t i = 0; i < 3; ++i) ok &= r->SetFieldFloat32(kFloatDef, f[i], i);
         cGZPersistResourceKey key{0x11, 0x22, 0x33};

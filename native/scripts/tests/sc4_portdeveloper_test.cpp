@@ -128,6 +128,16 @@ struct FakeZoneManager final : IPortZoneManagerApi {
     }
 };
 
+// Every lot the fakes create starts with two references (the caller's and the lot list's); the fixture
+// drops whatever is left of them when it goes away.
+std::vector<cSC4Lot*> g_testLots;
+void ReleaseTestLots() {
+    for (cSC4Lot* lot : g_testLots) {
+        for (std::uint32_t n = lot->AddRef(); n > 0; --n) lot->Release();   // the last Release deletes the lot
+    }
+    g_testLots.clear();
+}
+
 struct FakeLotManager final : IPortLotManagerApi {
     int refs = 0;
     void AddRef() override { ++refs; }
@@ -161,6 +171,7 @@ struct FakeLotManager final : IPortLotManagerApi {
             return false;
         }
         auto* lot = new cSC4Lot(x, z, sizeX, sizeZ, facing);
+        g_testLots.push_back(lot);
         lot->AddRef();
         lot->AddRef();
         created.push_back(lot);
@@ -431,7 +442,12 @@ struct TestPortDeveloper final : cSC4PortDeveloper {
     std::vector<cPortLot*> newLotArgs;
     std::vector<cPortLot*> upgradeArgs;
 
-    ~TestPortDeveloper() override { ++g_destroyed; }
+    ~TestPortDeveloper() override {
+        // Shutdown (the owner of these) is a no-op on a developer that was never Init-ed but did Read.
+        for (cPortLot* port : PortLots()) delete port;
+        for (cPortTypeConfig* config : Configurations()) delete config;
+        ++g_destroyed;
+    }
 
     void Configure(std::uint32_t developerId, std::uint16_t zoneType, std::uint32_t historyCategory,
                    std::uint32_t advisorEvent, std::uint32_t group) {
@@ -548,6 +564,7 @@ struct Fixture {
     ~Fixture() {
         SetPortDeveloperHost(nullptr);
         delete developer;
+        ReleaseTestLots();
     }
 
     // Release() destroys the developer below a count of 2; drop the fixture's pointer first.
@@ -614,6 +631,7 @@ struct Fixture {
     // A 1x1 lot at cell (x, z); two references like CreateLot (the caller's and the lot list's).
     static cSC4Lot* MakeLot(int x, int z, int facing = 0) {
         auto* lot = new cSC4Lot(x, z, 1, 1, facing);
+        g_testLots.push_back(lot);
         lot->AddRef();
         lot->AddRef();
         return lot;

@@ -144,6 +144,7 @@ int main() {
         auto* copy = static_cast<cIHitPersistResource*>(cp);
         assert(copy->GetInstance() == 0x77 && copy != static_cast<cIHitPersistResource*>(r));
         copy->Release();
+        copy->Release();   // the copy inherits the source count (1), then QueryInterface added one
         r->Release();
     }
     {

@@ -278,6 +278,7 @@ int main() {
     void* raw = nullptr;
     CHECK(gen->QueryInterface(kGZIID_cIGZWinGen, &raw) && raw == static_cast<cIGZWinGen*>(gen)); gen->Release();
     gen->Release();
+    imagePtr->Release();
     std::printf(failures ? "FAILED (%d)\n" : "OK\n", failures);
     return failures ? 1 : 0;
 }

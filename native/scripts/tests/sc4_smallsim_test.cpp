@@ -47,8 +47,8 @@ int main() {
     CHECK(requester->SelectProp(candidates, 0, 0) == 0);
     void* out = nullptr;
     CHECK(requester->QueryInterface(0x89c498be, &out) && requester->QueryInterface(0xe4fda3d4, &out) && !requester->QueryInterface(2, &out));
-    requester->Release();
-    requester->Release();   // refcount 3 -> frees at the last release
+    requester->Release(); requester->Release();   // the two successful queries
+    requester->Release();   // refcount 1 -> frees
 
     auto* filter = new cSC4LotConfigurationFilter();
     filter->AddRef();

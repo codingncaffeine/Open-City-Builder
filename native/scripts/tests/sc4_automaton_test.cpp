@@ -2,6 +2,7 @@
 // controller handshake and the behaviour state machine, the simulated step (DoAnimationTick) and the placement path.
 // The model, effect, city, sound and controller-manager neighbours are fakes (the automaton only ever reaches them
 // through IAutomatonHost / IAutomatonModel / IAutomatonEffects and the recovered cSC4AutomataController).
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -26,7 +27,13 @@ using namespace sc4;
 namespace {
 
 // ---- fakes ---------------------------------------------------------------------------------------------------------
+struct FakeModel;
+// The models are counted by hand and nothing deletes them: main frees them all once every automaton is gone.
+std::vector<FakeModel*> g_models;
+
 struct FakeModel final : IAutomatonModel {
+    FakeModel() { g_models.push_back(this); }
+    ~FakeModel() { g_models.erase(std::find(g_models.begin(), g_models.end(), this)); }   // stack models leave the list
     int refs = 1;
     int addRefs = 0, releases = 0, transformSets = 0, opacitySets = 0, rendererUpdates = 0, frame = 0, frameCount = 1;
     float opacity = 1.0f;
@@ -863,6 +870,7 @@ int main() {
         CHECK(automaton->StateStack().empty());
         CHECK(target->refs == 1);   // the released reference
         target->Release();
+        delete target;
         CHECK(automaton->Release() == 0);
     }
 
@@ -1161,6 +1169,7 @@ int main() {
         registry->Release();
     }
 
+    for (FakeModel* model : std::vector<FakeModel*>(g_models)) delete model;
     if (failures == 0) std::printf("PASS sc4_automaton\n");
     else std::printf("FAIL sc4_automaton (%d checks)\n", failures);
     return failures == 0 ? 0 : 1;

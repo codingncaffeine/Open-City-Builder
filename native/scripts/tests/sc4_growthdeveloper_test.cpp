@@ -426,9 +426,9 @@ struct FakeSpecialOccupant final : cISC4Occupant {
     bool QueryInterface(std::uint32_t, void**) override { return false; }
     std::uint32_t AddRef() override { return static_cast<std::uint32_t>(++refs); }
     std::uint32_t Release() override {
-        --refs;
-        if (refs <= 0) delete this;
-        return static_cast<std::uint32_t>(refs);
+        const int left = --refs;
+        if (left <= 0) delete this;
+        return static_cast<std::uint32_t>(left);
     }
     bool Init() override { return true; }
     bool Shutdown() override { return true; }
@@ -1139,6 +1139,7 @@ void TestLandmarkPass() {
     CHECK(d->DesirabilityWorkMap()->GetTractValue(1, 0) == 38);
     CHECK(d->MapUpdateStage() == 16);     // the list is finished
     occupant->Release();                  // the fixture's list keeps its own reference
+    occupant->Release();                  // drops the construction reference
 }
 
 void TestEstimateDesirability() {

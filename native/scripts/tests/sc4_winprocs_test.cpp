@@ -132,6 +132,7 @@ int main() {
     CHECK(proc->DoWinProcMessage(&compassWindow, stop) && host.removed.size() == 2);
     CHECK(proc->QueryInterface(0x452294aa, &out) && proc->QueryInterface(0x22e85d8e, &out) && !proc->QueryInterface(9, &out));
     message->Release();
+    proc->Release(); proc->Release(); proc->Release();   // the count of 1 plus the two successful queries
     for (cGZWin* w : {&dialog, &panel, &small, &legendWindow, &face1, &face2, &face3}) w->Release();
     compassWindow.Release();
     std::printf(failures ? "FAILED\n" : "OK\n");

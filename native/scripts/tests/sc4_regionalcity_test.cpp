@@ -748,6 +748,9 @@ void testConnections() {
     host.currentCity = nullptr;
     CHECK(city.DoMessage(&changed));
     CHECK(city.ConnectionChangesForTest().empty());
+    fake->Release();   // the fakes start with the test's own reference
+    adjacency->Release();
+    incoming->Release();
 }
 
 void testDeals() {
