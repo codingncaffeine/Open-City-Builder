@@ -19,7 +19,7 @@ void InstallSoundBankStub();
 void InstallAuraStub();
 void InstallAuraHost();   // app/NativeAura.cpp
 void InstallPropDeveloperHost();   // app/NativePropDeveloper.cpp
-void InstallAutomataAttractorStub();
+void InstallAutomataGroupHosts();
 void InstallAutomataControllerStub();
 void InstallAutomataControllerHost();   // app/NativeAutomataControllerHost.cpp
 void InstallControllerManagerStub();
@@ -34,7 +34,7 @@ void InstallBuildingDevelopmentSimStub();
 void InstallFeatureStub();
 void InstallCameraControlStub();
 void InstallCitySituationAdviceStub();
-void InstallCivicBuildingStub();
+void InstallCivicBuildingHost();
 void InstallDemandSimulatorStub();
 void InstallDisasterStub();
 void InstallDisasterHosts();   // NativeDisasters.cpp
@@ -55,7 +55,7 @@ void InstallHelicopterStub();
 void InstallLandfillDeveloperStub();
 void InstallLandfillDeveloperHost();   // NativeLandfill.cpp
 void InstallLightingManagerStub();
-void InstallLocalGridStub();
+void InstallLocalGridHost();
 void InstallLotStub();
 void InstallLotBaseTextureStub();
 void InstallLotConfigurationStub();
@@ -76,10 +76,8 @@ void InstallNetworkOccupantStub();
 void InstallNetworkLotHosts();   // NativeNetworkLots.cpp
 void InstallPreBuiltModelOccupantStub();
 void InstallNetworkToolStub();
-void InstallOccupantGroupStub();
 void InstallOrdinanceStub();
 void InstallOrdinanceHost();   // app/NativeOrdinance.cpp
-void InstallOrdinanceSimStub();
 void InstallOverlayStub();
 void InstallPlaceableStub();
 void InstallPortDeveloperStub();
@@ -139,7 +137,7 @@ void InstallStubHosts() {
     InstallSoundBankStub();
     InstallAuraStub();
     InstallAuraHost();                    // the mayor rating simulator's real host replaces the stub
-    InstallAutomataAttractorStub();
+    InstallAutomataGroupHosts();          // NativeAutomataGroups.cpp: occupant group rolls, attractor states
     InstallAutomataControllerStub();
     InstallAutomataControllerHost();   // the native host replaces the stub
     InstallControllerManagerStub();
@@ -154,7 +152,7 @@ void InstallStubHosts() {
     InstallFeatureStub();
     InstallCameraControlStub();
     InstallCitySituationAdviceStub();
-    InstallCivicBuildingStub();
+    InstallCivicBuildingHost();           // NativeCivic.cpp: the civic building simulator's services
     InstallDemandSimulatorStub();
     InstallDisasterStub();
     InstallDisasterHosts();               // the real disaster, fire and flammability hosts replace the stub
@@ -174,7 +172,7 @@ void InstallStubHosts() {
     InstallLandfillDeveloperStub();
     InstallLandfillDeveloperHost();       // the landfill developer's real host replaces the stub above
     InstallLightingManagerStub();
-    InstallLocalGridStub();
+    InstallLocalGridHost();               // NativeLocalGrid.cpp: the cursor grid's effect and cell size
     InstallLotStub();
     InstallLotBaseTextureStub();
     InstallLotConfigurationStub();
@@ -195,10 +193,8 @@ void InstallStubHosts() {
     InstallNetworkLotHosts();             // the lot manager's and the pieces' real hosts replace the two stubs
     InstallPreBuiltModelOccupantStub();
     InstallNetworkToolStub();
-    InstallOccupantGroupStub();
     InstallOrdinanceStub();
     InstallOrdinanceHost();               // the real ordinance host replaces the stub above
-    InstallOrdinanceSimStub();
     InstallOverlayStub();
     InstallPlaceableStub();
     InstallPortDeveloperStub();

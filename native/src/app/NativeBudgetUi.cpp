@@ -1,3 +1,4 @@
+#include "app/NativeTutorial.h"
 #include "app/NativeBudgetUi.h"
 
 #include <cstdio>
@@ -127,7 +128,7 @@ public:
     bool RestoreWindowLocation(cIGZWin*, bool) override { return false; }
     void DecimalSeparator(cIGZString& out) override { out.AssignFromCString("."); }
     std::uint32_t MakeNativeColor(std::uint8_t r, std::uint8_t g, std::uint8_t b) override { return 0xff000000u | (std::uint32_t(r) << 16) | (std::uint32_t(g) << 8) | b; }
-    bool FilterUICommandMessage(cGZMessage&) override { return true; }
+    bool FilterUICommandMessage(cGZMessage& message) override { return NativeTutorialFilterUiCommand(message); }   // a running tutorial may veto it
     sc4::ISubBudgetWindow* CreateSubBudgetWindow() override { return new sc4::cSC4SubBudgetWindow(); }   // the department dialogs
 
 private:

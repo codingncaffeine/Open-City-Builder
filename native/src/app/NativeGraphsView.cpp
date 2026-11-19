@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <string>
 
+#include "app/NativeTutorial.h"
 #include "app/NativeCity.h"
 #include "app/NativeUi.h"
 #include "gz/Buffer.h"
@@ -44,8 +45,8 @@ template <class T> T* Component(CityComponent c, std::uint32_t clsid) {
 class GraphsViewHost final : public IGraphsViewHost {
 public:
     cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
-    // nsSC4TutorialSystem::FilterUICommandMessage: no tutorial runs natively yet, so every command goes through
-    bool FilterUICommandMessage(cGZMessage&) override { return true; }
+    // nsSC4TutorialSystem::FilterUICommandMessage: a running tutorial may veto the command
+    bool FilterUICommandMessage(cGZMessage& message) override { return NativeTutorialFilterUiCommand(message); }
     bool LoadExemplarString(cIGZString& out, cISCPropertyHolder* holder, std::uint32_t property) override {
         return native::LoadExemplarString(out, holder, property);
     }

@@ -233,11 +233,15 @@ void cSC4OrdinanceSimulator::ReleaseAll() {
     ordinances_.clear();
 }
 
+// ordinance.md 8.1: the month agent, and a city that was not loaded gets every standard ordinance (not made available yet: that is
+// the first month-end's work).
 bool cSC4OrdinanceSimulator::Init() {
     if (!initialised_) {
         initialised_ = true;
+        if (g_host) g_host->AddSimulatorAgent(this);
         if (!loaded_) {
             monthlyExpense_ = monthlyIncome_ = netAdjustment_ = 0;
+            LoadAllStandardOrdinances();
         }
         loaded_ = false;
     }
@@ -245,7 +249,10 @@ bool cSC4OrdinanceSimulator::Init() {
 }
 
 bool cSC4OrdinanceSimulator::Shutdown() {
-    if (initialised_) initialised_ = false;
+    if (initialised_) {
+        initialised_ = false;
+        if (g_host) g_host->RemoveSimulatorAgent(this);
+    }
     return true;
 }
 
@@ -326,9 +333,10 @@ bool cSC4OrdinanceSimulator::RemoveOrdinance(cISC4Ordinance* ordinance) {
     return true;
 }
 
+// ordinance.md 8.1 / i386 0x0053272a: the class is chosen by the exemplar's INSTANCE id; an instance with no class makes no ordinance.
 void cSC4OrdinanceSimulator::CreateStandardOrdinance(const cGZPersistResourceKey& key) {
-    auto* ordinance = new cSC4OrdinanceSimple();
-    ordinance->AddRef();
+    cSC4OrdinanceSimple* ordinance = g_host ? g_host->CreateOrdinance(key.instance) : nullptr;   // one reference
+    if (!ordinance) return;
     ordinance->SetKey(key);
     ordinance->Init();
     const std::uint32_t id = ordinance->GetID();

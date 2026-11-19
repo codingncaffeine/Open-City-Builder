@@ -5,8 +5,10 @@
 #include <map>
 #include <memory>
 
+#include "app/NativeLighting.h"
 #include "app/NativeAutomataViews.h"
 #include "app/NativeCity.h"
+#include "sc4/LightingManager.h"
 #include "sc4/AutomataManager.h"
 #include "sc4/DBSegment.h"
 #include "sc4/Pedestrian.h"
@@ -267,7 +269,7 @@ public:
     // cSC4VehicleManager::sbDefaultCollide (cars follow their leaders) / sbDefaultHeadlights (off until the cheat).
     bool DefaultCollide() override { return true; }
     bool DefaultHeadlights() override { return false; }
-    bool SceneLightsOn() override { return false; }   // PARTIAL: the lighting manager's night state
+    bool SceneLightsOn() override { sc4::cSC4LightingManager* lighting = LightingManager(); return lighting && lighting->IsNight(); }   // SL::spLightingManager slot 0x48
     void ManagerRecalculateLeaders(cSC4Automaton* automaton) override {
         auto* manager = Component<cSC4TrafficAutomataManager>(CityComponent::VehicleManager);
         if (manager && automaton) manager->RecalculateLeaders(TrafficAutomatonView(AutomatonView(automaton)));

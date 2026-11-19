@@ -422,7 +422,7 @@ src/app/hosts/StubAdvisorSystem.cpp
 src/app/hosts/StubAircraft.cpp
 src/app/hosts/StubAmbienceState.cpp
 src/app/hosts/StubAura.cpp
-src/app/hosts/StubAutomataAttractor.cpp
+src/app/NativeAutomataGroups.cpp
 src/app/hosts/StubAutomataController.cpp
 src/app/hosts/StubAutomataManager.cpp
 src/app/hosts/StubAutomaton.cpp
@@ -433,7 +433,7 @@ src/app/hosts/StubBuildingDevelopmentSim.cpp
 src/app/hosts/StubCameraControl.cpp
 src/app/hosts/StubCatalogView.cpp
 src/app/hosts/StubCitySituationAdvice.cpp
-src/app/hosts/StubCivicBuilding.cpp
+src/app/NativeCivic.cpp
 src/app/NativeControllerManagerHost.cpp
 src/app/hosts/StubDemandSimulator.cpp
 src/app/hosts/StubDisaster.cpp
@@ -457,7 +457,7 @@ src/app/hosts/StubHelicopter.cpp
 src/app/hosts/StubLandfillDeveloper.cpp
 src/app/hosts/StubLightingManager.cpp
 src/app/hosts/StubLoadHeightField.cpp
-src/app/hosts/StubLocalGrid.cpp
+src/app/NativeLocalGrid.cpp
 src/app/hosts/StubLot.cpp
 src/app/hosts/StubLotBaseTexture.cpp
 src/app/hosts/StubLotConfiguration.cpp
@@ -476,9 +476,7 @@ src/app/hosts/StubNetworkLotManager.cpp
 src/app/hosts/StubNetworkManager.cpp
 src/app/hosts/StubNetworkOccupant.cpp
 src/app/hosts/StubNetworkTool.cpp
-src/app/hosts/StubOccupantGroup.cpp
 src/app/hosts/StubOrdinance.cpp
-src/app/hosts/StubOrdinanceSim.cpp
 src/app/hosts/StubOverlay.cpp
 src/app/hosts/StubPlaceLot.cpp
 src/app/hosts/StubPlaceable.cpp

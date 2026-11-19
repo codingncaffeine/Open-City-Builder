@@ -8,6 +8,7 @@
 // PARTIAL: loose advisor scripts from the plugin folders
 // (UpdateResourcesFromDirectory), the tutorial registry's Lua, the MySim functions, is_tutorial, and the building words of
 // a reward subject.
+#include <algorithm>
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
@@ -15,6 +16,7 @@
 #include <cstdlib>
 #include <string>
 
+#include "app/NativeTutorial.h"
 #include "app/NativeRegionScreen.h"
 #include "app/NativeCity.h"
 #include "app/NativeCityView.h"
@@ -49,6 +51,8 @@
 #include "sc4/Simulator.h"
 #include "sc4/StringDetokenizer.h"
 #include "app/NativeBoot.h"
+#include "sc4/RegionalCity.h"
+#include "sc4/App.h"
 #include "app/NativeCitySystems.h"
 #include "app/NativeUi.h"
 #include "gz/Win.h"
@@ -406,7 +410,27 @@ int L_unlock_reward_building(lua_State* L) {
     civic->UpdateConditionalBuildingStatus(guid, &record);
     return 0;
 }
-int L_is_tutorial(lua_State* L) { HostOf(L)->PushNumber(0.0); return 1; }   // PARTIAL: no tutorial city natively yet (scripts compare it with < 1)
+// LUAExtension_is_tutorial (i386 0x003081e0): with a number argument (Lua type 3), whether the regional city's tutorial GUID
+// (+0x104) is that GUID; without one (or with 0xffffffff), whether the city is a tutorial at all (GUID != -1). 0 without a city.
+int L_is_tutorial(lua_State* L) {
+    cISCLua* lua = HostOf(L);
+    cSC4App* app = BootApplication();
+    auto* regional = app ? dynamic_cast<cSC4RegionalCity*>(app->GetRegionalCity()) : nullptr;
+    double result = 0.0;
+    if (HostCity() && regional) {
+        const int guid = regional->GetTutorialGUID();
+        std::uint32_t wanted = 0xffffffffu;
+        if (lua->GetTop() >= 1 && lua->Type(1) == 3) {
+            // the double is clamped to [0, 2^32 - 1] and converted unsigned (the compiled float-to-uint32 sequence)
+            const double value = std::min(std::max(lua->ToNumber(1), 0.0), 4294967295.0);
+            wanted = static_cast<std::uint32_t>(value);
+        }
+        if (wanted != 0xffffffffu) result = static_cast<std::uint32_t>(guid) == wanted ? 1.0 : 0.0;
+        else result = guid != -1 ? 1.0 : 0.0;
+    }
+    lua->PushNumber(result);
+    return 1;
+}
 int L_advice_info(lua_State*) {
     cRZString text("No context advice available...\n");
     cSC4AdvisorSystem* system = System();
@@ -551,7 +575,7 @@ public:
         return ok;
     }
     cIGZMessageServer2* Messages() override { return SL::spMS2; }
-    void FilterUICommandMessage(cGZMessage&) override {}   // PARTIAL: the tutorial system is not recovered
+    void FilterUICommandMessage(cGZMessage& message) override { NativeTutorialFilterUiCommand(message); }   // a running tutorial's veto (ignored here, as in the original)
 };
 
 // The advisor system's view of the window (IAdvisorWinProc) over the recovered procedure.

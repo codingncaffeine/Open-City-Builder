@@ -73,7 +73,7 @@ bool cSC4OccupantGroupTemplate::IsOccupantIncluded(cISC4Occupant* occupant) {
     if (!cSCPropertyHelp::GetPropertyValue(occupant->AsPropertyHolder(), kPropertyOccupantGroups, groups) || groupId == 0) return false;
     for (std::uint32_t id : groups) {
         if (id != groupId) continue;
-        if (chance_ < 1.0f) return g_host->RandomDouble() <= static_cast<double>(chance_);
+        if (chance_ < 1.0f) return static_cast<float>(g_host->RandomDouble()) <= chance_;   // compared as a float, as the original
         return true;
     }
     return false;

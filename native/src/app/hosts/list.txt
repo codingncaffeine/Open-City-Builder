@@ -8,7 +8,6 @@ Aircraft
 AmbienceState
 SoundBank
 Aura
-AutomataAttractor
 AutomataController
 ControllerManager
 AutomataManager
@@ -20,7 +19,6 @@ BuildingDevelopmentSim
 Feature
 CameraControl
 CitySituationAdvice
-CivicBuilding
 DemandSimulator
 Disaster
 Effects
@@ -33,7 +31,6 @@ GrowthDeveloper
 Helicopter
 LandfillDeveloper
 LightingManager
-LocalGrid
 Lot
 LotBaseTexture
 LotConfiguration
@@ -52,9 +49,7 @@ NetworkManager
 NetworkOccupant
 PreBuiltModelOccupant
 NetworkTool
-OccupantGroup
 Ordinance
-OrdinanceSim
 Overlay
 PipeBurst
 Placeable

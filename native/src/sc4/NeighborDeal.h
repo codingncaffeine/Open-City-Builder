@@ -31,7 +31,7 @@ class INeighborDealHost {
 public:
     virtual ~INeighborDealHost() = default;
     virtual bool CityHasBudget() = 0;                                         // SL::spCity vslot 0x1f0 != null
-    virtual double DealCost(double amount, std::uint32_t type, void* otherCity) = 0;   // budget vslot 0x118
+    virtual double DealCost(double amount, std::uint32_t type, void* otherCity) = 0;   // the current city's neighbors simulator vslot 0x118 (GetDealCost)
     virtual bool CityEntryAtCell(int x, int y, void*& city) = 0;              // regional manager vslot 0x58
     virtual void* CurrentCity() = 0;                                          // SL::spSC4 vslot 0x120
     virtual double CurrentCityFunds() = 0;                                    // city vslot 0x190

@@ -18,6 +18,7 @@
 #include "sc4/BudgetSimulator.h"
 #include "app/NativeCity.h"
 #include "sc4/NeighborsSimulator.h"
+#include "sc4/Simulator.h"
 #include "sc4/Region.h"
 #include "sc4/RegionalCity.h"
 #include "gz/cGZPersistResourceManager.h"
@@ -227,6 +228,16 @@ int CurrentCellsZ() { cISC4City* city = g_app ? g_app->GetCity() : nullptr; auto
 
 class NeighborsHost final : public sc4::INeighborsHost {
 public:
+    static sc4::cSC4Simulator* Simulator() {
+        sc4::cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::Simulator) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(0x8695664e, &raw) || !raw) return nullptr;
+        auto* simulator = static_cast<sc4::cSC4Simulator*>(static_cast<sc4::cISC4Simulator*>(raw));
+        simulator->Release();   // the city keeps it
+        return simulator;
+    }
+
     cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
     cISC4City* City() override { return g_app ? g_app->GetCity() : nullptr; }
     cISC4RegionalCity* CurrentRegionalCity() override { return g_app ? g_app->GetRegionalCity() : nullptr; }
@@ -235,11 +246,28 @@ public:
         const cGZPersistResourceKey key{0x6534284a, 0x7a4a8458, 0x6a469021};
         return SL::spRM && SL::spRM->GetResource(key, 0xa52160f5, &raw, 0, nullptr) ? static_cast<sc4::cISCResExemplar*>(raw) : nullptr;
     }
-    void AddSimulatorAgent(cIGZMessageTarget2*, int, const char*) override {}   // PARTIAL: the deal pass does not run natively
-    void RemoveSimulatorAgent(cIGZMessageTarget2*) override {}
-    void SimDate(cIGZDate&) override {}
-    void PostMessage(std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, cIGZUnknown*) override {}
-    void PostDealStatusMessage(std::uint32_t, cIGZUnknown*) override {}
+    // neighbors.md 11.2: the month, day and idle agents, flags 2 (an established city only)
+    void AddSimulatorAgent(cIGZMessageTarget2* agent, int interval, const char* name) override { AddCitySimulatorAgent(agent, interval, name, 2); }
+    void RemoveSimulatorAgent(cIGZMessageTarget2* agent) override { RemoveCitySimulatorAgent(agent); }
+    void SimDate(cIGZDate& out) override {
+        if (sc4::cSC4Simulator* simulator = Simulator()) out.Copy(simulator->GetSimDate());
+    }
+    void PostMessage(std::uint32_t type, std::uint32_t data1, std::uint32_t data2, std::uint32_t data3, std::uint32_t data4,
+                     cIGZUnknown* unknown) override {
+        if (!SL::spMS2) return;
+        auto* message = new cRZMessage2Standard();
+        message->AddRef();
+        message->SetType(type);
+        message->SetData1(data1);
+        message->SetData2(data2);
+        message->SetData3(data3);
+        message->SetData4(data4);
+        message->SetIGZUnknown(unknown);
+        SL::spMS2->MessagePost(message, false);
+        message->Release();
+    }
+    // a status report (neighbors.md 5.3): data1 = the status, the deal as the message object
+    void PostDealStatusMessage(std::uint32_t status, cIGZUnknown* deal) override { PostMessage(sc4::kNeighborsMessageDealStatus, status, 0, 0, 0, deal); }
     cISC4RegionalCity* RegionCityAt(int x, int z) override { return RegionCity(x, z); }
     void ReloadCityAt(int, int) override {}
     int CityCellCountX() override { return CurrentCellsX(); }
@@ -350,7 +378,14 @@ public:
 class DealHost final : public sc4::INeighborDealHost {
 public:
     bool CityHasBudget() override { return Budget() != nullptr; }
-    double DealCost(double, std::uint32_t, void*) override { return 0.0; }
+    // cSC4NeighborDeal::UpdateCost: the CURRENT city's neighbors simulator prices the deal (neighbors.md 8.1, vslot 0x118
+    // GetDealCost(type, amount, the city on the other side)). Without a city or simulator the original crashes; 0 here (the deal
+    // then costs 1).
+    double DealCost(double amount, std::uint32_t type, void* otherCity) override {
+        sc4::cSC4City* city = HostCity();
+        auto* neighbors = city ? dynamic_cast<sc4::cSC4NeighborsSimulator*>(city->GetComponent(sc4::CityComponent::NeighborsSimulator)) : nullptr;
+        return neighbors ? neighbors->GetDealCost(type, amount, static_cast<const cISC4RegionalCity*>(otherCity)) : 0.0;
+    }
     bool CityEntryAtCell(int x, int z, void*& city) override {
         city = RegionCity(x, z);
         return city != nullptr;

@@ -48,6 +48,9 @@ constexpr std::uint32_t kOrdPropIncomeFactor = 0x28ebbc3a;
 constexpr std::uint32_t kOrdPropAdvisor = 0x28ebbc3b;
 constexpr std::uint32_t kOrdPropIsIncome = 0x28ebbc3c;
 
+class cSC4OrdinanceSimple;
+class cSC4OrdinanceSimulator;
+
 class IOrdinanceHost {
 public:
     virtual ~IOrdinanceHost() = default;
@@ -58,6 +61,13 @@ public:
     virtual void PostMessage(std::uint32_t type, std::uint32_t id, std::uint32_t flag) = 0;
     // Calls back for every exemplar key of the ordinance type (resource manager vslot 0x90 / 0x38 enumeration).
     virtual void ForEachOrdinanceKey(const std::function<void(const cGZPersistResourceKey&)>&) {}
+    // GZCOM()->CreateInstance(classId, 0x8bd4fc74): the ordinance class registered under `classId` (the exemplar's instance), one
+    // reference, or null when no class has that id (such an exemplar makes no ordinance).
+    virtual cSC4OrdinanceSimple* CreateOrdinance(std::uint32_t classId) { (void)classId; return nullptr; }
+    // Simulator vslot 0x98 (target, 6 = month, "cSC4OrdinanceSimulator", flags 2 = an established city only) and its removal: the
+    // simulator's begin and month messages reach DoMessage through it.
+    virtual void AddSimulatorAgent(cSC4OrdinanceSimulator* simulator) { (void)simulator; }
+    virtual void RemoveSimulatorAgent(cSC4OrdinanceSimulator* simulator) { (void)simulator; }
 };
 IOrdinanceHost* OrdinanceHost();
 void SetOrdinanceHost(IOrdinanceHost* host);
