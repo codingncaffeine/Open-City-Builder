@@ -119,6 +119,7 @@ bool cRZCursor::LoadCursorA(const cIGZString& path) {
     file.SeekToPosition(imageOffset);
 
     if (!g_platform || !g_platform->HasGraphicsSystem()) return false;
+    if (buffer_) buffer_->Release();   // a reload replaces the image
     buffer_ = g_platform->CreateBuffer();
     if (!buffer_) return false;
     if (!buffer_->Init(width, height, cGZBufferColorType{kBufferColorARGB8888, 32})) {
