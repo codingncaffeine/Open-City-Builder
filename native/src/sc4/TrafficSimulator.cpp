@@ -15,6 +15,7 @@
 #include "sc4/Lot.h"
 #include "sc4/SCProperty.h"
 #include "sc4/PathFinder.h"
+#include "sc4/cSC4SimGrid.h"
 
 namespace sc4 {
 
@@ -99,13 +100,260 @@ std::uint32_t cSC4TrafficSimulator::Release() {
 
 // DoMessage, the work cycle and the network model: TrafficCycle.cpp.
 
-// 0x10007a5f8 / 0x10007b550 — the stream format is not recovered yet; stubbed so the class can be a
-// cIGZSerializable. See notes/ledger_pending/cSC4TrafficSimulator.txt.
-// The record a city file carried, replayed (RecordTape.h): the port's traffic simulator keeps none of its state yet.
+// A city file's record is replayed as it was read (RecordTape.h): the parts of it the port does not model stay as the file had them.
+// A city that did not come from a file writes the original's record (WriteFreshCityRecord).
 bool cSC4TrafficSimulator::Write(cIGZOStream& stream) const {
-    if (cityRecord_.Empty()) return false;
-    return cityRecord_.Replay(stream);
+    if (stream.GetError()) return false;
+    if (!cityRecord_.Empty()) return cityRecord_.Replay(stream);
+    return WriteFreshCityRecord(stream);
 }
+
+// i386 0x00061498 (save-records 7.1.1, version 41) for a city that did not come from a file. What the port models is written from its
+// state; the rest holds what the original holds for a new city (its constructor and Init, i386 0x0005bed6 / 0x00058684):
+// - the 0x69d5c3fa float grid (never written by the original) is a zero grid of the city's size;
+// - the transit switches whose building the host hands out as an object, with the two switch grids holding only their cells;
+// - the roads and mass-transit departments are null references (the port keeps the budget outside this class; the original's Init
+//   answers a null one with a new department);
+// - the scanning iterator is the one Init makes (state 0, cell (0, 0), step 1, the city rectangle), the lot iterator likewise (state 0,
+//   length 1, the city rectangle widened by one cell);
+// - the trip-search context the port does not keep (the context words after the re-route cell, the 3 x 9 table, its two flags), the
+//   three unused words, the per-switch-type statistics rows and the set tails, the tunnels, the ferry total and the ferry terminals
+//   are 0 / empty, as the original's constructor leaves them or as a city without tunnels and ferries holds them.
+bool cSC4TrafficSimulator::WriteFreshCityRecord(cIGZOStream& stream) const {
+    constexpr int kNetworkTypes = 13, kTravelTypes = 9;
+    const auto grid = [&stream](const cISC4SimGridBase* g) { SC4WriteGZSerializable(stream, g); };
+    const int cellsX = cellsX_ > 0 ? cellsX_ : lastX_ + 1, cellsZ = cellsZ_ > 0 ? cellsZ_ : lastZ_ + 1;
+    stream.SetUint16(41);
+    stream.SetSint32(kNetworkTypes);                         // network types
+    stream.SetSint32(1);                                     // bridge rows
+    stream.SetSint32(kNetworkTypes);                         // legacy rows
+    stream.SetSint32(kTravelTypes);                          // travel types
+    grid(airMap_);                                           // i386 +0x30
+    grid(peakVolume_);                                       // +0x34
+    grid(commercialMap_);                                    // +0x38
+    grid(commercialWork_);                                   // +0x3c
+    grid(tripLengthMap_);                                    // +0x44
+    grid(congestionMap_);                                    // +0x48
+    // the destination map, [x + 1][z + 1]: (W + 2) rows of (H + 2) bytes
+    const std::uint32_t rows = !cellTripFlags_.empty() ? std::uint32_t(cellTripFlags_.size()) : std::uint32_t(std::max(cellsX, 0) + 2);
+    const std::uint32_t columns = !cellTripFlags_.empty() ? std::uint32_t(cellTripFlags_[0].size()) : std::uint32_t(std::max(cellsZ, 0) + 2);
+    stream.SetUint32(rows);
+    stream.SetUint32(columns);
+    for (std::uint32_t x = 0; x < rows; ++x)
+        for (std::uint32_t z = 0; z < columns; ++z)
+            stream.SetUint8(x < cellTripFlags_.size() && z < cellTripFlags_[x].size() ? cellTripFlags_[x][z] : 0);
+    stream.SetUint32(6);                                     // the volume grids, one per transit network
+    for (const cSC4SimGrid<float>* volume : volume_) grid(volume);
+    {
+        auto* unused = new cSC4SimGrid<float>();             // 0x69d5c3fa
+        unused->AddRef();
+        unused->Init();
+        unused->SetTractSize(1);
+        unused->SetInstanceID(0x69d5c3fa);
+        grid(unused);
+        unused->Release();                                   // a save's serializer holds its own reference
+    }
+    grid(peakRatio_);
+    stream.SetUint32(std::uint32_t(edgeDensities_.size()));
+    for (const auto& [key, record] : edgeDensities_) {
+        stream.SetUint32(key);
+        for (std::uint16_t v : record.last) stream.SetUint16(v);
+        stream.SetUint16(record.density);
+        for (std::uint16_t v : record.current) stream.SetUint16(v);
+    }
+    for (int k = 0; k < 3; ++k) {
+        stream.SetUint32(std::uint32_t(tripCapacityTotals_[std::size_t(k)]));
+        stream.SetUint32(attempted_[std::size_t(k)]);
+        stream.SetUint32(routed_[std::size_t(k)]);
+    }
+    // the transit switches with a building object, and the two switch grids over their cells
+    std::vector<std::pair<std::uint32_t, cIGZUnknown*>> switches;
+    for (const auto& [id, sw] : transitSwitches_)
+        if (cIGZUnknown* building = sw.occupant ? host_->BuildingObject(sw.occupant) : nullptr) switches.emplace_back(id, building);
+    std::sort(switches.begin(), switches.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    {
+        auto* modes = new cSC4SimGrid<std::uint8_t>();       // 0x69d5c424
+        auto* ids = new cSC4SimGrid<std::uint32_t>();        // 0x69d5c42d
+        modes->AddRef();
+        ids->AddRef();
+        modes->Init();
+        ids->Init();
+        modes->SetTractSize(1);
+        ids->SetTractSize(1);
+        modes->SetInstanceID(0x69d5c424);
+        ids->SetInstanceID(0x69d5c42d);
+        if (!switchIds_.empty() && !switches.empty())
+            for (int x = 0; x < ids->GetTractCountX() && x < modes->GetTractCountX() && x < 256; ++x)
+                for (int z = 0; z < ids->GetTractCountZ() && z < modes->GetTractCountZ() && z < 256; ++z) {
+                    const std::size_t cell = (std::size_t(x) << 8) | std::size_t(z);
+                    const std::uint32_t id = switchIds_[cell];
+                    if (id == 0 || std::none_of(switches.begin(), switches.end(), [id](const auto& e) { return e.first == id; })) continue;
+                    ids->SetTractValue(x, z, id);
+                    modes->SetTractValue(x, z, switchModes_[cell]);
+                }
+        grid(modes);
+        grid(ids);
+        modes->Release();
+        ids->Release();
+    }
+    stream.SetUint32(nextSwitchId_);
+    stream.SetUint32(std::uint32_t(switches.size()));
+    for (const auto& [id, building] : switches) {
+        const TransitSwitch& sw = transitSwitches_.at(id);
+        stream.SetUint32(id);
+        SC4WriteGZSerializable(stream, building);
+        stream.SetFloat32(sw.traffic);                       // load
+        stream.SetFloat32(sw.cost);                          // time factor
+        stream.SetFloat32(sw.capacity);
+        stream.SetUint8(sw.hasAccessPoint ? 1 : 0);
+        stream.SetUint8(sw.accessX);
+        stream.SetUint8(sw.accessZ);
+        stream.SetFloat32(sw.usage);                         // the two counters
+        stream.SetFloat32(sw.percent);
+        stream.SetUint32(std::uint32_t(sw.rules.size()));
+        for (const TransitSwitchRule& rule : sw.rules) {
+            stream.SetUint8(rule.kind);
+            for (bool side : rule.side) stream.SetUint8(side ? 1 : 0);
+            stream.SetUint16(rule.from);
+            stream.SetUint16(rule.to);
+        }
+        stream.SetFloat32(sw.toll);
+        stream.SetUint8(sw.countsAsIntersection ? 1 : 0);
+    }
+    SC4WriteGZSerializable(stream, nullptr);                 // roads department
+    SC4WriteGZSerializable(stream, nullptr);                 // mass-transit department
+    stream.SetSint64(strikeEligible_);                       // the mass-transit building expense total
+    stream.SetFloat32(transitIncome_);
+    stream.SetFloat32(tollIncome_);
+    stream.SetFloat32(float(lastMonthlyIncome_));
+    stream.SetFloat64(incomeAcc_);
+    stream.SetFloat64(feeAcc_);
+    stream.SetUint32(cycleStartDate_);
+    stream.SetUint8(std::uint8_t(strikeState_));
+    stream.SetSint32(strikeDays_);
+    const auto damage = [&stream](std::uint32_t cells, int damaged, float rate, const CellSet& intact, const CellSet& broken) {
+        stream.SetUint32(cells);
+        stream.SetUint32(std::uint32_t(damaged));
+        stream.SetFloat32(rate);
+        stream.SetUint32(std::uint32_t(intact.Size()));
+        for (std::size_t i = 0; i < intact.Size(); ++i) stream.SetUint16(intact.At(i));
+        stream.SetUint32(std::uint32_t(broken.Size()));
+        for (std::size_t i = 0; i < broken.Size(); ++i) stream.SetUint16(broken.At(i));
+    };
+    damage(roadPotholeTotal_, roadPotholeCount_, roadFundingAccum_, healthyRoads_, damagedRoads_);
+    damage(railPotholeTotal_, railPotholeCount_, railFundingAccum_, healthyRail_, damagedRail_);
+    // the cycle position
+    stream.SetUint8(std::uint8_t(cycleState_));
+    stream.SetSint8(0);                                      // the scanning iterator as Init makes it
+    stream.SetSint32(0);
+    stream.SetSint32(0);
+    stream.SetUint32(1);
+    stream.SetSint32(0);
+    stream.SetSint32(0);
+    stream.SetSint32(cellsX - 1 < 0 ? 0 : cellsX - 1);
+    stream.SetSint32(cellsZ - 1 < 0 ? 0 : cellsZ - 1);
+    stream.SetUint8(intersectionDirty_ ? 1 : 0);
+    stream.SetSint32(dirtyX0_);
+    stream.SetSint32(dirtyZ0_);
+    stream.SetSint32(dirtyX1_);
+    stream.SetSint32(dirtyZ1_);
+    stream.SetUint8(networkChanged_ ? 1 : 0);
+    stream.SetUint32(strategyBucketCounter_);
+    stream.SetUint32(strategyBucket_);
+    // the phase position: the source being worked in states 15 - 18 (15 and 16 resume after it, 17 and 18 at it)
+    std::int16_t phaseX = 0, phaseZ = 0;
+    if (cycleState_ >= 15 && cycleState_ <= 18) {
+        const std::size_t held = cycleState_ <= 16 ? (sourceIndex_ > 0 ? sourceIndex_ - 1 : sources_.size()) : sourceIndex_;
+        if (held < sources_.size() && sources_[held]) {
+            int x = 0, z = 0;
+            sources_[held]->Location(x, z);
+            phaseX = std::int16_t(x);
+            phaseZ = std::int16_t(z);
+        }
+    }
+    stream.SetSint16(phaseX);
+    stream.SetSint16(phaseZ);
+    stream.SetSint8(0);                                      // the lot iterator as Init makes it
+    stream.SetSint8(0);
+    stream.SetSint32(0);
+    stream.SetSint32(0);
+    stream.SetSint32(1);
+    stream.SetSint32(-1);
+    stream.SetSint32(-1);
+    stream.SetSint32(cellsX);
+    stream.SetSint32(cellsZ);
+    stream.SetUint8(continueSearch_ ? 1 : 0);
+    stream.SetUint8(0);
+    stream.SetFloat32(0.0f);
+    stream.SetSint32(tripParams_.sourceX);                   // the re-route context cell
+    stream.SetSint32(tripParams_.sourceZ);
+    stream.SetUint32(0);
+    for (int i = 0; i < 4; ++i) stream.SetUint32(0);
+    stream.SetUint8(0);
+    stream.SetUint32(0);
+    for (int i = 0; i < 4; ++i) stream.SetSint32(0);
+    for (int i = 0; i < 3 * kTravelTypes; ++i) stream.SetUint32(0);
+    stream.SetUint8(0);
+    stream.SetUint8(0);
+    stream.SetSint32(std::int32_t(processed_));
+    stream.SetSint32(std::int32_t(dayIndex_));
+    stream.SetSint32(std::int32_t(total_));
+    stream.SetUint32(days_);
+    for (int i = 0; i < 3; ++i) stream.SetUint32(0);         // never used
+    stream.SetSint32(std::int32_t(passTotal_));
+    stream.SetSint32(std::int32_t(toReRoute_));
+    stream.SetSint32(std::int32_t(toSearch_));
+    for (std::uint32_t counter : passCounters_) stream.SetUint32(counter);
+    // the two statistics sets: the published one, then the working one
+    const auto stats = [&](const std::array<TrafficStatsRow, 14>& rows, std::uint16_t potholes, std::uint8_t tail) {
+        for (const TrafficStatsRow& row : rows) {             // 13 network types, then the bridge row
+            stream.SetFloat32(row.average);
+            stream.SetUint32(row.congested);
+            stream.SetSint32(row.maxX);
+            stream.SetSint32(row.maxZ);
+            stream.SetFloat32(row.max);
+        }
+        for (const TrafficStatsRow& row : rows) stream.SetUint16(row.records);
+        stream.SetUint16(potholes);
+        stream.SetSint32(12);                                // the per-switch-type rows
+        for (int i = 0; i < 12; ++i) {
+            stream.SetUint16(0);
+            stream.SetFloat32(0.0f);
+            stream.SetSint32(0);
+            stream.SetSint32(0);
+            stream.SetFloat32(0.0f);
+        }
+        stream.SetFloat32(0.0f);
+        stream.SetFloat32(0.0f);
+        stream.SetUint8(0);
+        stream.SetFloat32(0.0f);
+        stream.SetUint8(tail);
+    };
+    stats(statsPublished_, std::uint16_t(statRoadPotholes_), freightByte_);
+    stats(statsWork_, 0, 0);
+    stream.SetUint32(0);                                     // tunnels
+    stream.SetFloat32(avgCarCommute_);
+    stream.SetFloat32(carLenSum_);
+    stream.SetUint32(carLenCount_);
+    stream.SetFloat32(freightLenSum_);
+    stream.SetUint32(freightCount_);
+    for (std::uint32_t cells : cellCounts_) stream.SetUint32(cells);
+    stream.SetUint32(4);                                     // the free destinations per lane group
+    for (int k : connectionCounts_) stream.SetUint32(std::uint32_t(k));
+    stream.SetUint32(std::uint32_t(neighborPools_.size()));
+    for (const auto& [id, holder] : neighborPools_) {
+        stream.SetUint16(id);
+        holder.Write(stream);
+    }
+    for (int i = 0; i < kTravelTypes; ++i) {
+        stream.SetUint32(typeCountsPublished_[std::size_t(i)]);
+        stream.SetUint32(typeCountsBuilding_[std::size_t(i)]);
+    }
+    stream.SetUint32(0);                                     // ferry total
+    stream.SetUint32(0);                                     // ferry terminals
+    return !stream.GetError();
+}
+
 // 0x10007b550. The city file's traffic record is read completely (every field, reference and nested list in the original's order and with
 // the original's version conditions, from version 0x13 up). The port's traffic simulator keeps none of this state yet (the grids, accident lists, tunnel and ferry
 // tables of the original live outside the recovered class), so the values are consumed, not stored: loading a city no longer fails and

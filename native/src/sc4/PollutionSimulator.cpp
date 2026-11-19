@@ -217,16 +217,29 @@ bool cSC4PollutionSimulator::ReadCityRecord(cIGZIStream& stream) {
     return !stream.GetError();
 }
 
-// The city-file record, as ReadCityRecord reads it (version 4); what the port does not model is written as the file had it.
+// The city-file record, as ReadCityRecord reads it (i386 0x0006e8c8, version 4). A city that came from a file writes its building lists
+// and its department reference back as the file had them. A city that did not writes its own building lists (water treatment,
+// incinerators, waste to energy, recycling: the occupants the host hands out as objects; the others are left out) and a null department
+// (the port keeps the sanitation department outside this class; the original's Init answers a null one with a new department).
 bool cSC4PollutionSimulator::WriteCityRecord(cIGZOStream& stream) const {
     stream.SetUint16(4);
     for (auto& grid : valueGrids_) SC4WriteGZSerializable(stream, static_cast<cISC4SimGridBase*>(grid.get()));
     for (auto& grid : sourceGrids_) SC4WriteGZSerializable(stream, static_cast<cISC4SimGridBase*>(grid.get()));
     stream.SetUint32(cellX_);                                // +0xb8
     stream.SetUint32(cellZ_);                                // +0xbc
-    for (const auto& kept : fileLists_) {                     // +0xc0 / +0xd8 / +0xf0 / +0x108
-        stream.SetUint32(std::uint32_t(kept.size()));
-        for (const cRetainedReference& occupant : kept) occupant.Write(stream);
+    if (fromCityFile_) {
+        for (const auto& kept : fileLists_) {                 // +0xc0 / +0xd8 / +0xf0 / +0x108
+            stream.SetUint32(std::uint32_t(kept.size()));
+            for (const cRetainedReference& occupant : kept) occupant.Write(stream);
+        }
+    } else {
+        for (const std::list<IPollutionOccupant*>* list : {&waterTreatment_, &incinerators_, &wasteToEnergy_, &recyclingCenters_}) {
+            std::vector<cIGZUnknown*> objects;
+            for (IPollutionOccupant* occupant : *list)
+                if (cIGZUnknown* object = occupant ? occupant->Object() : nullptr) objects.push_back(object);
+            stream.SetUint32(std::uint32_t(objects.size()));
+            for (cIGZUnknown* object : objects) SC4WriteGZSerializable(stream, object);
+        }
     }
     stream.SetUint32(recyclingCenterCountSnapshot);           // +0x208
     stream.SetSint32(averageAir_);                            // +0x20c
@@ -273,7 +286,7 @@ bool cSC4PollutionSimulator::WriteCityRecord(cIGZOStream& stream) const {
     stream.SetFloat32(efficiency_);                           // +0x348
     stream.SetSint32(static_cast<std::int32_t>(garbageSupply_));     // +0x34c
     stream.SetSint32(static_cast<std::int32_t>(garbageCapacity_));   // +0x350
-    fileWaterGrid_.Write(stream);                             // +0x1c0
+    fileWaterGrid_.Write(stream);                             // i386 +0xe8: the sanitation department (null for a new city)
     return !stream.GetError();
 }
 
@@ -390,11 +403,13 @@ void cSC4PollutionSimulator::CreateGrids() {
     for (int i = 0; i < 4; ++i) {
         if (!valueGrids_[i]) {
             valueGrids_[i] = SimGridPtr<std::int16_t>(new cSC4SimGrid<std::int16_t>());
+            valueGrids_[i]->AddRef();   // the owner's reference (a save's serializer takes and drops its own)
             valueGrids_[i]->SetTractSize(2);
             valueGrids_[i]->SetInstanceID(kPollutionGridInstanceValueBase + static_cast<std::uint32_t>(i));
         }
         if (!sourceGrids_[i]) {
             sourceGrids_[i] = SimGridPtr<std::int16_t>(new cSC4SimGrid<std::int16_t>());
+            sourceGrids_[i]->AddRef();
             sourceGrids_[i]->SetTractSize(i == 2 ? 1 : 2);
             sourceGrids_[i]->SetInstanceID(kPollutionGridInstanceSourceBase + static_cast<std::uint32_t>(i));
         }

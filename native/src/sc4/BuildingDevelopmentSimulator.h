@@ -28,6 +28,7 @@
 namespace sc4 {
 
 template <class T> class cSC4SimGrid;
+class cSC4Demand;
 
 constexpr std::uint32_t kBuildingMapInstance = 0x49d5b678;
 constexpr std::uint32_t kMessageLotStateChangedForBuildings = 0xe8bda2e7;
@@ -73,6 +74,8 @@ public:
     virtual void Init() {}
     virtual void SetTotal(float total) { (void)total; }      // vslot 0x90 SetSupplyValue
     virtual void SetUsed(float used) { (void)used; }         // vslot 0x98 SetDemandValue
+    // The cSC4Demand behind the counter: the construction node the city record references (+0x8c on i386); null = none.
+    virtual cSC4Demand* Demand() { return nullptr; }
 };
 
 class IBuildingPlacementServices;
@@ -222,6 +225,8 @@ public:
     virtual bool ListsValid() const { return false; }                      // vslot 0x50
     virtual std::vector<GrowthTract> GrowthList() const { return {}; }     // vslot 0x58
     virtual float ActiveDemand() const { return 0.0f; }                    // vslot 0x90 -> demand vslot 0x60
+    // The developer object (a cSC4GrowthDeveloper, class 0x0990c138) the city record references; null = none.
+    virtual cIGZUnknown* Object() const { return nullptr; }
 };
 // One pending demolition of the decline plan (a node of the list at this+0x110).
 class IDeclineSource {
@@ -443,6 +448,7 @@ public:
     bool Write(cIGZOStream& stream) const;
     bool Read(cIGZIStream& stream);
     bool ReadCityRecord(cIGZIStream& stream);   // @ 0x10014e064
+    bool WriteFreshCityRecord(cIGZOStream& stream) const;   // i386 0x000f7e0c for a city that did not come from a file
 
 private:
     std::uint32_t refCount_ = 0;
@@ -462,6 +468,7 @@ private:
     std::map<std::uint32_t, std::set<std::pair<int, int>>> growthMarks_;       // mGrowthMarks
     // the city-file record's tables the port does not model (kept as read, saved back around the growth marks)
     bool fromCityFile_ = false;
+    bool loadedFromSave_ = false;       // a Read took place: Init keeps the highest-stage map (spec 1.3 step 4)
     cRecordTape fileHead_, fileTail_;   // around the live civic list and growth marks
     bool cheatPlumbing_ = false, cheatPower_ = false, cheatCaps_ = false;       // +0x1c9..0x1cb
     bool cheatDebug_ = false, cheatCoffee_ = false;                             // +0x1cc, +0x1cd

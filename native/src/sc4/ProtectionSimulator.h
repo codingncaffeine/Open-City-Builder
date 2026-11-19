@@ -60,6 +60,8 @@ public:
     virtual ~IProtectionStation() = default;
     virtual std::uint32_t OccupantType() = 0;               // vslot 0x38
     virtual void Position(float xyz[3]) = 0;                // vslot 0x40
+    // The station (or jail) as the city record references it (a cISC4Occupant COM object); null = the host does not hand it out.
+    virtual cIGZUnknown* Object() { return nullptr; }
 };
 
 // The 0xc9c00435 "dispatch" view (GetDispatchesAtStation etc.). Answered at +0x10 by the fire/police
@@ -173,8 +175,8 @@ private:
     SimGridPtr<std::uint8_t> adjusted_;
     SimGridPtr<std::int16_t> unadjusted_;
     std::list<IProtectionStation*> stations_;
-    // a city file's grid and station references (the coverage model and the stations are not resolved yet): kept as read
-    cRetainedReference fileUnadjusted_, fileAdjusted_, fileThird_;
+    // a city file's department, grid and station references (the coverage model and the stations are not resolved yet): kept as read
+    cRetainedReference fileDepartment_, fileAdjusted_, fileUnadjusted_;
     cRetainedReferences fileStations_;
     bool fromCityFile_ = false;
     bool WriteCityRecord(cIGZOStream& stream) const;

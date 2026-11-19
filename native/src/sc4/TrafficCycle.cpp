@@ -1129,6 +1129,7 @@ bool cSC4TrafficSimulator::DoDailySimulation() {
 // ---- states 0, 16, 17, 18 (§4.3, §4.4) ------------------------------------------------------------------------------------
 
 void cSC4TrafficSimulator::StartRecalc() {
+    cycleStartDate_ = host_->SimDateNumber();   // the record's cycle start date (GetSimDateNumber)
     incomeAcc_ = feeAcc_ = 0.0;
     tripCapacityTotals_.fill(0);
     attempted_.fill(0);

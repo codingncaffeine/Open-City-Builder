@@ -90,6 +90,8 @@ public:
     virtual ~IPollutionOccupant() = default;
     virtual cISCPropertyHolder* PropertyHolder() = 0;                  // vslot 0x30
     virtual void Position(float xyz[3]) = 0;                           // vslot 0x40
+    // The occupant as the city record references it (a cISC4Occupant COM object); null = the host does not hand it out.
+    virtual cIGZUnknown* Object() { return nullptr; }
 };
 
 // City objects the occupant passes reach (lot manager, budget simulator). Optional: set with SetServices.

@@ -43,12 +43,14 @@ void cSC4ProtectionSimulator::CreateGrids(int citySizeXInCells, int citySizeZInC
     (void)citySizeZInCells;   // the grids size themselves from the registered city (SimGridCity)
     if (!adjusted_) {
         adjusted_ = SimGridPtr<std::uint8_t>(new cSC4SimGrid<std::uint8_t>());
+        adjusted_->AddRef();   // the owner's reference (a save's serializer takes and drops its own)
         adjusted_->SetInstanceID(kProtectionAdjustedGridInstance);
         adjusted_->SetTractSize(tractSize_);
         adjusted_->SetTractValues(0);
     }
     if (!unadjusted_) {
         unadjusted_ = SimGridPtr<std::int16_t>(new cSC4SimGrid<std::int16_t>());
+        unadjusted_->AddRef();
         unadjusted_->SetInstanceID(0x49b9e605);
         unadjusted_->SetTractSize(tractSize_);
         unadjusted_->SetTractValues(0);
@@ -269,24 +271,39 @@ IProtectionStation* cSC4ProtectionSimulator::DispatchFromNearestStation(float x,
 
 // ---- streams ------------------------------------------------------------------------------------------------------
 
-// The record of a city file (the layout ReadCityRecord reads): the grid and station references a loaded file named are
-// written back as they were read; the walk iterator follows the first grid.
+// The record of a city file (i386 0x0007d392, spec 11; the layout ReadCityRecord reads): version 3, the department, the walk iterator,
+// the adjusted (uint8) and unadjusted (int16) grids, the stations, the cycle counters, the strike flag and day and the next call number.
+// A city that came from a file writes its department, grid and station references back as they were read. A city that did not writes
+// its own grids and the stations the host hands out as objects (the others are left out), and a null department: the port keeps the
+// budget department outside this class, and the original's Init answers a null one with a new department.
 bool cSC4ProtectionSimulator::WriteCityRecord(cIGZOStream& stream) const {
     stream.SetUint16(3);
-    if (fromCityFile_ || !unadjusted_.get()) fileUnadjusted_.Write(stream); else SC4WriteGZSerializable(stream, static_cast<cISC4SimGridBase*>(unadjusted_.get()));   // +0xa0
-    stream << walk_;                                                      // +0x40
-    if (fromCityFile_ || !adjusted_.get()) fileAdjusted_.Write(stream); else SC4WriteGZSerializable(stream, static_cast<cISC4SimGridBase*>(adjusted_.get()));       // +0xa8
-    fileThird_.Write(stream);                                             // +0xb0
-    stream.SetUint32(std::uint32_t(fileStations_.size()));                // +0xb8 (the port's stations are not COM objects yet)
-    for (const cRetainedReference& station : fileStations_) station.Write(stream);
-    stream.SetSint32(zonedCount_);                                        // +0xd0
-    stream.SetSint32(protectionSum_);                                     // +0xd4
-    stream.SetSint32(protectedCount_);                                    // +0xd8
-    stream.SetFloat32(averageProtection_);                                // +0xdc
-    stream.SetFloat32(coverageShare_);                                    // +0xe0
-    stream.SetUint8(flagE8_ ? 1 : 0);                                     // +0xe8
-    stream.SetUint32(valueEC_);                                           // +0xec
-    stream.SetUint32(dispatchBitsInUse);                                  // +0xf0
+    if (fromCityFile_) {
+        fileDepartment_.Write(stream);                                    // i386 +0x6c
+        stream << walk_;                                                  // +0x2c
+        fileAdjusted_.Write(stream);                                      // +0x70
+        fileUnadjusted_.Write(stream);                                    // +0x74
+        stream.SetUint32(std::uint32_t(fileStations_.size()));            // +0x78
+        for (const cRetainedReference& station : fileStations_) station.Write(stream);
+    } else {
+        SC4WriteGZSerializable(stream, nullptr);
+        stream << walk_;
+        SC4WriteGZSerializable(stream, adjusted_ ? static_cast<const cISC4SimGridBase*>(adjusted_.get()) : nullptr);
+        SC4WriteGZSerializable(stream, unadjusted_ ? static_cast<const cISC4SimGridBase*>(unadjusted_.get()) : nullptr);
+        std::vector<cIGZUnknown*> stations;
+        for (IProtectionStation* station : stations_)
+            if (cIGZUnknown* object = station ? station->Object() : nullptr) stations.push_back(object);
+        stream.SetUint32(std::uint32_t(stations.size()));
+        for (cIGZUnknown* object : stations) SC4WriteGZSerializable(stream, object);
+    }
+    stream.SetSint32(zonedCount_);                                        // +0x80
+    stream.SetSint32(protectionSum_);                                     // +0x84
+    stream.SetSint32(protectedCount_);                                    // +0x88
+    stream.SetFloat32(averageProtection_);                                // +0x8c
+    stream.SetFloat32(coverageShare_);                                    // +0x90
+    stream.SetUint8(flagE8_ ? 1 : 0);                                     // +0x98 strike flag
+    stream.SetUint32(valueEC_);                                           // +0x9c strike day
+    stream.SetUint32(dispatchBitsInUse);                                  // +0xa0 next call number
     return !stream.GetError();
 }
 
@@ -329,10 +346,10 @@ bool cSC4ProtectionSimulator::ReadCityRecord(cIGZIStream& stream) {
     };
     (void)skipReference;
     fromCityFile_ = true;
-    fileUnadjusted_.Read(stream);                                         // +0xa0
-    stream >> walk_;                                                      // +0x40
-    fileAdjusted_.Read(stream);                                           // +0xa8
-    fileThird_.Read(stream);                                              // +0xb0
+    fileDepartment_.Read(stream);                                         // i386 +0x6c (IID 0x223e2b67)
+    stream >> walk_;                                                      // +0x2c
+    fileAdjusted_.Read(stream);                                           // +0x70 (IID 0xc9bd939a)
+    fileUnadjusted_.Read(stream);                                         // +0x74 (IID 0xc9bd939a)
     std::uint32_t stationCount = 0;
     stream.GetUint32(stationCount);                                       // +0xb8: the occupants of the stations
     fileStations_.clear();

@@ -2,6 +2,10 @@
 #include "sc4/BuildingZoneFit.h"
 #include "sc4/DBSegment.h"
 #include "sc4/cSC4SimGrid.h"
+#include "sc4/cSC4Demand.h"
+#include "sc4/CommonIIDs.h"
+#include "gz/cIGZSerializable.h"
+#include "rz/cRZAutoRefCount.h"
 
 #include <algorithm>
 #include <cmath>
@@ -471,6 +475,9 @@ bool cSC4BuildingDevelopmentSimulator::Init() {
     // every exemplar of type 0x6534284a whose ExemplarType (0x10) is 4 (a simulator) that names a developer type makes a developer
     if (g_host) g_host->ForEachExemplarKey([this](const cGZPersistResourceKey& key) { InitDynamicDataFromExemplar(key, this); });
     ReadSimulatorTunableValues();
+    // a new city starts every developer's highest stage at 0 (0x0069D240 step 4); a loaded one keeps its record's map
+    if (!loadedFromSave_)
+        for (const auto& entry : developers_) stagesReached_[entry.first] = 0;
     // the construction resources (+0xe0): a cSC4Demand with supply 100 and demand 0
     if (!resources_ && g_host) {
         resources_ = g_host->CreateConstructionResources();
@@ -796,11 +803,13 @@ void cSC4BuildingDevelopmentSimulator::DoMonthlySimulation() {
 
 bool cSC4BuildingDevelopmentSimulator::Write(cIGZOStream& stream) const {
     if (stream.GetError()) return false;
-    stream.SetUint16(4);
     void* dbStream = nullptr;
-    if (fromCityFile_ && stream.QueryInterface(kGZIID_cISC4DBSegmentOStream, &dbStream) && dbStream) {
+    const bool cityFile = stream.QueryInterface(kGZIID_cISC4DBSegmentOStream, &dbStream) && dbStream;
+    if (dbStream) static_cast<cIGZUnknown*>(dbStream)->Release();
+    if (cityFile && !fromCityFile_) return WriteFreshCityRecord(stream);
+    stream.SetUint16(4);
+    if (cityFile) {
         // the city-file layout ReadCityRecord reads: the file's own tables around the port's growth marks and flags
-        static_cast<cIGZUnknown*>(dbStream)->Release();
         fileHead_.Replay(stream);
         stream.SetUint32(static_cast<std::uint32_t>(civicOccupants_.size()));
         for (const cIGZUnknown* occupant : civicOccupants_) SC4WriteGZSerializable(stream, occupant);
@@ -838,6 +847,79 @@ bool cSC4BuildingDevelopmentSimulator::Write(cIGZOStream& stream) const {
         stream.SetSint32(kv.first);
         stream.SetSint32(kv.second);
     }
+    stream.SetUint8(cheatPlumbing_);
+    stream.SetUint8(cheatPower_);
+    stream.SetUint8(cheatCaps_);
+    return !stream.GetError();
+}
+
+namespace {
+// The construction node as the city record references it: a serializable view (class 0x8990c12d) of the cSC4Demand the
+// construction resources keep. The view only borrows the demand; the serializer's reference keeps the view alive through the
+// save, and the simulator (which owns the counter) outlives the save.
+class ConstructionNodeView final : public cIGZSerializable {
+public:
+    explicit ConstructionNodeView(cSC4Demand* demand) : demand_(demand) {}
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid == kGZIID_cIGZUnknown || iid == kGZIID_cIGZSerializable) { *out = static_cast<cIGZSerializable*>(this); AddRef(); return true; }
+        if (iid == kGZIID_PlainObject) { *out = demand_; return true; }
+        *out = nullptr;
+        return false;
+    }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override { if (--refs_ == 0) { delete this; return 0; } return refs_; }
+    bool Write(cIGZOStream& stream) const override { return demand_->Write(stream); }
+    bool Read(cIGZIStream& stream) override { return demand_->Read(stream); }
+    std::uint32_t GetGZCLSID() const override { return kDemandClassId; }
+private:
+    cSC4Demand* demand_;
+    std::uint32_t refs_ = 0;
+};
+}  // namespace
+
+// i386 0x000f7e0c (spec section 6), for a city that did not come from a file: version 4, the building map (+0x48) and the construction
+// node (+0x8c) as references, the developers by type (+0x70 map, ascending) as type + reference, the special buildings (+0x4c list), the
+// highest stage per developer type (+0x58 map), the tried-tract marks, the planned-growth map (+0xd8) and the three persisted cheats
+// (+0x125..+0x127). The planned-growth map belongs to the growth-plan path the shipped game never takes (spec 10.1 Q1); the port has
+// none, so it is written empty, as the original's always is. Without a construction node (no resources, or a counter that does not hand
+// out its cSC4Demand) the reference is null, which the original's Init answers with a new node (supply 100, demand 0).
+bool cSC4BuildingDevelopmentSimulator::WriteFreshCityRecord(cIGZOStream& stream) const {
+    stream.SetUint16(4);
+    SC4WriteGZSerializable(stream, buildingMap_ ? static_cast<const cISC4SimGridBase*>(buildingMap_) : nullptr);
+    cSC4Demand* node = resources_ ? resources_->Demand() : nullptr;
+    if (node) {
+        cRZAutoRefCount<cIGZSerializable> view(new ConstructionNodeView(node));
+        SC4WriteGZSerializable(stream, view.get());
+    } else {
+        SC4WriteGZSerializable(stream, nullptr);
+    }
+    // A developer whose object the host does not hand out is left out rather than written as a null reference (the original keeps a
+    // null entry and crashes on it); a reader's Init then makes a fresh developer of that type, as for a new city.
+    std::vector<std::pair<std::uint32_t, cIGZUnknown*>> developers;
+    for (const auto& [type, developer] : developers_)
+        if (cIGZUnknown* object = developer ? developer->Object() : nullptr) developers.emplace_back(type, object);
+    stream.SetUint32(static_cast<std::uint32_t>(developers.size()));
+    for (const auto& [type, object] : developers) {
+        stream.SetUint32(type);
+        SC4WriteGZSerializable(stream, object);
+    }
+    stream.SetUint32(static_cast<std::uint32_t>(civicOccupants_.size()));
+    for (const cIGZUnknown* occupant : civicOccupants_) SC4WriteGZSerializable(stream, occupant);
+    stream.SetUint32(static_cast<std::uint32_t>(stagesReached_.size()));
+    for (const auto& [type, stage] : stagesReached_) {
+        stream.SetUint32(type);
+        stream.SetUint8(stage);
+    }
+    stream.SetUint32(static_cast<std::uint32_t>(growthMarks_.size()));
+    for (const auto& mark : growthMarks_) {
+        stream.SetUint32(mark.first);
+        stream.SetUint32(static_cast<std::uint32_t>(mark.second.size()));
+        for (const auto& cell : mark.second) {
+            stream.SetSint32(cell.first);
+            stream.SetSint32(cell.second);
+        }
+    }
+    stream.SetUint32(0);                                       // the planned-growth map
     stream.SetUint8(cheatPlumbing_);
     stream.SetUint8(cheatPower_);
     stream.SetUint8(cheatCaps_);
@@ -932,6 +1014,7 @@ bool cSC4BuildingDevelopmentSimulator::ReadCityRecord(cIGZIStream& stream) {
         fileTail_.S32(stream); fileTail_.S32(stream); fileTail_.U8(stream); fileTail_.U32(stream);
     }
     fromCityFile_ = true;
+    loadedFromSave_ = true;
     stream.GetUint8(u8); cheatPlumbing_ = u8 != 0;
     stream.GetUint8(u8); cheatPower_ = u8 != 0;
     stream.GetUint8(u8); cheatCaps_ = u8 != 0;
@@ -947,6 +1030,7 @@ bool cSC4BuildingDevelopmentSimulator::Read(cIGZIStream& stream) {
     std::uint16_t version = 0;
     stream.GetUint16(version);
     if (version != 4) return false;
+    loadedFromSave_ = true;
     growthMarks_.clear();
     std::uint32_t count = 0;
     stream.GetUint32(count);

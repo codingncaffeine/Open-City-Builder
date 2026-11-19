@@ -205,6 +205,7 @@ public:
     cISC4Occupant* Occupant() const { return occupant_; }
     cISCPropertyHolder* PropertyHolder() override { return occupant_->AsPropertyHolder(); }
     void Position(float xyz[3]) override { occupant_->GetPosition(xyz); }
+    cIGZUnknown* Object() override { return occupant_; }   // the record's building reference
 private:
     cISC4Occupant* occupant_;
 };
@@ -324,6 +325,7 @@ class FireOccupant final : public IFireOccupant {
 public:
     explicit FireOccupant(cISC4Occupant* occupant) : occupant_(occupant) {}
     cISC4Occupant* Occupant() const { return occupant_; }
+    cIGZUnknown* Object() override { return occupant_; }   // the record's station reference
     std::uint32_t OccupantType() override { return occupant_->GetType(); }
     void Position(float xyz[3]) override { occupant_->GetPosition(xyz); }
     cISCPropertyHolder* PropertyHolder() override { return occupant_->AsPropertyHolder(); }
@@ -395,6 +397,7 @@ class PoliceOccupant final : public IPoliceOccupant {
 public:
     explicit PoliceOccupant(cISC4Occupant* occupant) : occupant_(occupant) {}
     cISC4Occupant* Occupant() const { return occupant_; }
+    cIGZUnknown* Object() override { return occupant_; }   // the record's station reference
     std::uint32_t OccupantType() override { return occupant_->GetType(); }
     void Position(float xyz[3]) override { occupant_->GetPosition(xyz); }
     cISCPropertyHolder* PropertyHolder() override { return occupant_->AsPropertyHolder(); }

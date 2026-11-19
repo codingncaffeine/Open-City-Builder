@@ -143,12 +143,36 @@ bool cSC4PoliceSimulator::Write(cIGZOStream& stream) const {
     filePowerGrid_.Write(stream);                                         // +0x128 police power grid (unrecovered)
     // a loaded city's jails are the references its file named (fundedJails_/jails_ stay empty then)
     const bool keptFunded = fundedJails_.empty(), keptJails = jails_.empty();
-    stream.SetUint32(std::uint32_t(keptFunded ? fileFundedJails_.size() : fundedJails_.size()));   // +0x168
-    if (keptFunded) for (const cRetainedReference& jail : fileFundedJails_) jail.Write(stream);
-    else for (IPoliceOccupant* jail : fundedJails_) host_->WriteOccupant(stream, jail);
-    stream.SetUint32(std::uint32_t(keptJails ? fileJails_.size() : jails_.size()));                 // +0x130
-    if (keptJails) for (const cRetainedReference& jail : fileJails_) jail.Write(stream);
-    else for (IPoliceOccupant* jail : jails_) host_->WriteOccupant(stream, jail);
+    void* dbStream = nullptr;
+    const bool cityFile = stream.QueryInterface(kGZIID_cISC4DBSegmentOStream, &dbStream) && dbStream;
+    if (dbStream) static_cast<cIGZUnknown*>(dbStream)->Release();
+    // In a city file each jail is a reference: the jails the host hands out as objects (the others are left out, so the count
+    // always matches the references that follow).
+    const auto writeJails = [&](const std::list<IPoliceOccupant*>& jails) {
+        std::vector<cIGZUnknown*> objects;
+        for (IPoliceOccupant* jail : jails)
+            if (cIGZUnknown* object = jail ? jail->Object() : nullptr) objects.push_back(object);
+        stream.SetUint32(std::uint32_t(objects.size()));
+        for (cIGZUnknown* object : objects) SC4WriteGZSerializable(stream, object);
+    };
+    if (keptFunded) {                                                     // +0x168
+        stream.SetUint32(std::uint32_t(fileFundedJails_.size()));
+        for (const cRetainedReference& jail : fileFundedJails_) jail.Write(stream);
+    } else if (cityFile) {
+        writeJails(fundedJails_);
+    } else {
+        stream.SetUint32(std::uint32_t(fundedJails_.size()));
+        for (IPoliceOccupant* jail : fundedJails_) host_->WriteOccupant(stream, jail);
+    }
+    if (keptJails) {                                                      // +0x130
+        stream.SetUint32(std::uint32_t(fileJails_.size()));
+        for (const cRetainedReference& jail : fileJails_) jail.Write(stream);
+    } else if (cityFile) {
+        writeJails(jails_);
+    } else {
+        stream.SetUint32(std::uint32_t(jails_.size()));
+        for (IPoliceOccupant* jail : jails_) host_->WriteOccupant(stream, jail);
+    }
     stream.SetSint32(jailCapacity_);                                      // +0x148
     stream.SetSint32(jailPopulation_);                                    // +0x14c
     stream.SetSint32(criminals_);                                         // +0x150

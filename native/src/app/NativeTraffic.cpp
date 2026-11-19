@@ -123,6 +123,8 @@ private:
 
 class TrafficHost final : public ITrafficHost {
 public:
+    // a transit switch's building is the lot's building occupant (TrafficLot::Building), a COM object
+    cIGZUnknown* BuildingObject(void* building) override { return static_cast<cIGZUnknown*>(building); }
     void PostMessage(std::uint32_t message) override { Post(message); }
     void PostPotholeMessage(int x, int z, bool potholed) override { Post(kTrafficMessagePotholeChanged, std::uint32_t(x), std::uint32_t(z), potholed ? 1 : 0); }
     void PostPotholeMessage3(int x, int z, std::uint32_t data3) override { Post(kTrafficMessagePotholeChanged, std::uint32_t(x), std::uint32_t(z), data3); }

@@ -50,6 +50,9 @@ float GrowthDeveloperActiveDemand(void* developer) {
     sc4::IGrowthDemandApi* demand = developer ? static_cast<sc4::cSC4GrowthDeveloper*>(developer)->GetSourceDemand() : nullptr;
     return demand ? demand->GetActiveValue() : 0.0f;
 }
+cIGZUnknown* GrowthDeveloperObject(void* developer) {
+    return developer ? static_cast<sc4::cISC4GrowthDeveloper*>(static_cast<sc4::cSC4GrowthDeveloper*>(developer)) : nullptr;
+}
 sc4::cSC4GrowthDeveloper* GrowthDeveloperOfType(std::uint32_t type) {
     for (sc4::cSC4GrowthDeveloper* d : Developers()) if (static_cast<std::uint32_t>(d->GetSubType()) == type) return d;
     return nullptr;

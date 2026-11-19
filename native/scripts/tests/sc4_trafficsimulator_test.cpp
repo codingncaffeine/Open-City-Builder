@@ -4,6 +4,11 @@
 #include <map>
 #include <string>
 #include <tuple>
+#include <unistd.h>
+#include "gz/cIGZPersistDBSerialRecord.h"
+#include "rz/cRZString.h"
+#include "sc4/DBSegment.h"
+#include "sc4/cSC4SimGrid.h"
 
 #include "sc4/Lot.h"
 #include "sc4/PathFinder.h"
@@ -101,6 +106,10 @@ const FakePathFinder::Call* FindCall(const FakePathFinder& pf, const char* name)
 }
 
 struct Host : ITrafficHost {
+    int cellsX = 0, cellsZ = 0;
+    void CityCellCount(int& x, int& z) override { x = cellsX; z = cellsZ; }
+    std::uint32_t simDate = 0;
+    std::uint32_t SimDateNumber() override { return simDate; }
     std::map<std::uint32_t, int> messages;
     std::vector<std::array<int, 3>> potholes;
     std::map<int, int> road, transit;
@@ -1052,6 +1061,122 @@ int main() {
         FakePathFinder finder4;
         CHECK(!sim3.SetupPathFinderForLot(&finder4, &oddLot));
         CHECK(FindCall(finder4, "SetFlag") == nullptr && FindCall(finder4, "SetStartingCostArray") != nullptr);
+    }
+
+    // ==== the city-file record of a city that did not come from a file (i386 0x00061498, version 41) ====
+    {
+        struct GridCity final : sc4::ISimGridCity {
+            std::int32_t CitySizeXInCells() const override { return 8; }
+            std::int32_t CitySizeZInCells() const override { return 8; }
+            float CellSizeXMeters() const override { return 16.0f; }
+            float CellSizeZMeters() const override { return 16.0f; }
+        } gridCity;
+        sc4::SetSimGridCity(&gridCity);
+        struct Factory final : sc4::ISerializableFactory {
+            cIGZSerializable* CreateSerializable(std::uint32_t classId) override {
+                cIGZSerializable* out = nullptr;
+                if (classId == 0x49b9e602) out = static_cast<cIGZSerializable*>(new sc4::cSC4SimGrid<std::uint8_t>());
+                else if (classId == 0x49b9e60a) out = static_cast<cIGZSerializable*>(new sc4::cSC4SimGrid<float>());
+                else if (classId == 0x49b9e606) out = static_cast<cIGZSerializable*>(new sc4::cSC4SimGrid<std::uint32_t>());
+                if (out) out->AddRef();
+                return out;
+            }
+        } factory;
+        sc4::SetSerializableFactory(&factory);
+        const auto open = [](const std::string& path, bool write) -> sc4::cSC4DBSegment* {
+            auto* seg = new sc4::cSC4DBSegment();
+            seg->AddRef();
+            seg->Init();
+            cRZString p(path.c_str());
+            seg->SetPath(p);
+            if (!(write ? seg->Open(false, true) : seg->Open(true, false))) { seg->Release(); return nullptr; }
+            return seg;
+        };
+        const auto bytesOf = [](sc4::cSC4DBSegment* seg, const cGZPersistResourceKey& key) {
+            std::vector<std::uint8_t> out;
+            sc4::cISC4DBSegmentIStream* is = nullptr;
+            if (!seg->OpenIStream(key, &is)) return out;
+            out.resize(is->GetRecord()->GetSize());
+            for (std::uint8_t& b : out) is->GetUint8(b);
+            seg->CloseIStream(is);
+            is->Release();
+            return out;
+        };
+        const auto u32At = [](const std::vector<std::uint8_t>& b, std::size_t at) {
+            std::uint32_t v = 0;
+            for (int i = 3; i >= 0; --i) v = (v << 8) | (at + i < b.size() ? b[at + i] : 0);
+            return v;
+        };
+        // the record with the serializer's object ids zeroed (it numbers the objects per save): the 6 + 8 + 2 grids around the
+        // destination map, the edge densities and the job counters; no transit switches in this city
+        const auto withoutIds = [&](std::vector<std::uint8_t> b) {
+            const auto zero = [&](std::size_t at) { for (std::size_t i = at; i < at + 8 && i < b.size(); ++i) b[i] = 0; };
+            std::size_t at = 18;
+            for (int i = 0; i < 6; ++i, at += 12) zero(at);
+            at += 8 + std::size_t(u32At(b, at)) * u32At(b, at + 4);
+            at += 4;
+            for (int i = 0; i < 8; ++i, at += 12) zero(at);
+            at += 4 + std::size_t(u32At(b, at)) * 70 + 36;
+            for (int i = 0; i < 2; ++i, at += 12) zero(at);
+            return b;
+        };
+        host.cellsX = host.cellsZ = 8;
+        host.simDate = 731;
+        cSC4TrafficSimulator fresh(&host, &random);
+        CHECK(fresh.Init());
+        fresh.GetCongestionMap()->SetTractValue(3, 4, 77);
+        const cGZPersistResourceKey key{0x6990c1aa, 0x60606060, 1};
+        const std::string path = "/tmp/sc4_traffic_fresh_" + std::to_string(getpid()) + ".sc4";
+        const std::string again = "/tmp/sc4_traffic_resave_" + std::to_string(getpid()) + ".sc4";
+        std::vector<std::uint8_t> first, second;
+        if (sc4::cSC4DBSegment* seg = open(path, true)) {
+            sc4::cISC4DBSegmentOStream* os = nullptr;
+            CHECK(seg->OpenOStream(key, &os, true));
+            CHECK(fresh.Write(*os));
+            CHECK(seg->CloseOStream(os));
+            os->Release();
+            seg->Close();
+            seg->Release();
+        }
+        cSC4TrafficSimulator back(&host, &random);
+        if (sc4::cSC4DBSegment* seg = open(path, false)) {
+            CHECK(seg->LoadClassObjects(0x48));
+            first = bytesOf(seg, key);
+            sc4::cISC4DBSegmentIStream* is = nullptr;
+            CHECK(seg->OpenIStream(key, &is));
+            CHECK(back.Read(*is));
+            CHECK(!is->GetError() && is->GetRecord()->GetPosition() == is->GetRecord()->GetSize());
+            seg->CloseIStream(is);
+            is->Release();
+            seg->Close();
+            seg->Release();
+        }
+        CHECK(first.size() > 18 && first[0] == 41 && first[1] == 0 && u32At(first, 2) == 13 && u32At(first, 14) == 9);
+        CHECK(u32At(first, 18 + 72) == 10 && u32At(first, 18 + 76) == 10);       // the destination map: (8 + 2) x (8 + 2)
+        // Init keeps the record's grids: the congestion value is back
+        CHECK(back.Init() && back.GetCongestionMap() && back.GetCongestionMap()->GetTractValue(3, 4) == 77);
+        CHECK(back.GetStrikeState() == cSC4TrafficSimulator::kStrikeNone);
+        if (sc4::cSC4DBSegment* seg = open(again, true)) {
+            sc4::cISC4DBSegmentOStream* os = nullptr;
+            CHECK(seg->OpenOStream(key, &os, true));
+            CHECK(back.Write(*os));
+            CHECK(seg->CloseOStream(os));
+            os->Release();
+            seg->Close();
+            seg->Release();
+        }
+        if (sc4::cSC4DBSegment* seg = open(again, false)) {
+            second = bytesOf(seg, key);
+            seg->Close();
+            seg->Release();
+        }
+        CHECK(!first.empty() && withoutIds(second) == withoutIds(first));
+        unlink(path.c_str());
+        unlink(again.c_str());
+        sc4::SetSerializableFactory(nullptr);
+        fresh.Shutdown();
+        back.Shutdown();
+        host.cellsX = host.cellsZ = 0;
     }
 
     if (failures) return 1;

@@ -1,5 +1,14 @@
 #include <cstdio>
+#include <memory>
+#include <string>
+#include <unistd.h>
 #include "rz/PortMemoryStreams.h"
+#include "rz/cRZString.h"
+#include "gz/cIGZSerializable.h"
+#include "gz/cIGZPersistDBSerialRecord.h"
+#include "sc4/CommonIIDs.h"
+#include "sc4/DBSegment.h"
+#include "sc4/cSC4Demand.h"
 #include "sc4/BuildingDevelopmentSimulator.h"
 #include "sc4/SCPropertyHelp.h"
 #include "sc4/cSC4SimGrid.h"
@@ -48,6 +57,8 @@ public:
     float DemandChannelSupply(std::uint32_t type) override { return channels.count(type) ? channels[type] : 0.0f; }
     ITractDeveloperRef* tract = nullptr;
     ITractDeveloperRef* TractDeveloper() override { return tract; }
+    IConstructionResources* constructionResources = nullptr;   // what Init gets as its new construction node
+    IConstructionResources* CreateConstructionResources() override { return constructionResources; }
     std::uint32_t RandomBelow(std::uint32_t) override { return 0; }
     std::uint64_t BeginGrowSlice() override { return 0; }
     bool GrowSliceExpired(std::uint64_t) override { return false; }
@@ -130,7 +141,7 @@ struct FakeDeveloper final : IGrowthDeveloperRef {
     void StartMapUpdate() override { ++mapUpdates; }
     bool IsMapUpdateFinished() const override { return finished; }
 };
-struct FakeServices final : IBuildingPlacementServices {
+struct FakeServices : IBuildingPlacementServices {
     FakeBuilding building; bool occupied = false; int added = 0, removed = 0, released = 0; float surface = 33;
     FakeDeveloper developer; int created = 0; float lastRect[4] = {};
     IPlacedBuilding* CreateBuilding() override { return &building; }
@@ -165,6 +176,114 @@ struct GrowingDeveloper final : IGrowthDeveloperRef {
 };
 struct Filter final : IBuildingTypeFilter { bool Accepts(std::uint32_t t) override { return t == 0x1002; } };
 }
+namespace {
+// The construction resources as the city keeps them: a cSC4Demand (supply = total, demand = used).
+struct NodeResources final : IConstructionResources {
+    cSC4Demand demand;
+    float Total() const override { return demand.QuerySupplyValue(); }
+    float Used() const override { return demand.QueryDemandValue(); }
+    void Add(float a) override { demand.AddToDemandValue(a); }
+    void Update() override { demand.EndOfCycle(); }
+    void Init() override { demand.Init(); }
+    void SetTotal(float t) override { demand.SetSupplyValue(t); }
+    void SetUsed(float u) override { demand.SetDemandValue(u); }
+    cSC4Demand* Demand() override { return &demand; }
+};
+// A serializable test object of a given class: a growth developer (0x0990c138, one marker word) or a construction node
+// (0x8990c12d, a cSC4Demand record).
+struct RecordObject final : cIGZSerializable {
+    explicit RecordObject(std::uint32_t cls, std::uint32_t mark = 0) : classId(cls), marker(mark) {}
+    std::uint32_t classId, marker, refs = 0;
+    cSC4Demand demand;
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid == kGZIID_cIGZUnknown || iid == kGZIID_cIGZSerializable) { *out = static_cast<cIGZSerializable*>(this); AddRef(); return true; }
+        *out = nullptr;
+        return false;
+    }
+    std::uint32_t AddRef() override { return ++refs; }
+    std::uint32_t Release() override { if (--refs == 0) { delete this; return 0; } return refs; }
+    bool Write(cIGZOStream& s) const override {
+        if (classId == kDemandClassId) return demand.Write(s);
+        s.SetUint32(marker);
+        return !s.GetError();
+    }
+    bool Read(cIGZIStream& s) override {
+        if (classId == kDemandClassId) return demand.Read(s);
+        s.GetUint32(marker);
+        return !s.GetError();
+    }
+    std::uint32_t GetGZCLSID() const override { return classId; }
+};
+struct SerialDeveloper final : IGrowthDeveloperRef {
+    explicit SerialDeveloper(RecordObject* o) : object(o) { object->AddRef(); }
+    ~SerialDeveloper() override { object->Release(); }
+    RecordObject* object;
+    int inits = 0;
+    void Init(cISCPropertyHolder*) override { ++inits; }
+    cIGZUnknown* Object() const override { return object; }
+};
+// Placement services whose developers are serializable objects; Init adopts a loaded city's developers through AdoptGrowthDeveloper.
+struct SerialServices final : FakeServices {
+    std::vector<std::unique_ptr<SerialDeveloper>> made;
+    std::uint32_t nextMarker = 0x51;
+    IGrowthDeveloperRef* CreateGrowthDeveloper() override {
+        made.push_back(std::make_unique<SerialDeveloper>(new RecordObject(0x0990c138, nextMarker++)));
+        return made.back().get();
+    }
+    IGrowthDeveloperRef* AdoptGrowthDeveloper(cIGZUnknown* object) override {
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(kGZIID_cIGZSerializable, &raw) || !raw) return nullptr;
+        auto* record = static_cast<RecordObject*>(static_cast<cIGZSerializable*>(raw));
+        made.push_back(std::make_unique<SerialDeveloper>(record));
+        record->Release();
+        return made.back().get();
+    }
+};
+// The class store's factory for the objects the record references.
+struct RecordFactory final : ISerializableFactory {
+    RecordObject* lastNode = nullptr;   // borrowed: the class store holds it
+    cIGZSerializable* CreateSerializable(std::uint32_t classId) override {
+        if (classId == 0x49b9e602) {
+            auto* g = new cSC4SimGrid<std::uint8_t>();
+            g->AddRef();
+            return static_cast<cIGZSerializable*>(g);
+        }
+        if (classId == kDemandClassId || classId == 0x0990c138) {
+            auto* o = new RecordObject(classId);
+            o->AddRef();
+            if (classId == kDemandClassId) lastNode = o;
+            return o;
+        }
+        return nullptr;
+    }
+};
+cSC4DBSegment* OpenSegment(const std::string& path, bool write) {
+    cSC4DBSegment* seg = new cSC4DBSegment();
+    seg->AddRef();
+    seg->Init();
+    cRZString p(path.c_str());
+    seg->SetPath(p);
+    if (!(write ? seg->Open(false, true) : seg->Open(true, false))) { seg->Release(); return nullptr; }
+    return seg;
+}
+void CloseSegment(cSC4DBSegment* seg) {
+    if (!seg) return;
+    seg->Close();
+    seg->Release();
+}
+std::vector<std::uint8_t> RecordBytes(cSC4DBSegment* seg, const cGZPersistResourceKey& key) {
+    std::vector<std::uint8_t> out;
+    cISC4DBSegmentIStream* is = nullptr;
+    if (!seg->OpenIStream(key, &is)) return out;
+    const std::uint32_t size = is->GetRecord()->GetSize();
+    out.resize(size);
+    for (std::uint8_t& b : out) is->GetUint8(b);
+    seg->CloseIStream(is);
+    is->Release();
+    return out;
+}
+}  // namespace
+
 int StageReached(const cSC4BuildingDevelopmentSimulator& sim, std::uint32_t type) {
     auto it = sim.StagesReached().find(type);
     return it == sim.StagesReached().end() ? -1 : it->second;
@@ -673,6 +792,145 @@ int main() {
         SetTerrainChangedHost(nullptr);
         growth->DoTerrainChanged(rect, 3);                 // without the city's services: nothing
         growth->Release();
+    }
+    // The city-file record of a city that did not come from a file (i386 0x000f7e0c, spec 6): the original's layout, read back whole.
+    {
+        auto developerExemplar = [](std::uint32_t type) {
+            auto* h = new cSCPropertyHolder();
+            h->AddRef();
+            cSCPropertyHelp::SetPropertyValue(h, 0x10, static_cast<std::uint32_t>(4));
+            cSCPropertyHelp::SetPropertyValue(h, 0x21, type);
+            return h;
+        };
+        host.exemplars[0x9001] = developerExemplar(0x3110);
+        host.exemplars[0x9002] = developerExemplar(0x1010);
+        NodeResources node;
+        host.constructionResources = &node;
+        SerialServices services;
+        auto* fresh = new cSC4BuildingDevelopmentSimulator();
+        fresh->AddRef();
+        fresh->SetPlacementServices(&services);
+        CHECK(fresh->Init());
+        host.constructionResources = nullptr;
+        // the new city: a developer per developer exemplar, each at highest stage 0, the node at supply 100 / demand 0
+        CHECK(fresh->GetDevelopers().size() == 2 && StageReached(*fresh, 0x1010) == 0 && StageReached(*fresh, 0x3110) == 0);
+        CHECK(node.demand.QuerySupplyValue() == 100.0f && node.demand.QueryDemandValue() == 0.0f);
+        fresh->MarkTract(0x1010, 3, -2);
+        fresh->MarkTract(0x1010, 1, 4);
+        fresh->SetCheats(false, true, true);
+        const cGZPersistResourceKey key{0x8990be7a, 0x30303030, 1};
+        const std::string path = "/tmp/sc4_bds_fresh_" + std::to_string(getpid()) + ".sc4";
+        RecordFactory factory;
+        SetSerializableFactory(&factory);
+        std::size_t expected = 0;
+        if (cSC4DBSegment* seg = OpenSegment(path, true)) {
+            cISC4DBSegmentOStream* os = nullptr;
+            CHECK(seg->OpenOStream(key, &os, true));
+            CHECK(fresh->Write(*os));
+            CHECK(seg->CloseOStream(os));
+            os->Release();
+            CloseSegment(seg);
+            // 2 + 2 grid/node refs (12 each) + 4 + 2 x (4 + 12) + 4 (no special buildings) + 4 + 2 x 5 + 4 + 4 + 4 + 2 x 8 + 4 + 3
+            expected = 2 + 24 + 4 + 32 + 4 + 14 + 4 + 4 + 4 + 16 + 4 + 3;
+        } else {
+            CHECK(!"segment open (write)");
+        }
+        if (cSC4DBSegment* seg = OpenSegment(path, false)) {
+            CHECK(seg->LoadClassObjects(0x48));
+            CHECK(RecordBytes(seg, key).size() == expected);
+            cISC4DBSegmentIStream* is = nullptr;
+            CHECK(seg->OpenIStream(key, &is));
+            auto* back = new cSC4BuildingDevelopmentSimulator();
+            back->AddRef();
+            CHECK(back->Read(*is));
+            CHECK(!is->GetError() && is->GetRecord()->GetPosition() == is->GetRecord()->GetSize());
+            CHECK(back->StagesReached() == fresh->StagesReached());
+            CHECK(!back->IsTractUnmarked(0x1010, 3, -2) && !back->IsTractUnmarked(0x1010, 1, 4) && back->IsTractUnmarked(0x1010, 0, 0));
+            CHECK(!back->CheatIgnorePlumbing() && back->CheatIgnorePower() && back->CheatIgnoreCaps());
+            cSC4SimGrid<std::uint8_t>* map = back->GetBuildingMap();
+            CHECK(map && map != fresh->GetBuildingMap() && map->GetInstanceID() == 0x49d5b678 && map->GetTractSize() == 1);
+            CHECK(factory.lastNode && factory.lastNode->demand.QuerySupplyValue() == 100.0f && factory.lastNode->demand.QueryDemandValue() == 0.0f);
+            // Init adopts the record's developers (markers 0x51 / 0x52 by type) and keeps the record's stages
+            SerialServices adopted;
+            back->SetPlacementServices(&adopted);
+            CHECK(back->Init());
+            CHECK(back->GetDevelopers().size() == 2 && adopted.made.size() == 2);
+            std::map<std::uint32_t, std::uint32_t> markers;
+            for (const auto& [type, developer] : back->GetDevelopers())
+                markers[type] = static_cast<RecordObject*>(developer->Object())->marker;
+            CHECK(markers[0x1010] == 0x52 && markers[0x3110] == 0x51);
+            CHECK(back->StagesReached() == fresh->StagesReached());
+            back->Release();
+            seg->CloseIStream(is);
+            is->Release();
+            CloseSegment(seg);
+        } else {
+            CHECK(!"segment open (read)");
+        }
+        unlink(path.c_str());
+        fresh->Release();
+
+        // A record in the original's layout that came from a file saves back byte for byte (the replay): null references, stages,
+        // marks, one planned-growth entry and the cheats.
+        const std::string pathIn = "/tmp/sc4_bds_file_" + std::to_string(getpid()) + ".sc4";
+        const std::string pathOut = "/tmp/sc4_bds_resave_" + std::to_string(getpid()) + ".sc4";
+        std::vector<std::uint8_t> original, resaved;
+        if (cSC4DBSegment* seg = OpenSegment(pathIn, true)) {
+            cISC4DBSegmentOStream* os = nullptr;
+            CHECK(seg->OpenOStream(key, &os, true));
+            os->SetUint16(4);
+            os->SetUint64(0);                                  // building map
+            os->SetUint64(0);                                  // construction node
+            os->SetUint32(0);                                  // developers
+            os->SetUint32(0);                                  // special buildings
+            os->SetUint32(2);
+            os->SetUint32(0x1010); os->SetUint8(3);
+            os->SetUint32(0x3110); os->SetUint8(1);
+            os->SetUint32(1);
+            os->SetUint32(0x1010); os->SetUint32(2);
+            os->SetSint32(-1); os->SetSint32(7);
+            os->SetSint32(2); os->SetSint32(0);
+            os->SetUint32(1);                                  // planned growth: developer, x, z, stage, day
+            os->SetUint64(0); os->SetSint32(5); os->SetSint32(6); os->SetUint8(2); os->SetUint32(1234);
+            os->SetUint8(1); os->SetUint8(0); os->SetUint8(1);
+            CHECK(seg->CloseOStream(os));
+            os->Release();
+            CloseSegment(seg);
+        }
+        auto* loaded = new cSC4BuildingDevelopmentSimulator();
+        loaded->AddRef();
+        if (cSC4DBSegment* seg = OpenSegment(pathIn, false)) {
+            original = RecordBytes(seg, key);
+            cISC4DBSegmentIStream* is = nullptr;
+            CHECK(seg->OpenIStream(key, &is));
+            CHECK(loaded->Read(*is));
+            CHECK(is->GetRecord()->GetPosition() == is->GetRecord()->GetSize());
+            CHECK(StageReached(*loaded, 0x1010) == 3 && StageReached(*loaded, 0x3110) == 1 && !loaded->IsTractUnmarked(0x1010, -1, 7));
+            seg->CloseIStream(is);
+            is->Release();
+            CloseSegment(seg);
+        }
+        if (cSC4DBSegment* seg = OpenSegment(pathOut, true)) {
+            cISC4DBSegmentOStream* os = nullptr;
+            CHECK(seg->OpenOStream(key, &os, true));
+            CHECK(loaded->Write(*os));
+            CHECK(seg->CloseOStream(os));
+            os->Release();
+            CloseSegment(seg);
+        }
+        if (cSC4DBSegment* seg = OpenSegment(pathOut, false)) {
+            resaved = RecordBytes(seg, key);
+            CloseSegment(seg);
+        }
+        CHECK(!original.empty() && resaved == original);
+        loaded->Release();
+        unlink(pathIn.c_str());
+        unlink(pathOut.c_str());
+        SetSerializableFactory(nullptr);
+        for (std::uint32_t id : {0x9001u, 0x9002u}) {
+            host.exemplars[id]->Release();
+            host.exemplars.erase(id);
+        }
     }
     S::StaticShutdown();
     for (auto& kv : host.exemplars) kv.second->Release();   // the host map owns the exemplars the test made

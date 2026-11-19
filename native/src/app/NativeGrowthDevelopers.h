@@ -23,6 +23,8 @@ std::uint32_t GrowthDeveloperSubType(void* developer);               // vslot 0x
 bool GrowthDeveloperListsValid(void* developer);                     // vslot 0x50
 void GrowthDeveloperGrowthList(void* developer, std::vector<std::array<std::int32_t, 3>>& out);   // vslot 0x58 {x, z, style}
 float GrowthDeveloperActiveDemand(void* developer);                  // vslot 0x90 -> demand vslot 0x60
+// The developer as a COM object (its cISC4GrowthDeveloper view): what the building development simulator's record references.
+cIGZUnknown* GrowthDeveloperObject(void* developer);
 sc4::cSC4GrowthDeveloper* GrowthDeveloperOfType(std::uint32_t type); // the developer of one developer type (or null)
 // cSC4TractDeveloper::Grow for one developer's tract (NativeTractDevelopment.cpp); > 0 when something was built
 bool NativeLotConfigurationsByFilter(std::vector<sc4::cSC4LotConfiguration*>& out, sc4::cISC4LotConfigurationFilter* filter);   // manager vslot 0x48

@@ -109,6 +109,7 @@ public:
     void Init() override { demand_.Init(); }
     void SetTotal(float total) override { demand_.SetSupplyValue(total); }     // vslot 0x90
     void SetUsed(float used) override { demand_.SetDemandValue(used); }        // vslot 0x98
+    cSC4Demand* Demand() override { return &demand_; }                         // the record's construction node
 private:
     cSC4Demand demand_;
 };
@@ -131,6 +132,7 @@ public:
         return out;
     }
     float ActiveDemand() const override { return GrowthDeveloperActiveDemand(developer_); }
+    cIGZUnknown* Object() const override { return GrowthDeveloperObject(developer_); }   // the record's developer reference
     void* Handle() const { return developer_; }
 private:
     void* developer_;

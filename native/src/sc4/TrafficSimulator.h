@@ -232,6 +232,9 @@ public:
     virtual void AddNotification(cIGZMessageTarget2* target, std::uint32_t message) { (void)target; (void)message; }
     virtual void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t message) { (void)target; (void)message; }
     virtual const cISCPropertyHolder* SimulatorExemplar() { return nullptr; }                    // {0x6534284a, 0xe7e2c2db, 0xc9133286}
+    // A transit switch's building (the identity ITrafficLot::Building gave) as the city record references it (a cISC4Occupant COM
+    // object); null = the host does not hand it out, and the switch is left out of the record.
+    virtual cIGZUnknown* BuildingObject(void* building) { (void)building; return nullptr; }
     virtual int DayOfMonth() { return 0; }                                                         // simulator GetSimDate
     virtual std::uint32_t SimDateNumber() { return 0; }
     // Every lot in the lot manager's list order (slot 15), as views the simulator owns.
@@ -320,7 +323,8 @@ public:
     std::uint32_t AddRef() override { return ++refCount_; }
     std::uint32_t Release() override;
     bool DoMessage(cIGZMessage2* message) override;   // unrecovered
-    bool Write(cIGZOStream& stream) const override;   // unrecovered (stub)
+    bool Write(cIGZOStream& stream) const override;   // a loaded record replayed, else WriteFreshCityRecord
+    bool WriteFreshCityRecord(cIGZOStream& stream) const;   // i386 0x00061498, version 41
     bool Read(cIGZIStream& stream) override;          // unrecovered (stub)
     std::uint32_t GetGZCLSID() const override { return kGZCLSID_cSC4TrafficSimulator; }
 
@@ -633,6 +637,7 @@ private:
     cSC4SimGrid<float>* peakRatio_ = nullptr;               // 0x69d5c40e
     std::array<std::uint32_t, 13> cellCounts_{};            // per network type (§3.6)
     double incomeAcc_ = 0, feeAcc_ = 0;
+    std::uint32_t cycleStartDate_ = 0;                      // StartRecalc's sim date (saved; 0 until the first cycle starts)
     float transitIncome_ = 0, tollIncome_ = 0;
     std::array<std::uint32_t, 3> attempted_{}, routed_{};
     float carLenSum_ = 0, freightLenSum_ = 0;

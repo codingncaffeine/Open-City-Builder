@@ -1,7 +1,14 @@
 #include <cmath>
 #include <cstdio>
+#include <string>
+#include <unistd.h>
 
+#include "gz/cIGZPersistDBSerialRecord.h"
+#include "rz/cRZString.h"
+#include "sc4/CommonIIDs.h"
+#include "sc4/DBSegment.h"
 #include "sc4/PollutionSimulator.h"
+#include "sc4/cSC4SimGrid.h"
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
 using namespace sc4;
@@ -19,7 +26,76 @@ public:
     bool powered = true;
     cISCPropertyHolder* PropertyHolder() override { return &holder; }
     void Position(float p[3]) override { p[0] = p[1] = p[2] = 0; }
+    cIGZUnknown* object = nullptr;
+    cIGZUnknown* Object() override { return object; }
 };
+// A building as the city record references it (a test class): one marker word.
+constexpr std::uint32_t kTestOccupantClass = 0x7e570001;
+struct OccupantObject final : cIGZSerializable {
+    std::uint32_t refs = 0, marker = 0;
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid == kGZIID_cIGZUnknown || iid == kGZIID_cIGZSerializable) { *out = static_cast<cIGZSerializable*>(this); AddRef(); return true; }
+        *out = nullptr;
+        return false;
+    }
+    std::uint32_t AddRef() override { return ++refs; }
+    std::uint32_t Release() override { if (--refs == 0) { delete this; return 0; } return refs; }
+    bool Write(cIGZOStream& s) const override { s.SetUint32(marker); return !s.GetError(); }
+    bool Read(cIGZIStream& s) override { s.GetUint32(marker); return !s.GetError(); }
+    std::uint32_t GetGZCLSID() const override { return kTestOccupantClass; }
+};
+struct RecordFactory final : ISerializableFactory {
+    cIGZSerializable* CreateSerializable(std::uint32_t classId) override {
+        if (classId == 0x49b9e605) {
+            auto* g = new cSC4SimGrid<std::int16_t>();
+            g->AddRef();
+            return static_cast<cIGZSerializable*>(g);
+        }
+        if (classId == kTestOccupantClass) {
+            auto* o = new OccupantObject();
+            o->AddRef();
+            return o;
+        }
+        return nullptr;
+    }
+};
+cSC4DBSegment* OpenSegment(const std::string& path, bool write) {
+    cSC4DBSegment* seg = new cSC4DBSegment();
+    seg->AddRef();
+    seg->Init();
+    cRZString p(path.c_str());
+    seg->SetPath(p);
+    if (!(write ? seg->Open(false, true) : seg->Open(true, false))) { seg->Release(); return nullptr; }
+    return seg;
+}
+std::vector<std::uint8_t> RecordBytes(cSC4DBSegment* seg, const cGZPersistResourceKey& key) {
+    std::vector<std::uint8_t> out;
+    cISC4DBSegmentIStream* is = nullptr;
+    if (!seg->OpenIStream(key, &is)) return out;
+    out.resize(is->GetRecord()->GetSize());
+    for (std::uint8_t& b : out) is->GetUint8(b);
+    seg->CloseIStream(is);
+    is->Release();
+    return out;
+}
+// The record with its object ids zeroed (the serializer numbers the objects per save): the eight grids, then the four lists.
+std::vector<std::uint8_t> WithoutObjectIds(std::vector<std::uint8_t> bytes) {
+    auto zero = [&](std::size_t at) { for (std::size_t i = at; i < at + 8 && i < bytes.size(); ++i) bytes[i] = 0; };
+    auto u32 = [&](std::size_t at) {
+        std::uint32_t v = 0;
+        for (int i = 3; i >= 0; --i) v = (v << 8) | (at + i < bytes.size() ? bytes[at + i] : 0);
+        return v;
+    };
+    std::size_t at = 2;
+    for (int grid = 0; grid < 8; ++grid, at += 12) zero(at);
+    at += 8;                                                       // the next cell
+    for (int list = 0; list < 4; ++list) {
+        const std::uint32_t n = u32(at);
+        at += 4;
+        for (std::uint32_t i = 0; i < n && at < bytes.size(); ++i, at += 12) zero(at);
+    }
+    return bytes;
+}
 class Host final : public IPollutionHost {
 public:
     bool power = true, poweredOccupants = true;
@@ -278,6 +354,80 @@ int main() {
         CHECK(!view->UsesCustomPropSelector() && view->SelectProp({1, 2}, 0, 0) == 0 && view->GetRequesterSatisfactionId() == 0xe9a4300b);
         view->Release();
         fresh->Release();
+    }
+    // The city-file record of a new city (i386 0x0006e8c8, spec 6): version 4 in the original's layout, read back whole by the city-file
+    // reader, and saved again unchanged (but for the serializer's object ids) once it came from a file.
+    {
+        Host h3;
+        RecordFactory factory;
+        SetSerializableFactory(&factory);
+        cSC4PollutionSimulator fresh(&h3);
+        CHECK(fresh.Init());
+        fresh.SetAirValue(10, 12, 1234);
+        Occupant plant;
+        auto* plantObject = new OccupantObject();
+        plantObject->AddRef();
+        plantObject->marker = 0xfeed;
+        plant.object = plantObject;
+        Occupant hidden;                                                       // no object: left out of the list
+        CHECK(fresh.AddOrRemoveOccupant(fresh.IncineratorList(), &plant, true) && fresh.AddOrRemoveOccupant(fresh.IncineratorList(), &hidden, true));
+        const cGZPersistResourceKey key{0x8990c065, 0x40404040, 1};
+        const std::string path = "/tmp/sc4_pollution_fresh_" + std::to_string(getpid()) + ".sc4";
+        const std::string again = "/tmp/sc4_pollution_resave_" + std::to_string(getpid()) + ".sc4";
+        std::vector<std::uint8_t> first, second;
+        if (cSC4DBSegment* seg = OpenSegment(path, true)) {
+            cISC4DBSegmentOStream* os = nullptr;
+            CHECK(seg->OpenOStream(key, &os, true));
+            CHECK(fresh.Write(*os));
+            CHECK(seg->CloseOStream(os));
+            os->Release();
+            CHECK(seg->Close());
+            seg->Release();
+        }
+        cSC4PollutionSimulator back(&h3);
+        if (cSC4DBSegment* seg = OpenSegment(path, false)) {
+            CHECK(seg->LoadClassObjects(0x48));
+            first = RecordBytes(seg, key);
+            cISC4DBSegmentIStream* is = nullptr;
+            CHECK(seg->OpenIStream(key, &is));
+            CHECK(back.Read(*is));
+            CHECK(!is->GetError() && is->GetRecord()->GetPosition() == is->GetRecord()->GetSize());
+            seg->CloseIStream(is);
+            is->Release();
+            seg->Close();
+            seg->Release();
+        }
+        // 2 + 8 grids x 12 + 8 + lists (4 + 0, 4 + 12, 4 + 0, 4 + 0) + the fixed fields + the iterator + the department (8)
+        CHECK(first.size() > 2 + 96 + 8 + 28 && first[0] == 4 && first[1] == 0);
+        int value = 0;
+        back.GetAirValue(10, 12, value);
+        CHECK(value == 1234 && back.GetIncineratorCount() == 0);   // the lists come back as references only
+        if (cSC4DBSegment* seg = OpenSegment(again, true)) {
+            cISC4DBSegmentOStream* os = nullptr;
+            CHECK(seg->OpenOStream(key, &os, true));
+            CHECK(back.Write(*os));
+            CHECK(seg->CloseOStream(os));
+            os->Release();
+            seg->Close();
+            seg->Release();
+        }
+        if (cSC4DBSegment* seg = OpenSegment(again, false)) {
+            second = RecordBytes(seg, key);
+            seg->Close();
+            seg->Release();
+        }
+        CHECK(!first.empty() && WithoutObjectIds(second) == WithoutObjectIds(first));
+        // the incinerator list holds the one building that has an object; the department reference is null
+        CHECK(first.size() > 2 + 96 + 8 + 4 + 4 + 12 && first[2 + 96 + 8 + 4] == 1);
+        bool nullDepartment = true;
+        for (std::size_t i = first.size() - 8; i < first.size(); ++i) nullDepartment = nullDepartment && first[i] == 0;
+        CHECK(nullDepartment);
+        unlink(path.c_str());
+        unlink(again.c_str());
+        SetSerializableFactory(nullptr);
+        fresh.Shutdown();
+        back.Shutdown();
+        plantObject->Release();
     }
     std::printf(failures ? "FAILED\n" : "sc4_pollutionsimulator: all passed\n");
     return failures ? 1 : 0;
