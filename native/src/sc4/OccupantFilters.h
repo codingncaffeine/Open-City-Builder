@@ -69,6 +69,11 @@ class cSC4SignpostFilter : public cSC4OccupantFilter {
 public:
     bool IsOccupantIncluded(cISC4Occupant* occupant) override;
 };
+// Signs and labels: props whose prop type is the signpost's (0xab72fbb3) or the text decal's (0xcb79919b) (PC 0x004d7680).
+class cSC4SignOrLabelFilter : public cSC4OccupantFilter {
+public:
+    bool IsOccupantIncluded(cISC4Occupant* occupant) override;
+};
 // Buildings whose property 0x6a95e503 (bool) is set.
 class cSC4BuildingPropFilter : public cSC4OccupantFilter {
 public:

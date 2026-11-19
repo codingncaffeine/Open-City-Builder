@@ -1,4 +1,5 @@
 #include "sc4/OccupantFilters.h"
+#include "sc4/PropOccupantInterface.h"
 
 #include "sc4/SCPropertyHelp.h"
 
@@ -56,6 +57,16 @@ bool cSC4DecalFilter::IsOccupantIncluded(cISC4Occupant* occupant) {
 
 bool cSC4SignpostFilter::IsOccupantIncluded(cISC4Occupant* occupant) {
     return occupant->GetType() == kTypeProp && Supports(occupant, 0x4b44fbe2);
+}
+
+bool cSC4SignOrLabelFilter::IsOccupantIncluded(cISC4Occupant* occupant) {
+    if (occupant->GetType() != kTypeProp) return false;
+    void* raw = nullptr;
+    if (!occupant->QueryInterface(0xe9793a65, &raw) || !raw) return false;   // cISC4PropOccupant
+    auto* prop = static_cast<cISC4PropOccupant*>(raw);
+    const std::uint32_t type = prop->GetPropType();
+    prop->Release();
+    return type == 0xab72fbb3u || type == 0xcb79919bu;
 }
 
 bool cSC4BuildingPropFilter::IsOccupantIncluded(cISC4Occupant* occupant) {

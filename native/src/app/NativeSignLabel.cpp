@@ -32,6 +32,7 @@
 #include "sc4/TrafficNetworkMap.h"
 #include "sc4/View3DWin.h"
 #include "sc4/ViewInputControlLabelTool.h"
+#include "sc4/ViewInputControlSignLabelDemolish.h"
 #include "sc4/ViewInputControlSignTool.h"
 #include "sc4/ViewUtilities.h"
 #include "sc4/cSC4City.h"
@@ -202,9 +203,24 @@ struct SignpostHost final : ISignpostHost {
         const bool inserted = r && r->InsertModel(model);
         if (Trace()) std::fprintf(stderr, "sign: signpost %p inserted %d\n", static_cast<void*>(model), inserted);
     }
-    void RendererRemoveModel(s3d::cIS3DModelInstance* model) override { if (cSC43DRender* r = CityRenderer()) r->RemoveModel(model); }
+    void RendererRemoveModel(s3d::cIS3DModelInstance* model) override {
+        cSC43DRender* r = CityRenderer();
+        if (Trace() && r && r->GetViewUtilities()) {
+            cS3DBoundingBox box;
+            model->GetWorldBounds(box);
+            int lo[2] = {0, 0}, hi[2] = {0, 0};
+            r->GetViewUtilities()->ProjectBoundingBoxToViewportRectangle(box.min, box.max, lo, hi);
+            std::fprintf(stderr, "sign: signpost %p repaint rect %d,%d..%d,%d\n", static_cast<void*>(model), lo[0], lo[1], hi[0], hi[1]);
+        }
+        const bool removed = r && r->RemoveModel(model);
+        if (Trace()) std::fprintf(stderr, "sign: signpost %p removed %d\n", static_cast<void*>(model), removed);
+    }
     void RendererMoveModel(s3d::cIS3DModelInstance* model) override { if (cSC43DRender* r = CityRenderer()) r->MoveModel(model); }
-    void RendererChangeModel(s3d::cIS3DModelInstance* model, int reason) override { if (cSC43DRender* r = CityRenderer()) r->ChangeModel(model, reason); }
+    void RendererChangeModel(s3d::cIS3DModelInstance* model, int reason) override {
+        cSC43DRender* r = CityRenderer();
+        const bool changed = r && r->ChangeModel(model, reason);
+        if (Trace()) std::fprintf(stderr, "sign: signpost %p changed (%d) %d\n", static_cast<void*>(model), reason, changed);
+    }
     void StringToGlyphTextureArray(std::uint32_t fontId, cIGZString& text, std::vector<cRZAutoRefCount<ISignpostGlyphTextureInfo>>& out) override {
         out.clear();
         if (cSC4GlyphTextureManager* manager = GlyphTextureManager()) manager->StringToGlyphTextureArray(fontId, text, out);
@@ -397,9 +413,41 @@ private:
     LabelPiece cell_, at_;
 };
 
+struct SignLabelDemolishHostImpl final : ISignLabelDemolishHost {
+    sc4::cISC4Occupant* PickOccupant(int x, int y, sc4::cISC4OccupantFilter* filter) override {
+        static class Renderer renderer;
+        IPickedObject* picked = nullptr;
+        if (!CityRenderer() || !renderer.PickObject(x, y, filter, &picked) || !picked) return nullptr;
+        cIGZUnknown* owner = picked->GetOwner();
+        void* raw = nullptr;
+        sc4::cISC4Occupant* occupant = nullptr;
+        if (owner && owner->QueryInterface(kGZIID_cISC4Occupant, &raw) && raw) occupant = static_cast<sc4::cISC4Occupant*>(raw);
+        picked->Release();
+        return occupant;
+    }
+    bool PickTerrain(int x, int y, float out[3]) override { return tool_.PickTerrain(x, y, out); }
+    sc4::cISC4Occupant* FirstOccupantAt(float x, float z, sc4::cISC4OccupantFilter* filter) override {
+        cISC4OccupantManager* manager = labels_.OccupantManager();
+        sc4::cISC4Occupant* occupant = nullptr;
+        if (manager) manager->GetFirstOccupantByPosition(occupant, x, z, filter);
+        return occupant;
+    }
+    void RemoveProp(sc4::cISC4Occupant* occupant) override {
+        tool_.RemoveProp(occupant);
+        if (Trace()) std::fprintf(stderr, "sign bulldozer: removed %p\n", static_cast<void*>(occupant));
+    }
+    void ShowSignsAndLabels() override { tool_.ShowSignsAndLabels(); }
+    void PlaySound(std::uint32_t, std::uint32_t) override {}   // the sound system is not wired natively
+
+private:
+    LabelHost labels_;
+    LabelToolHostImpl tool_;
+};
+
 }  // namespace
 
 cSC4ViewInputControl* CreateLabelTool() { return new cSC4ViewInputControlLabelTool(); }
+cSC4ViewInputControl* CreateSignLabelDemolishTool() { return new cSC4ViewInputControlSignLabelDemolish(); }
 
 void InstallSignToolHost() {
     static SignHost host;
@@ -410,6 +458,8 @@ void InstallSignToolHost() {
     SetTextDecalHost(&labels);
     static LabelToolHostImpl labelTool;
     SetLabelToolHost(&labelTool);
+    static SignLabelDemolishHostImpl demolish;
+    SetSignLabelDemolishHost(&demolish);
 }
 
 }  // namespace native

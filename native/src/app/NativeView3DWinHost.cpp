@@ -294,7 +294,7 @@ struct StubView3DWin final : IView3DWinHost {
     cSC4ViewInputControl* CreatePlaceLotTool(std::uint32_t lot) override { return new cSC4ViewInputControlPlaceLot(0, lot, 0, false); }
     cSC4ViewInputControl* CreateDemolishTool() override { return native::CreateDemolishTool(); }
     cSC4ViewInputControl* CreateLabelTool() override { return native::CreateLabelTool(); }   // NativeSignLabel.cpp
-    cSC4ViewInputControl* CreateSignLabelDemolishTool() override { SC4_UNWIRED("IView3DWinHost::CreateSignLabelDemolishTool (not recovered)"); return nullptr; }
+    cSC4ViewInputControl* CreateSignLabelDemolishTool() override { return native::CreateSignLabelDemolishTool(); }   // NativeSignLabel.cpp
     cSC4ViewInputControl* CreateObliterateCityTool() override { SC4_UNWIRED("IView3DWinHost::CreateObliterateCityTool (cSC4ObliterateCity not recovered)"); return nullptr; }
     cSC4ViewInputControl* CreateFloraTool(std::uint32_t type) override { return native::CreateFloraTool(type); }
     cSC4ViewInputControl* CreateNetworkIntxTool(std::uint32_t) override { SC4_UNWIRED("IView3DWinHost::CreateNetworkIntxTool (not recovered)"); return nullptr; }
