@@ -584,7 +584,7 @@ int main() {
         // obliterating: the empty state is written into a temporary segment, the city's own file removed, a new city made
         // and saved to the old path with the camera kept
         Object viewUtilities;
-        SL::spViewUtilities = static_cast<cIGZUnknown*>(&viewUtilities);
+        SL::spViewUtilities = reinterpret_cast<SC4ViewUtilities*>(&viewUtilities);   // only its presence is read
         SL::spView3D = reinterpret_cast<SL::IView3DSystems*>(&viewUtilities);
         a->CityHooks().viewZoomAndRotation = [&](int& z, int& r) { z = 3; r = 5; };
         std::vector<std::pair<int, int>> restored;

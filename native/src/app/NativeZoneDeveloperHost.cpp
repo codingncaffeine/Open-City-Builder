@@ -54,10 +54,11 @@ namespace native {
 namespace {
 using namespace sc4;
 
-cSC4City* g_city = nullptr;
+// The current city: SL::spCity, as the original asks (a pointer kept from an earlier city outlives it).
+sc4::cSC4City* CurrentCity() { return dynamic_cast<sc4::cSC4City*>(SL::spCity); }
 
 template <class T> T* Component(CityComponent c, std::uint32_t clsid) {
-    cIGZUnknown* object = g_city ? g_city->GetComponent(c) : nullptr;
+    cIGZUnknown* object = CurrentCity() ? CurrentCity()->GetComponent(c) : nullptr;
     void* raw = nullptr;
     if (!object || !object->QueryInterface(0xe4fda3d4, &raw) || !raw) return nullptr;
     auto* serializable = static_cast<cIGZSerializable*>(raw);
@@ -69,7 +70,7 @@ cSC4ZoneManager* Zones() { return Component<cSC4ZoneManager>(CityComponent::Zone
 cSC4ZoneDeveloper* Developer() { return Component<cSC4ZoneDeveloper>(CityComponent::ZoneDeveloper, cSC4ZoneDeveloper::kZoneDeveloperClassId); }
 cSC4LotDeveloper* LotDeveloper() { return Component<cSC4LotDeveloper>(CityComponent::LotDeveloper, kGZCLSID_cSC4LotDeveloper); }
 cSTETerrain* Terrain() {
-    cIGZUnknown* object = g_city ? g_city->GetComponent(CityComponent::Terrain) : nullptr;
+    cIGZUnknown* object = CurrentCity() ? CurrentCity()->GetComponent(CityComponent::Terrain) : nullptr;
     void* raw = nullptr;
     if (!object || !object->QueryInterface(0xab953253, &raw) || !raw) return nullptr;
     auto* terrain = static_cast<cSTETerrain*>(static_cast<cIGZSerializable*>(raw));
@@ -77,7 +78,7 @@ cSTETerrain* Terrain() {
     return terrain;
 }
 cISC4OccupantManager* Occupants() {
-    cIGZUnknown* object = g_city ? g_city->GetComponent(CityComponent::OccupantManager) : nullptr;
+    cIGZUnknown* object = CurrentCity() ? CurrentCity()->GetComponent(CityComponent::OccupantManager) : nullptr;
     void* raw = nullptr;
     if (!object || !object->QueryInterface(kGZIID_cISC4OccupantManager, &raw) || !raw) return nullptr;
     auto* manager = static_cast<cISC4OccupantManager*>(raw);
@@ -91,10 +92,10 @@ bool CellIsWater(int x, int z) {
 
 // The services the zone developer AddRefs and Releases: the city keeps them alive, so the counts are not modelled.
 struct CityApi final : IZoneDeveloperCityApi {
-    int CellCountX() override { return g_city ? g_city->CellCountX() : 0; }
-    int CellCountZ() override { return g_city ? g_city->CellCountZ() : 0; }
-    void PositionToCell(float x, float z, int& cellX, int& cellZ) override { if (g_city) g_city->PositionToCell(x, z, cellX, cellZ); }
-    bool LocationIsInBounds(float x, float z) override { return g_city && g_city->LocationIsInBounds(x, z); }
+    int CellCountX() override { return CurrentCity() ? CurrentCity()->CellCountX() : 0; }
+    int CellCountZ() override { return CurrentCity() ? CurrentCity()->CellCountZ() : 0; }
+    void PositionToCell(float x, float z, int& cellX, int& cellZ) override { if (CurrentCity()) CurrentCity()->PositionToCell(x, z, cellX, cellZ); }
+    bool LocationIsInBounds(float x, float z) override { return CurrentCity() && CurrentCity()->LocationIsInBounds(x, z); }
 } g_cityApi;
 
 struct TerrainApi final : IZoneDeveloperTerrainApi {
@@ -111,14 +112,14 @@ struct TerrainApi final : IZoneDeveloperTerrainApi {
         return t && x >= 0 && z >= 0 && t->CellHasLand(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z));
     }
     bool IsNavigable(int x, int z) override {
-        cIGZUnknown* object = g_city ? g_city->GetComponent(CityComponent::SurfaceWater) : nullptr;
+        cIGZUnknown* object = CurrentCity() ? CurrentCity()->GetComponent(CityComponent::SurfaceWater) : nullptr;
         void* raw = nullptr;
         if (!object || !object->QueryInterface(kGZIID_cISTESurfaceWater, &raw) || !raw) return false;
         auto* water = static_cast<cSTESurfaceWater*>(static_cast<cIGZSerializable*>(raw));
         static_cast<cIGZSerializable*>(raw)->Release();
         return water->IsNavigable(x, z, 0, nullptr);
     }
-    bool CellIsInBounds(int x, int z) override { return g_city && g_city->CellIsInBounds(x, z); }
+    bool CellIsInBounds(int x, int z) override { return CurrentCity() && CurrentCity()->CellIsInBounds(x, z); }
 } g_terrainApi;
 
 struct ZoneManagerApi final : IZoneDeveloperZoneManagerApi {
@@ -335,8 +336,8 @@ struct BaseTextureServices final : ILotBaseTextureServices {
     cISC4OccupantManager* OccupantManager() override { return Occupants(); }
     std::uint32_t ZoneDragColor(int zoneType) override { cSC4ZoneManager* m = Zones(); return m ? m->GetZoneDragColor(zoneType) : 0; }
     std::uint8_t ZoneDisplayAlpha() override { cSC4ZoneManager* m = Zones(); return m ? m->GetZoneDisplayAlpha() : 0xff; }
-    int CityCellsX() override { return g_city ? g_city->CellCountX() : 0; }
-    int CityCellsZ() override { return g_city ? g_city->CellCountZ() : 0; }
+    int CityCellsX() override { return CurrentCity() ? CurrentCity()->CellCountX() : 0; }
+    int CityCellsZ() override { return CurrentCity() ? CurrentCity()->CellCountZ() : 0; }
     void BoundaryLotTexture(const int sides[4], std::uint32_t& texture, std::uint8_t& rotation, bool& flag) override {
         BoundaryType boundary;
         for (int i = 0; i < 4; ++i) boundary.sides[i] = sides[i];
@@ -567,7 +568,6 @@ bool InstallZoneDeveloperHost(sc4::cSC4City* city) {
     if (city && city == installedFor && installedOk) return true;
     installedFor = city;
     installedOk = false;
-    g_city = city;
     sc4::SetZoneDeveloperHost(&g_host);
     sc4::SetLotHost(&g_lotHost);
     sc4::cSC4LotDeveloper::SetBaseTextureServices(&g_baseTextures);
@@ -605,7 +605,7 @@ bool NativeRealisticOccupant(sc4::cISC4Occupant* occupant) {
     if (type == 0x497f6d9d && answers(kGZIID_cISC4LotBaseTextureOccupant)) {
         float p[3] = {};
         occupant->GetPosition(p);
-        cSC4Lot* lot = g_city ? NativeLotAtCell(int(p[0] / 16.0f), int(p[2] / 16.0f), false) : nullptr;
+        cSC4Lot* lot = CurrentCity() ? NativeLotAtCell(int(p[0] / 16.0f), int(p[2] / 16.0f), false) : nullptr;
         if (lot && lot->GetState() == 1) return false;
     }
     if (type == 0xa823821e && (answers(0x4b44fbe2) || answers(0x2b3b7d86))) return false;

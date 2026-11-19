@@ -42,7 +42,7 @@ struct View final : SL::IView3DSystems {
     cIGZUnknown* Renderer() override { return &o[1]; }
     cIGZUnknown* ModelMaker() override { return &o[2]; }
     cIGZUnknown* ViewManager() override { return &o[3]; }
-    cIGZUnknown* RendererViewUtilities() override { return &o[4]; }
+    SC4ViewUtilities* RendererViewUtilities() override { return reinterpret_cast<SC4ViewUtilities*>(&o[4]); }
     cIGZUnknown* RendererLightingManager() override { return &o[5]; }
 };
 struct Window final : SL::IWinSC4App { View view; SL::IView3DSystems* View3D() override { return &view; } };
@@ -99,7 +99,7 @@ int main() {
     CHECK(SL::OnAppInit2() && SL::spWinSC4App == &window);
     CHECK(SL::OnView3DInit());
     CHECK(SL::spView3DWin == &window.view.o[0] && SL::spRenderer == &window.view.o[1] && SL::spModelMaker == &window.view.o[2]);
-    CHECK(SL::ViewManager() == &window.view.o[3] && SL::ViewUtilities() == &window.view.o[4] && SL::spLightingManager == &window.view.o[5]);
+    CHECK(SL::ViewManager() == &window.view.o[3] && SL::ViewUtilities() == reinterpret_cast<SC4ViewUtilities*>(&window.view.o[4]) && SL::spLightingManager == &window.view.o[5]);
     CHECK(SL::OnView3DShutdown() && SL::spRenderer == nullptr && SL::spView3D == nullptr);
     std::printf(failures ? "FAILED\n" : "OK\n");
     return failures ? 1 : 0;

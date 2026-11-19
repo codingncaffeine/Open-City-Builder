@@ -429,7 +429,8 @@ public:
 
 // ---- hosts ------------------------------------------------------------------------------------------------------
 sc4::cSC43DRender* g_render = nullptr;
-sc4::cSC4City* g_city = nullptr;
+// The current city: SL::spCity, as the original asks (a pointer kept from an earlier city outlives it).
+sc4::cSC4City* CurrentCity() { return dynamic_cast<sc4::cSC4City*>(SL::spCity); }
 
 class ModelInstanceHost final : public s3d::IModelInstanceHost {
 public:
@@ -460,8 +461,8 @@ public:
 };
 
 sc4::cSTETerrain* Terrain() {
-    if (!g_city) return nullptr;
-    cIGZUnknown* object = g_city->GetComponent(sc4::CityComponent::Terrain);
+    if (!CurrentCity()) return nullptr;
+    cIGZUnknown* object = CurrentCity()->GetComponent(sc4::CityComponent::Terrain);
     void* serializable = nullptr;
     if (!object || !object->QueryInterface(0xab953253, &serializable)) return nullptr;
     auto* terrain = static_cast<sc4::cSTETerrain*>(static_cast<cIGZSerializable*>(serializable));
@@ -587,7 +588,7 @@ public:
     cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
     cIGZMessageServer2* AnimationTickManager() override { return nullptr; }
     sc4::cISC4OccupantManager* OccupantManager() override {
-        cIGZUnknown* object = g_city ? g_city->GetComponent(sc4::CityComponent::OccupantManager) : nullptr;
+        cIGZUnknown* object = CurrentCity() ? CurrentCity()->GetComponent(sc4::CityComponent::OccupantManager) : nullptr;
         void* raw = nullptr;
         if (!object || !object->QueryInterface(sc4::kGZIID_cISC4OccupantManager, &raw)) return nullptr;
         auto* manager = static_cast<sc4::cISC4OccupantManager*>(raw);
@@ -595,8 +596,8 @@ public:
         return manager;
     }
     sc4::cISC4LotManager* LotManager() override { return nullptr; }
-    cIGZUnknown* BuildingDevelopmentSim() override { return g_city ? g_city->GetComponent(sc4::CityComponent::BuildingDevelopmentSimulator) : nullptr; }
-    cIGZUnknown* Terrain() override { return g_city ? g_city->GetComponent(sc4::CityComponent::Terrain) : nullptr; }
+    cIGZUnknown* BuildingDevelopmentSim() override { return CurrentCity() ? CurrentCity()->GetComponent(sc4::CityComponent::BuildingDevelopmentSimulator) : nullptr; }
+    cIGZUnknown* Terrain() override { return CurrentCity() ? CurrentCity()->GetComponent(sc4::CityComponent::Terrain) : nullptr; }
     int ShadowRenderQuality() override { const char* q = std::getenv("SC4_SHADOWQ"); return q ? std::atoi(q) : 5; }
     float ShadowMinimumHeight() override { return 0.0f; }
     float ShadowViewScale() override { return 1.0f; }
@@ -796,7 +797,6 @@ void DetachModelMaker() {
 bool AttachModelMaker(sc4::cSC43DRender& render, sc4::cSC4City& city) {
     DetachModelMaker();
     g_render = &render;
-    g_city = &city;
     if (sc4::cSTETerrain* terrain = Terrain()) {
         AttachShadowOverlay(render, *terrain);
         AttachDecalOverlays(render, city, *terrain);

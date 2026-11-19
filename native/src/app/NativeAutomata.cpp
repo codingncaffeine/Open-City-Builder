@@ -17,6 +17,7 @@
 #include "sc4/TrafficAutomaton.h"
 #include "sc4/TrafficNetworkMap.h"
 #include "sc4/Render3D.h"
+#include "app/NativeCityView.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
@@ -32,7 +33,8 @@ using namespace sc4;
 constexpr std::uint32_t kGZIID_cIS3DResModel = 0x9ad0e7e3;
 
 sc4::cSC43DRender* g_render = nullptr;
-sc4::cSC4City* g_city = nullptr;
+// The current city: SL::spCity, as the original asks (a pointer kept from an earlier city outlives it).
+sc4::cSC4City* CurrentCity() { return dynamic_cast<sc4::cSC4City*>(SL::spCity); }
 std::vector<sc4::cSC4Automaton*> g_automata;   // the started automata (one reference each)
 std::chrono::steady_clock::time_point g_lastTick = std::chrono::steady_clock::now();
 int g_zoom = 5, g_rotation = 0;
@@ -87,8 +89,8 @@ private:
 };
 
 sc4::cSTETerrain* Terrain() {
-    if (!g_city) return nullptr;
-    cIGZUnknown* object = g_city->GetComponent(sc4::CityComponent::Terrain);
+    if (!CurrentCity()) return nullptr;
+    cIGZUnknown* object = CurrentCity()->GetComponent(sc4::CityComponent::Terrain);
     void* serializable = nullptr;
     if (!object || !object->QueryInterface(0xab953253, &serializable)) return nullptr;
     auto* terrain = static_cast<sc4::cSTETerrain*>(static_cast<cIGZSerializable*>(serializable));
@@ -97,7 +99,7 @@ sc4::cSTETerrain* Terrain() {
 }
 
 cSC4TrafficNetworkMap* NetworkMap() {
-    cIGZUnknown* object = g_city ? g_city->GetComponent(CityComponent::TrafficNetwork) : nullptr;
+    cIGZUnknown* object = CurrentCity() ? CurrentCity()->GetComponent(CityComponent::TrafficNetwork) : nullptr;
     return object ? dynamic_cast<cSC4TrafficNetworkMap*>(object) : nullptr;
 }
 
@@ -178,7 +180,7 @@ public:
     bool InsertOccupant(cISC4Occupant*) override { return true; }
     void RemoveOccupant(cISC4Occupant*) override {}
     bool RefreshOccupant(cISC4Occupant*) override { return true; }
-    bool HasCity() override { return g_city != nullptr; }
+    bool HasCity() override { return CurrentCity() != nullptr; }
     float CitySizeX() override { auto* t = Terrain(); return t ? static_cast<float>(t->CellCountX()) * 16.0f : 0.0f; }
     float CitySizeZ() override { auto* t = Terrain(); return t ? static_cast<float>(t->CellCountZ()) * 16.0f : 0.0f; }
     float TerrainHeight(float x, float z) override { auto* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
@@ -232,7 +234,6 @@ void InstallAutomataHost() {
 
 void SetAutomataRenderer(sc4::cSC43DRender* render, sc4::cSC4City* city) {
     g_render = render;
-    g_city = city;
     if (g_render) {
         for (s3d::cIS3DModelInstance* instance : g_pending) g_render->InsertModel(instance);
         g_pending.clear();
@@ -266,15 +267,10 @@ void PostCityInitToAutomataManagers(sc4::cSC4City* city) {
         }
     }
     std::fprintf(stderr, "automata: %d started, %d skipped\n", started, skipped);
-    // The managers keep their view rectangle from the camera's messages; none has come since they subscribed, so one camera move is
-    // announced now (their HandleViewChanged reads the current view). Without it every automaton counts as offscreen.
-    if (SL::spMS2) {
-        auto* message = new cRZMessage2Standard();
-        message->AddRef();
-        message->SetType(0xa6b79602);
-        SL::spMS2->MessagePost(message, false);
-        message->Release();
-    }
+    // The managers keep their view rectangle from the camera's messages; none has come since they subscribed, so the camera
+    // announces its zoom and rotation now (their HandleViewChanged reads the current view; without it every automaton counts as
+    // offscreen). The camera's own message carries the previous and current zoom / rotation every other listener reads.
+    AnnounceCameraZoomRotation();
 }
 
 // A camera move from outside the view's own scroll path (a scenario's `look`) is announced as the scroll it stands for: the

@@ -14,6 +14,8 @@ namespace native {
 
 // The city view's renderer (null before the city view exists).
 sc4::cSC43DRender* CityRenderer();
+// The city camera sends its zoom / rotation messages (cSC4CameraControl::SendPostViewChangeMessage, kind 2) as after a zoom change.
+void AnnounceCameraZoomRotation();
 // The renderer's ChangeModel(model, change) (vslot 0xf8); false without a city view.
 bool CityRendererChangeModel(s3d::cIS3DModelInstance* model, int change);
 // Listen for the next city load's saved camera (the view state record) and open the city there; call before LoadCity.
@@ -49,6 +51,11 @@ void NativeRiotReport();                          // kit command `riots`
 void NativeQueryReport(std::uint32_t skipUi, int limit);   // the query tool's buildings (querylist kit command; app/NativeQuery.cpp)
 void NativeTrailerReport(int limit);  // the trailer vehicles on screen and the cars they pull (app/NativeAutomataGenerator.cpp)
 void NativeTrainReport(int limit);    // track cells, trains and buses, the first engines with their cars (app/NativeTrafficAutomata.cpp)
-bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* city, gd::cIGZGDriver* driver, gz::cIGZDrawContext* screen, int viewportWidth, int viewportHeight);
+// The city view's render stack, built as the original's view does: SetCityRenderTarget when the city screen is made,
+// PrepareCityRenderStack on DoPreCityInit (before cSC4City::Init: camera, control, 3D render), FinishCityRenderStack on
+// DoPostCityInit (after it: the city's size, terrain view, lighting, models, automata, effects, tools, city UI).
+void SetCityRenderTarget(sc4::cSC4View3DWin& view, gd::cIGZGDriver* driver, gz::cIGZDrawContext* screen, int viewportWidth, int viewportHeight);
+bool PrepareCityRenderStack(cISC4City* city);
+bool FinishCityRenderStack(cISC4City* city);
 
 }  // namespace native

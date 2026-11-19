@@ -1,4 +1,5 @@
 // Installs the generated neutral stub hosts (src/app/hosts, scripts/gen_stub_hosts.py).
+#include "app/NativeObliterate.h"
 #include "app/NativeSignLabel.h"
 #include "app/NativeTips.h"
 #include "app/NativeSnapshot.h"
@@ -226,6 +227,7 @@ void InstallStubHosts() {
     InstallQueryHost();                   // the real query host replaces the stub above
     InstallSignToolStub();
     InstallSignToolHost();                // NativeSignLabel.cpp: the sign tool and signposts' real hosts replace the stubs
+    InstallObliterateCityHost();          // NativeObliterate.cpp: the obliterate scene's services
     InstallWeatherStub();
     InstallNativeWeather();               // the real weather host replaces the stub above
     InstallWinAdviceListStub();

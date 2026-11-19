@@ -115,7 +115,7 @@ public:
     cIGZUnknown* Renderer() override { return render_ ? static_cast<cIGZUnknown*>(static_cast<::cISC43DRender*>(render_)) : nullptr; }
     cIGZUnknown* ModelMaker() override { return nullptr; }         // the model maker object is not published natively yet
     cIGZUnknown* ViewManager() override { return nullptr; }
-    cIGZUnknown* RendererViewUtilities() override { return nullptr; }   // SC4ViewUtilities is a plain class, not a COM object
+    SC4ViewUtilities* RendererViewUtilities() override { return render_ ? render_->GetViewUtilities() : nullptr; }
     cIGZUnknown* RendererLightingManager() override { return SL::spLightingManager; }
     sc4::cSC4View3DWin* view_ = nullptr;
     sc4::cSC43DRender* render_ = nullptr;

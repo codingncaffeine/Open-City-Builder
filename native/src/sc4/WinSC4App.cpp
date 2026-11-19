@@ -320,7 +320,7 @@ cIGZUnknown* WinSC4AppView3D::ViewManager() {   // vslot 0x30
     return view ? view->GetViewManager() : nullptr;
 }
 
-cIGZUnknown* WinSC4AppView3D::RendererViewUtilities() {   // the renderer's vslot 0x40
+SC4ViewUtilities* WinSC4AppView3D::RendererViewUtilities() {   // the renderer's vslot 0x40
     cSC4View3DWin* view = window_ ? window_->View3D() : nullptr;
     auto* renderer = view ? static_cast<IRenderer3D*>(view->GetRenderer()) : nullptr;
     return renderer ? renderer->ViewUtilities() : nullptr;

@@ -86,7 +86,7 @@ public:
     virtual void OnCityCreated() {}
     virtual void OnCityInitialized() {}
     virtual void OnCityShuttingDown() {}
-    virtual void OnCityDestroyed() {}
+    virtual void OnCityDestroyed(cISC4City* city) { (void)city; }   // the city is going away (its destructor, after Shutdown)
     virtual void OnComponentCreated(CityComponent /*component*/, cIGZUnknown* /*object*/, float /*sizeX*/, float /*sizeZ*/) {}
     // Init / Shutdown of one component (cSC4City::Init / Shutdown). The original calls slot 0x18 / 0x20 of the stored interface
     // directly: every cISC4 component interface starts QueryInterface, AddRef, Release, Init, Shutdown. The port keeps components
@@ -101,6 +101,12 @@ public:
     virtual std::uint32_t GetSimulatorDate() { return 0; }                       // simulator -> clock -> date
     virtual void OnEstablishedChanged(bool /*established*/) {}                   // simulator slot 0x108
     virtual void LoadDefaultCityName(cIGZString& /*name*/) {}                    // SC4LoadString(0x6a231eaa, 0xaa738c4e)
+    // SaveObliterated: the terrain (slot SaveObliterated) and then the flora simulator (slot 24) write themselves into the
+    // obliteration segment (flora.md 10.3)
+    virtual void SaveObliterated(cIGZPersistDBSegment* /*segment*/) {}
+    // cISC4App slot 5 RunMessageServer2Pump(100, 500, 5000): the city's Shutdown drains the occupant manager's queued Remove and
+    // Destroy messages before the manager is released (occupant-manager.md 2.3, 0x0045B826)
+    virtual void PumpMessageServer2() {}
     virtual bool ReadStringRecord(cIGZPersistDBSegment* /*segment*/, std::uint32_t /*instance*/, int /*language*/,
                                   cIGZString& /*out*/) { return false; }
     virtual int GetUILanguage() { return 0; }                                    // RZ::LM() slot 0x38 on load

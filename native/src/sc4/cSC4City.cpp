@@ -187,7 +187,7 @@ cSC4City::cSC4City(ICityHost* host) : host_(host) {
 
 cSC4City::~cSC4City() {
     Shutdown();
-    host_->OnCityDestroyed();
+    host_->OnCityDestroyed(this);
 }
 
 bool cSC4City::QueryInterface(std::uint32_t iid, void** out) {
@@ -367,6 +367,9 @@ bool cSC4City::Shutdown() {
         auto& slot = components_[static_cast<std::size_t>(id)];
         if (!slot) continue;
         host_->ShutdownComponent(id, slot.get());   // slot 0x20 of the component
+        // the occupant manager's queued Remove / Destroy messages are delivered before it is released (0x0045B826): a city made
+        // right after (NewCity) must not receive the old city's occupants
+        if (id == CityComponent::OccupantManager) host_->PumpMessageServer2();
         slot = nullptr;
     }
     host_->UnregisterCityCommands();
@@ -557,7 +560,11 @@ bool cSC4City::WriteRetainedRecords(cIGZPersistDBSegment* segment) const {
     return false;   // (the original returns false regardless)
 }
 
-bool cSC4City::SaveObliterated(cIGZPersistDBSegment* /*segment*/) const { return true; }
+// The terrain, then the flora (application.md 11.6, flora.md 10.3): what the replacement city starts from.
+bool cSC4City::SaveObliterated(cIGZPersistDBSegment* segment) const {
+    if (host_ && segment) host_->SaveObliterated(segment);
+    return true;
+}
 
 void cSC4City::WriteRegionViewThumbnail(cIGZPersistDBSegment& target, const cIGZString& sourceFile, bool reuse) {
     bool copied = false;

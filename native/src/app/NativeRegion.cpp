@@ -113,7 +113,8 @@ public:
     void SetCityMayorName(cISC4City* city, const cIGZString& name) override { if (auto* live = LiveCity(city)) live->SetMayorName(name); }
     std::uint32_t CityDifficulty(const cISC4City* city) override { auto* live = LiveCity(city); return live ? std::uint32_t(live->GetDifficultyLevel()) : 0; }
     void SetCityDifficulty(cISC4City* city, std::uint32_t level) override { if (auto* live = LiveCity(city)) live->SetDifficultyLevel(sc4::cSC4City::DifficultyLevel(level)); }
-    void SetCitySize(cISC4City*, float, float) override {}
+    // city vslot 0x2c0 SetSize: a city made from the region (NewCity, e.g. after an obliteration) takes the tile's size here
+    void SetCitySize(cISC4City* city, float sizeX, float sizeZ) override { if (auto* live = LiveCity(city)) live->SetSize(sizeX, sizeZ); }
     std::uint32_t CitySerialNumber(const cISC4City* city) override { auto* live = LiveCity(city); return live ? live->GetCitySerialNumber() : 0; }
     bool CityEstablished(const cISC4City* city) override { auto* live = LiveCity(city); return live && live->GetEstablished(); }
     // (no live mayor rating yet: the record's value is kept)
@@ -227,7 +228,6 @@ int CurrentCellsX() { cISC4City* city = g_app ? g_app->GetCity() : nullptr; auto
 int CurrentCellsZ() { cISC4City* city = g_app ? g_app->GetCity() : nullptr; auto* live = LiveCity(city); return live ? live->CellCountZ() : 0; }
 
 class NeighborsHost final : public sc4::INeighborsHost {
-public:
     static sc4::cSC4Simulator* Simulator() {
         sc4::cSC4City* city = HostCity();
         cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::Simulator) : nullptr;
@@ -238,6 +238,7 @@ public:
         return simulator;
     }
 
+public:
     cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
     cISC4City* City() override { return g_app ? g_app->GetCity() : nullptr; }
     cISC4RegionalCity* CurrentRegionalCity() override { return g_app ? g_app->GetRegionalCity() : nullptr; }
@@ -374,7 +375,6 @@ public:
 
 // cSC4NeighborDeal's services: which city a region cell holds (a deal finds the city on each side of it this way; a clone whose cells
 // hold no city is cancelled), the current regional city and the city's funds.
-//   PARTIAL: the deal's monthly cost (budget vslot 0x118 in the 64-bit build) is not ported; a cost of 0 leaves the deal at 1.
 class DealHost final : public sc4::INeighborDealHost {
 public:
     bool CityHasBudget() override { return Budget() != nullptr; }

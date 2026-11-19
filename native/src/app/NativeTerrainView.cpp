@@ -373,6 +373,18 @@ private:
 }  // namespace
 
 sc4::cSTETerrainView3D* g_terrainView = nullptr;
+namespace {
+// The closed city's view: out of reach of picks and culling at once, released when the next city's view is linked to its terrain
+// (the old terrain's Shutdown still calls into it through the link when the city closes after its screen).
+sc4::cSTETerrainView3D* g_retiredTerrainView = nullptr;
+}  // namespace
+
+void DetachTerrainView() {
+    if (!g_terrainView) return;
+    if (g_retiredTerrainView) g_retiredTerrainView->Release();
+    g_retiredTerrainView = g_terrainView;
+    g_terrainView = nullptr;
+}
 
 bool TerrainCullingInfo(int& rowBegin, int& rowEnd, const std::int32_t*& colStart, const std::int32_t*& colEnd) {
     if (!g_terrainView) return false;
@@ -428,6 +440,7 @@ bool AttachTerrainView(sc4::cSC43DRender& render, sc4::cSTETerrain& terrain, gd:
     static TerrainViewLink* link = nullptr;
     delete link;
     link = new TerrainViewLink(*view);
+    if (g_retiredTerrainView) { g_retiredTerrainView->Release(); g_retiredTerrainView = nullptr; }
     terrain.SetView(link);
     terrain.SetDisplayEnabled(true);
     // AddViewObject's list ids: 2 = drawn before the static view (view pass 0: the terrain), 0 = after it (view pass 2: the water)

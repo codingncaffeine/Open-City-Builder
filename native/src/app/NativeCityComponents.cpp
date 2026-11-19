@@ -21,12 +21,6 @@ using namespace sc4;
 // (src/tools/city_probe_bindings.cpp): their Init dereferences services the probe does not answer, so they stay uninitialised until a
 // native host replaces the probe. Each entry is a to-do (SIM-HOST-*).
 constexpr const char* kProbeHosted = ",";
-// Components the native city view initialises itself, after its render stack is up (NativeCityView.cpp: the terrain needs the view's
-// services for its first surface pass, the occupant manager needs the automata host installed first). Initialised here they come up
-// half-wired and their init guard then stops the second call (the terrain drew black). Ordering divergence until those services exist
-// before cSC4City::Init. Their Shutdown stays in the city's pass (kShutdownOrder): skipping it left every occupant alive after the city
-// closed, still answering day ticks (a construction site went on completing the old city's lots inside the next city).
-constexpr const char* kInitByCityView = ",Terrain,OccupantManager,";
 
 // Dev switch: SC4_COMPINIT_SKIP=Name,Name leaves more components uninitialised (bisecting a component whose Init breaks);
 // SC4_COMPINIT_PROBES=1 initialises the probe-hosted ones anyway.
@@ -34,17 +28,14 @@ bool Skipped(const char* name, bool init) {
     const std::string key = std::string(",") + name + ",";
     static const bool probes = std::getenv("SC4_COMPINIT_PROBES") != nullptr;
     if (!probes && std::string(kProbeHosted).find(key) != std::string::npos) return true;
-    if (init && std::string(kInitByCityView).find(key) != std::string::npos) return true;
     static const char* list = std::getenv("SC4_COMPINIT_SKIP");
     if (!list) return false;
     return (std::string(",") + list + ",").find(key) != std::string::npos;
 }
 
-// Components whose recovered class has a no-argument Init (the list in citycomp/CityComponentInit.h, one TU per class). Not there
-// because their Init / Shutdown are not recovered (each is a to-do): cSC4LotDeveloper, cSC4FireProtectionSimulator, cSC4FloraSimulator,
-// cSC4PlumbingSimulator (Init), cSC4PoliceSimulator, cSC4PollutionSimulator, cSC4ResidentialSimulator,
-// cSC4TrafficSimulator, cSC4CrimeSimulator (Init takes the tunables: the slot-0x18 wrapper is not recovered), the effects manager,
-// the disaster layer and the demolition utility.
+// Components whose recovered class has a no-argument Init (the list in citycomp/CityComponentInit.h, one TU per class), plus the
+// disaster layer and the crime simulator (their own files). Not dispatched yet (each is a to-do, PLAN.md 3a item A): the lot
+// developer, the effects manager and the demolition utility.
 bool Dispatch(cIGZUnknown* object, bool init) {
     if (CityComponentInit_cSC4DisasterLayer(object, init)) return true;   // NativeDisasters.cpp
     if (CityComponentInit_cSC4CrimeSimulator(object, init)) return true;  // NativeCrime.cpp

@@ -11,6 +11,8 @@ namespace native {
 
 // Creates the terrain view for `terrain` and registers its terrain and water passes with the renderer.
 bool AttachTerrainView(sc4::cSC43DRender& render, sc4::cSTETerrain& terrain, gd::cIGZGDriver* driver);
+// Takes the current terrain view out of reach (picks, culling) when its city goes; released once the next city links its own.
+void DetachTerrainView();
 // The terrain view's draw-frustum culling of the last frame (cSTETerrainView3D::GetCullingInfo: rows are z cells, colStart[z]..colEnd[z]
 // the x cells drawn in that row); false before the view exists.
 bool TerrainCullingInfo(int& rowBegin, int& rowEnd, const std::int32_t*& colStart, const std::int32_t*& colEnd);

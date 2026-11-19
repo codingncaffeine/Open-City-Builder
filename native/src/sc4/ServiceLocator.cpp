@@ -31,7 +31,8 @@ cIGZUnknown *spTerrain = nullptr, *spTerrainMap = nullptr, *spTerrainView = null
     *spResidentialSim = nullptr, *spTrafficSim = nullptr, *spWeatherSim = nullptr, *spZoneDeveloper = nullptr,
     *spCivicBuildingSim = nullptr, *spPropDeveloper = nullptr, *sp24HourClock = nullptr, *spHistoryWarehouse = nullptr;
 IView3DSystems* spView3D = nullptr;
-cIGZUnknown *spView3DWin = nullptr, *spModelMaker = nullptr, *spRenderer = nullptr, *spViewUtilities = nullptr,
+SC4ViewUtilities* spViewUtilities = nullptr;
+cIGZUnknown *spView3DWin = nullptr, *spModelMaker = nullptr, *spRenderer = nullptr,
     *spLightingManager = nullptr;
 
 namespace {
@@ -228,7 +229,7 @@ cIGZUnknown* ATM() { return g_framework ? ServiceNonOwning(0x86ad10ec, 0x86ad10e
 cIGZUnknown* AEMS() { return g_framework ? ServiceNonOwning(0xac1fae31, 0x8c1faeb7) : nullptr; }
 cIGZUnknown* NetworkManager() { return spCity && spCitySystems ? spCitySystems->NetworkManager() : nullptr; }
 cIGZUnknown* OccupantManager() { return spOccupantManager; }
-cIGZUnknown* ViewUtilities() { return spViewUtilities; }
+SC4ViewUtilities* ViewUtilities() { return spViewUtilities; }
 cISC4City* City() { return spCity; }
 cIGZUnknown* Terrain() { return spTerrain; }
 cIGZUnknown* SS() { return spSS; }

@@ -10,6 +10,7 @@
 #include "app/NativeLotConstruction.h"
 #include "app/NativeProps.h"
 #include "app/NativeCityView.h"
+#include "app/NativeBoot.h"
 #include "app/NativeFlora.h"
 #include "app/NativeLotSerial.h"
 #include "app/NativeUi.h"
@@ -25,6 +26,10 @@
 #include "sc4/Exemplar.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/AutoHelpers.h"
+#include "sc4/FloraOccupant.h"
+#include "sc4/FloraSimulator.h"
+#include "sc4/OccupantManager.h"
+#include "sc4/cSTETerrain.h"
 #include "sc4/DBSegment.h"
 #include "sc4/ISC4City.h"
 #include "sc4/SaveGame.h"
@@ -45,6 +50,7 @@ void InstallCityProbeBindings();                                          // cit
 
 namespace native {
 void SetTerrainHostCity(cISC4City* city);   // NativeTerrainHost.cpp
+void ForgetTerrainHostCity(cISC4City* city);
 static cISC4City* g_hostCity = nullptr;
 static std::set<std::uint32_t>* g_missingClasses = nullptr;   // the factory's list of classes it could not make
 static sc4::ISerializableFactory* g_serFactory = nullptr;      // the city the host creates (OnCityInitialized binds its services)
@@ -52,6 +58,21 @@ namespace {
 
 // The city's host services. The game implements this with the framework, the message server and GZCOM; the probe only
 // needs the serial number and the language, and everything optional stays a no-op so the load path itself runs.
+sc4::cSTETerrain* CityTerrainComponent() {
+    sc4::cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::Terrain) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(0xab953253, &raw) || !raw) return nullptr;
+    auto* terrain = static_cast<sc4::cSTETerrain*>(static_cast<cIGZSerializable*>(raw));
+    static_cast<cIGZSerializable*>(raw)->Release();   // the city keeps it
+    return terrain;
+}
+
+// cSC4City::SaveObliterated's flora part: the flora simulator's slot 24 (flora.md 10.3).
+void SaveObliteratedFlora(cIGZPersistDBSegment* segment) {
+    if (sc4::cSC4FloraSimulator* flora = CityFloraSimulator(); flora && segment) flora->SaveObliterated(segment);
+}
+
 struct CityHost final : sc4::ICityHost {
     std::uint32_t CreateCitySerialNumber() override { return sc4::SC4CreateCitySerialNumber(); }
     void GetCurrentLanguageAndCountry(int& language, int& country) override { language = 0; country = 0; }
@@ -61,14 +82,44 @@ struct CityHost final : sc4::ICityHost {
     // the region view thumbnails are copied from the city's previous file (cSC4City::WriteRegionViewThumbnail)
     cIGZPersistDBSegment* OpenSaveGame(const cIGZString& path) override { return sc4::SC4OpenSaveGame(path, false, true); }
     void CloseSaveGame(cIGZPersistDBSegment* segment) override { sc4::SC4CloseSaveGame(segment); }
+    void PumpMessageServer2() override { if (cSC4App* app = BootApplication()) app->RunMessageServer2Pump(100, 500, 5000); }
+    // cSC4City::SaveObliterated: the terrain (cSTETerrain::SaveObliterated) and then the flora simulator's slot 24 (flora.md
+    // 10.3, save 0x006B2760)
+    void SaveObliterated(cIGZPersistDBSegment* segment) override {
+        if (sc4::cSTETerrain* terrain = CityTerrainComponent()) terrain->SaveObliterated(segment);
+        SaveObliteratedFlora(segment);
+    }
     bool FileExists(const cIGZString& path) override { return cRZFile::FileExists(path); }
     void PostMessage(cIGZMessage2* message) override { if (SL::spMS2) SL::spMS2->MessagePost(message, false); }   // SL::spMS2 slot 0x20
     void SendMessage(cIGZMessage2* message) override { if (SL::spMS2) SL::spMS2->MessageSend(message); }          // slot 0x18
     // slot 0x18 / 0x20 of each component (NativeCityComponents.cpp)
     void InitComponent(sc4::CityComponent component, cIGZUnknown* object) override { RunCityComponentLifecycle(component, object, true); }
     void ShutdownComponent(sc4::CityComponent component, cIGZUnknown* object) override { RunCityComponentLifecycle(component, object, false); }
+    // A destroyed city is no longer the host's (a load that failed releases its half-read city; later teardown asks HostCity()).
+    // cSC4City::CreateCityComponents (i386 0x0048a8.., after the occupant manager's CreateInstance): a newly made occupant
+    // manager learns the city's size (vslot 0x14 SetCitySize(sizeX, sizeZ)); a loaded one read its own. Without it its cell
+    // queries cover no cells (the model maker finds no occupants in a city built from nothing).
+    void OnComponentCreated(sc4::CityComponent component, cIGZUnknown* object, float sizeX, float sizeZ) override {
+        if (component != sc4::CityComponent::OccupantManager || !object) return;
+        void* raw = nullptr;
+        if (!object->QueryInterface(sc4::kGZIID_cISC4OccupantManager, &raw) || !raw) return;
+        auto* manager = static_cast<sc4::cISC4OccupantManager*>(raw);
+        manager->SetCitySize(sizeX, sizeZ);
+        manager->Release();
+    }
+    // cSC4City::Shutdown begins with SL::OnCityShutdown (i386 0x0048a4ac: the city's services leave the locator) and the
+    // destructor ends with SL::OnCityDestroy (SL::spCity goes).
+    void OnCityShuttingDown() override { SL::OnCityShutdown(); }
+    void OnCityDestroyed(cISC4City* city) override {
+        SL::OnCityDestroy(city);
+        if (g_hostCity == city) g_hostCity = nullptr;
+        ForgetTerrainHostCity(city);
+    }
     // cSC4City::Init has created and initialised the components: the locator's OnCityCreate / OnCityInit.
-    void OnCityInitialized() override { BindCityServices(g_hostCity); ReportCityWiring(); }
+    void OnCityInitialized() override {
+        BindCityServices(g_hostCity);
+        ReportCityWiring();
+    }
     // SetEstablished: the simulator's SetCityEstablished (vslot 0x108) switches the agents of an established city on.
     void OnEstablishedChanged(bool established) override {
         sc4::cSC4City* city = HostCity();

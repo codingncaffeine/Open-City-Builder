@@ -241,6 +241,9 @@ public:
     void SetWinSC4App(SL::IWinSC4App* window) { winSC4App_ = window; }
     std::uint8_t* GetPreferences() const override { return const_cast<sc4::SC4Preferences*>(&preferences_)->data(); }   // @ 0x100012336
     cSC4NewCitySpecification* GetNewCitySpecification() override { return reinterpret_cast<cSC4NewCitySpecification*>(newCitySpecification_); }   // @ 0x100012352
+    // The obliteration template (SC4NewCitySpecification.obliteratedCityDBSegment): set by DoCityObliteration around NewCity;
+    // the new city's terrain and flora restore themselves from it.
+    cIGZPersistDBSegment* ObliterationSegment() const { return obliterationSegment_; }
     void GetAppDirectory(cIGZString& out) override { out.AssignFromCString(appDirectory_.ToChar()); }               // @ 0x10001236e
     void GetCDAppDirectory(cIGZString& out) override { out.AssignFromCString(cdAppDirectory_.ToChar()); }          // @ 0x1000123d6
     void GetDataDirectory(cIGZString& out, int language) override;       // @ 0x10001243e
@@ -466,8 +469,8 @@ private:
     sc4::AppStartupHooks startupHooks_;
     sc4::AppCityHooks cityHooks_;
     cIGZPersistDBSegment* citySegment_ = nullptr;        // +0x7a8 (the registered city file segment)
-    // +0x670: the scratch slot DoCityObliteration parks the temporary segment in around NewCity; nothing recovered
-    // reads it (the original probably lets the city-creation path see the segment)
+    // the new-city specification's obliterated segment (DoCityObliteration parks the temporary segment here around NewCity;
+    // read through ObliterationSegment())
     cIGZPersistDBSegment* obliterationSegment_ = nullptr;
     static bool sMacQuitDialogIsShowing_;
     std::map<std::string, ServiceFactory> serviceFactories_;

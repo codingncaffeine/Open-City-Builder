@@ -17,6 +17,7 @@
 #include "sc4/ISC4App.h"
 
 class cIGZFrameWork;
+class SC4ViewUtilities;   // global scope (src/sc4/ViewUtilities.h)
 
 namespace SL {
 
@@ -86,7 +87,7 @@ public:
     virtual cIGZUnknown* Renderer() = 0;              // vslot 0x20
     virtual cIGZUnknown* ModelMaker() = 0;            // vslot 0x28
     virtual cIGZUnknown* ViewManager() = 0;           // vslot 0x30
-    virtual cIGZUnknown* RendererViewUtilities() = 0; // renderer vslot 0x40
+    virtual SC4ViewUtilities* RendererViewUtilities() = 0; // renderer vslot 0x40 (a plain object, not COM)
     virtual cIGZUnknown* RendererLightingManager() = 0;   // renderer vslot 0x48
 };
 
@@ -133,7 +134,8 @@ extern cIGZUnknown *spTerrain, *spTerrainMap, *spTerrainView, *spSurfaceWater, *
     *spResidentialSim, *spTrafficSim, *spWeatherSim, *spZoneDeveloper, *spCivicBuildingSim, *spPropDeveloper,
     *sp24HourClock, *spHistoryWarehouse;
 extern IView3DSystems* spView3D;
-extern cIGZUnknown *spView3DWin, *spModelMaker, *spRenderer, *spViewUtilities, *spLightingManager;
+extern cIGZUnknown *spView3DWin, *spModelMaker, *spRenderer, *spLightingManager;
+extern SC4ViewUtilities* spViewUtilities;   // the renderer's view utilities: a plain object in the original too
 
 // The framework the locator asks for services (RZGetFramework()).
 void SetFramework(cIGZFrameWork* framework);
@@ -160,7 +162,7 @@ cIGZUnknown* ATM();                          // @ 0x1000410e0  animation tick ma
 cIGZUnknown* AEMS();                         // @ 0x100041134  audio event system
 cIGZUnknown* NetworkManager();               // @ 0x100041188
 cIGZUnknown* OccupantManager();              // @ 0x1003f75a0
-cIGZUnknown* ViewUtilities();                // @ 0x1003f75b0
+SC4ViewUtilities* ViewUtilities();           // @ 0x1003f75b0
 cISC4City* City();                           // @ 0x1003f75f0
 cIGZUnknown* Terrain();                      // @ 0x1003f78a0
 cIGZUnknown* SS();                           // @ 0x1003f7980

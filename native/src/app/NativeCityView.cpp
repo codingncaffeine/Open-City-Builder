@@ -103,6 +103,7 @@ public:
         native::DetachWaterRipple();
         native::DetachEffects();
         native::DetachModelMaker();
+        native::DetachTerrainView();
         render_->Shutdown();
         native::ShutdownCityLighting();
     }
@@ -149,7 +150,7 @@ public:
     // The pointer's terrain point: the renderer's pick (the camera's eye ray through the pixel onto the terrain view).
     bool PickTerrain(int x, int y, float* out3, bool always, bool arg5) override { return render_->PickTerrain(x, y, out3, always, arg5); }
     bool Pick(int x, int y, cISC4OccupantFilter* filter, s3d::cIS3DModelInstance*& model) override { return render_->Pick(x, y, filter, model); }
-    cIGZUnknown* ViewUtilities() override { return nullptr; }
+    SC4ViewUtilities* ViewUtilities() override { return render_->GetViewUtilities(); }
     cIGZUnknown* LightingManager() override { return nullptr; }
 
 private:
@@ -262,6 +263,9 @@ void ProbeBuildingsAt(float x, float z, float radius) {
 
 sc4::cSC43DRender* g_cityRender = nullptr;
 sc4::cSC43DRender* CityRenderer() { return g_cityRender; }
+void AnnounceCameraZoomRotation() {
+    if (sc4::cSC4CameraControl* camera = g_cityRender ? g_cityRender->GetCameraControl() : nullptr) camera->SendPostViewChangeMessage(sc4::kCameraUpdateZoomRotation);
+}
 bool CityRendererChangeModel(s3d::cIS3DModelInstance* model, int change) { return g_cityRender && g_cityRender->ChangeModel(model, change); }
 
 // The saved camera. cSC4View3DWin::DoLoad (i386 0x0052272c) reads record (0xa9c8647c, 0xe9c8647e, 1), versions below 5: the
@@ -367,44 +371,90 @@ void ListenForSavedView() {
     SL::spMS2->AddNotification(&g_savedViewTarget, 0x26c63344);
 }
 
-bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* cityInterface, gd::cIGZGDriver* driver, gz::cIGZDrawContext* screen, int width, int height) {
-    // The city's view from here on: the model maker built below asks it for its filter (the previous city's view is gone).
+namespace {
+// The city view being brought up: set when the city screen is made, used by the view's DoPreCityInit / DoPostCityInit.
+struct CityRenderTarget {
+    sc4::cSC4View3DWin* view = nullptr;
+    gd::cIGZGDriver* driver = nullptr;
+    gz::cIGZDrawContext* screen = nullptr;
+    int width = 0, height = 0;
+    sc4::cSC4CameraControl* control = nullptr;
+    bool renderOk = false;
+} g_target;
+CameraHost& TheCameraHost() { static CameraHost host; return host; }
+
+sc4::cSTETerrain* CityTerrainOf(cISC4City* cityInterface) {
+    auto* city = dynamic_cast<sc4::cSC4City*>(cityInterface);
+    cIGZUnknown* terrainObject = city ? city->GetComponent(sc4::CityComponent::Terrain) : nullptr;
+    void* serializable = nullptr;
+    if (!terrainObject || !terrainObject->QueryInterface(0xab953253, &serializable) || !serializable) return nullptr;
+    auto* terrain = static_cast<sc4::cSTETerrain*>(static_cast<cIGZSerializable*>(serializable));
+    static_cast<cIGZSerializable*>(serializable)->Release();
+    return terrain;
+}
+}  // namespace
+
+// The city screen was made: its view gets the render stack when the city starts (the original's view builds it on the city's
+// "init begins" message, 0x26d31ec0, which a new city sends before it has any components). The previous city's renderer is gone.
+void SetCityRenderTarget(sc4::cSC4View3DWin& view, gd::cIGZGDriver* driver, gz::cIGZDrawContext* screen, int width, int height) {
+    g_target = CityRenderTarget{&view, driver, screen, width, height, nullptr, false};
+    g_cityRender = nullptr;
+    native::DetachTerrainView();   // the previous city's, if its screen did not shut its renderer down
     native::SetCityView3DWin(&view);
-    sc4::cSTETerrain* terrain = nullptr;
-    if (auto* city = dynamic_cast<sc4::cSC4City*>(cityInterface)) {
-        cIGZUnknown* terrainObject = city->GetComponent(sc4::CityComponent::Terrain);
-        void* serializable = nullptr;
-        if (terrainObject && terrainObject->QueryInterface(0xab953253, &serializable)) terrain = static_cast<sc4::cSTETerrain*>(static_cast<cIGZSerializable*>(serializable));
-        if (terrain) terrain->Init();   // the port's terrain is not a cIGZInitShutdown, so the city's component pass skips it
-        std::printf("city view: terrain component %p -> %p", static_cast<void*>(terrainObject), static_cast<void*>(terrain));
-        if (terrain) std::printf(" cells %u x %u", terrain->CellCountX(), terrain->CellCountZ());
-        std::printf("\n");
-        // The occupant manager is not a cIGZInitShutdown in the port, so the city's component pass skips it; its Init
-        // initialises every occupant the save restored (and lets the queries below and the model maker see them).
-        native::InstallAutomataHost();   // before the occupant manager initialises the vehicles it restored
-        { auto* c = dynamic_cast<sc4::cSC4City*>(cityInterface); if (c) native::SetAutomataRenderer(nullptr, c); }
-        cIGZUnknown* om = city->GetComponent(sc4::CityComponent::OccupantManager);
-        void* iface = nullptr;
-        if (om && om->QueryInterface(sc4::kGZIID_cISC4OccupantManager, &iface)) {
-            auto* manager = static_cast<sc4::cISC4OccupantManager*>(iface);
-            manager->Init();
-            if (std::getenv("SC4_DEBUG")) native::PrintOccupantCensus(city, "occupants");   // the loaded occupants by type
-            manager->Release();
-        }
-    }
-    static CameraHost cameraHost;
+}
+
+// cSC4View3DWin::DoPreCityInit (i386 0x00528030): the camera, its control (looking at the middle of a 1 km city) and the 3D render
+// on the graphics driver, before cSC4City::Init. Nothing here reads the city: a new city has no components yet. The automata
+// host goes in now because the occupant manager's Init (in the city's pass) initialises the vehicles a save restored.
+bool PrepareCityRenderStack(cISC4City* cityInterface) {
+    if (!g_target.view || !g_target.driver) return false;
+    native::InstallAutomataHost();
+    if (auto* c = dynamic_cast<sc4::cSC4City*>(cityInterface)) native::SetAutomataRenderer(nullptr, c);
+    CameraHost& cameraHost = TheCameraHost();
     cameraHost.render = nullptr;
-    cameraHost.terrain = terrain;
+    cameraHost.terrain = nullptr;
     sc4::SetCameraControlHost(&cameraHost);
-    // DoPreCityInit: the camera, its control (looking at the middle of a 1 km city) and the renderer.
     auto* camera = new s3d::cS3DCamera();
     camera->AddRef();
     camera->Init();
     auto* control = new sc4::cSC4CameraControl();
     control->AddRef();
-    control->SetViewportSize(width, height);
+    control->SetViewportSize(g_target.width, g_target.height);
     control->Init(cS3DVector3{512.0f, 0.0f, 512.0f}, camera);
-    if (terrain) {   // DoPostCityInit: the camera knows the city's size; look at its middle
+    g_target.control = control;
+    auto* render = new sc4::cSC43DRender();
+    render->AddRef();
+    // StaticSetGDriver sizes the backing store from the driver's viewport, which in the original is the whole screen at this point;
+    // here the 2-D windows last left it on one of their own rectangles.
+    g_target.driver->SetViewport();
+    sc4::cSC43DRender::StaticSetGDriver(g_target.driver);
+    render->SetViewportSize(static_cast<std::uint32_t>(g_target.width), static_cast<std::uint32_t>(g_target.height));
+    render->SetCamera(camera);
+    render->SetCameraControl(control);
+    cameraHost.render = render;
+    g_cityRender = render;
+    g_target.renderOk = render->Init();
+    std::printf("city view: renderer %s\n", g_target.renderOk ? "up" : "FAILED");
+    return g_target.renderOk;
+}
+
+// cSC4View3DWin::DoPostCityInit (i386 0x0052bac8) and the native hook-up that needs the initialised city: the camera learns the
+// city's size, the terrain view, lighting, models, automata, effects, tools and the city UI. Runs on the city's "init done"
+// message (0x26d31ec1), after cSC4City::Init has initialised every component (the terrain and the occupant manager included).
+bool FinishCityRenderStack(cISC4City* cityInterface) {
+    if (!g_target.view || !g_cityRender || !g_target.control) return false;
+    sc4::cSC4View3DWin& view = *g_target.view;
+    sc4::cSC43DRender* render = g_cityRender;
+    sc4::cSC4CameraControl* control = g_target.control;
+    gd::cIGZGDriver* driver = g_target.driver;
+    const bool ok = g_target.renderOk;
+    sc4::cSTETerrain* terrain = CityTerrainOf(cityInterface);
+    std::printf("city view: terrain %p", static_cast<void*>(terrain));
+    if (terrain) std::printf(" cells %u x %u", terrain->CellCountX(), terrain->CellCountZ());
+    std::printf("\n");
+    if (auto* city = dynamic_cast<sc4::cSC4City*>(cityInterface); city && std::getenv("SC4_DEBUG")) native::PrintOccupantCensus(city, "occupants");
+    TheCameraHost().terrain = terrain;
+    if (terrain) {   // the camera knows the city's size; look at its middle
         const float sizeX = static_cast<float>(terrain->CellCountX()) * 16.0f, sizeZ = static_cast<float>(terrain->CellCountZ()) * 16.0f;
         control->SetCitySize(sizeX, sizeZ);
         control->SetZoomAndRotation(std::getenv("SC4_ZOOM") ? std::atoi(std::getenv("SC4_ZOOM")) : 0, 0);
@@ -412,26 +462,12 @@ bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* cityInterface, g
         if (const char* focus = std::getenv("SC4_FOCUS")) std::sscanf(focus, "%f,%f", &focusX, &focusZ);   // dev: look at a world x,z
         control->SetViewTargetPosition(cS3DVector3{focusX, terrain->GetAltitude(focusX, focusZ), focusZ});
         control->SendViewChangeMessage();
+        native::AttachTerrainView(*render, *terrain, driver);
     }
-
-    auto* render = new sc4::cSC43DRender();
-    render->AddRef();
-    // StaticSetGDriver sizes the backing store from the driver's viewport, which in the original is the whole screen at this point;
-    // here the 2-D windows last left it on one of their own rectangles.
-    driver->SetViewport();
-    sc4::cSC43DRender::StaticSetGDriver(driver);
-    if (terrain) native::AttachTerrainView(*render, *terrain, driver);
-    render->SetViewportSize(static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height));
-    render->SetCamera(camera);
-    render->SetCameraControl(control);
-    cameraHost.render = render;
-    g_cityRender = render;
-    const bool ok = render->Init();
     ApplySavedView();   // a saved camera read before the view existed
     // The static view (terrain, buildings) is kept in the driver's backing store below zoom 3 and only the moving things are
     // drawn each frame, as DoViewZoomChange3 decides on every zoom change; this sets it for the zoom the city opened at.
     render->SetBackingStoreEnabled(control->Zoom() < 3);
-    std::printf("city view: renderer %s\n", ok ? "up" : "FAILED");
     // the lighting manager first: the model maker's shadows project through it as the models load
     {
         sc4::cSC4Simulator* simulator = nullptr;
@@ -462,8 +498,7 @@ bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* cityInterface, g
         native::AttachEffects(*render, *city);
     }
 
-
-    auto* adapter = new RendererAdapter(render, control, driver, screen);
+    auto* adapter = new RendererAdapter(render, control, driver, g_target.screen);
     static ViewInput* input = nullptr;
     delete input;
     input = new ViewInput(view);
@@ -479,8 +514,8 @@ bool AttachCityRenderStack(sc4::cSC4View3DWin& view, cISC4City* cityInterface, g
     native::InstallDispatchTool(view);
     native::InstallCatalogUi(view.GetWindowManager());
     native::SetBudgetViewWindow(view.AsIGZWin());
-    view.AddGUI();   // DoPostCityInit's city UI (the view's engine DoMessage that sends it there is not ported)
-    native::ConfigureCityPanels(view);   // ... and its gauges: RCI bars and opinion polls
+    view.AddGUI();   // DoPreCityInit's city UI (kept after the tools: the panels it builds look them up)
+    native::ConfigureCityPanels(view);   // DoPostCityInit's gauges: RCI bars and opinion polls
     // ... and the toolbar readouts the date / funds / population / name messages refresh in the game
     view.UpdateCityName();
     view.UpdateBudget();

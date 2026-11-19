@@ -317,6 +317,8 @@ bool cSC4App::NewCity() {
     city_ = cityHooks_.createCity ? cityHooks_.createCity() : nullptr;
     if (!city_) return false;
     if (regionalCity_ && regionalCity_->get()) regionalCity_->get()->SetupCity(city_);
+    if (std::getenv("SC4_DEBUG"))
+        std::printf("app: new city, regional city %s\n", regionalCity_ && regionalCity_->get() ? "set up" : "MISSING");
     PostCityMessage(city_, 0x26d31ec0, 1, 0, false);
     city_->Init();
     PostCityMessage(city_, 0x2b96b3ea, 0, 0, true);

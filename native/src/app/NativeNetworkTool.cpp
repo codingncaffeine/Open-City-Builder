@@ -39,12 +39,13 @@
 namespace native {
 namespace {
 
-sc4::cSC4City* g_city = nullptr;
+// The current city: SL::spCity, as the original asks (a pointer kept from an earlier city outlives it).
+sc4::cSC4City* CurrentCity() { return dynamic_cast<sc4::cSC4City*>(SL::spCity); }
 sc4::cSC4View3DWin* g_view = nullptr;
 bool g_gridShown = false;
 
 sc4::cSTETerrain* Terrain() {
-    cIGZUnknown* object = g_city ? g_city->GetComponent(sc4::CityComponent::Terrain) : nullptr;
+    cIGZUnknown* object = CurrentCity() ? CurrentCity()->GetComponent(sc4::CityComponent::Terrain) : nullptr;
     void* raw = nullptr;
     if (!object || !object->QueryInterface(0xab953253, &raw) || !raw) return nullptr;
     auto* terrain = static_cast<sc4::cSTETerrain*>(static_cast<cIGZSerializable*>(raw));
@@ -52,7 +53,7 @@ sc4::cSTETerrain* Terrain() {
     return terrain;
 }
 sc4::cISC4OccupantManager* Occupants() {
-    cIGZUnknown* object = g_city ? g_city->GetComponent(sc4::CityComponent::OccupantManager) : nullptr;
+    cIGZUnknown* object = CurrentCity() ? CurrentCity()->GetComponent(sc4::CityComponent::OccupantManager) : nullptr;
     void* raw = nullptr;
     if (!object || !object->QueryInterface(sc4::kGZIID_cISC4OccupantManager, &raw) || !raw) return nullptr;
     auto* manager = static_cast<sc4::cISC4OccupantManager*>(raw);
@@ -60,7 +61,7 @@ sc4::cISC4OccupantManager* Occupants() {
     return manager;
 }
 sc4::cSC4BudgetSimulator* Budget() {
-    cIGZUnknown* object = g_city ? g_city->GetComponent(sc4::CityComponent::BudgetSimulator) : nullptr;
+    cIGZUnknown* object = CurrentCity() ? CurrentCity()->GetComponent(sc4::CityComponent::BudgetSimulator) : nullptr;
     void* raw = nullptr;
     if (!object || !object->QueryInterface(0xe4fda3d4, &raw) || !raw) return nullptr;
     auto* serializable = static_cast<cIGZSerializable*>(raw);
@@ -378,7 +379,6 @@ InputHost g_inputHost;
 
 void InstallNetworkTool(sc4::cSC4View3DWin& view, cISC4City* city) {
     g_view = &view;
-    g_city = dynamic_cast<sc4::cSC4City*>(city);
     sc4::SetNetworkToolHost(&g_toolHost);
     InstallNetworkManagerTools();
     // The tile rules (RUL files) the solver matches drags against, once.

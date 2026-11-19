@@ -7,6 +7,8 @@
 #include <cstdlib>
 #include <random>
 #include <vector>
+#include "app/NativeBoot.h"
+#include "sc4/App.h"
 #include "app/NativeAnimationTicks.h"
 #include "sc4/AnimationTickManager.h"
 #include "app/NativeUi.h"
@@ -372,7 +374,10 @@ struct NativeTerrainHost final : ITerrainHost {
     ITerrainEffect* CreateTerrainEffect(std::uint32_t id0, std::uint32_t id1) override { return native::CreateTerrainEffect(id0, id1); }
     cRZString NewCityName() override { return {}; }
     ITerrainHeightImage* NewCityHeightImage() override { return {}; }
-    cIGZPersistDBSegment* NewCityObliteratedTerrainSegment() override { return {}; }
+    cIGZPersistDBSegment* NewCityObliteratedTerrainSegment() override {   // the obliteration template (DoCityObliteration)
+        cSC4App* app = BootApplication();
+        return app ? app->ObliterationSegment() : nullptr;
+    }
     bool NewCityBaseAltitude(float& out) override { return {}; }
     ITerrainHeightImage* LoadHeightImage(const cRZString& path) override { return {}; }
     std::mt19937 rng_{12345};
@@ -392,5 +397,6 @@ struct NativeTerrainHost final : ITerrainHost {
 
 void InstallTerrainStub() { static NativeTerrainHost s; static NativeSurfaceWaterHost water; static NativeMySimAgentHost agent; sc4::SetTerrainHost(&s); gzcom::SetSurfaceWaterHost(&water); gzcom::SetMySimAgentHost(&agent); }
 void SetTerrainHostCity(cISC4City* city) { g_city = city; }
+void ForgetTerrainHostCity(cISC4City* city) { if (g_city == city) g_city = nullptr; }
 
 }  // namespace native

@@ -121,6 +121,7 @@
 #include "sc4/ViewInputControl.h"
 
 class cIGZCommandParameterSet;
+class SC4ViewUtilities;   // global scope (src/sc4/ViewUtilities.h)
 class cRZCmdLine;
 class cISC4Occupant;
 class cISC4OccupantFilter;
@@ -414,7 +415,7 @@ public:
     virtual bool Pick(int x, int y, cISC4OccupantFilter* filter, s3d::cIS3DModelInstance*& model) = 0;   // vslot 0x200
     // cISC43DRender vslots 0x40 / 0x48 (the SC4ViewUtilities / IS4LightingManager objects): what SL::OnView3DInit
     // stores in SL::spViewUtilities and SL::spLightingManager. A host renderer adapter answers them; null otherwise.
-    virtual cIGZUnknown* ViewUtilities() { return nullptr; }
+    virtual SC4ViewUtilities* ViewUtilities() { return nullptr; }
     virtual cIGZUnknown* LightingManager() { return nullptr; }
 };
 class ICoverageHelper3D : public cIGZUnknown {          // cSC4CoverageRadiusEffectHelper at +0x5f8

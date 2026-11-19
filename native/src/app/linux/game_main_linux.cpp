@@ -767,7 +767,7 @@ bool Boot() {
         screen.loadBitmap = [](std::uint32_t group, std::uint32_t instance) { return native::LoadBitmapResource(group, instance); };
         native::SetCityScreenCallbacks({[] { if (gAppWindow) gAppWindow->DestroyCurrentScreen(); }, [] {
             if (!gAppWindow || !gAppWindow->CreateCityScreen()) return;
-            if (sc4::cSC4View3DWin* view = gAppWindow->View3D()) native::AttachCityRenderStack(*view, native::BootApplication() ? native::BootApplication()->GetCity() : nullptr, gDriver.get(), static_cast<gz::cIGZDrawContext*>(gGraphics->Primary()->GetDrawContext()), gW, gH);
+            if (sc4::cSC4View3DWin* view = gAppWindow->View3D()) native::SetCityRenderTarget(*view, gDriver.get(), static_cast<gz::cIGZDrawContext*>(gGraphics->Primary()->GetDrawContext()), gW, gH);
         }, [] { if (gAppWindow) gAppWindow->CreateRegionScreen(); }});
         screen.loadCity = [app](const std::string& path, cRZAutoRefCount<cISC4RegionalCity>* holder) { return native::LoadCityFile(*app, path, holder); };
         native::InstallRegionScreenHost(screen);

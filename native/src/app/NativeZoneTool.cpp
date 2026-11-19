@@ -24,12 +24,13 @@
 namespace native {
 namespace {
 
-sc4::cSC4City* g_city = nullptr;
+// The current city: SL::spCity, as the original asks (a pointer kept from an earlier city outlives it).
+sc4::cSC4City* CurrentCity() { return dynamic_cast<sc4::cSC4City*>(SL::spCity); }
 sc4::cSC4View3DWin* g_view = nullptr;
 
 // A city component as its concrete class, through its serializable view (dynamic_cast is unreliable here).
 template <class T> T* Component(sc4::CityComponent c, std::uint32_t clsid) {
-    cIGZUnknown* object = g_city ? g_city->GetComponent(c) : nullptr;
+    cIGZUnknown* object = CurrentCity() ? CurrentCity()->GetComponent(c) : nullptr;
     void* raw = nullptr;
     if (!object || !object->QueryInterface(0xe4fda3d4, &raw) || !raw) return nullptr;
     auto* serializable = static_cast<cIGZSerializable*>(raw);
@@ -40,7 +41,7 @@ template <class T> T* Component(sc4::CityComponent c, std::uint32_t clsid) {
 sc4::cSC4ZoneManager* Zones() { return Component<sc4::cSC4ZoneManager>(sc4::CityComponent::ZoneManager, sc4::kZoneManagerClassId); }
 sc4::cSC4BudgetSimulator* Budget() { return Component<sc4::cSC4BudgetSimulator>(sc4::CityComponent::BudgetSimulator, sc4::kGZCLSID_cSC4BudgetSimulator); }
 sc4::cSTETerrain* Terrain() {
-    cIGZUnknown* object = g_city ? g_city->GetComponent(sc4::CityComponent::Terrain) : nullptr;
+    cIGZUnknown* object = CurrentCity() ? CurrentCity()->GetComponent(sc4::CityComponent::Terrain) : nullptr;
     void* raw = nullptr;
     if (!object || !object->QueryInterface(0xab953253, &raw) || !raw) return nullptr;
     auto* terrain = static_cast<sc4::cSTETerrain*>(static_cast<cIGZSerializable*>(raw));
@@ -48,7 +49,7 @@ sc4::cSTETerrain* Terrain() {
     return terrain;
 }
 sc4::cISC4ZoneDeveloper* Developer() {
-    cIGZUnknown* object = g_city ? g_city->GetComponent(sc4::CityComponent::ZoneDeveloper) : nullptr;
+    cIGZUnknown* object = CurrentCity() ? CurrentCity()->GetComponent(sc4::CityComponent::ZoneDeveloper) : nullptr;
     void* raw = nullptr;
     if (!object || !object->QueryInterface(0xe818ed2bu, &raw) || !raw) return nullptr;
     auto* developer = static_cast<sc4::cISC4ZoneDeveloper*>(raw);
@@ -56,7 +57,7 @@ sc4::cISC4ZoneDeveloper* Developer() {
     return developer;
 }
 sc4::cISC4OccupantManager* Occupants() {
-    cIGZUnknown* object = g_city ? g_city->GetComponent(sc4::CityComponent::OccupantManager) : nullptr;
+    cIGZUnknown* object = CurrentCity() ? CurrentCity()->GetComponent(sc4::CityComponent::OccupantManager) : nullptr;
     void* raw = nullptr;
     if (!object || !object->QueryInterface(sc4::kGZIID_cISC4OccupantManager, &raw) || !raw) return nullptr;
     auto* manager = static_cast<sc4::cISC4OccupantManager*>(raw);
@@ -178,13 +179,12 @@ PlacementHost g_placement;
 
 void InstallZoneTool(sc4::cSC4View3DWin& view, cISC4City* city, sc4::cSC43DRender& render) {
     g_view = &view;
-    g_city = dynamic_cast<sc4::cSC4City*>(city);
     sc4::SetZoneToolHost(&g_toolHost);
     sc4::cSC4ZoneManager* zones = Zones();
     if (zones) zones->SetPlacementHost(&g_placement);
     // With the zone developer up, zoning makes real lots that draw the game's zone textures (cSC4LotDeveloper::SetEmptyLotBaseTexture),
     // so the native overlay keeps only the drag preview; without it the overlay still paints the zone grid.
-    const bool developer = InstallZoneDeveloperHost(g_city);
+    const bool developer = InstallZoneDeveloperHost(CurrentCity());
     SetZoneOverlayManager(developer ? nullptr : zones);
     if (sc4::cSTETerrain* terrain = Terrain()) AttachZoneOverlay(render, *terrain);
     std::printf("city view: zone tool %s\n", zones ? "up" : "no zone manager");

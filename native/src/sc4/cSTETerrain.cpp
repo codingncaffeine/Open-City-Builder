@@ -1243,6 +1243,11 @@ bool cSTETerrain::Init() {
         surfaceWater_ = host->SurfaceWater();
         if (surfaceWater_) surfaceWater_->AddRef();
     }
+    if (std::getenv("SC4_DEBUG") && !vertices_.empty()) {
+        float lo = 1e9f, hi = -1e9f;
+        for (const Vertex& v : vertices_) { lo = std::min(lo, v.altitude); hi = std::max(hi, v.altitude); }
+        std::fprintf(stderr, "terrain: Init with %zu vertices, altitudes %.1f..%.1f\n", vertices_.size(), lo, hi);
+    }
     LayOutGrid(host->CityCellCountX(), host->CityCellCountZ());
     cityTerrainType_ = host->CityTerrainType();      // +0x70 (spCity slot 0x2b8)
     // +0x98: the terrain type's normal-height limit. (The original indexes the table without a mask.)
@@ -4049,8 +4054,14 @@ bool cSTETerrain::Create() {
     ITerrainHost* host = TerrainHost();
     if (!host) return false;
     const cRZString name = host->NewCityName();
+    if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "terrain: Create, obliterated segment %p\n", static_cast<void*>(host->NewCityObliteratedTerrainSegment()));
     if (cIGZPersistDBSegment* segment = host->NewCityObliteratedTerrainSegment()) {
         LoadObliterated(segment);                             // vslot 0x300
+        if (std::getenv("SC4_DEBUG")) {
+            float lo = 1e9f, hi = -1e9f;
+            for (const Vertex& v : vertices_) { lo = std::min(lo, v.altitude); hi = std::max(hi, v.altitude); }
+            std::fprintf(stderr, "terrain: obliterated template %s, %u x %u vertices, altitudes %.1f..%.1f\n", loadOk_ ? "loaded" : "NOT loaded", vertsX_, vertsZ_, lo, hi);
+        }
         ResetWaterToSeaLevel(gridRect_);
     } else {
         ITerrainHeightImage* image = host->NewCityHeightImage();

@@ -1,4 +1,6 @@
 // cSTESurfaceWater — see sc4/SurfaceWater.h.
+#include <cstdio>
+#include <cstdlib>
 #include "sc4/SurfaceWater.h"
 
 #include <algorithm>
@@ -63,6 +65,7 @@ bool cSTESurfaceWater::Init() {
     terrain_ = host_ ? host_->Terrain() : nullptr;
     if (!terrain_) return false;
     const std::uint32_t vertexCount = terrain_->VertexCount();
+    if (std::getenv("SC4_WATERDEBUG")) std::fprintf(stderr, "water %p: Init, terrain %p, %u vertices\n", static_cast<void*>(this), static_cast<void*>(terrain_), vertexCount);
     info_.resize(vertexCount);
     scratchFloats_.resize(vertexCount, 0.0f);
     dirty_ = TerrainRect{0, 0, static_cast<std::int32_t>(terrain_->VertexCountX()) - 1, static_cast<std::int32_t>(terrain_->VertexCountZ()) - 1};
@@ -551,6 +554,7 @@ void cSTESurfaceWater::RainStatic(int vertex, TerrainBrushContext& context, Terr
 // water is navigable, removed where it is not, and a new one is placed at the deepest spot of a run of more than two cells that has none,
 // moved off shallow water (< 30) near the ends of the run. The edge walk uses the vertex count of the x axis for all four edges.
 void cSTESurfaceWater::UpdateNeighborConnections() {
+    if (std::getenv("SC4_WATERDEBUG")) std::fprintf(stderr, "water %p: UpdateNeighborConnections, terrain %p, %zu infos, initialized %d\n", static_cast<void*>(this), static_cast<void*>(terrain_), info_.size(), int(initialized_));
     static const int kStepX[4] = {1, 0, 1, 0}, kStepZ[4] = {0, 1, 0, 1};
     static const int kOutX[4] = {0, 1, 0, -1}, kOutZ[4] = {-1, 0, 1, 0};
     const std::uint32_t vertsX = terrain_->VertexCountX();

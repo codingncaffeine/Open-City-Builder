@@ -181,7 +181,7 @@ public:
     cIGZUnknown* Renderer() override;              // view vslot 0x20
     cIGZUnknown* ModelMaker() override;            // view vslot 0x28
     cIGZUnknown* ViewManager() override;           // view vslot 0x30
-    cIGZUnknown* RendererViewUtilities() override; // renderer vslot 0x40
+    SC4ViewUtilities* RendererViewUtilities() override; // renderer vslot 0x40
     cIGZUnknown* RendererLightingManager() override;   // renderer vslot 0x48
 private:
     const cWinSC4App* window_;

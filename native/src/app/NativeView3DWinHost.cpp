@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include "sc4/View3DWin.h"
+#include "app/NativeObliterate.h"
 #include "app/NativeSignLabel.h"
 #include "app/NativeTips.h"
 #include "app/NativeSnapshot.h"
@@ -39,6 +40,7 @@
 #include "sc4/ViewInputControlCityScroll.h"
 #include "app/NativeUi.h"
 #include "app/NativeBoot.h"
+#include "app/NativeCityView.h"
 #include "sc4/App.h"
 #include "sc4/BudgetSimulator.h"
 #include "sc4/ResidentialSimulator.h"
@@ -287,15 +289,19 @@ struct StubView3DWin final : IView3DWinHost {
     cSC4ViewInputControl* CreateDispatchTool(int type) override { return native::CreateDispatchTool(type); }
     cSC4ViewInputControl* CreateNetworkTool(int type) override { return native::CreateNetworkTool(type); }
     void ShowMyStreetSim() override { SC4_UNWIRED("IView3DWinHost::ShowMyStreetSim"); }
-    void PostCityInit() override { native::ShowTipOfTheDayOnce(); }   // DoPostCityInit's end: the tip of the day, once per run
     void MayorRatingChanged() override { if (sc4::cSC4View3DWin* view = CityView3DWin()) native::UpdateMayorRatingBar(*view); }
     ISimulatorPauseSink* Simulator() override { static SimulatorView view; return CityExists() ? &view : nullptr; }
+    void PreCityInit() override { native::PrepareCityRenderStack(native::BootApplication() ? native::BootApplication()->GetCity() : nullptr); }
+    void PostCityInit() override {
+        native::FinishCityRenderStack(native::BootApplication() ? native::BootApplication()->GetCity() : nullptr);
+        native::ShowTipOfTheDayOnce();   // DoPostCityInit's end: the tip of the day, once per run
+    }
     cSC4ViewInputControl* CreateSignTool() override { return new cSC4ViewInputControlSignTool(); }
     cSC4ViewInputControl* CreatePlaceLotTool(std::uint32_t lot) override { return new cSC4ViewInputControlPlaceLot(0, lot, 0, false); }
     cSC4ViewInputControl* CreateDemolishTool() override { return native::CreateDemolishTool(); }
     cSC4ViewInputControl* CreateLabelTool() override { return native::CreateLabelTool(); }   // NativeSignLabel.cpp
     cSC4ViewInputControl* CreateSignLabelDemolishTool() override { return native::CreateSignLabelDemolishTool(); }   // NativeSignLabel.cpp
-    cSC4ViewInputControl* CreateObliterateCityTool() override { SC4_UNWIRED("IView3DWinHost::CreateObliterateCityTool (cSC4ObliterateCity not recovered)"); return nullptr; }
+    cSC4ViewInputControl* CreateObliterateCityTool() override { return native::CreateObliterateCityTool(); }   // NativeObliterate.cpp
     cSC4ViewInputControl* CreateFloraTool(std::uint32_t type) override { return native::CreateFloraTool(type); }
     cSC4ViewInputControl* CreateNetworkIntxTool(std::uint32_t) override { SC4_UNWIRED("IView3DWinHost::CreateNetworkIntxTool (not recovered)"); return nullptr; }
     bool CursorOverView(cIGZWin* view, int& x, int& y) override {
