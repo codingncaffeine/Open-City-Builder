@@ -34,6 +34,7 @@
 #include "platform/PointerState.h"
 #include "sc4/Simulator.h"
 #include "sc4/RegionDialogs.h"
+#include "app/NativeCitySystems.h"
 #include "app/NativeSnapshot.h"
 #include "app/NativeCheats.h"
 #include "app/NativeWinControls.h"
@@ -1375,6 +1376,17 @@ int RunScenario(const std::string& path) {
             native::NativeAdviceLinkProbe(advisor, code.c_str() + (code.empty() ? 0 : 1));
         } else if (command == "advwin") {   // the advisor window's state
             native::NativeAdvisorWindowReport();
+        } else if (command == "command") {   // command HEXID: a framework command run as a shortcut runs it (menus without keys)
+            std::string hex;
+            words >> hex;
+            const std::uint32_t id = std::uint32_t(std::strtoul(hex.c_str(), nullptr, 16));
+            std::printf("command %08x -> status %u\n", id, native::ExecuteGameCommand(id));
+        } else if (command == "viewcmd") {   // viewcmd HEXID: the city view's command switch, as its toolbar buttons reach it
+            std::string hex;
+            words >> hex;
+            const std::uint32_t id = std::uint32_t(std::strtoul(hex.c_str(), nullptr, 16));
+            sc4::cSC4View3DWin* view = native::CityView3DWin();
+            std::printf("viewcmd %08x -> %s\n", id, view ? (view->ProcessViewCommand(id) ? "handled" : "not handled") : "no city view");
         } else if (command == "key") {
             // key [ctrl+][shift+][alt+]NAME [FRAMES]: a key press and release as SDL events through the player's key path
             // (NAME as SDL names keys: X, Left, F1, Escape, /, Keypad 8 ...; "Keypad 8" is written Keypad_8), the key held
