@@ -177,7 +177,7 @@ void cSC4TextDecalOccupant::UpdateDecal() {
     const float hi[3] = {pos_[0] + halfX, ground + 0.1f, pos_[1] + halfZ};
     SetBoundingBox(lo, hi);
 
-    decalA_ = overlayA_->AddDecal(width_, 0.0f, texture_, pos_);
+    decalA_ = overlayA_->AddDecal(width_, turns, texture_, pos_);   // both managers get the turns (i386 0x004c73f4)
     if (decalA_ != -1) {
         overlayA_->SetDecalColor(decalA_, color_);
         overlayA_->SetDecalAlpha(decalA_, alpha_);

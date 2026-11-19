@@ -144,6 +144,7 @@ int main() {
     d->GetBoundingBox(lo, hi);
     CHECK(lo[0] == -8.0f && hi[2] == 16.0f);
     CHECK(host.overlays[1].lastTurns == 0.75f);
+    CHECK(host.overlays[0].lastTurns == 0.75f);   // the first manager is turned the same (i386 0x004c73f4)
     CHECK(d->DecalIdA() == 8);
     Count(host.overlays[0], "remove", 1);
     d->SetOrientation(0);                       // no change: nothing rebuilt
