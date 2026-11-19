@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstddef>
 
+#include "gz/DrawContext.h"
 #include "gz/GimexFactory.h"
 #include "gz/RZDraw.h"
 #include "rz/cRZCallbackTimer.h"
@@ -306,6 +307,25 @@ bool cWinBMPView::Scroll(int dx, int dy) {
 
 bool cWinBMPView::GZPaint() {
     cIGZBuffer* target = WinBMPViewHost()->DrawBuffer(*this);
+    if (!target) {
+        // The port's windows draw through their draw context (cGZWinBMP::GZPaint does the same): the fill where the image
+        // does not cover the window, then the image stretched into its destination.
+        auto* context = static_cast<gz::cIGZDrawContext*>(drawContext_);
+        if (!context) return true;
+        if (!(flags_ & gz::kWinBMPNoFill) &&
+            (!bmp_ || imageDest_.right - imageDest_.left < drawArea_.right - drawArea_.left ||
+             imageDest_.bottom - imageDest_.top < drawArea_.bottom - drawArea_.top)) {
+            context->SetColor(GetFillColorRGB());
+            context->Fill(drawArea_);
+        }
+        if (bmp_) {
+            const cRZRect source{0, 0, static_cast<int>(bmp_->Width()), static_cast<int>(bmp_->Height())};
+            const cRZRect destination{drawArea_.left + imageDest_.left, drawArea_.top + imageDest_.top,
+                                      drawArea_.left + imageDest_.right, drawArea_.top + imageDest_.bottom};
+            context->Blt(bmp_, source, destination);
+        }
+        return true;
+    }
     // The fill is skipped by flag 2 and only drawn when there is no image or the image does not cover the window.
     if (!(flags_ & gz::kWinBMPNoFill) &&
         (!bmp_ || imageDest_.right - imageDest_.left < drawArea_.right - drawArea_.left ||

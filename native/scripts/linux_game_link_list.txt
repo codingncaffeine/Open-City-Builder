@@ -127,6 +127,8 @@ src/gz/cGZPersistResourceManager.cpp
 src/gz/GimexFactory.cpp
 src/gz/GimexReaderWriter.cpp
 src/app/NativeGimex.cpp
+src/app/NativeSnapshot.cpp
+src/sc4/WinSnapshot.cpp
 src/gz/cGZDate.cpp
 src/rz/cRZDate.cpp
 src/sc4/Nation.cpp

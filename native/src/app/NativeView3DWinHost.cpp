@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include "sc4/View3DWin.h"
+#include "app/NativeSnapshot.h"
 #include "app/NativeTutorial.h"
 #include "app/NativeCheats.h"
 #include "app/NativeKeyboard.h"
@@ -319,8 +320,8 @@ struct StubView3DWin final : IView3DWinHost {
         RunGameOptionsDialog([this] { return Preferences(); });
         if (sc4::cSC4View3DWin* view = CityView3DWin()) view->SetFocus();
     }
-    void ShowSnapshotAlbum(cIGZWin*) override { SC4_UNWIRED("IView3DWinHost::ShowSnapshotAlbum (cSC4WinSnapshotAlbum not recovered)"); }
-    void CreateSnapshotTaker(cIGZWin*) override { SC4_UNWIRED("IView3DWinHost::CreateSnapshotTaker (cSC4WinSnapshotTaker not recovered)"); }
+    void ShowSnapshotAlbum(cIGZWin* parent) override { native::ShowSnapshotAlbum(parent); }
+    void CreateSnapshotTaker(cIGZWin* parent) override { native::CreateSnapshotTaker(parent); }
     void RequestSaveCity(bool announce, bool alternate) override { if (cSC4App* app = BootApplication()) app->RequestSaveCity(announce, alternate); }
     void RequestGoToRegionView(bool ask) override { if (cSC4App* app = BootApplication()) app->RequestGoToRegionView(ask); }
     void RequestQuit(bool ask, bool save) override { if (cSC4App* app = BootApplication()) app->RequestQuit(ask, save); }

@@ -34,6 +34,7 @@
 #include "platform/PointerState.h"
 #include "sc4/Simulator.h"
 #include "sc4/RegionDialogs.h"
+#include "app/NativeSnapshot.h"
 #include "app/NativeCheats.h"
 #include "app/NativeWinControls.h"
 #include "app/NativeNetworkLots.h"
@@ -1522,6 +1523,9 @@ int main(int argc, char** argv) {
 
     gz::SetWinTextEditHost(&gTextEditHost);
     gDriver = gd::cGLGDriver::Create(std::uint32_t(gW), std::uint32_t(gH), std::uint32_t(windowW), std::uint32_t(windowH));
+    native::SetSnapshotFrameReader([](std::vector<std::uint8_t>& bgra, std::uint32_t& w, std::uint32_t& h) {
+        return gDriver && gDriver->ReadBack(bgra, w, h);
+    });
     // However main returns, the driver stops touching GL before the static windows are torn down after it (their buffers
     // delete textures; through a dead context that crashed at exit on NVIDIA).
     struct DetachAtReturn { ~DetachAtReturn() { if (gDriver) gDriver->DetachContext(); } } detachAtReturn;
