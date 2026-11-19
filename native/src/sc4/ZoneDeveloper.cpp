@@ -2612,6 +2612,7 @@ void cSC4ZoneDeveloper::OnZone(const SC4CellRegion<int>* region, SC4CellRegion<i
         facings.push_back((orientation + 2) & 3);
         cSC4Lot* lot = nullptr;
         const bool created = CreateLotToFaceRoad(x0, z0, width, depth, facings, lot);
+        if (lot) lot->Release();   // the caller's reference (the original keeps it: every such lot outlived its demolition)
         if (out && !created) {
             *out = new SC4CellRegion<int>(SC4CellRegion<int>::Make(region->bounds, false));
         }
