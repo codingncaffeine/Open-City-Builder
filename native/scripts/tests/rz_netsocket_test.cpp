@@ -16,7 +16,9 @@ namespace {
 // A BSD loopback address (length byte and AF_INET, which cRZINetSocketAddress does not write on this platform).
 cRZSocketAddress Loopback(std::uint16_t port) {
     sockaddr_in in{};
+#ifdef __APPLE__   // the BSD length byte (Linux's sockaddr_in has none)
     in.sin_len = sizeof in;
+#endif
     in.sin_family = AF_INET;
     in.sin_port = htons(port);
     in.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -121,8 +123,8 @@ int main() {
         CHECK(wincompat::WSAGetLastError() == 10002);
         errno = EWOULDBLOCK;
         CHECK(wincompat::WSAGetLastError() == 0x2733);
-        errno = 0x58;
-        CHECK(wincompat::WSAGetLastError() == 0x58);
+        errno = 200;   // beyond the mapped range on every platform: passed through
+        CHECK(wincompat::WSAGetLastError() == 200);
         wincompat::SetHost(nullptr);
         CHECK(wincompat::GetKeyState(1) == 0);
     }

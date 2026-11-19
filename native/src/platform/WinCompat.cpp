@@ -82,8 +82,33 @@ int SetCursorPos(short x, short y) {   // @ 0x100642414
 int closesocket(int socket) { return ::close(socket); }                                                   // @ 0x100642440
 int ioctlsocket(int socket, unsigned long request, void* argument) { return ::ioctl(socket, request, argument); }   // @ 0x10064244a
 
+namespace {
+// Winsock codes are 10000 + the BSD errno; the original adds that base to the Darwin errno. Linux numbers the socket errors
+// differently, so they are first turned into their BSD numbers (macOS: unchanged).
+int BsdErrno(int error) {
+#ifdef __APPLE__
+    return error;
+#else
+    switch (error) {
+        case EWOULDBLOCK: return 35;     case EINPROGRESS: return 36;     case EALREADY: return 37;
+        case ENOTSOCK: return 38;        case EDESTADDRREQ: return 39;    case EMSGSIZE: return 40;
+        case EPROTOTYPE: return 41;      case ENOPROTOOPT: return 42;     case EPROTONOSUPPORT: return 43;
+        case ESOCKTNOSUPPORT: return 44; case EOPNOTSUPP: return 45;      case EPFNOSUPPORT: return 46;
+        case EAFNOSUPPORT: return 47;    case EADDRINUSE: return 48;      case EADDRNOTAVAIL: return 49;
+        case ENETDOWN: return 50;        case ENETUNREACH: return 51;     case ENETRESET: return 52;
+        case ECONNABORTED: return 53;    case ECONNRESET: return 54;      case ENOBUFS: return 55;
+        case EISCONN: return 56;         case ENOTCONN: return 57;        case ESHUTDOWN: return 58;
+        case ETOOMANYREFS: return 59;    case ETIMEDOUT: return 60;       case ECONNREFUSED: return 61;
+        case ELOOP: return 62;           case ENAMETOOLONG: return 63;    case EHOSTDOWN: return 64;
+        case EHOSTUNREACH: return 65;
+        default: return error;
+    }
+#endif
+}
+}  // namespace
+
 int WSAGetLastError() {   // @ 0x100642456
-    const int error = errno;
+    const int error = BsdErrno(errno);
     return (error >= 1 && error <= 0x57) ? error + kWSABase : error;
 }
 

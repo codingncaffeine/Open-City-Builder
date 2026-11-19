@@ -11,10 +11,13 @@
 #include "rz/SocketErrorTable.inc"
 
 namespace {
-constexpr int kSolSocket = 0xffff;
-constexpr int kSoDebug = 1, kSoReuseAddr = 4, kSoKeepAlive = 8, kSoDontRoute = 0x10, kSoBroadcast = 0x20, kSoLinger = 0x80, kSoOobInline = 0x100,
-              kSoSndBuf = 0x1001, kSoRcvBuf = 0x1002, kSoSndTimeo = 0x1005, kSoRcvTimeo = 0x1006;
-constexpr unsigned long kFionRead = 0x4004667f;
+// The platform's own socket constants: the original's numbers (SOL_SOCKET 0xffff, SO_REUSEADDR 4, FIONREAD 0x4004667f...) are
+// the BSD ones and equal these on macOS; Linux numbers them differently.
+constexpr int kSolSocket = SOL_SOCKET;
+constexpr int kSoDebug = SO_DEBUG, kSoReuseAddr = SO_REUSEADDR, kSoKeepAlive = SO_KEEPALIVE, kSoDontRoute = SO_DONTROUTE,
+              kSoBroadcast = SO_BROADCAST, kSoLinger = SO_LINGER, kSoOobInline = SO_OOBINLINE, kSoSndBuf = SO_SNDBUF,
+              kSoRcvBuf = SO_RCVBUF, kSoSndTimeo = SO_SNDTIMEO, kSoRcvTimeo = SO_RCVTIMEO;
+constexpr unsigned long kFionRead = FIONREAD;
 constexpr int kWsaEWouldBlock = 0x2733, kWsaENotConn = 0x2749;
 constexpr std::uint32_t kEventRead = 0xab2045c3, kEventWrite = 0xab2045c4, kEventOob = 0xab2045c6, kEventAccept = 0xab2045ca,
                         kEventConnect = 0xab2045d2, kEventClose = 0xab2045e2;
