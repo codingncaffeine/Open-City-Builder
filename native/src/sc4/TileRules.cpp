@@ -371,7 +371,8 @@ bool cSC4TileEvaluator::AddRules(cSC4FileTokenizer& tokens) {
 namespace {
 constexpr std::uint32_t kNetworkTypeCount = 13;
 std::vector<cSC4TileEvaluator*>& EvaluatorsOf(std::uint32_t type) {
-    static std::vector<cSC4TileEvaluator*> evaluators[kNetworkTypeCount];
+    // The registry lives for the whole program (never destroyed, so no exit-time teardown order to get wrong).
+    static auto* evaluators = new std::vector<cSC4TileEvaluator*>[kNetworkTypeCount];
     return evaluators[type];
 }
 }  // namespace
