@@ -133,6 +133,7 @@ src/sc4/TipOfTheDayWinProc.cpp
 src/app/NativeTips.cpp
 src/app/NativeGlyphTextures.cpp
 src/sc4/GlyphTextureManager.cpp
+src/app/NativeSignLabel.cpp
 src/gz/cGZDate.cpp
 src/rz/cRZDate.cpp
 src/sc4/Nation.cpp

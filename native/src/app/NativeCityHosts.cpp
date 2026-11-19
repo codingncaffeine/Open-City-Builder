@@ -1,4 +1,5 @@
 // Installs the generated neutral stub hosts (src/app/hosts, scripts/gen_stub_hosts.py).
+#include "app/NativeSignLabel.h"
 #include "app/NativeTips.h"
 #include "app/NativeSnapshot.h"
 #include "app/NativeTutorial.h"
@@ -232,6 +233,7 @@ void InstallStubHosts() {
     InstallQueryStub();
     InstallQueryHost();                   // the real query host replaces the stub above
     InstallSignToolStub();
+    InstallSignToolHost();                // NativeSignLabel.cpp: the sign tool and signposts' real hosts replace the stubs
     InstallWeatherStub();
     InstallNativeWeather();               // the real weather host replaces the stub above
     InstallWinAdviceListStub();
