@@ -816,8 +816,12 @@ bool cSC4WatercraftManager::Read(cIGZIStream& stream) {
         for (std::int32_t r = 0; r < routeCount; ++r) {
             FerryRouteInformation routeInfo;
             FerryRouteInfo& route = routeInfo.route;
-            route.fromLot = host_->ReadLot(stream);
-            route.toLot = host_->ReadLot(stream);
+            cSC4Lot* from = host_->ReadLot(stream);   // counted: the route's auto references take their own
+            cSC4Lot* to = host_->ReadLot(stream);
+            route.fromLot = from;
+            route.toLot = to;
+            ReleaseCounted(from);
+            ReleaseCounted(to);
             std::int32_t state = -1;
             stream.GetSint32(state);
             route.state = state;
