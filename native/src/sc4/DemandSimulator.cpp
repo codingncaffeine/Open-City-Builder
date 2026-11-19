@@ -88,8 +88,13 @@ void cSC4DemandSimulator::ResetStaticStateForTest() {
 cSC4DemandSimulator::cSC4DemandSimulator() : utilizationWeights_(13, 0.0f) {}
 
 cSC4DemandSimulator::~cSC4DemandSimulator() {
-    // The original's destructor frees neither the demand objects nor the two response curves (Shutdown does),
-    // it only tears the containers down. Kept: a plain delete leaks whatever Shutdown did not release.
+    // What Shutdown did not free (a simulator read but never initialised): the original's destructor only tears the
+    // containers down and leaks the demand objects and the two response curves.
+    for (auto& entry : demands_) delete entry.second;
+    delete taxCurve_;
+    taxCurve_ = nullptr;
+    delete economyCurve_;
+    economyCurve_ = nullptr;
     delete census_;
     census_ = nullptr;
     utilizationWeights_.clear();
@@ -289,11 +294,10 @@ bool cSC4DemandSimulator::Shutdown() {
     census_ = nullptr;
     censusMap_.clear();
     previousCensus_.clear();
-    // Quirk kept: the original frees +0x140 and then clears +0x138, so +0x140 stays dangling.
     delete taxCurve_;
     taxCurve_ = nullptr;
     delete economyCurve_;
-    taxCurve_ = nullptr;
+    economyCurve_ = nullptr;   // (the original clears +0x138 a second time here and leaves +0x140 dangling)
     connectedCities_.clear();
     regionalCities_.clear();
     return true;

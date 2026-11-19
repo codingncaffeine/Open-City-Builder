@@ -114,6 +114,13 @@ struct FakeHistory {
 }  // namespace
 
 struct FakeHost final : IDemandSimulatorHost {
+    // the lot of a lot-state message: the test sends a FakeLotState (the game's host resolves a cISC4Lot)
+    bool MessageLot(cIGZUnknown* unknown, std::uint32_t& buildingType, cISCPropertyHolder*& building) override {
+        auto* lot = static_cast<FakeLotState*>(unknown);
+        buildingType = lot->GetBuildingType(false);
+        building = lot->occupant.holder;
+        return true;
+    }
     std::map<cGZPersistResourceKey, std::unique_ptr<Exemplar>, cGZPersistResourceKeyOrder> exemplars;
     std::map<std::uint32_t, cGZPersistResourceKey> buildingKeys;
     std::vector<std::uint32_t> buildingTypes;
@@ -652,7 +659,7 @@ int main() {
     const unsigned char badVersion[2] = {3, 0};
     PortMemoryIStream badStream(badVersion, 2);
     CHECK(!copy->Read(badStream));
-    copy->Release();
+    copy->Release();   // read but never initialised: its destructor frees the demands it read
 
     // ---- shutdown ----------------------------------------------------------------------------------
     CHECK(sim->Shutdown());
