@@ -449,8 +449,6 @@ src/sc4/ViewInputControlTerrainScrubber.cpp
 src/sc4/ViewInputControlFlora.cpp
 src/sc4/UIFilters.cpp
 src/app/hosts/StubFeature.cpp
-src/app/hosts/StubFlora.cpp
-src/app/hosts/StubFloraSimulator.cpp
 src/app/hosts/StubGraphsView.cpp
 src/app/hosts/StubGrowthDeveloper.cpp
 src/app/hosts/StubHelicopter.cpp

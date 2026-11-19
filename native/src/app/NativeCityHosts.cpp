@@ -45,8 +45,6 @@ void InstallCityPanelHosts();
 void InstallEstablishCityHost();
 void InstallBudgetSimHosts();
 void InstallTerrainTools();
-void InstallFloraStub();
-void InstallFloraSimulatorStub();
 void InstallNativeFlora();
 void InstallGraphsViewStub();
 void InstallGraphsViewHost();   // app/NativeGraphsView.cpp
@@ -162,9 +160,7 @@ void InstallStubHosts() {
     InstallEstablishCityHost();
     InstallBudgetSimHosts();
     InstallTerrainTools();
-    InstallFloraStub();
-    InstallFloraSimulatorStub();
-    InstallNativeFlora();                 // the real flora hosts replace the two stubs above
+    InstallNativeFlora();                 // NativeFlora.cpp: the flora simulator, flora occupant and tree tool services
     InstallGraphsViewStub();
     InstallGraphsViewHost();              // the real host replaces the stub above
     InstallGrowthDeveloperStub();

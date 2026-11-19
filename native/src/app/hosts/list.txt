@@ -24,8 +24,6 @@ Disaster
 Effects
 EffectsManager
 EstablishCity
-Flora
-FloraSimulator
 GraphsView
 GrowthDeveloper
 Helicopter

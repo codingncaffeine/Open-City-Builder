@@ -484,8 +484,6 @@ src/sc4/ViewInputControlTerrainScrubber.cpp
 src/sc4/ViewInputControlFlora.cpp
 src/sc4/UIFilters.cpp
 src/app/hosts/StubFeature.cpp
-src/app/hosts/StubFlora.cpp
-src/app/hosts/StubFloraSimulator.cpp
 src/app/hosts/StubGraphsView.cpp
 src/app/hosts/StubGrowthDeveloper.cpp
 src/app/hosts/StubHelicopter.cpp
@@ -744,6 +742,7 @@ src/app/citycomp/cSC4HistoryWarehouse.cpp
 src/app/citycomp/cSTETerrain.cpp
 src/app/citycomp/cSTESurfaceWater.cpp
 src/app/citycomp/cSC4AutomataScriptSystem.cpp
+src/app/citycomp/cSC4FloraSimulator.cpp
 src/app/citycomp/cSC4AutomataControllerManager.cpp
 src/app/citycomp/cSC4OccupantManager.cpp
 src/app/citycomp/cSC4ZoneManager.cpp

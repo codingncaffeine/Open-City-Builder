@@ -9,8 +9,14 @@
 #include <cstdlib>
 #include <vector>
 
+#include "app/NativeBoot.h"
+#include "app/NativeCheats.h"
 #include "app/NativeCity.h"
 #include "app/NativeCitySystems.h"
+#include "app/NativeKeyboard.h"
+#include "gz/CommandServer.h"
+#include "platform/Unwired.h"
+#include "sc4/App.h"
 #include "sc4/AuraSimulator.h"
 #include "sc4/BudgetSimulator.h"
 #include "sc4/View3DWin.h"
@@ -81,7 +87,6 @@ struct FloraSimulatorHost final : sc4::IFloraSimulatorHost {
         list->Release();
         for (const cGZPersistResourceKey& key : keys) callback(key, context);
     }
-    void PostFloraTypesUpdated() override {}   // no native listener of the "flora types updated" message yet
     float SeaLevel() override { sc4::cSTETerrain* t = Terrain(); return t ? t->GetSeaLevel() : 0.0f; }
     float TerrainHeight(float x, float z) override { sc4::cSTETerrain* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
     int TerrainClass(float x, float z) override {
@@ -110,14 +115,59 @@ struct FloraSimulatorHost final : sc4::IFloraSimulatorHost {
         t->GetFaceNormal(x, z, normal);
         return normal.y;
     }
-    void CitySizeMeters(float& x, float& z) override {
+    void CitySizeMeters(float& x, float& z) override {   // SL::spCity SizeX / SizeZ
         sc4::cSC4City* city = HostCity();
-        x = city ? static_cast<float>(city->CellCountX()) * 16.0f : 0.0f;
-        z = city ? static_cast<float>(city->CellCountZ()) * 16.0f : 0.0f;
+        x = city ? city->SizeX() : 0.0f;
+        z = city ? city->SizeZ() : 0.0f;
     }
     std::uint32_t SimDate() override {
         auto* simulator = Component<sc4::cSC4Simulator>(CityComponent::Simulator, sc4::kGZCLSID_cSC4Simulator);
         return simulator ? simulator->GetSimDateNumber() : 0;
+    }
+    // Init / Shutdown / DoMessage (flora.md 4, 5)
+    cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
+    bool RegisterCommand(std::uint32_t id, const char* name, const char* parameterInfo) override {
+        cIGZCommandServer* server = GameCommandServer();
+        if (!server) {
+            SC4_UNWIRED("IFloraSimulatorHost::RegisterCommand (no command server natively)");
+            return false;
+        }
+        return server->RegisterCommand(id, name, parameterInfo);
+    }
+    bool UnregisterCommand(std::uint32_t id) override {
+        cIGZCommandServer* server = GameCommandServer();
+        if (!server) {
+            SC4_UNWIRED("IFloraSimulatorHost::UnregisterCommand (no command server natively)");
+            return false;
+        }
+        return server->UnregisterCommand(id);
+    }
+    bool AddSimulatorAgent(cIGZMessageTarget2* target, int level, const char* name, std::uint32_t flags) override {
+        return AddCitySimulatorAgent(target, level, name, flags);
+    }
+    void RemoveSimulatorAgent(cIGZMessageTarget2* target) override { RemoveCitySimulatorAgent(target); }
+    bool CheatCodeManagerPresent() override { return GameCheatCodeManager() != nullptr; }
+    void RegisterCheatCode(std::uint32_t id, const char* text) override { RegisterGameCheat(id, text); }
+    void UnregisterCheatCode(std::uint32_t id) override { UnregisterGameCheat(id); }
+    void AddCheatNotification(cIGZMessageTarget2* target, std::uint32_t id) override { AddGameCheatListener(target, id); }
+    void RemoveCheatNotification(cIGZMessageTarget2* target, std::uint32_t id) override { RemoveGameCheatListener(target, id); }
+    bool CityPresent() override { return HostCity() != nullptr; }
+    void CityCellCounts(std::int32_t& x, std::int32_t& z) override {
+        sc4::cSC4City* city = HostCity();
+        x = city ? city->CellCountX() : 1;
+        z = city ? city->CellCountZ() : 1;
+    }
+    bool CityEstablished() override {
+        sc4::cSC4City* city = HostCity();
+        return city && city->GetEstablished();
+    }
+    bool TerrainInitialized() override {
+        sc4::cSTETerrain* t = Terrain();
+        return t && t->IsInitialized();
+    }
+    cIGZPersistDBSegment* ObliteratedCitySegment() override {   // SC4NewCitySpecification::obliteratedCityDBSegment
+        cSC4App* app = BootApplication();
+        return app ? app->ObliterationSegment() : nullptr;
     }
 };
 
@@ -131,28 +181,6 @@ struct FloraHost final : sc4::IFloraHost {
 FloraSimulatorHost g_floraSimulatorHost;
 FloraHost g_floraHost;
 
-// cSC4FloraSimulator::Init subscribes the simulator to the terrain-changed message 0x278e6003 (the port's simulator is not a
-// message target, so this target listens on its behalf and hands the message to the city's simulator).
-class FloraMessageTarget final : public cIGZMessageTarget2 {
-public:
-    bool QueryInterface(std::uint32_t iid, void** out) override {
-        if (iid != 0x452294aa && iid != 1) return false;
-        *out = static_cast<cIGZMessageTarget2*>(this);
-        return true;
-    }
-    std::uint32_t AddRef() override { return 1; }
-    std::uint32_t Release() override { return 1; }
-    bool DoMessage(cIGZMessage2* message) override {
-        if (!message || message->GetType() != 0x278e6003) return true;
-        void* raw = nullptr;
-        if (!message->QueryInterface(kGZIID_cIGZMessage2Standard, &raw) || !raw) return true;
-        auto* standard = static_cast<cIGZMessage2Standard*>(raw);
-        if (sc4::cSC4FloraSimulator* flora = CityFloraSimulator())
-            flora->DoTerrainChangedMessage(static_cast<std::uint32_t>(standard->GetData1()), static_cast<std::uint32_t>(standard->GetData2()));
-        standard->Release();
-        return true;
-    }
-} g_floraMessages;
 
 // The mayor-mode tree tool's services: the city's flora simulator, budget, aura simulator and terrain.
 struct FloraToolHost final : sc4::IFloraToolHost {
@@ -203,31 +231,19 @@ sc4::cSC4ViewInputControl* CreateFloraTool(std::uint32_t floraType) {
     return new sc4::cSC4ViewInputControlFlora(floraType);   // the view's stack takes the first reference
 }
 
-// The city's flora simulator. Its Init is not recovered, so the species are loaded on the first use (StaticInit, as
-// the original's Init does first).
+// The city's flora simulator. Its Init (flora.md 4.1) loads the species, subscribes it and reads the tuning; until the city's
+// component lifecycle runs that Init, the species are loaded here on the first use so the tree tool and the lot developer
+// find them.
 sc4::cSC4FloraSimulator* CityFloraSimulator() {
     auto* flora = Component<sc4::cSC4FloraSimulator>(CityComponent::FloraSimulator, sc4::kFloraSimulatorClassId);
     if (!flora) return nullptr;
     static bool loaded = false;
     if (!loaded) {
         loaded = true;
-        if (SL::spMS2) SL::spMS2->AddNotification(&g_floraMessages, 0x278e6003);
-        sc4::cSC4FloraSimulator::StaticInit();
-        // ReadSimulatorTunableValues (Mac i386 0x89e4c), the part placement reads: the elevation scale (+0x98) is 16 / property
-        // 0xc9dbdd02 of the flora tuning exemplar (the height the 16 elevation bands span). Its other values pace the unported
-        // growth simulation.
-        cGZPersistResourceKey key{0x6534284a, 0x7a4a8458, 0x1a2fdb6a};
-        if (sc4::cISCResExemplar* exemplar = g_floraSimulatorHost.LoadExemplar(key)) {
-            float span = 0.0f;
-            if (sc4::cSCPropertyHelp::GetPropertyValue(exemplar->AsISCPropertyHolder(), 0xc9dbdd02, span) && span != 0.0f)
-                flora->SetElevationScale(16.0f / span);
-            exemplar->Release();
-        }
+        if (!flora->IsInitialized()) sc4::cSC4FloraSimulator::StaticInit(flora);
         std::uint32_t count = 0;
         flora->GetAllFloraTypes(nullptr, count);
-        if (std::getenv("SC4_DEBUG")) {
-            std::fprintf(stderr, "flora: %u species loaded\n", count);
-        }
+        if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "flora: %u species loaded\n", count);
     }
     return flora;
 }
