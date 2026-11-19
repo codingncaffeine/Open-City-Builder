@@ -212,10 +212,7 @@ struct UIHost final : ITutorialUIHost {
         if (!dispatch || !dispatch->GetDispatchInfo(id, info)) return false;
         x = info.x;
         z = info.z;
-        if (info.station) info.station->Release();
-        if (info.automaton) info.automaton->Release();
-        if (info.pylon) info.pylon->Release();
-        return true;
+        return true;   // the info's station / automaton / pylon are the manager's (borrowed, as GetDispatchInfo copies them)
     }
     int ResidentialPopulation() override {
         auto* residential = Component<cSC4ResidentialSimulator>(CityComponent::ResidentialSimulator);
