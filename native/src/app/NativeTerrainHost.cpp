@@ -121,8 +121,19 @@ struct NativeSurfaceWaterHost final : ISurfaceWaterHost {
         for (std::uint32_t id : {kWaterMsgCityCell1, kWaterMsgCityCell4, kWaterMsgCityCell5, kWaterMsgNetworkBuilt, kWaterMsgOccupantAdded, kWaterMsgOccupantMoved})
             SL::spMS2->RemoveNotification(static_cast<cIGZMessageTarget2*>(&water), id);
     }
-    void RegisterTicks(cSTESurfaceWater&) override { SC4_UNWIRED("cSTESurfaceWater tick registration (spSimulator vslot 0x98, ATM vslot 0x28): the water never animates"); }
-    void UnregisterTicks(cSTESurfaceWater&) override {}
+    // spSimulator vslot 0x98: an agent of interval 4 (its 0x66956814 rebuilds the bodies of water an occupant change marked), and the
+    // animation tick manager's ticks (0x86ad10ee) at priority 0xc0.
+    void RegisterTicks(cSTESurfaceWater& water) override {
+        auto* target = static_cast<cIGZMessageTarget2*>(&water);
+        AddCitySimulatorAgent(target, 4, "cSTESurfaceWater", 2);
+        if (sc4::cSC4AnimationTickManager* ticks = AnimationTickManager()) ticks->AddTickableObject(target, 0xc0);
+    }
+    // ATM vslot 0x30 (target, 0xc0), then the agent leaves the simulator (spCity vslot 0x190 -> vslot 0xa8).
+    void UnregisterTicks(cSTESurfaceWater& water) override {
+        auto* target = static_cast<cIGZMessageTarget2*>(&water);
+        if (sc4::cSC4AnimationTickManager* ticks = AnimationTickManager()) ticks->RemoveTickableObject(target, 0xc0);
+        RemoveCitySimulatorAgent(target);
+    }
     // The neighbours simulator is a city component (NativeSurfaceWaterNeighbors.cpp: its header cannot share this translation unit).
     bool NeighborHasConnection(std::uint32_t type, int x, int z) override { return NeighborsHasConnection(Component(CityComponent::NeighborsSimulator), type, x, z); }
     void NeighborDeleteConnection(std::uint32_t type, int x, int z) override { NeighborsDeleteConnection(Component(CityComponent::NeighborsSimulator), type, x, z); }
