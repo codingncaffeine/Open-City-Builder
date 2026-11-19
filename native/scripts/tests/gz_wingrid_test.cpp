@@ -157,7 +157,8 @@ int main() {
 
     // --- construction defaults (0x10025086a) ---
     CHECK(grid->GetFlags() == 0);
-    CHECK(grid->GetDefaultColumnWidth() == 100 && grid->GetDefaultRowHeight() == 0x140);
+    // (the original's constructor, Mac i386 0x001b8d03: +0x14c = 100, +0x150 = 0x14)
+    CHECK(grid->GetDefaultColumnWidth() == 100 && grid->GetDefaultRowHeight() == 0x14);
     int headerHeight = 0, headerWidth = 0;
     CHECK(grid->GetHeaderSizes(headerHeight, headerWidth) && headerHeight == 20 && headerWidth == 5);
     int l = 0, t = 0, r = 0, b = 0;
@@ -363,12 +364,12 @@ int main() {
     grid->Refresh();
     cIGZWinGrid::CursorHitTestResult hit = cIGZWinGrid::kCursorNothing;
     cIGZWinGrid::CellCoordinates hitCell{0, 0};
-    CHECK(grid->DoCursorHitTest(50, 50, hit, hitCell) && hit == cIGZWinGrid::kCursorCell && hitCell.col == 0 &&
+    CHECK(grid->DoCursorHitTest(50, 10, hit, hitCell) && hit == cIGZWinGrid::kCursorCell && hitCell.col == 0 &&
           hitCell.row == 0);
     CHECK(grid->DoCursorHitTest(-5, -5, hit, hitCell) && hit == cIGZWinGrid::kCursorOutsideGrid);
-    CHECK(grid->GZOnMouseDownL(50, 50, 0) && grid->GetSelectionCount() == 1 && grid->GetCellIsSelected(0, 0));
-    CHECK(grid->GZOnMouseUpL(50, 50, 0));
-    CHECK(grid->GZOnMouseMove(50, 50, 0));
+    CHECK(grid->GZOnMouseDownL(50, 10, 0) && grid->GetSelectionCount() == 1 && grid->GetCellIsSelected(0, 0));
+    CHECK(grid->GZOnMouseUpL(50, 10, 0));
+    CHECK(grid->GZOnMouseMove(50, 10, 0));
     CHECK(grid->GZOnMouseWheel(0, 0, 0, 120));
     int firstColumn = -1, firstRow = -1;
     CHECK(grid->GetFirstVisibleCell(firstColumn, firstRow) && firstColumn == 0 && firstRow == 0);

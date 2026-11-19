@@ -74,7 +74,9 @@ namespace {
 // The original's cSC4UndergroundOccupant is abstract (three pure virtuals), so the test instantiates this. The
 // reference count is the test's own so the object survives the tool's Release() calls for later inspection.
 struct TestOccupant final : cSC4UndergroundOccupant {
-    TestOccupant() { fakeRefs = 1; }
+    TestOccupant() { fakeRefs = 1; All().push_back(this); }
+    // The tool never releases what it was given (it is never destroyed), so main frees every fake.
+    static std::vector<TestOccupant*>& All() { static std::vector<TestOccupant*> v; return v; }
     tCustomGeometryInfo info{};
     const tCustomGeometryInfo* GetCustomGeometryInfo() const override { return &info; }
     std::uint32_t GetNetworkType() const override { return 4; }
@@ -166,6 +168,8 @@ struct TestOccupant final : cSC4UndergroundOccupant {
 
 // A cSC4UndergroundConnectionOccupant (iid 0x8a139184) of a chosen network, with a counted fake reference.
 struct FakeConnectionOccupant final : cSC4UndergroundConnectionOccupant {
+    FakeConnectionOccupant() { All().push_back(this); }
+    static std::vector<FakeConnectionOccupant*>& All() { static std::vector<FakeConnectionOccupant*> v; return v; }
     std::uint32_t GetGZIID() const override { return 0xea0a5acf; }
     std::uint32_t GetNetworkOccupantGZIID() const override { return network; }
     std::uint32_t GetNetworkType() const override { return kNetworkPipe; }
@@ -465,6 +469,10 @@ struct TestTool final : cSC4UndergroundNetworkTool {
 // ============================================================================================================
 // fixture
 // ============================================================================================================
+// The tools live until the program ends, as in the game (their destructor is the original's ud2 trap): kept reachable here,
+// with everything they hold, instead of dropped.
+std::vector<void*>& gLiveTools = *new std::vector<void*>;   // never destroyed: the leak check runs after static destructors
+
 struct Fixture {
     explicit Fixture(std::uint32_t networkType = kNetworkPipe, std::uint32_t gziid = kGZIID_cSC4PipeOccupant) {
         baseHost.worldCache = &cache;
@@ -474,12 +482,13 @@ struct Fixture {
         SetNetworkToolHost(&baseHost);
         SetUndergroundNetworkToolHost(&host);
         tool = new TestTool(networkType, gziid);
+        gLiveTools.push_back(tool);
     }
     ~Fixture() {
         SetUndergroundNetworkToolHost(nullptr);
         SetNetworkToolHost(nullptr);
         if (baseHost.preview != nullptr) delete baseHost.preview;
-        // The tool and the fake world cache are deliberately leaked: its destructor is the original's ud2 trap by design.
+        // The tool stays in gLiveTools: its destructor is the original's ud2 trap by design.
     }
     Fixture(const Fixture&) = delete;
     Fixture& operator=(const Fixture&) = delete;
@@ -1208,6 +1217,7 @@ void TestSetQuadTrianglesToDraw() {
     plain->SetNetworkFlag(kNetworkFlagHideTriangle0);
     f.tool->SetQuadTrianglesToDraw(plain, compact);
     CHECK((plain->GetNetworkFlag() & kNetworkFlagHideTriangle0) != 0);
+    plain->Release();
     f.tool->SetQuadTrianglesToDraw(nullptr, compact);   // no crash
 }
 
@@ -1229,6 +1239,7 @@ void TestPipeToolCreatesPipe() {
     Fixture f;
     f.baseHost.typeInfo.placement.unknownA8[9] = 125;
     auto* tool = new cSC4PipeTool();
+    gLiveTools.push_back(tool);
     CHECK(tool->Init());
     CHECK(tool->NetworkGZIID() == kGZCLSID_cSC4PipeOccupant);
     cSC4NetworkCellInfo cell;
@@ -1293,6 +1304,8 @@ int main() {
     TestSetQuadTrianglesToDraw();
     TestUpdateTerrainHeightsPartial();
     TestPipeToolCreatesPipe();
+    for (auto* o : TestOccupant::All()) delete o;
+    for (auto* o : FakeConnectionOccupant::All()) delete o;
     if (failures == 0) {
         std::printf("all cSC4UndergroundNetworkTool tests passed\n");
         return 0;

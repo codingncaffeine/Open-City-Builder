@@ -295,6 +295,18 @@ int main() {
     burst.demolition = false;
     SetPipeBurstHost(nullptr);
     SetDisasterInstanceFactory(nullptr);
+    // every effect the instances asked for was given back (the host hands each out with one reference), except a leak's
+    // effect when its pipe bursts: the original stops it (transition 0, fade out) and drops it without a release
+    for (Effect* e : burst.effects) {
+        CHECK(e->refs == (e->stopped > 0 && e->lastStop == 0 ? 1 : 0));
+        delete e;
+    }
+    burst.effects.clear();
+    layer->Shutdown();
+    host.layer = nullptr;
+    layer->Release();
+    for (PipeOccupant* p : pipes) p->Release();
+    occupants->Release();
     std::printf(failures ? "FAILED\n" : "sc4_pipeburstinstance ok\n");
     return failures != 0;
 }

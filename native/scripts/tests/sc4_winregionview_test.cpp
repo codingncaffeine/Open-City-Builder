@@ -359,10 +359,13 @@ void TestConstructAndQueryInterface() {
     // QueryInterface forwards to cGZWin: the three window iids, and not the canvas-source view.
     void* out = nullptr;
     CHECK(view->QueryInterface(kGZIID_cIGZWin, &out) && out == static_cast<cIGZWin*>(view));
+    view->Release();   // QueryInterface returns an AddRef'd pointer
     out = nullptr;
     CHECK(view->QueryInterface(1, &out) && out != nullptr);
+    view->Release();
     out = nullptr;
     CHECK(view->QueryInterface(kGZIID_cGZWinAlt, &out) && out != nullptr);
+    view->Release();
     out = nullptr;
     CHECK(!view->QueryInterface(0x4a5d1208, &out));
     CHECK(!view->QueryInterface(0x5386d516, &out));
@@ -600,8 +603,9 @@ void TestUpdateSignpostOccupied() {
 
     CHECK(rig.host.scriptRequests.size() == 1);
     if (!rig.host.scriptRequests.empty()) {
-        CHECK(std::get<0>(rig.host.scriptRequests[0]) == 0x96a006b0);
-        CHECK(std::get<1>(rig.host.scriptRequests[0]) == 0);
+        // the UI script resources: type 0, group 0x96a006b0
+        CHECK(std::get<0>(rig.host.scriptRequests[0]) == 0);
+        CHECK(std::get<1>(rig.host.scriptRequests[0]) == 0x96a006b0);
         CHECK(std::get<2>(rig.host.scriptRequests[0]) == 0x1111);
         CHECK(std::get<3>(rig.host.scriptRequests[0]) == 0x2222);
     }

@@ -33,7 +33,9 @@ int main() {
     CHECK(RZFtoaEnglishA(0.5, buf, 32, 6) && std::strcmp(buf, "0.5") == 0);
     CHECK(RZFtoaEnglishA(-2.0, buf, 32, 6) && std::strcmp(buf, "-2") == 0);
     CHECK(RZFtoaEnglishA(100.0, buf, 32, 2) && std::strcmp(buf, "100") == 0);
-    CHECK(RZFtoaEnglishA(0.001, buf, 32, 6) && std::strcmp(buf, "0.00100000") == 0);   // maxFraction counts digits after the leading zeros
+    // maxFraction counts digits after the leading zeros (values exact in binary: the C library's fcvt rounds 0.001 differently per platform)
+    CHECK(RZFtoaEnglishA(0.0625, buf, 32, 2) && std::strcmp(buf, "0.062") == 0);
+    CHECK(RZFtoaEnglishA(0.125, buf, 32, 2) && std::strcmp(buf, "0.12") == 0);
     CHECK(!RZFtoaEnglishA(123456.0, buf, 3, 2));
 
     const std::uint8_t data[4] = {0x0a, 0xff, 0x10, 0x5c};

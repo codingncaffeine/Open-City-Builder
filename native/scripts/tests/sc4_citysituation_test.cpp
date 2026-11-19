@@ -265,7 +265,7 @@ public:
         return true;
     }
     bool GetSuccessEffectName(cRZString&) const override { return false; }
-    bool GetSuccessMoney(std::int64_t& money) const override {
+    bool GetSuccessMoney(long long& money) const override {
         money = successMoney;
         return true;
     }
@@ -275,7 +275,7 @@ public:
         return true;
     }
     bool GetFailureEffectName(cRZString&) const override { return false; }
-    bool GetFailureMoney(std::int64_t& money) const override {
+    bool GetFailureMoney(long long& money) const override {
         money = failureMoney;
         return true;
     }
@@ -469,7 +469,7 @@ int main() {
         manager->Release();
         manager->Release();
         manager->Release();
-        // last reference: Shutdown + delete
+        manager->Release();   // the creating reference: Shutdown + delete
     }
 
     // --- Init / Shutdown: subscriptions, automata managers, cheat code, completed missions ------------------
@@ -702,6 +702,7 @@ int main() {
         CHECK(manager->GetTrackedAutomataCount() == 0);
         manager->Release();
         advice->Release();
+        advice->Release();   // the construction reference (the object starts at one)
         occupantA->Release();
     }
 
@@ -810,6 +811,7 @@ int main() {
         CHECK(manager->Shutdown());
         manager->Release();
         advice->Release();
+        advice->Release();   // the construction reference (the object starts at one)
         occupant->Release();
     }
 

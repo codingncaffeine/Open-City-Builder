@@ -922,6 +922,7 @@ struct FakeHost final : IView3DWinHost {
     FakeCompassWindow* compassWindow = nullptr;
     FakePanelButton* toolbarButton = nullptr;
     int imageBuffers = 0;
+    std::vector<FakeBuffer*> createdBuffers;   // owned here: the view only holds counted references
     bool disasterAlert = false, situationAlert = false, simulatorBusy = false;
     bool keysDown[0x20] = {};
     std::vector<std::uint32_t> commands;
@@ -1029,6 +1030,7 @@ struct FakeHost final : IView3DWinHost {
         ++imageBuffers;
         if (!imageBuffers) return nullptr;
         auto* buffer = new FakeBuffer();
+        createdBuffers.push_back(buffer);
         buffer->AddRef();
         return buffer;
     }
@@ -1736,6 +1738,8 @@ int main() {
         filterB->Release();
         View3DWinTestAccess::FilterInfo(*view)->Release();
         View3DWinTestAccess::FilterInfo(*view) = nullptr;
+        delete filterA;                                            // Release never deletes this fake
+        delete filterB;
     }
 
     // ------------------------------------------------------------------ DoMessage(cGZMessage&)
@@ -2058,8 +2062,8 @@ int main() {
         CHECK(!View3DWinTestAccess::Scrolling(*view));
         View3DWinTestAccess::EdgeScrollX(*view) = 1;
         View3DWinTestAccess::Scrolling(*view) = false;
-        CHECK(view->GZOnMouseMove(10, 10, 0));                 // the edge input survives into RecalcScrollVelocity
-        CHECK(View3DWinTestAccess::Scrolling(*view));
+        CHECK(view->GZOnMouseMove(10, 10, 0));                 // the edge input is cleared, then the velocity recomputed
+        CHECK(View3DWinTestAccess::EdgeScrollX(*view) == 0 && !View3DWinTestAccess::Scrolling(*view));   // (i386 0x005297fe)
         host.gsSelfScroll = true;
         View3DWinTestAccess::Scrolling(*view) = false;
         View3DWinTestAccess::Stopping(*view) = false;
@@ -2473,7 +2477,8 @@ int main() {
         View3DWinTestAccess::ToolbarWindow(*view) = makeGen();
         View3DWinTestAccess::GuiWindows(*view).push_back(makeGen());
         View3DWinTestAccess::PanelAttach(*view)[0] = makeGen();
-        View3DWinTestAccess::PanelUIWinProc(*view) = makeProc();
+        auto* panelProc = makeProc();
+        View3DWinTestAccess::PanelUIWinProc(*view) = panelProc;
         auto* tickerProc = new FakeNewsTicker(); tickerProc->AddRef();
         View3DWinTestAccess::NewsTickerWinProc(*view) = tickerProc;
         auto* mysimProc = new FakeMySimProc(); mysimProc->AddRef();
@@ -2522,6 +2527,10 @@ int main() {
         view->UpdateDayNightButtons();                              // no menu: no crash
         view->UpdatePopulation();                                   // no text: no crash
         host.cityExists = false;
+        // Release never deletes these fakes; RemoveGUI dropped the view's references (checked above).
+        CHECK(panelProc->refs == 0);
+        delete tickerProc; delete mysimProc; delete budgetProc; delete graphsProc; delete buildingProc;
+        delete panelProc; delete queue;
     }
 
     // ------------------------------------------------------------------ AddGUI: the game's 42 windows
@@ -2866,7 +2875,14 @@ int main() {
     CHECK(orphan->Shutdown());
     delete orphan;
 
-    host.cursorWindow.window_->AddRef();      // the host outlives its manager at exit: keep the window alive
+    // The view dropped its references in Shutdown (RemoveGUI); Release never deletes these fakes.
+    CHECK(host.panelProc->refs == 0 && host.newsProc->refs == 0 && host.mySimProc->refs == 0 && host.budgetProc->refs == 0);
+    CHECK(host.graphsProc->refs == 0 && host.buildingProc->refs == 0 && host.advisorQueue->refs == 0);
+    for (FakeBuffer* b : host.createdBuffers) { CHECK(b->refs == 0); delete b; }
+    delete host.panelProc; delete host.newsProc; delete host.mySimProc; delete host.budgetProc;
+    delete host.graphsProc; delete host.buildingProc; delete host.advisorQueue;
+    host.cursorWindow.window_->Release();      // the manager is still alive here
+    host.cursorWindow.window_ = nullptr;
     std::printf(failures ? "FAILED\n" : "sc4_view3dwin ok\n");
     return failures ? 1 : 0;
 }

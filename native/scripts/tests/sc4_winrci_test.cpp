@@ -164,7 +164,8 @@ int main() {
     {
         const float ratio = 450.0f / 1500.0f + std::log(450.0f) / std::log(1500.0f);
         const int middle = 50;
-        const std::string expect = "fill " + std::to_string(Edge(ratio, middle, true, false)) + ",0," + std::to_string(middle + 1) + ",20";
+        // the port orders the corners (the original fills right-to-left and relies on the window clip)
+        const std::string expect = "fill " + std::to_string(middle + 1) + ",0," + std::to_string(Edge(ratio, middle, true, false)) + ",20";
         CHECK(ctx.log.size() == 2 && ctx.log[0] == "color 65280");
         CHECK(ctx.log.size() == 2 && ctx.log[1] == expect);
         if (ctx.log.size() == 2 && ctx.log[1] != expect) std::printf("  got %s want %s\n", ctx.log[1].c_str(), expect.c_str());

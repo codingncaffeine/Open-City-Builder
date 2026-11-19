@@ -446,7 +446,7 @@ struct AdvisorState {
     std::vector<int> simulatePeriods;
     std::vector<int> pushedEvents;
     int shutdownCalls = 0;
-    int adviceGuid = 0;
+    int adviceGuid = 0, adviceSession = 0;
     std::shared_ptr<AdviceState> advice = std::make_shared<AdviceState>();
     std::uint32_t refs = 0;
 };
@@ -484,7 +484,8 @@ struct FakeAdvisor final : cISC4Advisor {
     cISC4Advice* GetAdviceByGUID(int guid) const override {
         return guid == state->adviceGuid ? advice : nullptr;
     }
-    cISC4Advice* GetAdviceBySessionID(int) const override { return nullptr; }
+    // an advice link names the advice by its session id (the original's DoLink calls vslot 0x34, i386 0x001e54xx)
+    cISC4Advice* GetAdviceBySessionID(int id) const override { return id == state->adviceSession ? advice : nullptr; }
     bool Simulate(int period) override { state->simulatePeriods.push_back(period); return true; }
     int GetHeadAnimCount(bool) override { return 0; }
     bool SetHeadAnim(bool, int) override { return false; }
@@ -509,9 +510,11 @@ struct WinProcState {
 struct FakeWinProc final : IAdvisorWinProc {
     explicit FakeWinProc(std::shared_ptr<WinProcState> s) : state(std::move(s)) {}
     std::shared_ptr<WinProcState> state;
-    void AddRef() override { ++state->refs; }
+    std::uint32_t own = 0;   // per instance: the shared state spans every window the host creates
+    void AddRef() override { ++own; ++state->refs; }
     void Release() override {
-        if (state->refs > 1) { --state->refs; return; }
+        if (state->refs) --state->refs;
+        if (own > 1) { --own; return; }
         delete this;
     }
     void Init() override { ++state->initCalls; }
@@ -877,11 +880,12 @@ int main() {
     CHECK(!system->DoLink(cRZString("00000001")));   // sscanf reads only one value
     // an advice link: type 30 (the advisor) + guid + body, the body after the 16 hex characters
     auto* linkAdvisor = system->GetAdvisor(10);
-    static_cast<FakeAdvisor*>(linkAdvisor)->state->adviceGuid = 0x1234;
+    static_cast<FakeAdvisor*>(linkAdvisor)->state->adviceSession = 0x1234;
     lua->doBuffers.clear();
     CHECK(system->DoLink(cRZString("0000000a00001234some body")));
     CHECK(static_cast<FakeAdvisor*>(linkAdvisor)->state->advice->links.size() == 1);
-    CHECK(static_cast<FakeAdvisor*>(linkAdvisor)->state->advice->links.back() == "some body");
+    CHECK(!static_cast<FakeAdvisor*>(linkAdvisor)->state->advice->links.empty() &&
+          static_cast<FakeAdvisor*>(linkAdvisor)->state->advice->links.back() == "some body");
     CHECK(lua->doBuffers.empty());
     // an unknown type falls back to the Lua chunk after the first eight characters
     CHECK(system->DoLink(cRZString("0000009900000000chunk")));

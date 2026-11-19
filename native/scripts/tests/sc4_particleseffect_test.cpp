@@ -255,7 +255,7 @@ struct Fixture {
 
 // ---- tests -----------------------------------------------------------------------------------------
 void TestLayoutAndConstruction() {
-    CHECK_EQ(sizeof(cSC4ParticlesDescription), static_cast<std::size_t>(0x278));
+    CHECK_EQ(sizeof(cSC4ParticlesDescription), static_cast<std::size_t>(0x2c0));
     CHECK_EQ(sizeof(cSC4EffectsParticle), static_cast<std::size_t>(0x44));
     CHECK_EQ(sizeof(sc4::cSC4ParticlesEffect), static_cast<std::size_t>(0x280));
     sc4::cSC4ParticlesEffect effect;
@@ -316,7 +316,7 @@ void TestInitAndShutdown() {
 void TestStartDelaysAndWalk() {
     Hosts hosts;
     cSC4ParticlesDescription description = MakeDescription();
-    description.flags = 0x8000ull | 0x1000000ull | 8ull;   // random walk, direction from the description, start transition
+    description.flags = 0x800000ull | 0x1000000ull | 8ull;   // random walk (bit 23: i386 Start tests bit 0x17), direction from the description, start transition
     description.velocityMin[0] = description.velocityMax[0] = 3.0f;
     description.velocityMin[1] = description.velocityMax[1] = 4.0f;
     description.velocityMin[2] = description.velocityMax[2] = 5.0f;
@@ -382,7 +382,7 @@ void TestStartDelaysAndWalk() {
 void TestRandomWalkDeterminism() {
     Hosts hosts;
     cSC4ParticlesDescription description = MakeDescription();
-    description.flags = 0x8000ull;
+    description.flags = 0x800000ull;   // random walk (bit 23)
     description.walkIntervalMin = description.walkIntervalMax = 1.0f;
     description.walkSpeedMin = description.walkSpeedMax = 1.0f;
     description.walkAngle = 0.0f;
@@ -478,6 +478,9 @@ void TestActiveParticlesBox() {
     CHECK_NEAR(box.min[0], -12.0, 0);
     CHECK_NEAR(box.max[0], 12.0, 0);
     effect.Shutdown();
+    // AddParticle only links them: the effect does not free particles on Shutdown.
+    effect.DestroyParticle(reinterpret_cast<cSCParticle*>(particle));
+    effect.DestroyParticle(reinterpret_cast<cSCParticle*>(other));
 }
 
 void TestEmissionModes() {
@@ -694,10 +697,12 @@ void TestTransforms() {
     CHECK((effect.SourceTransform().flags & 1) != 0);
     CHECK_NEAR(effect.SourceTransform().scale, 2.0, 0);
     const cS3DBoundingBox box = effect.BoundingBox();
-    CHECK_NEAR(box.min[0], 20.0, 1e-6);   // translation * scale
-    CHECK_NEAR(box.min[1], 40.0, 1e-6);
-    CHECK_NEAR(box.min[2], 60.0, 1e-6);
-    CHECK_NEAR(box.max[0], 20.0, 1e-6);
+    // the effect's origin through the source transform, (R p) * scale + t (cS3DTransform::TransformPoint, i386 0x0065fdcc):
+    // the effect translation is 0, so the box sits on the source translation
+    CHECK_NEAR(box.min[0], 10.0, 1e-6);
+    CHECK_NEAR(box.min[1], 20.0, 1e-6);
+    CHECK_NEAR(box.min[2], 30.0, 1e-6);
+    CHECK_NEAR(box.max[0], 10.0, 1e-6);
     // The aligned mode (description flag 0x1000) drops both translations and centres on the emission box.
     description.flags |= 0x1000;
     effect.SetTransforms(effectTransform, source);
@@ -824,10 +829,11 @@ void TestExtraPhysics() {
     CHECK_EQ(particle->alive, 1);
     CHECK_NEAR(particle->velocity.x, 0.0, 1e-7);   // position_ is (0,0,0)
     CHECK_NEAR(particle->position.x, 3.0, 1e-7);
-    // The building test is dispatched from the extra-physics step (description bit 32).
+    // The building test is dispatched from the extra-physics step (the description's flag byte +8, bit 0).
     particle->alive = 1;
     hosts.occupants.blocked = true;
-    description.flags = 0x100000800ull;
+    description.flags = 0x800ull;
+    description.flags8 = 1;
     CHECK(!effect.UpdateParticlePhysics(particle, 0.1f));   // the collision kills it, so the step reports false
     CHECK_EQ(hosts.occupants.boxCalls, 1);
     CHECK_EQ(particle->alive, 0);
@@ -910,6 +916,7 @@ void TestTerrainForcesAndCollision() {
     effect.TestBuildingCollision(particle);
     CHECK_EQ(particle->alive, 1);
     effect.Shutdown();
+    effect.DestroyParticle(reinterpret_cast<cSCParticle*>(particle));   // never added to the effect
 }
 
 void TestUpdateDraws() {

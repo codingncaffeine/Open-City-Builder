@@ -364,6 +364,9 @@ struct FakePathFinder final : cISC4PathFinder {
     float GetTripLengthScaledForDisplay() override { return 0.0f; }
     void GetEndCell(int& x, int& z) const override { x = endCellX; z = endCellZ; }
     std::uint8_t GetLastTravelType() const override { return 0; }
+    int FindPath() override { return 0; }
+    bool WasTripReversible() override { return false; }
+    void GetCompressedRoute(std::vector<std::uint8_t>&, std::uint32_t&) override {}
 };
 
 struct FakeHost final : IMySimDispatchHost {
