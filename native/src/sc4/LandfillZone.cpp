@@ -183,6 +183,7 @@ void cSC4LandfillZone::BuildHeaps() {
 
 cSC4LandfillZone::~cSC4LandfillZone() {
     if (zot_) zot_->Release();
+    delete region_;   // a zone read but never initialised still owns its region (Shutdown frees it only once initialised)
 }
 
 std::uint32_t cSC4LandfillZone::AddRef() { return ++refCount_; }

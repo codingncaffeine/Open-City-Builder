@@ -617,7 +617,7 @@ bool cSC4LandfillDeveloper::Write(cIGZOStream& stream) const {
 }
 
 // @ 0x100061146: version 3 only. The +0x20 flag is armed before the version check, the list is cleared
-// without releasing its zones (the original leaks them here as well), and a zone whose Read fails is leaked.
+// without releasing its zones (the original leaks them here as well); a zone whose Read fails is released.
 bool cSC4LandfillDeveloper::Read(cIGZIStream& stream) {
     pendingZoneInit_ = true;
     std::uint16_t version = 0;
@@ -630,6 +630,7 @@ bool cSC4LandfillDeveloper::Read(cIGZIStream& stream) {
         auto* zone = new cSC4LandfillZone(ZoneHostOrNull());
         zone->AddRef();
         if (zone->Read(stream)) zones_.push_front(zone);
+        else zone->Release();   // (the original leaks a zone it could not read)
     }
     return true;
 }
