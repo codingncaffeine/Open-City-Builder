@@ -24,6 +24,7 @@
 #include "app/NativeGrowthDevelopers.h"
 #include "app/NativeUi.h"
 #include "gz/cGZPersistResourceManager.h"
+#include "sc4/SubBudgetWindow.h"
 #include "sc4/AuraSimulator.h"
 #include "sc4/Exemplar.h"
 #include "sc4/Budget.h"
@@ -793,6 +794,87 @@ void NativeQueryReport(std::uint32_t skipUi, int limit) {
 void InstallQueryHost() {
     static Host host;
     sc4::SetQueryHost(&host);
+}
+
+
+// The single-building budget dialog's service queries (budget-window-bodies.md section 5.3), through the query tool's own
+// simulator adapters: hospital / school query data and capacity, police / fire efficiency and station funding, power output,
+// funding and cost.
+bool NativeBuildingService(sc4::cISCPropertyHolder* holder, std::uint32_t kind, sc4::ISubBudgetWindowHost::BuildingService& out) {
+    out = sc4::ISubBudgetWindowHost::BuildingService{};
+    void* raw = nullptr;
+    if (!holder || !holder->QueryInterface(sc4::kGZIID_cISC4Occupant, &raw) || !raw) return false;
+    auto* occupant = static_cast<sc4::cISC4Occupant*>(raw);
+    switch (kind) {
+        case 0xca565486: case 0xea5654b6: {   // hospital / school
+            QueryEducationRecord record;
+            out.residential = kind == 0xea5654b6 ? g_residential.GetSchoolQueryData(occupant, record) : g_residential.GetHospitalQueryData(occupant, record);
+            if (out.residential) {
+                std::uint32_t capacity = 0, other = 0;
+                g_residential.EstimateCurrentOccupantCapacity(occupant, capacity, other);
+                out.served = static_cast<int>(record.count);
+                out.capacity = static_cast<int>(capacity);
+                out.staffFraction = record.staffFunding;
+                out.staffCost = static_cast<std::uint32_t>(record.staffCost);
+                out.vehicleFraction = record.secondFunding;
+                out.vehicleCost = static_cast<std::uint32_t>(record.secondCost);
+            }
+            break;
+        }
+        case 0x0a567baa: case 0xea567bc3: {   // police / fire: the efficiency, then the cost and funding (its result unused)
+            const bool police = kind == 0x0a567baa;
+            out.station = true;
+            out.efficiency = police ? g_police.StationEffectiveness(occupant) : g_fire.StationEffectiveness(occupant);
+            int cost = 0;
+            float funding = 0.0f;
+            if (police) g_police.StationFunding(occupant, &cost, &funding);
+            else g_fire.StationFunding(occupant, &cost, &funding);
+            out.baseCost = cost;
+            out.funding = funding;
+            break;
+        }
+        case 0xca58e540: {   // power: output (used / capacity), funding, then cost
+            std::uint32_t capacity = 0, used = 0;
+            g_power.GetOccupantPowerProduced(occupant, capacity, used);
+            out.denominator = static_cast<int>(capacity);
+            out.numerator = static_cast<int>(used);
+            out.powerFunding = g_power.GetPowerPlantFundingPercentage(occupant, out.funding);
+            if (out.powerFunding) out.powerCost = g_power.GetMonthlyPowerGenerationCost(occupant, out.powerBaseCost);
+            break;
+        }
+        default: break;
+    }
+    occupant->Release();
+    return true;
+}
+
+// SetOccupantFundingLevel's calls: power / police / fire set their only funding; a hospital or school keeps the other half of
+// its query data and sets the pair.
+bool NativeSetBuildingFunding(sc4::cISCPropertyHolder* holder, std::uint32_t kind, bool secondary, float fraction) {
+    void* raw = nullptr;
+    if (!holder || !holder->QueryInterface(sc4::kGZIID_cISC4Occupant, &raw) || !raw) return false;
+    auto* occupant = static_cast<sc4::cISC4Occupant*>(raw);
+    bool done = false;
+    switch (kind) {
+        case 0xca58e540: if (!secondary) { g_power.SetPowerPlantFundingPercentage(occupant, fraction); done = true; } break;
+        case 0x0a567baa: if (!secondary) { g_police.SetStationFunding(occupant, fraction); done = true; } break;
+        case 0xea567bc3: if (!secondary) { g_fire.SetStationFunding(occupant, fraction); done = true; } break;
+        case 0xca565486: case 0xea5654b6: {
+            const bool school = kind == 0xea5654b6;
+            QueryEducationRecord record;
+            if (school ? g_residential.GetSchoolQueryData(occupant, record) : g_residential.GetHospitalQueryData(occupant, record)) {
+                float staff = record.staffFunding, second = record.secondFunding;
+                if (secondary) second = fraction;
+                else staff = fraction;
+                g_residential.SetOccupantFundingPercentages(occupant, staff, second, school);
+                done = true;
+            }
+            break;
+        }
+        default: break;
+    }
+    occupant->Release();
+    return done;
 }
 
 }  // namespace native

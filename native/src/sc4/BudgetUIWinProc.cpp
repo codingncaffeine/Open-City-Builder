@@ -1116,7 +1116,7 @@ void cSC4BudgetUIWinProc::DoSubBudgetWindow(std::uint32_t purpose) {
     sub->AddRef();   // the member (+0x30) holds a reference
     subBudget_ = sub;
     cIGZWin* dialog = nullptr;
-    if (sub->Create(&dialog, purpose, static_cast<std::uint32_t>(period_), nullptr) && dialog) {
+    if (sub->Create(&dialog, purpose, static_cast<std::uint32_t>(period_), 0) && dialog) {
         dialog->ShowWindow();
         dialog->SetFlag(0x800, true);
         dialog->PullToFront();

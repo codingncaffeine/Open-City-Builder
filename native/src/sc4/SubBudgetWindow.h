@@ -69,6 +69,36 @@ public:
     virtual gz::cIGZWinCombo* CreateComboBox() { return nullptr; }
     // SL::spRM GetResource({0x6534284a, group, instance}, 0xa52160f5): the exemplar's properties (borrowed), or null.
     virtual cISCPropertyHolder* Exemplar(std::uint32_t group, std::uint32_t instance) { (void)group; (void)instance; return nullptr; }
+
+    // ---- the single-building dialog (budget-window-bodies.md section 5)
+    // The department's buildings of one service kind (department slot 0x80), in its order, one reference each.
+    virtual void LocallyFundedBuildings(std::uint32_t department, std::uint32_t kind, std::vector<cISCPropertyHolder*>& out) {
+        (void)department; (void)kind; out.clear();
+    }
+    virtual float DepartmentMaxFunding(std::uint32_t department) { (void)department; return 1.0f; }   // department slot 0x30
+    // The raw service queries of one building (section 5.3): which ones answered, and what.
+    struct BuildingService {
+        bool residential = false;   // hospital / school: the residential simulator's query (slot 27 / 26)
+        int served = 0, capacity = 0;
+        float staffFraction = 0, vehicleFraction = 0;
+        std::uint32_t staffCost = 0, vehicleCost = 0;
+        bool station = false;       // police / fire: the efficiency, then the station's cost and funding
+        float efficiency = 0, funding = 0;
+        std::int32_t baseCost = 0;
+        int numerator = 0, denominator = 0;   // power: the plant's output; then its funding, then its cost
+        bool powerFunding = false, powerCost = false;
+        std::int64_t powerBaseCost = 0;
+    };
+    virtual bool QueryBuildingService(cISCPropertyHolder* holder, std::uint32_t kind, BuildingService& out) {
+        (void)holder; (void)kind; (void)out; return false;
+    }
+    virtual bool BuildingName(cISCPropertyHolder* holder, cRZString& out) { (void)holder; (void)out; return false; }   // QI 0x87dda3a9, slot 19
+    virtual bool HasBudgetItem(cISCPropertyHolder* holder, std::uint32_t purpose) { (void)holder; (void)purpose; return false; }   // budget slot 51
+    // SetOccupantFundingLevel's simulator calls: the building's (secondary) funding of the kind, as a fraction.
+    virtual bool SetBuildingFunding(cISCPropertyHolder* holder, std::uint32_t kind, bool secondary, float fraction) {
+        (void)holder; (void)kind; (void)secondary; (void)fraction; return false;
+    }
+    virtual void MoneyString(std::int64_t amount, cRZString& out) { (void)amount; out = cRZString(); }   // SC4MakeMoneyString
 };
 ISubBudgetWindowHost* SubBudgetWindowHost();
 void SetSubBudgetWindowHost(ISubBudgetWindowHost* host);
@@ -83,7 +113,7 @@ public:
     std::uint32_t Release() override;                                   // 0x00261c60
 
     // ISubBudgetWindow
-    bool Create(cIGZWin** window, std::uint32_t purpose, std::uint32_t period, cIGZWin* parent) override;   // CreateSubBudgetWindow 0x00265358
+    bool Create(cIGZWin** window, std::uint32_t purpose, std::uint32_t period, std::uint32_t department) override;   // CreateSubBudgetWindow 0x00265358
     void Destroy() override;                                            // DestroySubBudgetWindow 0x0026961a
 
     // cIGZWinProc
@@ -137,13 +167,24 @@ private:
     void RestoreDeals();                                                // 0x0026a0da
     void ReleaseDeals();                                                // DestroySubBudgetWindow's deal part 0x0026961a
     void Departments(std::vector<cSC4DepartmentBudget*>& out);          // the purpose's group (GetAllGroups + GetDepartmentBudgetsInGroup)
+    // ---- the single-building dialog (+0x24 a department id; budget-window-bodies.md section 5)
+    void InitIndividualBudget(cIGZWin* window);                         // initIndividualBudget 0x002666ba
+    void UpdateIndividualBudget(cIGZWin* window, bool rebuild);         // updateIndividualBudget 0x002646a2
+    void SetupWindowIndiv(cIGZWin* window, std::uint32_t rows);         // 0x00265c58
+    bool SetOccupantFundingLevel(cISCPropertyHolder* holder, bool secondary, float percent);   // 0x0026364e
+    void ReleaseIndividualRestore();
+    void DoIndividualBudgetWindow(std::uint32_t department);           // 0x00269f00: the nested modal dialog
+    void AddFixedText(cIGZWin* parent, std::uint32_t id, int x, int y, int width, const cIGZString& text, int align,
+                      std::uint32_t font, std::uint8_t r, std::uint8_t g, std::uint8_t b);   // add_fixed_text 0x00261d18
+    void AddTextButton(cIGZWin* parent, std::uint32_t id, int x, int y, int width, const cIGZString& text, int capStyle,
+                       std::uint32_t font, std::uint8_t r, std::uint8_t g, std::uint8_t b);  // add_text_button 0x00261990
 
     std::uint32_t refs_ = 0;
     bool initialized_ = false;                   // +0x08
     cIGZWin* dialog_ = nullptr;                  // +0x0c (the dialog window, one reference)
     cIGZWin* body_ = nullptr;                    // +0x10 (the inner window gen that holds the rows, one reference)
     std::uint32_t purpose_ = 0;                  // +0x20 (the budget group)
-    cIGZWin* individual_ = nullptr;              // +0x24 (non-null: one building's dialog)
+    std::uint32_t individual_ = 0;               // +0x24 the department id (non-zero: the single-building dialog)
     std::uint32_t period_ = 0;                   // +0x28 (0 monthly, else yearly)
     std::vector<SliderInfo> sliders_;            // +0x2c
     std::vector<BudgetRestoreInfo> restore_;     // +0x38
@@ -158,6 +199,17 @@ private:
     std::uint32_t incomeRows_ = 0, expenseRows_ = 0;       // +0xf4 / +0xf8
     bool updating_ = false;                      // +0xfc
     std::uint32_t result_ = 0;                   // the end_dialog code
+    // the single-building dialog
+    struct IndividualRestore { cISCPropertyHolder* holder = nullptr; float primary = 0.0f, secondary = 0.0f; };   // 12 bytes
+    std::vector<IndividualRestore> individualRestore_;   // +0x44 (one reference per holder)
+    cSC4SubBudgetWindow* child_ = nullptr;      // +0x1c the single-building dialog while it runs
+    std::uint32_t kind_ = 0, secondKind_ = 0;    // +0x108 / +0x10c the service kind and its second budget item
+    std::uint32_t buildingCount_ = 0;            // +0xf8 (setup's count; expenseRows_ in the department path)
+    std::uint32_t listCount_ = 0;                // +0x128 (the last refresh's count)
+    std::uint32_t rowOffset_ = 0;                // +0x120 (the first row shown)
+    cRZString individualTitle_, secondColumn_;   // the dialog's title, the second slider column's header (+0xd4)
+    std::vector<std::pair<std::uint32_t, cISCPropertyHolder*>> rowHolders_;   // port: the sliders' and names' building
+                                                                             // (the original keeps it as window property 0x4bfee088)
     std::uint32_t expenseTotalText_ = 0;         // port: the expense total's money text
     struct ItemRow { std::uint32_t moneyText = 0; cSC4DepartmentBudget* department = nullptr; std::uint32_t item = 0; };
     std::vector<ItemRow> itemRows_;              // port: the expense item rows UpdateValues re-captions

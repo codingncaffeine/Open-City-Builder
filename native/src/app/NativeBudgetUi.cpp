@@ -10,6 +10,7 @@
 #include "app/NativeUi.h"
 #include "app/NativeZoneTool.h"
 #include "gz/WinInterfaces.h"
+#include "sc4/BuildingOccupant.h"
 #include "sc4/App.h"
 #include "sc4/BudgetSimulator.h"
 #include "sc4/BudgetUIWinProc.h"
@@ -33,6 +34,11 @@
 #include "sc4/Simulator.h"
 #include "sc4/View3DWin.h"
 #include "sc4/cSC4City.h"
+
+namespace native {
+bool NativeBuildingService(sc4::cISCPropertyHolder* holder, std::uint32_t kind, sc4::ISubBudgetWindowHost::BuildingService& out);   // NativeQuery.cpp
+bool NativeSetBuildingFunding(sc4::cISCPropertyHolder* holder, std::uint32_t kind, bool secondary, float fraction);                  // NativeQuery.cpp
+}  // namespace native
 
 namespace native {
 namespace {
@@ -280,6 +286,41 @@ public:
         }
         return it->second ? it->second->AsISCPropertyHolder() : nullptr;
     }
+
+    // ---- the single-building dialog
+    sc4::cSC4BudgetSimulator* Budget() { return Component<sc4::cSC4BudgetSimulator>(sc4::CityComponent::BudgetSimulator, sc4::kGZCLSID_cSC4BudgetSimulator); }
+    void LocallyFundedBuildings(std::uint32_t department, std::uint32_t kind, std::vector<sc4::cISCPropertyHolder*>& out) override {
+        out.clear();
+        sc4::cSC4BudgetSimulator* budget = Budget();
+        sc4::cSC4DepartmentBudget* found = budget ? budget->GetDepartmentBudget(department) : nullptr;   // budget slot 28 (borrowed)
+        if (!found) return;
+        found->GetLocallyFundedItemsByPurpose(kind, out);   // department slot 32: one reference each
+    }
+    float DepartmentMaxFunding(std::uint32_t department) override {
+        sc4::cSC4BudgetSimulator* budget = Budget();
+        sc4::cSC4DepartmentBudget* found = budget ? budget->GetDepartmentBudget(department) : nullptr;
+        return found ? found->GetMaxAllowedFundingPercentage() : 1.0f;
+    }
+    bool QueryBuildingService(sc4::cISCPropertyHolder* holder, std::uint32_t kind, BuildingService& out) override {
+        return NativeBuildingService(holder, kind, out);
+    }
+    bool BuildingName(sc4::cISCPropertyHolder* holder, cRZString& out) override {
+        void* raw = nullptr;
+        if (!holder || !holder->QueryInterface(sc4::kGZIID_cISC4BuildingOccupant, &raw) || !raw) return false;
+        auto* building = static_cast<sc4::cISC4BuildingOccupant*>(raw);
+        out = building->GetBuildingName();
+        building->Release();
+        return out.Strlen() != 0;
+    }
+    bool HasBudgetItem(sc4::cISCPropertyHolder* holder, std::uint32_t purpose) override {
+        sc4::cSC4BudgetSimulator* budget = Budget();
+        sc4::BudgetItem item;
+        return budget && holder && budget->GetBudgetItemForPurpose(holder, purpose, item);   // budget slot 51
+    }
+    bool SetBuildingFunding(sc4::cISCPropertyHolder* holder, std::uint32_t kind, bool secondary, float fraction) override {
+        return NativeSetBuildingFunding(holder, kind, secondary, fraction);
+    }
+    void MoneyString(std::int64_t amount, cRZString& out) override { sc4::SC4MakeMoneyString(amount, out); }
 
 private:
     std::map<std::uint32_t, cIGZBuffer*> images_;

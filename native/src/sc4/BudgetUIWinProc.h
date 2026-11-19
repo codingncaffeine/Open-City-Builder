@@ -219,7 +219,8 @@ constexpr std::uint32_t kBudgetUIReturnKey = 0xd;
 // calls DestroySubBudgetWindow @ 0x100333a1a.
 class ISubBudgetWindow : public cIGZUnknown {
 public:
-    virtual bool Create(cIGZWin** window, std::uint32_t purpose, std::uint32_t period, cIGZWin* parent) = 0;
+    // `department`: 0 for a group's dialog, else the department whose buildings the single-building dialog lists (+0x24).
+    virtual bool Create(cIGZWin** window, std::uint32_t purpose, std::uint32_t period, std::uint32_t department) = 0;
     virtual void Destroy() = 0;
 };
 

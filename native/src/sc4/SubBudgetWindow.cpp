@@ -98,7 +98,7 @@ std::uint32_t cSC4SubBudgetWindow::Release() {
 }
 
 // CreateSubBudgetWindow (i386 0x00265358): a dialog window gen with this as its proc.
-bool cSC4SubBudgetWindow::Create(cIGZWin** window, std::uint32_t purpose, std::uint32_t period, cIGZWin* parent) {
+bool cSC4SubBudgetWindow::Create(cIGZWin** window, std::uint32_t purpose, std::uint32_t period, std::uint32_t department) {
     if (window) *window = nullptr;
     gz::cIGZWinGen* gen = g_host ? g_host->CreateWinGen() : nullptr;
     if (!gen) return false;
@@ -123,7 +123,7 @@ bool cSC4SubBudgetWindow::Create(cIGZWin** window, std::uint32_t purpose, std::u
     win->SetFlag(0x800, false);
     win->SetID(kDialogId);
     purpose_ = purpose;
-    individual_ = parent;
+    individual_ = department;
     period_ = period;
     if (Trace()) std::fprintf(stderr, "sub budget: created for purpose 0x%08x period %u\n", purpose, period);
     gen->Release();
@@ -160,7 +160,17 @@ bool cSC4SubBudgetWindow::DoWinMsg(cIGZWin* window, std::uint32_t type, std::uin
             auto* slider = static_cast<gz::cIGZWinSlider*>(raw);
             if (!reentered) {
                 reentered = true;
-                if (!individual_) {
+                if (individual_) {
+                    // a building's slider (primary 0xabce400 + row, its second item + 0x100): its building's funding
+                    for (const auto& row : rowHolders_) {
+                        if (row.first != p2 || !row.second) continue;
+                        const bool second = p2 >= 0x0abce500u;
+                        SetOccupantFundingLevel(row.second, second, static_cast<float>(slider->GetValue()));
+                        if (Trace()) std::fprintf(stderr, "sub budget: building slider %08x -> %d%%\n", static_cast<std::uint32_t>(p2), slider->GetValue());
+                        break;
+                    }
+                    UpdateIndividualBudget(window, false);
+                } else {
                     for (const SliderInfo& info : sliders_) {
                         if (info.id == p2 && info.department) {
                             info.department->SetFundingPercentage(static_cast<float>(slider->GetValue()) * kFraction, 0);
@@ -203,6 +213,8 @@ bool cSC4SubBudgetWindow::OnShutdown() {
     for (BudgetRestoreInfo& info : restore_)
         if (info.department) info.department->Release();
     restore_.clear();
+    ReleaseIndividualRestore();
+    rowHolders_.clear();
     AddRef();   // the original holds itself across the releases below
     if (dialog_) { dialog_->Release(); dialog_ = nullptr; }
     if (body_) { body_->Release(); body_ = nullptr; }
@@ -234,6 +246,15 @@ bool cSC4SubBudgetWindow::OnButtonActivated(cIGZWin* window, std::uint32_t id) {
             static_cast<gz::cIGZWinBtn*>(raw)->Release();
         }
         UpdateOrdinanceBudget(window);
+        return false;
+    }
+    if (id - 0x0abce600u < 0x100 && !individual_) {   // a department row's button: its buildings, one by one
+        for (const SliderInfo& info : sliders_) {
+            if (info.departmentRow && info.id == id - 0x700 && info.department) {   // the row's slider is 0xabcdf00 + n
+                DoIndividualBudgetWindow(info.department->GetDepartmentID());
+                return true;
+            }
+        }
         return false;
     }
     if (id == kButtonCancel) {
@@ -274,7 +295,13 @@ bool cSC4SubBudgetWindow::OnButtonActivated(cIGZWin* window, std::uint32_t id) {
 // RestoreStartSettings (i386 0x002638fc): every department back to the funding the dialog opened with.
 void cSC4SubBudgetWindow::RestoreStartSettings() {
     if (Trace()) std::fprintf(stderr, "sub budget: restore start settings\n");
-    if (individual_) return;   // PARTIAL: the per-building restore
+    if (individual_) {   // every building back to the two fundings the dialog saw last (the +0x44 records)
+        for (const IndividualRestore& record : individualRestore_) {
+            SetOccupantFundingLevel(record.holder, false, record.primary);
+            SetOccupantFundingLevel(record.holder, true, record.secondary);
+        }
+        return;
+    }
     for (BudgetRestoreInfo& info : restore_)
         if (info.department) info.department->SetFundingPercentage(info.funding, 0);
 }
@@ -497,11 +524,7 @@ bool cSC4SubBudgetWindow::OnInit(cIGZWin* window) {
         return true;
     }
     if (individual_) {
-        // PARTIAL: the individual building dialog.
-        cIGZBuffer* strip = g_host->UiImage(kSegBody);
-        width_ = strip ? static_cast<int>(strip->Width()) : 0x1c8;
-        height_ = 0x60;
-        SetEmptyWindow(window, cRZString(), cRZString());
+        InitIndividualBudget(window);
     } else {
         std::vector<cSC4DepartmentBudget*> departments;
         Departments(departments);
@@ -1329,6 +1352,334 @@ void cSC4SubBudgetWindow::ReleaseDeals() {
     combos_.clear();
     dealList_.clear();
     dealCities_.clear();
+}
+
+
+// ================================================================== the single-building dialog
+// (+0x24 a department id; budget-window-bodies.md section 5, budget.md section 5.1)
+
+namespace {
+constexpr std::uint32_t kIndivSegTop = 0x2bfeb0cf, kIndivSegHead = 0x2bfeb0cb, kIndivSegBody = 0x2bfeb0cc,
+                        kIndivSegFoot = 0x2bfeb0cd, kIndivSegBottom = 0x2bfeb0ce;
+constexpr std::uint32_t kKindHospital = 0xca565486, kKindSchool = 0xea5654b6, kKindPolice = 0x0a567baa,
+                        kKindFire = 0xea567bc3, kKindPower = 0xca58e540;
+constexpr std::uint32_t kIndivTextFirst = 0x0abcde06, kIndivSliderFirst = 0x0abce400, kIndivSecondOffset = 0x100,
+                        kIndivImageFirst = 0x0abce200;
+constexpr std::uint32_t kIndivRows = 9;
+// binary32 (x87 rounding to nearest) of value * 100.0f, as the saved percentages are stored
+float Percent(float fraction) { return static_cast<float>(static_cast<double>(fraction) * 100.0); }
+// trunc(cost * fraction + 0.5) kept to its low 32 bits (the x87 product, then _ftol2)
+std::int32_t RoundedCost(double cost, float fraction) {
+    return static_cast<std::int32_t>(static_cast<std::int64_t>(cost * static_cast<double>(fraction) + 0.5));
+}
+}  // namespace
+
+void cSC4SubBudgetWindow::ReleaseIndividualRestore() {
+    for (IndividualRestore& record : individualRestore_)
+        if (record.holder) record.holder->Release();
+    individualRestore_.clear();
+}
+
+// SetupWindowIndiv (i386 0x00265c58): top strip, the head + a body strip per two rows + the foot when there are rows,
+// the bottom; the dialog sized to them and centred in its parent.
+void cSC4SubBudgetWindow::SetupWindowIndiv(cIGZWin* window, std::uint32_t rows) {
+    height_ += GetBudgetSegment(kIndivSegTop, 0, height_, body_);
+    if (rows != 0) {
+        height_ += GetBudgetSegment(kIndivSegHead, 0, height_, body_);
+        expenseTop_ = height_;
+        for (std::uint32_t i = 0; i < rows >> 1; ++i) height_ += GetBudgetSegment(kIndivSegBody, 0, height_, body_);
+        height_ += GetBudgetSegment(kIndivSegFoot, 0, height_, body_);
+    }
+    height_ += GetBudgetSegment(kIndivSegBottom, 0, height_, body_);
+    window->SetSize(width_, height_);
+    if (cIGZWin* parent = window->GetParentWin())
+        window->GZWinMoveTo((parent->GetW() - window->GetW()) / 2, (parent->GetH() - window->GetH()) / 2);
+    if (body_) body_->SetSize(width_, height_);
+}
+
+// add_fixed_text (i386 0x00261d18): a label of a fixed width (x .. x + width, one line of the font high).
+void cSC4SubBudgetWindow::AddFixedText(cIGZWin* parent, std::uint32_t id, int x, int y, int width, const cIGZString& text, int align,
+                                       std::uint32_t font, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+    if (!parent || !g_host) return;
+    gz::cIGZWinText* label = g_host->CreateLabel(id, text);
+    if (!label) return;
+    cIGZWin* win = label->AsIGZWin();
+    win->SetID(id);
+    label->SetTextColor(g_host->MakeColor(r, g, b));
+    if (gz::IWinFont* face = g_host->Font(font)) {
+        label->SetFont(face);
+        win->SetArea(x, y, x + width, y + face->LineHeight(0, 0));
+    } else {
+        win->GZWinMoveTo(x, y);
+    }
+    label->SetAlignment(static_cast<std::uint32_t>(align));
+    win->SetFlag(0x800, false);
+    win->SetFlag(0x8000, false);
+    parent->ChildAdd(win);
+    label->Release();
+}
+
+// add_text_button (i386 0x00261990): a flat text button (the building's name) that notifies the dialog.
+void cSC4SubBudgetWindow::AddTextButton(cIGZWin* parent, std::uint32_t id, int x, int y, int width, const cIGZString& text, int capStyle,
+                                        std::uint32_t font, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+    if (!parent || !g_host) return;
+    gz::cIGZWinBtn* button = g_host->CreateButton(static_cast<std::uint32_t>(capStyle), id, text, nullptr);
+    if (!button) return;
+    cIGZWin* win = button->AsIGZWin();
+    win->SetID(id);
+    button->SetFontColor(0, g_host->MakeColor(r, g, b));
+    button->SetFontColor(2, g_host->MakeColor(0, 0, 0));
+    if (gz::IWinFont* face = g_host->Font(font)) {
+        button->SetFontStyle(font);
+        win->SetArea(x, y, x + width, y + face->LineHeight(0, 0));
+    } else {
+        win->GZWinMoveTo(x, y);
+    }
+    win->SetCaption(text);
+    win->SetFlag(0x800, false);
+    win->SetFlag(0x8000, false);
+    win->SetNotificationTarget(dialog_);
+    parent->ChildAdd(win);
+    button->Release();
+}
+
+// SetOccupantFundingLevel (i386 0x0026364e): one building's funding (percent) through its service's simulator; the second
+// item (a hospital's or school's second budget) only for those two.
+bool cSC4SubBudgetWindow::SetOccupantFundingLevel(cISCPropertyHolder* holder, bool secondary, float percent) {
+    if (!holder || !g_host) return false;
+    if (secondary && kind_ != kKindHospital && kind_ != kKindSchool) return false;
+    return g_host->SetBuildingFunding(holder, kind_, secondary, percent * kFraction);
+}
+
+// initIndividualBudget (i386 0x002666ba): the department's service kind and titles, the list's count, the rows (at most 9),
+// the headers, the total, OK / Cancel and the scroll arrows; then the first refresh.
+void cSC4SubBudgetWindow::InitIndividualBudget(cIGZWin* window) {
+    kind_ = secondKind_ = 0;
+    cRZString title, column2;
+    switch (individual_) {
+        case 0x4a538cc6: case 0x09188f4c:
+            kind_ = kKindSchool; secondKind_ = 0x4a5654ba; title = Text(0x6c04a35e); column2 = Text(0x0c04a37a); break;
+        case 0xaa538cb3: case 0x09188f42:
+            kind_ = kKindHospital; secondKind_ = 0xea56549e; title = Text(0x4c04a355); column2 = Text(0x6c04a36e); break;
+        case 0x28f55a9f: kind_ = kKindFire; title = Text(0x4c04a33a); break;
+        case 0x8910bc8a: kind_ = kKindPower; title = Text(0x2c04a366); break;
+        case 0xa2963983: case 0xa2963984: kind_ = kKindPolice; title = Text(0x8c04a34b); break;
+        default: break;
+    }
+    individualTitle_ = title;
+    secondColumn_ = column2;
+    std::vector<cISCPropertyHolder*> buildings;
+    g_host->LocallyFundedBuildings(individual_, kind_, buildings);
+    buildingCount_ = static_cast<std::uint32_t>(buildings.size());
+    for (cISCPropertyHolder* holder : buildings)
+        if (holder) holder->Release();
+    const float maximum = g_host->DepartmentMaxFunding(individual_) * kPercent;
+    float barX = 9000.0f / maximum - 12.0f;
+    if (barX <= 0.0f) barX = 0.0f;
+    const int bar = static_cast<int>(static_cast<std::uint32_t>(barX));
+    if (cIGZBuffer* strip = g_host->UiImage(kIndivSegBody)) {
+        width_ = static_cast<int>(strip->Width());
+        rowStep_ = static_cast<int>(strip->Height()) / 2;
+    }
+    if (buildingCount_ == 0) {
+        SetEmptyWindow(window, title, Text(0x4a5cb4b6));
+        return;
+    }
+    const std::uint32_t rows = std::min(buildingCount_, kIndivRows);
+    SetupWindowIndiv(window, rows);
+    const int headY = expenseTop_ - rowStep_;
+    AddText(body_, 0xabcde00, 0x14, 8, title, 0, 0x4a809916, 'D', 'U', 'f');
+    AddText(body_, 0xabcde01, 0x15, headY, Text(0xac04a30f), 0, kFontHeader, 'D', 'U', 'f');
+    AddFixedText(body_, 0xabcde02, 0x96, headY, 0xbe, Text(0x4c04a321), 6, kFontHeader, 'D', 'U', 'f');
+    AddFixedText(body_, 0xabcde03, 0xff, headY, 0xbe, column2, 6, kFontHeader, 'D', 'U', 'f');
+    AddFixedText(body_, 0xabcde04, 0x15e, headY, 0xdc, Text(0xcc04a330), 6, kFontHeader, 'D', 'U', 'f');
+    AddFixedText(body_, 0xabcde05, 0x1d6, headY, 0x87, expenseHeader_, 6, kFontHeader, 'D', 'U', 'f');   // +0xd4
+    total_ = 0;
+    std::uint32_t text = kIndivTextFirst, image = kIndivImageFirst;
+    int y = expenseTop_;
+    const int maxValue = static_cast<int>(maximum);
+    for (std::uint32_t row = 0; row < rows; ++row) {
+        AddTextButton(window, text, 0x15, y, 0xb1, cRZString(), 1, 0xac0c7170, 0x44, 0x55, 0x66);
+        AddBitmap(kImageFundingBar, bar + 200, y, window, image);
+        AddSlider(window, kIndivSliderFirst + row, 200, y, 0x5a, 1, 0, maxValue, 0);
+        AddBitmap(kImageFundingBar, bar + 0x131, y, window, image + 1);
+        AddSlider(window, kIndivSliderFirst + kIndivSecondOffset + row, 0x131, y, 0x5a, 1, 0, maxValue, 0);
+        AddFixedText(body_, text + 1, 400, y, 0x78, cRZString(), 6, kFontItem, 'D', 'U', 'f');
+        AddFixedText(body_, text + 2, 0x208, y, 0x55, cRZString(), 6, kFontItem, 'D', 'U', 'f');
+        text += 3;
+        image += 2;
+        y += rowStep_;
+    }
+    if ((rows & 1) == 0) y += rowStep_;
+    AddText(body_, text, 0x159, y, totalCaption_, 0, kFontHeader, 'D', 'U', 'f');
+    AddFixedText(body_, text + 1, 0x208, y, 0x55, cRZString(), 6, kFontHeader, 'w', 0, 0);
+    AddImageButton(window, kButtonOk, 0xe, height_ - 0x28, 0x144161eb, true);
+    AddImageButton(window, kButtonCancel, width_ - 0xc3, height_ - 0x28, 0x144161eb, true);
+    for (std::uint32_t id : {kButtonOk, kButtonCancel}) {
+        if (cIGZWin* button = window->GetChildWindowFromIDRecursive(id)) {
+            button->SetSize(0xb4, 0x1e);
+            button->SetNotificationTarget(window);
+            button->SetCaption(id == kButtonOk ? cRZString(cSLString(0x0a554ae8, 0x2a6cd8fd, true))
+                                               : cRZString(cSLString(0x6a231eaa, 0x6a56b0bb, true)));   // window slot 0x128
+        }
+        if (cIGZWin* box = window->GetChildWindowFromIDRecursive(id + 0x100)) box->SetSize(0xb4, 0x1e);
+    }
+    AddImageButton(window, 0x453, width_ - 0x21, expenseTop_ + 4, 0x140155cb, false);
+    AddImageButton(window, 0x454, width_ - 0x21, expenseTop_ + 4 + rowStep_ * 8, 0x140155cc, false);
+    for (std::uint32_t id : {0x453u, 0x454u}) {
+        cIGZWin* arrow = window->GetChildWindowFromIDRecursive(id);
+        if (!arrow) continue;
+        arrow->SetNotificationTarget(window);
+        if (id == 0x453 || buildingCount_ < 10) arrow->SetFlag(1, false);   // up starts hidden; down only with more rows than fit
+    }
+    UpdateIndividualBudget(window, true);
+}
+
+// updateIndividualBudget (i386 0x002646a2): a fresh enumeration; every building contributes to the total and (rebuild) to the
+// cancel snapshot; the rows from +0x120 on (at most min(count, 9)) show its name, service text, cost and sliders.
+void cSC4SubBudgetWindow::UpdateIndividualBudget(cIGZWin* window, bool rebuild) {
+    if (!g_host || !window) return;
+    std::vector<cISCPropertyHolder*> buildings;
+    g_host->LocallyFundedBuildings(individual_, kind_, buildings);
+    listCount_ = static_cast<std::uint32_t>(buildings.size());
+    total_ = 0;
+    const std::uint32_t quota = std::min(listCount_, kIndivRows);
+    if (rebuild) ReleaseIndividualRestore();
+    rowHolders_.clear();
+    cRZString serviceText;   // carried from one building to the next when a branch leaves it alone (the original's quirk)
+    std::uint32_t drawn = 0, text = kIndivTextFirst, image = kIndivImageFirst;
+    for (std::uint32_t ordinal = 0; ordinal < buildings.size(); ++ordinal) {
+        cISCPropertyHolder* holder = buildings[ordinal];
+        std::int32_t amount = 0;
+        float primary = 0.0f, secondary = 0.0f;
+        ISubBudgetWindowHost::BuildingService q;
+        char line[64];
+        if (holder && g_host->QueryBuildingService(holder, kind_, q)) {
+            switch (kind_) {
+                case kKindHospital: case kKindSchool:
+                    if (q.residential) {
+                        std::snprintf(line, sizeof line, "%d/%d", q.served, q.capacity);
+                        serviceText = cRZString(line);
+                        primary = Percent(q.staffFraction);
+                        secondary = Percent(q.vehicleFraction);
+                        amount = static_cast<std::int32_t>(static_cast<std::uint32_t>(RoundedCost(static_cast<double>(q.vehicleCost), q.vehicleFraction)) +
+                                                           static_cast<std::uint32_t>(RoundedCost(static_cast<double>(q.staffCost), q.staffFraction)));
+                    }
+                    break;
+                case kKindPolice: case kKindFire:
+                    std::snprintf(line, sizeof line, "%2.0f%%", static_cast<double>(q.efficiency * 100.0f));
+                    serviceText = cRZString(line);
+                    primary = Percent(q.funding);
+                    amount = RoundedCost(static_cast<double>(q.baseCost), q.funding);
+                    break;
+                case kKindPower:
+                    std::snprintf(line, sizeof line, "%d/%d", q.numerator, q.denominator);
+                    serviceText = cRZString(line);
+                    if (q.powerFunding) {
+                        primary = Percent(q.funding);
+                        if (q.powerCost) amount = RoundedCost(static_cast<double>(q.powerBaseCost), q.funding);
+                    }
+                    break;
+                default: break;
+            }
+        }
+        if (period_ == 1) amount = static_cast<std::int32_t>(static_cast<std::uint32_t>(amount) * 12u);
+        total_ += amount;
+        if (rebuild && holder) {
+            holder->AddRef();
+            individualRestore_.push_back(IndividualRestore{holder, primary, secondary});
+        }
+        if (ordinal < rowOffset_ || drawn >= quota) continue;
+        // the row: name, sliders (the second only when the building has the second budget item), service text, cost
+        cRZString name;
+        if (!holder || !g_host->BuildingName(holder, name)) name = cRZString("Error: No name");
+        const bool second = secondKind_ != 0 && g_host->HasBudgetItem(holder, secondKind_);
+        const std::uint32_t slider = kIndivSliderFirst + drawn, slider2 = slider + kIndivSecondOffset;
+        auto show = [&](std::uint32_t id, bool on) {
+            if (cIGZWin* w = window->GetChildWindowFromIDRecursive(id)) {
+                if (on) w->ShowWindow();
+                else w->HideWindow();
+            }
+        };
+        show(text, true);
+        show(slider, true);
+        show(image, true);
+        show(slider2, second);
+        show(image + 1, second);
+        rowHolders_.push_back({text, holder});
+        rowHolders_.push_back({slider, holder});
+        rowHolders_.push_back({slider2, holder});
+        auto setSlider = [&](std::uint32_t id, float value) {
+            void* raw = nullptr;
+            if (!window->GetChildAsRecursive(id, gz::kGZIID_cIGZWinSlider, &raw) || !raw) return;
+            static_cast<gz::cIGZWinSlider*>(raw)->SetValue(static_cast<int>(value));
+            static_cast<gz::cIGZWinSlider*>(raw)->Release();
+        };
+        setSlider(slider, primary);
+        if (secondKind_ != 0) setSlider(slider2, secondary);
+        auto caption = [&](std::uint32_t id, const cIGZString& value) {
+            void* raw = nullptr;
+            if (window->GetChildAsRecursive(id, gz::kGZIID_cIGZWinText, &raw) && raw) {
+                static_cast<gz::cIGZWinText*>(raw)->SetCaption(value);
+                static_cast<gz::cIGZWinText*>(raw)->Release();
+            } else if (cIGZWin* w = window->GetChildWindowFromIDRecursive(id)) {
+                w->SetCaption(value);   // the name's text button (window slot 0x128)
+            }
+        };
+        caption(text, name);
+        caption(text + 1, serviceText);
+        cRZString money;
+        g_host->MoneyString(static_cast<std::int64_t>(amount), money);
+        caption(text + 2, money);
+        ++drawn;
+        text += 3;
+        image += 2;
+    }
+    // the rows left over hide (their buildings are kept)
+    for (std::uint32_t row = drawn; row < quota; ++row) {
+        for (std::uint32_t id : {text, text + 1, text + 2, kIndivSliderFirst + row, kIndivSliderFirst + kIndivSecondOffset + row, image, image + 1})
+            if (cIGZWin* w = window->GetChildWindowFromIDRecursive(id)) w->HideWindow();
+        text += 3;
+        image += 2;
+    }
+    cRZString money;
+    g_host->MoneyString(total_, money);
+    void* raw = nullptr;
+    if (window->GetChildAsRecursive(text + 1, gz::kGZIID_cIGZWinText, &raw) && raw) {
+        static_cast<gz::cIGZWinText*>(raw)->SetCaption(money);
+        static_cast<gz::cIGZWinText*>(raw)->Release();
+    }
+    for (cISCPropertyHolder* holder : buildings)
+        if (holder) holder->Release();
+}
+
+
+// DoIndividualBudgetWindow (i386 0x00269f00): a second dialog (purpose 0, this period) over the department's buildings, run
+// modally; afterwards it is destroyed.
+void cSC4SubBudgetWindow::DoIndividualBudgetWindow(std::uint32_t department) {
+    if (child_ || !g_host) return;
+    child_ = new cSC4SubBudgetWindow();
+    child_->AddRef();
+    cIGZWin* window = nullptr;
+    if (child_->Create(&window, 0, period_, department) && window) {
+        window->ShowWindow();
+        window->SetFlag(0x800, true);
+        window->PullToFront();
+        window->SetFlag(0x800, false);
+        window->SetFlag(0x100, true);
+        gz::cIGZWinGen* gen = nullptr;
+        if (window->QueryInterface(gz::kGZIID_cIGZWinGen, reinterpret_cast<void**>(&gen)) && gen) {
+            gen->SetWinGenFlag(0x1000, true);
+            gen->SetWinGenFlag(0x2000, true);
+            gen->SetWinGenFlag(0x4000, true);
+            gen->Release();
+        }
+        if (cIGZWinMgr* manager = g_host->WindowManager()) manager->RunPopup(window);
+        window->Release();
+    }
+    child_->Destroy();
+    child_->Release();
+    child_ = nullptr;
 }
 
 }  // namespace sc4

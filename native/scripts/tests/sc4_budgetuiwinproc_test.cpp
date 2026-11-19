@@ -192,7 +192,7 @@ struct FakeSubBudget final : sc4::ISubBudgetWindow {
         }
         return result;
     }
-    bool Create(cIGZWin** window, std::uint32_t purpose, std::uint32_t period, cIGZWin*) override {
+    bool Create(cIGZWin** window, std::uint32_t purpose, std::uint32_t period, std::uint32_t) override {
         ++log_->created;
         log_->purpose = purpose;
         log_->period = period;
