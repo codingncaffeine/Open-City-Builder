@@ -16,6 +16,7 @@
 
 class cSC4App;
 
+class cISCLua;
 namespace native {
 
 struct RegionScreenServices {
@@ -36,6 +37,8 @@ bool DrawRegionLayers();
 // The tutorial registry (SL::spSC4 vslot 0x178), read from tutorial_registry.lua on first use with the app's Lua; the finished
 // tutorials come from the preferences (+0xf34). Null when the script cannot be run.
 sc4::cSC4TutorialRegistry* TutorialRegistry();
+// cSC4TutorialRegistry::SetLua: the registry read again from `lua` (a city's scripts); false when nothing changed.
+bool SetTutorialRegistryLua(cISCLua* lua);
 // cSC4TutorialRegistry::SetActive plus the preferences save the original does after it (spSC4 vslot 0x44).
 void SetTutorialActive(int guid, bool active);
 

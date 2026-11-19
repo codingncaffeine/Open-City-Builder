@@ -1,4 +1,5 @@
 // Installs the generated neutral stub hosts (src/app/hosts, scripts/gen_stub_hosts.py).
+#include "app/NativeTutorial.h"
 #include "app/NativeUnderground.h"
 #include "app/NativeCity.h"
 
@@ -218,6 +219,7 @@ void InstallStubHosts() {
     InstallTractDeveloperStub();
     InstallTutorialSystemStub();
     InstallTutorialTaskStub();
+    InstallTutorialHosts();               // NativeTutorial.cpp: the tutorial system's, its tasks' and its window's real hosts
     InstallUndergroundHosts();   // NativeUnderground.cpp
     InstallVertexHtConstraintStub();
     InstallView3DWinStub();

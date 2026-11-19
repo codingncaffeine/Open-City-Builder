@@ -203,6 +203,7 @@ public:
     cISCLua* Lua() const { return lua_; }
     const std::vector<std::uint32_t>& ButtonGUIDs() const { return buttonGuids_; }
     const std::vector<std::vector<cGridData>>& GridData() const { return grid_; }
+    bool TallerThanWide() const { return tallerThanWide_; }   // +0x164 (i386 +0xd0): a road task wants north-south pieces
 
 private:
     bool GetString(const cRZString& field, cRZString& out);                        // @ 0x10011df28

@@ -564,13 +564,24 @@ static cISCLua* RegistryLua() {
     return lua;
 }
 
+namespace {
+sc4::cSC4TutorialRegistry& RegistryObject() {
+    static auto* registry = new sc4::cSC4TutorialRegistry();   // program lifetime
+    return *registry;
+}
+cISCLua* g_registryLua = nullptr;   // the Lua the registry was last read from (cSC4TutorialRegistry +0x30)
+bool g_registryReady = false;
+}  // namespace
+
 sc4::cSC4TutorialRegistry* TutorialRegistry() {
-    static sc4::cSC4TutorialRegistry registry;
-    static bool tried = false, ready = false;
+    sc4::cSC4TutorialRegistry& registry = RegistryObject();
+    static bool tried = false;
+    bool& ready = g_registryReady;
     if (!tried) {
         cISCLua* lua = RegistryLua();
         if (!lua) return nullptr;   // try again once the app has its Lua
         tried = true;
+        g_registryLua = lua;
         InstallScriptResources();   // the loader reads tutorial_registry.lua from the game's packages
         bool listChanged = false;
         ready = registry.Init(lua, InactiveTutorials(), &listChanged);
@@ -582,6 +593,20 @@ sc4::cSC4TutorialRegistry* TutorialRegistry() {
         }
     }
     return ready ? &registry : nullptr;
+}
+
+// cSC4TutorialRegistry::SetLua (Mac i386 0x00452f2e), reached through cSC4AdvisorSystem::reload_data: a city's scripts have
+// run its tutorials' task tables (set_task_range fills each tutorial's task_first / task_count), so the registry is read
+// again from the city's Lua. Deviation: the original skips a Lua it already holds; the native region screen reads the
+// registry early from the one Lua the app and the city share, before any tutorial script ran, so the city's call re-reads.
+bool SetTutorialRegistryLua(cISCLua* lua) {
+    if (!lua) return false;
+    sc4::cSC4TutorialRegistry& registry = RegistryObject();
+    registry.Shutdown();
+    g_registryLua = lua;
+    g_registryReady = registry.Init(lua, InactiveTutorials(), nullptr);
+    if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "tutorial registry: read again from the city's scripts: %s\n", g_registryReady ? "ok" : "FAILED");
+    return g_registryReady;
 }
 
 void SetTutorialActive(int guid, bool active) {

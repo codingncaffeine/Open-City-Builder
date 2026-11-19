@@ -166,8 +166,8 @@ public:
     bool leftClickAnswer = true;
     int nextTaskNumber = 100;
 
-    void AddRef() override { ++addRefs; }
-    void Release() override { ++releases; }
+    std::uint32_t AddRef() override { return static_cast<std::uint32_t>(++addRefs); }
+    std::uint32_t Release() override { return static_cast<std::uint32_t>(++releases); }
     void Init() override { ++inits; }
     void Shutdown() override { ++shutdowns; }
     void handleButtons(std::uint32_t command) override { buttons.push_back(command); }

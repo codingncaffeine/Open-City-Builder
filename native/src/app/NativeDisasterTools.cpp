@@ -143,6 +143,9 @@ DisasterToolHost g_toolHost;
 
 }  // namespace
 
+// The tool effects manager the disaster tools use, for the tutorial tasks' decals (NativeTutorial.cpp).
+sc4::IToolEffectsManager* NativeToolEffectsManager() { return g_effectHost.EffectsManager(); }
+
 void InstallDisasterTools() {
     sc4::SetEffectToolHost(&g_effectHost);
     sc4::SetDisasterToolHost(&g_toolHost);

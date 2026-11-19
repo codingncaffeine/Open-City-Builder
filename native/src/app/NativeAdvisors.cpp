@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <string>
 
+#include "app/NativeRegionScreen.h"
 #include "app/NativeCity.h"
 #include "app/NativeCityView.h"
 #include "gz/CheatCodeManager.h"
@@ -623,7 +624,7 @@ public:
     bool DebugFunctionalityEnabled() override { return SL::spSC4 && SL::spSC4->GetDebugFunctionalityEnabled(); }
     void GetDataDirectory(cIGZString& out, int language) override { if (SL::spSC4) SL::spSC4->GetDataDirectory(out, language); }
     void GetPluginDirectory(cIGZString& out) override { if (SL::spSC4) SL::spSC4->GetPluginDirectory(out); }
-    void SetTutorialRegistryLua(cISCLua*) override {}   // PARTIAL: cSC4TutorialRegistry is not recovered
+    void SetTutorialRegistryLua(cISCLua* lua) override { native::SetTutorialRegistryLua(lua); }
     bool CreateAdvisor(std::uint32_t classId, std::uint32_t iid, cISC4Advisor** out) override {
         const bool ok = CreateObject(classId, iid, reinterpret_cast<void**>(out));
         if (kTrace) std::fprintf(stderr, "advisors: create advisor class 0x%08x -> %s\n", classId, ok ? "ok" : "FAILED");
@@ -805,6 +806,12 @@ public:
 };
 
 }  // namespace
+
+// The city's scripting server's Lua (cSC4City vslot 0x288 is the advisor system; its slot 0x50), for the tutorial.
+cISCLua* NativeCityScriptingContext() {
+    cSC4AdvisorSystem* system = System();
+    return system ? system->GetScriptingContext() : nullptr;
+}
 
 bool NativeLlamaCheatActive() { return g_llama; }
 

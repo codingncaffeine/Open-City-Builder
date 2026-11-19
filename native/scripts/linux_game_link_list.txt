@@ -859,3 +859,5 @@ src/gz/ScatterGraph.cpp
 src/gz/WinCtrlMgr.cpp
 src/app/NativeWinControls.cpp
 src/gz/WinOptGrp.cpp
+src/sc4/TutorialUIWinProc.cpp
+src/app/NativeTutorial.cpp

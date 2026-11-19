@@ -120,8 +120,8 @@ constexpr int kTutorialGUIDNone = -1;                                      // +0
 class ITutorialUIWinProc {
 public:
     virtual ~ITutorialUIWinProc() = default;
-    virtual void AddRef() = 0;                                                    // vslot 0x08
-    virtual void Release() = 0;                                                   // vslot 0x10
+    virtual std::uint32_t AddRef() = 0;                                           // vslot 0x08 (the one count of every view)
+    virtual std::uint32_t Release() = 0;                                          // vslot 0x10
     virtual void Init() = 0;                                                      // @ 0x1000b6d8c
     virtual void Shutdown() = 0;                                                  // @ 0x1000b7470
     virtual void handleButtons(std::uint32_t command) = 0;                        // vslot 0x48 @ 0x1000bb0a0

@@ -430,6 +430,9 @@ void Host::ReleaseEffect(IDemolitionEffect* effect) { delete static_cast<Effect*
 
 }  // namespace
 
+// The city's demolition utility (initialised), for the tutorial's bulldozing of a misplaced building.
+sc4::cSC4Demolition* NativeDemolitionService() { return Service(); }
+
 IDemolitionHost* NativeDemolitionHost() { return &g_host; }
 cISC4Occupant* DemolitionOccupant(IDemolishable* occupant) { return occupant ? Raw(occupant) : nullptr; }
 cSC4NetworkManager* CityNetworkManager() { return Networks(); }

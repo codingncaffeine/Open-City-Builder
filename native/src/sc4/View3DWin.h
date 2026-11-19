@@ -931,6 +931,7 @@ public:
     void RemoveGUI();                                              // @ 0x100780eaa
     bool SetRenderProperties(const cIGZString& name, const cIGZString& value);   // @ 0x10079064e
     bool ProcessCheatCode(std::uint32_t id, const cRZCmdLine& line);             // @ 0x10078526a
+    cSC4CameraControl* CameraControl() const { return cameraControl_; }       // +0x180
     static void SetRenderPropertiesStatic(const cRZString& name, const cRZString& value, void* context);   // @ 0x100792b3a
     void UpdateZoomButtons();                                      // @ 0x1007872e8
     void UpdateSpeedButtons();                                     // @ 0x100787896

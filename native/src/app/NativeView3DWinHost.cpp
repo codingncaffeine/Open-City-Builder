@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include "sc4/View3DWin.h"
+#include "app/NativeTutorial.h"
 #include "app/NativeCheats.h"
 #include "app/NativeKeyboard.h"
 #include "gz/WinKeyAcceleratorRes.h"
@@ -360,7 +361,8 @@ struct StubView3DWin final : IView3DWinHost {
     bool PopupModalDialogsSafe() override { return ActiveWinMgr() && ActiveWinMgr()->modalDialogs; }
     bool PopupModalDialogsEnabled() override { return ActiveWinMgr() && ActiveWinMgr()->modalDialogs; }
     std::uint32_t SimulationFrameCounter() override { return {}; }
-    bool FilterUiCommandMessage(cGZMessage&) override { return true; }   // no tutorial running: every message is kept
+    bool FilterUiCommandMessage(cGZMessage& message) override { return native::NativeTutorialFilterUiCommand(message); }
+    void TutorialCatalogOpened(cISC4WinCatalogView* catalog) override { native::NativeTutorialCatalogOpened(catalog); }
     bool HandleUrl(cIGZString* link) override { return link && native::NativeHtmlLinkDoURL(*link); }
     // Only the reward cheat so far (it sets the view's +0x456 byte, ProcessCheatCode 0x10078526a); the other cheats are not ported.
     void ProcessCheatCode(std::uint32_t id, const char* cmdLine) override {
@@ -586,7 +588,7 @@ public:
                                  PopupModalDialogsSafe(), PopupModalDialogsEnabled(), AdvisorPopupsPreferenceEnabled());
         return true;
     }
-    bool TutorialRunning() override { return false; }
+    bool TutorialRunning() override { return native::NativeTutorialRunning(); }   // any tutorial suppresses the popups
     bool VehicleManagerPaused() override { return false; }
     bool SimulatorPaused() override {
         auto* simulator = CityComponentAs<cSC4Simulator>(CityComponent::Simulator, kGZCLSID_cSC4Simulator);
