@@ -145,7 +145,12 @@ bool cSC4NetworkLotManager::Init() {
         }
         if (lot->GetConfiguration() != found) lot->SetConfiguration(found);   // AddRef new, release old
     }
-    for (std::uint16_t key : missing) networkLots_.erase(key);
+    for (std::uint16_t key : missing) {   // (the original erases them without the release)
+        auto it = networkLots_.find(key);
+        if (it == networkLots_.end()) continue;
+        it->second->Release();
+        networkLots_.erase(it);
+    }
     return true;
 }
 
