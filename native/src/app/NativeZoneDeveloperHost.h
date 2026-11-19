@@ -7,6 +7,8 @@ namespace sc4 { class cSC4City; class cSC4Lot; class cISC4Occupant; }
 namespace native {
 
 // Installs both on the loaded city and initialises its zone developer; true when it came up.
+// The zone developer's and the lots' services (before the city initializes its components).
+void InstallZoneDeveloperServices();
 bool InstallZoneDeveloperHost(sc4::cSC4City* city);
 
 // The network types (bit n = network type n) of the first network occupant on a city cell; 0 when the cell has none.

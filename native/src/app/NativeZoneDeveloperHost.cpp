@@ -560,6 +560,19 @@ float NativeAreaSlope(const std::int32_t rect[4], bool includeWater) {
     return developer ? developer->GetAreaSlope(LotCellRect{rect[0], rect[1], rect[2], rect[3]}, includeWater) : 0.0f;
 }
 
+// The zone developer's and the lots' services, as the original's globals: in place before cSC4City::Init initializes the zone
+// developer (installed after it, the component pass initialized the developer against the generated stub host, and the real
+// services never reached it: no streets in a zone drag, no road access).
+void InstallZoneDeveloperServices() {
+    sc4::SetZoneDeveloperHost(&g_host);
+    sc4::SetLotHost(&g_lotHost);
+    sc4::cSC4LotDeveloper::SetBaseTextureServices(&g_baseTextures);
+    cSC4LotDeveloper::SetLotListProvider(+[]() -> const std::list<cSC4Lot*>* {   // the lot developer's lots are the zone developer's
+        cSC4ZoneDeveloper* zones = Developer();
+        return zones ? &zones->Lots() : nullptr;
+    });
+}
+
 bool InstallZoneDeveloperHost(sc4::cSC4City* city) {
     // Once per city: the city view brings the lot manager up before the model maker builds the loaded occupants (the retaining
     // walls look their lots up), and the zone tool asks again later.
@@ -568,17 +581,11 @@ bool InstallZoneDeveloperHost(sc4::cSC4City* city) {
     if (city && city == installedFor && installedOk) return true;
     installedFor = city;
     installedOk = false;
-    sc4::SetZoneDeveloperHost(&g_host);
-    sc4::SetLotHost(&g_lotHost);
-    sc4::cSC4LotDeveloper::SetBaseTextureServices(&g_baseTextures);
-    // The component pass ran Init against the stub host, which failed on its first service; with the real services it completes.
+    InstallZoneDeveloperServices();
+    // The city's component pass has initialized the developer with these services; Init again only answers whether it is up.
     cSC4ZoneDeveloper* developer = Developer();
     const bool ok = developer && developer->Init();
     // The lot developer's daily lot pass (lot-developer.md §4.1; agent level 4, flags 2): its lots are the zone developer's.
-    cSC4LotDeveloper::SetLotListProvider(+[]() -> const std::list<cSC4Lot*>* {
-        cSC4ZoneDeveloper* zones = Developer();
-        return zones ? &zones->Lots() : nullptr;
-    });
     if (cSC4LotDeveloper* lots = LotDeveloper()) AddCitySimulatorAgent(static_cast<cIGZMessageTarget2*>(lots), 4, "cSC4LotDeveloper", 2);
     std::printf("city view: zone developer %s (lot developer %s)\n", ok ? "up" : "NOT initialised", LotDeveloper() ? "found" : "MISSING");
     installedOk = ok;

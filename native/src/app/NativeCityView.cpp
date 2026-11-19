@@ -409,6 +409,7 @@ void SetCityRenderTarget(sc4::cSC4View3DWin& view, gd::cIGZGDriver* driver, gz::
 bool PrepareCityRenderStack(cISC4City* cityInterface) {
     if (!g_target.view || !g_target.driver) return false;
     native::InstallAutomataHost();
+    native::InstallZoneDeveloperServices();   // the zone developer and the lots are initialized by the city's Init, next
     if (auto* c = dynamic_cast<sc4::cSC4City*>(cityInterface)) native::SetAutomataRenderer(nullptr, c);
     CameraHost& cameraHost = TheCameraHost();
     cameraHost.render = nullptr;
