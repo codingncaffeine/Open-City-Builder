@@ -15,6 +15,7 @@
 #include "gz/GZFramework.h"
 #include "lua/SCLuaInstance.h"
 #include "rz/COMDirectors.h"
+#include "app/NativeGimex.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/StringDetokenizer.h"
@@ -150,6 +151,8 @@ bool RunBoot(bool verbose, bool keepAlive, gd::cIGZGDriver* driver, const std::f
 
     // GZCOM class cSCLua (0xea10c4a2 / 0x4b2811aa): the scripting host on the vendored Lua 5.0 (the app's Lua, advisors, tutorial).
     gz::RegisterDirectorMaker("cSCLua", +[]() -> cIGZUnknown* { return lua5::MakeSCLuaObject(); });
+    // The Gimex reader / writer classes and the port's PNG / BMP codecs behind them (snapshots, image views).
+    native::InstallImageCodecs();
     if (beforeInit) beforeInit(*framework, *app);
     Step("PreFrameWorkInit", app->PreFrameWorkInit());
     // The framework's PreAppInit starts the services of priority -1999999 and up. The native boot runs the application's

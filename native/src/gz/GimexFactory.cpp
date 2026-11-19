@@ -183,17 +183,28 @@ bool cGZGimexFactory::CreateFromResource(cGZPersistResourceKey& key, std::uint32
 bool cGZGimexFactory::SaveWithWriter(cIGZGimexWriter* writer, std::uint32_t format, cIGZBuffer* buffer, const cRZRect& area, std::uint32_t flags) {
     bool result = false;
     if (writer->BeginWrite(format, 1u)) {
+        // the description (gimex.md section 6): size, version, area, 32 bits, quality, data size, channel bits
         cGZGimexInfo info;
         std::memset(&info, 0, sizeof info);
         std::int32_t width = area.right - area.left, height = area.bottom - area.top;
+        auto put = [&info](std::size_t offset, std::uint32_t value) { std::memcpy(reinterpret_cast<std::uint8_t*>(&info) + offset, &value, 4); };
+        put(0, sizeof(cGZGimexInfo));
+        put(4, 0x157);
         info.width = width;
         info.height = height;
         info.bitsPerPixel = 32;
+        put(0x1c, 32);
         std::uint32_t bytes = static_cast<std::uint32_t>(height * width * 4);
+        put(kGimexInfoQuality, flags);
+        put(kGimexInfoDataSize, bytes);
+        const std::int32_t colorType = buffer->GetColorType().type;
+        put(kGimexInfoAlphaBits, colorType == 6 || colorType == 7 || colorType == 9 ? 8u : 0u);
+        put(kGimexInfoAlphaBits + 4, 8);
+        put(kGimexInfoAlphaBits + 8, 8);
+        put(kGimexInfoAlphaBits + 12, 8);
         pixelScratch_.assign(bytes, 0);
-        TranslateGZBufferToGimex(buffer, area, &info, pixelScratch_.data());
-        result = writer->PutFramePixels(&info, pixelScratch_.data(), static_cast<std::uint32_t>(info.bitsPerPixel * width / 8));
-        (void)flags;
+        if (TranslateGZBufferToGimex(buffer, area, &info, pixelScratch_.data()))
+            result = writer->PutFramePixels(&info, pixelScratch_.data(), static_cast<std::uint32_t>(info.bitsPerPixel * width / 8));
     }
     writer->EndWrite();
     writer->Release();
@@ -262,8 +273,8 @@ bool cGZGimexFactory::SaveToResource(cGZPersistResourceKey& key, cIGZPersistDBSe
 
 // ---- pixel translation --------------------------------------------------------------------------------
 
-// 8-bit images are expanded through the palette; 32-bit images are not converted (the buffer is locked, nothing is
-// copied and the answer is false); other depths fail.
+// 8-bit images are expanded through the palette; 32-bit images (A8R8G8B8 dwords) are converted to the buffer's color
+// type (gimex.md section 5, 0x0090C1D4); other depths fail.
 bool cGZGimexFactory::TranslateGimexToGZBuffer(cGZGimexInfo* info, void* pixels, cIGZBuffer* buffer) {
     if (!pixels || !info || !buffer) return false;
     if (info->bitsPerPixel == 8) {
@@ -274,29 +285,83 @@ bool cGZGimexFactory::TranslateGimexToGZBuffer(cGZGimexInfo* info, void* pixels,
         else return false;
         return true;
     }
-    if (info->bitsPerPixel == 0x20) {
-        buffer->GetColorSurfaceStride();
-        buffer->GetColorType();
-        if (buffer->Lock(static_cast<cIGZBuffer::eLockFlags>(0x8040))) {
-            buffer->GetColorSurfaceBits();
-            buffer->Unlock(static_cast<cIGZBuffer::eLockFlags>(0x8040));
-            return false;
+    if (info->bitsPerPixel != 0x20) return false;
+    const std::uint32_t stride = buffer->GetColorSurfaceStride();
+    const std::int32_t colorType = buffer->GetColorType().type;
+    if (!buffer->Lock(static_cast<cIGZBuffer::eLockFlags>(0x8040))) return false;
+    auto* destination = static_cast<std::uint8_t*>(buffer->GetColorSurfaceBits());
+    const auto* source = static_cast<const std::uint32_t*>(pixels);
+    const int width = info->width, height = info->height;
+    bool result = destination != nullptr;
+    if (result && colorType == 7 && flag30_ && dither_) {
+        result = DitherToARGB4444(info, pixels, destination, stride);
+    } else if (result) {
+        for (int y = 0; y < height; ++y, source += width, destination += stride) {
+            auto* row16 = reinterpret_cast<std::uint16_t*>(destination);
+            auto* row32 = reinterpret_cast<std::uint32_t*>(destination);
+            for (int x = 0; x < width; ++x) {
+                const std::uint32_t v = source[x];
+                switch (colorType) {
+                    case 4: row16[x] = static_cast<std::uint16_t>(0x8000 | ((v >> 9) & 0xfc00) | ((v >> 6) & 0x3e0) | ((v >> 3) & 0x1f)); break;
+                    // quirk kept (0x0090B0C0): green gets only its top 5 bits, one bit too low, so it is halved
+                    case 5: row16[x] = static_cast<std::uint16_t>(((v >> 8) & 0xf800) | ((v >> 6) & 0x3e0) | ((v >> 3) & 0x1f)); break;
+                    case 6: row16[x] = static_cast<std::uint16_t>(((v >> 9) & 0x7c00) | ((v >> 6) & 0x3e0) | ((v >> 3) & 0x1f) | ((v >> 16) & 0x8000)); break;
+                    case 7: row16[x] = static_cast<std::uint16_t>(((v >> 16) & 0xf000) | ((v >> 12) & 0xf00) | ((v >> 8) & 0xf0) | ((v >> 4) & 0xf)); break;
+                    case 8: case 9: row32[x] = v; break;
+                    default: result = false; break;
+                }
+                if (!result) break;
+            }
+            if (!result) break;
         }
     }
-    return false;
+    buffer->Unlock(static_cast<cIGZBuffer::eLockFlags>(0x8040));
+    return result;
 }
 
-// The save direction only locks the buffer; the pixel conversion itself is not done by the original (always false).
-bool cGZGimexFactory::TranslateGZBufferToGimex(cIGZBuffer* buffer, const cRZRect&, cGZGimexInfo* info, void* pixels) {
-    if (buffer && info && pixels) {
-        buffer->GetColorSurfaceStride();
-        buffer->GetColorType();
-        if (buffer->Lock(static_cast<cIGZBuffer::eLockFlags>(0x8040))) {
-            buffer->GetColorSurfaceBits();
-            buffer->Unlock(static_cast<cIGZBuffer::eLockFlags>(0x8040));
+// The area of the buffer as 32-bit A8R8G8B8 pixels (gimex.md section 6, 0x0090BA37). Channels widen as c * 255 / max.
+bool cGZGimexFactory::TranslateGZBufferToGimex(cIGZBuffer* buffer, const cRZRect& area, cGZGimexInfo* info, void* pixels) {
+    if (!buffer || !info || !pixels) return false;
+    const std::uint32_t stride = buffer->GetColorSurfaceStride();
+    const std::int32_t colorType = buffer->GetColorType().type;
+    if (!buffer->Lock(static_cast<cIGZBuffer::eLockFlags>(0x8040))) return false;
+    const auto* base = static_cast<const std::uint8_t*>(buffer->GetColorSurfaceBits());
+    const int width = area.right - area.left, height = area.bottom - area.top;
+    const int bytesPerPixel = static_cast<int>(buffer->GetBitsPerPixel() / 8);
+    auto* out = static_cast<std::uint32_t*>(pixels);
+    bool result = base != nullptr;
+    auto widen = [](std::uint32_t c, std::uint32_t max) { return c * 255 / max; };
+    for (int y = 0; result && y < height; ++y) {
+        const std::uint8_t* row = base + static_cast<std::size_t>(area.top + y) * stride + static_cast<std::size_t>(area.left) * bytesPerPixel;
+        for (int x = 0; x < width; ++x, ++out) {
+            std::uint16_t p16 = 0;
+            std::uint32_t p32 = 0;
+            switch (colorType) {
+                case 4: case 6: {
+                    std::memcpy(&p16, row + x * 2, 2);
+                    const std::uint32_t alpha = colorType == 4 || (p16 & 0x8000) ? 0xffu : 0u;
+                    *out = alpha << 24 | widen((p16 >> 10) & 0x1f, 31) << 16 | widen((p16 >> 5) & 0x1f, 31) << 8 | widen(p16 & 0x1f, 31);
+                    break;
+                }
+                case 5:
+                    std::memcpy(&p16, row + x * 2, 2);
+                    *out = 0xffu << 24 | widen((p16 >> 11) & 0x1f, 31) << 16 | widen((p16 >> 5) & 0x3f, 63) << 8 | widen(p16 & 0x1f, 31);
+                    break;
+                case 7:   // quirk kept (0x0090B408): the source advances one byte per pixel
+                    std::memcpy(&p16, row + x, 2);
+                    *out = ((p16 & 0xf000u) >> 4) | (p16 & 0xf0u);
+                    break;
+                case 8: case 9:
+                    std::memcpy(&p32, row + x * 4, 4);
+                    *out = p32;
+                    break;
+                default: result = false; break;
+            }
+            if (!result) break;
         }
     }
-    return false;
+    buffer->Unlock(static_cast<cIGZBuffer::eLockFlags>(0x8040));
+    return result;
 }
 
 bool cGZGimexFactory::TranslateGimex8ToGZBuffer8(const cGZGimexInfo* info, const void* pixels, cIGZBuffer* buffer) {

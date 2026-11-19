@@ -31,6 +31,8 @@ struct cGZGimexInfo {
     std::uint8_t rest[0x2a70 - 0x428];
 };
 static_assert(sizeof(cGZGimexInfo) == 0x2a70);
+// Save description fields (gimex.md section 6): the quality, the data size, then alpha / red / green / blue bits.
+constexpr std::size_t kGimexInfoQuality = 0x430, kGimexInfoDataSize = 0x434, kGimexInfoAlphaBits = 0x438;
 
 class cIGZGimexReader : public cIGZUnknown {
 public:
@@ -120,7 +122,8 @@ public:
 private:
     std::uint32_t refCount_ = 0;                                    // +0x28
     std::uint32_t defaultColorType_ = 1;                            // +0x2c
-    bool flag30_ = true;                                            // +0x30
+    bool flag30_ = true;                                            // +0x30 (dither setting 1)
+    bool dither_ = true;                                            // dither setting 2 (Windows +0x1c)
     std::vector<std::uint8_t> pixelScratch_;                        // +0x38
     std::vector<std::uint32_t> ditherScratch_;                      // +0x50
     static inline cIGZPersistResourceManager* sResourceManager = nullptr;

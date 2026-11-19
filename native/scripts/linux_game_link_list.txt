@@ -125,6 +125,8 @@ src/gz/cGZDBRecords.cpp
 src/gz/cGZPersistDBSegmentMultiPackedFiles.cpp
 src/gz/cGZPersistResourceManager.cpp
 src/gz/GimexFactory.cpp
+src/gz/GimexReaderWriter.cpp
+src/app/NativeGimex.cpp
 src/gz/cGZDate.cpp
 src/rz/cRZDate.cpp
 src/sc4/Nation.cpp
