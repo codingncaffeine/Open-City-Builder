@@ -1453,6 +1453,14 @@ void cSC43DRender::ProcessModelChangeQueue() {
         s3d::cIS3DModelInstance* model = item.model;
         if (!model) continue;
         auto* element = static_cast<SC43DGridElement*>(model->GetCustomData());
+        static const bool queueTrace = std::getenv("SC4_RENDERQDEBUG") != nullptr;
+        if (queueTrace) {
+            const cS3DBoundingBox oldBox = ItemBox(item);
+            int lo[2] = {0, 0}, hi[2] = {0, 0};
+            if (viewUtilities_) viewUtilities_->ProjectBoundingBoxToViewportRectangle(oldBox.min, oldBox.max, lo, hi);
+            std::fprintf(stderr, "render queue: model %p change %d element %p flags %04x dirty %d item rect %d,%d..%d,%d\n", static_cast<void*>(model),
+                         item.change, static_cast<void*>(element), element ? element->flags : 0, addDirty, lo[0], lo[1], hi[0], hi[1]);
+        }
         if (element) {
             const std::uint16_t flags = element->flags;
             element->flags = static_cast<std::uint16_t>(flags & ~0x10);
@@ -1530,6 +1538,8 @@ void cSC43DRender::ProcessModelChangeQueue() {
                 }
                 default: break;
             }
+            if (queueTrace) std::fprintf(stderr, "render queue: model %p now flags %04x\n", static_cast<void*>(model),
+                                         static_cast<SC43DGridElement*>(model->GetCustomData()) ? static_cast<SC43DGridElement*>(model->GetCustomData())->flags : 0);
         }
         model->Release();   // the queue's reference
     }

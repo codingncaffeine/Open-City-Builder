@@ -1,5 +1,8 @@
 #include "sc4/SignpostOccupant.h"
 
+#include <cstdio>
+#include <cstdlib>
+
 #include <algorithm>
 #include <cmath>
 
@@ -264,6 +267,11 @@ void cSC4SignpostOccupant::RebuildModel() {
 
     WorldBoxesFromTransform(localBounds_, localBounds_ + 3, worldBounds_, worldBounds_ + 3);
     SetBoundingBox(worldBounds_, worldBounds_ + 3);   // the original writes the prop's min/max from the same values
+    if (std::getenv("SC4_SIGNDEBUG"))
+        std::fprintf(stderr, "signpost: local %.1f,%.1f,%.1f..%.1f,%.1f,%.1f world %.1f,%.1f,%.1f..%.1f,%.1f,%.1f at %.1f,%.1f,%.1f\n", localBounds_[0],
+                     localBounds_[1], localBounds_[2], localBounds_[3], localBounds_[4], localBounds_[5], worldBounds_[0], worldBounds_[1],
+                     worldBounds_[2], worldBounds_[3], worldBounds_[4], worldBounds_[5], transform_.translation[0], transform_.translation[1],
+                     transform_.translation[2]);
 
     WorldBoxesFromTransform(localBounds_, localBounds_ + 3, pickBoxes_[0], pickBoxes_[0] + 3);
     const float postMin[3] = {-halfPost, 0.0f, 0.0f};
