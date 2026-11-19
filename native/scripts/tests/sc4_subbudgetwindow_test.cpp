@@ -129,6 +129,8 @@ struct Host final : sc4::ISubBudgetWindowHost {
         return true;
     }
     void MoneyString(std::int64_t amount, cRZString& out) override { out = cRZString(std::to_string(amount).c_str()); }
+    std::vector<sc4::cISCPropertyHolder*> looked;
+    bool LookAtBuilding(sc4::cISCPropertyHolder* holder) override { looked.push_back(holder); return true; }
 };
 
 std::string Caption(cIGZWin* root, std::uint32_t id) {
@@ -255,6 +257,25 @@ int main() {
         single->DoWinMsg(win, 3, 0x887113a4, 0xabce400, 0);
         CHECK(host.fundings.size() == 1 && host.fundings[0].holder == host.buildings[0] && !host.fundings[0].secondary &&
               host.fundings[0].fraction > 0.59f && host.fundings[0].fraction < 0.61f);
+        // the arrows (i386 0x00278454..): two rows a click over the twelve; up shows after the first, down hides at the end
+        auto shown = [&](std::uint32_t id) { cIGZWin* w = win->GetChildWindowFromIDRecursive(id); return w && w->GetFlag(1); };
+        CHECK(!shown(0x453) && shown(0x454));
+        single->DoWinMsg(win, 3, 0x287259f6, 0x454, 0);
+        CHECK(Caption(win, 0xabcde06) == "Clinic 2");
+        CHECK(Caption(win, 0xabcde06 + 3 * 8) == "Clinic 10");
+        CHECK(shown(0x453) && shown(0x454));
+        single->DoWinMsg(win, 3, 0x287259f6, 0x454, 0);   // 12 <= 4 + 9: the last page, down hides
+        CHECK(Caption(win, 0xabcde06) == "Clinic 4");
+        CHECK(Caption(win, 0xabcde06 + 3 * 7) == "Clinic 11");
+        CHECK(shown(0x453) && !shown(0x454));
+        CHECK(Caption(win, 0xabcde06 + 3 * 9 + 1) == "1080");   // the total still counts every building
+        // a name: the camera looks at that row's building (the scrolled list's first row = building 4)
+        single->DoWinMsg(win, 3, 0x287259f6, 0xabcde06, 0);
+        CHECK(host.looked.size() == 1 && host.looked[0] == host.buildings[4]);
+        single->DoWinMsg(win, 3, 0x287259f6, 0x453, 0);
+        single->DoWinMsg(win, 3, 0x287259f6, 0x453, 0);
+        CHECK(Caption(win, 0xabcde06) == "Clinic 0");
+        CHECK(!shown(0x453) && shown(0x454));
         // Cancel: every building (all twelve, shown or not) back to 75% / 50%
         host.fundings.clear();
         single->DoWinMsg(win, 3, 0x287259f6, 0x6d, 0);

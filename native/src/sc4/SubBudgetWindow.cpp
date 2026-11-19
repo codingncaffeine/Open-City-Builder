@@ -248,6 +248,15 @@ bool cSC4SubBudgetWindow::OnButtonActivated(cIGZWin* window, std::uint32_t id) {
         UpdateOrdinanceBudget(window);
         return false;
     }
+    if (individual_ && id > 0x0abcddffu && id < 0x0abcdf00u) {   // a building's name (i386 0x002783..): the camera looks at it
+        for (const auto& row : rowHolders_)
+            if (row.first == id && row.second) {
+                const bool moved = g_host && g_host->LookAtBuilding(row.second);
+                if (Trace()) std::fprintf(stderr, "sub budget: name %08x -> camera %s\n", id, moved ? "moved" : "unchanged");
+                break;
+            }
+        return false;
+    }
     if (id - 0x0abce600u < 0x100 && !individual_) {   // a department row's button: its buildings, one by one
         for (const SliderInfo& info : sliders_) {
             if (info.departmentRow && info.id == id - 0x700 && info.department) {   // the row's slider is 0xabcdf00 + n
@@ -267,7 +276,7 @@ bool cSC4SubBudgetWindow::OnButtonActivated(cIGZWin* window, std::uint32_t id) {
         EndDialog(window, kResultClose);
         return true;
     }
-    if (id >= 0x451 && id <= 0x454 && purpose_ == 2) {   // the scroll arrows (two rows a click)
+    if (id >= 0x451 && id <= 0x454 && (purpose_ == 2 || individual_)) {   // the scroll arrows (two rows a click)
         const bool income = id <= 0x452, down = id == 0x452 || id == 0x454;
         std::uint32_t& scroll = income ? incomeScroll_ : expenseScroll_;
         const std::uint32_t rows = income ? incomeRows_ : expenseRows_;
@@ -282,7 +291,8 @@ bool cSC4SubBudgetWindow::OnButtonActivated(cIGZWin* window, std::uint32_t id) {
             if (scroll == 0 || (scroll -= 2, scroll == 0)) show(up, false);
             if (scroll + 9 < rows) show(downId, true);
         }
-        UpdateNeighborBudget(window);
+        if (individual_) UpdateIndividualBudget(window, false);   // the single-building list (i386 0x00278532..)
+        else UpdateNeighborBudget(window);
         return false;
     }
     if (id == kButtonOk) {
@@ -1470,7 +1480,7 @@ void cSC4SubBudgetWindow::InitIndividualBudget(cIGZWin* window) {
     secondColumn_ = column2;
     std::vector<cISCPropertyHolder*> buildings;
     g_host->LocallyFundedBuildings(individual_, kind_, buildings);
-    buildingCount_ = static_cast<std::uint32_t>(buildings.size());
+    expenseRows_ = static_cast<std::uint32_t>(buildings.size());
     for (cISCPropertyHolder* holder : buildings)
         if (holder) holder->Release();
     const float maximum = g_host->DepartmentMaxFunding(individual_) * kPercent;
@@ -1481,11 +1491,11 @@ void cSC4SubBudgetWindow::InitIndividualBudget(cIGZWin* window) {
         width_ = static_cast<int>(strip->Width());
         rowStep_ = static_cast<int>(strip->Height()) / 2;
     }
-    if (buildingCount_ == 0) {
+    if (expenseRows_ == 0) {
         SetEmptyWindow(window, title, Text(0x4a5cb4b6));
         return;
     }
-    const std::uint32_t rows = std::min(buildingCount_, kIndivRows);
+    const std::uint32_t rows = std::min(expenseRows_, kIndivRows);
     SetupWindowIndiv(window, rows);
     const int headY = expenseTop_ - rowStep_;
     AddText(body_, 0xabcde00, 0x14, 8, title, 0, 0x4a809916, 'D', 'U', 'f');
@@ -1530,7 +1540,7 @@ void cSC4SubBudgetWindow::InitIndividualBudget(cIGZWin* window) {
         cIGZWin* arrow = window->GetChildWindowFromIDRecursive(id);
         if (!arrow) continue;
         arrow->SetNotificationTarget(window);
-        if (id == 0x453 || buildingCount_ < 10) arrow->SetFlag(1, false);   // up starts hidden; down only with more rows than fit
+        if (id == 0x453 || expenseRows_ < 10) arrow->SetFlag(1, false);   // up starts hidden; down only with more rows than fit
     }
     UpdateIndividualBudget(window, true);
 }
@@ -1589,7 +1599,7 @@ void cSC4SubBudgetWindow::UpdateIndividualBudget(cIGZWin* window, bool rebuild) 
             holder->AddRef();
             individualRestore_.push_back(IndividualRestore{holder, primary, secondary});
         }
-        if (ordinal < rowOffset_ || drawn >= quota) continue;
+        if (ordinal < expenseScroll_ || drawn >= quota) continue;
         // the row: name, sliders (the second only when the building has the second budget item), service text, cost
         cRZString name;
         if (!holder || !g_host->BuildingName(holder, name)) name = cRZString("Error: No name");

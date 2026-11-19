@@ -7,6 +7,7 @@
 #include <string>
 
 #include "app/NativeBoot.h"
+#include "app/NativeCitySystems.h"
 #include "app/NativeUi.h"
 #include "app/NativeZoneTool.h"
 #include "gz/WinInterfaces.h"
@@ -14,6 +15,8 @@
 #include "sc4/App.h"
 #include "sc4/BudgetSimulator.h"
 #include "sc4/BudgetUIWinProc.h"
+#include "sc4/CameraControl.h"
+#include "sc4/Occupant.h"
 #include "gz/Buffer.h"
 #include "gz/WinBMP.h"
 #include "gz/WinBtn.h"
@@ -321,6 +324,17 @@ public:
         return NativeSetBuildingFunding(holder, kind, secondary, fraction);
     }
     void MoneyString(std::int64_t amount, cRZString& out) override { sc4::SC4MakeMoneyString(amount, out); }
+    bool LookAtBuilding(sc4::cISCPropertyHolder* holder) override {
+        void* raw = nullptr;
+        if (!holder || !holder->QueryInterface(sc4::kGZIID_cISC4Occupant, &raw) || !raw) return false;
+        auto* occupant = static_cast<sc4::cISC4Occupant*>(raw);
+        float xyz[3] = {};
+        occupant->GetPosition(xyz);
+        occupant->Release();
+        sc4::cSC4View3DWin* view = CityView3DWin();
+        sc4::cSC4CameraControl* camera = view ? view->CameraControl() : nullptr;
+        return camera && camera->SetViewTargetPosition(cS3DVector3{xyz[0], xyz[1], xyz[2]});
+    }
 
 private:
     std::map<std::uint32_t, cIGZBuffer*> images_;

@@ -99,6 +99,9 @@ public:
         (void)holder; (void)kind; (void)secondary; (void)fraction; return false;
     }
     virtual void MoneyString(std::int64_t amount, cRZString& out) { (void)amount; out = cRZString(); }   // SC4MakeMoneyString
+    // a building row's name button: the camera looks at the building (QI 0x26bb767e slot 8 GetPosition, renderer slot 0x40
+    // camera control SetViewTargetPosition)
+    virtual bool LookAtBuilding(cISCPropertyHolder* holder) { (void)holder; return false; }
 };
 ISubBudgetWindowHost* SubBudgetWindowHost();
 void SetSubBudgetWindowHost(ISubBudgetWindowHost* host);
@@ -204,9 +207,7 @@ private:
     std::vector<IndividualRestore> individualRestore_;   // +0x44 (one reference per holder)
     cSC4SubBudgetWindow* child_ = nullptr;      // +0x1c the single-building dialog while it runs
     std::uint32_t kind_ = 0, secondKind_ = 0;    // +0x108 / +0x10c the service kind and its second budget item
-    std::uint32_t buildingCount_ = 0;            // +0xf8 (setup's count; expenseRows_ in the department path)
     std::uint32_t listCount_ = 0;                // +0x128 (the last refresh's count)
-    std::uint32_t rowOffset_ = 0;                // +0x120 (the first row shown)
     cRZString individualTitle_, secondColumn_;   // the dialog's title, the second slider column's header (+0xd4)
     std::vector<std::pair<std::uint32_t, cISCPropertyHolder*>> rowHolders_;   // port: the sliders' and names' building
                                                                              // (the original keeps it as window property 0x4bfee088)
