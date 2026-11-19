@@ -232,6 +232,7 @@ public:
     void SetAxisLabelRotation(Axis axis, GraphRotation rotation) override { labelRotation_[axis] = rotation; }
     void SetMajorTickUsage(Axis axis, Usage usage) override { majorTicks_[axis] = usage != 0; }
     void SetMajorTickSpacing(Axis axis, float spacing) override { majorSpacing_[axis] = spacing; }
+    float MajorTickSpacing(Axis axis) const { return majorSpacing_[axis]; }   // (port accessor: kAutoValue until committed)
     void SetMajorTickDivisions(Axis axis, std::uint32_t divisions, bool minPixels) override;
     void SetMajorTickGridUsage(Axis axis, Usage usage) override { majorGrid_[axis] = usage != 0; }
     void SetMajorTickDecimalPlaces(Axis axis, int places) override;

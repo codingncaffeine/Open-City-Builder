@@ -62,7 +62,8 @@ constexpr std::uint32_t kOptionContainerId = 0xaa9244b6;
 constexpr std::uint32_t kTimeScaleSliderId = 0xea4a7cf2;
 constexpr std::uint32_t kTimeScaleTextId = 0x8a2871d9;
 constexpr std::uint32_t kGraphAreaWindowId = 0x8a4b0aa0;
-constexpr std::uint32_t kTimeScaleWindowIds[2] = {kTimeScaleSliderId, kTimeScaleTextId};
+constexpr std::uint32_t kTimeScaleCaptionId = 0x8a2871d8;   // the "Time Scale" caption (UI script 0x96a006b0/0xea2871aa: GZWinText 0x8a2871d8)
+constexpr std::uint32_t kTimeScaleWindowIds[3] = {kTimeScaleSliderId, kTimeScaleTextId, kTimeScaleCaptionId};
 constexpr std::uint32_t kSliderCommandSender = 0x887113a3;  // gz::kGZSliderValueChanged
 constexpr std::uint32_t kFirstOptionId = 0x4000;            // two buttons per option: +0x4000 / +0x4100
 constexpr std::uint32_t kSecondOptionOffset = 0x100;
@@ -633,6 +634,7 @@ void cSC4GraphsViewWinProc::ShowGraph(std::uint32_t option) {   // @ 0x1002e0688
                 plot.series = series;
                 plot.combine = PropertyUint32(holder, kPropertyCombine, i);
                 plot.enabled = true;
+                bar->InsertCategoryName(plot.name, i);   // each plot is a category, named under its bar (the original's "1-10" ...)
                 if (series + 1 > optionCount_) optionCount_ = series + 1;
             }
             if (optionCount_ > 0x10) optionCount_ = 0x10;
@@ -691,7 +693,9 @@ void cSC4GraphsViewWinProc::RefreshGraph() {   // @ 0x1002e1a80
 void cSC4GraphsViewWinProc::SetVerticalAxis(float low, float high, float spacing, bool setHorizontalMin) {
     graph_->SetAxisMinValue(gz::kAxisVertical, low);
     graph_->SetAxisMaxValue(gz::kAxisVertical, high);
-    graph_->SetMajorTickSpacing(gz::kAxisVertical, autoTickSpacing_ != 0.0f ? spacing : 0.0f);
+    // The exemplar's auto tick spacing hands the spacing to the graph; otherwise the computed one is used (the original's mayor
+    // rating graph shows the computed 40 between -100 and 100). (0 would never end DrawTicks.)
+    graph_->SetMajorTickSpacing(gz::kAxisVertical, autoTickSpacing_ != 0.0f ? gz::kAutoValue : spacing);
     if (setHorizontalMin) graph_->SetAxisMinValue(gz::kAxisHorizontal, 0.0f);
 }
 
@@ -823,7 +827,7 @@ void cSC4GraphsViewWinProc::RefreshLineGraph(gz::cIGZLineGraph* line) {
 
     line->RemoveCategoryNames();
     line->InsertCategoryName(cSLString(kStringGroup, scale.caption + 1, true), 0);
-    line->InsertCategoryName(cSLString(kStringGroup, kAxisCaptionOffset, true), timeScale_);
+    line->InsertCategoryName(cSLString(kStringGroup, kAxisCaptionOffset, true), scale.points);   // "Now" under the last sample
 
     const float highest = line->GetHighestAxisValue(gz::kAxisVertical);
     float lowest = line->GetLowestAxisValue(gz::kAxisVertical);

@@ -651,6 +651,7 @@ src/app/NativeAura.cpp
 src/app/NativePropDeveloper.cpp
 src/app/NativePower.cpp
 src/app/NativePlumbing.cpp
+src/app/NativeGraphsView.cpp
 src/app/NativeLotConfigHost.cpp
 src/app/NativeCatalogUi.cpp
 src/app/NativeToolTips.cpp

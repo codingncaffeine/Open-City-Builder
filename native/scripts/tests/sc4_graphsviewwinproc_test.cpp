@@ -426,7 +426,9 @@ int main() {
         CHECK(lineGraph->SeriesInfo(2).color == MakeColor(70, 80, 90));
         CHECK(lineGraph->SeriesInfo(0).lineUse && !lineGraph->SeriesInfo(0).symbolUse);
         CHECK(lineGraph->SeriesInfo(0).thickness == 1 && lineGraph->SeriesInfo(0).symbolSize == 12);
-        CHECK(lineGraph->CategoryNames().size() == 1);   // both captions land on index 0 / time scale 0
+        CHECK(lineGraph->CategoryNames().size() == 13);
+        // no AutoTickSpacing in the exemplar: the panel's computed spacing, not the graph's automatic one
+        CHECK(lineGraph->MajorTickSpacing(gz::kAxisVertical) != gz::kAutoValue && lineGraph->MajorTickSpacing(gz::kAxisVertical) > 0.0f);   // the scale caption under the first sample, "Now" under the last (index 12)
     }
 
     // ---- the time scale -------------------------------------------------------------------------------------
@@ -493,6 +495,7 @@ int main() {
         CHECK(barGraph != nullptr);
         if (barGraph) {
             CHECK(barGraph->SeriesCount() == 2 && proc->PlotCount() == 2 && proc->OptionCount() == 2);
+            CHECK(barGraph->CategoryNames().size() == 2);   // each plot is a named category under its bar
             CHECK(barGraph->Series(0).size() == 2 && barGraph->Series(1).size() == 2);
             // sim day 10000: 10000 % 7 == 4
             CHECK(barGraph->Series(0)[0] == 14.0f && barGraph->Series(0)[1] == 0.0f);

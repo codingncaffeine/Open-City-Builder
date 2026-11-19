@@ -45,6 +45,7 @@ void InstallFloraStub();
 void InstallFloraSimulatorStub();
 void InstallNativeFlora();
 void InstallGraphsViewStub();
+void InstallGraphsViewHost();   // app/NativeGraphsView.cpp
 void InstallGrowthDeveloperStub();
 void InstallHelicopterStub();
 void InstallLandfillDeveloperStub();
@@ -163,6 +164,7 @@ void InstallStubHosts() {
     InstallFloraSimulatorStub();
     InstallNativeFlora();                 // the real flora hosts replace the two stubs above
     InstallGraphsViewStub();
+    InstallGraphsViewHost();              // the real host replaces the stub above
     InstallGrowthDeveloperStub();
     InstallHelicopterStub();
     InstallLandfillDeveloperStub();
