@@ -82,7 +82,7 @@ struct RecordingSink final : IEffectsCollectionHost {
         calls.push_back({"decal", name, Num(description.life)});
     }
     void AddShakeDescription(const char* name, const cSC4ShakeDescription& description) override {
-        calls.push_back({"shake", name, Num(description.amplitude)});
+        calls.push_back({"shake", name, Num(description.duration)});
     }
     void AddLightDescription(const char* name, const cSC4LightDescription& description) override {
         calls.push_back({"light", name, Num(description.range)});
@@ -131,7 +131,7 @@ void AddDecals(cSC4EffectsCollection& collection, const char* prefix, int count)
 void AddShakes(cSC4EffectsCollection& collection, const char* prefix, int count) {
     for (int i = 0; i < count; ++i) {
         cSC4ShakeDescription description;
-        description.amplitude = static_cast<float>(i) + 0.25f;
+        description.duration = static_cast<float>(i) + 0.25f;
         collection.AddShakeDescription((std::string(prefix) + std::to_string(i)).c_str(), description);
     }
 }
@@ -293,23 +293,23 @@ void DecalTable() {
 void ShakeAndLightTables() {
     cSC4EffectsCollection collection;
     cSC4ShakeDescription rumble;
-    rumble.amplitude = 4.0f;
-    rumble.frequency = 8.0f;
-    rumble.curveA = {0.0f, 1.0f};
-    rumble.curveB = {2.0f};
-    rumble.falloff = 0.5f;
-    rumble.flags = 3;
+    rumble.duration = 4.0f;
+    rumble.fadeOut = 8.0f;
+    rumble.amplitudeCurve = {0.0f, 1.0f};
+    rumble.rateCurve = {2.0f};
+    rumble.aspect = 0.5f;
+    rumble.pattern = 3;
     collection.AddShakeDescription("Rumble", rumble);
     cSC4ShakeDescription outShake;
     CHECK(collection.GetShakeDescription("rUMBLE", &outShake));
-    CHECK(outShake.amplitude == 4.0f && outShake.frequency == 8.0f);
-    CHECK(Equals(outShake.curveA, {0.0f, 1.0f}));
-    CHECK(Equals(outShake.curveB, {2.0f}));
-    CHECK(outShake.falloff == 0.5f && outShake.flags == 3);
+    CHECK(outShake.duration == 4.0f && outShake.fadeOut == 8.0f);
+    CHECK(Equals(outShake.amplitudeCurve, {0.0f, 1.0f}));
+    CHECK(Equals(outShake.rateCurve, {2.0f}));
+    CHECK(outShake.aspect == 0.5f && outShake.pattern == 3);
     CHECK(!collection.GetShakeDescription("none", &outShake));
     AddShakes(collection, "shake", 2);
     CHECK(collection.Shakes().size() == 3);
-    CHECK(collection.GetShakeDescription("shake1", &outShake) && outShake.amplitude == 1.25f);
+    CHECK(collection.GetShakeDescription("shake1", &outShake) && outShake.duration == 1.25f);
 
     cSC4LightDescription glow;
     glow.colors = {Vec3(1, 0, 0), Vec3(0, 1, 0)};
@@ -622,7 +622,7 @@ void MergeWithNames() {
     decal.life = 0.75f;
     source.AddDecalDescription("Scorch", decal);
     cSC4ShakeDescription shake;
-    shake.amplitude = 4.5f;
+    shake.duration = 4.5f;
     source.AddShakeDescription("Rumble", shake);
     cSC4LightDescription light;
     light.range = 12.0f;

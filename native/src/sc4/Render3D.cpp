@@ -922,57 +922,54 @@ void cSC43DRender::TurnOnLighting(bool enable) {
 // ---------------------------------------------------------------------------------------------
 // Screen shake
 // ---------------------------------------------------------------------------------------------
-std::uint32_t cSC43DRender::StartScreenShake(float amplitude, float frequency) {
-    // 0x100768eb0 builds a description {amplitude, frequency, curveA = {0, amplitude, 0}, curveB = {0, 60, 0},
-    // falloff = 1, flags = 0} and forwards it. PARTIAL: the decompiler leaves the frequency stack slot uninitialised,
-    // so the port passes its two arguments through (see the pending ledger).
+// Slot 43 (PC 0x007C6BC0): a shake of `duration` seconds whose amplitude falls from `amplitude` to 0, walked at rate 60 at its
+// middle, aspect 1, the random pattern. The original never writes the fade-out field (stack contents, render3d.md 10.1);
+// 0 here, so StopScreenShake removes such a shake at once.
+std::uint32_t cSC43DRender::StartScreenShake(float amplitude, float duration) {
     cSC4ShakeDescription description;
-    description.amplitude = amplitude;
-    description.frequency = frequency;
-    description.curveA = {0.0f, amplitude, 0.0f};
-    description.curveB = {0.0f, 60.0f, 0.0f};
-    description.falloff = 1.0f;
-    cSC43DRender::StartScreenShake(description, nullptr);
-    return static_cast<std::uint32_t>(shakeSerial_ - 1);
+    description.duration = duration;
+    description.fadeOut = 0.0f;
+    description.amplitudeCurve = {amplitude, 0.0f};
+    description.rateCurve = {0.0f, 60.0f, 0.0f};
+    description.aspect = 1.0f;
+    description.pattern = 0;
+    return cSC43DRender::StartScreenShake(description, nullptr);
 }
 
-void cSC43DRender::StartScreenShake(const cSC4ShakeDescription& description, const cS3DVector2* position) {
-    // 0x100769064
+// Slot 42 (PC 0x007CACD0): the clock restarts when no shake runs; the new shake goes to the front of the list and its handle is
+// returned. `position` (world x, z) makes it fade with the distance from the view's terrain centre.
+std::uint32_t cSC43DRender::StartScreenShake(const cSC4ShakeDescription& description, const cS3DVector2* position) {
     if (shakes_.empty()) {
         shakeTimer_.Restart();
         unknown3a0_ = 0;
     }
     cSC4Shake shake;
-    shake.amplitude = description.amplitude;
-    shake.frequency = description.frequency;
-    shake.curveA = description.curveA;
-    shake.curveB = description.curveB;
-    shake.falloff = description.falloff;
-    shake.duration = description.falloff;   // the node's +0x10 takes the description's +0x38 (falloff)
+    shake.description = description;
     if (position) {
         shake.positionX = position->x;
-        shake.positionY = position->y;
+        shake.positionZ = position->y;
     }
     shake.positioned = position != nullptr;
-    shake.elapsed = 0;
-    shake.serial = static_cast<std::uint32_t>(shakeSerial_++);
-    shakes_.push_back(shake);
+    shakeTimer_.GetElapsedTimeFloat(shake.startTime);
+    shake.phase = 0.0f;
+    shake.handle = static_cast<std::uint32_t>(shakeSerial_++);
+    shakes_.push_front(shake);
+    return shake.handle;
 }
 
-void cSC43DRender::StopScreenShake(std::uint32_t serial) {
-    // 0x10076929a: a zero falloff removes the shake, otherwise its duration is shortened to now + the remaining
-    // falloff window (the original adds the elapsed clock to the description's two time fields).
+// Slot 44 (PC 0x007C8630): a shake without a fade-out goes at once; otherwise its start is pulled back so that it plays the last
+// fade-out seconds of its curves (only when that makes it older).
+void cSC43DRender::StopScreenShake(std::uint32_t handle) {
     for (auto it = shakes_.begin(); it != shakes_.end(); ++it) {
-        if (it->serial != serial) continue;
-        if (it->falloff == 0.0f) {
+        if (it->handle != handle) continue;
+        if (it->description.fadeOut == 0.0f) {
             shakes_.erase(it);
             return;
         }
         float now = 0.0f;
         shakeTimer_.GetElapsedTimeFloat(now);
-        now = (it->falloff - it->amplitude) + now;
-        if (it->duration <= now) return;
-        it->duration = now;
+        const float start = now + (it->description.fadeOut - it->description.duration);
+        if (start < it->startTime) it->startTime = start;
         return;
     }
 }
@@ -2922,11 +2919,32 @@ void cSC43DRender::Draw() {
 // ---------------------------------------------------------------------------------------------
 // Screen-shake offsets
 // ---------------------------------------------------------------------------------------------
+// The frame's offsets at the shake clock's reading.
 void cSC43DRender::SetShakeOffsets() {
-    // 0x1007663a8. PARTIAL: the per-shake curve / table sampling at the end of the original is not ported (see the
-    // pending ledger). What is ported: the one-time random / sine tables, the reset of both offsets and dropping the
-    // shakes whose fade window has elapsed. With no live shake — the common case, and the one the draw pass needs —
-    // the result is identical to the original: both offsets are 0.
+    float now = 0.0f;
+    shakeTimer_.GetElapsedTimeFloat(now);
+    SetShakeOffsetsAt(now);
+}
+
+namespace {
+// sample(c, u) (render3d.md 10.3): n = 1 -> c[0]; else x = (n - 1) u, i = floor(x), r = x - i, r <= 0 -> c[i], else the blend.
+float SampleShakeCurve(const std::vector<float>& curve, float u) {
+    if (curve.empty()) return 0.0f;
+    if (curve.size() == 1) return curve[0];
+    const float x = static_cast<float>(curve.size() - 1) * u;
+    const float floorX = std::floor(x);
+    const std::size_t i = static_cast<std::size_t>(floorX);
+    const float r = x - floorX;
+    if (r <= 0.0f || i + 1 >= curve.size()) return curve[std::min(i, curve.size() - 1)];
+    return curve[i] + (curve[i + 1] - curve[i]) * r;
+}
+}  // namespace
+
+// PC 0x007C86D0 / Mac i386 0x00507a20 (render3d.md 10.3): every shake younger than its duration adds its pattern, sampled at
+// its phase, scaled by its amplitude curve (and, when positioned, by 1 - d^2 / R^2 with R = 640 x metres per pixel); the sum is
+// scaled by 0.6 per zoom level below 4 and rounded half to even to whole pixels.
+void cSC43DRender::SetShakeOffsetsAt(float now) {
+    // the two pattern tables, built on the first call (render3d.md 10.2)
     if (sShakeTableRandom.empty()) {
         sShakeRandom = std::make_unique<cRZRandom>(0x58);   // cRZRandom::Seed(0x58)
         for (int index = 0; index < 0x40; ++index) {
@@ -2936,25 +2954,64 @@ void cSC43DRender::SetShakeOffsets() {
         }
         // 64 entries around the circle: sin(index * 0.09817477) * 10 (2 * pi / 64 = 0.09817477).
         for (int index = 0; index < 0x40; ++index) {
-            const float value = std::sin(static_cast<float>(index) * 0.09817477f) * 10.0f;
+            const float value = static_cast<float>(std::sin(static_cast<double>(static_cast<float>(index) * 0.09817477f)) * 10.0);
             sShakeTableSine.push_back(cS3DVector2{0.0f, value});
         }
     }
     shakeX_ = 0;
     shakeY_ = 0;
     if (shakes_.empty()) return;
-    float now = 0.0f;
-    shakeTimer_.GetElapsedTimeFloat(now);
+    const float centreX = 0.0f, centreZ = 0.0f;   // the view's terrain centre: zeroed by its constructor, never written
+    const float radius = (cameraControl_ ? cameraControl_->WorldPerPixel() : 1.0f) * 640.0f;
+    const float inverse = 1.0f / (radius * radius);
+    int steps = 4 - (drawContext_ ? drawContext_->Zoom() : 0);
+    const float dt = now - unknown3a0_;
     unknown3a0_ = now;
+    float sumX = 0.0f, sumY = 0.0f;
     for (auto it = shakes_.begin(); it != shakes_.end();) {
-        // A shake's +0x10 field is the timestamp its fade ends; it lives on for `amplitude` seconds after that.
-        const float elapsed = now - it->duration;
-        if (elapsed > it->amplitude) {
+        cSC4Shake& shake = *it;
+        const cSC4ShakeDescription& d = shake.description;
+        const float t = now - shake.startTime;
+        if (t > d.duration) {
             it = shakes_.erase(it);
             continue;
         }
         ++it;
+        float weight = 1.0f;
+        if (shake.positioned) {
+            const float dx = shake.positionX - centreX, dz = shake.positionZ - centreZ;
+            weight = 1.0f - (dx * dx + dz * dz) * inverse;
+            if (weight < 0.0f) continue;   // out of reach: no offset, the phase stands still
+        }
+        const float u = t / d.duration;
+        const float amplitude = SampleShakeCurve(d.amplitudeCurve, u) * weight;
+        const float rate = SampleShakeCurve(d.rateCurve, u);
+        const float amplitudeY = amplitude * d.aspect;
+        const float amplitudeX = amplitude / d.aspect;
+        shake.phase += rate * (dt > t ? t : dt);
+        const std::vector<cS3DVector2>* table = d.pattern == 0 ? &sShakeTableRandom : d.pattern == 1 ? &sShakeTableSine : nullptr;
+        if (!table || table->empty()) continue;
+        const float cycles = shake.phase / static_cast<float>(sShakeTableRandom.size());
+        const float fraction = cycles - std::floor(cycles);
+        const float x = static_cast<float>(table->size() - 1) * fraction;
+        const float floorX = std::floor(x);
+        const std::size_t i = static_cast<std::size_t>(floorX);
+        const float r = x - floorX;
+        cS3DVector2 value = (*table)[i];
+        if (r > 0.0f && i + 1 < table->size()) {
+            value.x = r * (*table)[i + 1].x + (1.0f - r) * (*table)[i].x;
+            value.y = (1.0f - r) * (*table)[i].y + r * (*table)[i + 1].y;
+        }
+        sumX += value.x * amplitudeX;
+        sumY += value.y * amplitudeY;
     }
+    float scale = 1.0f;
+    for (; steps > 0; --steps) scale *= 0.6f;
+    shakeX_ = static_cast<int>(std::lrintf(sumX * scale));
+    shakeY_ = static_cast<int>(std::lrintf(sumY * scale));
+    static const bool trace = std::getenv("SC4_SHAKEDEBUG") != nullptr;
+    if (trace && (shakeX_ != 0 || shakeY_ != 0))
+        std::fprintf(stderr, "shake: %zu shakes at %.2f s, offsets %d,%d\n", shakes_.size(), now, shakeX_, shakeY_);
 }
 
 // ---------------------------------------------------------------------------------------------

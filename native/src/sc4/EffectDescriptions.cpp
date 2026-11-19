@@ -41,21 +41,21 @@ void S3DTransformLegacySave(cIGZOStream& s, const cS3DTransform& v) {
 
 // ---- shake ----
 cIGZIStream& operator>>(cIGZIStream& s, cSC4ShakeDescription& v) {
-    s.GetFloat32(v.amplitude);
-    s.GetFloat32(v.frequency);
-    s >> v.curveA;
-    s >> v.curveB;
-    s.GetFloat32(v.falloff);
-    v.flags = ReadU8(s);
+    s.GetFloat32(v.duration);
+    s.GetFloat32(v.fadeOut);
+    s >> v.amplitudeCurve;
+    s >> v.rateCurve;
+    s.GetFloat32(v.aspect);
+    v.pattern = ReadU8(s);
     return s;
 }
 cIGZOStream& operator<<(cIGZOStream& s, const cSC4ShakeDescription& v) {
-    s.SetFloat32(v.amplitude);
-    s.SetFloat32(v.frequency);
-    s << v.curveA;
-    s << v.curveB;
-    s.SetFloat32(v.falloff);
-    s.SetUint8(static_cast<std::uint8_t>(v.flags));
+    s.SetFloat32(v.duration);
+    s.SetFloat32(v.fadeOut);
+    s << v.amplitudeCurve;
+    s << v.rateCurve;
+    s.SetFloat32(v.aspect);
+    s.SetUint8(static_cast<std::uint8_t>(v.pattern));
     return s;
 }
 

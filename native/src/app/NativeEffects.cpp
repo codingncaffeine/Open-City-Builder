@@ -280,8 +280,11 @@ public:
         return view ? view->ViewportUnitsToWorldUnits(1.0f) : 1.0f;
     }
     float RenderHeightScale() override { return 300.0f; }
-    std::uint32_t AddShake(const cSC4ShakeDescription&, const cS3DVector2*) override { return 0; }
-    void RemoveShake(std::uint32_t) override {}
+    // The renderer's screen shakes (vslots 0x158 / 0x160): the shake's handle goes on the effect, which stops it with its effect.
+    std::uint32_t AddShake(const cSC4ShakeDescription& shake, const cS3DVector2* position) override {
+        return g_render ? g_render->StartScreenShake(shake, position) : 0;
+    }
+    void RemoveShake(std::uint32_t handle) override { if (g_render) g_render->StopScreenShake(handle); }
     // SL::spLightingManager vslots 0x38 / 0x40 (the lightning's flash, the fires' glow).
     void SetLightingTint(float intensity, const cS3DVector3& colour) override {
         if (sc4::cISC4LightingManager* lighting = Lighting()) lighting->SetLightingTint(colour, intensity);

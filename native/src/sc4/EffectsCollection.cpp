@@ -157,14 +157,14 @@ void cSC4EffectsCollection::AddShakeDescription(const char* name, const cSC4Shak
         index = found->second;
     }
     cSC4ShakeDescription& target = shakes_[static_cast<std::size_t>(index)];
-    target.amplitude = description.amplitude;
-    target.frequency = description.frequency;
+    target.duration = description.duration;
+    target.fadeOut = description.fadeOut;
     if (&target != &description) {
-        target.curveA = description.curveA;
-        target.curveB = description.curveB;
+        target.amplitudeCurve = description.amplitudeCurve;
+        target.rateCurve = description.rateCurve;
     }
-    target.falloff = description.falloff;
-    target.flags = description.flags;
+    target.aspect = description.aspect;
+    target.pattern = description.pattern;
 }
 
 // @ 0x1005772a6

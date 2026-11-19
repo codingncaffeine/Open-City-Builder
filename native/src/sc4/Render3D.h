@@ -82,9 +82,10 @@
 //  * Init calls ViewUtilities::UpdateCameraPosition with a possibly null camera control; that path dereferences it in
 //    the original. The port only updates when a control is attached (documented deviation, same visible behaviour for
 //    every caller that sets the control first).
-//  * Screen shake: the first StartScreenShake restarts the clock and clears +0x3a0; every shake gets a serial number
-//    from +0x378 (0x100769064). StopScreenShake with a non-zero falloff shortens the shake to now + the remaining
-//    falloff instead of removing it (0x10076929a).
+//  * Screen shake (render3d.md 6.3 and 10): the first StartScreenShake restarts the clock and clears +0x3a0; every shake
+//    gets a handle from +0x378 and goes to the FRONT of the list. StopScreenShake removes a shake without a fade-out at
+//    once, else pulls its start back so it plays its last fade-out seconds. The view's terrain centre the positioned
+//    shakes measure against is only ever zeroed (SC4ViewUtilities ctor, Mac i386 0x001149fc): the map origin.
 //  * GetStatsString1 reads a counter set the draw path normally fills; the format strings are kept verbatim.
 //  * InsertModel on a model that already has an element with the 0x10 (queued) flag sets: if the queue holds an item
 //    for it, InsertModel drains the queue and then builds a *second* element anyway, overwriting the model's custom
@@ -321,8 +322,8 @@ public:
     virtual void RotateLeft() = 0;                                                    // [39] +0x138
     virtual void RotateRight() = 0;                                                   // [40] +0x140
     virtual void SetZoomAndRotation(int zoom, int rotation) = 0;                      // [41] +0x148
-    virtual std::uint32_t StartScreenShake(float amplitude, float frequency) = 0;     // [42] +0x150
-    virtual void StartScreenShake(const cSC4ShakeDescription& description,
+    virtual std::uint32_t StartScreenShake(float amplitude, float duration) = 0;      // [42] +0x150
+    virtual std::uint32_t StartScreenShake(const cSC4ShakeDescription& description,
                                   const cS3DVector2* position) = 0;                     // [43] +0x158
     virtual void StopScreenShake(std::uint32_t serial) = 0;                           // [44] +0x160
     virtual void GetShakeOffsets(float& x, float& y) = 0;                             // [45] +0x168
@@ -403,18 +404,15 @@ public:
         std::uint32_t stamp = 0;      // +0x10
     };
     // One running screen shake (+0x360 list node, 0x70 bytes in the original).
+    // One running screen shake (render3d.md 10.1; PC node 0x48 bytes).
     struct cSC4Shake {
-        bool positioned = false;      // +0x18
-        float positionX = 0;          // +0x1c
-        float positionY = 0;          // +0x20
-        float duration = 0;           // +0x10
-        float elapsed = 0;            // +0x14
-        float amplitude = 0;          // +0x28
-        std::vector<float> curveA;    // +0x30
-        std::vector<float> curveB;    // +0x48
-        float frequency = 0;          // +0x60
-        float falloff = 0;            // +0x2c
-        std::uint32_t serial = 0;     // +0x68
+        float startTime = 0;                 // +0x08 the shake clock when it started
+        float phase = 0;                     // +0x0c how far the pattern has been walked
+        bool positioned = false;             // +0x10
+        float positionX = 0;                 // +0x14 world x
+        float positionZ = 0;                 // +0x18 world z
+        cSC4ShakeDescription description;    // +0x1c
+        std::uint32_t handle = 0;            // +0x44
     };
 
     cSC43DRender();     // @ 0x10075f4fe (C1 alias @ 0x10075f3a8)
@@ -470,8 +468,8 @@ public:
     void RotateLeft() override;                                     // @ 0x100768e7a
     void RotateRight() override;                                    // @ 0x100768e8c
     void SetZoomAndRotation(int zoom, int rotation) override;       // @ 0x100768e9e
-    std::uint32_t StartScreenShake(float amplitude, float frequency) override;             // @ 0x100768eb0
-    void StartScreenShake(const cSC4ShakeDescription& description, const cS3DVector2* position) override;  // @ 0x100769064
+    std::uint32_t StartScreenShake(float amplitude, float duration) override;              // @ 0x100768eb0 (PC 0x007C6BC0)
+    std::uint32_t StartScreenShake(const cSC4ShakeDescription& description, const cS3DVector2* position) override;  // @ 0x100769064
     void StopScreenShake(std::uint32_t serial) override;            // @ 0x10076929a
     void GetShakeOffsets(float& x, float& y) override;              // @ 0x10076937e
     void SetViewportClearColor(const float* color) override;        // @ 0x1007693a0
@@ -558,6 +556,8 @@ public:
     bool RestoreBackingStore();                                     // @ 0x10076605c
     bool RestoreBackingStore(int dstX, int dstY, int width, int height, int srcX, int srcY);   // @ 0x100769b1c
     void SetShakeOffsets();                                         // @ 0x1007663a8
+    // SetShakeOffsets' work at the shake clock reading `now` (the tests drive it with fixed readings).
+    void SetShakeOffsetsAt(float now);
 
     // ---- the model change queue and the quad grid (RENDER3D-2) ----------------------------------
     void ProcessModelChangeQueue();                                 // @ 0x100761896

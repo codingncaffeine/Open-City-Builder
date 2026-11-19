@@ -546,33 +546,65 @@ int main() {
         CHECK(render->Release() == 0);
     }
 
-    // ---- screen shake --------------------------------------------------------------------------
+    // ---- screen shake (render3d.md 6.3 and 10) ------------------------------------------------------
     {
         FakeHost host;
         SetRender3DHost(&host);
         auto* render = new cSC43DRender();
         render->AddRef();
-        CHECK(render->StartScreenShake(2.0f, 30.0f) == 0);
-        CHECK(render->ShakeCount() == 1);
-        const std::uint32_t serial = render->StartScreenShake(1.0f, 10.0f);
-        CHECK(serial == 1);
+        // S1: two shakes from the overload: handles 0 and 1
+        CHECK(render->StartScreenShake(5.0f, 2.0f) == 0);
+        CHECK(render->StartScreenShake(5.0f, 2.0f) == 1);
         CHECK(render->ShakeCount() == 2);
+        // the overload's shakes have no fade-out: stopping one removes it at once; an unknown handle does nothing
+        render->StopScreenShake(0);
+        CHECK(render->ShakeCount() == 1);
+        render->StopScreenShake(1234);
+        CHECK(render->ShakeCount() == 1);
+        render->StopScreenShake(1);
+        CHECK(render->ShakeCount() == 0);
         float x = 5, y = 5;
+        render->SetShakeOffsetsAt(1.0f);
         render->GetShakeOffsets(x, y);
         CHECK(x == 0.0f && y == 0.0f);
-        // The synthetic description StartScreenShake(f, f) builds has falloff 1, so stopping it shortens the
-        // duration (0x10076929a) instead of removing it.
-        render->StopScreenShake(0);
+
+        // The sine pattern at a constant rate 16 for 1 s: phase 16, a quarter of the table (x = 63 * 0.25 = 15.75): y =
+        // sin(15.75 * 2 pi / 64) * 10 = 9.997, x = 0. At zoom 5 the scale is 1 (y rounds to 10), at zoom 3 it is 0.6 (6).
+        cSC4ShakeDescription sine;
+        sine.duration = 10.0f;
+        sine.fadeOut = 2.0f;
+        sine.amplitudeCurve = {1.0f};
+        sine.rateCurve = {16.0f};
+        sine.aspect = 1.0f;
+        sine.pattern = 1;
+        const std::uint32_t handle = render->StartScreenShake(sine, nullptr);
+        render->GetDrawContext()->SetZoomAndRotation(5, 0);
+        render->SetShakeOffsetsAt(1.0f);
+        render->GetShakeOffsets(x, y);
+        CHECK(x == 0.0f && y == 10.0f);
+        render->StopScreenShake(handle);   // a fade-out of 2: the shake now ends 2 s from now instead of 10
+        CHECK(render->ShakeCount() == 1);
+        render->SetShakeOffsetsAt(2.5f);   // older than its duration: removed, no offset
+        CHECK(render->ShakeCount() == 0);
+        render->GetShakeOffsets(x, y);
+        CHECK(x == 0.0f && y == 0.0f);
+
+        // S4 (zoom 3 scales by 0.6) and the aspect: x amplitude / k, y amplitude * k
+        sine.aspect = 2.0f;
+        sine.fadeOut = 0.0f;
+        render->StartScreenShake(sine, nullptr);
+        render->GetDrawContext()->SetZoomAndRotation(3, 0);
+        render->SetShakeOffsetsAt(1.0f);
+        render->GetShakeOffsets(x, y);
+        CHECK(y == 12.0f);   // 9.997 * 2 * 0.6 = 11.996
+        // S3: a positioned shake beyond R (640 x metres per pixel = 640) neither adds nor stays out of the list
+        const cS3DVector2 far{1000.0f, 0.0f};
+        sine.aspect = 1.0f;
+        render->StartScreenShake(sine, &far);
         CHECK(render->ShakeCount() == 2);
-        render->StopScreenShake(1234);   // unknown serial does nothing
-        CHECK(render->ShakeCount() == 2);
-        // A description with a zero falloff is removed outright.
-        cSC4ShakeDescription description;
-        description.falloff = 0.0f;
-        render->StartScreenShake(description, nullptr);
-        CHECK(render->ShakeCount() == 3);
-        render->StopScreenShake(2);
-        CHECK(render->ShakeCount() == 2);
+        render->SetShakeOffsetsAt(1.0f);
+        render->GetShakeOffsets(x, y);
+        CHECK(y == 12.0f && render->ShakeCount() == 2);
         CHECK(render->Release() == 0);
     }
 

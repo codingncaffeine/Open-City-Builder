@@ -10,13 +10,14 @@
 #include "gz/StreamOps.h"
 #include "sc4/EffectComponents.h"
 
+// A screen shake (render3d.md 10.1: cSC43DRender::StartScreenShake's parameter block).
 struct cSC4ShakeDescription {
-    float amplitude = 0;                     // +0
-    float frequency = 0;                     // +4
-    std::vector<float> curveA;               // +8
-    std::vector<float> curveB;               // +0x20
-    float falloff = 0;                       // +0x38
-    std::uint32_t flags = 0;                 // +0x3c (one byte in the stream)
+    float duration = 0;                      // +0 seconds the shake lasts
+    float fadeOut = 0;                       // +4 the window StopScreenShake leaves it to fade
+    std::vector<float> amplitudeCurve;       // +8 sampled over the shake's life (pixels at zoom 4 and 5)
+    std::vector<float> rateCurve;            // +0x20 the speed the pattern is walked at
+    float aspect = 0;                        // +0x38 X / Y aspect k: x amplitude / k, y amplitude * k
+    std::uint32_t pattern = 0;               // +0x3c 0 random, 1 sine, other none (one byte in the stream)
 };
 
 // The fields as cSC4DecalEffect reads them (i386 0x0041318e..0x00412f4a; the shipped decals confirm the order: the
