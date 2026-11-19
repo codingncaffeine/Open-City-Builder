@@ -368,7 +368,10 @@ OpaqueContextRef* MacDisplay::CreateScreenContext(int, std::uint8_t& fastFlag) {
     fastFlag = 0;
     auto* ref = new OpaqueContextRef;
     void* context = DisplayPlatform()->CreateGLContext(sMainWindow, !sInWindowMode, sCurrentWidth, sCurrentHeight);
-    if (!context) return nullptr;   // (the allocated reference leaks, as in the original)
+    if (!context) {
+        delete ref;   // (the original leaks it here)
+        return nullptr;
+    }
     ref->context = context;
     ref->swapOnSync = true;
     sContextRef = ref;
