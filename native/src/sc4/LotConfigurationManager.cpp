@@ -190,6 +190,7 @@ bool cSC4LotConfigurationManager::AddLotConfiguration(cSC4LotConfiguration* conf
             return true;
         }
         FlushCachedLotConfigurationSearches();
+        it->second->Release();   // the reference the table took when it was added
         g_configurations.erase(it);
         return true;
     }
