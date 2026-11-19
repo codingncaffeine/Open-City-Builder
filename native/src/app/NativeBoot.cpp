@@ -10,6 +10,7 @@
 
 #include "sc4/DBSegment.h"
 #include "platform/GameDataPath.h"
+#include "app/NativeGlyphTextures.h"
 #include "app/NativeBoot.h"
 #include "gz/CommandServer.h"
 #include "gz/GZFramework.h"
@@ -131,8 +132,10 @@ bool RunBoot(bool verbose, bool keepAlive, gd::cIGZGDriver* driver, const std::f
         return true;
     };
     app->StartupHooks().bundleGameDataDirectory = [&] { return bundle + "/GameData"; };
-    for (const char* name : {"cSC4GlyphTextureManager", "cSLWinLocationSaver", "cSC4FeatureManager", "cSC4ToolTipManager", "cSC4MissingPluginDataReporter"})   // the nation is created by the application (NativeRegion)
+    for (const char* name : {"cSLWinLocationSaver", "cSC4FeatureManager", "cSC4ToolTipManager", "cSC4MissingPluginDataReporter"})   // the nation is created by the application (NativeRegion)
         app->SetServiceFactory(name, []() -> cIGZUnknown* { return new Object(); });
+    // The glyph texture manager (text in the 3D view: signposts, labels): app/NativeGlyphTextures.cpp, Init'ed on creation.
+    app->SetServiceFactory("cSC4GlyphTextureManager", []() -> cIGZUnknown* { return native::CreateGlyphTextureManager(); });
     // The string detokenizer (GZCOM 0xaa2c8c2a): the recovered default one, with #City# #Mayor# #Year# #Population# #Region#
     // answered by the IDetokenizerHost (NativeView3DWinHost.cpp). A placeholder here left every token in the game's text.
     app->SetServiceFactory("cSCStringDetokenizer", []() -> cIGZUnknown* {

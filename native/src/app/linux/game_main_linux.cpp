@@ -34,6 +34,7 @@
 #include "platform/PointerState.h"
 #include "sc4/Simulator.h"
 #include "sc4/RegionDialogs.h"
+#include "app/NativeGlyphTextures.h"
 #include "app/NativeCitySystems.h"
 #include "app/NativeSnapshot.h"
 #include "app/NativeCheats.h"
@@ -603,6 +604,7 @@ void Frame() {
         if (gMessages2) gMessages2->OnTick(16);   // posted and general messages (the splash timer, screen swaps)
         app->OnTick(16);
     }
+    native::TickGlyphTextures(static_cast<std::uint32_t>(SDL_GetTicks()));   // the framework's tick of the glyph texture service
     gLaps.Lap("messages");
     const bool regionScreen = gAppWindow && gAppWindow->CurrentScreen() && gAppWindow->CurrentScreen()->GetID() == 0xea659793;
     if (gAudio && gAppWindow && gAppWindow->CurrentScreen()) {   // the radio follows the screen: the region station on the map, the mayor's in a city
