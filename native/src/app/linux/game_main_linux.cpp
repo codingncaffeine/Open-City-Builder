@@ -1637,6 +1637,8 @@ int main(int argc, char** argv) {
                         if (at != current) continue;
                         fired.insert(entry);
                         gMgr->GZWinMsgPost_Keyboard(kGZMsgKeyDown, std::uint32_t(x), 0);
+                        if (x == 0x0d || x == 0x08 || x == 0x09 || x == 0x1b)   // the character the player's key path adds (HandleEvent)
+                            gMgr->GZWinMsgPost_Keyboard(kGZMsgCharacter, std::uint32_t(x), 0);
                         gMgr->GZWinMsgPost_Keyboard(kGZMsgKeyUp, std::uint32_t(x), 0);
                         std::printf("modal input: key %d at frame %d\n", x, at);
                         continue;
