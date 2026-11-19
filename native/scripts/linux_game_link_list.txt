@@ -134,6 +134,7 @@ src/app/NativeTips.cpp
 src/app/NativeGlyphTextures.cpp
 src/sc4/GlyphTextureManager.cpp
 src/app/NativeSignLabel.cpp
+src/sc4/ViewInputControlLabelTool.cpp
 src/gz/cGZDate.cpp
 src/rz/cRZDate.cpp
 src/sc4/Nation.cpp

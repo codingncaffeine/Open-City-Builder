@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include "sc4/View3DWin.h"
+#include "app/NativeSignLabel.h"
 #include "app/NativeTips.h"
 #include "app/NativeSnapshot.h"
 #include "app/NativeTutorial.h"
@@ -292,7 +293,7 @@ struct StubView3DWin final : IView3DWinHost {
     cSC4ViewInputControl* CreateSignTool() override { return new cSC4ViewInputControlSignTool(); }
     cSC4ViewInputControl* CreatePlaceLotTool(std::uint32_t lot) override { return new cSC4ViewInputControlPlaceLot(0, lot, 0, false); }
     cSC4ViewInputControl* CreateDemolishTool() override { return native::CreateDemolishTool(); }
-    cSC4ViewInputControl* CreateLabelTool() override { SC4_UNWIRED("IView3DWinHost::CreateLabelTool (cSC4ViewInputControlLabelTool not recovered)"); return nullptr; }
+    cSC4ViewInputControl* CreateLabelTool() override { return native::CreateLabelTool(); }   // NativeSignLabel.cpp
     cSC4ViewInputControl* CreateSignLabelDemolishTool() override { SC4_UNWIRED("IView3DWinHost::CreateSignLabelDemolishTool (not recovered)"); return nullptr; }
     cSC4ViewInputControl* CreateObliterateCityTool() override { SC4_UNWIRED("IView3DWinHost::CreateObliterateCityTool (cSC4ObliterateCity not recovered)"); return nullptr; }
     cSC4ViewInputControl* CreateFloraTool(std::uint32_t type) override { return native::CreateFloraTool(type); }
