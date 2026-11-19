@@ -1,4 +1,5 @@
 // Installs the generated neutral stub hosts (src/app/hosts, scripts/gen_stub_hosts.py).
+#include "app/NativeTips.h"
 #include "app/NativeSnapshot.h"
 #include "app/NativeTutorial.h"
 #include "app/NativeUnderground.h"
@@ -237,7 +238,8 @@ void InstallStubHosts() {
     InstallWinHtmlHosts();                // the real advice-list host replaces the stub above
     InstallWinAnimationRecorderStub();
     InstallWinBMPViewStub();
-    InstallSnapshotHost();                // NativeSnapshot.cpp: the snapshot frame and album; the picture view's real host replaces the stub above
+    InstallSnapshotHost();
+    InstallTipOfTheDayHost();             // NativeTips.cpp: the tip of the day dialog's host                // NativeSnapshot.cpp: the snapshot frame and album; the picture view's real host replaces the stub above
     InstallCatalogViewStub();
     InstallLoadHeightFieldStub();
     InstallWinLotConfigurationEditorStub();

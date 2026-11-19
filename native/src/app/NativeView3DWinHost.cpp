@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include "sc4/View3DWin.h"
+#include "app/NativeTips.h"
 #include "app/NativeSnapshot.h"
 #include "app/NativeTutorial.h"
 #include "app/NativeCheats.h"
@@ -285,7 +286,7 @@ struct StubView3DWin final : IView3DWinHost {
     cSC4ViewInputControl* CreateDispatchTool(int type) override { return native::CreateDispatchTool(type); }
     cSC4ViewInputControl* CreateNetworkTool(int type) override { return native::CreateNetworkTool(type); }
     void ShowMyStreetSim() override { SC4_UNWIRED("IView3DWinHost::ShowMyStreetSim"); }
-    void PostCityInit() override {}
+    void PostCityInit() override { native::ShowTipOfTheDayOnce(); }   // DoPostCityInit's end: the tip of the day, once per run
     void MayorRatingChanged() override { if (sc4::cSC4View3DWin* view = CityView3DWin()) native::UpdateMayorRatingBar(*view); }
     ISimulatorPauseSink* Simulator() override { static SimulatorView view; return CityExists() ? &view : nullptr; }
     cSC4ViewInputControl* CreateSignTool() override { return new cSC4ViewInputControlSignTool(); }
