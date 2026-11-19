@@ -1,5 +1,6 @@
 #include "gz/WinUtils.h"
 
+// The GetChildAs... helpers hand back a counted child: each is released here, as in the original (Mac i386 0x00474a92..).
 namespace nsGZWinUtils {
 
 bool FindSiblingAs(cIGZWin* window, std::uint32_t id, std::uint32_t iid, void** out) {
@@ -61,13 +62,16 @@ bool SetButtonToggleState(cIGZWin* window, std::uint32_t id, bool on) {
     if (!window->GetChildAsRecursive(id, gz::kGZIID_cIGZWinBtn, reinterpret_cast<void**>(&button))) return false;
     if (on) button->ToggleOn();
     else button->ToggleOff();
+    button->Release();
     return true;
 }
 
 bool GetButtonToggleState(cIGZWin* window, std::uint32_t id) {
     gz::cIGZWinBtn* button = nullptr;
     if (!window->GetChildAsRecursive(id, gz::kGZIID_cIGZWinBtn, reinterpret_cast<void**>(&button))) return false;
-    return button->IsOn();
+    const bool on = button->IsOn();
+    button->Release();
+    return on;
 }
 
 void ExcludeButtonByRange(cIGZWin* window, std::uint32_t firstId, std::uint32_t count, std::uint32_t onId) {
@@ -78,6 +82,7 @@ bool SetEditText(cIGZWin* window, std::uint32_t id, const cIGZString& text) {
     gz::cIGZWinTextEdit* edit = nullptr;
     if (!window->GetChildAsRecursive(id, gz::kGZIID_cIGZWinTextEdit, reinterpret_cast<void**>(&edit))) return false;
     edit->SetText(text, false);
+    edit->Release();
     return true;
 }
 
@@ -85,6 +90,7 @@ bool SetSpinnerValue(cIGZWin* window, std::uint32_t id, int value) {
     gz::cIGZWinSpinner* spinner = nullptr;
     if (!window->GetChildAsRecursive(id, gz::kGZIID_cIGZWinSpinner, reinterpret_cast<void**>(&spinner))) return false;
     spinner->SetValue(value);
+    spinner->Release();
     return true;
 }
 
