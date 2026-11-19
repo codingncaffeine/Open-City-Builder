@@ -28,6 +28,7 @@
 #include "sc4/App.h"
 #include "sc4/Region.h"
 #include "sc4/ServiceLocator.h"
+#include "sc4/WinLocationSaver.h"
 #include "sc4/BudgetSimulator.h"
 #include "sc4/ResidentialSimulator.h"
 #include "sc4/SC4Utilities.h"
@@ -221,8 +222,12 @@ struct Host final : ISnapshotHost {
         if (on) simulator->HiddenPause();
         else simulator->HiddenResume();
     }
-    void RestoreWindowLocation(cIGZWin*) override {}   // cSLWinLocationSaver is not wired natively
-    void SaveWindowLocation(cIGZWin*) override {}
+    void RestoreWindowLocation(cIGZWin* window) override {   // SL::spWinLocationSaver: restore, kept on screen
+        if (auto* saver = static_cast<cSLWinLocationSaver*>(SL::spWinLocationSaver)) saver->RestoreWindowLocation(window, true);
+    }
+    void SaveWindowLocation(cIGZWin* window) override {
+        if (auto* saver = static_cast<cSLWinLocationSaver*>(SL::spWinLocationSaver)) saver->SaveWindowLocation(window);
+    }
     void Notify(const cRZString& title, const cRZString& text) override {
         std::fprintf(stderr, "snapshot: %s: %s\n", title.ToChar(), text.ToChar());
     }

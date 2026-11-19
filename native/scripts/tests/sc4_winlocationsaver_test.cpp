@@ -15,6 +15,7 @@ namespace {
 // a cISC4App that only knows its main window
 struct App final : cISC4App {
     cIGZWin* main = nullptr;
+    std::uint8_t* prefs = nullptr;
     cIGZWin* GetMainWindow() const override { return main; }
     bool QueryInterface(std::uint32_t, void**) override { return false; }
     std::uint32_t AddRef() override { return 1; }
@@ -32,7 +33,8 @@ struct App final : cISC4App {
     void GetAppIniFileName(cIGZString&) const override U() void GetAppIniFilePath(cIGZString&) const override U() void GetAppPreferencesFileName(cIGZString&) const override U()
     void GetAppPreferencesFilePath(cIGZString&) const override U() cIGZUnknown* GetFeatureManager() const override U() cIGZUnknown* GetCheatCodeManager() const override U()
     cISC4Nation* GetNation() override U() cISC4Region* GetRegion() override U() cISC4RegionalCity* GetRegionalCity() override U() cISC4City* GetCity() const override U()
-    std::uint8_t* GetPreferences() const override U() cSC4NewCitySpecification* GetNewCitySpecification() override U() cIGZUnknown* GetDebugConsole() const override U()
+    std::uint8_t* GetPreferences() const override { return prefs; }   // Init reads the app's blob (vslot 0x98)
+    cSC4NewCitySpecification* GetNewCitySpecification() override U() cIGZUnknown* GetDebugConsole() const override U()
     cIGZUnknown* GetGimexFactory() const override U() cIGZUnknown* GetStringDetokenizer() const override U() cIGZUnknown* GetWinLocationSaver() const override U()
     cIGZUnknown* GetRenderProperties() const override U() cIGZUnknown* GetGlyphTextureManager() const override U() cIGZUnknown* GetLuaInterpreter() const override U()
     cSC4TutorialRegistry* GetTutorialRegistry() override U() bool IsRunFirstTimeAfterInstall() override U() void GetAppDirectory(cIGZString&) override U()
@@ -48,7 +50,7 @@ struct App final : cISC4App {
 
 int main() {
     sc4::SC4Preferences prefs;
-    SL::spPreferences = prefs.data();
+    SL::spPreferences = nullptr;   // as in cSC4App::Init: the saver's Init runs before SL::OnAppInit1 publishes the blob
     // two saved windows in the blob
     std::uint32_t triples[2][3] = {{0x10, 100, 120}, {0x20, static_cast<std::uint32_t>(-30), 40}};
     std::memcpy(prefs.data() + 0x4f0, triples, sizeof triples);
@@ -58,7 +60,7 @@ int main() {
     cGZWin& root = *rootWin; root.SetArea(0, 0, 800, 600); root.SetID(1);
     auto* child = new cGZWin(&mgr); child->SetID(0x10); child->SetArea(0, 0, 50, 40); root.ChildAdd(child);
     auto* edge = new cGZWin(&mgr); edge->SetID(0x20); edge->SetArea(0, 0, 30, 30); root.ChildAdd(edge);
-    App app; app.main = &root;
+    App app; app.main = &root; app.prefs = prefs.data();
     SL::spSC4 = &app;
 
     auto* saver = new cSLWinLocationSaver(); saver->AddRef();
@@ -66,6 +68,7 @@ int main() {
     CHECK(saver->QueryInterface(0xaa601692, &q) && saver->QueryInterface(0xaa6016b1, &q) && saver->QueryInterface(1, &q) && !saver->QueryInterface(2, &q));
     saver->Release(); saver->Release(); saver->Release();     // the three queries
     CHECK(saver->Init());
+    SL::spPreferences = prefs.data();   // SL::OnAppInit1 (Shutdown writes the blob through it)
     int x = 0, y = 0;
     CHECK(saver->GetWindowRestoreLocation(0x10u, x, y, false) && x == 100 && y == 120);
     CHECK(!saver->GetWindowRestoreLocation(0x99u, x, y, false) && !saver->GetWindowRestoreLocation(0u, x, y, false));

@@ -24,7 +24,8 @@ int main() {
     CHECK(features->IsFeatureEnabled(10) && !features->IsFeatureEnabled(11) && features->IsFeatureEnabled(12) &&
           features->IsFeatureEnabled(7));
     CHECK(features->IsExpansionPackInstalled(1) && !features->IsExpansionPackInstalled(2) && features->IsExpansionPackInstalled(3));
-    CHECK(features->GetCurrentExpansionPack() == 12);
+    // the highest INSTALLED pack (vslot 0x18 IsExpansionPackInstalled, i386 0x0048cfce), not the highest enabled feature id
+    CHECK(features->GetCurrentExpansionPack() == 3);
     CHECK(features->QueryInterface(0xb562673, &raw) && !features->QueryInterface(4, &raw));
     features->Release();
     features->Release();   // the successful QueryInterface took a second reference

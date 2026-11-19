@@ -8,6 +8,7 @@
 #include "rz/RZConvert.h"
 #include "sc4/DBSegment.h"
 #include "sc4/Lot.h"
+#include "sc4/ServiceLocator.h"
 
 namespace sc4 {
 
@@ -120,6 +121,7 @@ bool cSC4FeatureManager::Shutdown() {
 bool cSC4FeatureManager::StaticInit() {
     if (g_staticInitialised) return true;
     g_staticInitialised = true;
+    if (SL::spSC4) SL::spSC4->RegisterShutdownCallbackFunction(&cSC4FeatureManager::StaticShutdown, nullptr);   // spSC4 vslot 0x10c
     g_installedPacks = 0;
     g_features.clear();
     if (!g_featureHost) return true;
@@ -155,9 +157,10 @@ bool cSC4FeatureManager::IsExpansionPackInstalled(int pack) const {
     return ((g_installedPacks >> ((static_cast<std::uint32_t>(pack) - 1u) & 0x1f)) & 1u) != 0;
 }
 
+// @ i386 0x0048cfce: the highest installed pack (its own vslot 0x18, IsExpansionPackInstalled), 0 for none.
 int cSC4FeatureManager::GetCurrentExpansionPack() const {
     for (int pack = 0x20; pack != 0; --pack)
-        if (IsFeatureEnabled(static_cast<std::uint32_t>(pack))) return pack;
+        if (IsExpansionPackInstalled(pack)) return pack;
     return 0;
 }
 

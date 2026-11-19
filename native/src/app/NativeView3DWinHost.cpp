@@ -37,6 +37,7 @@
 #include "sc4/Ordinance.h"
 #include "sc4/cSTETerrain.h"
 #include "sc4/ServiceLocator.h"
+#include "sc4/WinLocationSaver.h"
 #include "sc4/ViewInputControlCityScroll.h"
 #include "app/NativeUi.h"
 #include "app/NativeBoot.h"
@@ -620,7 +621,7 @@ public:
     void EndGamePause() override {
         if (auto* simulator = CityComponentAs<cSC4Simulator>(CityComponent::Simulator, kGZCLSID_cSC4Simulator)) simulator->HiddenResume();
     }
-    cSLWinLocationSaver* WindowLocationSaver() override { return nullptr; }
+    cSLWinLocationSaver* WindowLocationSaver() override { return static_cast<cSLWinLocationSaver*>(SL::spWinLocationSaver); }
     cIGZWinMgr* WindowManager() override { return ActiveWinMgr(); }
     // RZ::WM() vslot 0x128 GZSetFocus(SL::spView3DWin): the keys go back to the city view when the popup is done.
     void FocusView3D() override {

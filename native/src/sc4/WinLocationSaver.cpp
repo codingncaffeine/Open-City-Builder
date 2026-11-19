@@ -22,7 +22,9 @@ std::uint32_t cSLWinLocationSaver::Release() {
 bool cSLWinLocationSaver::Init() {
     if (!initialized_) {
         mainWindow_ = SL::spSC4->GetMainWindow();
-        const std::uint8_t* entries = SL::spPreferences + kPreferencesOffset;
+        // the app's preferences (spSC4 vslot 0x98): SL::spPreferences is not published yet (cSC4App::Init calls this before
+        // SL::OnAppInit1)
+        const std::uint8_t* entries = SL::spSC4->GetPreferences() + kPreferencesOffset;
         for (int i = 0; i < kSavedWindowCount; ++i) {
             std::uint32_t triple[3];
             std::memcpy(triple, entries + i * 12, sizeof triple);

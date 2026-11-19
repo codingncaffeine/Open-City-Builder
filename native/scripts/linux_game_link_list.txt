@@ -58,6 +58,7 @@ src/html/HTMLDrawContext.cpp
 src/sc4/SimStreamOps.cpp
 src/sc4/AutoHelpers.cpp
 src/sc4/DBSegment.cpp
+src/sc4/ResourceAsFile.cpp
 src/rz/cRZMessage2Standard.cpp
 src/rz/RZStringUtils.cpp
 src/rz/Radio.cpp
@@ -82,6 +83,7 @@ src/gz/GZApp.cpp
 src/gz/cGZCOM.cpp
 src/gz/CheatCodeManager.cpp
 src/gz/cGZDBSegmentPackedFile.cpp
+src/gz/cGZDBSerialRecordAsIGZFile.cpp
 src/gz/cGZPersistDBSegment.cpp
 src/rz/cRZCOMDllDirector.cpp
 src/rz/cRZStream.cpp
@@ -229,6 +231,7 @@ src/gz/DrawFontRenderer.cpp
 src/app/NativeFonts.cpp
 src/sc4/WinSC4App.cpp
 src/app/NativeBoot.cpp
+src/app/NativeAppServices.cpp
 src/app/NativeUi.cpp
 src/sc4/View3DWin.cpp
 src/sc4/ViewInputControlCityScroll.cpp
@@ -661,7 +664,8 @@ src/app/NativePlumbing.cpp
 src/app/NativeGraphsView.cpp
 src/app/NativeLotConfigHost.cpp
 src/app/NativeCatalogUi.cpp
-src/app/NativeToolTips.cpp
+src/sc4/ToolTipManager.cpp
+src/sc4/MissingPluginDataReporter.cpp
 src/app/NativeWaterRipple.cpp
 src/app/NativeVolcanoLava.cpp
 src/sc4/VolcanoLava.cpp

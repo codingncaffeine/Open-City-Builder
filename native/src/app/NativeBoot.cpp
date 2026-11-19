@@ -12,6 +12,8 @@
 #include "platform/GameDataPath.h"
 #include "app/NativeGlyphTextures.h"
 #include "app/NativeBoot.h"
+#include "app/NativeAppServices.h"
+#include "gz/cGZDBSerialRecordAsIGZFile.h"
 #include "gz/CommandServer.h"
 #include "gz/GZFramework.h"
 #include "lua/SCLuaInstance.h"
@@ -34,12 +36,6 @@ void SetGameResolution(int width, int height, int screenWidth, int screenHeight)
 }  // namespace native
 namespace {
 sc4::cSCStringDetokenizer* g_detokenizer = nullptr;
-struct Object final : cIGZUnknown {
-    bool QueryInterface(std::uint32_t, void** out) override { *out = this; return true; }
-    std::uint32_t AddRef() override { return ++refs; }
-    std::uint32_t Release() override { return --refs; }
-    int refs = 0;
-};
 struct Graphics final : IGraphicSystemControl {
     gd::cIGZGDriver* driver = nullptr;   // the native Metal driver the application window made
     DisplayMetrics GetScreenMetrics() override { return {std::uint32_t(g_screenW), std::uint32_t(g_screenH), 32}; }
@@ -132,8 +128,9 @@ bool RunBoot(bool verbose, bool keepAlive, gd::cIGZGDriver* driver, const std::f
         return true;
     };
     app->StartupHooks().bundleGameDataDirectory = [&] { return bundle + "/GameData"; };
-    for (const char* name : {"cSLWinLocationSaver", "cSC4FeatureManager", "cSC4ToolTipManager", "cSC4MissingPluginDataReporter"})   // the nation is created by the application (NativeRegion)
-        app->SetServiceFactory(name, []() -> cIGZUnknown* { return new Object(); });
+    // The window location saver, the feature manager, the tool tip manager and the missing plugin reporter are the recovered
+    // classes (NativeAppServices.cpp); the nation is created by the application (NativeRegion).
+    InstallAppServices(*app);
     // The glyph texture manager (text in the 3D view: signposts, labels): app/NativeGlyphTextures.cpp, Init'ed on creation.
     app->SetServiceFactory("cSC4GlyphTextureManager", []() -> cIGZUnknown* { return native::CreateGlyphTextureManager(); });
     // The string detokenizer (GZCOM 0xaa2c8c2a): the recovered default one, with #City# #Mayor# #Year# #Population# #Region#
@@ -154,6 +151,8 @@ bool RunBoot(bool verbose, bool keepAlive, gd::cIGZGDriver* driver, const std::f
 
     // GZCOM class cSCLua (0xea10c4a2 / 0x4b2811aa): the scripting host on the vendored Lua 5.0 (the app's Lua, advisors, tutorial).
     gz::RegisterDirectorMaker("cSCLua", +[]() -> cIGZUnknown* { return lua5::MakeSCLuaObject(); });
+    // GZCOM class 0x0a32c0da (cGZResManCOMDirector): a database record as a file (SC4GetResourceAsFile, the Gimex reader / writer).
+    gz::RegisterDirectorMaker("CreateGZDBSerialRecordAsIGZFile", &gz::CreateGZDBSerialRecordAsIGZFile);
     // The Gimex reader / writer classes and the port's PNG / BMP codecs behind them (snapshots, image views).
     native::InstallImageCodecs();
     if (beforeInit) beforeInit(*framework, *app);

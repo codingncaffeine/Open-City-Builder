@@ -47,7 +47,6 @@
 #include "app/NativeBoot.h"
 #include "app/NativeCity.h"
 #include "app/NativeAnimationTicks.h"
-#include "app/NativeToolTips.h"
 #include "app/NativeIntro.h"
 #include "platform/PerfLog.h"
 #include "sc4/CameraControl.h"
@@ -63,6 +62,7 @@
 #include "app/NativeWinMgr.h"
 #include "app/NativeWinSC4App.h"
 #include "gz/BufferFontRenderer.h"
+#include "gz/cGZMessageServer.h"
 #include "gz/cGZMessageServer2.h"
 #include "gz/DrawFontRenderer.h"
 #include "gz/GZFont.h"
@@ -81,6 +81,7 @@
 #include "sc4/SC4UI.h"
 #include "sc4/SLBuffer.h"
 #include "sc4/ServiceLocator.h"
+#include "sc4/WinLocationSaver.h"
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/WinSC4App.h"
 #include "sc4/WinSplashScreen.h"
@@ -449,7 +450,7 @@ public:
         window->Release();
         return ok;
     }
-    cSLWinLocationSaver* WindowLocationSaver() override { return nullptr; }
+    cSLWinLocationSaver* WindowLocationSaver() override { return static_cast<cSLWinLocationSaver*>(SL::spWinLocationSaver); }
     void BeginGamePause() override {}
     void EndGamePause() override {}
 } gUiHost;
@@ -595,7 +596,6 @@ void Frame() {
     native::EndFrameJobs();
     if (gAudio) gAudio->Tick();
     PumpTimers();
-    native::TickToolTips();
     gLaps.Lap("jobs+audio");
     cSC4App* app = native::BootApplication();
     if (app) {
@@ -697,7 +697,6 @@ bool Boot() {
     gMgr->Init();
     gMgr->GetMainWindow()->SetArea(0, 0, gW, gH);
     SetWinClock([]() -> std::uint32_t { return static_cast<std::uint32_t>(SDL_GetTicks()); });   // the windows' fade clock (ms)
-    native::InstallToolTips(gMgr.get());   // cSC4ToolTipManager + the callout boxes' buffers
     if (!InitFont()) std::printf("font: FAILED to initialise\n");
     gz::SetWinFontSource(&gFontSource);
     gz::SetWinStyleManager(&gStyleManager);
@@ -713,6 +712,11 @@ bool Boot() {
             void RemoveTickClient(cIGZSystemService*) override {}
         } messageFramework;
         SetMessageServerFramework(&messageFramework);
+        // The first message server (service 0x64063387, cSC4App::AddSystemServices makes it before the second): the tool tips, the
+        // quit request and the sound events go through it; the frame loop pumps it (RunMessageServerPump).
+        auto* messages = new cGZMessageServer();
+        framework.AddSystemService(messages);
+        messages->Init();
         auto* messages2 = new cGZMessageServer2();
         // As cSC4App::AddSystemServices sets it: a tick delivers only what was queued when it began, so a message that posts
         // itself again (the advisor ticker) waits for the next tick instead of keeping one tick going for ever.

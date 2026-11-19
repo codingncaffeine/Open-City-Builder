@@ -1,7 +1,8 @@
 #include "app/NativeAudio.h"
 
 #include "app/GameAudio.h"
-#include "app/NativeToolTips.h"
+#include "gz/RZServices.h"
+#include "sc4/ToolTipManager.h"
 #include <cstdio>
 #include <cstdlib>
 
@@ -29,8 +30,13 @@ public:
     cIGZBuffer* Image(std::uint32_t id) override { gz::IWinCtrlFactory* stock = gz::WinCtrlFactory(); return stock ? stock->Image(id) : nullptr; }
     std::uint32_t DefaultSoundId(int) override { return 0; }
     void PlaySound(std::uint32_t soundId) override { PlayGameSound(soundId); }
-    void ShowTip(const gz::BtnTipRequest& request) override { if (request.text) ShowToolTip(*request.text); }   // 0x22c010d0
-    void HideTip() override { HideToolTip(); }                                                                  // 0x22c010d2
+    // RZ::MS(): the tip request goes to the tool tip manager (cSC4ToolTipManager) as message 0x22c010d0, the hide as 0x22c010d2.
+    void ShowTip(const gz::BtnTipRequest& request) override {
+        if (cIGZMessageServer* messages = RZ::MS()) messages->MessageSend(cGZMessage{kMsgToolTipShow, reinterpret_cast<std::uint64_t>(&request), 0, 0});
+    }
+    void HideTip() override {
+        if (cIGZMessageServer* messages = RZ::MS()) messages->MessageSend(cGZMessage{kMsgToolTipHide, 0, 0, 0});
+    }
     bool HasWindowColorManager() override { gz::IWinFontSource* fonts = gz::WinFontSource(); return fonts && fonts->Available(); }
 };
 ButtonHost g_buttons;

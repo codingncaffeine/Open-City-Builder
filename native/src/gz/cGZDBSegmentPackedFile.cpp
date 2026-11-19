@@ -7,6 +7,7 @@
 #include <filesystem>
 
 #include "gz/cGZDBRecords.h"
+#include "gz/cGZDBSerialRecordAsIGZFile.h"
 #include "gz/cGZPersistResourceKeyList.h"
 #include "rz/cRZFastCompression3.h"
 
@@ -16,120 +17,6 @@ constexpr cGZPersistResourceKey kDirectoryRecordKey{0xe86b1eef, 0xe86b1eef, 0x28
 constexpr std::uint32_t kDirectoryRecordType = 0xe86b1eef;
 constexpr std::uint8_t kEmbeddedMarker[16] = {0x80, 0x9d, 0x88, 0xec, 0x8f, 0x24, 0x03, 0x6c,
                                               0xc9, 0xa6, 0x31, 0x56, 0x5b, 0xcf, 0x77, 0x22};
-
-// A persisted record exposed as a plain file (cIGZFile) — cGZDBSerialRecordAsIGZFile.
-class RecordAsFile final : public cIGZFile {
-public:
-    explicit RecordAsFile(cIGZPersistDBRecord* record) {
-        void* raw = nullptr;
-        if (record && record->QueryInterface(kGZIID_cIGZPersistDBSerialRecord, &raw))
-            record_ = static_cast<cIGZPersistDBSerialRecord*>(raw);
-    }
-    ~RecordAsFile() override { if (record_) Close(); }
-
-    bool QueryInterface(std::uint32_t iid, void** out) override {
-        if (iid == 0x8a32c0ac || iid == kGZIID_cIGZUnknown) { *out = static_cast<cIGZUnknown*>(this); }
-        else if (iid == kGZIID_cIGZFile) { *out = static_cast<cIGZFile*>(this); }
-        else return false;
-        AddRef();
-        return true;
-    }
-    std::uint32_t AddRef() override { return ++refs_; }
-    std::uint32_t Release() override {
-        if (refs_ < 2) {
-            if (IsOpen()) Close();
-            delete this;
-            return 0;
-        }
-        return --refs_;
-    }
-    // @ 0x10036982c: takes a reference on the new record, drops the old one, always succeeds.
-    bool SetDBSerialRecord(cIGZPersistDBSerialRecord* record) {
-        if (record) record->AddRef();
-        if (record_) record_->Release();
-        record_ = record;
-        return true;
-    }
-    cIGZPersistDBSerialRecord* GetDBSerialRecord() { return record_; }       // @ 0x1003709ce
-    cIGZFile* AsIGZFile() { return this; }                                   // @ 0x1003709d8 (the cIGZFile base at +8)
-    bool Open(int, int, int) override { return false; }
-    bool IsOpen() const override { return record_ != nullptr; }
-    bool Close() override {
-        if (!record_) return false;
-        record_->AsIGZPersistDBRecord()->Close();
-        record_->Release();
-        record_ = nullptr;
-        return true;
-    }
-    int Position() override { return record_ ? static_cast<int>(record_->GetPosition()) : -1; }
-    std::uint32_t Length() override { return record_ ? record_->GetSize() : 0; }
-    bool SetLength(std::uint32_t n) override { return record_ ? record_->SetSize(n) : false; }
-    void SeekToBegin() override { if (record_) record_->SeekAbsolute(0); }
-    void SeekToEnd() override {
-        if (!record_) return;
-        std::uint32_t size = record_->GetSize();
-        if (size) record_->SeekAbsolute(size);
-    }
-    void SeekToRelativePosition(int d) override { if (record_) record_->SeekRelative(d); }
-    void SeekToPosition(std::uint32_t p) override { if (record_) record_->SeekAbsolute(p); }
-    std::uint32_t Seek(int offset, int origin) override {
-        if (!record_) return 0xffffffffu;
-        switch (origin) {
-            case 0: return record_->SeekAbsolute(static_cast<std::uint32_t>(offset)) ? static_cast<std::uint32_t>(offset) : 0xffffffffu;
-            case 1: return record_->SeekRelative(offset) ? record_->GetPosition() : 0xffffffffu;
-            case 2: {
-                std::uint32_t size = record_->GetSize();
-                if (size == 0) return 0xffffffffu;
-                std::uint32_t p = size + static_cast<std::uint32_t>(offset);
-                return record_->SeekAbsolute(p) ? p : 0xffffffffu;
-            }
-            default: return 0xffffffffu;
-        }
-    }
-    bool Read(void* d, std::uint32_t n) override { return record_ && record_->GetFieldVoid(d, n); }
-    bool ReadWithCount(void* d, std::uint32_t& n) override {
-        if (!record_) return false;
-        std::uint32_t pos = record_->GetPosition(), size = record_->GetSize();
-        if (size < n + pos) n = size - pos;
-        return record_->GetFieldVoid(d, n);
-    }
-    bool Write(const void* s, std::uint32_t n) override { return record_ && record_->SetFieldVoid(s, n); }
-    bool WriteWithCount(const void* s, std::uint32_t& n) override {
-        if (!record_) return false;
-        if (!record_->SetFieldVoid(s, n)) n = 0;
-        return true;
-    }
-    bool Flush() override { return true; }
-    bool Remove() override { return false; }
-    bool Rename(const cIGZString&) override { return false; }
-    bool Exists() override { return record_ != nullptr; }
-    bool Copy(const cIGZString&, bool) override { return false; }
-    bool Copy(const cIGZFile&, bool) override { return false; }
-    void GetPath(cIGZString&) const override {}
-    const cIGZString* GetPath() const override {
-        static const cRZString kEmpty;
-        return &kEmpty;
-    }
-    const char* GetPathCStr() const override { return nullptr; }
-    void SetPath(const cIGZString&) override {}
-    void SetPath(const char*) override {}
-    bool GetOpenModes(int& access, int& creation, int& share) const override {
-        access = 0;
-        creation = 3;
-        share = 1;
-        if (!record_) return false;
-        std::uint32_t flags = record_->AsIGZPersistDBRecord()->GetAccessFlags();
-        if (flags & 1) access |= 1;
-        if (flags & 2) access |= 2;
-        return true;
-    }
-    void GetBuffering(std::uint32_t&, std::uint32_t&) const override {}
-    bool SetBuffering(std::uint32_t, std::uint32_t) override { return true; }
-
-private:
-    cIGZPersistDBSerialRecord* record_ = nullptr;
-    std::uint32_t refs_ = 0;
-};
 
 }  // namespace
 
@@ -573,9 +460,14 @@ bool cGZDBSegmentPackedFile::WriteFileSpan(const void* source, std::uint32_t off
 
 bool cGZDBSegmentPackedFile::GetRecordAsIGZFile(cIGZPersistDBRecord* record, cIGZFile** file) {
     std::lock_guard<std::recursive_mutex> guard(mutex_);
-    auto* wrapper = new RecordAsFile(record);
-    wrapper->AddRef();
-    *file = wrapper;
+    auto* wrapper = new gz::cGZDBSerialRecordAsIGZFile();
+    void* serial = nullptr;
+    if (record && record->QueryInterface(kGZIID_cIGZPersistDBSerialRecord, &serial)) {
+        wrapper->SetDBSerialRecord(static_cast<cIGZPersistDBSerialRecord*>(serial));
+        static_cast<cIGZPersistDBSerialRecord*>(serial)->Release();
+    }
+    *file = wrapper->AsIGZFile();
+    (*file)->AddRef();
     return true;
 }
 
