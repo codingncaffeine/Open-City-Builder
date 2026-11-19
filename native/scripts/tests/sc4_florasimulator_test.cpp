@@ -555,6 +555,25 @@ int main() {
         CHECK(s->Propagation());
         Send(*s, kFloraMsgCityEstablished);
         CHECK(!s->Propagation());
+        {   // the same two messages as plain messages (no payload interface): handled the same way
+            struct Plain final : cIGZMessage2 {
+                std::uint32_t type = 0;
+                bool QueryInterface(std::uint32_t, void**) override { return false; }
+                std::uint32_t AddRef() override { return 2; }
+                std::uint32_t Release() override { return 1; }
+                bool Create(std::uint32_t, void**) const override { return false; }
+                std::uint32_t GetType() const override { return type; }
+                void SetType(std::uint32_t t) override { type = t; }
+                bool IsEqual(const cIGZMessage2&) const override { return false; }
+                bool IsLess(const cIGZMessage2&) const override { return false; }
+            } plain;
+            plain.type = kFloraMsgCityObliterated;
+            s->DoMessage(&plain);
+            CHECK(s->Propagation());
+            plain.type = kFloraMsgCityEstablished;
+            s->DoMessage(&plain);
+            CHECK(!s->Propagation());
+        }
         Cheat(*s, "Flora propogation");
         CHECK(s->Propagation() && s->PropagationForced());
         s->Shutdown();

@@ -53,6 +53,7 @@ struct Host final : IObliterateCityHost {
     std::vector<std::pair<int, int>> demolished;   // x0, z0 of each call
     std::set<std::pair<int, int>> occupiedBlocks;  // block corners that report occupants
     std::vector<std::string> effects;
+    std::vector<std::size_t> effectBlocks;   // how many blocks were demolished when each effect was made (its block's index)
     std::uint32_t finaleMessage = 0;
     Tuning ReadTuning() override {
         Tuning t;
@@ -77,6 +78,7 @@ struct Host final : IObliterateCityHost {
     void DezoneCity(int maxX, int maxZ) override { if (maxX == 63 && maxZ == 63) ++dezoned; }
     IObliterateEffect* CreateEffect(const char* name, float, float, bool keep, std::uint32_t endMessage) override {
         effects.push_back(name);
+        effectBlocks.push_back(demolished.size());
         if (!keep) return nullptr;
         finaleMessage = endMessage;
         return new Effect(&effectStops, &hardStop);
@@ -129,6 +131,7 @@ int main() {
     Tick(tool, 0);         // no change: no work
     CHECK(tool->BlocksProcessed() == 8);
     CHECK(host.effects.size() == 2);   // after six empty blocks the seventh empty one sparkles (blocks 2..7 skipped, 8 sparkles)
+    CHECK(host.effectBlocks.size() == 2 && host.effectBlocks[0] == 0 && host.effectBlocks[1] == 7);
     // an occupied block sparkles at once
     const std::size_t before = host.effects.size();
     for (int z = 0; z < 64; z += 4)
