@@ -22,7 +22,6 @@ CitySituationAdvice
 DemandSimulator
 Disaster
 Effects
-EffectsManager
 EstablishCity
 GraphsView
 GrowthDeveloper
@@ -57,7 +56,6 @@ PropDeveloper
 PropManager
 Prop
 PropController
-PropVisualEffect
 PropertyView
 PylonOccupant
 Render3D

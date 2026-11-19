@@ -14,6 +14,7 @@
 namespace native {
 bool CityComponentInit_cSC4DisasterLayer(cIGZUnknown* object, bool init);
 bool CityComponentInit_cSC4CrimeSimulator(cIGZUnknown* object, bool init);
+bool CityComponentInit_cSC4EffectsManager(cIGZUnknown* object, bool init);   // NativeEffects.cpp
 namespace {
 using namespace sc4;
 
@@ -34,11 +35,12 @@ bool Skipped(const char* name, bool init) {
 }
 
 // Components whose recovered class has a no-argument Init (the list in citycomp/CityComponentInit.h, one TU per class), plus the
-// disaster layer and the crime simulator (their own files). Not dispatched yet (each is a to-do, PLAN.md 3a item A): the lot
-// developer, the effects manager and the demolition utility.
+// disaster layer, the crime simulator and the effects manager (their own files). Not dispatched yet (each is a to-do, PLAN.md 3a
+// item A): the lot developer and the demolition utility.
 bool Dispatch(cIGZUnknown* object, bool init) {
     if (CityComponentInit_cSC4DisasterLayer(object, init)) return true;   // NativeDisasters.cpp
     if (CityComponentInit_cSC4CrimeSimulator(object, init)) return true;  // NativeCrime.cpp
+    if (CityComponentInit_cSC4EffectsManager(object, init)) return true;  // NativeEffects.cpp
 #define SC4_TRY_CITY_COMPONENT(c) if (CityComponentInit_##c(object, init)) return true;
     SC4_CITY_COMPONENTS(SC4_TRY_CITY_COMPONENT)
 #undef SC4_TRY_CITY_COMPONENT

@@ -2,9 +2,10 @@
 // the animation ticks, its draw pass in the renderer), the particle systems' terrain, model and effect lookups, and the
 // terrain's CreateTerrainEffect (the god-mode animal brushes place their herds through it).
 //
-// The original's manager Init reaches the renderer (vslot 0x100: AddViewObject(manager, list 5, priority 0x76c)), the
-// animation tick manager (AddTickableObject(manager, 0xc0)) and the message server; here the city view attaches it once
-// its renderer exists (AttachEffects) and detaches it when the renderer shuts down (DetachEffects).
+// The manager is a city component: cSC4City::Init initialises it in its own pass (after the terrain and the surface water, before
+// the occupant manager), and its Init reaches the renderer through the host (SL::spRenderer, published by the view's
+// DoPreCityInit; vslot 0x100: AddViewObject(manager, list 5, priority 0x76c)), the animation tick manager
+// (AddTickableObject(manager, 0xc0)) and the message server. The props reach it as SL::spEffectsManager.
 #include "app/NativeCheats.h"
 #include "app/NativeEffects.h"
 #include "app/NativeEffectComponents.h"
@@ -35,6 +36,12 @@
 #include "sc4/AnimationTickManager.h"
 #include "sc4/CameraControl.h"
 #include "sc4/EffectsManager.h"
+#include "rz/cRZAutoRefCount.h"
+#include "rz/cRZMessage2Standard.h"
+#include "sc4/WeatherSimulator.h"
+#include "sc4/Simulator.h"
+#include "sc4/LightingManager.h"
+#include "sc4/EffectMaps.h"
 #include "sc4/EffectsResource.h"
 #include "sc4/ModelBasedParticlesEffect.h"
 #include "sc4/VisualEffect.h"
@@ -46,16 +53,15 @@
 #include "sc4/cSTETerrain.h"
 
 namespace native {
+sc4::cSC43DRender* CityRenderer();   // app/NativeCityView.cpp
 namespace {
 
 constexpr std::uint32_t kGZIID_cIS3DResModel = 0x9ad0e7e3;
 constexpr std::uint32_t kModelType = 0x5ad0e817, kModelGroup = 0xbadb57f1;
 
 sc4::cSC4EffectsManager* g_manager = nullptr;
-sc4::cSC4City* g_city = nullptr;
-sc4::cSC43DRender* g_render = nullptr;   // attached, waiting for its effects manager (created after the view in a loaded city)
+sc4::cSC43DRender* g_render = nullptr;   // the renderer the effects pass is in (the manager's AttachRenderable)
 bool g_debug = false;
-bool BindManager();
 
 sc4::cSTETerrain* CityTerrain() {
     sc4::cSC4City* city = HostCity();
@@ -151,15 +157,16 @@ public:
     std::uint32_t AddRef() override { return ++refs_; }
     std::uint32_t Release() override { return --refs_; }
     void DrawViewObject(SC4DrawContext& context) override {
-        if (!g_manager && !BindManager()) return;
+        if (!g_manager) return;
         g_draw.context = &context;
         if (g_debug) {
             static int frame = 0;
             if (++frame % 10 == 0) {
                 int inUse = 0, started = 0, particles = 0, withModel = 0;
                 g_manager->ModelEffectCensus(inUse, started, particles, withModel);
-                std::fprintf(stderr, "effects: frame %d, %zu visual effects active, model systems %d (started %d, with model %d), %d particles, dt %.3f\n",
-                                        frame, g_manager->ActiveVisualEffectSlots().size(), inUse, started, withModel, particles, g_manager->ElapsedSeconds());
+                std::fprintf(stderr, "effects: frame %d, %zu visual effects active, model systems %d (started %d, with model %d), %d particles, dt %.3f, zoom %d lod %d\n",
+                                        frame, g_manager->ActiveVisualEffectSlots().size(), inUse, started, withModel, particles, g_manager->ElapsedSeconds(),
+                                        g_manager->Zoom(), g_manager->LodLevel());
             }
         }
         g_manager->Update(&context);
@@ -168,6 +175,19 @@ public:
 private:
     std::uint32_t refs_ = 1;
 };
+EffectsPass g_pass;
+
+sc4::cSC4WeatherSimulator* CityWeather() {
+    sc4::cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::WeatherSimulator) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(0xe4fda3d4, &raw) || !raw) return nullptr;
+    auto* serializable = static_cast<cIGZSerializable*>(raw);
+    auto* weather = serializable->GetGZCLSID() == sc4::kGZCLSID_cSC4WeatherSimulator ? static_cast<sc4::cSC4WeatherSimulator*>(serializable) : nullptr;
+    serializable->Release();
+    return weather;
+}
+sc4::cISC4LightingManager* Lighting() { return dynamic_cast<sc4::cISC4LightingManager*>(SL::spLightingManager); }
 
 // ---- IEffectsManagerHost ----
 class ManagerHost final : public sc4::IEffectsManagerHost {
@@ -177,12 +197,29 @@ public:
     float TerrainCellSize() override { return 16.0f; }
     int TerrainCellsX() override { sc4::cSTETerrain* t = CityTerrain(); return t ? static_cast<int>(t->CellCountX()) : 64; }
     int TerrainCellsZ() override { sc4::cSTETerrain* t = CityTerrain(); return t ? static_cast<int>(t->CellCountZ()) : 64; }
-    cIGZUnknown* Renderer() override { return nullptr; }   // AttachEffects adds the pass once the renderer exists
-    void AttachRenderable(cIGZUnknown*) override {}
-    void DetachRenderable(cIGZUnknown*) override {}
+    // SL::spRenderer, one reference (the manager keeps it until its Shutdown).
+    cIGZUnknown* Renderer() override {
+        cIGZUnknown* renderer = SL::spRenderer;
+        if (renderer) renderer->AddRef();
+        return renderer;
+    }
+    void AttachRenderable(cIGZUnknown*) override;     // renderer vslot 0x100 (list 5, priority 0x76c)
+    void DetachRenderable(cIGZUnknown*) override;     // renderer vslot 0x108
     IParticlesVertexBuffer* VertexBufferExtension() override { return nullptr; }
-    cIGZUnknown* WeatherSim() override { return nullptr; }
-    sc4::cSC4EffectMaps* CreateEffectMaps() override { return nullptr; }
+    // SL::spWeatherSim: the city's weather simulator, one reference (the manager keeps it until its Shutdown).
+    cIGZUnknown* WeatherSim() override {
+        sc4::cSC4WeatherSimulator* weather = CityWeather();
+        if (!weather) return nullptr;
+        cIGZUnknown* object = static_cast<sc4::cISC4WeatherSimulator*>(weather);
+        object->AddRef();
+        return object;
+    }
+    // new cSC4EffectMaps (the manager Inits it).
+    sc4::cSC4EffectMaps* CreateEffectMaps() override {
+        auto* maps = new sc4::cSC4EffectMaps();
+        maps->AddRef();
+        return maps;
+    }
     cIGZUnknown* CreateEffectsResource() override { return nullptr; }
     void ShutdownEffectsResource(cIGZUnknown*) override {}
     bool EffectsResourceChanged() override { return false; }
@@ -225,11 +262,17 @@ public:
     }
     void RegisterGameDataFunctions() override {}
     void UnregisterGameDataFunctions() override {}
-    void PostMessage(std::uint32_t) override {}
+    // SL::spMS2 MessagePost of a cRZMessage2Standard of this type (the effects tick, the parse of the effect files).
+    void PostMessage(std::uint32_t type) override {
+        if (!SL::spMS2) return;
+        cRZAutoRefCount<cRZMessage2Standard> message(new cRZMessage2Standard());
+        message->SetType(type);
+        SL::spMS2->MessagePost(message.get(), false);
+    }
     bool EffectsResourceParseFiles() override { return false; }
     const char* EffectsResourceErrorString() override { return ""; }
     void SetView3DErrorReportString(const char*) override {}
-    int ViewZoom() override { return 5; }
+    int ViewZoom() override { return SL::spViewUtilities ? SL::spViewUtilities->Zoom() : 0; }   // SL::spViewUtilities +0x14
     // The particle size cap: SL::spViewUtilities +0x158 (world units per viewport unit at this zoom) times the render property
     // kParticleSizeThreshold (float 11, default 300 viewport units).
     float WorldUnitsPerViewportUnit() override {
@@ -239,20 +282,62 @@ public:
     float RenderHeightScale() override { return 300.0f; }
     std::uint32_t AddShake(const cSC4ShakeDescription&, const cS3DVector2*) override { return 0; }
     void RemoveShake(std::uint32_t) override {}
-    void SetLightingTint(float, const cS3DVector3&) override {}
-    void ClearLightingTint() override {}
+    // SL::spLightingManager vslots 0x38 / 0x40 (the lightning's flash, the fires' glow).
+    void SetLightingTint(float intensity, const cS3DVector3& colour) override {
+        if (sc4::cISC4LightingManager* lighting = Lighting()) lighting->SetLightingTint(colour, intensity);
+    }
+    void ClearLightingTint() override {
+        if (sc4::cISC4LightingManager* lighting = Lighting()) lighting->ResetLightingTint();
+    }
     std::int32_t AddSnowlineEffect() override { return -1; }
     void RemoveSnowlineEffect(std::int32_t) override {}
     void SetSnowlineAltitude(std::int32_t, float, float) override {}
-    int SimulatorDayOfYear() override { return 0; }
-    int CityHemisphere() override { return 0; }
+    int SimulatorDayOfYear() override {   // SL::spSimulator's date, day of the year
+        sc4::cSC4Simulator* simulator = CitySimulatorObject();
+        if (!simulator) return 0;
+        int year = 0, month = 0, day = 0, dayOfYear = 0, weekDay = 0;
+        simulator->GetSimDate(&year, &month, &day, &dayOfYear, &weekDay);
+        return dayOfYear;
+    }
+    int CityHemisphere() override { sc4::cSC4City* city = HostCity(); return city ? city->GetWorldHemisphere() : 0; }   // SL::spCity vslot 0xf0
     bool WeatherEnabled() override { return false; }
-    bool ViewportPositionToRay(int, int, float*, float*) override { return false; }
-    float SimulatorSpeed() override { return 1.0f; }
-    void WeatherWind(float& x, float& z) override { x = 0.0f; z = 0.0f; }
+    bool ViewportPositionToRay(int x, int y, float* origin, float* direction) override {
+        return SL::spViewUtilities && SL::spViewUtilities->ViewportPositionToRay(x, y, origin, direction);
+    }
+    // SL::spSimulator vslot 0x100 GetAnimationTimeDilation: 0 while paused, 1.5 / 2 at the faster speeds (effects.md 6); 1 without a
+    // simulator.
+    float SimulatorSpeed() override {
+        sc4::cSC4Simulator* simulator = CitySimulatorObject();
+        return simulator ? simulator->GetAnimationTimeDilation() : 1.0f;
+    }
+    // The weather simulator's ambient wind (vslot 0xb0): its direction scaled to its speed (weather.md 5.1.2).
+    void WeatherWind(float& x, float& z) override {
+        x = 0.0f;
+        z = 0.0f;
+        sc4::cSC4WeatherSimulator* weather = CityWeather();
+        if (!weather) return;
+        float wind[2] = {0.0f, 0.0f};
+        weather->GetAmbientWind(wind);
+        x = wind[0];
+        z = wind[1];
+    }
+    // SC4ViewUtilities::IsBoundingBoxInViewFrustum: particle systems outside the view are simulated but not drawn.
+    bool IsBoundingBoxInView(const cS3DBoundingBox& box) override {
+        if (!SL::spViewUtilities) return true;
+        return SL::spViewUtilities->IsBoundingBoxInViewFrustum(box.min, box.max);
+    }
     IParticlesDrawContext* ParticlesDrawContext(SC4DrawContext* context) override { return context ? &g_draw : nullptr; }
 };
 ManagerHost g_host;
+
+void ManagerHost::AttachRenderable(cIGZUnknown*) {
+    g_render = CityRenderer();
+    if (g_render) g_render->AddViewObject(&g_pass, 5, 0x76c);
+}
+void ManagerHost::DetachRenderable(cIGZUnknown*) {
+    if (g_render) g_render->RemoveViewObject(&g_pass);
+    g_render = nullptr;
+}
 
 // The effect components' services (sc4/EffectComponents.h): the sound components post their events to the sound system, which
 // here plays the sound through the game's sound manager. PARTIAL: the positional half (the move events, the 3D attenuation),
@@ -472,13 +557,11 @@ void DumpEffect(const sc4::cSC4EffectsCollection& collection, const std::string&
     }
 }
 
-// The city's effects manager, once it exists: hosts installed, Init (the packed library, the messages, the tick).
-bool BindManager() {
-    if (g_manager) return true;
-    if (!g_city) return false;
-    cIGZUnknown* component = g_city->GetComponent(sc4::CityComponent::EffectsManager);
-    g_manager = dynamic_cast<sc4::cSC4EffectsManager*>(component);
-    if (!g_manager) return false;
+}  // namespace
+
+// The manager's host and the services its effects reach (the particle systems' terrain, cells, textures and effects, the effect
+// components, the models): installed at start-up, before any city creates its manager (the manager keeps the host it was made with).
+void InstallEffectsManagerHost() {
     SetParticlesTerrain(&g_terrain);
     SetParticlesCity(&g_cityCells);
     SetParticlesTextures(&g_textures);
@@ -510,17 +593,28 @@ bool BindManager() {
     });
     sc4::SetModelParticlesHost(&g_models);
     InstallEffectComponentHosts();            // the scrubber, attractor and sequence classes and the brush component's terrain
-    g_manager->SetHost(&g_host);
-    sc4::SetPropVisualEffectHost(g_manager);  // visual-effect props create their effects through the manager (vslots 0x30 / 0x38)
-    g_manager->Init();                        // loads the packed library, registers the messages and the tick
-    g_manager->SetEffectsActive(true);       // the 0xab96b05f "effects active" message of the city start-up
-    // The view's zoom messages set the level of detail; the one the view sent before the manager existed is replayed.
-    if (sc4::cSC4CameraControl* camera = g_render ? g_render->GetCameraControl() : nullptr) g_manager->DoZoomChanged(camera->Zoom());
+    sc4::SetEffectsManagerHost(&g_host);
+}
+
+// cSC4City::Init / Shutdown, slot 0x18 / 0x20 of the effects manager component (NativeCityComponents.cpp dispatches here). Init loads
+// the packed library, attaches the effects pass to the renderer and registers the messages, the cheats and the tick; the city posts
+// "effects active" (0xab96b05f) after its Init and the camera's first view-change message sets the level of detail.
+bool CityComponentInit_cSC4EffectsManager(cIGZUnknown* object, bool init) {
+    auto* manager = dynamic_cast<sc4::cSC4EffectsManager*>(object);
+    if (!manager) return false;
+    if (!init) {
+        manager->Shutdown();
+        if (g_manager == manager) g_manager = nullptr;
+        return true;
+    }
+    g_debug = std::getenv("SC4_DEBUG") != nullptr;
+    g_manager = manager;
+    manager->Init();
     if (g_debug)
-        std::fprintf(stderr, "effects: manager up, %zu effects, %zu bindings\n", g_manager->Collection().Effects().size(),
-                     g_manager->EffectBindings().size());
+        std::fprintf(stderr, "effects: manager up, %zu effects, %zu bindings\n", manager->Collection().Effects().size(),
+                     manager->EffectBindings().size());
     if (const char* part = std::getenv("SC4_EFFECTNAMES")) {   // every effect name that holds the given text
-        for (const auto& entry : g_manager->Collection().EffectNames())
+        for (const auto& entry : manager->Collection().EffectNames())
             if (entry.first.find(part) != std::string::npos) std::fprintf(stderr, "fxname: %s [%d]\n", entry.first.c_str(), entry.second);
     }
     if (const char* names = std::getenv("SC4_EFFECTDUMP")) {
@@ -528,39 +622,22 @@ bool BindManager() {
         std::string list = names;
         for (std::size_t at = 0; at <= list.size();) {
             const std::size_t comma = std::min(list.find(',', at), list.size());
-            if (comma > at) DumpEffect(g_manager->Collection(), list.substr(at, comma - at), 0, seen);
+            if (comma > at) DumpEffect(manager->Collection(), list.substr(at, comma - at), 0, seen);
             at = comma + 1;
         }
     }
     return true;
 }
-}  // namespace
 
-void AttachEffects(sc4::cSC43DRender& render, sc4::cSC4City& city) {
-    g_debug = std::getenv("SC4_DEBUG") != nullptr;
-    g_city = &city;
-    g_render = &render;
-    g_manager = nullptr;
-    render.AddViewObject(new EffectsPass(), 5, 0x76c);
-    BindManager();
-}
-
+// The renderer shuts down (leaving the city): the effects pass leaves it. The manager itself shuts down in the city's pass.
 void DetachEffects() {
-    if (g_manager) {
-        if (sc4::cSC4AnimationTickManager* atm = AnimationTickManager()) atm->RemoveTickableObject(&g_target, 0xffffffffu);
-        g_manager->Shutdown();
-    }
-    g_manager = nullptr;
-    g_city = nullptr;
+    if (g_render) g_render->RemoveViewObject(&g_pass);
     g_render = nullptr;
-    sc4::SetModelParticlesHost(nullptr);
-    sc4::SetPropVisualEffectHost(nullptr);
-    SetParticlesEffects(nullptr);
 }
 
 sc4::ITerrainEffect* CreateTerrainEffect(std::uint32_t group, std::uint32_t type) {
-    if (!BindManager()) {
-        if (std::getenv("SC4_FXDEBUG")) std::fprintf(stderr, "effects: terrain effect %08x/%08x: no manager (city %p)\n", group, type, static_cast<void*>(g_city));
+    if (!g_manager) {
+        if (std::getenv("SC4_FXDEBUG")) std::fprintf(stderr, "effects: terrain effect %08x/%08x: no manager\n", group, type);
         return nullptr;
     }
     sc4::cSC4VisualEffect* effect = nullptr;
@@ -577,17 +654,17 @@ sc4::ITerrainEffect* CreateTerrainEffect(std::uint32_t group, std::uint32_t type
     return new TerrainEffect(effect);
 }
 
-bool HasNamedEffect(const char* name) { return BindManager() && g_manager->HasVisualEffect(name); }
+bool HasNamedEffect(const char* name) { return g_manager && g_manager->HasVisualEffect(name); }
 
 sc4::cSC4VisualEffect* CreateNamedEffect(const char* name) {
-    if (!name || !BindManager()) return nullptr;
+    if (!name || !g_manager) return nullptr;
     sc4::cSC4VisualEffect* effect = nullptr;
     if (!g_manager->CreateVisualEffect(name, &effect) || !effect) return nullptr;
     return effect;
 }
 
 sc4::cSC4VisualEffect* CreateKeyedEffect(std::uint32_t group, std::uint32_t type) {
-    if (!BindManager()) return nullptr;
+    if (!g_manager) return nullptr;
     sc4::cSC4VisualEffect* effect = nullptr;
     const bool ok = g_manager->CreateVisualEffect(group, type, &effect) && effect;
     if (std::getenv("SC4_FXDEBUG")) std::fprintf(stderr, "effects: keyed effect %08x/%08x -> %s\n", group, type, ok ? "made" : "none");
@@ -595,7 +672,7 @@ sc4::cSC4VisualEffect* CreateKeyedEffect(std::uint32_t group, std::uint32_t type
 }
 
 int StartNamedEffect(const char* name, float x, float y, float z) {
-    if (!BindManager()) return -1;
+    if (!g_manager) return -1;
     sc4::cSC4VisualEffect* effect = nullptr;
     if (!g_manager->CreateVisualEffect(name, &effect) || !effect) return 0;
     cS3DTransform source;   // identity rotation, translation, scale 1

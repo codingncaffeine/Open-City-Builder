@@ -6,16 +6,15 @@
 
 #include "s3d/S3DMath.h"
 #include "sc4/SCPropertyHelp.h"
+#include "sc4/ServiceLocator.h"
 
 namespace sc4 {
 
 namespace {
-IPropVisualEffectHost* g_host = nullptr;
 constexpr float kHalfPi = 1.5707964f;   // the original's 0x3fc90fdb
 }  // namespace
 
-IPropVisualEffectHost* PropVisualEffectHost() { return g_host; }
-void SetPropVisualEffectHost(IPropVisualEffectHost* host) { g_host = host; }
+IPropVisualEffectHost* PropVisualEffectHost() { return dynamic_cast<IPropVisualEffectHost*>(SL::spEffectsManager); }
 
 cSC4PropOccupantVisualEffect::cSC4PropOccupantVisualEffect() = default;
 
@@ -277,14 +276,14 @@ bool cSC4PropOccupantVisualEffect::RestartFromTypeVariant() {
 }
 
 bool cSC4PropOccupantVisualEffect::CreateByName() {
-    IPropVisualEffectHost* host = g_host;
+    IPropVisualEffectHost* host = PropVisualEffectHost();
     if (!host) return false;   // port guard: the original dereferences SL::spEffectsManager unconditionally
     return host->CreateEffectByName(effectName_.Data(), &effect_);
 }
 
 bool cSC4PropOccupantVisualEffect::CreateByType(std::uint32_t typeId) {
     if (typeId == 0) return false;
-    IPropVisualEffectHost* host = g_host;
+    IPropVisualEffectHost* host = PropVisualEffectHost();
     if (!host) return false;   // port guard: see CreateByName
     return host->CreateEffectByType(kPropEffectGroupId, typeId, &effect_);
 }

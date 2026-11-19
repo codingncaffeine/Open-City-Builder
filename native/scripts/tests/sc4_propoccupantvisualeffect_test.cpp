@@ -10,6 +10,7 @@
 #include "rz/PortMemoryStreams.h"
 #include "sc4/PropOccupantVisualEffect.h"
 #include "sc4/SCPropertyHelp.h"
+#include "sc4/ServiceLocator.h"
 
 using namespace sc4;
 
@@ -27,8 +28,12 @@ public:
     int refs = 0, starts = 0, stops = 0;
 };
 
-class FakeHost final : public IPropVisualEffectHost {
+// The effects manager service (SL::spEffectsManager) as the props reach it.
+class FakeHost final : public cIGZUnknown, public IPropVisualEffectHost {
 public:
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return 1; }
+    std::uint32_t Release() override { return 1; }
     struct Created {
         std::string name;   // empty for a type lookup
         std::uint32_t group = 0;
@@ -104,7 +109,7 @@ bool BitwiseEqual(float a, float b) { return std::memcmp(&a, &b, sizeof a) == 0;
 
 int main() {
     FakeHost host;
-    SetPropVisualEffectHost(&host);
+    SL::spEffectsManager = &host;
 
     // --- layout and construction -------------------------------------------------------------
     auto* object = NewObject();
@@ -345,7 +350,7 @@ int main() {
     sized->Release();
     writer->Release();
     object->Release();
-    SetPropVisualEffectHost(nullptr);
+    SL::spEffectsManager = nullptr;
 
     std::puts(failures ? "sc4_propoccupantvisualeffect: FAILED" : "sc4_propoccupantvisualeffect ok");
     return failures != 0;

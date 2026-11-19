@@ -41,7 +41,7 @@ void InstallDisasterStub();
 void InstallDisasterHosts();   // NativeDisasters.cpp
 void InstallDisasterTools();   // NativeDisasterTools.cpp
 void InstallEffectsStub();
-void InstallEffectsManagerStub();
+void InstallEffectsManagerHost();   // NativeEffects.cpp
 void InstallCityPanelHosts();
 void InstallEstablishCityHost();
 void InstallBudgetSimHosts();
@@ -86,7 +86,6 @@ void InstallPropDeveloperStub();
 void InstallPropManagerStub();
 void InstallPropStub();
 void InstallPropControllerStub();
-void InstallPropVisualEffectStub();
 void InstallPropertyViewStub();
 void InstallPylonOccupantStub();
 void InstallRender3DStub();
@@ -156,7 +155,7 @@ void InstallStubHosts() {
     InstallDisasterStub();
     InstallDisasterHosts();               // the real disaster, fire and flammability hosts replace the stub
     InstallEffectsStub();
-    InstallEffectsManagerStub();
+    InstallEffectsManagerHost();         // the effects manager's real host (a city's manager keeps the host it was made with)
     InstallCityPanelHosts();              // the RCI and opinion-poll gauges' services (NativeCityPanel.cpp)
     InstallEstablishCityHost();
     InstallBudgetSimHosts();
@@ -202,7 +201,6 @@ void InstallStubHosts() {
     InstallPropManagerStub();
     InstallPropStub();
     InstallPropControllerStub();
-    InstallPropVisualEffectStub();
     InstallPropertyViewStub();
     InstallPylonOccupantStub();
     InstallRender3DStub();

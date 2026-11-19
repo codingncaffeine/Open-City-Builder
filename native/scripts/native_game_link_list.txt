@@ -439,7 +439,6 @@ src/app/hosts/StubDemandSimulator.cpp
 src/app/hosts/StubDisaster.cpp
 src/app/hosts/StubEffectTool.cpp
 src/app/hosts/StubEffects.cpp
-src/app/hosts/StubEffectsManager.cpp
 src/app/NativeEstablishCity.cpp
 src/app/NativeBudgetSim.cpp
 src/app/NativeTerrainTool.cpp
@@ -485,7 +484,6 @@ src/app/hosts/StubProp.cpp
 src/app/hosts/StubPropController.cpp
 src/app/hosts/StubPropDeveloper.cpp
 src/app/hosts/StubPropManager.cpp
-src/app/hosts/StubPropVisualEffect.cpp
 src/app/hosts/StubPropertyView.cpp
 src/app/hosts/StubPylonOccupant.cpp
 src/app/hosts/StubQuery.cpp

@@ -75,8 +75,8 @@ constexpr char kPropEffectOffName[] = "off";
 constexpr std::uint16_t kPropVisualEffectRecordVersion = 3;
 constexpr std::uint8_t kOccupantFlagShown = 0x2;   // cSC4Occupant flags byte, bit 1: flagged by the view
 
-// The effects manager (SL::spEffectsManager, the global at 0x100b21368) as this class uses it. The manager itself
-// (cSC4EffectsManager) is not recovered; each method mirrors one original vtable call.
+// The effects manager (SL::spEffectsManager, the global at 0x100b21368) as this class uses it: cSC4EffectsManager implements
+// it; each method mirrors one original vtable call.
 // The effect object is the cSC4VisualEffect the manager returns; the calls this class makes on it are its primary
 // vtable's 0x18 Start / 0x20 Stop / 0x38 SetEffectTransform / 0x10 Release.
 class IPropVisualEffectHost {
@@ -88,8 +88,8 @@ public:
     // manager vslot 0x38: CreateVisualEffect(uint group, uint type, cISC4VisualEffect**) @ 0x1005e0c08.
     virtual bool CreateEffectByType(std::uint32_t groupId, std::uint32_t typeId, cSC4VisualEffect** out) = 0;
 };
+// SL::spEffectsManager seen through these calls (null without a city or when the service is not the manager).
 IPropVisualEffectHost* PropVisualEffectHost();
-void SetPropVisualEffectHost(IPropVisualEffectHost* host);
 
 // cISC4PropOccupantVisualEffect (iid 0x09820792). Slots after the cIGZUnknown trio; the two destructor slots of
 // the original (0x48 / 0x50) sit between StopEffect and Init there, but C++ places ours at the end of the table.

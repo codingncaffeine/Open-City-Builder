@@ -436,6 +436,9 @@ bool PrepareCityRenderStack(cISC4City* cityInterface) {
     g_cityRender = render;
     g_target.renderOk = render->Init();
     std::printf("city view: renderer %s\n", g_target.renderOk ? "up" : "FAILED");
+    // SL::OnView3DInit (DoPreCityInit, i386 after the model maker's Init): the view, its renderer and the view utilities are
+    // published before cSC4City::Init, whose components reach them (the effects manager attaches its pass to SL::spRenderer).
+    native::BindView3DServices(g_target.view, render);
     return g_target.renderOk;
 }
 
@@ -496,7 +499,6 @@ bool FinishCityRenderStack(cISC4City* cityInterface) {
         sc4::SetDBSegmentMessageServer(SL::spMS2);
         native::SetAutomataRenderer(render, city);
         native::PostCityInitToAutomataManagers(city);
-        native::AttachEffects(*render, *city);
     }
 
     auto* adapter = new RendererAdapter(render, control, driver, g_target.screen);
@@ -523,7 +525,6 @@ bool FinishCityRenderStack(cISC4City* cityInterface) {
     view.UpdatePopulation();
     view.UpdateSimulationClock();
     native::BindCityServices(cityInterface);
-    native::BindView3DServices(&view, render);
     native::ReportCityWiring();
     return ok;
 }
