@@ -54,8 +54,7 @@ bool cSLBuffer::Load() {
     if (buffer_ && colorType_ != 1 && colorType_ != 3) {
         cRZAutoRefCount<cIGZBuffer> converted;
         cIGZBuffer* fresh = host->CreateBuffer();
-        if (fresh) {
-            fresh->AddRef();
+        if (fresh) {   // the host's counted reference is the one released below
             cGZBufferColorType type;
             type.type = colorType_;
             const std::uint32_t index = static_cast<std::uint32_t>(colorType_) - 2;

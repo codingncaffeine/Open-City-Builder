@@ -28,7 +28,7 @@ struct Host final : ISLBufferHost {
         ++fileCalls; lastPath = path; lastType = type;
         auto* b = new cGZBuffer(); b->AddRef(); b->Init(2, 2, {kBufferColorRGB565, 16}); *out = b; return true;
     }
-    cIGZBuffer* CreateBuffer() override { return new cGZBuffer(); }
+    cIGZBuffer* CreateBuffer() override { auto* buffer = new cGZBuffer(); buffer->AddRef(); return buffer; }   // counted, as the hosts do
 };
 }  // namespace
 
