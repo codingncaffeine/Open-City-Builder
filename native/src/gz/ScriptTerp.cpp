@@ -177,7 +177,10 @@ bool cGZScriptTerp::AddToken(const cIGZString& name, std::uint32_t value) {   //
     IScriptVocab* vocab = CurrentVocabulary();
     if (!vocab) return false;
     cRZVariant* variant = new cRZVariant(value);
-    return vocab->AddTranslation(name, variant);
+    variant->AddRef();   // held across the call: a name already in the table leaves the variant unowned (the original leaks it)
+    const bool added = vocab->AddTranslation(name, variant);
+    variant->Release();
+    return added;
 }
 
 bool cGZScriptTerp::RemoveToken(const cIGZString& name) {   // @0x10054eabe
@@ -508,6 +511,7 @@ bool cGZScriptTerp::ExecuteScript() {   // @0x10054ecf0
     }
 
 finished:
+    if (token) token->Release();   // an error leaves the loop holding the current token (the original leaks it)
     cursor_ = nullptr;
     ClearParams();
     const bool success = state != kStateError;
