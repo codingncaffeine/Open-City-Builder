@@ -500,7 +500,9 @@ for entry in "${TESTS[@]}"; do
   objs=""; libs=""
   for w in "${words[@]}"; do
     case "$w" in
-      *.cpp|*.c) key=$(printf '%s|%s' "$w" "$inc" | cksum | cut -d' ' -f1); obj="$OUT/obj/$(basename "$w").$key.o"
+      # the source's modification time is part of the key, so an edited source compiles again on a subset run
+      # (a header edit still needs a full run, which starts from an empty cache)
+      *.cpp|*.c) key=$(printf '%s|%s|%s' "$w" "$inc" "$(stat -c %Y "$w" 2>/dev/null || stat -f %m "$w")" | cksum | cut -d' ' -f1); obj="$OUT/obj/$(basename "$w").$key.o"
                  wanted[$obj]="$w|$inc"; objs="$objs $obj" ;;
       -I*) ;;
       *) libs="$libs $w" ;;
