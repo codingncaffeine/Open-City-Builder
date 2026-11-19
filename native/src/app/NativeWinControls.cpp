@@ -41,14 +41,14 @@ void InstallWindowControlManager(cIGZWinMgr* windows, gz::cIGZWinCtrlMgr* existi
         ++images;
     });
     int captions = 0;
+    // The manager keeps the strings it is given (a reference each; cRZString::Release deletes at one): heap strings it owns.
     for (const auto& [id, instance] : kCaptions) {
         cRZString text;
         if (!LoadLocalizedString(kCaptionGroup, instance, text)) continue;
-        controls->SetDefaultText(static_cast<int>(id), &text);
+        controls->SetDefaultText(static_cast<int>(id), new cRZString(text));
         ++captions;
     }
-    const cRZString ellipsis("\xe2\x80\xa6");   // a literal U+2026, not a localized string
-    controls->SetDefaultText(static_cast<int>(kEllipsisCaption), &ellipsis);
+    controls->SetDefaultText(static_cast<int>(kEllipsisCaption), new cRZString("\xe2\x80\xa6"));   // a literal U+2026
     gz::SetWinCtrlMgr(controls);
     std::printf("window controls: %d stock images, %d captions (%s manager)\n", images, captions, existing ? "the framework's" : "own");
 }
