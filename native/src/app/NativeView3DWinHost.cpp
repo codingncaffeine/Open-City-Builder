@@ -607,7 +607,12 @@ public:
     }
     cSLWinLocationSaver* WindowLocationSaver() override { return nullptr; }
     cIGZWinMgr* WindowManager() override { return ActiveWinMgr(); }
-    void FocusView3D() override {}
+    // RZ::WM() vslot 0x128 GZSetFocus(SL::spView3DWin): the keys go back to the city view when the popup is done.
+    void FocusView3D() override {
+        WinMgr* manager = ActiveWinMgr();
+        sc4::cSC4View3DWin* view = CityView3DWin();
+        if (manager && view) manager->GZSetFocus(static_cast<cIGZWin*>(static_cast<cGZWin*>(view)));
+    }
     // operator new + the constructor: a count of 0, the tracker takes the reference.
     sc4::IAdvisorUIImageWinProc* CreateImageWinProc(int advisorId) override { return new sc4::cSC4AdvisorUIImageWinProc(advisorId); }
     bool SystemFont(std::uint32_t fontId, sc4::AdvisorPopupFont& out) override {
