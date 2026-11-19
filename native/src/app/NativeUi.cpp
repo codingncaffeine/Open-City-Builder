@@ -1,6 +1,7 @@
 // Platform glue of the native Metal application (no recovered counterpart on macOS); derived from the early host.
 #include "platform/GameDataPath.h"
 #include "app/NativeUi.h"
+#include "sc4/WinText.h"
 
 #include <algorithm>
 #include <cmath>
@@ -336,8 +337,8 @@ bool InitUiScripts(WinMgr* mgr) {
     gz::RegisterDirectorMaker("cGZWinBMP", +[]() -> cIGZUnknown* { return MakeWin<gz::cGZWinBMP>(); });
     gz::RegisterDirectorMaker("cGZWinCustom", +[]() -> cIGZUnknown* { return MakeWin<gz::cGZWinCustom>(); });
     gz::RegisterDirectorMaker("cSC4WinGenTransparent", +[]() -> cIGZUnknown* { return MakeWin<sc4::cSC4WinGenTransparent>(); });
-    // cSC4WinText (clsid 0xaa7cecfd) is not recovered (3 functions); a plain cGZWinText stands in for it
-    gz::RegisterDirectorMaker("cSC4WinText", +[]() -> cIGZUnknown* { return MakeWin<gz::cGZWinText>(); });
+    // cSC4WinText (clsid 0xaa7cecfd): the game's text window, a cGZWinText that wraps and ellipsizes its caption itself
+    gz::RegisterDirectorMaker("cSC4WinText", +[]() -> cIGZUnknown* { return MakeWin<sc4::cSC4WinText>(); });
     gz::RegisterDirectorMaker("cGZWinFlatRect", +[]() -> cIGZUnknown* { return MakeWin<gz::cGZWinFlatRect>(); });
     gz::RegisterDirectorMaker("cSC4WinMapView", +[]() -> cIGZUnknown* { return MakeWin<sc4::cSC4WinMapView>(); });   // clsid 0x28c5a41f
     gz::RegisterDirectorMaker("cSC4WinMiniMap", +[]() -> cIGZUnknown* { return MakeWin<sc4::cSC4WinMiniMap>(); });   // the city view's corner minimap
