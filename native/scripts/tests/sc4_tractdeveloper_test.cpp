@@ -1004,6 +1004,27 @@ void TestScoreCandidateLots() {
     CHECK(cSC4TractDeveloper::CompareCandidateLots(existing, measured));
     CHECK(!cSC4TractDeveloper::CompareCandidateLots(measured, existing));
 
+    // the lot's growth stage comes from its configuration, which the lot holds as the manager's reference (by id): a stage 3
+    // configuration raises the candidate's highest stage to 3 (the reference itself is no configuration and was read as one)
+    struct Reference final : cISC4LotConfigurationRef {
+        std::uint32_t id = 0;
+        bool QueryInterface(std::uint32_t, void**) override { return false; }
+        std::uint32_t AddRef() override { return 2; }
+        std::uint32_t Release() override { return 1; }
+        std::uint32_t GetID() const override { return id; }
+    } reference;
+    cSC4LotConfiguration* staged = MakeConfiguration(0x5150, 3, {1}, {1}, 1, 20, {0x2000});
+    CHECK(host.manager->AddLotConfiguration(staged, true));
+    reference.id = 0x5150;
+    lot->SetLotConfiguration(&reference);
+    existing->existingCapacity = existing->abandonedCapacity = -1;   // not measured yet
+    existing->maxGrowthStage = 1;
+    CHECK(developer.ScoreCandidateLots() == 0);
+    CHECK(existing->maxGrowthStage == 3);
+    lot->SetLotConfiguration(nullptr);
+    host.manager->AddLotConfiguration(staged, false);   // out of the process-wide table again
+    staged->Release();
+
     delete lot;
     developer.ClearCandidateList(developer.Candidates());
     developer.Shutdown();

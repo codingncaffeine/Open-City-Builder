@@ -575,11 +575,12 @@ int cSC4TractDeveloper::FindExistingCapacity(CandidateLot* candidate) {
         } else {
             candidate->existingCapacity += capacity;
         }
-        // lot vslot 0x48: the lot configuration; its +0x58 growth stage.
-        const std::uint8_t stage = lot->GetLotConfiguration()
-                                       ? static_cast<const cSC4LotConfiguration*>(
-                                             static_cast<const void*>(lot->GetLotConfiguration()))->GetGrowthStage()
-                                       : 0;
+        // lot vslot 0x48: the lot configuration; its +0x58 growth stage. The port's lot holds the manager's reference, not the
+        // configuration itself: the configuration comes from the manager by the reference's id (as ListCandidateLots_Existing does).
+        cISC4LotConfigurationRef* reference = lot->GetLotConfiguration();
+        const cSC4LotConfiguration* configuration =
+            reference && lotConfigurationManager_ ? lotConfigurationManager_->GetLotConfiguration(reference->GetID()) : nullptr;
+        const std::uint8_t stage = configuration ? configuration->GetGrowthStage() : 0;
         if (candidate->maxGrowthStage < static_cast<std::int32_t>(stage)) {
             candidate->maxGrowthStage = stage;
         }
