@@ -1429,6 +1429,20 @@ int RunScenario(const std::string& path) {
                 for (int i = 1; k.key.down && i < hold; ++i) { PumpEvents(); Frame(); Nap(); }
             }
             for (int i = 0; i < 5; ++i) { PumpEvents(); Frame(); Nap(); }
+        } else if (command == "type") {
+            // type TEXT: each character as an SDL text-input event through the player's path (what typing sends besides the
+            // key presses: the characters text fields and the sign tool read); "_" stands for a space.
+            std::string text; words >> text;
+            for (char& c : text) if (c == '_') c = ' ';
+            static std::string character;   // the event keeps a pointer: it lives until the event is pumped below
+            for (char c : text) {
+                character.assign(1, c);
+                SDL_Event t{};
+                t.type = SDL_EVENT_TEXT_INPUT; t.text.windowID = SDL_GetWindowID(gWindow); t.text.text = character.c_str();
+                SDL_PushEvent(&t); PumpEvents(); Frame(); Nap();
+            }
+            std::printf("type \"%s\"\n", text.c_str());
+            for (int i = 0; i < 5; ++i) { PumpEvents(); Frame(); Nap(); }
         } else if (command == "cheats") {   // every registered cheat string, as the cheat code box's list has them
             auto* cheats = native::GameCheatCodeManager();
             std::uint32_t none = 0;
