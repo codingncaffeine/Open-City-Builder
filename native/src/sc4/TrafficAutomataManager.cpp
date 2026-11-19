@@ -300,7 +300,13 @@ bool cSC4TrafficAutomataManager::Dispatch(IAutomataAutomaton* automaton, const t
     finder->SetEndRect({end.x0, end.z0, end.x1, end.z1});
     automaton->SetAutomataFlag(4, false);
     bool placed = false;
-    if (finder->FindPath() == 1 && route && type <= route->size() && traffic->BeginRoute(false)) {
+    const int found = finder->FindPath();
+    static const bool trace = std::getenv("SC4_DISPATCHDEBUG") != nullptr;
+    if (trace)
+        std::fprintf(stderr, "dispatch route: %d,%d..%d,%d -> %d,%d..%d,%d: found %d, %zu cells, last %d,%d\n", start.x0, start.z0, start.x1,
+                     start.z1, end.x0, end.z0, end.x1, end.z1, found, route ? route->size() : 0u,
+                     route && !route->empty() ? route->back().x : -1, route && !route->empty() ? route->back().z : -1);
+    if (found == 1 && route && type <= route->size() && traffic->BeginRoute(false)) {
         automaton->SetAutomataFlag(0x40, true);
         automaton->SetAutomataFlag(0x2000, false);
         automaton->SetAutomataFlag(0x100, false);

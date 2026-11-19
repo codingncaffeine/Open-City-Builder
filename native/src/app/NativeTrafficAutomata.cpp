@@ -434,4 +434,7 @@ void NativeTrainReport(int limit) {
     std::printf("trains: %d engines (%d mass transit), %d cars in trains, %d cars in the manager, %d buses\n", engines, transit, cars, loose, buses);
 }
 
+// A new path finder over the city's traffic simulator (the caller owns the reference); null without a simulator.
+sc4::cISC4PathFinder* NativeCreatePathFinder() { return g_simulatorApi.CreatePathFinder(); }
+
 }  // namespace native

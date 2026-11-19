@@ -69,6 +69,7 @@ sc4::IFireOccupant* NativeFireStation(sc4::cISC4Occupant* occupant);       // ap
 sc4::IPoliceOccupant* NativePoliceStation(sc4::cISC4Occupant* occupant);
 sc4::cISC4Occupant* NativeStationOccupant(sc4::IProtectionStation* station);
 
+sc4::cISC4PathFinder* NativeCreatePathFinder();   // app/NativeTrafficAutomata.cpp
 namespace {
 using namespace sc4;
 
@@ -446,6 +447,7 @@ public:
         return manager->Dispatch(AutomatonView(&vehicle), from, to, 2, 2);
     }
     void PositionToCell(float x, float z, int& cellX, int& cellZ) override { cellX = int(x / 16.0f); cellZ = int(z / 16.0f); }
+    cISC4PathFinder* CreatePathFinder() override { return NativeCreatePathFinder(); }
 private:
     EmergencyVehicleTuning tuning_;
 } g_emergency;

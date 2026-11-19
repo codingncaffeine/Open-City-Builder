@@ -2,8 +2,11 @@
 #include "sc4/EmergencyVehicle.h"
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 #include "sc4/DBSegment.h"
+#include "sc4/GeometryUtilities.h"
 
 namespace sc4 {
 
@@ -304,6 +307,10 @@ bool cSC4EmergencyVehicle::CloseEnoughToDispatchDestination() const {
     const float dz = destination.z - position[2];
     const float distance = std::sqrt(dz * dz + (dy * dy + dx * dx));
     const std::uint32_t limit = emergencyHost_ ? emergencyHost_->Tuning().teleportCells : 0;
+    static const bool trace = std::getenv("SC4_DISPATCHDEBUG") != nullptr;
+    if (trace)
+        std::fprintf(stderr, "emergency: route end at (%.0f, %.0f), call at (%.0f, %.0f), distance %.0f, close enough within %u cells\n",
+                     position[0], position[2], destination.x, destination.z, distance, limit);
     if (static_cast<float>(limit << 4) < distance || std::isnan(distance)) return false;
     if (!emergencyHost_ || !trafficHost_) return true;
     int cellX = 0, cellZ = 0;
@@ -365,6 +372,54 @@ void cSC4EmergencyVehicle::HandleDispatched(const cS3DVector3& position, cISC4Oc
             return;
         }
     }
+}
+
+// i386 0x0023622c: the path finder ends a call's route on the road cell before the call's own cell. When that last cell is a
+// road, the route is extended to the usable road piece nearest to the call (within teleportCells cells of the call's cell)
+// that the path finder reaches from the last cell. (The original releases neither the path finder nor the road pieces.)
+void cSC4EmergencyVehicle::AppendRouteToNearbyRoad(int cellX, int cellZ, const cS3DVector3& destination) {
+    if (!emergencyHost_ || !trafficHost_) return;
+    cSC4TrafficNetworkMap* map = trafficHost_->TrafficNetworkMap();
+    if (!map) return;
+    int callX = 0, callZ = 0;
+    emergencyHost_->PositionToCell(destination.x, destination.z, callX, callZ);   // spCity vslot 0x17c
+    std::vector<ITrafficNetworkMapOccupant*> roads;
+    if (!map->GetSurroundingRoads(roads, SC4RectInt32{callX, callZ, callX, callZ}, emergencyHost_->Tuning().teleportCells, 0, 0x1c49))
+        return;
+    if (cISC4PathFinder* finder = emergencyHost_->CreatePathFinder()) {
+        std::deque<RouteData> route, best;
+        finder->SetStartRect({cellX, cellZ, cellX, cellZ});
+        finder->SetTravelTypeFlag(2, true);
+        finder->SetTrafficDensity(0);
+        finder->SetFlag(1);
+        finder->SetFlag(2);
+        finder->SetTripDestinationFilter(3);
+        finder->SetRouteInfo(&route);
+        const float call[2] = {static_cast<float>(callX), static_cast<float>(callZ)};
+        float nearest = 3.4028235e+38f;
+        bool found = false;
+        for (ITrafficNetworkMapOccupant* road : roads) {
+            std::uint32_t x = 0, z = 0;
+            road->GetOccupiedCell(x, z);
+            const float cell[2] = {static_cast<float>(x), static_cast<float>(z)};
+            const float distance = SC4GeometryUtilities::LengthOfLineSquared2D(call, cell);
+            if (distance >= nearest) continue;
+            route.clear();
+            finder->SetEndRect({static_cast<std::int32_t>(x), static_cast<std::int32_t>(z), static_cast<std::int32_t>(x), static_cast<std::int32_t>(z)});
+            if (finder->FindPath() == 1) {
+                best = route;
+                found = true;
+                nearest = distance;
+            }
+        }
+        static const bool trace = std::getenv("SC4_DISPATCHDEBUG") != nullptr;
+        if (trace)
+            std::fprintf(stderr, "emergency: route from %d,%d towards the call at %d,%d: %zu roads, %s %zu cells\n", cellX, cellZ, callX, callZ,
+                         roads.size(), found ? "appended" : "none", best.size());
+        if (found) route_.insert(route_.end(), best.begin(), best.end());
+        finder->Release();
+    }
+    for (ITrafficNetworkMapOccupant* road : roads) road->Release();
 }
 
 // 0x1002f7670: tell the dispatcher the call is over and drive home (unless a player is driving).

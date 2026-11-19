@@ -54,6 +54,8 @@ public:
     virtual ITrafficAutomatonOccupant* NetworkOccupantAt(float x, float z) = 0;                     // spCity position -> cell, network manager vslot 0x38
     // spCity vslot 0x158 (the route finder) vslot 0x90(vehicle, list, request{1, destination}, 0, 3): true when a route was found
     virtual bool FindRoute(cSC4EmergencyVehicle& vehicle, const cS3DVector3& destination) = 0;
+    // SL::spTrafficSim vslot 0x18: a new path finder over the traffic simulator's network (the caller owns the reference)
+    virtual cISC4PathFinder* CreatePathFinder() { return nullptr; }
     // the same service asked for the way home (DoTeleportTick): request {1, the vehicle's own position}, list {0, source}, 2, 2
     virtual bool FindReturnRoute(cSC4EmergencyVehicle& vehicle, const cS3DVector3& position, cIGZUnknown* source) = 0;
     virtual void PositionToCell(float x, float z, int& cellX, int& cellZ) = 0;                       // spCity vslot 0x2f8
@@ -96,7 +98,7 @@ public:
     void HandleDispatched(const cS3DVector3& position, cISC4Occupant* occupant) override;   // 0x2b8 @ 0x1002f6322
     // 0x1002f64bc (about 1.2 KB: asks the path finder for a route from the last route cell to the cell nearest the call and
     // appends it). NOT RECOVERED: it needs the path finder service and the network map's area query; the port keeps the hook.
-    virtual void AppendRouteToNearbyRoad(int cellX, int cellZ, const cS3DVector3& destination) { (void)cellX; (void)cellZ; (void)destination; }
+    virtual void AppendRouteToNearbyRoad(int cellX, int cellZ, const cS3DVector3& destination);   // i386 0x0023622c
     bool ValidateNetworkOccupant();                                           // @ 0x1002f5a26
     void SendPathBlockedMessage();                                            // @ 0x1002f5c36
     void SetDispatchState(std::uint32_t state) override;                      // 0xc8  @ 0x1002f796c
