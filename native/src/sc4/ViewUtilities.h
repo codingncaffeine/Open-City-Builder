@@ -182,6 +182,9 @@ public:
     void SetCitySize(float citySizeX, float citySizeZ) { citySizeX_ = citySizeX; citySizeZ_ = citySizeZ; }
     int Zoom() const { return zoom_; }
     const cS3DVector3& EyePosition() const { return eye_; }   // +0x44
+    const cS3DVector3& LookAtPosition() const { return lookAt_; }   // +0x50
+    int ViewportWidth() const { return viewportW_; }            // +0x30
+    int ViewportHeight() const { return viewportH_; }           // +0x34
     const cS3DVector3& RightVector() const { return right_; }   // +0x68
     const cS3DVector3& UpVector() const { return up_; }         // +0x74
     int Rotation() const { return rotation_; }

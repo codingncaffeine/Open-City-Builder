@@ -1,72 +1,115 @@
-// The audio directors on the native application: what cGZSndSysMacCOMDirector, cHitManCOMDirector and
-// cSC4AudioCOMDirector::PostAppInit do at start-up (0x100625020, 0x10043b11c, 0x1003e01ba). The services are created,
-// registered with the framework, and the game's own sound .ini (SimCity_1.dat {0, 0x8a5971c5, 0xea8a1115}) configures them:
-// the default sound players, the sample banks, the track lists and the hit manager's type groups.
+// The game's audio on the native application. The game's own director (cSC4AudioCOMDirector, sc4audio/AudioCOMDirector.cpp)
+// does the work: cSC4App::AddCOMDirectors adds it through the start-up hook set here, its OnStart adds the sound, renderer,
+// Hit and Freshness directors and their services, and its PostAppInit reads the sound configuration and creates the radio,
+// the sound manager, the listener, the soundscape and ambience managers and the two event handlers.
+//
+// The native boot runs the application's steps by hand instead of the framework's main loop, so the two framework phases
+// the directors hook are run from here at the same points: AudioPreAppInit after the application's PreFrameWorkInit (the
+// framework's own PreAppInit starts every service there; this starts the sound services the directors added, then runs
+// the directors' PreAppInit), AudioPostAppInit after the application's PostFrameWorkInit (the directors' PostAppInit).
+// The frame loop ticks the sound services (TickAudio), and AudioPreAppShutdown runs before the sound output closes.
+//
+// The rest of this file is what the sound classes ask the game for: the Hit library's services, the sound
+// configuration's services, the game context of the sound manager and the listener (preferences, simulator pause, city
+// extent, sea level), the tuning exemplars, the camera, and the event handler's neighbours.
 #include "app/NativeAudioDirector.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "app/GameAudio.h"   // CreatePlatformAudioBackend
+#include "app/NativeCity.h"
 #include "app/NativeUi.h"
 #include "audio/AudioServices.h"
-#include "audio/GZSnd.h"
-#include "audio/GZSnd3D.h"
-#include "audio/GZSndMgr.h"
-#include "audio/SegmentDataSources.h"
+#include "audio/FreshHost.h"
+#include "audio/HitClassIds.h"
+#include "audio/interfaces/cIFreshPlayer.h"
 #include "audio/GZSndSys.h"
 #include "audio/GZSndSysMac.h"
 #include "audio/HitChannel.h"
-#include "audio/HitClassIds.h"
 #include "audio/HitIniFile.h"
-#include "audio/HitSegmentCreators.h"
 #include "audio/HitMan.h"
-#include "audio/HitManDirector.h"
 #include "audio/HitManServices.h"
 #include "audio/HitPropertySetResource.h"
-#include "audio/HitResourceFactory.h"
 #include "audio/HitTrackPlayer.h"
+#include "audio/interfaces/cIHitDebugInfo.h"
+#include "audio/platform/AudioPlatform.h"
 #include "gz/AudioPersistAdapter.h"
 #include "gz/GZCOM.h"
+#include "gz/GZCOMDirector.h"
 #include "gz/GZFramework.h"
+#include "gz/RZServices.h"
 #include "gz/cGZAny.h"
 #include "gz/cGZDBSegmentPackedFile.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "gz/cIGZPersistDBSegment.h"
+#include "rz/COMDirectors.h"
+#include "rz/Radio.h"
+#include "rz/cRZSysServPtr.h"
+#include "sc4/App.h"
+#include "sc4/AudioAEMSSoundBank.h"
+#include "sc4/AudioPreferencesWinProc.h"
+#include "sc4/Exemplar.h"
+#include "sc4/OccupantManager.h"
+#include "sc4/ResourceAsFile.h"
+#include "sc4/SCPropertyHelp.h"
 #include "sc4/ServiceLocator.h"
+#include "sc4/Simulator.h"
+#include "sc4/ViewUtilities.h"
+#include "sc4/cSC4City.h"
+#include "sc4/cSTETerrain.h"
+#include "sc4audio/AudioAmbienceManager.h"
+#include "sc4audio/AudioCOMDirector.h"
+#include "sc4audio/AudioEventHandler.h"
+#include "sc4audio/AudioScapeManager.h"
+#include "sc4audio/Listener.h"
+#include "sc4audio/SC4AudioHost.h"
+#include "sc4audio/SoundManager.h"
+
+namespace linuxapp { void AudioVoiceReport(); }   // app/linux/GameAudioSDL.cpp
 
 namespace native {
+void InstallAmbienceHosts();   // app/NativeAudioAmbience.cpp
+
 namespace {
 
-cGZFramework* g_framework = nullptr;
-std::string g_dataDirectory;   // GameData/ with the trailing slash
+constexpr std::uint32_t kGZSID_HitMan = 0x1b2ce671;
 
-// GZCOM()->CreateInstance through the generated class table; the object comes back with one reference.
+bool g_installed = false;   // the director is behind the application's start-up hook
+bool g_running = false;     // PostAppInit ran
+std::string g_dataDirectory;   // GameData/ with the trailing slash
+std::unique_ptr<AudioPlatform::IBackend> g_backend;
+AudioPersistAdapter* g_persist = nullptr;
+
+bool Trace() { static const bool on = std::getenv("SC4_AUDIODEBUG") != nullptr; return on; }
+
+// GZCOM()->CreateInstance: the directors' classes, then the generated class table (classes whose director is not in the
+// build); the object comes back with one reference.
 bool CreateByClass(std::uint32_t classId, std::uint32_t iid, void** out) {
-    // The classes the sound directors register (cGZSoundCOMDirector's table: 0xdc1f73d6 the segment data source creator,
-    // 0xfded7f31 / 0xfded7f34 the 2D / 3D sound players) are not in the generated table.
-    cIGZUnknown* unknown = nullptr;
-    switch (classId) {
-        case 0xdc1f73d6: unknown = cGZSndSegmentDataSourceCreator::Create(); break;
-        case 0xfded7f31: unknown = static_cast<cIGZSnd*>(cGZSnd::Create()); break;
-        case 0xfded7f34: unknown = static_cast<cIGZSnd*>(cGZSnd3D::Create()); break;
-        case HitIds::kClsidHitMan: unknown = static_cast<cIHitMan*>(new cHitMan()); break;
-        case HitIds::kClsidHitSegmentTrackCreator: unknown = static_cast<cIGZSoundCreator*>(new cHitSegmentTrackCreator()); break;
-        case HitIds::kClsidHitSegmentDataSourceChannelCreator: unknown = static_cast<cIGZSoundCreator*>(new cHitSegmentDataSourceChannelCreator()); break;
-        case HitIds::kClsidHitResourceFactory: unknown = static_cast<cIGZPersistResourceFactory*>(new sc4audio::cHitResourceFactory()); break;
-        default: break;
-    }
-    if (!unknown) {
-        const gzcom::ClassFactoryInfo* info = gzcom::FindClassFactory(classId);
-        void* object = info && info->create ? info->create() : nullptr;
-        if (!object) { if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "audio: no class %08x\n", classId); return false; }
-        unknown = static_cast<cIGZUnknown*>(object);
-    }
+    if (cIGZCOM* com = GZCOM(); com && com->CreateInstance(classId, iid, out)) return true;
+    const gzcom::ClassFactoryInfo* info = gzcom::FindClassFactory(classId);
+    void* object = info && info->create ? info->create() : nullptr;
+    if (!object) { if (Trace()) std::fprintf(stderr, "audio: no class %08x\n", classId); return false; }
+    auto* unknown = static_cast<cIGZUnknown*>(object);
     unknown->AddRef();
     const bool ok = unknown->QueryInterface(iid, out);
     unknown->Release();
     return ok;
+}
+
+// The resource manager creates a factory registered by class id through GZCOM. The native boot registers the game's
+// other resource factories with their objects (RegisterExemplarFactories), so only the audio directors' classes are
+// answered here: the Hit resource factory and what the sound configuration's [ResourceFactories] names.
+bool CreateAudioFactoryByClass(std::uint32_t classId, std::uint32_t iid, void** out) {
+    for (cRZCOMDllDirector* director : {static_cast<cRZCOMDllDirector*>(GetSC4AudioCOMDirector()), gz::GetGZSoundCOMDirector(),
+                                        GetGZSndSysMacCOMDirector(), GetHitManCOMDirector(), GetFreshnessCOMDirector()})
+        if (director->GetClassObject(classId, iid, out)) return true;
+    return false;
 }
 
 // The services of the hit manager (Hit::cIHitManServices): the sound system, the sound manager, the resource manager
@@ -182,28 +225,6 @@ public:
     }
 };
 
-// cHitManCOMDirector's framework side.
-class HitDirectorHost final : public sc4audio::IHitDirectorHost {
-public:
-    void AddClass(std::uint32_t) override {}   // the generated class table already knows the Hit classes
-    cIGZPersistResourceManager* ResourceManager() override { return SL::spRM; }
-    cIGZSndMgr* SoundManager() override { return Audio::SoundManagerService(); }
-    cIHitMan* HitManager() override { return hitMan; }
-    cIHitDebugInfo* DebugInfo() override { return nullptr; }
-    bool CreateInstance(std::uint32_t classId, std::uint32_t iid, void** out) override { return CreateByClass(classId, iid, out); }
-    // The framework is already running, so the service is initialised here as the other sound services are below
-    // (cHitMan::Init makes it the hit manager instance the creators and the ini file reach).
-    void RegisterSystemService(cIGZUnknown* service) override {
-        cIGZSystemService* asService = nullptr;
-        if (!service || !service->QueryInterface(kGZIID_cIGZSystemService, reinterpret_cast<void**>(&asService))) return;
-        g_framework->AddSystemService(asService);
-        asService->Init();
-        asService->Release();
-    }
-    void AddSystemServiceDirector(cIGZUnknown*) override {}
-    cIHitMan* hitMan = nullptr;
-};
-
 // The services of cHitIniFile::EnumDefaultEntries.
 class HitIniHost final : public sc4audio::IHitIniHost {
 public:
@@ -224,74 +245,346 @@ public:
     }
 };
 
+// The Freshness library's services (Fresh::cIFreshHost): the sound manager's sounds by name and by id, the sound
+// system's update targets, and a score's text read from its record.
+class FreshHost final : public Fresh::cIFreshHost {
+public:
+    bool HasSoundSystem() const override { return Audio::SoundSystem() != nullptr; }
+    cIGZSnd* CreateSndByFileName(const cIGZString& fileName) override {
+        cIGZSndMgr* manager = Audio::SoundManagerService();
+        cRZString name(fileName.ToChar());
+        void* out = nullptr;
+        return manager && manager->GetSoundByName(name, 0, nullptr, kGZIID_cIGZSnd, &out) ? static_cast<cIGZSnd*>(out) : nullptr;
+    }
+    cIGZSnd* CreateSndByResourceId(std::uint32_t resourceId) override {
+        cIGZSndMgr* manager = Audio::SoundManagerService();
+        void* out = nullptr;
+        return manager && manager->GetSoundById(resourceId, 0, nullptr, kGZIID_cIGZSnd, &out) ? static_cast<cIGZSnd*>(out) : nullptr;
+    }
+    bool IsSoundSystemInTestMode() const override { cIGZSndSys* system = Audio::SoundSystem(); return system && system->GetTestMode(); }
+    cIFreshPlayer* CreateFreshPlayerInstance() override {
+        void* out = nullptr;
+        return CreateByClass(HitIds::kClsidFreshPlayer, kGZIID_cIFreshPlayer, &out) ? static_cast<cIFreshPlayer*>(out) : nullptr;
+    }
+    void AddUpdateTarget(cIGZSndUpdateTarget* target, std::uint32_t intervalMs) override {
+        if (cIGZSndSys* system = Audio::SoundSystem()) system->RegisterTarget(target, intervalMs);
+    }
+    void RemoveUpdateTarget(cIGZSndUpdateTarget* target) override {
+        if (cIGZSndSys* system = Audio::SoundSystem()) system->UnregisterTarget(target);
+    }
+    bool ReadScoreText(const cGZPersistResourceKey& key, std::string& outText) override {
+        cIGZPersistDBSegment* segment = nullptr;
+        if (!SL::spRM || !SL::spRM->FindDBSegment(key, &segment) || !segment) return false;
+        bool read = false;
+        const std::uint32_t size = segment->GetRecordSize(key);
+        if (size != 0xffffffffu) {
+            outText.assign(size, '\0');
+            std::uint32_t got = size;
+            read = segment->ReadRecord(key, outText.data(), got) != 0xffffffffu && got == size;
+        }
+        segment->Release();
+        return read;
+    }
+};
+
+sc4::cSTETerrain* Terrain() {
+    sc4::cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::Terrain) : nullptr;
+    void* serializable = nullptr;
+    if (!object || !object->QueryInterface(0xab953253, &serializable)) return nullptr;
+    auto* terrain = static_cast<sc4::cSTETerrain*>(static_cast<cIGZSerializable*>(serializable));
+    static_cast<cIGZSerializable*>(serializable)->Release();
+    return terrain;
+}
+
+sc4::cISC4OccupantManager* Occupants() {
+    sc4::cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::OccupantManager) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(sc4::kGZIID_cISC4OccupantManager, &raw) || !raw) return nullptr;
+    auto* manager = static_cast<sc4::cISC4OccupantManager*>(raw);
+    manager->Release();   // borrowed: the city keeps it
+    return manager;
+}
+
+// What the sound manager and the listener ask the game (SL::spSC4 vslot 0x130, SL::spSimulator vslot 0x78, SFX::Listener(),
+// SL::spOccupantManager vslot 0x90, SL::spTerrain vslot 0xe8).
+class GameContext final : public SC4Audio::cIGameAudioContext {
+public:
+    SC4Audio::AudioPreferences GetAudioPreferences() override {
+        SC4Audio::AudioPreferences out;
+        if (const std::uint8_t* preferences = SL::spPreferences) {
+            out.soundEnabled = preferences[sc4::prefs::kAudioEnabled] != 0;
+            std::memcpy(&out.masterVolume, preferences + sc4audio::kPrefsEffectsVolume, sizeof out.masterVolume);
+        }
+        return out;
+    }
+    bool IsSimulationPaused() override { sc4::cSC4Simulator* simulator = CitySimulatorObject(); return simulator && simulator->IsPaused(); }
+    bool GetListenerView(SC4Audio::ListenerView& out) override {
+        cSC4AudioListener* listener = GetSC4AudioCOMDirector()->Listener();
+        if (!listener) return false;
+        out = listener->View();
+        return true;
+    }
+    bool HasOccupantManager() override { return Occupants() != nullptr; }
+    void GetCityExtentMeters(float& x, float& z) override {
+        sc4::cSC4City* city = HostCity();
+        x = city ? static_cast<float>(city->CellCountX()) * 16.0f : 0.0f;
+        z = city ? static_cast<float>(city->CellCountZ()) * 16.0f : 0.0f;
+    }
+    float GetSeaLevel() override { sc4::cSTETerrain* terrain = Terrain(); return terrain ? terrain->GetSeaLevel() : 0.0f; }
+};
+
+// The tuning exemplars (SL::spRM->GetResource(key, 0xa52160f5) and cSCPropertyHelp::GetPropertyValue).
+class ExemplarSource final : public SC4Audio::cIExemplarSource {
+public:
+    bool ExemplarExists(const cGZPersistResourceKey& key) override { Holder holder(key); return holder.properties != nullptr; }
+    bool GetUint32Property(const cGZPersistResourceKey& key, std::uint32_t propertyId, std::uint32_t& out) override {
+        Holder holder(key);
+        return holder.properties && sc4::cSCPropertyHelp::GetPropertyValue(holder.properties, propertyId, out);
+    }
+    bool GetFloatProperty(const cGZPersistResourceKey& key, std::uint32_t propertyId, float& out) override {
+        Holder holder(key);
+        return holder.properties && sc4::cSCPropertyHelp::GetPropertyValue(holder.properties, propertyId, out);
+    }
+    bool GetFloatArrayProperty(const cGZPersistResourceKey& key, std::uint32_t propertyId, std::vector<float>& out) override {
+        Holder holder(key);
+        return holder.properties && sc4::cSCPropertyHelp::GetPropertyValue(holder.properties, propertyId, out);
+    }
+
+private:
+    struct Holder {
+        explicit Holder(const cGZPersistResourceKey& key) {
+            void* raw = nullptr;
+            if (!SL::spRM || !SL::spRM->GetResource(key, 0xa52160f5, &raw, 0, nullptr) || !raw) return;
+            exemplar = static_cast<sc4::cISCResExemplar*>(raw);
+            properties = exemplar->AsISCPropertyHolder();
+        }
+        ~Holder() { if (exemplar) exemplar->Release(); }
+        sc4::cISCResExemplar* exemplar = nullptr;
+        sc4::cISCPropertyHolder* properties = nullptr;
+    };
+};
+
+// SL::spViewUtilities as the sound classes use it.
+class Viewport final : public SC4Audio::cIViewport {
+public:
+    void ProjectPointToViewportCoordinates2D(float point[3]) override { SL::spViewUtilities->ProjectPointToViewportCoordinates2D(point); }
+    std::int32_t ViewportWidth() const override { return SL::spViewUtilities->ViewportWidth(); }
+    std::int32_t ViewportHeight() const override { return SL::spViewUtilities->ViewportHeight(); }
+    void GetCameraEye(float out[3]) const override { Copy(SL::spViewUtilities->EyePosition(), out); }
+    void GetCameraTarget(float out[3]) const override { Copy(SL::spViewUtilities->LookAtPosition(), out); }
+    std::int32_t GetZoomLevel() const override { return SL::spViewUtilities->Zoom(); }
+    void GetCameraUp(float out[3]) const override { Copy(SL::spViewUtilities->UpVector(), out); }
+
+private:
+    static void Copy(const cS3DVector3& from, float out[3]) { out[0] = from.x; out[1] = from.y; out[2] = from.z; }
+};
+Viewport g_viewport;
+SC4Audio::cIViewport* CurrentViewport() { return SL::spViewUtilities ? &g_viewport : nullptr; }
+
+// The event handler's neighbours: the Audio Options dialog's statics, the city, the occupants.
+class EventHandlerHost final : public sc4audio::IAudioEventHandlerHost {
+public:
+    using Dialog = sc4::cSC4AudioPreferencesWinProc;
+    void PreferencesStaticInit() override { Dialog::StaticInit(); }
+    std::uint32_t FadeOutTimeMs() override { return Dialog::FadeOutTimeMs(); }
+    std::uint32_t VolumeFromSliderValue(std::uint32_t sliderValue, AudioType type) override {
+        return Dialog::GetVolumeFromSliderValue(sliderValue, type == kAudioTypeMusic ? Dialog::kAudioTypeMusic : Dialog::kAudioTypeSound);
+    }
+    void SetDefaultMusicListPreferences() override { Dialog::SetDefaultMusicListPreferences(); }
+    void UpdateExclusionList(AudioMode mode) override { Dialog::UpdateExclusionList(mode); }
+    bool CityEstablished() override { sc4::cSC4City* city = HostCity(); return city && city->GetEstablished(); }
+    // A network occupant (it answers 0xa821ef94) by its occupant view's position.
+    bool NetworkOccupantPosition(cIGZUnknown* networkOccupant, float* xyz) override {
+        void* network = nullptr;
+        if (!networkOccupant || !networkOccupant->QueryInterface(sc4audio::kGZIID_cISC4NetworkOccupantAudio, &network) || !network) return false;
+        static_cast<cIGZUnknown*>(network)->Release();
+        void* raw = nullptr;
+        if (!networkOccupant->QueryInterface(sc4audio::kGZIID_cISC4OccupantAudio, &raw) || !raw) return false;
+        auto* occupant = static_cast<sc4::cISC4Occupant*>(raw);
+        occupant->GetPosition(xyz);
+        occupant->Release();
+        return true;
+    }
+    bool IterateOccupants(OccupantCallback callback, void* context, sc4::cISC4OccupantFilter* filter) override {
+        sc4::cISC4OccupantManager* occupants = Occupants();
+        return occupants && occupants->IterateOccupants(callback, context, nullptr, nullptr, filter);
+    }
+};
+
 HitServices g_hitServices;
-HitDirectorHost g_hitDirector;
 HitIniHost g_iniHost;
-AudioPersistAdapter* g_persist = nullptr;
+FreshHost g_freshHost;
+GameContext g_gameContext;
+ExemplarSource g_exemplars;
+EventHandlerHost g_eventHost;
+
+template <class T> T* Service(cGZFramework& framework, std::uint32_t serviceId, std::uint32_t iid) {
+    void* found = nullptr;
+    if (!framework.GetSystemService(serviceId, iid, &found) || !found) return nullptr;
+    auto* service = static_cast<T*>(found);
+    service->Release();   // borrowed: the framework keeps its services
+    return service;
+}
+
+// The services the framework ticks for the sound: the radio (tick and idle), the soundscape manager and the ambience
+// manager (tick, while they are registered).
+constexpr std::uint32_t kTickedServices[] = {kGZSID_cRZRadio, kGZSID_cISC4AudioScapeManager, 0xaa12f911};
 
 }  // namespace
 
-bool StartAudioDirectors(cGZFramework& framework, const std::string& dataDirectory) {
-    g_framework = &framework;
+void InstallAudioDirector(cSC4App& app, const std::string& dataDirectory) {
+    g_backend.reset(CreatePlatformAudioBackend());
+    if (!g_backend) { std::printf("audio: no sound output; the game runs silent\n"); return; }
+    AudioPlatform::SetBackend(g_backend.get());
     g_dataDirectory = dataDirectory;
-    // The persistence layer the sound classes read their resources through is the game's own resource manager.
-    if (!SL::spRM) return false;
-    cGZPersistResourceManager::SetClassCreator(CreateByClass);   // the Hit resource factory, registered by class id
+    Hit::SetServices(&g_hitServices);
+    sc4audio::SetHitIniHost(&g_iniHost);
+    Fresh::SetHost(&g_freshHost);
+    cGZPersistResourceManager::SetClassCreator(CreateAudioFactoryByClass);   // the Hit resource factory, registered by class id
+    SC4Audio::GetServices().game = &g_gameContext;
+    SC4Audio::GetServices().exemplars = &g_exemplars;
+    SC4Audio::SetViewUtilitiesProvider(&CurrentViewport);
+    sc4audio::SetAudioEventHandlerHost(&g_eventHost);
+    InstallAmbienceHosts();
+    app.StartupHooks().audioDirector = []() -> cRZCOMDllDirector* { return GetSC4AudioCOMDirector(); };
+    g_installed = true;
+}
+
+void AudioPreAppInit(cGZFramework& framework) {
+    if (!g_installed) return;
+    cIGZSndSys* system = Service<cIGZSndSys>(framework, kGZSID_cGZSndSys, kGZIID_cIGZSndSys);
+    cIGZSndMgr* manager = Service<cIGZSndMgr>(framework, kGZSID_cGZSndMgr, kGZIID_cIGZSndMgr);
+    if (!system || !manager) {   // the player's audio option is off (the application did not add the director)
+        g_installed = false;
+        return;
+    }
+    // The services the sound classes of this build look up through their own seam (audio/AudioServices.h).
     g_persist = new AudioPersistAdapter(SL::spRM);
     Audio::SetPersistService(g_persist);
-    Audio::SetMessageServer(SL::spMS2);
-    Audio::SetFileSystemDataDirectory(dataDirectory);
+    Audio::SetMessageServer(RZ::MS2());
+    Audio::SetFileSystemDataDirectory(g_dataDirectory);
+    Audio::SetSoundSystem(system);
+    Audio::SetSoundManagerService(manager);
+    system->SetDataDirectory(cRZString(g_dataDirectory.c_str()));
 
+    // The framework's PreAppInit for the services the directors added: Init by falling priority, then running.
+    std::vector<cIGZSystemService*> services;
+    for (const std::uint32_t id : {kGZSID_cGZSndSys, kGZSID_cGZSndMgr, cGZSndSysMac::kServiceId, kGZSID_HitMan, kGZSID_cHitDebugInfo})
+        if (auto* service = Service<cIGZSystemService>(framework, id, kGZIID_cIGZSystemService)) services.push_back(service);
+    std::stable_sort(services.begin(), services.end(),
+                     [](cIGZSystemService* a, cIGZSystemService* b) { return a->GetServicePriority() > b->GetServicePriority(); });
+    for (cIGZSystemService* service : services) {
+        const bool ok = service->Init();
+        if (ok) service->SetServiceRunning(true);
+        if (Trace()) std::fprintf(stderr, "audio: service %08x priority %d Init %d\n", service->GetServiceID(), service->GetServicePriority(), int(ok));
+    }
+    if (cHitMan* hitMan = RZ::HitManInstance(); hitMan && Trace())
+        hitMan->SetTrackFlowErrorHandler([](cIHitTrackPlayer* player, const char* message) {
+            std::fprintf(stderr, "audio: track %p: %s\n", static_cast<void*>(player), message);
+        });
+    framework.HookPreAppInit();
+}
+
+bool AudioPostAppInit(cGZFramework& framework) {
+    if (!g_installed) return false;
     // Sound.dat (the samples and the track definitions) joins the game's resource manager.
     {
         auto* sounds = new cGZDBSegmentPackedFile();
         sounds->AddRef();
         sounds->Init();
-        sounds->SetPath(cRZString((dataDirectory + "Sound.dat").c_str()));
+        sounds->SetPath(cRZString((g_dataDirectory + "Sound.dat").c_str()));
         if (sounds->Open(true, false)) SL::spRM->RegisterDBSegment(*sounds);
         else std::printf("audio: cannot open Sound.dat\n");
     }
-    // cGZSndSysMacCOMDirector / the sound services: the system, the manager and the platform renderer.
-    auto* system = cGZSndSys::Create();
-    system->AddRef();
-    Audio::SetSoundSystem(system);
-    system->SetDataDirectory(cRZString(dataDirectory.c_str()));
-    framework.AddSystemService(system);
-    system->Init();
-    auto* manager = cGZSndMgr::Create();
-    manager->AddRef();
-    Audio::SetSoundManagerService(manager);
-    framework.AddSystemService(manager);
-    manager->Init();
-    auto* renderer = cGZSndSysMac::Create();
-    renderer->AddRef();
-    framework.AddSystemService(renderer);
-    renderer->Init();
+    SC4Audio::Services& services = SC4Audio::GetServices();
+    services.soundSystem = Audio::SoundSystem();
+    services.soundManager = Audio::SoundManagerService();
+    services.messageServer = RZ::MS2();
+    framework.HookPostAppInit();
+    g_running = true;
 
-    // cHitManCOMDirector: the hit manager and its services.
-    Hit::SetServices(&g_hitServices);
-    sc4audio::cHitManCOMDirector hitDirector(&g_hitDirector);
-    hitDirector.OnStart(nullptr);
-    g_hitDirector.hitMan = RZ::HitManInstance();
-    if (g_hitDirector.hitMan && std::getenv("SC4_DEBUG"))
-        g_hitDirector.hitMan->SetTrackFlowErrorHandler([](cIHitTrackPlayer* player, const char* message) {
-            std::fprintf(stderr, "audio: track %p: %s\n", static_cast<void*>(player), message);
-        });
-    hitDirector.PreAppInit();
-
-    // cSC4AudioCOMDirector::PostAppInit: the game's sound configuration.
-    std::vector<std::uint8_t> bytes;
-    if (!LoadResourceBytes(0, 0x8a5971c5, 0xea8a1115, bytes)) {
-        std::printf("audio: sound .ini not found\n");
-        return false;
-    }
-    const std::string path = std::string(std::getenv("TMPDIR") ? std::getenv("TMPDIR") : "/tmp/") + "sc4_hit.ini";
-    if (FILE* f = std::fopen(path.c_str(), "wb")) { std::fwrite(bytes.data(), 1, bytes.size(), f); std::fclose(f); } else return false;
-    sc4audio::cHitIniFile ini(&g_iniHost);
-    ini.SetFilename(cRZString(path.c_str()));
-    const bool ok = ini.EnumDefaultEntries();
-    std::printf("audio: sound .ini %s\n", ok ? "loaded" : "FAILED");
+    cSC4AudioCOMDirector* director = GetSC4AudioCOMDirector();
+    cRZSysServPtr<cIGZRadio, kGZSID_cRZRadio, kGZIID_cIGZRadio> radio;
+    const bool ok = director->SoundManager() && director->Listener() && director->ScapeManager() && radio;
+    std::printf("audio: the game's sound services %s (radio %s, %u stations)\n", ok ? "started" : "did NOT all start",
+                radio ? "on the air" : "missing", radio ? radio->GetStationCount() : 0u);
     return ok;
+}
+
+void TickAudio() {
+    if (!g_running) return;
+    if (cGZFramework* framework = cGZFramework::FrameWork()) framework->TickServices(kTickedServices, std::size(kTickedServices));
+}
+
+// The directors' PreAppShutdown, then the framework's shutdown of the services they added (rising priority), and the
+// sound output last: its voices are streams of the platform's audio device.
+void AudioPreAppShutdown() {
+    if (!g_running) return;
+    g_running = false;
+    cGZFramework* framework = cGZFramework::FrameWork();
+    if (!framework) return;
+    GetSC4AudioCOMDirector()->PreAppShutdown();
+    GetHitManCOMDirector()->PreAppShutdown();
+    gz::GetGZSoundCOMDirector()->PreAppShutdown();
+    std::vector<cIGZSystemService*> services;
+    for (const std::uint32_t id : {kGZSID_cRZRadio, kGZSID_cGZSndSys, kGZSID_cGZSndMgr, cGZSndSysMac::kServiceId, kGZSID_HitMan, kGZSID_cHitDebugInfo})
+        if (auto* service = Service<cIGZSystemService>(*framework, id, kGZIID_cIGZSystemService)) services.push_back(service);
+    std::stable_sort(services.begin(), services.end(),
+                     [](cIGZSystemService* a, cIGZSystemService* b) { return a->GetServicePriority() < b->GetServicePriority(); });
+    for (cIGZSystemService* service : services) {
+        service->Shutdown();
+        service->SetServiceRunning(false);
+    }
+    AudioPlatform::SetBackend(nullptr);
+    g_backend.reset();
+}
+
+bool AudioRunning() { return g_running; }
+
+// The AEMS sound banks read their records as files: SC4GetResourceAsFile.
+void InstallSoundBankHost() {
+    static struct final : sc4::ISoundBankHost {
+        bool GetResourceAsFile(const cGZPersistResourceKey& key, cIGZFile** out, bool flag) override { return sc4::SC4GetResourceAsFile(key, out, flag); }
+    } host;
+    sc4::SetSoundBankHost(&host);
+}
+
+// Kit command `audio`: one line each for the radio, the sound manager and the listener.
+void NativeAudioReport() {
+    if (!g_running) { std::printf("audio: not running\n"); return; }
+    cSC4AudioCOMDirector* director = GetSC4AudioCOMDirector();
+    cRZSysServPtr<cIGZRadio, kGZSID_cRZRadio, kGZIID_cIGZRadio> radio;
+    if (radio) {
+        char callSign[kRZRadioCallSignBufferSize] = {};
+        const bool tuned = radio->GetCurrentStation(callSign);
+        callSign[kRZRadioCallSignLength] = 0;
+        cRZString song;
+        const bool hasSong = radio->GetCurrentSong(song);
+        const std::string name = hasSong ? song.str().substr(song.str().find_last_of('/') + 1) : std::string();
+        std::printf("audio: radio on %d volume %d stations %u station \"%s\" playing %d song \"%s\"\n", int(radio->IsOn()), radio->GetVolume(),
+                    radio->GetStationCount(), tuned ? callSign : "", int(radio->IsPlaying()), name.c_str());
+        if (Trace()) {
+            cRZString directory;
+            radio->GetRadioDirectory(directory);
+            std::printf("audio: radio directory \"%s\" file system %d\n", directory.ToChar(), int(RZ::FS() != nullptr));
+        }
+    } else {
+        std::printf("audio: no radio\n");
+    }
+    if (cSC4AudioSoundManager* sounds = director->SoundManager())
+        std::printf("audio: sound manager master %u sounds %zu (looping %d, one-shot %d) max per sound %u\n", sounds->GetMasterVolume(),
+                    sounds->SoundCount(), sounds->masterSoundCount(), sounds->nonMasterSoundCount(), sounds->maxInstancesPerSound());
+    if (cSC4AudioSoundManager* sounds = director->SoundManager(); sounds && Trace())
+        for (const tSound* sound : sounds->Sounds())
+            std::printf("audio:   sound %08x instance %08x volume %d flags %x pauses %d playing %d at %.0f %.0f %.0f\n", sound->soundId(),
+                        sound->instanceId(), sound->volume(), sound->flags(), sound->pauseCount(), int(sound->snd() && sound->snd()->IsPlaying()),
+                        sound->position()[0], sound->position()[1], sound->position()[2]);
+    if (Trace()) linuxapp::AudioVoiceReport();
+    if (cSC4AudioListener* listener = director->Listener())
+        std::printf("audio: listener eye %.0f %.0f %.0f target %.0f %.0f %.0f\n", listener->eye()[0], listener->eye()[1], listener->eye()[2],
+                    listener->target()[0], listener->target()[1], listener->target()[2]);
 }
 
 }  // namespace native

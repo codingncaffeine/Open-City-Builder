@@ -241,7 +241,6 @@ src/gz/WinBMP.cpp
 src/sc4/WinSmallViews.cpp
 src/sc4/EstablishCityWinProc.cpp
 src/gz/WinUtils.cpp
-
 src/sc4/BudgetUIWinProc.cpp
 src/sc4/SC4UIWindows.cpp
 src/app/NativeRegion.cpp
@@ -423,7 +422,6 @@ src/app/hosts/StubAdvisorConcrete.cpp
 src/app/hosts/StubAdvisorPopupTracker.cpp
 src/app/hosts/StubAdvisorSystem.cpp
 src/app/hosts/StubAircraft.cpp
-src/app/hosts/StubAmbienceState.cpp
 src/app/hosts/StubAura.cpp
 src/app/NativeAutomataGroups.cpp
 src/app/hosts/StubAutomataController.cpp
@@ -496,7 +494,6 @@ src/app/hosts/StubRewardAdvice.cpp
 src/app/hosts/StubSignTool.cpp
 src/app/hosts/StubSignpost.cpp
 src/app/NativeSimulatorHost.cpp
-src/app/hosts/StubSoundBank.cpp
 src/app/NativeTerrainHost.cpp
 src/app/hosts/StubTextDecal.cpp
 src/app/hosts/StubToxic.cpp
@@ -759,3 +756,22 @@ src/gz/WinListBox.cpp
 src/gz/WinLineInput.cpp
 src/gz/WinScrollbar2.cpp
 src/gz/WinSpinner.cpp
+src/audio/GZSoundDirector.cpp
+src/sc4audio/AudioCOMDirector.cpp
+src/sc4audio/SemManager.cpp
+src/sc4audio/EaseSound.cpp
+src/sc4audio/AudioScapeManager.cpp
+src/sc4audio/AudioAmbienceManager.cpp
+src/sc4audio/AmbienceLayer.cpp
+src/rz/DiskRadioStation.cpp
+src/sc4/AmbienceOccupantFilters.cpp
+src/sc4/AmbienceCellFilters.cpp
+src/audio/FreshCell.cpp
+src/audio/FreshCellPlayer.cpp
+src/audio/FreshDimensionPlayer.cpp
+src/audio/FreshHost.cpp
+src/audio/FreshPlayer.cpp
+src/audio/FreshScore.cpp
+src/sc4/GroupLayer.cpp
+src/app/NativeAudioAmbience.cpp
+src/gz/FileSystem.cpp

@@ -9,6 +9,12 @@
 // preferences it opened with and Cancel puts them back. Accept saves the preferences and stops the playing song when it
 // was just switched off; both post 0x231bbf91 (preferences changed).
 //
+// The sound follows through the game's own audio messages, all posted on message server 2 (the audio event handler
+// listens): UpdateSoundSys sends the sound manager's master volume event 0x2a5b69c0 to the sound system and posts
+// 0xaa650860 (music on / off, music volume); UpdateExclusionList posts 0xa611b34 (the station, its song list, the
+// playlist mode); Preview posts 0xaa611b6e with the song's path; Stop posts 0x2a611b51; the first Preview or Stop
+// posts 0xaa650861 with 1 (the radio plays on demand) and EndDialog posts it with 0.
+//
 // The two playlists (one per radio station) come from the tuning exemplars {0x6534284a, 0xca25875d, 0x2a5e5854 /
 // 0x2a5e5855}: properties 0x8a5e7b50 + i (i < 30) = {name string id, file string id, enabled by default}; the strings are
 // in group 0x8a635d24. Their enable bytes live in the preference blob at +0x4a (playlist 0) and +0x2c (playlist 1).
@@ -28,15 +34,8 @@ struct AudioPreferencesServices {
     std::function<cIGZWinMgr*()> windowManager;
     std::function<std::uint8_t*()> preferences;                 // SL::spPreferences (the 0x1734-byte blob)
     std::function<void()> savePreferences;                      // SL::spSC4 vslot 0x44
-    std::function<void(std::uint32_t type)> postMessage;        // SL::spMS2->MessagePost
     std::function<void(bool begin)> gamePause;
     std::function<std::string()> dataDirectory;                 // "<GameData>/"
-    // The sound system (UpdateSoundSys / the radio's event messages): apply the blob's switches and volumes now.
-    std::function<void()> applyAudio;
-    std::function<bool(const std::string& path)> playSong;      // Preview (event 0xaa611b6e with the file)
-    std::function<void()> stopRadio;                            // Stop (event 0x2a611b51)
-    std::function<void()> resumeRadio;                          // the dialog closed: the radio picks songs again
-    std::function<std::string()> currentSong;                   // the radio's song (cIGZRadio vslot 0x80)
 };
 AudioPreferencesServices& GetAudioPreferencesServices();
 
@@ -52,13 +51,24 @@ public:
     void EndDialog();
     static bool Displayed();
 
-    // For the sound system: whether the radio may play `path` (a song of either playlist whose box is off answers
-    // false; files outside the playlists answer true), and the gains (0..1) the blob's volumes mean.
+    // Whether the radio may play `path` (a song of either playlist whose box is off answers false; files outside the
+    // playlists answer true), and the gain (0..1) the blob's effects volume means (the intro movies' sound).
     static bool IsSongEnabled(const std::string& path);
-    static float MusicGain(const std::uint8_t* preferences);
     static float SoundGain(const std::uint8_t* preferences);
 
+    // The statics the audio event handler calls at start-up (Mac i386 0x002c623c, 0x002c52f0, 0x002c4e66, 0x002c53c4,
+    // 0x002c642e).
+    enum eAudioType : std::uint32_t { kAudioTypeSound = 0, kAudioTypeMusic = 1 };
+    static void StaticInit();                                    // the two playlists, once
+    static void ReadTunerVariables();                            // the volume ranges and the fade time
+    static std::uint32_t GetVolumeFromSliderValue(std::uint32_t sliderValue, eAudioType type);
+    static void SetDefaultMusicListPreferences();                // every song's enable byte = its exemplar default
+    // Posts the station's song list: mode 0 is the region station's playlist, 1 the mayor station's.
+    static void UpdateExclusionList(std::uint32_t mode);
+    static std::uint32_t FadeOutTimeMs();                        // kFadeOutTimeMs (tuning property 0x4a7cb3bf)
+
 private:
+    void UpdateSoundSys();                                       // 0x002c51fc
     void InitDialog();
     void InsertMusicList(int mode, int firstRow);
     bool HandleControlMessage(std::uint32_t id, cIGZWin* window, std::uint32_t value);
@@ -67,7 +77,8 @@ private:
     std::uint32_t refCount_ = 0;
     gz::cIGZWinGen* dialog_ = nullptr;
     cIGZWin* grid_ = nullptr;
-    std::uint8_t saved_[0x67] = {};                              // the audio preferences the dialog opened with
+    bool onDemand_ = false;                                      // +0xc: Preview / Stop took the radio over
+    std::uint8_t saved_[0x67] = {};                             // the audio preferences the dialog opened with
 };
 
 }  // namespace sc4

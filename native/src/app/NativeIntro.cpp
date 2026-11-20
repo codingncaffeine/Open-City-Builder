@@ -14,6 +14,8 @@
 // - The transition messages the screen posts from GZPaint are posted once (the original posts on every paint until one is
 //   handled; the window manager here keeps raw targets, so a second one would reach a destroyed screen).
 #include "app/NativeIntro.h"
+#include "app/NativeAudio.h"
+#include "app/NativeAudioDirector.h"
 
 #include <algorithm>
 #include <chrono>
@@ -23,7 +25,6 @@
 #include <vector>
 
 #include "app/NativeAudio.h"
-#include "app/GameAudio.h"
 #include "app/NativeMovie.h"
 #include "app/NativeUi.h"
 #include "gz/Buffer.h"
@@ -91,7 +92,7 @@ public:
             frame_->Init(static_cast<std::uint32_t>(movie_.Width()), static_cast<std::uint32_t>(movie_.Height()), cGZBufferColorType{kBufferColorARGB8888, 32});
         }
         startMs_ = -1.0;   // the clock starts with the first paint
-        if (GameAudio* audio = CurrentGameAudio()) sound_.Open(audio->SoundGain());
+        if (AudioRunning()) sound_.Open(EffectsGain());
         if (Debug()) std::fprintf(stderr, "intro: clip %u %dx%d stoppable %d\n", instance, movie_.Width(), movie_.Height(), int(stoppable_));
         InvalidateSelf();
         return true;

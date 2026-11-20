@@ -7,11 +7,16 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <list>
 #include <vector>
 
+#include "audio/interfaces/cIGZSndSys.h"
 #include "gz/WinBtn.h"
 #include "gz/WinGrid.h"
 #include "gz/WinSlider.h"
+#include "rz/Radio.h"
+#include "rz/cRZMessage2Standard.h"
+#include "rz/cRZSysServPtr.h"
 #include "sc4/DialogWinProcs.h"
 #include "sc4/Exemplar.h"
 #include "sc4/SCPropertyHelp.h"
@@ -29,6 +34,10 @@ constexpr std::uint32_t kCancel = 0xea5509e3, kAccept = 0xea5509e4;
 constexpr std::uint32_t kBtnActivated = 0x287259f6, kBtnOnChanged = 0x287259f7, kBtnPressedChanged = 0x287259f8;
 constexpr std::uint32_t kComboChanged = 0xe8711255, kGridSelectionChanged = 0x9a1552d2;
 constexpr std::uint32_t kMessagePreferencesChanged = 0x231bbf91, kEndDialogCode = 0xf;
+// The audio messages (sc4audio/AudioEventHandler.h) and the sound manager's events (sc4audio/SoundManager.h).
+constexpr std::uint32_t kMessageRadioStationOptions = 0x0a611b34, kMessageStopPlayback = 0x2a611b51, kMessagePlaySong = 0xaa611b6e,
+                        kMessageRadioOnOffVolume = 0xaa650860, kMessageRadioOnDemand = 0xaa650861;
+constexpr std::uint32_t kEventSetMasterVolume = 0x2a5b69c0, kEventStartSound = 1;
 constexpr std::uint32_t kWinFlagKeepFocus = 0x1000, kWinFlagEnabled = 2;
 constexpr std::uint32_t kSongStringGroup = 0x8a635d24, kButtonSound = 0x8a5c324a;
 // The playlist rows' check boxes: built here (no script), one id per song. The original's two base ids are data
@@ -49,12 +58,14 @@ struct PlaylistEntry {   // tSC4PlaylistEntry
 struct AudioMode {       // __sAudioModeData, 0x2c bytes each
     std::uint32_t exemplar = 0;
     std::vector<PlaylistEntry> songs;
+    std::list<cRZString> modifiers;   // +0x18: the song files UpdateExclusionList last posted (the message carries this list)
     std::string directory;   // "<GameData>/Radio/Stations/<station>/Music/"
 };
 AudioMode g_modes[2];
 
-// Tuning ({0x6534284a, 0xca25875d, 0x6a359c5d}); kMinMusicVolume is never read from it.
-std::uint32_t g_minSound = 0, g_maxSound = 1000, g_minMusic = 0, g_maxMusic = 1000, g_fadeOutMs = 0;
+// Tuning ({0x6534284a, 0xca25875d, 0x6a359c5d}); kMinMusicVolume is never read from it. The fade time is 4000 ms until
+// the tuning is read (kFadeOutTimeMs's initial value).
+std::uint32_t g_minSound = 0, g_maxSound = 1000, g_minMusic = 0, g_maxMusic = 1000, g_fadeOutMs = 4000;
 
 bool g_staticInitialized = false;
 bool g_displayed = false;
@@ -63,7 +74,28 @@ AudioPreferencesServices g_services;
 template <typename T> T Get(const std::uint8_t* p, std::size_t at) { T v; std::memcpy(&v, p + at, sizeof v); return v; }
 template <typename T> void Put(std::uint8_t* p, std::size_t at, T v) { std::memcpy(p + at, &v, sizeof v); }
 
-std::uint8_t* Prefs() { return g_services.preferences ? g_services.preferences() : nullptr; }
+// SL::spPreferences; the dialog's caller hands the same blob in.
+std::uint8_t* Prefs() { return g_services.preferences ? g_services.preferences() : SL::spPreferences; }
+
+// _PostEventMessage (0x002c50e4): a standard message with its first two data words, posted on message server 2.
+void PostEventMessage(std::uint32_t type, std::uint32_t data1, std::uint32_t data2) {
+    if (!SL::spMS2) return;   // the original posts through the pointer unchecked
+    auto* message = new cRZMessage2Standard();
+    message->AddRef();
+    message->SetType(type);
+    message->SetData1(data1);
+    message->SetData2(data2);
+    SL::spMS2->MessagePost(message, false);
+    message->Release();
+}
+void PostPreferencesChanged() {
+    if (!SL::spMS2) return;
+    auto* message = new cRZMessage2Standard();
+    message->AddRef();
+    message->SetType(kMessagePreferencesChanged);
+    SL::spMS2->MessagePost(message, false);
+    message->Release();
+}
 
 std::string Lower(std::string s) {
     for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -78,17 +110,6 @@ cISCPropertyHolder* AcquireExemplar(std::uint32_t instance, cISCResExemplar*& ex
     if (!SL::spRM->GetResource(key, 0xa52160f5, &raw, 0, nullptr) || !raw) return nullptr;
     exemplar = static_cast<cISCResExemplar*>(raw);
     return exemplar->AsISCPropertyHolder();
-}
-
-void ReadTunerVariables() {
-    cISCResExemplar* exemplar = nullptr;
-    if (cISCPropertyHolder* holder = AcquireExemplar(0x6a359c5d, exemplar)) {
-        cSCPropertyHelp::GetPropertyValue(holder, 0x4a7cb3bb, g_minSound);
-        cSCPropertyHelp::GetPropertyValue(holder, 0x4a7cb3bc, g_maxMusic);
-        cSCPropertyHelp::GetPropertyValue(holder, 0x4a7cb3bd, g_maxSound);
-        cSCPropertyHelp::GetPropertyValue(holder, 0x4a7cb3bf, g_fadeOutMs);
-        exemplar->Release();
-    }
 }
 
 void ReadPlaylistInfoFromExemplar(int mode) {
@@ -135,7 +156,21 @@ void ResolveDirectories() {
         }
 }
 
-void StaticInit() {
+}  // namespace
+
+void cSC4AudioPreferencesWinProc::ReadTunerVariables() {
+    cISCResExemplar* exemplar = nullptr;
+    if (cISCPropertyHolder* holder = AcquireExemplar(0x6a359c5d, exemplar)) {
+        cSCPropertyHelp::GetPropertyValue(holder, 0x4a7cb3bb, g_minSound);
+        cSCPropertyHelp::GetPropertyValue(holder, 0x4a7cb3bc, g_maxMusic);
+        cSCPropertyHelp::GetPropertyValue(holder, 0x4a7cb3bd, g_maxSound);
+        cSCPropertyHelp::GetPropertyValue(holder, 0x4a7cb3bf, g_fadeOutMs);
+        exemplar->Release();
+    }
+}
+std::uint32_t cSC4AudioPreferencesWinProc::FadeOutTimeMs() { return g_fadeOutMs; }
+
+void cSC4AudioPreferencesWinProc::StaticInit() {
     if (g_staticInitialized) return;
     g_staticInitialized = true;
     g_displayed = false;
@@ -154,14 +189,54 @@ void StaticInit() {
         std::printf("audio options: sound %u..%u music %u..%u fade %u ms\n", g_minSound, g_maxSound, g_minMusic, g_maxMusic, g_fadeOutMs);
 }
 
-// GetVolumeFromSliderValue: 0 and 1000 are the ends; between them the range scales linearly.
-std::uint32_t VolumeFromSlider(std::uint32_t value, bool music) {
+// GetVolumeFromSliderValue: 1000 is the maximum and 0 the minimum; between them the range scales linearly, and a result
+// outside the range answers the end it passed.
+std::uint32_t cSC4AudioPreferencesWinProc::GetVolumeFromSliderValue(std::uint32_t value, eAudioType type) {
+    const bool music = type != kAudioTypeSound;
     const std::uint32_t lo = music ? g_minMusic : g_minSound, hi = music ? g_maxMusic : g_maxSound;
-    if (value >= 1000) return hi;
+    if (value == 1000) return hi;
     if (value == 0) return lo;
     const float scaled = std::max(0.0f, float(hi - lo) * float(value) / 1000.0f);
-    return std::clamp(lo + static_cast<std::uint32_t>(scaled), lo, hi);
+    const std::uint32_t volume = lo + static_cast<std::uint32_t>(scaled);
+    if (volume > hi) return hi;
+    return volume < lo ? lo : volume;
 }
+
+// The enable bytes of both playlists take the exemplars' defaults (at most 30 songs each).
+void cSC4AudioPreferencesWinProc::SetDefaultMusicListPreferences() {
+    std::uint8_t* p = Prefs();
+    if (!p) return;
+    for (int mode : {1, 0}) {
+        const AudioMode& m = g_modes[mode];
+        for (std::size_t i = 0; i < m.songs.size() && i < kMaxSongs; ++i) p[kEnableList[mode] + i] = m.songs[i].enabledByDefault ? 1 : 0;
+    }
+}
+
+// The station's song list goes to the radio: every song whose enable byte differs from the custom tunes switch (+0x68),
+// by file name; the message carries the list itself (the station copies it) and the switch as the playlist mode.
+void cSC4AudioPreferencesWinProc::UpdateExclusionList(std::uint32_t mode) {
+    StaticInit();
+    std::uint8_t* p = Prefs();
+    if (mode >= 2 || !p) return;
+    AudioMode& m = g_modes[mode];
+    const std::uint8_t customTunes = p[kCustomTunesOn];
+    m.modifiers.clear();
+    for (std::size_t i = 0; i < m.songs.size(); ++i) {
+        if (p[kEnableList[mode] + i] == customTunes) continue;
+        m.modifiers.push_back(cRZString(cSLString(kSongStringGroup, m.songs[i].fileString, true).ToChar()));
+    }
+    if (!SL::spMS2) return;   // the original posts through the pointer unchecked
+    auto* message = new cRZMessage2Standard();
+    message->AddRef();
+    message->SetType(kMessageRadioStationOptions);
+    message->SetData1(mode == 0 ? 1 : 0);   // 1 = the region station, 0 = the mayor station
+    message->SetVoid2(&m.modifiers);
+    message->SetData3(customTunes);
+    SL::spMS2->MessagePost(message, false);
+    message->Release();
+}
+
+namespace {
 // InitDialog's inverse: the slider position of a stored volume (one below the minimum stores as 0).
 std::uint32_t SliderFromVolume(std::uint32_t volume, bool music) {
     const std::uint32_t lo = music ? g_minMusic : g_minSound, hi = music ? g_maxMusic : g_maxSound;
@@ -186,9 +261,16 @@ void EnableChild(cIGZWin* window, std::uint32_t id, bool on) {
 AudioPreferencesServices& GetAudioPreferencesServices() { return g_services; }
 bool cSC4AudioPreferencesWinProc::Displayed() { return g_displayed; }
 
-float cSC4AudioPreferencesWinProc::MusicGain(const std::uint8_t* p) {
-    if (!p || !Get<std::uint32_t>(p, kMusicOn)) return 0.0f;
-    return g_maxMusic ? std::min(1.0f, float(Get<std::uint32_t>(p, kMusicVolume)) / float(g_maxMusic)) : 1.0f;
+// The effects volume goes to the sound manager as its master volume (0 when sound is off), synchronously through the sound
+// system; the music switch and volume go to the radio as a message.
+void cSC4AudioPreferencesWinProc::UpdateSoundSys() {
+    const std::uint8_t* p = Prefs();
+    if (!p) return;
+    {
+        cRZSysServPtr<cIGZSndSys, kGZSID_cGZSndSys, kGZIID_cIGZSndSys> system;
+        if (system) system->DoEventIds(kEventSetMasterVolume, p[kSoundOn] ? Get<std::uint32_t>(p, kSoundVolume) : 0, 0, 0, 0);
+    }
+    PostEventMessage(kMessageRadioOnOffVolume, Get<std::uint32_t>(p, kMusicOn), Get<std::uint32_t>(p, kMusicVolume));
 }
 float cSC4AudioPreferencesWinProc::SoundGain(const std::uint8_t* p) {
     if (!p || !p[kSoundOn]) return 0.0f;
@@ -358,6 +440,7 @@ bool cSC4AudioPreferencesWinProc::DoModalWin() {
 void cSC4AudioPreferencesWinProc::EndDialog() {
     if (!g_displayed) return;
     AddRef();
+    if (onDemand_) PostEventMessage(kMessageRadioOnDemand, 0, 0);   // the radio picks its own songs again
     if (dialog_) {
         cIGZWin* window = dialog_->AsIGZWin();
         if (cIGZWinMgr* manager = window->GetWindowManager()) {
@@ -370,7 +453,6 @@ void cSC4AudioPreferencesWinProc::EndDialog() {
         dialog->Release();
     }
     g_displayed = false;
-    if (g_services.resumeRadio) g_services.resumeRadio();
     Release();
 }
 
@@ -415,11 +497,20 @@ bool cSC4AudioPreferencesWinProc::HandleControlMessage(std::uint32_t id, cIGZWin
     AudioPreferencesServices& s = g_services;
     std::uint8_t* p = Prefs();
     if (!p) return true;
-    auto apply = [&] { if (s.applyAudio) s.applyAudio(); };
     if (std::getenv("SC4_DEBUG")) std::printf("audio options: control %08x value %u\n", id, value);
+    // Preview and Stop take the radio over until the dialog closes (once).
+    auto takeRadio = [&] {
+        if (onDemand_) return;
+        onDemand_ = true;
+        PostEventMessage(kMessageRadioOnDemand, 1, 0);
+    };
     switch (id) {
-    case kPlaylist: {   // a row was picked: Preview works for songs whose file is there
+    case kPlaylist: {   // a row was picked (with the list's click): Preview works for songs whose file is there
         EnableChild(window, kPreview, false);
+        {
+            cRZSysServPtr<cIGZSndSys, kGZSID_cGZSndSys, kGZIID_cIGZSndSys> system;   // SL::spSS
+            if (system) system->PostEventIds(kEventStartSound, kButtonSound, 0, 0, 0);
+        }
         int mode = 0, index = 0;
         if (SelectedSong(mode, index)) {
             std::error_code error;
@@ -433,42 +524,59 @@ bool cSC4AudioPreferencesWinProc::HandleControlMessage(std::uint32_t id, cIGZWin
         auto* slider = Child<gz::cIGZWinSlider>(window, id, gz::kGZIID_cIGZWinSlider);
         if (!slider) return true;
         const bool music = id == kMusicSlider;
-        const std::uint32_t volume = VolumeFromSlider(static_cast<std::uint32_t>(std::max(0, slider->GetValue())), music);
+        const std::uint32_t volume = GetVolumeFromSliderValue(static_cast<std::uint32_t>(std::max(0, slider->GetValue())),
+                                                              music ? kAudioTypeMusic : kAudioTypeSound);
         Put<std::uint32_t>(p, music ? kMusicVolume : kSoundVolume, volume > (music ? g_minMusic : g_minSound) ? volume : 0);
-        apply();
+        UpdateSoundSys();
         return true;
     }
     case kMusicCheck:
         Put<std::uint32_t>(p, kMusicOn, value);
-        apply();
+        UpdateSoundSys();
+        UpdateExclusionList(0);
+        UpdateExclusionList(1);
         return true;
     case kSoundCheck:
         p[kSoundOn] = static_cast<std::uint8_t>(value);
-        apply();
+        UpdateSoundSys();
         return true;
     case kCustomTunes:
         p[kCustomTunesOn] = static_cast<std::uint8_t>(value);
         return true;
-    case kPreview: {
+    case kPreview: {   // the song's path goes to the radio in a counted string the handler releases
+        takeRadio();
         int mode = 0, index = 0;
-        if (SelectedSong(mode, index) && s.playSong) s.playSong(g_modes[mode].directory + g_modes[mode].songs[std::size_t(index)].file);
+        if (!SelectedSong(mode, index) || !SL::spMS2) return true;
+        auto* song = new cRZString((g_modes[mode].directory + g_modes[mode].songs[std::size_t(index)].file).c_str());
+        song->AddRef();
+        auto* message = new cRZMessage2Standard();
+        message->AddRef();
+        message->SetType(kMessagePlaySong);
+        message->SetVoid1(song);
+        SL::spMS2->MessagePost(message, false);
+        message->Release();
         return true;
     }
     case kStop:
-        if (s.stopRadio) s.stopRadio();
+        takeRadio();
+        PostEventMessage(kMessageStopPlayback, 0, 0);
         return true;
-    case kCancel:   // the audio preferences go back to what the dialog opened with
+    case kCancel:   // the audio preferences go back to what the dialog opened with (UpdatePreferences)
         std::memcpy(p + kAudioPrefs, saved_, kAudioPrefsSize);
-        apply();
-        if (s.postMessage) s.postMessage(kMessagePreferencesChanged);
+        UpdateSoundSys();
+        PostPreferencesChanged();
         EndDialog();
         return true;
-    case kAccept: {
+    case kAccept: {   // saved; the stations get their lists; a playing song that was just switched off stops
         if (s.savePreferences) s.savePreferences();
-        const std::string playing = s.currentSong ? s.currentSong() : std::string();
-        if (!playing.empty() && !IsSongEnabled(playing) && s.stopRadio) s.stopRadio();
-        apply();
-        if (s.postMessage) s.postMessage(kMessagePreferencesChanged);
+        UpdateExclusionList(0);
+        UpdateExclusionList(1);
+        {
+            cRZSysServPtr<cIGZRadio, kGZSID_cRZRadio, kGZIID_cIGZRadio> radio;
+            cRZString playing;
+            if (radio && radio->GetCurrentSong(playing) && !IsSongEnabled(playing.str())) PostEventMessage(kMessageStopPlayback, 0, 0);
+        }
+        PostPreferencesChanged();
         EndDialog();
         return true;
     }

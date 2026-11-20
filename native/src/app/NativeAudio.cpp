@@ -1,7 +1,8 @@
 #include "app/NativeAudio.h"
 
-#include "app/GameAudio.h"
+#include "app/NativeAudioDirector.h"
 #include "gz/RZServices.h"
+#include "sc4/ServiceLocator.h"
 #include "sc4/ToolTipManager.h"
 #include <cstdio>
 #include <cstdlib>
@@ -16,8 +17,6 @@
 
 namespace native {
 namespace {
-GameAudio* g_audio = nullptr;
-
 // RZ::SS() / RZ::WCM for the window buttons: the sounds play; the captions take the game's font styles (the same source the
 // text windows use), so the colour manager counts as present once that source is up; its stock images come from the
 // control factory's table (cSC4App::SetupWinCtrlMgr's).
@@ -42,33 +41,15 @@ public:
 ButtonHost g_buttons;
 }  // namespace
 
-void SetGameAudio(GameAudio* audio) { g_audio = audio; }
-GameAudio* CurrentGameAudio() { return g_audio; }
-void ApplyAudioPreferences(const std::uint8_t* preferences) {
-    if (!g_audio || !preferences) return;
-    using sc4::cSC4AudioPreferencesWinProc;
-    const float music = cSC4AudioPreferencesWinProc::MusicGain(preferences), sound = cSC4AudioPreferencesWinProc::SoundGain(preferences);
-    g_audio->SetMusic(music > 0.0f, music);
-    g_audio->SetSound(sound > 0.0f, sound);
-    if (auto* system = dynamic_cast<cGZSndSys*>(Audio::SoundSystem()))
-        system->StoreMasterVolume(static_cast<std::int32_t>(sound * 0x400 + 0.5f));   // the game's own sounds
-    g_audio->SetSongFilter([](const std::string& path) { return cSC4AudioPreferencesWinProc::IsSongEnabled(path); });
-}
 void PlayGameSound(std::uint32_t soundId) {
-    if (!soundId) return;
-    // The game's own path first: the sound manager builds the sound from its track definition and the hit manager plays it.
-    if (cIGZSndMgr* manager = Audio::SoundManagerService()) {
-        cIGZSnd* sound = nullptr;
-        if (manager->GetSoundById(soundId, 0, nullptr, kGZIID_cIGZSnd, reinterpret_cast<void**>(&sound)) && sound) {
-            const bool played = sound->PlayWithVolumeAndLoop(0x400, false, 0);
-            if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "audio: sound %08x played %d\n", soundId, int(played));
-            sound->Release();
-            if (played) return;
-        } else if (std::getenv("SC4_DEBUG")) {
-            std::fprintf(stderr, "audio: sound %08x not built by the sound manager\n", soundId);
-        }
-    }
-    if (g_audio) g_audio->PlayTrack(soundId);   // the direct track lookup when the sound system is not up
+    if (!soundId || !AudioRunning()) return;
+    auto* system = static_cast<cIGZSndSys*>(RZ::SS());
+    if (!system) return;
+    const bool posted = system->PostEventIds(1, soundId, 0, 0, 0);
+    if (std::getenv("SC4_AUDIODEBUG")) std::fprintf(stderr, "audio: sound %08x posted %d\n", soundId, int(posted));
+}
+float EffectsGain() {
+    return AudioRunning() ? sc4::cSC4AudioPreferencesWinProc::SoundGain(SL::spPreferences) : 0.0f;
 }
 void InstallButtonSounds() { gz::SetWinButtonHost(&g_buttons); }
 

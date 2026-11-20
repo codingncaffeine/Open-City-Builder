@@ -207,6 +207,15 @@ public:
     // SFX::SoundManager()->GenerateNewInstanceId() (cSC4AudioSoundManager's process-wide counter).
     virtual std::uint32_t GenerateNewInstanceId() = 0;
     virtual void LogError(const char* /*message*/) {}
+
+    // The three places the original takes another class's own interface straight from an object: an occupant's (or a
+    // railway crossing message's) automaton by QueryInterface 0xa9b40f05 (one reference), the automaton a callback
+    // message carries in Void1 (the pointer itself, borrowed), and a lot message's lot by QueryInterface 0xe818fced
+    // (one reference). The defaults do exactly that, for objects that carry IAmbienceAutomaton / IAmbienceLot; the
+    // integration answers with views of the game's own automaton and lot classes.
+    virtual IAmbienceAutomaton* AutomatonOfObject(cIGZUnknown* object);
+    virtual IAmbienceAutomaton* AutomatonOfCallbackPayload(void* payload) { return static_cast<IAmbienceAutomaton*>(payload); }
+    virtual IAmbienceLot* LotOfObject(cIGZUnknown* object);
 };
 IAmbienceManagerHost* AmbienceManagerHost();
 void SetAmbienceManagerHost(IAmbienceManagerHost* host);

@@ -58,7 +58,7 @@
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/WinSC4App.h"
 #include "sc4/WinSplashScreen.h"
-#include "app/GameAudio.h"
+#include "app/NativeAudioDirector.h"
 #include "app/NativeZoneTool.h"
 #include "app/NativeRegionExtras.h"
 #include "app/NativeAudio.h"
@@ -403,21 +403,9 @@ struct SplashHost final : sc4::ISplashScreenHost {
     void CreateRegionScreen() override { std::printf("splash: CreateRegionScreen\n"); if (gAppWindow) gAppWindow->CreateRegionScreen(); }
 } gSplashHost;
 
-// The game's sound: Sound.dat opened through the recovered persistence layer, an ambient bed that follows the screen
-// and a click on every mouse press (the interactive run only; shots stay silent).
-GameAudio* gAudio = nullptr;
-void StartGameAudio() {
-    static GameAudio audio;
-    std::string error;
-    const std::string dat = platform::GameDataDir() + "Sound.dat";
-    if (!audio.Open(dat, error)) { std::printf("audio: %s\n", error.c_str()); return; }
-    gAudio = &audio;
-    native::SetGameAudio(&audio);
-    if (std::getenv("SC4_AUDIODIRECTORS") && native::BootFramework())
-        native::StartAudioDirectors(*native::BootFramework(), dat.substr(0, dat.rfind('/') + 1));
-    native::InstallButtonSounds();
-    std::printf("audio: %zu sounds\n", audio.SoundCount());
-}
+// The game's sound runs in the interactive game, or with SC4_AUDIO=1 (shots and scenarios stay without it): the game's own
+// audio director is installed before the boot (NativeAudioDirector.cpp).
+bool gAudioWanted = false;
 
 void Frame() {
     native::PumpToolTicks(16);
@@ -431,7 +419,7 @@ void Frame() {
     // not recovered). Init is idempotent: the region screen shut it down when the city replaced it.
     if (gAppWindow && gAppWindow->View3D() && native::StartAnimationTicks()) native::TickAnimation();
     native::EndFrameJobs();
-    if (gAudio) gAudio->Tick();
+    native::TickAudio();   // the framework's tick of the radio and the soundscape and ambience managers
     PumpTimers();
     cSC4App* app = native::BootApplication();
     if (app) {
@@ -441,10 +429,6 @@ void Frame() {
         app->OnTick(16);
     }
     const bool regionScreen = gAppWindow && gAppWindow->CurrentScreen() && gAppWindow->CurrentScreen()->GetID() == 0xea659793;
-    if (gAudio && gAppWindow && gAppWindow->CurrentScreen()) {   // the radio follows the screen: the region station on the map, the mayor's in a city
-        static const std::string stations = platform::GameDataDir() + "Radio/Stations/";
-        gAudio->SetStation(stations + (regionScreen ? "Region" : (gAppWindow->View3D() ? "Mayor" : "Region")) + "/Music");
-    }
     if (regionScreen && native::DrawRegionLayers()) InvalidateTree(gMgr->GetMainWindow());   // the map is drawn under the windows: they repaint over it
     // The city view redraws the 3D scene into the whole screen every frame, so the windows over it repaint every frame too.
     if (gAppWindow && gAppWindow->View3D() && !regionScreen) InvalidateTree(gMgr->GetMainWindow());
@@ -467,6 +451,7 @@ bool Boot() {
 
     const bool ok = native::RunBoot(true, true, gDriver.get(), [&](cGZFramework& framework, cSC4App& app) {
         SL::SetFramework(&framework);             // the locator's RZGetFramework(): without it every SL:: service stays null
+        if (gAudioWanted) native::InstallAudioDirector(app, platform::GameDataDir());   // cSC4App::AddCOMDirectors adds it
         framework.AddSystemService(gMgr.get());   // RZ::WM(): the application finds the main window through it
         // The second message server (service 0x04fa845b): the splash timer, the screen swaps and every posted command go through it.
         // The frame loop ticks it by hand (RunMessageServer2Pump), so the framework tick registration is a no-op.
@@ -496,6 +481,9 @@ bool Boot() {
     });
     if (!ok) std::printf("boot: FAILED\n");
     native::RegisterExemplarFactories();   // tuning exemplars are read on the region screen too (the audio options)
+    // The framework's HookPostAppInit: the audio director reads the sound configuration and starts the game's sound services.
+    if (native::BootFramework()) native::AudioPostAppInit(*native::BootFramework());
+    native::InstallButtonSounds();
     if (cSC4App* app = native::BootApplication()) {
         native::RegionCallbacks callbacks;
         callbacks.dataDirectory = platform::GameDataDir();
@@ -820,8 +808,8 @@ int main(int argc, char** argv) {
         }
         gDriver = gd::cMetalGDriver::Create((__bridge void*)layer, kW, kH);
         if (!gDriver) { std::printf("no Metal device\n"); return 1; }
+        gAudioWanted = (shot.empty() && scenario.empty()) || std::getenv("SC4_AUDIO");
         Boot();
-        if ((shot.empty() && scenario.empty()) || std::getenv("SC4_AUDIO")) StartGameAudio();
         // A modal dialog (RunModalLoop) keeps the windows painting: interactively the Cocoa events go on being dispatched; a scenario
         // shows the dialog for 30 frames, writes work/shots/modal<N>.png and cancels it (the scenario cannot press its buttons).
         // The simulation does not tick under a dialog (the original holds a game pause around every one).
@@ -852,7 +840,7 @@ int main(int argc, char** argv) {
                 gMgr->PostWinMessage(gz::kWinMgrMsgEndModal, 0, 0x80000001u, 0x80000001u);
             }
         };
-        if (!native::VerifyRuntimeWiring(gDriver.get(), gAudio != nullptr)) { std::fprintf(stderr, "boot halted: a required dependency is not wired\n"); return 3; }
+        if (!native::VerifyRuntimeWiring(gDriver.get(), native::AudioRunning())) { std::fprintf(stderr, "boot halted: a required dependency is not wired\n"); return 3; }
         if (!scenario.empty()) return RunScenario(scenario);
         if (const char* cityPath = std::getenv("SC4_LOADCITY")) {   // development: load one city file straight after boot and exit
             cSC4App* loadApp = native::BootApplication();

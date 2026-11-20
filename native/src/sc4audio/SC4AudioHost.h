@@ -42,6 +42,9 @@ public:
 };
 cIViewport* ViewUtilities();   // SL::spViewUtilities
 void SetViewUtilities(cIViewport* viewport);
+// The game's answer when no viewport was set by hand: SL::spViewUtilities changes with every city, so the
+// integration answers through a function (null outside a city).
+void SetViewUtilitiesProvider(cIViewport* (*provider)());
 
 // cSC4AudioListener::afZoomDistances @ 0x100b6ddf0: camera distance per zoom level (index 0..4),
 // written by cSC4AudioListener::_CalculateZoomValues and read by the 3D sems and ambience layers.

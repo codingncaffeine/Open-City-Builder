@@ -54,4 +54,11 @@ void PumpTimers() {
     }
 }
 
+// The sound output's timers (AudioPlatform::IBackend::AddTimer: a fading sound's 20 ms update) are the same pumped timers, so a
+// fade runs on the loop's thread like the rest of the sound code.
+std::uint32_t AddPumpedTimer(std::uint32_t intervalMs, std::uint32_t (*callback)(std::uint32_t, void*), void* context) {
+    return static_cast<std::uint32_t>(SDL_AddTimer(intervalMs, callback, context));
+}
+void RemovePumpedTimer(std::uint32_t id) { SDL_RemoveTimer(static_cast<SDL_TimerID>(id)); }
+
 }  // namespace linuxapp

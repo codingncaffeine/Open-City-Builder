@@ -89,7 +89,7 @@
 #include "app/NativeRegionExtras.h"
 #include "app/NativeAudio.h"
 #include "app/NativeAudioDirector.h"
-#include "app/GameAudio.h"
+#include "app/NativeAudioDirector.h"
 
 namespace linuxapp {   // StubClock.cpp: the game's stub SDL clock and timer
 double NowMs();
@@ -523,24 +523,10 @@ struct SplashHost final : sc4::ISplashScreenHost {
     void CreateRegionScreen() override { std::printf("splash: CreateRegionScreen\n"); if (gAppWindow) gAppWindow->CreateRegionScreen(); }
 } gSplashHost;
 
-// The game's sound: Sound.dat opened through the recovered persistence layer, the radio station that follows the screen and
-// the window buttons' sounds (the interactive run only, or SC4_AUDIO=1; shots and scenarios stay silent).
-GameAudio* gAudio = nullptr;
+// The game's sound runs in the interactive game, or with SC4_AUDIO=1 (shots and scenarios stay without it): the game's own
+// audio director is installed before the boot (NativeAudioDirector.cpp).
+bool gAudioWanted = false;
 bool gQuit = false;   // ends the main loop (the window's close button, the game's own quit)
-void StartGameAudio() {
-    static GameAudio audio;
-    std::string error;
-    const std::string dat = platform::GameDataDir() + "Sound.dat";
-    if (!audio.Open(dat, error)) { std::printf("audio: %s\n", error.c_str()); return; }
-    gAudio = &audio;
-    native::SetGameAudio(&audio);
-    // The game's own sound system (sound manager, Hit tracks, the sound .ini): every game sound by id, the effects'
-    // random hit lists included. Without it only the plain one-sample tracks of the fallback play.
-    if (native::BootFramework() && !native::StartAudioDirectors(*native::BootFramework(), dat.substr(0, dat.rfind('/') + 1)))
-        std::printf("audio: the game's sound system did not start; plain tracks only\n");
-    if (cSC4App* app = native::BootApplication()) native::ApplyAudioPreferences(app->GetPreferences());   // the saved volumes and songs
-    std::printf("audio: %zu sounds\n", audio.SoundCount());
-}
 
 // SC4_FRAMEPROF (stderr) / SC4_PERFLOG=<file>: milliseconds spent in each part of every frame, the time since the previous
 // frame began (it includes presenting and the window events), the draw count and the city view's scroll state.
@@ -594,7 +580,7 @@ void Frame() {
     if (gAppWindow && gAppWindow->View3D() && native::StartAnimationTicks()) native::TickAnimation();
     gLaps.Lap("anim");
     native::EndFrameJobs();
-    if (gAudio) gAudio->Tick();
+    native::TickAudio();   // the framework's tick of the radio and the soundscape and ambience managers
     PumpTimers();
     gLaps.Lap("jobs+audio");
     cSC4App* app = native::BootApplication();
@@ -607,10 +593,6 @@ void Frame() {
     native::TickGlyphTextures(static_cast<std::uint32_t>(SDL_GetTicks()));   // the framework's tick of the glyph texture service
     gLaps.Lap("messages");
     const bool regionScreen = gAppWindow && gAppWindow->CurrentScreen() && gAppWindow->CurrentScreen()->GetID() == 0xea659793;
-    if (gAudio && gAppWindow && gAppWindow->CurrentScreen()) {   // the radio follows the screen: the region station on the map, the mayor's in a city
-        static const std::string stations = platform::GameDataDir() + "Radio/Stations/";
-        gAudio->SetStation(stations + (regionScreen ? "Region" : (gAppWindow->View3D() ? "Mayor" : "Region")) + "/Music");
-    }
     if (regionScreen && native::DrawRegionLayers()) InvalidateTree(gMgr->GetMainWindow());   // the map is drawn under the windows: they repaint over it
     // The city view redraws the 3D scene into the whole screen every frame, so the windows over it repaint every frame too.
     if (gAppWindow && gAppWindow->View3D() && !regionScreen) InvalidateTree(gMgr->GetMainWindow());
@@ -704,6 +686,7 @@ bool Boot() {
 
     const bool ok = native::RunBoot(true, true, gDriver.get(), [&](cGZFramework& framework, cSC4App& app) {
         SL::SetFramework(&framework);             // the locator's RZGetFramework(): without it every SL:: service stays null
+        if (gAudioWanted) native::InstallAudioDirector(app, platform::GameDataDir());   // cSC4App::AddCOMDirectors adds it
         framework.AddSystemService(gMgr.get());   // RZ::WM(): the application finds the main window through it
         // The second message server (service 0x04fa845b): the splash timer, the screen swaps and every posted command go through it.
         // The frame loop ticks it by hand (RunMessageServer2Pump), so the framework tick registration is a no-op.
@@ -749,6 +732,8 @@ bool Boot() {
     });
     if (!ok) std::printf("boot: FAILED\n");
     native::RegisterExemplarFactories();   // tuning exemplars are read on the region screen too (the audio options)
+    // The framework's HookPostAppInit: the audio director reads the sound configuration and starts the game's sound services.
+    if (native::BootFramework()) native::AudioPostAppInit(*native::BootFramework());
     if (cSC4App* app = native::BootApplication()) {
         native::RegionCallbacks callbacks;
         callbacks.dataDirectory = platform::GameDataDir();
@@ -1447,6 +1432,12 @@ int RunScenario(const std::string& path) {
             }
             std::printf("type \"%s\"\n", text.c_str());
             for (int i = 0; i < 5; ++i) { PumpEvents(); Frame(); Nap(); }
+        } else if (command == "audio") {   // audio: the radio's station and song, the sound manager's sounds, the listener
+            native::NativeAudioReport();
+        } else if (command == "sound") {   // sound HEXID: starts a game sound by id, as a button or a tool does
+            std::string id; words >> id;
+            native::PlayGameSound(static_cast<std::uint32_t>(std::strtoul(id.c_str(), nullptr, 16)));
+            std::printf("sound %s\n", id.c_str());
         } else if (command == "cheats") {   // every registered cheat string, as the cheat code box's list has them
             auto* cheats = native::GameCheatCodeManager();
             std::uint32_t none = 0;
@@ -1576,8 +1567,8 @@ int main(int argc, char** argv) {
     // delete textures; through a dead context that crashed at exit on NVIDIA).
     struct DetachAtReturn { ~DetachAtReturn() { if (gDriver) gDriver->DetachContext(); } } detachAtReturn;
     if (!gDriver) { std::printf("no usable OpenGL driver\n"); return 1; }
+    gAudioWanted = interactive || std::getenv("SC4_AUDIO");
     Boot();
-    if (interactive || std::getenv("SC4_AUDIO")) StartGameAudio();
     // A modal dialog (RunModalLoop) keeps the windows painting: interactively the events go on being dispatched; a scenario
     // shows the dialog for 30 frames, writes work/shots/modal<N>.png and cancels it (the scenario cannot press its buttons).
     // The simulation does not tick under a dialog (the original holds a game pause around every one).
@@ -1588,6 +1579,15 @@ int main(int argc, char** argv) {
         if (interactive) PumpEvents();
         Nap();
         PumpTimers();
+        // The original's modal loop idles the framework, so the message servers and the sound services keep ticking under a
+        // dialog: what a dialog posts is delivered while it is open (the Audio Options dialog's switches, sliders, Preview
+        // and Stop reach the radio at once) and the radio goes on to its next song.
+        native::TickAudio();
+        if (cSC4App* app = native::BootApplication()) {
+            app->RunMessageServerPump(0, 64, 4);
+            app->RunMessageServer2Pump(0, 64, 4);
+            if (gMessages2) gMessages2->OnTick(16);
+        }
         // the region map under the dialog: re-blitted every frame like Frame() does (the clouds keep drawing over it)
         const bool regionScreen = gAppWindow && gAppWindow->CurrentScreen() && gAppWindow->CurrentScreen()->GetID() == 0xea659793;
         if (regionScreen && native::DrawRegionLayers()) InvalidateTree(gMgr->GetMainWindow());
@@ -1679,7 +1679,7 @@ int main(int argc, char** argv) {
             std::printf("dump: %08x %08x %08x not found\n", type, group, instance);
         }
     }
-    if (!native::VerifyRuntimeWiring(gDriver.get(), gAudio != nullptr)) { std::fprintf(stderr, "boot halted: a required dependency is not wired\n"); return 3; }
+    if (!native::VerifyRuntimeWiring(gDriver.get(), native::AudioRunning())) { std::fprintf(stderr, "boot halted: a required dependency is not wired\n"); return 3; }
     if (!scenario.empty()) {
         const int result = RunScenario(scenario);
         CloseWindows();
@@ -1713,7 +1713,7 @@ int main(int argc, char** argv) {
         if (frames > 0 && ++n >= frames) break;
     }
     CloseWindows();
-    if (gAudio) gAudio->Close();   // its voices are SDL audio streams: they go before SDL_Quit (the static outlives it)
+    native::AudioPreAppShutdown();   // the sound services and the output: its voices are SDL audio streams, they go before SDL_Quit
     if (gDriver) gDriver->DetachContext();
     SDL_GL_DestroyContext(context);
     SDL_DestroyWindow(gWindow);

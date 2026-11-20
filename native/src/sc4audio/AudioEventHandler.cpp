@@ -6,6 +6,8 @@
 // functions plus thunks), both from SC4AudioEventHandler.cpp (module initialiser @ 0x1003efe16).
 #include "sc4audio/AudioEventHandler.h"
 
+#include <cstdio>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -833,6 +835,13 @@ bool cSC4AudioEventHandler::DoMessage(cIGZMessage2* message) {
     // Payload accessors live on the cIGZMessage2Standard view of the same object.
     cIGZMessage2Standard* standard = nullptr;
     if (!message->QueryInterface(kGZIID_cIGZMessage2Standard, reinterpret_cast<void**>(&standard))) standard = nullptr;
+
+    // SC4_AUDIODEBUG: the radio's messages as they arrive (station, playlist options, stop, play, on / off + volume, on demand).
+    if (standard && std::getenv("SC4_AUDIODEBUG") &&
+        (type == kMessageRadioStation || type == kMessageRadioStationOptions || type == kMessageStopPlayback || type == kMessagePlaySong ||
+         type == kMessageRadioOnOffVolume || type == kMessageRadioOnDemand))
+        std::fprintf(stderr, "audio handler: radio message %08x data %llu %llu %llu\n", type, static_cast<unsigned long long>(standard->GetData1()),
+                     static_cast<unsigned long long>(standard->GetData2()), static_cast<unsigned long long>(standard->GetData3()));
 
     bool result = true;
     switch (type) {

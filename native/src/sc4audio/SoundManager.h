@@ -197,6 +197,7 @@ public:
 
     // --- inspection ---
     std::size_t SoundCount() const { return sounds_.size(); }
+    const std::list<tSound*>& Sounds() const { return sounds_; }   // in start order
     tSound* FindSound(std::uint32_t instanceId) const;
     std::int32_t nonMasterSoundCount() const { return nonMasterCount_; }
     std::int32_t masterSoundCount() const { return masterCount_; }

@@ -370,6 +370,24 @@ void cGZFramework::OnIdle() {
     --idleDepth_;
 }
 
+void cGZFramework::TickServices(const std::uint32_t* serviceIds, std::size_t count) {
+    const auto listed = [&](cIGZSystemService* service) {
+        const std::uint32_t id = service->GetServiceID();
+        for (std::size_t i = 0; i < count; ++i) if (serviceIds[i] == id) return true;
+        return false;
+    };
+    // The snapshots hold a reference each: a service may leave the list (or be released) from inside a call.
+    std::vector<cRZAutoRefCount<cIGZSystemService>> tick, idle;
+    lock_.Lock();
+    const std::uint32_t tickNumber = ++partialTickCounter_;
+    for (auto& service : tickList_) if (listed(service.get())) tick.push_back(service);
+    const bool idleNow = tickNumber % static_cast<std::uint32_t>(idleInterval_) == 0;
+    if (idleNow) for (auto& service : idleList_) if (listed(service.get())) idle.push_back(service);
+    lock_.Unlock();
+    for (auto& service : tick) service->OnTick(tickNumber);
+    for (auto& service : idle) service->OnIdle(tickNumber / static_cast<std::uint32_t>(idleInterval_));
+}
+
 void cGZFramework::MakeHookListCopy(HookList& out) {
     Locked guard(lock_);
     hooksLocked_ = true;

@@ -72,14 +72,20 @@ std::uint32_t OccupantInstanceId(sc4::cISC4Occupant* occupant) {
 }
 
 // The cISC4Automaton view of an occupant (iid 0xa9b40f05); one reference, or null.
-IAmbienceAutomaton* QueryAutomaton(sc4::cISC4Occupant* occupant) {
-    if (!occupant) return nullptr;
-    void* raw = nullptr;
-    if (!occupant->QueryInterface(kGZIID_cISC4AutomatonView, &raw) || !raw) return nullptr;
-    return static_cast<IAmbienceAutomaton*>(raw);
-}
+IAmbienceAutomaton* QueryAutomaton(cIGZUnknown* object) { return g_host ? g_host->AutomatonOfObject(object) : nullptr; }
 
 }  // namespace
+
+IAmbienceAutomaton* IAmbienceManagerHost::AutomatonOfObject(cIGZUnknown* object) {
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(kGZIID_cISC4AutomatonView, &raw) || !raw) return nullptr;
+    return static_cast<IAmbienceAutomaton*>(raw);
+}
+IAmbienceLot* IAmbienceManagerHost::LotOfObject(cIGZUnknown* object) {
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(kGZIID_cISC4LotView, &raw) || !raw) return nullptr;
+    return static_cast<IAmbienceLot*>(raw);
+}
 
 IAmbienceManagerHost* AmbienceManagerHost() { return g_host; }
 void SetAmbienceManagerHost(IAmbienceManagerHost* host) { g_host = host; }
@@ -550,12 +556,10 @@ bool cSC4AudioAmbienceManager::HandleOccupantMessages(cIGZMessage2Standard* mess
             }
         }
     } else if (source && type == sc4::kMessageLotConditionChanged) {
-        void* raw = nullptr;
-        if (source->QueryInterface(kGZIID_cISC4LotView, &raw) && raw) {
-            lot = static_cast<IAmbienceLot*>(raw);
+        lot = g_host ? g_host->LotOfObject(source) : nullptr;
+        if (lot)
             UpdateLotOccupantsForConditionChange(lot, static_cast<int>(message->GetData1()),
                                                 static_cast<int>(message->GetData2()));
-        }
     }
 
     if (lot) lot->Release();
@@ -575,7 +579,7 @@ bool cSC4AudioAmbienceManager::HandleAutomatonMessage(cIGZMessage2Standard* mess
         if (signal == 0x10) {
             // The original treats the payload as the automaton directly (no QueryInterface) and asks its
             // state 0x10: a moving automaton plays the occupant's sound, a stopped one stops it.
-            auto* automaton = static_cast<IAmbienceAutomaton*>(payload);
+            IAmbienceAutomaton* automaton = payload && g_host ? g_host->AutomatonOfCallbackPayload(payload) : nullptr;
             if (!automaton) return true;
             automaton->AddRef();
             const bool hasState = automaton->FindState(kAutomatonRunningState) != nullptr;
@@ -583,7 +587,7 @@ bool cSC4AudioAmbienceManager::HandleAutomatonMessage(cIGZMessage2Standard* mess
             PlayOccupantSound(automaton->AsOccupant(), play);
             automaton->Release();
         } else if (signal == 0x1e || signal == 0x14) {
-            auto* automaton = static_cast<IAmbienceAutomaton*>(payload);
+            IAmbienceAutomaton* automaton = payload && g_host ? g_host->AutomatonOfCallbackPayload(payload) : nullptr;
             if (!automaton) return true;
             automaton->AddRef();
             PlayOccupantSound(automaton->AsOccupant(), kind != 12);
@@ -596,7 +600,8 @@ bool cSC4AudioAmbienceManager::HandleAutomatonMessage(cIGZMessage2Standard* mess
         // "the automaton moved": update the sound position of its occupant instead of restarting it.
         void* payload = message->GetVoid1();
         if (!payload) return true;
-        auto* automaton = static_cast<IAmbienceAutomaton*>(payload);
+        IAmbienceAutomaton* automaton = g_host ? g_host->AutomatonOfCallbackPayload(payload) : nullptr;
+        if (!automaton) return true;
         float position[3] = {0.0f, 0.0f, 0.0f};
         automaton->GetPosition(position);
         sc4::cISC4Occupant* occupant = automaton->AsOccupant();
@@ -619,12 +624,11 @@ bool cSC4AudioAmbienceManager::HandleRailwayCrossingMessage(cIGZMessage2Standard
     cIGZUnknown* source = message->GetIGZUnknown();
     if (!source) return true;
     source->AddRef();
-    void* raw = nullptr;
-    if (!source->QueryInterface(kGZIID_cISC4AutomatonView, &raw) || !raw) {
+    IAmbienceAutomaton* automaton = QueryAutomaton(source);
+    if (!automaton) {
         source->Release();
         return true;
     }
-    auto* automaton = static_cast<IAmbienceAutomaton*>(raw);
     sc4::cISC4Occupant* occupant = automaton->AsOccupant();
     sc4::cISCPropertyHolder* holder = occupant ? occupant->AsPropertyHolder() : nullptr;
     std::uint32_t soundId = 0;

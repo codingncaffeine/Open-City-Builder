@@ -87,6 +87,10 @@ public:
     void SetOnIdleInterval(int interval) override { idleInterval_ = interval > 0 ? interval : 1; }   // @ 0x10002baa6
     void OnTick(std::uint32_t tickNumber) override;                  // @ 0x10002b7ce
     void OnIdle() override;                                          // @ 0x10002b90e
+    // Port-only: one tick (and, every idle interval, one idle call) for the registered services whose ids are listed.
+    // The native frame loop runs the application's own steps by hand, so it ticks groups of services instead of the
+    // whole list; a service that took itself out of the tick or idle list is not called.
+    void TickServices(const std::uint32_t* serviceIds, std::size_t count);
     bool IsTickEnabled() const override { return tickEnabled_; }     // @ 0x10002d662
     void ToggleTick(bool enabled) override { tickEnabled_ = enabled; }              // @ 0x10002d66e
     void Quit(int exitCode) override { quit_ = true; exitCode_ = exitCode; }        // @ 0x10002d62a
@@ -173,6 +177,7 @@ private:
     ServiceList tickPending_;                                            // +0x168 removed during a tick pass
     bool tickEnabled_ = false;                                           // +0x180
     int idleInterval_ = 4;                                               // +0x184
+    std::uint32_t partialTickCounter_ = 0;                               // port-only (TickServices)
     std::uint32_t idleCounter_ = 0;                                      // +0x188
     std::uint32_t idleServiceCounter_ = 0;                               // +0x18c
     bool isInstall_ = false;                                             // +0x190

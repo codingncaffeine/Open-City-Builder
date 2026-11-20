@@ -15,8 +15,8 @@ void InstallAdvisorConcreteStub();
 void InstallAdvisorPopupTrackerStub();
 void InstallAdvisorSystemStub();
 void InstallAircraftStub();
-void InstallAmbienceStateStub();
-void InstallSoundBankStub();
+void InstallAmbienceHosts();    // app/NativeAudioAmbience.cpp: the ambience system's real hosts
+void InstallSoundBankHost();    // app/NativeAudioDirector.cpp
 void InstallAuraStub();
 void InstallAuraHost();   // app/NativeAura.cpp
 void InstallPropDeveloperHost();   // app/NativePropDeveloper.cpp
@@ -131,8 +131,8 @@ void InstallStubHosts() {
     InstallAdvisorPopupTrackerStub();
     InstallAdvisorSystemStub();
     InstallAircraftStub();
-    InstallAmbienceStateStub();
-    InstallSoundBankStub();
+    InstallAmbienceHosts();
+    InstallSoundBankHost();
     InstallAuraStub();
     InstallAuraHost();                    // the mayor rating simulator's real host replaces the stub
     InstallAutomataGroupHosts();          // NativeAutomataGroups.cpp: occupant group rolls, attractor states

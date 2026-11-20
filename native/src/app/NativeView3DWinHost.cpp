@@ -66,7 +66,6 @@
 #include "sc4/ViewInputControlSignTool.h"
 #include "sc4/GamePreferencesWinProc.h"
 #include "platform/GameDataPath.h"
-#include "app/GameAudio.h"
 #include "app/NativeAudio.h"
 #include "sc4/AudioPreferencesWinProc.h"
 #include "sc4/VideoPreferencesWinProc.h"
@@ -460,7 +459,7 @@ void RunGameOptionsDialog(std::function<std::uint8_t*()> preferences) {
 }
 
 // new cSC4AudioPreferencesWinProc; ShowDialog; DoModalWin: the "Audio Options" dialog, from the city view's options menu and the
-// region screen's. Its controls drive the running sound output (GameAudio) as they change.
+// region screen's. Its controls reach the sound through the game's own audio messages.
 void RunAudioOptionsDialog(std::function<std::uint8_t*()> preferences) {
     using sc4::cSC4AudioPreferencesWinProc;
     if (!ActiveWinMgr() || !ActiveWinMgr()->modalDialogs || cSC4AudioPreferencesWinProc::Displayed()) return;
@@ -469,20 +468,7 @@ void RunAudioOptionsDialog(std::function<std::uint8_t*()> preferences) {
     if (!services.windowManager) {
         services.windowManager = [] { return static_cast<cIGZWinMgr*>(ActiveWinMgr()); };
         services.savePreferences = [] { if (cSC4App* app = BootApplication()) app->SavePreferences(); };
-        services.postMessage = [](std::uint32_t type) {
-            if (!SL::spMS2) return;
-            auto* message = new cRZMessage2Standard();
-            message->AddRef();
-            message->SetType(type);
-            SL::spMS2->MessagePost(message, false);
-            message->Release();
-        };
         services.dataDirectory = [] { return platform::GameDataDir(); };
-        services.applyAudio = [] { ApplyAudioPreferences(sc4::GetAudioPreferencesServices().preferences ? sc4::GetAudioPreferencesServices().preferences() : nullptr); };
-        services.playSong = [](const std::string& path) { GameAudio* audio = CurrentGameAudio(); return audio && audio->PlaySong(path); };
-        services.stopRadio = [] { if (GameAudio* audio = CurrentGameAudio()) audio->StopRadio(); };
-        services.resumeRadio = [] { if (GameAudio* audio = CurrentGameAudio()) audio->ResumeRadio(); };
-        services.currentSong = [] { GameAudio* audio = CurrentGameAudio(); return audio ? audio->CurrentSong() : std::string(); };
     }
     auto* proc = new cSC4AudioPreferencesWinProc();
     proc->AddRef();

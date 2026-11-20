@@ -2,16 +2,14 @@
 #pragma once
 #include <cstdint>
 
-class GameAudio;
-
 namespace native {
 
-void SetGameAudio(GameAudio* audio);          // the running sound output (null: silent)
-GameAudio* CurrentGameAudio();
-// The preference blob's audio settings (music / sound switches and volumes, the playlists' song boxes) onto the running
-// sound output; called when the sound starts and by the Audio Options dialog as its controls change.
-void ApplyAudioPreferences(const std::uint8_t* preferences);
-void PlayGameSound(std::uint32_t soundId);    // a Hit track id of Sound.dat
+// Starts the sound `soundId` (a Hit track id of Sound.dat) the way the game's own callers do: the start-sound event of
+// the game's sound manager, posted to the sound system (SL::spSS PostEventIds(1, id, 0, 0, 0)). Silent without the sound
+// services.
+void PlayGameSound(std::uint32_t soundId);
+// The effects volume as a gain 0..1 (0 when the player's sound is off or there is no sound output): the intro movies' sound.
+float EffectsGain();
 void InstallButtonSounds();                   // the window buttons' sound service
 
 }  // namespace native

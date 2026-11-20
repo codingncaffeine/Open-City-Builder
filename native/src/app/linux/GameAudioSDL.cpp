@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 #include <mpg123.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <vector>
@@ -12,15 +13,28 @@
 #include "app/GameAudio.h"
 #include "audio/platform/AudioPlatform.h"
 
+namespace linuxapp {   // StubClock.cpp
+std::uint32_t AddPumpedTimer(std::uint32_t intervalMs, std::uint32_t (*callback)(std::uint32_t, void*), void* context);
+void RemovePumpedTimer(std::uint32_t id);
+}  // namespace linuxapp
+
 namespace {
 
 SDL_AudioDeviceID gDevice = 0;
+class SdlVoice;
+std::vector<SdlVoice*> gVoices;   // every live voice (the kit's `audio` report); made and freed on the frame loop's thread
 
 // A stream bound to the device. Pan is not modelled (SDL streams have no per-stream pan); the voices are mixed centred.
 class SdlVoice : public AudioPlatform::IVoice {
 public:
+    SdlVoice() { gVoices.push_back(this); }
     ~SdlVoice() override {
+        std::erase(gVoices, this);
         if (stream_) SDL_DestroyAudioStream(stream_);   // unbinds; the callback never runs again after this returns
+    }
+    void Report() const {
+        std::printf("audio:   voice queued %d bytes stopped %d playing %d gain %.2f\n", stream_ ? SDL_GetAudioStreamQueued(stream_) : -1,
+                    int(stopped_.load()), int(IsPlaying()), stream_ ? double(SDL_GetAudioStreamGain(stream_)) : 0.0);
     }
     bool ok() const { return stream_ != nullptr; }
     void Stop() override {
@@ -61,6 +75,9 @@ public:
         loopsLeft_ = loops;
         stopped_ = false;
         SDL_PutAudioStreamData(stream_, pcm_.data(), int(pcm_.size()));
+        // The last pass is flushed: without it the converter keeps the sample's tail queued for ever and a one-shot
+        // never reads as finished.
+        if (loops == 0) SDL_FlushAudioStream(stream_);
         SDL_UnlockAudioStream(stream_);
         if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "audio: voice %zu bytes gain %.2f\n", pcm_.size(), double(SDL_GetAudioStreamGain(stream_)));
     }
@@ -73,6 +90,7 @@ private:
         if (v->stopped_ || additional <= 0 || v->loopsLeft_ == 0 || SDL_GetAudioStreamQueued(stream) >= additional) return;
         if (v->loopsLeft_ > 0) --v->loopsLeft_;
         SDL_PutAudioStreamData(stream, v->pcm_.data(), int(v->pcm_.size()));
+        if (v->loopsLeft_ == 0) SDL_FlushAudioStream(stream);
     }
     std::vector<std::uint8_t> pcm_;
     std::atomic<std::int32_t> loopsLeft_{0};
@@ -147,11 +165,22 @@ public:
         if (!voice->ok()) { delete voice; return nullptr; }
         return voice;
     }
-    std::uint32_t AddTimer(std::uint32_t, AudioPlatform::TimerCallback, void*) override { return 0; }
-    void RemoveTimer(std::uint32_t) override {}
+    // The frame loop's pumped timers (StubClock.cpp): the callback runs on the loop's thread.
+    std::uint32_t AddTimer(std::uint32_t intervalMs, AudioPlatform::TimerCallback callback, void* context) override {
+        return linuxapp::AddPumpedTimer(intervalMs, callback, context);
+    }
+    void RemoveTimer(std::uint32_t id) override { linuxapp::RemovePumpedTimer(id); }
 };
 
 }  // namespace
+
+namespace linuxapp {
+// Kit command `audio` with SC4_AUDIODEBUG: one line per live voice of the sound output.
+void AudioVoiceReport() {
+    std::printf("audio: %zu voices, device paused %d\n", gVoices.size(), gDevice ? int(SDL_AudioDevicePaused(gDevice)) : -1);
+    for (const SdlVoice* voice : gVoices) voice->Report();
+}
+}  // namespace linuxapp
 
 AudioPlatform::IBackend* CreatePlatformAudioBackend() {
     if (!gDevice) {

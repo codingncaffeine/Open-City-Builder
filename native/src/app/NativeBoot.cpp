@@ -12,6 +12,8 @@
 #include "platform/GameDataPath.h"
 #include "app/NativeGlyphTextures.h"
 #include "app/NativeBoot.h"
+#include "app/NativeAudioDirector.h"
+#include "gz/FileSystem.h"
 #include "app/NativeAppServices.h"
 #include "gz/cGZDBSerialRecordAsIGZFile.h"
 #include "gz/CommandServer.h"
@@ -143,6 +145,20 @@ bool RunBoot(bool verbose, bool keepAlive, gd::cIGZGDriver* driver, const std::f
         }
         return g_detokenizer;
     });
+    // The file system service (0x2073215d, RZ::FS()): the recovered cGZFileSystem. The radio and the audio event handler
+    // read the data directory from it; the application keeps taking its own directories from the hook above.
+    {
+        static struct final : IFileSystemHost {
+            std::string bundle;
+            std::string CurrentAppPath() override { return bundle + "/MacOS/SimCity 4"; }
+            bool BundleGameDataPath(std::string& path) override { path = bundle + "/GameData"; return true; }
+            std::string FindCDROM(const std::string&) override { return {}; }   // no CD
+            std::string AppObjectName() override { return "SimCity 4"; }
+        } files;
+        files.bundle = bundle;
+        SetFileSystemHost(&files);
+        app->SetServiceFactory("cGZFileSystem", []() -> cIGZUnknown* { return static_cast<cIGZFileSystem*>(new cGZFileSystem()); });
+    }
     // The framework command server (0xeb903a32): the keyboard shortcuts and the cheat code dialog run commands through it,
     // and its dispatcher sends each one as a message on message server 2 to the windows that listen for it.
     app->SetServiceFactory("cGZCommandServer", []() -> cIGZUnknown* { return static_cast<cIGZCommandServer*>(new cGZCommandServer()); });
@@ -157,6 +173,7 @@ bool RunBoot(bool verbose, bool keepAlive, gd::cIGZGDriver* driver, const std::f
     native::InstallImageCodecs();
     if (beforeInit) beforeInit(*framework, *app);
     Step("PreFrameWorkInit", app->PreFrameWorkInit());
+    AudioPreAppInit(*framework);   // the framework's PreAppInit for the sound services, when the audio director was added
     // The framework's PreAppInit starts the services of priority -1999999 and up. The native boot runs the application's
     // steps itself, so it starts the command server (priority -1000000: its message dispatcher and string generator) here.
     {

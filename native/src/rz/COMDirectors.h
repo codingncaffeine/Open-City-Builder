@@ -227,6 +227,9 @@ class cGZSoundCOMDirector : public cRZCOMDllDirector {
 public:
     cGZSoundCOMDirector();
     std::uint32_t GetDirectorID() const override { return 0xe9d3a40b; }
+    bool OnStart(cIGZCOM* com) override;
+    bool PostAppInit() override;
+    bool PreAppShutdown() override;
 };
 
 class cGZGraphicCOMDirector : public cRZCOMDllDirector {
