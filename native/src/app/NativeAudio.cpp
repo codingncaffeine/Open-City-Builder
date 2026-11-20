@@ -1,5 +1,3 @@
-#include "audio/interfaces/cIGZSndEventStd.h"
-#include "sc4audio/SoundManager.h"
 #include "app/NativeAudio.h"
 
 #include "app/NativeAudioDirector.h"
@@ -12,6 +10,8 @@
 #include "audio/AudioServices.h"
 #include "audio/GZSndSys.h"
 #include "audio/interfaces/cIGZSnd.h"
+#include "audio/interfaces/cIGZSndEventStd.h"
+#include "sc4audio/SoundManager.h"
 #include "gz/WinBtn.h"
 #include "gz/WinCtrlFactory.h"
 #include "sc4/AudioPreferencesWinProc.h"
@@ -29,7 +29,12 @@ public:
         return fonts && fonts->Available() ? fonts->Font(style) : nullptr;
     }
     cIGZBuffer* Image(std::uint32_t id) override { gz::IWinCtrlFactory* stock = gz::WinCtrlFactory(); return stock ? stock->Image(id) : nullptr; }
-    std::uint32_t DefaultSoundId(int) override { return 0; }
+    // RZ::WCM() vslot 0xe8 (SystemSndID): the sound manager's system sound for the button event. Nothing in the game sets
+    // one, so a button sounds only when its UI script names a sound.
+    std::uint32_t DefaultSoundId(int which) override {
+        cIGZSndMgr* manager = Audio::SoundManagerService();
+        return manager ? manager->SystemSndID(which) : 0;
+    }
     void PlaySound(std::uint32_t soundId) override { PlayGameSound(soundId); }
     // RZ::MS(): the tip request goes to the tool tip manager (cSC4ToolTipManager) as message 0x22c010d0, the hide as 0x22c010d2.
     void ShowTip(const gz::BtnTipRequest& request) override {
