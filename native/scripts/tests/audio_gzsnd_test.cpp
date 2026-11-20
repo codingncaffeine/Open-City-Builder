@@ -209,9 +209,18 @@ void TestPcmPlayer() {
         p.Play(true);
         assert(p.IsPlaying() && v->plays.size() == 1 && v->plays[0] == -1);
         p.Stop();
-        assert(v->stops == 1 && p.IsPlaying());    // the playing flag is sticky
+        assert(v->stops == 1 && !p.IsPlaying());   // Stop clears the playing flag
+        p.Stop();
+        assert(v->stops == 1);                     // and a stopped player is not stopped again
         p.Play(false);
-        assert(v->stops == 2 && v->plays.back() == 0);
+        assert(v->stops == 1 && v->plays.back() == 0 && p.IsPlaying());
+        v->playing = false;                        // the sample ran out: a one-shot is over
+        assert(!p.IsPlaying());
+        p.Play(true);
+        v->playing = false;
+        assert(p.IsPlaying());                     // a looping player stays playing until stopped
+        p.Stop();
+        assert(!p.IsPlaying());
         p.SetFrequency(8000);
         assert(p.GetFrequency() == 8000 && p.GetOriginalFrequency() == 0);
         p.Close();

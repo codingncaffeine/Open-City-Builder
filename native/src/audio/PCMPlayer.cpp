@@ -23,7 +23,10 @@ void CPCMPlayer::Close() {
 }
 
 void CPCMPlayer::Stop() {
-    if (voice_ && playing_) voice_->Stop();
+    if (voice_ && playing_) {
+        playing_ = false;
+        voice_->Stop();
+    }
 }
 
 void CPCMPlayer::Play(bool loop) {
