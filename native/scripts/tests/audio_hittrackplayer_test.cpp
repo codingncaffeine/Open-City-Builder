@@ -47,8 +47,8 @@ struct Program {
 constexpr std::uint32_t kEntryKey = 0x1234;
 constexpr std::uint32_t kRegEntry = 0xff5f15e1;
 
-// Registers a block holding `program` in the manager and returns a player pointing at it.
-cHitTrackPlayer* MakePlayer(cHitMan& hm, const Program& program) {
+// Registers a block holding `program` in the manager and returns a player pointing at it (at `entryOffset` in the block).
+cHitTrackPlayer* MakePlayer(cHitMan& hm, const Program& program, std::uint32_t entryOffset = 0) {
     // The block only points at the bytes; the test owns them until the manager is gone.
     g_programBytes.emplace_back(new std::uint8_t[program.bytes.size()]);
     std::uint8_t* data = g_programBytes.back().get();
@@ -56,7 +56,7 @@ cHitTrackPlayer* MakePlayer(cHitMan& hm, const Program& program) {
     auto* block = new cHitTrackDataBlock();
     block->AddRef();
     block->SetDataBlock(data, static_cast<std::uint32_t>(program.bytes.size()));
-    block->AddEntryPoint(kEntryKey, 0);
+    block->AddEntryPoint(kEntryKey, entryOffset);
     hm.RegisterTrackDataBlock(block);
     block->Release();
     auto* player = new cHitTrackPlayer();
@@ -130,6 +130,26 @@ int main() {
         p->HandleTimerCallback(0);                // runs until the program ends
         assert(p->GetRegisterValue(0x20) == 0 && !p->IsPlaying());
         assert(p->Release() == 0 || true);
+    }
+
+    // ---- a track that starts inside its data block: jump targets are offsets from the block's start ----
+    {
+        Program prog;
+        prog.b(0x04).b(0x27).b(1)          // 0: another track
+            .b(0x0c)                       // 3
+            .b(0x04).b(0x27).b(5)          // 4: the track: r27 = 5
+            .b(0x0d).i32(16)               // 7: jump to 16
+            .b(0x04).b(0x28).b(7)          // 12: skipped
+            .b(0x0c)                       // 15
+            .b(0x04).b(0x29).b(3)          // 16: r29 = 3
+            .b(0x0c)                       // 19: end
+            .b(0x04).b(0x28).b(99)         // 20: where a jump counted from the track's own start (4 + 16) would land
+            .b(0x0c);                      // 23
+        cHitTrackPlayer* p = MakePlayer(hm, prog, 4);
+        p->PlayPause();
+        p->HandleTimerCallback(0);
+        assert(p->GetRegisterValue(0x27) == 5 && p->GetRegisterValue(0x29) == 3 && p->GetRegisterValue(0x28) == 0 && !p->IsPlaying());
+        p->Release();
     }
 
     // ---- waits: "wait register" burns down by elapsed time, runs on afterwards ----

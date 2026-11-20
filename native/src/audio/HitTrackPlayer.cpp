@@ -1,5 +1,8 @@
 #include "audio/HitTrackPlayer.h"
 
+#include <cstdio>
+#include <cstdlib>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -349,7 +352,10 @@ bool cHitTrackPlayer::SetTrackDataEntryPoint(std::uint32_t entryKey) {  // @ 0x1
     cIHitTrackDataBlock* block = nullptr;
     std::uint32_t offset = 0;
     if (!hm->GetTrackDataBlockAndOffset(entryKey, &block, offset)) return false;
-    base_ = pc_ = entry_ = loopMark_ = block->DataStartAddress() + offset;
+    // The base is the start of the whole track data block (jump targets are offsets from it); the entry point, the
+    // program counter and the loop mark start at the track's own offset in it (Mac i386 0x00356a48: +0x60 / +0x64..0x6c).
+    base_ = block->DataStartAddress();
+    pc_ = entry_ = loopMark_ = base_ + offset;
     return true;
 }
 
@@ -1137,6 +1143,19 @@ bool cHitTrackPlayer::DoCommand() {
             return true;
         }
         default:  // includes 0x1a and the unused 0x34..0x3d
+            if (std::getenv("SC4_AUDIODEBUG")) {   // the opcode, where it sits in the track's data and the bytes before it
+                std::fprintf(stderr, "hit track %p: opcode %02x at +%td (entry +%td), before:", static_cast<void*>(this), op, opAddr - base_,
+                             entry_ - base_);
+                for (const std::uint8_t* b = opAddr - base_ >= 12 ? opAddr - 12 : base_; b < opAddr + 4; ++b) std::fprintf(stderr, " %02x", *b);
+                std::fprintf(stderr, "\n");
+                static const cHitTrackPlayer* dumped = nullptr;   // the program's head, once per player
+                if (dumped != this) {
+                    dumped = this;
+                    std::fprintf(stderr, "hit track %p: sound %08x program:", static_cast<void*>(this), GetID());
+                    for (const std::uint8_t* b = base_; b < base_ + 96; ++b) std::fprintf(stderr, " %02x", *b);
+                    std::fprintf(stderr, "\n");
+                }
+            }
             ReportError("Illegal Instruction");
             return true;
     }
