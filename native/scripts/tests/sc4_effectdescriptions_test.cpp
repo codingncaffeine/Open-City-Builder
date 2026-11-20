@@ -8,11 +8,11 @@ static int failures = 0;
 
 int main() {
     {   // shake
-        cSC4ShakeDescription a; a.amplitude = 1.5f; a.frequency = 2; a.curveA = {1, 2}; a.curveB = {3}; a.falloff = 4; a.flags = 7;
+        cSC4ShakeDescription a; a.duration = 1.5f; a.fadeOut = 2; a.amplitudeCurve = {1, 2}; a.rateCurve = {3}; a.aspect = 4; a.pattern = 7;
         PortMemoryOStream os; os << a;
         PortMemoryIStream is(os.bytes().data(), os.bytes().size());
         cSC4ShakeDescription b; is >> b;
-        CHECK(b.amplitude == 1.5f && b.frequency == 2 && b.curveA.size() == 2 && b.curveB[0] == 3 && b.falloff == 4 && b.flags == 7 && !is.GetError());
+        CHECK(b.duration == 1.5f && b.fadeOut == 2 && b.amplitudeCurve.size() == 2 && b.rateCurve[0] == 3 && b.aspect == 4 && b.pattern == 7 && !is.GetError());
     }
     {   // decal: kind 0 becomes 2 with flag 0x40
         cSC4DecalDescription a; a.flags = 3; a.textureId = 9; a.layer = 1; a.lifetime = 0; a.life = 0.5f; a.rotationCurve = {1}; a.colorCurve = {{1, 2, 3}, {4, 5, 6}};
