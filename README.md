@@ -10,14 +10,18 @@ the original's saved cities, plays them and saves them back. Running natively:
 
 - **The city:** growth, traffic with cars, trains, buses and working stations, subway stations, power, water with
   pipes you can lay and see underground, landfills, airports and seaports, street props and sidewalks on new roads,
-  the budget and taxes, advisors, the news ticker, data views, query dialogs, the city graphs and neighbor deals.
+  signs and labels, the budget and taxes down to a single building, advisors, the news ticker, data views, query
+  dialogs, the city graphs and neighbor deals.
 - **Events:** fires, crime with arrests and riots, toxic spills and potholes, a mayor rating that follows the city,
   night lights, and every disaster on the menu, including pipe bursts.
+- **Sound:** the game's own sound system: the radio stations and their playlists, effects placed in the city and
+  heard left and right, sirens, the city's ambience, and the audio options.
+- **Around the city:** the tutorials, the cheat box, snapshots and their album, and starting a city over.
 
 Still missing:
 
-- **Screens:** cheats, tutorials, the personal-sim and driving modes, the snapshot album, the subway view and the
-  budget window of a single building.
+- **Building:** bridges, tunnels, and the tools for power lines and subway tunnels; buildings are never abandoned.
+- **Screens:** the personal-sim and driving modes, the subway view, making and importing regions, and a few cheats.
 - **Display:** text is soft at fractional interface scales.
 
 There is no release yet.
