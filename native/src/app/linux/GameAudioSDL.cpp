@@ -24,7 +24,7 @@ SDL_AudioDeviceID gDevice = 0;
 class SdlVoice;
 std::vector<SdlVoice*> gVoices;   // every live voice (the kit's `audio` report); made and freed on the frame loop's thread
 
-// A stream bound to the device. Pan is not modelled (SDL streams have no per-stream pan); the voices are mixed centred.
+// A stream bound to the device.
 class SdlVoice : public AudioPlatform::IVoice {
 public:
     SdlVoice() { gVoices.push_back(this); }
@@ -33,16 +33,17 @@ public:
         if (stream_) SDL_DestroyAudioStream(stream_);   // unbinds; the callback never runs again after this returns
     }
     void Report() const {
-        std::printf("audio:   voice queued %d bytes stopped %d playing %d gain %.2f\n", stream_ ? SDL_GetAudioStreamQueued(stream_) : -1,
-                    int(stopped_.load()), int(IsPlaying()), stream_ ? double(SDL_GetAudioStreamGain(stream_)) : 0.0);
+        std::printf("audio:   voice queued %d bytes stopped %d playing %d gain %.2f pan %.2f\n", stream_ ? SDL_GetAudioStreamQueued(stream_) : -1,
+                    int(stopped_.load()), int(IsPlaying()), stream_ ? double(SDL_GetAudioStreamGain(stream_)) : 0.0, double(Pan()));
     }
+    virtual float Pan() const { return 0.0f; }
     bool ok() const { return stream_ != nullptr; }
     void Stop() override {
         stopped_ = true;
         if (stream_) SDL_ClearAudioStream(stream_);
     }
     void SetVolume(float v) override { if (stream_) SDL_SetAudioStreamGain(stream_, v); }
-    void SetPan(float) override {}
+    void SetPan(float) override {}   // the songs are not placed
 
 protected:
     bool Open(const SDL_AudioSpec& spec, SDL_AudioStreamCallback refill) {
@@ -60,40 +61,80 @@ protected:
     std::atomic<bool> stopped_{false};
 };
 
-// The whole sample in memory; `loops` follows AVAudioPlayer (0 once, -1 forever, n = n more times).
+// The whole sample in memory; `loops` follows AVAudioPlayer (0 once, -1 forever, n = n more times). The stream is fed a block
+// at a time from its own callback, as stereo 16-bit frames with the voice's pan applied to each block: a sound moving across
+// the view (the 3D sounds' left / right balance) is heard moving. The pan is a balance, as AVAudioPlayer's: -1 leaves only the
+// left channel, 1 only the right, 0 both in full.
 class PcmVoice final : public SdlVoice {
 public:
     PcmVoice(const std::uint8_t* data, std::int32_t size, std::uint16_t channels, std::uint32_t rate, std::uint16_t bits)
-        : pcm_(data, data + size) {
-        SDL_AudioSpec spec{bits == 8 ? SDL_AUDIO_U8 : SDL_AUDIO_S16LE, int(channels), int(rate)};
-        Open(spec, &Refill);
+        : channels_(channels ? channels : 1), bytesPerSample_(bits == 8 ? 1 : 2) {
+        const std::size_t frameBytes = std::size_t(channels_) * bytesPerSample_;
+        const std::size_t frames = frameBytes ? std::size_t(size) / frameBytes : 0;
+        samples_.resize(frames * channels_);
+        for (std::size_t i = 0; i < samples_.size(); ++i) {
+            if (bytesPerSample_ == 1) samples_[i] = static_cast<std::int16_t>((int(data[i]) - 128) << 8);
+            else samples_[i] = static_cast<std::int16_t>(data[2 * i] | (data[2 * i + 1] << 8));
+        }
+        frames_ = frames;
+        SDL_AudioSpec spec{SDL_AUDIO_S16, 2, int(rate)};
+        Open(spec, &Feed);
     }
     void Play(std::int32_t loops) override {
         if (!stream_) return;
         SDL_LockAudioStream(stream_);
         SDL_ClearAudioStream(stream_);
+        position_ = 0;
         loopsLeft_ = loops;
+        fed_ = frames_ == 0;
         stopped_ = false;
-        SDL_PutAudioStreamData(stream_, pcm_.data(), int(pcm_.size()));
-        // The last pass is flushed: without it the converter keeps the sample's tail queued for ever and a one-shot
-        // never reads as finished.
-        if (loops == 0) SDL_FlushAudioStream(stream_);
         SDL_UnlockAudioStream(stream_);
-        if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "audio: voice %zu bytes gain %.2f\n", pcm_.size(), double(SDL_GetAudioStreamGain(stream_)));
+        if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "audio: voice %zu frames gain %.2f pan %.2f\n", frames_, double(SDL_GetAudioStreamGain(stream_)), double(pan_.load()));
     }
-    bool IsPlaying() const override { return stream_ && !stopped_ && (SDL_GetAudioStreamQueued(stream_) > 0 || loopsLeft_ != 0); }
+    void SetPan(float pan) override { pan_ = pan < -1.0f ? -1.0f : pan > 1.0f ? 1.0f : pan; }
+    float Pan() const override { return pan_; }
+    // Playing until every pass was fed and the device has taken it all.
+    bool IsPlaying() const override { return stream_ && !stopped_ && (!fed_ || SDL_GetAudioStreamQueued(stream_) > 0); }
 
 private:
-    // Queues the sample again when it runs dry and loops remain.
-    static void SDLCALL Refill(void* self, SDL_AudioStream* stream, int additional, int) {
+    // On SDL's audio thread, with the stream locked: the frames the device asks for, each pass after the other; after the
+    // last pass the stream is flushed (the converter would keep the sample's tail queued and a one-shot would never end).
+    static void SDLCALL Feed(void* self, SDL_AudioStream* stream, int additional, int) {
         auto* v = static_cast<PcmVoice*>(self);
-        if (v->stopped_ || additional <= 0 || v->loopsLeft_ == 0 || SDL_GetAudioStreamQueued(stream) >= additional) return;
-        if (v->loopsLeft_ > 0) --v->loopsLeft_;
-        SDL_PutAudioStreamData(stream, v->pcm_.data(), int(v->pcm_.size()));
-        if (v->loopsLeft_ == 0) SDL_FlushAudioStream(stream);
+        if (v->stopped_ || v->fed_ || additional <= 0) return;
+        const float pan = v->pan_;
+        const float left = pan > 0.0f ? 1.0f - pan : 1.0f, right = pan < 0.0f ? 1.0f + pan : 1.0f;
+        std::size_t wanted = std::size_t(additional) / 4 + 1;   // stereo 16-bit frames
+        std::int16_t block[2 * 1024];
+        while (wanted > 0 && !v->fed_) {
+            const std::size_t count = std::min({wanted, std::size_t(1024), v->frames_ - v->position_});
+            for (std::size_t i = 0; i < count; ++i) {
+                const std::int16_t* frame = &v->samples_[(v->position_ + i) * v->channels_];
+                const float l = frame[0], r = v->channels_ > 1 ? frame[1] : frame[0];
+                block[2 * i] = static_cast<std::int16_t>(l * left);
+                block[2 * i + 1] = static_cast<std::int16_t>(r * right);
+            }
+            SDL_PutAudioStreamData(stream, block, int(count * 4));
+            v->position_ += count;
+            wanted -= count;
+            if (v->position_ >= v->frames_) {
+                if (v->loopsLeft_ == 0) {
+                    v->fed_ = true;
+                    SDL_FlushAudioStream(stream);
+                } else {
+                    if (v->loopsLeft_ > 0) --v->loopsLeft_;
+                    v->position_ = 0;
+                }
+            }
+        }
     }
-    std::vector<std::uint8_t> pcm_;
+    std::vector<std::int16_t> samples_;   // the sample as signed 16-bit, `channels_` to a frame
+    std::size_t frames_ = 0;
+    std::uint16_t channels_ = 1, bytesPerSample_ = 2;
+    std::size_t position_ = 0;            // the next frame to feed (the audio thread's, under the stream lock)
     std::atomic<std::int32_t> loopsLeft_{0};
+    std::atomic<bool> fed_{true};
+    std::atomic<float> pan_{0.0f};
 };
 
 // An MP3 file, decoded on demand into signed 16-bit samples at the file's own rate and channel count.
