@@ -304,6 +304,14 @@ public:
     virtual void PostMessage(cIGZMessage2* message) = 0;   // SL::spMS2 slot 0x20
     virtual std::uint32_t GenerateSoundInstanceId() = 0;   // cSC4AudioSoundManager::GenerateNewInstanceId
     virtual void StopSoundLoop(std::uint32_t handle) = 0;  // SL::SS slot 0x50, message 0x6a451908
+    // The active sound loop (UpdateActiveSound): RZ::SS() != null, its start (0xea451903: sound id, handle) and position
+    // (0xca45190f: handle, x, y, z) events, the view's zoom (SL::spViewUtilities +0x14) and the vehicle manager's driving
+    // mode (SL::spVehicleManager vslot 0x68). The defaults answer for a game without a sound system.
+    virtual bool SoundSystemAvailable() { return false; }
+    virtual void StartSoundLoop(std::uint32_t soundId, std::uint32_t handle) { (void)soundId; (void)handle; }
+    virtual void MoveSoundLoop(std::uint32_t handle, std::uint32_t x, std::uint32_t y, std::uint32_t z) { (void)handle; (void)x; (void)y; (void)z; }
+    virtual std::uint32_t ViewZoom() { return 0; }
+    virtual bool IsDrivingMode() { return false; }
     virtual void PostAudioEvent(std::uint32_t event) = 0;  // SL::AEMS slots 0x30/0x28
     virtual std::uint32_t RandomBelow(std::uint32_t range) = 0;               // cRZRandomSuper::RandomUint32Uniform(range)
     virtual std::int32_t RandomInt(std::int32_t lo, std::int32_t hi) = 0;     // RandomSint32RangeUniform
@@ -568,11 +576,11 @@ protected:
     AutomatonTween opacityTween_;                                // +0x2c8
     float animTimer_ = 0.0f;                                     // +0x2d8
     std::uint32_t automataGroupId_ = 0;                          // +0x2dc
-    std::vector<std::uint8_t> activeSoundData_;                  // +0x2e0
-    std::uint32_t field2f0_ = 0;                                 // +0x2f0
-    std::uint32_t activeSoundHandle_ = 0;                        // +0x2f8
+    std::vector<std::uint32_t> activeSoundData_;                 // +0x2e0 property 0x6c044bb5: one sound id per zoom level
+    std::uint32_t activeSoundHandle_ = 0;                        // +0x2f8 the playing loop's instance id (0: none)
+    std::uint32_t activeSoundId_ = 0;                            // +0x2fc the sound it plays
     bool activeSoundEnabled_ = false;                            // +0x300
-    std::uint32_t field304_ = 0;                                 // +0x304
+    float activeSoundTimer_ = 0.0f;                              // +0x304 milliseconds since the last update
     ControllerLink* controllerLink_ = nullptr;                    // port seam: the IControllerAutomaton adapter
     cSC4AutomatonExtension* extension_ = nullptr;                 // port seam: the automata managers' view (owned)
 };

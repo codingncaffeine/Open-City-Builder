@@ -1,3 +1,4 @@
+#include "app/NativeAudio.h"
 #include "app/NativeJobs.h"
 #include "app/NativeRegionScreen.h"
 #include "app/NativeKeyboard.h"
@@ -374,7 +375,7 @@ public:
     std::uint8_t* Preferences() override { return g_services.app->GetPreferences(); }
     void SavePreferences() override { g_services.app->SavePreferences(); }
     int DoubleClickTimeMs() override { return 500; }
-    void PlayUiSound(std::uint32_t) override {}
+    void PlayUiSound(std::uint32_t soundId) override { PostSoundSystemEvent(1, soundId); }
     cIGZUnknown* GraphicSystemObject() override { return nullptr; }
     void SetTerrainMap(cSC4RegionalTerrainMap*) override {}
     void SetViewUtilities(IRegionRenderer*) override {}

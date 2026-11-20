@@ -1,5 +1,6 @@
 // The disaster menu in a native city: cSC4View3DWin::InvokeDisaster (Mac i386 0x00521612), the two tools' city services
 // (sc4::IDisasterToolHost) and the cursor effects of every effect tool (sc4::IEffectToolHost over the effects manager).
+#include "app/NativeAudio.h"
 #include "app/NativeDisasterTools.h"
 
 #include <cstdio>
@@ -120,8 +121,8 @@ public:
     void SetFireCause(std::uint32_t cause) override { NativeSetFireCause(cause); }
     void StartTick(cIGZMessageTarget2* target, std::uint32_t interval) override { StartToolTick(target, interval); }
     void StopTick(cIGZMessageTarget2* target, std::uint32_t) override { StopToolTick(target); }
-    // The torch's sound events go to the sound system's listeners (cSC4AudioEventHandlerDisasterFire); nothing listens natively yet.
-    void SendToolAudio(std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t) override {}
+    // SendTorchToolAudioMessage (Mac i386 0x002b71ae): the audio event handler listens for the torch's events.
+    void SendToolAudio(std::uint32_t type, std::uint32_t a, std::uint32_t b, std::uint32_t c) override { PostSoundSystemEventObject(type, a, b, c); }
     bool HasDisasterManager(std::uint32_t id) override { return NativeHasDisasterManager(id); }
     void AttemptDisasterStart(std::uint32_t id, int x, int z) override {
         if (Trace()) std::fprintf(stderr, "disaster tools: manager %08x asked to start at %d,%d\n", id, x, z);

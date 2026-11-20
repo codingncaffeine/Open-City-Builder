@@ -597,7 +597,7 @@ public:
         cSLString text(cGZPersistResourceKey{0x2026960b, group, instance}, true);
         out.Copy(text);
     }
-    void PlaySound(std::uint32_t, std::uint32_t id) override { PlayGameSound(id); }
+    void PlaySound(std::uint32_t group, std::uint32_t id) override { PostSoundSystemEvent(group, id); }
     void ConnectLotUtilities(cSC4Lot*, const cS3DVector3&) override {}   // PARTIAL: pipe / subway connection occupants
     void MouseMoved() override {}
     bool BuildingPropertyBool(std::uint32_t type, std::uint32_t property) override {

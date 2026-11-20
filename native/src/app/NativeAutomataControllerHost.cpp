@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "app/NativeAudio.h"
 #include "app/NativeCity.h"
 #include "app/NativeCityView.h"
 #include "app/NativeZoneDeveloperHost.h"
@@ -90,8 +91,10 @@ struct NativeAutomataControllerHost final : IAutomataControllerHost {
     bool BeginEffectQuery() override { return false; }
     bool IsEffectActive(std::uint32_t) override { return false; }
     void EndEffectQuery() override {}
-    bool SoundAvailable() override { return false; }
-    void PostSound(std::uint32_t, std::uint32_t, std::int64_t, std::int64_t, std::int64_t) override {}
+    bool SoundAvailable() override { return SoundSystemAvailable(); }
+    void PostSound(std::uint32_t message, std::uint32_t a, std::int64_t b, std::int64_t c, std::int64_t d) override {
+        PostSoundSystemEvent(message, a, static_cast<std::uint32_t>(b), static_cast<std::uint32_t>(c), static_cast<std::uint32_t>(d));
+    }
     std::uint32_t RandomBelow(std::uint32_t count) override {
         cRZRandom random(0xffffffffu);
         return count ? random.RandomUint32Uniform(count) : 0;

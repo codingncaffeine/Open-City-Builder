@@ -2,6 +2,7 @@
 // (LoadAllStandardFloraTypes walks all 0x6534284a resources), the terrain, weather simulator, occupant manager and
 // simulator answer the placement questions (AddNewFloraOccupant / LocationIsOKForNewFlora), and a flora occupant read
 // from a save finds its species' data here.
+#include "app/NativeAudio.h"
 #include "app/NativeFlora.h"
 
 #include <cstdint>
@@ -214,7 +215,14 @@ struct FloraToolHost final : sc4::IFloraToolHost {
         aura->AddTransientEffect(x, z, static_cast<sc4::TransientAuraEffect>(1));
         aura->Release();
     }
-    void PlayPlantSound(const float*) override {}   // the positional sound events (spSS 0xea451903 / 0x49dc0c90) are not wired natively
+    void PlayPlantSound(const float* xyz) override {   // Mac i386 0x002d0576: a coordinate below 0 is sent as 0
+        if (!SoundSystemAvailable()) return;
+        const std::uint32_t instance = NewSoundInstanceId();
+        PostSoundSystemEvent(0xea451903, 0x49dc0c90, instance);
+        std::uint32_t position[3];
+        for (int i = 0; i < 3; ++i) position[i] = static_cast<std::uint32_t>(xyz[i] <= 0.0f ? 0.0f : xyz[i]);
+        PostSoundSystemEvent(0xca45190f, instance, position[0], position[1], position[2]);
+    }
     static sc4::cSC4BudgetSimulator* Budget() { return Component<sc4::cSC4BudgetSimulator>(CityComponent::BudgetSimulator, sc4::kGZCLSID_cSC4BudgetSimulator); }
 };
 FloraToolHost g_floraToolHost;

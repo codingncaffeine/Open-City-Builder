@@ -339,7 +339,7 @@ struct StubView3DWin final : IView3DWinHost {
     void ToggleSignsAndLabels() override {
         if (auto* props = CityComponentAs<cSC4PropDeveloper>(CityComponent::PropDeveloper, kGZCLSID_cSC4PropDeveloper)) props->ToggleSignsAndLabels();
     }
-    void PlayUISound(std::uint32_t) override { SC4_UNWIRED("IView3DWinHost::PlayUISound (sound system)"); }
+    void PlayUISound(std::uint32_t sound) override { PostSoundSystemEvent(1, sound); }
     void AlignWindowToWindow(std::uint32_t windowId, std::uint32_t childId, std::uint32_t alignId) override {
         nSC4UI::AlignWindowToWindow(windowId, childId, alignId, nullptr);
     }
@@ -362,7 +362,14 @@ struct StubView3DWin final : IView3DWinHost {
     void CityScrollSetMouseScroll(cSC4ViewInputControl* tool, int x, int y) override {
         if (auto* scroll = dynamic_cast<cSC4ViewInputControlCityScroll*>(tool)) scroll->SetMouseScroll(x, y);
     }
-    void PlayGlobalTerrainEffectSound() override {}
+    // RunGlobalTerrainTool (Mac i386 0x0051dce4): the effect's sound for the view's zoom (kGlobalTerrainEffectSoundPerZoomIds
+    // 0x00850fd0), started at once under a new instance id.
+    void PlayGlobalTerrainEffectSound() override {
+        static constexpr std::uint32_t kSoundPerZoom[5] = {0xea8b965c, 0x0a8b96a0, 0x4a8b96d4, 0x0a8b96f1, 0xca8b9720};
+        const int zoom = SL::spViewUtilities ? SL::spViewUtilities->Zoom() : 0;
+        if (zoom < 0 || zoom > 4) return;   // the original indexes the table with the zoom unchecked
+        DoSoundSystemEvent(1, kSoundPerZoom[zoom], NewSoundInstanceId());
+    }
     int AddContourCallback() override { return {}; }
     void RemoveContourCallback(int handle) override {}
     bool ProjectPointToViewport(cS3DVector3& point) override { return {}; }

@@ -342,20 +342,19 @@ void ManagerHost::DetachRenderable(cIGZUnknown*) {
     g_render = nullptr;
 }
 
-// The effect components' services (sc4/EffectComponents.h): the sound components post their events to the sound system, which
-// here plays the sound through the game's sound manager. PARTIAL: the positional half (the move events, the 3D attenuation),
-// the stop of a looping sound, and the camera effects (no ICameraControl natively).
+// The effect components' services (sc4/EffectComponents.h): the sound components post their events (start, position, stop)
+// to the sound system, where the game's sound manager handles them. PARTIAL: the camera effects (no ICameraControl natively).
 class ComponentsHost final : public sc4::IEffectsHost {
 public:
     sc4::ICameraControl* Camera() override { return nullptr; }
     bool CameraEffectsEnabled() override { return false; }
     void AddNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->AddNotification(target, message); }
     void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->RemoveNotification(target, message); }
-    void PostSoundEvent(std::uint32_t event, std::uint32_t a, std::uint64_t, std::uint64_t, std::uint64_t) override {
+    void PostSoundEvent(std::uint32_t event, std::uint32_t a, std::uint64_t b, std::uint64_t c, std::uint64_t d) override {
         if (g_debug) std::fprintf(stderr, "effects: sound event %08x %08x\n", event, a);
-        if (event == sc4::kSoundEventPlay) PlayGameSound(a);
+        PostSoundSystemEvent(event, a, static_cast<std::uint32_t>(b), static_cast<std::uint32_t>(c), static_cast<std::uint32_t>(d));
     }
-    bool HasSoundSystem() override { return true; }
+    bool HasSoundSystem() override { return SoundSystemAvailable(); }
 } g_componentsHost;
 
 // ---- the particle systems' terrain (SL::spTerrainMap) ----

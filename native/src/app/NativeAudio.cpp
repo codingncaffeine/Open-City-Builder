@@ -1,3 +1,5 @@
+#include "audio/interfaces/cIGZSndEventStd.h"
+#include "sc4audio/SoundManager.h"
 #include "app/NativeAudio.h"
 
 #include "app/NativeAudioDirector.h"
@@ -41,12 +43,32 @@ public:
 ButtonHost g_buttons;
 }  // namespace
 
-void PlayGameSound(std::uint32_t soundId) {
-    if (!soundId || !AudioRunning()) return;
+bool SoundSystemAvailable() { return AudioRunning() && RZ::SS() != nullptr; }
+void PostSoundSystemEvent(std::uint32_t event, std::uint32_t a, std::uint32_t b, std::uint32_t c, std::uint32_t d) {
+    if (!SoundSystemAvailable()) return;
+    const bool posted = static_cast<cIGZSndSys*>(RZ::SS())->PostEventIds(event, a, b, c, d);
+    if (std::getenv("SC4_AUDIODEBUG")) std::fprintf(stderr, "audio: event %08x (%08x %08x %08x %08x) posted %d\n", event, a, b, c, d, int(posted));
+}
+void DoSoundSystemEvent(std::uint32_t event, std::uint32_t a, std::uint32_t b, std::uint32_t c, std::uint32_t d) {
+    if (!SoundSystemAvailable()) return;
+    static_cast<cIGZSndSys*>(RZ::SS())->DoEventIds(event, a, b, c, d);
+    if (std::getenv("SC4_AUDIODEBUG")) std::fprintf(stderr, "audio: event %08x (%08x %08x %08x %08x) done\n", event, a, b, c, d);
+}
+void PostSoundSystemEventObject(std::uint32_t event, std::uint32_t a, std::uint32_t b, std::uint32_t c) {
+    if (!SoundSystemAvailable()) return;
     auto* system = static_cast<cIGZSndSys*>(RZ::SS());
-    if (!system) return;
-    const bool posted = system->PostEventIds(1, soundId, 0, 0, 0);
-    if (std::getenv("SC4_AUDIODEBUG")) std::fprintf(stderr, "audio: sound %08x posted %d\n", soundId, int(posted));
+    system->AddRef();
+    void* made = nullptr;
+    system->EventCreateWithData(event, 0x5b523ba4, &made, a, b, c, 0);
+    auto* object = static_cast<cIGZSndEventStd*>(made);
+    system->PostEvent(object);
+    if (object) object->Release();
+    system->Release();
+    if (std::getenv("SC4_AUDIODEBUG")) std::fprintf(stderr, "audio: event object %08x (%08x %08x %08x)\n", event, a, b, c);
+}
+std::uint32_t NewSoundInstanceId() { return cSC4AudioSoundManager::GenerateNewInstanceId(); }
+void PlayGameSound(std::uint32_t soundId) {
+    if (soundId) PostSoundSystemEvent(1, soundId, 0, 0, 0);
 }
 float EffectsGain() {
     return AudioRunning() ? sc4::cSC4AudioPreferencesWinProc::SoundGain(SL::spPreferences) : 0.0f;

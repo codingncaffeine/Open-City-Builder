@@ -1,3 +1,4 @@
+#include "app/NativeAudio.h"
 #include "app/NativeAutomata.h"
 
 #include <chrono>
@@ -211,9 +212,14 @@ public:
     // every new vehicle starts at this speed (cSC4Vehicle ctor), so a wrong value sends the whole traffic flow at it.
     float MaxSpeedUnits() override { return static_cast<float>(AutomataTuning().f21888); }
     float FadeDurationSeconds() override { return AutomataTuning().f219b4; }   // tuning 0x4998c916 (1.0 in the shipped data)
-    void PostMessage(cIGZMessage2*) override {}
-    std::uint32_t GenerateSoundInstanceId() override { return ++sound_; }
-    void StopSoundLoop(std::uint32_t) override {}
+    void PostMessage(cIGZMessage2* message) override { if (SL::spMS2 && message) SL::spMS2->MessagePost(message, false); }
+    std::uint32_t GenerateSoundInstanceId() override { return NewSoundInstanceId(); }
+    void StopSoundLoop(std::uint32_t handle) override { PostSoundSystemEvent(0x6a451908, handle); }
+    bool SoundSystemAvailable() override { return native::SoundSystemAvailable(); }
+    void StartSoundLoop(std::uint32_t soundId, std::uint32_t handle) override { PostSoundSystemEvent(0xea451903, soundId, handle); }
+    void MoveSoundLoop(std::uint32_t handle, std::uint32_t x, std::uint32_t y, std::uint32_t z) override { PostSoundSystemEvent(0xca45190f, handle, x, y, z); }
+    std::uint32_t ViewZoom() override { return SL::spViewUtilities ? static_cast<std::uint32_t>(SL::spViewUtilities->Zoom()) : 0; }
+    bool IsDrivingMode() override { return false; }   // no U-Drive-It yet: the vehicle manager never enters driving mode
     void PostAudioEvent(std::uint32_t) override {}
     std::uint32_t RandomBelow(std::uint32_t range) override { return range ? static_cast<std::uint32_t>(rng_() % range) : 0; }
     std::int32_t RandomInt(std::int32_t lo, std::int32_t hi) override { return hi > lo ? lo + static_cast<std::int32_t>(rng_() % static_cast<std::uint32_t>(hi - lo)) : lo; }
@@ -222,7 +228,6 @@ public:
 
 private:
     std::mt19937 rng_{12345};
-    std::uint32_t sound_ = 0;
 };
 
 }  // namespace

@@ -10,6 +10,7 @@
 #include <memory>
 #include <vector>
 
+#include "app/NativeAudio.h"
 #include "app/NativeAutomataViews.h"
 #include "app/NativeCity.h"
 #include "rz/cRZMessage2Standard.h"
@@ -363,9 +364,12 @@ public:
 // ---- the dispatched vehicles' services -----------------------------------------------------------------------------------
 class EmergencyHost final : public IEmergencyVehicleHost {
 public:
-    // PARTIAL: sirens (the sound system's 0x6a451908 / 0xca45190f / 0xea451903 events) and the emergency light model + effect.
-    void SirenStopped(const cSC4EmergencyVehicle&) override {}
-    void SirenMoved(const cSC4EmergencyVehicle&, int, int, int) override {}
+    // The siren is a sound instance named by the vehicle itself (its address in the original; the low 32 bits here).
+    static std::uint32_t SirenId(const cSC4EmergencyVehicle& vehicle) { return static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(&vehicle)); }
+    void SirenStopped(const cSC4EmergencyVehicle& vehicle) override { PostSoundSystemEvent(0x6a451908, SirenId(vehicle)); }
+    void SirenMoved(const cSC4EmergencyVehicle& vehicle, int x, int y, int z) override {
+        PostSoundSystemEvent(0xca45190f, SirenId(vehicle), static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(y), static_cast<std::uint32_t>(z));
+    }
     // cSC4EmergencyVehicle::ShowEmergencyLights (Mac i386 0x00235862): lights on = an "automata_pullover" attractor riding on the
     // vehicle (the cars around it pull over) and the flashing light model its exemplar names; lights off drops both.
     // PARTIAL: the player-drive audio event (AEMS event 0xb) is not posted.
@@ -392,7 +396,7 @@ public:
             model->Release();
         }
     }
-    void SirenStarted(const cSC4EmergencyVehicle&, std::uint32_t) override {}
+    void SirenStarted(const cSC4EmergencyVehicle& vehicle, std::uint32_t soundId) override { PostSoundSystemEvent(0xea451903, soundId, SirenId(vehicle)); }
     // sTuningParams +0x170..+0x17c (AutomataTuning(): 0x89aec88b..0xc9ee640d).
     const EmergencyVehicleTuning& Tuning() override {
         const AutomataTuningGlobals& t = AutomataTuning();

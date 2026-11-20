@@ -1181,18 +1181,36 @@ void cSC4Automaton::EnableActiveSound(bool on) {
     activeSoundEnabled_ = on;
 }
 
+// Mac i386 0x000bcb0c. Every 100 ms: the sound for the view's zoom (the last entry for a closer zoom than the list has;
+// none while the loop is off or in driving mode); a loop playing another sound stops, the new one starts under a new
+// instance id, and the playing loop follows the automaton (a coordinate below 0 is sent as 0).
 void cSC4Automaton::UpdateActiveSound(float milliseconds) {
-    // PARTIAL: the original starts / moves / stops a sound loop through the sound manager (SFX::SoundManager,
-    // cSC4AudioSoundManager::GenerateNewInstanceId) and the 0x6c044bb5 property data. The active-sound loop is not in
-    // the port's sound layer, so only the handle bookkeeping and the stop message are kept here.
-    if (!activeSoundEnabled_) {
-        if (activeSoundHandle_ != 0 && Host()) {
-            Host()->StopSoundLoop(activeSoundHandle_);
-            activeSoundHandle_ = 0;
-        }
-        return;
+    IAutomatonHost* host = Host();
+    if (!host || !host->SoundSystemAvailable()) return;
+    const std::uint32_t count = static_cast<std::uint32_t>(activeSoundData_.size());
+    if (count == 0) return;
+    activeSoundTimer_ += milliseconds;
+    if (activeSoundTimer_ <= 100.0f) return;
+    activeSoundTimer_ = 0.0f;
+    std::uint32_t level = host->ViewZoom();
+    if (count <= level) level = count - 1;
+    const std::uint32_t sound = (!activeSoundEnabled_ || host->IsDrivingMode()) ? 0 : activeSoundData_[level];
+    if (activeSoundHandle_ != 0 && sound != activeSoundId_) {
+        host->StopSoundLoop(activeSoundHandle_);
+        activeSoundHandle_ = 0;
+        activeSoundId_ = 0;
     }
-    (void)milliseconds;
+    if (activeSoundHandle_ == 0) {
+        if (sound == 0) return;
+        activeSoundHandle_ = host->GenerateSoundInstanceId();
+        activeSoundId_ = sound;
+        host->StartSoundLoop(activeSoundId_, activeSoundHandle_);
+    }
+    float position[3] = {0.0f, 0.0f, 0.0f};
+    GetPosition(position);
+    for (float& coordinate : position) if (coordinate <= 0.0f) coordinate = 0.0f;
+    host->MoveSoundLoop(activeSoundHandle_, static_cast<std::uint32_t>(position[0]), static_cast<std::uint32_t>(position[1]),
+                        static_cast<std::uint32_t>(position[2]));
 }
 
 // ---- states ----------------------------------------------------------------------------------------------------------

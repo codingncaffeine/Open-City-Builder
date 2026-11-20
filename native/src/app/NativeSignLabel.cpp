@@ -6,6 +6,7 @@
 #include "app/NativeSignLabel.h"
 
 #include "sc4/Render3D.h"   // first: its filter forward declaration must not meet sc4/OccupantManager.h's first
+#include "app/NativeAudio.h"
 #include <cstdio>
 #include <cstdlib>
 
@@ -150,7 +151,7 @@ struct SignHost final : ISignToolHost {
         cSC43DRender* render = CityRenderer();
         if (SC4ViewUtilities* view = render ? render->GetViewUtilities() : nullptr) view->ProjectPointToViewportCoordinates2D(point);
     }
-    void PlaySound(std::uint32_t, std::uint32_t) override {}   // the sound system is not wired natively
+    void PlaySound(std::uint32_t group, std::uint32_t id) override { PostSoundSystemEvent(group, id); }   // the group is the sound event (start)
     cIGZMessageServer* MessageServer() override { return SL::spMS; }
     cIGZClipboardManager* ClipboardManager() override { return nullptr; }   // the clipboard service is not started natively
 };
@@ -393,7 +394,7 @@ struct LabelToolHostImpl final : ILabelToolHost {
         if (auto* props = Plain<cSC4PropManager>(CityComponent::PropManager)) props->RemovePropA(occupant);
     }
     void ShowSignsAndLabels() override { if (cSC4PropDeveloper* developer = PropDeveloper()) developer->ShowSignsAndLabels(true); }
-    void PlaySound(std::uint32_t, std::uint32_t) override {}   // the sound system is not wired natively
+    void PlaySound(std::uint32_t group, std::uint32_t id) override { PostSoundSystemEvent(group, id); }   // the group is the sound event (start)
     cIGZWin* View3DWindow() override {
         cSC4View3DWin* view = CityView3DWin();
         return view ? static_cast<cIGZWin*>(static_cast<cGZWin*>(view)) : nullptr;
@@ -437,7 +438,7 @@ struct SignLabelDemolishHostImpl final : ISignLabelDemolishHost {
         if (Trace()) std::fprintf(stderr, "sign bulldozer: removed %p\n", static_cast<void*>(occupant));
     }
     void ShowSignsAndLabels() override { tool_.ShowSignsAndLabels(); }
-    void PlaySound(std::uint32_t, std::uint32_t) override {}   // the sound system is not wired natively
+    void PlaySound(std::uint32_t group, std::uint32_t id) override { PostSoundSystemEvent(group, id); }   // the group is the sound event (start)
 
 private:
     LabelHost labels_;

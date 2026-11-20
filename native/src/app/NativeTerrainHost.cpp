@@ -1,6 +1,7 @@
 // The terrain model's host on the native application (hand-written from the generated stub; scripts/gen_stub_hosts.py skips it).
 // The city and its components come from the application; the resource-backed readers use the resource manager.
 #include <string>
+#include "app/NativeAudio.h"
 #include "sc4/MapUtilities.h"
 #include "sc4/DBSegment.h"
 #include <cstdio>
@@ -344,7 +345,7 @@ struct NativeTerrainHost final : ITerrainHost {
     void SurfaceWaterAddRain(std::int32_t vertexIndex, float amount) override { if (cSTESurfaceWater* water = WaterOf(Component(CityComponent::SurfaceWater))) water->AddRain(vertexIndex, amount); }
     void SurfaceWaterCreateSpring(std::int32_t vertexIndex) override { if (cSTESurfaceWater* water = WaterOf(Component(CityComponent::SurfaceWater))) water->CreateSpring(vertexIndex); }
     void SurfaceWaterEndBrushScrub(std::uint32_t brushType, std::uint32_t arg) override { if (cSTESurfaceWater* water = WaterOf(Component(CityComponent::SurfaceWater))) water->EndBrushScrub(brushType, arg); }
-    void PostBrushSound(std::uint32_t type, std::uint32_t data1, std::uint32_t data2) override {}
+    void PostBrushSound(std::uint32_t type, std::uint32_t data1, std::uint32_t data2) override { PostSoundSystemEvent(type, data1, data2); }
     std::uint32_t FloraBrushCount() override {
         cSC4FloraSimulator* flora = native::CityFloraSimulator();
         std::uint32_t count = 0;

@@ -182,7 +182,17 @@ struct FakeHost final : IAutomatonHost {
     float FadeDurationSeconds() override { return fadeSeconds; }
     void PostMessage(cIGZMessage2* message) override { ++posted; messageTypes.push_back(message->GetType()); }
     std::uint32_t GenerateSoundInstanceId() override { return ++soundIds; }
-    void StopSoundLoop(std::uint32_t) override { ++stoppedLoops; }
+    void StopSoundLoop(std::uint32_t handle) override { ++stoppedLoops; loopEvents.push_back({'-', 0, handle, 0, 0, 0}); }
+    // the active sound loop's services
+    struct LoopEvent { char kind; std::uint32_t sound, handle, x, y, z; };
+    std::vector<LoopEvent> loopEvents;
+    bool soundSystem = false, drivingMode = false;
+    std::uint32_t zoom = 0;
+    bool SoundSystemAvailable() override { return soundSystem; }
+    void StartSoundLoop(std::uint32_t soundId, std::uint32_t handle) override { loopEvents.push_back({'+', soundId, handle, 0, 0, 0}); }
+    void MoveSoundLoop(std::uint32_t handle, std::uint32_t x, std::uint32_t y, std::uint32_t z) override { loopEvents.push_back({'m', 0, handle, x, y, z}); }
+    std::uint32_t ViewZoom() override { return zoom; }
+    bool IsDrivingMode() override { return drivingMode; }
     void PostAudioEvent(std::uint32_t) override {}
     std::uint32_t RandomBelow(std::uint32_t range) override { return range ? 0 : 0; }
     std::int32_t RandomInt(std::int32_t lo, std::int32_t) override { return lo; }
@@ -805,6 +815,43 @@ int main() {
         CHECK(automaton->IsActiveSoundEnabled());
         automaton->EnableActiveSound(false);
         CHECK(!automaton->IsActiveSoundEnabled());
+        CHECK(automaton->Release() == 0);
+    }
+    // The active sound loop: one sound id per zoom level (property 0x6c044bb5), updated every 100 ms.
+    {
+        FakeHost host;
+        cSC4Automaton* automaton = MakeAutomaton(host);
+        cSCPropertyHelp::SetPropertyValue(automaton->AsPropertyHolder(), kAutomatonPropertyActiveSound, std::vector<std::uint32_t>{0xa1, 0xa2, 0xa3});
+        const float where[3] = {40.0f, -5.0f, 72.9f};
+        automaton->SetPosition(where);
+        automaton->EnableActiveSound(true);
+        automaton->UpdateActiveSound(500.0f);
+        CHECK(host.loopEvents.empty());                      // no sound system: nothing
+        host.soundSystem = true;
+        automaton->UpdateActiveSound(60.0f);
+        CHECK(host.loopEvents.empty());                      // 60 ms: not yet
+        automaton->UpdateActiveSound(60.0f);                 // 120 ms: the zoom 0 sound starts and is placed (a negative coordinate as 0)
+        CHECK(host.loopEvents.size() == 2);
+        CHECK(host.loopEvents[0].kind == '+' && host.loopEvents[0].sound == 0xa1 && host.loopEvents[0].handle == 101);
+        CHECK(host.loopEvents[1].kind == 'm' && host.loopEvents[1].handle == 101 && host.loopEvents[1].x == 40 && host.loopEvents[1].y == 0 &&
+              host.loopEvents[1].z == 72);
+        automaton->UpdateActiveSound(101.0f);                // the same sound: only the position
+        CHECK(host.loopEvents.size() == 3 && host.loopEvents[2].kind == 'm');
+        host.zoom = 4;                                       // closer than the list has: its last entry; the old loop stops first
+        automaton->UpdateActiveSound(101.0f);
+        CHECK(host.loopEvents.size() == 6);
+        CHECK(host.loopEvents[3].kind == '-' && host.loopEvents[3].handle == 101);
+        CHECK(host.loopEvents[4].kind == '+' && host.loopEvents[4].sound == 0xa3 && host.loopEvents[4].handle == 102);
+        CHECK(host.loopEvents[5].kind == 'm' && host.loopEvents[5].handle == 102);
+        host.drivingMode = true;                             // driving mode silences the loop
+        automaton->UpdateActiveSound(101.0f);
+        CHECK(host.loopEvents.size() == 7 && host.loopEvents[6].kind == '-' && host.loopEvents[6].handle == 102);
+        automaton->UpdateActiveSound(101.0f);
+        CHECK(host.loopEvents.size() == 7);                  // and nothing more while it lasts
+        host.drivingMode = false;
+        automaton->EnableActiveSound(false);                 // switched off: no new loop
+        automaton->UpdateActiveSound(101.0f);
+        CHECK(host.loopEvents.size() == 7);
         CHECK(automaton->Release() == 0);
     }
 

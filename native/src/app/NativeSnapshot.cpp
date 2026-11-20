@@ -1,5 +1,6 @@
 // The snapshot taker's and album's host (sc4/WinSnapshot.h): the open city's facts, the frame's pixels, the user's Albums
 // folder, the UI art and strings; and the picture view's host (sc4/WinBMPView.h): its image factory.
+#include "app/NativeAudio.h"
 #include "app/NativeSnapshot.h"
 
 #include <algorithm>
@@ -215,7 +216,7 @@ struct Host final : ISnapshotHost {
         if (gz::IWinFont* font = fonts->Font(0xcad46524)) return font;
         return fonts->Font(gz::kWinDefaultFontStyle);   // stands in for "Arial MT" 14
     }
-    void PlayEvent(std::uint32_t) override {}   // the sound system is not wired natively
+    void PlayEvent(std::uint32_t id) override { PostSoundSystemEvent(1, id); }
     void PauseGame(bool on) override {
         cSC4Simulator* simulator = CitySimulatorObject();
         if (!simulator) return;
