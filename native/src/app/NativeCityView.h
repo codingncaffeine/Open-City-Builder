@@ -50,6 +50,7 @@ void NativeStartRiot(int cellX, int cellZ);       // kit command `riot` (app/Nat
 void NativeRiotReport();                          // kit command `riots`
 void NativeQueryReport(std::uint32_t skipUi, int limit);   // the query tool's buildings (querylist kit command; app/NativeQuery.cpp)
 void NativeTrailerReport(int limit);  // the trailer vehicles on screen and the cars they pull (app/NativeAutomataGenerator.cpp)
+void NativeAircraftReport();          // the aircraft manager's airports, runway markers and aircraft (app/NativeAircraft.cpp)
 void NativeTrainReport(int limit);    // track cells, trains and buses, the first engines with their cars (app/NativeTrafficAutomata.cpp)
 // The city view's render stack, built as the original's view does: SetCityRenderTarget when the city screen is made,
 // PrepareCityRenderStack on DoPreCityInit (before cSC4City::Init: camera, control, 3D render), FinishCityRenderStack on

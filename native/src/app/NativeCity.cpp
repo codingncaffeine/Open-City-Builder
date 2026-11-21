@@ -51,6 +51,7 @@ void InstallCityProbeBindings();                                          // cit
 namespace native {
 void SetTerrainHostCity(cISC4City* city);   // NativeTerrainHost.cpp
 void ForgetTerrainHostCity(cISC4City* city);
+cIGZSerializable* NativeCreateAircraftSerializable(std::uint32_t classId);   // NativeAircraft.cpp
 static cISC4City* g_hostCity = nullptr;
 static std::set<std::uint32_t>* g_missingClasses = nullptr;   // the factory's list of classes it could not make
 static sc4::ISerializableFactory* g_serFactory = nullptr;      // the city the host creates (OnCityInitialized binds its services)
@@ -148,6 +149,7 @@ struct Factory final : sc4::ISerializableFactory {
         // Classes the decompilation kept as plain C++ (no cIGZUnknown base) have a GZCOM creator that returns a raw
         // object, which is not a COM pointer; the probe's wrapper takes priority for those.
         if (cIGZSerializable* wrapped = CreateCityProbeSerializable(classId)) return wrapped;
+        if (cIGZSerializable* aircraft = NativeCreateAircraftSerializable(classId)) return aircraft;   // the helicopter, airplane and aircraft classes
         for (auto create : {CreateCityProbeSerializable2, CreateCityProbeSerializable3, CreateCityProbeSerializable4, CreateCityProbeSerializable5, CreateCityProbeSerializable6, CreateCityProbeSerializable7, CreateCityProbeSerializable8})
             if (cIGZSerializable* wrapped = create(classId)) return wrapped;
         const gzcom::ClassFactoryInfo* info = gzcom::FindClassFactory(classId);

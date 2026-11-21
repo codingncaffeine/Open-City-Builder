@@ -224,7 +224,7 @@ struct FakeAircraftHost final : IAircraftHost {
         effect->AddRef();
         return effect;
     }
-    bool FindRegPointTransform(const cRZString&, cS3DVector3& out) override {
+    bool FindRegPointTransform(IAutomatonModel*, const cRZString&, cS3DVector3& out) override {
         if (!regPointFound) return false;
         out = regPoint;
         return true;
@@ -316,10 +316,10 @@ struct FakeHeliHost final : IHelicopterHost {
     }
     void EndObstacleQuery() override { ++endQueries; }
     const void* LotAtPoint(const cS3DVector3&) override { ++lotCalls; return lotCalls == 1 ? lotHere : lotSpawn; }
-    bool RendererSpotlightCone(const cS3DVector3&, const cS3DVector3&, const cS3DVector3&) override {
+    bool RendererSpotlightCone(const cS3DVector3&, const cS3DVector3&, cS3DVector3&) override {
         ++coneCalls; return rendererCone;
     }
-    bool RendererSpotlightHit(float, float, const cS3DVector3&) override { ++hitCalls; return rendererHit; }
+    bool RendererSpotlightHit(float, float, cS3DVector3&) override { ++hitCalls; return rendererHit; }
     float CityCellSizeX() override { return cellSizeX; }
     float CityCellSizeZ() override { return cellSizeZ; }
     void CityCellCentre(float, float, float& outX, float& outZ) override { outX = centreX; outZ = centreZ; }

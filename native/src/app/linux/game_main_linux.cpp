@@ -1156,6 +1156,8 @@ int RunScenario(const std::string& path) {
             native::NativeTrailerReport(limit);
         } else if (command == "decline") {   // decline: the lots by state and what the tract developer abandoned / reoccupied
             native::NativeDeclineReport();
+        } else if (command == "aircraft") {   // aircraft: the aircraft manager's airports, runway markers and every aircraft
+            native::NativeAircraftReport();
         } else if (command == "trains") {   // trains [N]: the city's track cells, the trains and buses, and the first N engines with their cars
             int limit = 8;
             words >> limit;

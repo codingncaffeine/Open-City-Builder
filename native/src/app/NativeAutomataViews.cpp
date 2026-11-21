@@ -306,3 +306,11 @@ IAutomatonGroupTemplate* AutomatonGroupTemplateView(const IAutomataGroupTemplate
 }
 
 }  // namespace native
+
+namespace native {
+// The script group template behind an automaton's view of it (null for a view AutomatonGroupTemplateView did not make).
+sc4::cSC4OccupantGroupTemplate* OccupantGroupTemplateOf(const sc4::IAutomatonGroupTemplate* automatonView) {
+    const auto* view = dynamic_cast<const AutomatonGroupView*>(automatonView);
+    return view ? view->group_ : nullptr;
+}
+}  // namespace native

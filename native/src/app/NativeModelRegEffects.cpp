@@ -33,6 +33,7 @@ public:
     void SetSourceTransform(const cS3DTransform& transform) override { effect_->SetSourceTransform(transform); }
     void SetVectorParams(std::uint32_t type, const cS3DVector3* values, int count) override { effect_->SetVectorParams(type, values, count); }
     bool CheckEffectFlag(std::uint32_t flag) override { return effect_->CheckEffectFlag(flag); }
+    cSC4VisualEffect* Visual() const { return effect_; }
 
 private:
     cSC4VisualEffect* effect_;
@@ -56,4 +57,12 @@ sc4::IAutomatonEffects* NativeNewModelRegEffects() {
     return new sc4::cSC4ModelRegEffects();
 }
 
+}  // namespace native
+
+namespace native {
+// The visual effect behind a registered effect this file made (null for any other object).
+sc4::cSC4VisualEffect* NativeRegEffectVisual(sc4::IRegEffect* effect) {
+    auto* reg = dynamic_cast<RegEffect*>(effect);
+    return reg ? reg->Visual() : nullptr;
+}
 }  // namespace native

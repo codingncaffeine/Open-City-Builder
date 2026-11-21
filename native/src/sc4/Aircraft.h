@@ -5,7 +5,7 @@
 //
 // 36 symbols at 0x10050190a..0x1005024d8 (of which 17 are non-virtual thunks). Class id 0xc96e75dc. The class adds only
 // two bytes of state to cSC4Automaton:
-//   +0x308 float 1.0 (never read by this class; the helicopter/airplane keep their own field there)
+//   +0x308 float 1.0: the dispatching station's efficiency (cSC4AircraftManager::Dispatch writes it; not read here)
 //   +0x30c u8 player-drive mode (set by HandleEnterState when the state is 0x10, cleared by HandleExitState)
 //
 // Original vtables: primary 0x100abaa80 (+8 occupant view 0x100abaed8, +0x10 serializable 0x100abb020, +0x18 property
@@ -114,8 +114,9 @@ public:
     virtual const float* FindPlayerDriveParameters(IAutomatonGroupTemplate* group) = 0;
     // ---- effects (SL::spEffectsManager slot 0x30 = create a named effect; returns one reference) ---------------------
     virtual IAirplaneEffect* CreateEffect(const cRZString& name) = 0;
-    // cS3DRegPoints look-up used to initialise the skywriting position (Init). False when the point is absent.
-    virtual bool FindRegPointTransform(const cRZString& name, cS3DVector3& out) = 0;
+    // The model's cS3DRegPoints look-up (the first frame's translation of the named registration point of `model`, the
+    // aircraft's first model) that Init uses for the helipad / skywriting position. False when the point is absent.
+    virtual bool FindRegPointTransform(IAutomatonModel* model, const cRZString& name, cS3DVector3& out) = 0;
     // SL::spEffectsManager slot 0x48 -> the returned object's slot 0x30: water/effect height at a point
     // (EvaluateClearance samples this when the point is inside the terrain).
     virtual float EffectsWaterHeight(float x, float z) = 0;
@@ -157,6 +158,8 @@ public:
     IAircraftHost* AircraftHostPtr() const { return aircraftHost_; }
     bool IsPlayerDriving() const { return playerDriving_; }          // +0x30c
     float Field308() const { return field308_; }                     // +0x308
+    // cSC4AircraftManager::Dispatch stores the dispatching station's efficiency here (i386 +0x1f4).
+    void SetStationEfficiency(float efficiency) { field308_ = efficiency; }
 
 protected:
     IAircraftHost* aircraftHost_ = nullptr;   // port seam (not in the original)

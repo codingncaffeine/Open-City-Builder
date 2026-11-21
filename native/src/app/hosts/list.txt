@@ -4,7 +4,6 @@ Advisor
 AdvisorConcrete
 AdvisorPopupTracker
 AdvisorSystem
-Aircraft
 AmbienceState
 SoundBank
 Aura
@@ -25,7 +24,6 @@ Effects
 EstablishCity
 GraphsView
 GrowthDeveloper
-Helicopter
 LandfillDeveloper
 LightingManager
 Lot

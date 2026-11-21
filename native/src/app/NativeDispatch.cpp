@@ -15,6 +15,7 @@
 #include "app/NativeCity.h"
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/AutomataManager.h"
+#include "sc4/AircraftManager.h"
 #include "sc4/Automaton.h"
 #include "sc4/DBSegment.h"
 #include "sc4/DispatchManager.h"
@@ -303,6 +304,36 @@ private:
     }
 } g_vehicleDispatch;
 
+// ---- the aircraft manager as the dispatch manager's automata manager (the police helicopter and fire plane groups) ------
+class AircraftDispatch final : public IAutomataDispatchManager {
+public:
+    IDispatchAutomaton* Dispatch(std::uint32_t group, const tDispatchLocation& from, const tDispatchLocation& to, std::uint32_t flags,
+                                 std::uint8_t type, const cGZPersistResourceKey& key, std::uint8_t argument) override {
+        cSC4AircraftManager* manager = Aircraft();
+        if (!manager) return nullptr;
+        IAutomataAutomaton* automaton = manager->Dispatch(group, Location(from), Location(to), flags, type, key, argument);
+        if (Debug()) std::fprintf(stderr, "dispatch: aircraft group 0x%x to (%.0f, %.0f) -> %s\n", group, to.x, to.z, automaton ? "sent" : "none at the station");
+        return automaton ? DispatchView(AutomatonOf(automaton)) : nullptr;
+    }
+    bool Dispatch(IDispatchAutomaton* automaton, const tDispatchLocation& from, const tDispatchLocation& to, std::uint32_t flags,
+                  std::uint8_t type) override {
+        cSC4AircraftManager* manager = Aircraft();
+        cSC4Automaton* object = AutomatonOfDispatchView(automaton);
+        return manager && object && manager->Dispatch(AutomatonView(object), Location(from), Location(to), flags, type);
+    }
+    static cSC4AircraftManager* Aircraft() { return Component<cSC4AircraftManager>(CityComponent::AircraftManager); }
+private:
+    static tAutomataLocation Location(const tDispatchLocation& in) {
+        tAutomataLocation out;
+        out.kind = in.type;
+        out.occupant = in.occupant ? CityOccupantView(in.occupant) : nullptr;
+        out.x = in.x;
+        out.y = in.y;
+        out.z = in.z;
+        return out;
+    }
+} g_aircraftDispatch;
+
 // ---- the city the dispatch manager holds (cISC4City slots it calls) ------------------------------------------------------
 class DispatchCity final : public IDispatchCity {
 public:
@@ -328,11 +359,13 @@ public:
         pylon->AddRef();
         return PylonViewOf(pylon);
     }
-    // cSC4AutomataManager::GetAutomataManagerForGroup: the ground groups belong to the vehicle manager. PARTIAL: the fire plane
-    // and police helicopter groups (0x4303 / 0x4301, the aircraft manager).
+    // cSC4AutomataManager::GetAutomataManagerForGroup: the first manager whose CanCreateGroup takes the group, vehicles before
+    // aircraft (the ground groups belong to the vehicle manager, the police helicopter and fire plane groups to the aircraft one).
     IAutomataDispatchManager* GetAutomataManagerForGroup(std::uint32_t group) override {
         cSC4TrafficAutomataManager* manager = Vehicles();
-        return manager && manager->CanCreateGroup(group) ? &g_vehicleDispatch : nullptr;
+        if (manager && manager->CanCreateGroup(group)) return &g_vehicleDispatch;
+        cSC4AircraftManager* aircraft = AircraftDispatch::Aircraft();
+        return aircraft && aircraft->CanCreateGroup(group) ? &g_aircraftDispatch : nullptr;
     }
     void AddDispatchViewLayer(IDispatchVehicleView*) override {}
     void RemoveDispatchViewLayer(IDispatchVehicleView*) override {}

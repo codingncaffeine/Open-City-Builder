@@ -201,7 +201,7 @@ bool cSC4Airplane::Init() {
         // Quirk: the registration point is read from the found effect, then the effect is always replaced by the
         // effects manager's "skywritingwhite".
         cS3DVector3 point{0.0f, 0.0f, 0.0f};
-        if (host && host->FindRegPointTransform(cRZString("fx_00_skywriting"), point)) regPoint_ = point;
+        if (host && host->FindRegPointTransform(Models().empty() ? nullptr : Models()[0], cRZString("fx_00_skywriting"), point)) regPoint_ = point;
         skywritingColor_ = 0;   // +0x35c
         if (effectDrop_) { effectDrop_->Release(); effectDrop_ = nullptr; }
         if (host) effectDrop_ = host->CreateEffect(cRZString("skywritingwhite"));

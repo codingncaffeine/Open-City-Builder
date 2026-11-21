@@ -256,7 +256,7 @@ struct FakeAircraftHost final : IAircraftHost {
         effect->AddRef();
         return effect;
     }
-    bool FindRegPointTransform(const cRZString&, cS3DVector3& out) override {
+    bool FindRegPointTransform(IAutomatonModel*, const cRZString&, cS3DVector3& out) override {
         if (!regPointFound) return false;
         out = regPoint;
         return true;

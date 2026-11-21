@@ -354,7 +354,7 @@ bool cSC4Helicopter::Init() {
         (void)unused;
         IAircraftHost* host = HostFor(*this);
         cS3DVector3 regPoint;
-        if (host && host->FindRegPointTransform(cRZString("fx_00_helipad"), regPoint)) {
+        if (host && host->FindRegPointTransform(Models().empty() ? nullptr : Models()[0], cRZString("fx_00_helipad"), regPoint)) {
             // Quaternion from the model facing to the current orientation, then the original's rotation-matrix
             // application (its variable order is transcribed literally).
             const cS3DVector3 direction = Normalized(orientation_);

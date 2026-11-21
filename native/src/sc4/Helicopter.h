@@ -306,15 +306,17 @@ public:
     virtual void EndObstacleQuery() = 0;                                            // slot 0x180
     // ---- lot manager slot 0x30 (pointer identity is all DetectCollisions reads) -------------------------------------
     virtual const void* LotAtPoint(const cS3DVector3& point) = 0;
-    // ---- renderer spotlight cones (UpdateSpotlight slot 0x1e0, TranslatePlayerDriveCommands slot 0x1e8) ------------
-    virtual bool RendererSpotlightCone(const cS3DVector3& origin, const cS3DVector3& direction,
-                                       const cS3DVector3& target) = 0;              // slot 0x1e0, returns "lit"
-    virtual bool RendererSpotlightHit(float x, float z, const cS3DVector3& target) = 0;   // slot 0x1e8, returns "lit"
+    // ---- the renderer's terrain picks (cSC43DRender::PickTerrain by ray, slot 0x1e0, and by viewport point, slot 0x1e8):
+    // where the spotlight meets the ground, written to `target`; false when it misses -----------------------------------
+    virtual bool RendererSpotlightCone(const cS3DVector3& origin, const cS3DVector3& direction, cS3DVector3& target) = 0;
+    virtual bool RendererSpotlightHit(float x, float z, cS3DVector3& target) = 0;
     // ---- city -------------------------------------------------------------------------------------------------------
     virtual float CityCellSizeX() = 0;                                             // city slot 0x2d8
     virtual float CityCellSizeZ() = 0;                                             // city slot 0x2e0
     virtual void CityCellCentre(float x, float z, float& outX, float& outZ) = 0;    // city slot 0x308
-    virtual void DispatchManagerReport(cISC4Occupant* occupant, int state) = 0;     // city slot 0x178 -> 0x28/0x70
+    // city slot 0x178 (the automata controller manager): state 5 -> vslot 0x28 AddControllerFromTemplateName(occupant,
+    // "riot_police_repulsor"), any other state -> vslot 0x70 RemoveControllers(occupant).
+    virtual void DispatchManagerReport(cISC4Occupant* occupant, int state) = 0;
     // slot 0x158 -> cSC4TrafficEffectManager::TrafficEffectManagerGetMostRecentAccidentLocation (0x10011b6b6).
     virtual bool TrafficAccidentLocation(cS3DVector3& position) = 0;
     // ---- crime simulator slot 0x40 (0x100213f58 is Reset; the query used here returns true with a position) ---------

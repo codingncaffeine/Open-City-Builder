@@ -38,5 +38,7 @@ sc4::IAutomataBuildingOccupant* CityBuildingView(cIGZUnknown* object);
 sc4::IAutomataGroupTemplate* GroupTemplateView(sc4::cSC4OccupantGroupTemplate* group);
 // The automaton's view of the same template (null for a view GroupTemplateView did not make).
 sc4::IAutomatonGroupTemplate* AutomatonGroupTemplateView(const sc4::IAutomataGroupTemplate* managerView);
+// The script group template behind the automaton's view of it (null for a view AutomatonGroupTemplateView did not make).
+sc4::cSC4OccupantGroupTemplate* OccupantGroupTemplateOf(const sc4::IAutomatonGroupTemplate* automatonView);
 
 }  // namespace native

@@ -14,7 +14,7 @@ void InstallAdvisorStub();
 void InstallAdvisorConcreteStub();
 void InstallAdvisorPopupTrackerStub();
 void InstallAdvisorSystemStub();
-void InstallAircraftStub();
+void InstallAircraftHosts();   // app/NativeAircraft.cpp: the aircraft, helicopter and aircraft manager hosts
 void InstallAmbienceHosts();    // app/NativeAudioAmbience.cpp: the ambience system's real hosts
 void InstallSoundBankHost();    // app/NativeAudioDirector.cpp
 void InstallAuraStub();
@@ -50,7 +50,6 @@ void InstallNativeFlora();
 void InstallGraphsViewStub();
 void InstallGraphsViewHost();   // app/NativeGraphsView.cpp
 void InstallGrowthDeveloperStub();
-void InstallHelicopterStub();
 void InstallLandfillDeveloperStub();
 void InstallLandfillDeveloperHost();   // NativeLandfill.cpp
 void InstallLightingManagerStub();
@@ -130,7 +129,7 @@ void InstallStubHosts() {
     InstallAdvisorConcreteStub();
     InstallAdvisorPopupTrackerStub();
     InstallAdvisorSystemStub();
-    InstallAircraftStub();
+    InstallAircraftHosts();               // NativeAircraft.cpp: the aircraft, helicopter and aircraft manager hosts
     InstallAmbienceHosts();
     InstallSoundBankHost();
     InstallAuraStub();
@@ -164,7 +163,6 @@ void InstallStubHosts() {
     InstallGraphsViewStub();
     InstallGraphsViewHost();              // the real host replaces the stub above
     InstallGrowthDeveloperStub();
-    InstallHelicopterStub();
     InstallLandfillDeveloperStub();
     InstallLandfillDeveloperHost();       // the landfill developer's real host replaces the stub above
     InstallLightingManagerStub();
