@@ -298,6 +298,16 @@ public:
         occupants->ReleaseOccupantList(list);
         return found;
     }
+    bool OccupantInRect(int x0, int z0, int x1, int z1) override {
+        sc4::cISC4OccupantManager* occupants = Occupants();
+        if (!occupants) return false;
+        const int a[2] = {x0, z0}, b[2] = {x1, z1};
+        sc4::OccupantList list;
+        if (!occupants->GetOccupantsByStandardCityCells(list, a, b, static_cast<sc4::cISC4OccupantFilter*>(nullptr), 0xffffffffu)) return false;
+        const bool found = !list.empty();
+        occupants->ReleaseOccupantList(list);
+        return found;
+    }
     int CityWidth() override { sc4::cSTETerrain* t = Terrain(); return t ? static_cast<int>(t->CellCountX()) : 0; }
     int CityHeight() override { sc4::cSTETerrain* t = Terrain(); return t ? static_cast<int>(t->CellCountZ()) : 0; }
     cIGZUnknown* AcquireOccupantManager() override { return nullptr; }
@@ -592,19 +602,29 @@ sc4::cSC4ViewInputControl* CreateNetworkTool(int type) {
 }  // namespace native
 
 namespace native {
+sc4::cSC4NetworkTool* NativeManagerNetworkTool(std::uint32_t type);   // NativeNetworkManager.cpp
+
 // Kit verb `netline TYPE X1 Z1 X2 Z2`: a tool of TYPE made as the drag's view input control makes its own (InputHost
 // CreateNetworkTool + Init; the network manager's shared tool re-solves the demolished pieces of a placement, so it may not
 // be the one placing) lays a line as the drag's release does (cSC4NetworkToolUI::DoPlacement): a dry run with neighbour
-// connections on, the possible connection, then the placement with the connection. The player's confirmation dialog is skipped (kits have no input); the neighbour connections of the
-// city are counted before and after.
+// connections on, the possible connection, then the placement with the connection. The player's confirmation dialog is
+// skipped (kits have no input); the neighbour connections of the city are counted before and after.
 void NativeLayNetworkLine(std::uint32_t type, int x1, int z1, int x2, int z2) {
-    if (type >= 13 || type == 4 || type == sc4::kNetworkPowerLine || type == sc4::kNetworkSubway) {
-        std::printf("netline: no surface network tool of type %u\n", type);
+    if (type >= 13) {
+        std::printf("netline: no network type %u\n", type);
         return;
     }
-    auto* tool = new sc4::cSC4NetworkTool(type);
-    tool->AddRef();
-    tool->Init();
+    // The pipe, power line and subway tools stay the network manager's own (their drags have no other tool here).
+    const bool own = type != 4 && type != sc4::kNetworkPowerLine && type != sc4::kNetworkSubway;
+    sc4::cSC4NetworkTool* tool = own ? new sc4::cSC4NetworkTool(type) : NativeManagerNetworkTool(type);
+    if (!tool) {
+        std::printf("netline: the network manager has no tool of type %u\n", type);
+        return;
+    }
+    if (own) {
+        tool->AddRef();
+        tool->Init();
+    }
     sc4::cSC4NeighborsSimulator* neighbors = CityNeighborsSimulator();
     auto count = [&] {
         sc4::ConnectionList list;
@@ -643,8 +663,10 @@ void NativeLayNetworkLine(std::uint32_t type, int x1, int z1, int x2, int z2) {
         sc4::cISC4NeighborConnection* made = neighbors->FindConnection(info.unknown8, static_cast<int>(info.x), static_cast<int>(info.z));
         std::printf("netline: connection at %d,%d %s\n", static_cast<int>(info.x), static_cast<int>(info.z), made ? "made" : "MISSING");
     }
-    tool->Shutdown();
-    tool->Release();
+    if (own) {
+        tool->Shutdown();
+        tool->Release();
+    }
 }
 // Kit verb `bridges`: a water map of the rectangle (the whole city when no rectangle is given; one character per block of
 // cells so a row stays within 64 characters: '~' = a cell with water in the block) and every bridge piece in the city.

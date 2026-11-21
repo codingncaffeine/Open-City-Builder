@@ -1982,7 +1982,7 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, bool allowDiagonals, bool connect
         if (steps < validSteps_) { failureReason_ = kFailBridge; validSteps_ = 0; }
         CheckForGoodTerrain(steps);                                                 // vslot 0x11c
         if (steps < validSteps_) { failureReason_ = kFailStart; validSteps_ = 0; }
-        // IdentifyLandBridgeCells (hasBridgeTypes_): not ported.
+        if (hasBridgeTypes_) IdentifyLandBridgeCells(validSteps_, networkType);     // i386 +0x394
         bool solved = false;
         while (validSteps_ > 0) {
             solvedCells_.clear();
