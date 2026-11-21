@@ -13,6 +13,7 @@
 #include "app/NativeZoneTool.h"
 #include "sc4/BudgetSimulator.h"
 #include "sc4/NetworkTool.h"
+#include "sc4/SubwayOccupant.h"
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/NetworkToolUI.h"
 #include "sc4/NetworkPreview.h"
@@ -531,9 +532,10 @@ class InputHost final : public sc4::INetworkInputToolHost {
 public:
     sc4::cISC4View3DWin* View() override { return g_view; }
     // GetNetworkTool(type, true): cSC4NetworkTool for the surface types, the pipe tool for type 4 (shared, never destroyed),
-    // the power line tool (cSC4PowerLineTool, its own pole solver) for type 5.
+    // the power line tool (cSC4PowerLineTool, its own pole solver) for type 5, the subway tool for type 7 (shared like the pipe tool).
     sc4::cISC4NetworkTool* CreateNetworkTool(std::uint32_t type) override {
         sc4::cSC4NetworkTool* tool = type == 4 ? NativePipeTool()
+                                   : type == sc4::kSubwayNetworkType ? NativeSubwayTool()
                                    : type == sc4::kNetworkPowerLine ? static_cast<sc4::cSC4NetworkTool*>(new sc4::cSC4PowerLineTool())
                                                                     : new sc4::cSC4NetworkTool(type);
         tool->AddRef();

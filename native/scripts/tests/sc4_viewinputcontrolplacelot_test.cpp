@@ -524,7 +524,7 @@ struct FakeHost final : IPlaceLotHost, IViewInputHost {
         std::snprintf(buffer, sizeof(buffer), "error_%08x", instance);
         out.AssignFromCString(buffer);
     }
-    void ConnectLotUtilities(cSC4Lot*, const cS3DVector3&) override { ++utilityCalls; }
+    void ConnectLotUtilities(cSC4Lot*, const SC4Rect<int>&, const cS3DVector3&) override { ++utilityCalls; }
     void MouseMoved() override { ++mouseMoved; }
     bool BuildingPropertyBool(std::uint32_t buildingType, std::uint32_t property) override {
         auto it = boolProperties.find(property);

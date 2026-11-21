@@ -18,6 +18,7 @@
 #include "sc4/SCProperty.h"
 #include "sc4/SCPropertyHelp.h"
 #include "sc4/PipeTool.h"
+#include "sc4/SubwayTool.h"
 #include "sc4/UndergroundNetworkTool.h"
 
 static int failures = 0;
@@ -173,6 +174,7 @@ struct FakeConnectionOccupant final : cSC4UndergroundConnectionOccupant {
     std::uint32_t GetGZIID() const override { return 0xea0a5acf; }
     std::uint32_t GetNetworkOccupantGZIID() const override { return network; }
     std::uint32_t GetNetworkType() const override { return kNetworkPipe; }
+    bool QueryOccupantInterface(cISC4Occupant*, cSC4UndergroundOccupant*& out) override { out = nullptr; return false; }
     std::uint32_t AddRef() override { return ++fakeRefs; }
     std::uint32_t Release() override {
         ++releaseCalls;
@@ -1286,6 +1288,60 @@ void TestPipeToolCreatesPipe() {
     // The tool is never destroyed (its destructor is the original's trap).
 }
 
+// cSC4SubwayTool::CreateNetworkOccupant (i386 0x0012c46c): the pipe tool's body with a subway piece (type 7, model offset
+// 0x7000000) on the cell's corners, the cell's occupant, its network flags, the terrain under its vertices, the subway
+// edges and the type's demolition cost.
+void TestSubwayToolCreatesSubway() {
+    Fixture f;
+    f.baseHost.typeInfo.placement.unknownA8[9] = 250;
+    auto* tool = new cSC4SubwayTool();
+    gLiveTools.push_back(tool);
+    CHECK(tool->Init());
+    CHECK(tool->NetworkGZIID() == kGZCLSID_cSC4SubwayOccupant);
+    cSC4NetworkCellInfo cell;
+    cell.x = 6;
+    cell.z = 2;
+    cell.networkFlags = 0x20;
+    cell.tileNeighborhoods[kSubwayNetworkType] = 0x00020002;
+    cell.tileNeighborhoods[kNetworkPipe] = 0x02000200;
+    for (int v = 0; v < 4; ++v) {
+        cell.vertexHeights[v] = 200.0f + static_cast<float>(v);
+        cell.vertexBaseHeights[v] = 60 + v;
+        f.host.terrainHeights[static_cast<std::uint32_t>(60 + v)] = 215.0f + static_cast<float>(v);
+    }
+    float corners[4][3] = {};
+    cSC4UndergroundOccupant* made = nullptr;
+    tool->CreateNetworkOccupant(&cell, made, corners, 4);
+    CHECK(made != nullptr);
+    auto* subway = dynamic_cast<cSC4SubwayOccupant*>(made);
+    CHECK(subway != nullptr);
+    CHECK(dynamic_cast<cSC4PipeOccupant*>(made) == nullptr);
+    CHECK(cell.occupant == made);
+    CHECK(made->GetNetworkType() == kSubwayNetworkType);
+    CHECK_NEAR(corners[0][0], 96.0f);
+    CHECK_NEAR(corners[0][1], 200.0f);
+    CHECK_NEAR(corners[0][2], 32.0f);
+    CHECK_NEAR(corners[1][2], 48.0f);
+    CHECK_NEAR(corners[2][0], 112.0f);
+    CHECK_NEAR(corners[3][1], 203.0f);
+    std::uint32_t cx = 0, cz = 0;
+    made->GetOccupiedCell(cx, cz);
+    CHECK(cx == 6 && cz == 2);
+    CHECK((made->GetNetworkFlag() & 0x20) != 0);
+    CHECK(made->GetEdgeTypesFlag(kSubwayNetworkType) == 0x00020002);
+    CHECK(made->GetEdgeTypesFlag(kNetworkPipe) == 0);   // only the tool's network, whatever the argument says
+    CHECK(made->GetCostOfDemolition() == 250);
+    float terrain[4] = {};
+    made->GetTerrainHeights(terrain);
+    CHECK_NEAR(terrain[0], 215.0f);
+    CHECK_NEAR(terrain[3], 218.0f);
+    void* raw = nullptr;
+    CHECK(made->QueryInterface(kGZCLSID_cSC4SubwayOccupant, &raw) && raw == static_cast<void*>(subway));
+    if (raw) subway->Release();
+    made->Release();
+    tool->Shutdown();
+}
+
 }  // namespace
 
 int main() {
@@ -1304,6 +1360,7 @@ int main() {
     TestSetQuadTrianglesToDraw();
     TestUpdateTerrainHeightsPartial();
     TestPipeToolCreatesPipe();
+    TestSubwayToolCreatesSubway();
     for (auto* o : TestOccupant::All()) delete o;
     for (auto* o : FakeConnectionOccupant::All()) delete o;
     if (failures == 0) {

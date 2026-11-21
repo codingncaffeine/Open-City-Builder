@@ -24,6 +24,7 @@
 #include "sc4/PowerLineTool.h"
 #include "sc4/ResourceAsFile.h"
 #include "sc4/ServiceLocator.h"
+#include "sc4/SubwayTool.h"
 #include "sc4/cSC424HourClock.h"
 #include "sc4/cSC4City.h"
 
@@ -89,12 +90,13 @@ sc4::INetworkManagerOccupant* NetworkOccupantView(sc4::cISC4Occupant* occupant) 
     return view;
 }
 
-// A network tool for the network manager: cSC4NetworkTool for the surface types, the pipe tool for type 4. The tool itself is
+// A network tool for the network manager: cSC4NetworkTool for the surface types, the pipe tool for type 4, the power line tool
+// for type 5 and the subway tool for type 7. The tool itself is
 // made on first use (the manager Inits its tool around each demolition), when the view's network tool host is installed.
 class ManagerRoadTool final : public sc4::INetworkManagerTool {
 public:
     explicit ManagerRoadTool(std::uint32_t type) : type_(type) {}
-    ~ManagerRoadTool() { if (tool_ && type_ != sc4::kPipeNetworkType) tool_->Release(); }
+    ~ManagerRoadTool() { if (tool_ && type_ != sc4::kPipeNetworkType && type_ != sc4::kSubwayNetworkType) tool_->Release(); }
     bool QueryInterface(std::uint32_t, void**) override { return false; }
     std::uint32_t AddRef() override { return ++refs_; }
     std::uint32_t Release() override {
@@ -105,6 +107,8 @@ public:
     bool Init() override {
         if (!tool_ && type_ == sc4::kPipeNetworkType) {
             tool_ = NativePipeTool();
+        } else if (!tool_ && type_ == sc4::kSubwayNetworkType) {
+            tool_ = NativeSubwayTool();
         } else if (!tool_ && type_ == sc4::kNetworkPowerLine) {
             tool_ = new sc4::cSC4PowerLineTool();   // GetNetworkTool case 5: operator new(0x400) + cSC4PowerLineTool()
             tool_->AddRef();
@@ -208,11 +212,10 @@ public:
         file->Release();
         return ini;
     }
-    // Init / GetNetworkTool(type, true): the surface types, the pipe and the power line get their tools; the subway tool (7)
-    // is not wired to the manager yet, so its slot stays empty (DestroyNetworkOccupants skips an empty slot).
+    // Init / GetNetworkTool(type, true): every type gets its tool (the surface types, the pipe, the power line, the subway).
     sc4::INetworkManagerTool* CreateNetworkTool(sc4::eNetworkType type) override {
         const auto value = static_cast<std::uint32_t>(type);
-        if (value >= sc4::kNetworkToolCount || value == 7) return nullptr;
+        if (value >= sc4::kNetworkToolCount) return nullptr;
         return new ManagerRoadTool(value);
     }
     sc4::cISC4OccupantFilter* CreateOccupantFilter(bool subway) override {
@@ -260,6 +263,16 @@ public:
 } g_host;
 
 }  // namespace
+
+// The subway tool (cSC4SubwayTool, network type 7): one for the program, as the pipe tool (its destructor traps too).
+sc4::cSC4NetworkTool* NativeSubwayTool() {
+    static sc4::cSC4SubwayTool* tool = [] {
+        auto* made = new sc4::cSC4SubwayTool();
+        made->AddRef();
+        return made;
+    }();
+    return tool;
+}
 
 // The pipe tool (cSC4PipeTool, network type 4). Its destructor traps as the original's does (the game never destroys a
 // network tool), so one tool serves every city and keeps a reference for the life of the program.

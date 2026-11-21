@@ -25,8 +25,11 @@
 #include "sc4/UndergroundCustomView.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/PipeOccupant.h"
+#include "sc4/SubwayConnectionOccupant.h"
+#include "sc4/SubwayOccupant.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/UndergroundConnectionOccupant.h"
+#include "sc4/NetworkTool.h"
 #include "sc4/UndergroundNetworkTool.h"
 #include "sc4/UndergroundOccupant.h"
 #include "sc4/cSC4City.h"
@@ -36,6 +39,8 @@
 #include "s3d/ModelInstance.h"
 
 namespace native {
+sc4::cSC4NetworkTool* NativeManagerNetworkTool(std::uint32_t type);   // NativeNetworkManager.cpp
+
 namespace {
 
 using namespace sc4;
@@ -252,6 +257,69 @@ private:
     };
 };
 
+// The connection pieces' globals: the city's cell geometry, the terrain, the cell queries the underground tool makes, the
+// network manager's tool of the connection's network, the occupant manager and the renderer.
+class UndergroundConnectionHost final : public IUndergroundConnectionHost {
+public:
+    void PositionToCell(float x, float z, int& cellX, int& cellZ) override {   // spCity vslot 0x17c
+        if (cSC4City* city = HostCity()) city->PositionToCell(x, z, cellX, cellZ);
+        else cellX = static_cast<int>(x * 0.0625f), cellZ = static_cast<int>(z * 0.0625f);
+    }
+    void CellCornerToPosition(int cellX, int cellZ, float& x, float& z) override {   // spCity vslot 0x180
+        if (cSC4City* city = HostCity()) city->CellCornerToPosition(cellX, cellZ, x, z);
+        else x = static_cast<float>(cellX) * 16.0f, z = static_cast<float>(cellZ) * 16.0f;
+    }
+    float CellWidthX() override { cSC4City* city = HostCity(); return city ? city->CellWidthX() : 16.0f; }
+    float CellWidthZ() override { cSC4City* city = HostCity(); return city ? city->CellWidthZ() : 16.0f; }
+    void CellCornerHeights(int x, int z, float* heights) override {
+        cSTETerrain* terrain = Terrain();
+        if (!terrain) {
+            for (int i = 0; i < 4; ++i) heights[i] = 0.0f;
+            return;
+        }
+        heights[0] = terrain->GetAltitudeAtVertex(x, z);
+        heights[1] = terrain->GetAltitudeAtVertex(x, z + 1);
+        heights[2] = terrain->GetAltitudeAtVertex(x + 1, z + 1);
+        heights[3] = terrain->GetAltitudeAtVertex(x + 1, z);
+    }
+    cSC4UndergroundOccupant* FindUndergroundOccupant(int cellX, int cellZ, std::uint32_t gziid) override {
+        return occupantHost_.FindUndergroundOccupant(cellX, cellZ, gziid);
+    }
+    cSC4UndergroundConnectionOccupant* FindUndergroundConnectionOccupant(int cellX, int cellZ, std::uint32_t gziid) override {
+        std::list<cISC4Occupant*> occupants;
+        CellOccupants(cellX, cellZ, occupants);
+        cSC4UndergroundConnectionOccupant* found = nullptr;
+        for (cISC4Occupant* occupant : occupants) {
+            void* raw = nullptr;
+            if (occupant->QueryInterface(kGZIID_cISC4UndergroundConnectionOccupant, &raw) && raw) {
+                auto* connection = static_cast<cSC4UndergroundConnectionOccupant*>(raw);
+                if (connection->GetNetworkOccupantGZIID() == gziid && !found) found = connection;
+                else connection->Release();
+            }
+            occupant->Release();
+        }
+        return found;
+    }
+    void PlaceNetworkOccupants(std::uint32_t networkType, int x0, int z0, int x1, int z1) override {
+        sc4::cSC4NetworkTool* tool = NativeManagerNetworkTool(networkType);
+        if (!tool) return;
+        tool->AddRef();
+        tool->Init();
+        tool->PlaceNetworkOccupants(x0, z0, x1, z1, 0, nullptr, true, -1);
+        tool->Shutdown();
+        tool->Release();
+    }
+    void RemoveOccupant(cISC4Occupant* occupant, bool shutdown, std::uint32_t data) override {
+        if (cISC4OccupantManager* occupants = Occupants(); occupants && occupant) occupants->RemoveOccupant(occupant, shutdown, data);
+    }
+    void ChangeModelInRenderer(cSC4UndergroundConnectionOccupant* connection, int change) override {
+        if (CityRenderer() && connection) CityRendererChangeModel(static_cast<s3d::cIS3DModelInstance*>(connection), change);
+    }
+
+private:
+    UndergroundOccupantHost occupantHost_;
+};
+
 // The data views' filter asks for the state of the lot under a lot texture (spLotManager GetLot(x, z, false), vslot 0x84).
 class ViewFilterHost final : public IComplexViewFilterHost {
 public:
@@ -316,10 +384,61 @@ void InstallUndergroundHosts() {
     static UndergroundOccupantHost occupant;
     SetUndergroundNetworkToolHost(&tool);
     SetUndergroundOccupantHost(&occupant);
+    static UndergroundConnectionHost connection;
+    SetUndergroundConnectionHost(&connection);
     static ViewFilterHost filter;
     static CustomViewHost customView;
     SetComplexViewFilterHost(&filter);
     SetUndergroundCustomViewHost(&customView);
+}
+
+}  // namespace native
+
+namespace native {
+
+void NativeSubwayReport(int limit) {
+    cSTETerrain* terrain = Terrain();
+    if (!terrain) {
+        std::printf("subways: no city\n");
+        return;
+    }
+    const int countX = static_cast<int>(terrain->CellCountX()), countZ = static_cast<int>(terrain->CellCountZ());
+    int pieces = 0, modeled = 0, connections = 0;
+    for (int z = 0; z < countZ; ++z) {
+        for (int x = 0; x < countX; ++x) {
+            std::list<cISC4Occupant*> occupants;
+            CellOccupants(x, z, occupants);
+            for (cISC4Occupant* occupant : occupants) {
+                void* raw = nullptr;
+                if (occupant->QueryInterface(kGZCLSID_cSC4SubwayOccupant, &raw) && raw) {
+                    auto* subway = static_cast<cSC4SubwayOccupant*>(raw);
+                    const bool model = !subway->PieceGeometry().empty() || subway->CustomModel() != nullptr;
+                    if (model) ++modeled;
+                    if (pieces++ < limit) {
+                        float position[3] = {};
+                        subway->GetPosition(position);
+                        std::printf("subway: cell %d,%d piece %05x rotation %u edges %08x flags %08x y %.2f model %s (%zu vertices%s)\n", x, z,
+                                    subway->PieceId(), subway->GetRotationAndFlip(),
+                                    subway->GetEdgeTypesFlag(static_cast<std::uint8_t>(kSubwayNetworkType)), subway->GetNetworkFlag(),
+                                    position[1], model ? "yes" : "no", subway->PieceGeometry().size(), subway->CustomModel() ? ", custom" : "");
+                    }
+                    subway->Release();
+                } else if (occupant->QueryInterface(kGZCLSID_cSC4SubwayConnectionOccupant, &raw) && raw) {
+                    auto* connection = static_cast<cSC4SubwayConnectionOccupant*>(raw);
+                    if (connections++ < limit) {
+                        float position[3] = {};
+                        connection->GetPosition(position);
+                        std::printf("subway connection: cell %d,%d position %.1f,%.1f,%.1f network piece %s building %s\n", x, z, position[0],
+                                    position[1], position[2], connection->NetworkOccupant() ? "yes" : "no",
+                                    connection->BuildingOccupant() ? "yes" : "no");
+                    }
+                    connection->Release();
+                }
+                occupant->Release();
+            }
+        }
+    }
+    std::printf("subways: %d pieces (%d with a model), %d connections\n", pieces, modeled, connections);
 }
 
 }  // namespace native

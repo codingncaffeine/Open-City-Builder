@@ -546,6 +546,7 @@ src/sc4/WinResizableOutline.cpp
 src/sc4/ViewInputControlSignTool.cpp
 src/sc4/UndergroundNetworkTool.cpp
 src/sc4/PipeTool.cpp
+src/sc4/SubwayTool.cpp
 src/sc4/ComplexViewOccupantFilter.cpp
 src/sc4/UndergroundCustomView.cpp
 src/sc4/UndergroundOccupant.cpp
@@ -587,6 +588,7 @@ src/gz/gzcom_creators/cSC4PipeConnectionOccupant.cpp
 src/sc4/UndergroundConnectionOccupant.cpp
 src/sc4/PipeConnectionOccupant.cpp
 src/sc4/SubwayOccupant.cpp
+src/sc4/SubwayOccupantGeometry.cpp
 src/sc4/SubwayConnectionOccupant.cpp
 src/gz/gzcom_creators/cSC4SubwayOccupant.cpp
 src/gz/gzcom_creators/cSC4SubwayConnectionOccupant.cpp

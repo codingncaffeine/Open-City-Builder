@@ -23,6 +23,9 @@ public:
     std::uint32_t GetGZIID() const override { return kGZCLSID_cSC4PipeConnectionOccupant; }     // 0x1003de132
     std::uint32_t GetNetworkOccupantGZIID() const override { return kGZCLSID_cSC4PipeOccupant; }   // 0x1003de13e
     std::uint32_t GetNetworkType() const override { return kPipeNetworkType; }                  // 0x1003de14a
+    bool QueryOccupantInterface(cISC4Occupant* occupant, cSC4UndergroundOccupant*& out) override {
+        return QueryPieceInterface(occupant, kGZCLSID_cSC4PipeOccupant, out);
+    }
 };
 
 }  // namespace sc4

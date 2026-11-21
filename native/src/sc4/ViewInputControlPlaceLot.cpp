@@ -1067,7 +1067,7 @@ bool cSC4ViewInputControlPlaceLot::PlaceLot(const cS3DVector3& position, int fac
             if (host->Budget()) host->Budget()->Deposit(cost);
         } else {
             if (cost != 0 && host->Budget()) host->Budget()->Withdraw(cost);
-            host->ConnectLotUtilities(lot, point);
+            host->ConnectLotUtilities(lot, rect, position);
             if (playEffects) {
                 const int largest = std::max(rect.x1 - rect.x0, rect.z1 - rect.z0);
                 const char* name = largest < 1   ? "placement_effects_1x1"

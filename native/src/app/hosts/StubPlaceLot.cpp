@@ -27,7 +27,7 @@ struct StubPlaceLot final : IPlaceLotHost {
     void GetObjectIDArray(const cSC4LotConfigurationObject* object, std::vector<std::uint32_t>& out) override { SC4_UNWIRED("StubPlaceLot::GetObjectIDArray"); }
     void LoadString(std::uint32_t group, std::uint32_t instance, cIGZString& out) override { SC4_UNWIRED("StubPlaceLot::LoadString"); }
     void PlaySound(std::uint32_t group, std::uint32_t id) override { SC4_UNWIRED("StubPlaceLot::PlaySound"); }
-    void ConnectLotUtilities(cSC4Lot* lot, const cS3DVector3& position) override { SC4_UNWIRED("StubPlaceLot::ConnectLotUtilities"); }
+    void ConnectLotUtilities(cSC4Lot* lot, const SC4Rect<int>& rect, const cS3DVector3& position) override { SC4_UNWIRED("StubPlaceLot::ConnectLotUtilities"); }
     void MouseMoved() override { SC4_UNWIRED("StubPlaceLot::MouseMoved"); }
     bool BuildingPropertyBool(std::uint32_t buildingType, std::uint32_t property) override { SC4_UNWIRED("StubPlaceLot::BuildingPropertyBool"); return {}; }
     bool BuildingPropertyUint32(std::uint32_t buildingType, std::uint32_t property, std::uint32_t& out) override { SC4_UNWIRED("StubPlaceLot::BuildingPropertyUint32"); return {}; }

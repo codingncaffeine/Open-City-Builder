@@ -8,13 +8,13 @@
 // (AddCellPreview / ClearCellPreviews).
 //
 // The class itself is abstract: slots 0x298 and 0x2a0 are null in its vtable. The two concrete tools fill them
-// and are NOT recovered yet:
+// (sc4/PipeTool.h, sc4/SubwayTool.h):
 //   cSC4PipeTool   (vtable 0x100a7b050): NetworkGZIID 0x1001937ca = 0x49c05b9f,
 //                                        CreateNetworkOccupant 0x1001930c0
 //   cSC4SubwayTool (vtable 0x100a7ac80): NetworkGZIID 0x1001930ae = 0xca16374f,
 //                                        CreateNetworkOccupant 0x100192b10
-// (both create a cSC4PipeOccupant / cSC4SubwayOccupant, which are not recovered either). A test or the app
-// supplies a concrete subclass; scripts/tests/sc4_undergroundnetworktool_test.cpp does.
+// (they create a cSC4PipeOccupant / cSC4SubwayOccupant). scripts/tests/sc4_undergroundnetworktool_test.cpp also supplies
+// a concrete test subclass.
 //
 // Object layout (0x690 bytes; base cSC4NetworkTool is 0x638):
 //   +0x000 cSC4NetworkTool
@@ -195,6 +195,12 @@ public:
     // Build the concrete occupant of a cell (0x100192b10 / 0x1001930c0); it also fills the 4x3 corner array.
     virtual void CreateNetworkOccupant(cSC4NetworkCellInfo* cell, cSC4UndergroundOccupant*& out,
                                        float (*heights)[3], std::uint32_t networkType) = 0;
+
+    // The base state the concrete tools read when they build a piece (this class is the base's friend): the network type
+    // (+0x628) and the placement block's demolition cost (i386 +0x36c).
+    std::uint32_t PieceNetworkType() const { return networkType_; }
+    std::uint32_t PlacementDemolitionCost() const { return placement_.unknownA8[9]; }
+    std::uint32_t CellNeighborhood(const cSC4NetworkCellInfo& cell) const { return cell.tileNeighborhoods[networkType_]; }
 
     // port wiring the tests read
     bool Inited() const { return inited_; }                          // +0x638

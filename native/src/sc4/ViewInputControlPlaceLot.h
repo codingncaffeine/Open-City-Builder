@@ -374,10 +374,10 @@ public:
     // cSLString(group, instance, true) for the "can't place" reasons.
     virtual void LoadString(std::uint32_t group, std::uint32_t instance, cIGZString& out) = 0;
     virtual void PlaySound(std::uint32_t group, std::uint32_t id) = 0;   // sound system vslot 0x50
-    // The lot's utility connections (the original: lot 0x180 -> 0x18 -> 0x30 property holder,
-    // property 0x88ed3303 -> a cSC4PipeConnectionOccupant; SL::spNetworkManager 0x48 -> a
-    // cSC4SubwayConnectionOccupant; both are unrecovered, so the adapter owns them).
-    virtual void ConnectLotUtilities(cSC4Lot* lot, const cS3DVector3& position) = 0;
+    // The lot's utility connections (i386 0x002d814a, after a successful construction): a building whose property holder has
+    // property 0x88ed3303 gets a cSC4PipeConnectionOccupant, a subway station (SL::NetworkManager() IsOccupantSubwayStation)
+    // a cSC4SubwayConnectionOccupant, each at the center cell of `rect` at the height of the placement position.
+    virtual void ConnectLotUtilities(cSC4Lot* lot, const SC4Rect<int>& rect, const cS3DVector3& position) = 0;
     // RZ::WM()->vslot 0x98, the window manager's end-of-mouse-move housekeeping.
     virtual void MouseMoved() = 0;
 
