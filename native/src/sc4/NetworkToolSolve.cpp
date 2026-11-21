@@ -24,6 +24,7 @@
 #include <unordered_map>
 
 #include "sc4/NetworkOccupant.h"
+#include "sc4/NetworkBridgeOccupant.h"
 #include "sc4/NetworkWorldCache.h"
 #include "sc4/NetworkPreview.h"
 #include "sc4/TileRules.h"
@@ -505,8 +506,9 @@ void cSC4NetworkTool::BuildSetOfCellsToBeSolved() {
         solvedCells_.insert(key);
     }
     ExpandToSolveSetBasedOnConnectivity(seeds, 4);
-    // RemoveHighwayIntersectionPieces / RemoveTunnelPieces / RemoveBridgePiecesFromSetOfCellsToBeSolved: no such pieces
-    // exist until bridges, tunnels and highway intersections are ported.
+    // RemoveHighwayIntersectionPieces / RemoveTunnelPieces: no such pieces exist until tunnels and highway intersections are
+    // ported.
+    RemoveBridgePiecesFromSetOfCellsToBeSolved(solvedCells_);
 }
 
 // i386: `rings` times, every cell connected to the frontier that is not fixed (and not a short step) joins the set.
@@ -1201,9 +1203,11 @@ void cSC4NetworkTool::CreateNetworkOccupant(cSC4NetworkCellInfo* cell, cSC4Netwo
     cSC4NetworkOccupant* occupant = nullptr;
     if (clsid == 0) {
         occupant = new cSC4NetworkOccupant();
+    } else if (clsid == kGZCLSID_cSC4NetworkBridgeOccupant) {
+        occupant = new cSC4NetworkBridgeOccupant();
     } else {
-        // cSC4NetworkBridgeOccupant (0x49cc1bcd), cSC4NetworkTunnelOccupant (0x8a4bd52b), cSC4NetworkOccupantWithPreBuiltModel
-        // (0x49c1a034): not created by the land path yet.
+        // cSC4NetworkTunnelOccupant (0x8a4bd52b), cSC4NetworkOccupantWithPreBuiltModel (0x49c1a034): not created by the land
+        // path yet.
         std::fprintf(stderr, "network tool: occupant class %08x not ported, using a plain network occupant\n", clsid);
         occupant = new cSC4NetworkOccupant();
     }
@@ -1334,7 +1338,8 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, bool allowDiagonals, bool connect
         if (steps < validSteps_) { failureReason_ = kFailReserved; validSteps_ = 0; }
         steps = UpdateOccupantHighlights(validSteps_);                              // vslot 0xf4
         if (steps < validSteps_) { failureReason_ = kFailReserved; validSteps_ = 0; }
-        // IdentifyBridgeCells: not ported (no bridges; water stops the drag in CheckForGoodTerrain).
+        IdentifyBridgeCells(steps, networkType);                                    // the bridge steps (direction 1) leave the terrain check
+        if (steps < validSteps_) { failureReason_ = kFailBridge; validSteps_ = 0; }
         CheckForGoodTerrain(steps);                                                 // vslot 0x11c
         if (steps < validSteps_) { failureReason_ = kFailStart; validSteps_ = 0; }
         // IdentifyLandBridgeCells (hasBridgeTypes_): not ported.
@@ -1388,7 +1393,10 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, bool allowDiagonals, bool connect
             DestroyHilightedOccupants();                                             // vslot 0xf8
             // UpdateTerrainHeights / Mark*ExistingOccupantsAsNewlySolved: not ported yet.
         }
-        if (previewUpdateEnabled_) InsertOccupantsForSolvedCells(solvedCellList_, &placed, false);
+        if (previewUpdateEnabled_) {
+            InsertOccupantsForSolvedCells(solvedCellList_, &placed, false);
+            InsertBridgePieces(&placed);
+        }
     }
     if (!place) {
         // The preview occupants (+0x25c) are kept so ClearCellPreviews can take them out again.

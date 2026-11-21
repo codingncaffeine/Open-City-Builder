@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <set>
 #include <vector>
 
 #include "gz/cIGZMessage2.h"
@@ -11,6 +12,8 @@
 #include "sc4/NetworkTool.h"
 #include "sc4/NetworkOccupant.h"
 #include "sc4/TileRules.h"
+#include "sc4/SCProperty.h"
+#include "rz/cRZVariant.h"
 
 static int failures = 0;
 #define CHECK(c)                                                       \
@@ -20,6 +23,11 @@ static int failures = 0;
             ++failures;                                                \
         }                                                              \
     } while (0)
+
+class cIGZPersistResourceManager;
+namespace SL {
+cIGZPersistResourceManager* spRM = nullptr;   // the bridge type loader's resource manager (none here)
+}
 
 using namespace sc4;
 
@@ -54,6 +62,12 @@ struct NetworkToolTestAccess {
         t.SolveMultiTypeIntersections(cells, solved, type);
     }
     static std::vector<tSolvedCell>& SolvedCellList(cSC4NetworkTool& t) { return t.solvedCellList_; }
+    static void SetDrag(cSC4NetworkTool& t, int valid, int straight, int direction) {
+        t.validSteps_ = valid;
+        t.straightSteps_ = straight;
+        t.directionA_ = direction;
+    }
+    static void SetPlacing(cSC4NetworkTool& t, bool place) { t.unknown98_ = place; }
 };
 }  // namespace sc4
 
@@ -181,8 +195,19 @@ struct FakeHost : INetworkToolHost {
     float TerrainCellSize() override { return cellSize; }
     bool TerrainAllowsNetwork(std::uint32_t x, std::uint32_t z) override {
         lastTerrainCell = x | (z << 16);
-        return terrainAllows;
+        return terrainAllows || water.count(x | (z << 16)) != 0;
     }
+    // The bridge queries: water cells have their surface at waterSurface over a bed at waterBed, land is flat at landLevel.
+    std::set<std::uint32_t> water;
+    float landLevel = 300.0f, waterSurface = 250.0f, waterBed = 200.0f;
+    bool occupiedRect = false;
+    float CellMaxSurfaceLevel(std::uint32_t x, std::uint32_t z) override { return water.count(x | (z << 16)) ? waterSurface : landLevel; }
+    void CellCornerAltitudes(std::uint32_t x, std::uint32_t z, float out[4]) override {
+        for (int i = 0; i != 4; ++i) out[i] = water.count(x | (z << 16)) ? waterBed : landLevel;
+    }
+    bool NetworkOccupantInRect(int, int, int, int, std::uint32_t) override { return occupiedRect; }
+    int inserted = 0;
+    int InsertNetworkOccupant(cSC4NetworkOccupant*, std::uint32_t) override { return ++inserted; }
     int CityWidth() override { return width; }
     int CityHeight() override { return height; }
     cIGZUnknown* AcquireOccupantManager() override {
@@ -632,14 +657,14 @@ int main() {
         f.Init();
         CHECK(f.tool->GetMajorBridge() == -1);
         tBridge bridge{};
-        bridge.type = 3;
-        bridge.altitude = 12.5f;
+        bridge.bridgeType = 3;
+        bridge.elevation = 12.5f;
         bridge.referenceAltitude = 10.0f;
         bridge.landBridge = true;
         NetworkToolTestAccess::Bridges(*f.tool).push_back(bridge);
         tBridge second{};
-        second.type = 5;
-        second.altitude = 20.0f;
+        second.bridgeType = 5;
+        second.elevation = 20.0f;
         second.referenceAltitude = 18.0f;
         NetworkToolTestAccess::Bridges(*f.tool).push_back(second);
         CHECK(f.tool->GetMajorBridge() == 5);  // the last element
@@ -1105,6 +1130,153 @@ int main() {
             (void)b;
             SetNetworkToolHost(nullptr);
         }
+    }
+
+    // ---- bridges: the bridge type record read from an exemplar's properties ---------------------------------
+    {
+        sc4::cSCPropertyHolder holder;
+        const auto addU32 = [&](std::uint32_t id, std::vector<std::uint32_t> values) {
+            cRZVariant v;
+            v.RefUint32(values.data(), static_cast<std::uint32_t>(values.size()));
+            holder.AddProperty(id, &v, false);
+        };
+        const auto addF32 = [&](std::uint32_t id, std::vector<float> values) {
+            cRZVariant v;
+            v.RefFloat32(values.data(), static_cast<std::uint32_t>(values.size()));
+            holder.AddProperty(id, &v, false);
+        };
+        const auto addU8 = [&](std::uint32_t id, std::vector<std::uint8_t> values) {
+            cRZVariant v;
+            v.RefUint8(values.data(), static_cast<std::uint32_t>(values.size()));
+            holder.AddProperty(id, &v, false);
+        };
+        holder.AddProperty(0x482cb442, 2u, false);                 // two ramp steps
+        addU32(0x482cb443, {0x10, 0x11});
+        addU8(0x482cb444, {1, 2});
+        addF32(0x482cb44d, {5.0f, -1.0f});
+        addF32(0x482cb44b, {0.0f, 4.0f, 1.0f, 3.0f});              // the ramp pairs, near end first
+        holder.AddProperty(0x482cb448, 1u, false);                 // one pylon step
+        holder.AddProperty(0x482cb447, 4u, false);
+        addF32(0x482cb44e, {1.0f, 0.0f, 0.0f, 1.0f, -1.0f, 0.0f, 0.0f, -1.0f});
+        cSC4NetworkBridgeTypeInfo info;
+        CHECK(ReadNetworkBridgeTypeInfo(&holder, info));
+        CHECK(info.width == 1 && info.rampLength == 2);
+        CHECK(info.rampModels.size() == 2 && info.rampModels[1].id == 0x11 && info.rampModels[1].rotation == 2);
+        CHECK(info.rampRise.size() == 3 && info.rampRise[2] == 0.0f && info.rampRise[1] == 2.0f && info.rampRise[0] == 6.0f);
+        CHECK(info.rampDrop.size() == 2 && info.rampDrop[1] == 3.0f && info.rampDrop[0] == 6.0f);
+        CHECK(info.landClearance == 6.0f);
+        CHECK(info.lastSupportedRamp == 0);                         // the second ramp step has no support
+        CHECK(info.minSpan == 6 && info.maxSpan == 100000);         // the defaults: rampLength * 2 + 2
+        CHECK(info.pylonLength == 1 && info.pylonSpacing == 4 && info.pylonInset == 4);
+        CHECK(info.maxWaterDepth == 10000.0f && info.maxPylons == 100 && !info.hasCables);
+        CHECK(info.rampFootprint.size() == 32);                     // four corners and their three quarter turns
+        CHECK(info.rampFootprint[8] > -0.001f && info.rampFootprint[8] < 0.001f && info.rampFootprint[9] > 0.999f);
+        CHECK(info.pylonFootprint.size() == 32);                    // 0x482cb45e missing: the ramp footprint
+    }
+
+    // ---- bridges: a straight drag over water becomes a bridge, its pieces laid out and inserted -------------
+    {
+        Fixture f;
+        cSC4NetworkBridgeTypeInfo bridge;
+        bridge.isWater = true;
+        bridge.minSpan = 4;
+        bridge.maxSpan = 100000;
+        bridge.rampLength = 1;
+        bridge.rampModels = {cSC4NetworkModelInfo{0x20, 1}};
+        bridge.rampSupportHeights = {-1.0f};
+        bridge.rampRise = {4.0f, 0.0f};
+        bridge.rampDrop = {3.0f};
+        bridge.landClearance = 4.0f;
+        bridge.waterClearance = 20.0f;
+        bridge.deckModel = 0x30;
+        bridge.deckRotation = 1;
+        bridge.pylonLength = 1;
+        bridge.pylonSpacing = 3;
+        bridge.pylonInset = 2;
+        bridge.pylonModels = {cSC4NetworkModelInfo{0x40, 0}};
+        bridge.pylonSupportHeights = {12.0f};
+        bridge.pylonDeckOffset = 1.5f;
+        bridge.name = "Test Bridge";
+        f.host.typeInfo.bridges = {bridge};
+        f.Init();
+        f.host.terrainAllows = false;
+        for (std::uint32_t x = 8; x <= 12; ++x) f.host.water.insert(x | (5u << 16));
+        auto& steps = NetworkToolTestAccess::Steps(*f.tool);
+        auto& cells = NetworkToolTestAccess::Cells(*f.tool);
+        steps.clear();
+        cells.clear();
+        for (std::uint32_t i = 0; i < 20; ++i) {
+            cells.push_back(SC4PointU{i, 5});
+            steps.push_back(tDraggedStep{i, i, 0});
+        }
+        NetworkToolTestAccess::SetDrag(*f.tool, 20, 20, 0);
+        int count = 20;
+        f.tool->IdentifyBridgeCells(count, kNetworkRoad);
+        CHECK(count == 20);
+        const std::vector<tBridge>& bridges = f.tool->Bridges();
+        CHECK(bridges.size() == 1);
+        if (bridges.size() == 1) {
+            const tBridge& b = bridges[0];
+            CHECK(b.startStep == 7 && b.endStep == 13 && b.bridgeType == 0 && !b.landBridge);
+            CHECK(b.referenceAltitude == 300.0f);                   // no bank rises: the start bank's surface
+            CHECK(b.elevation == 304.0f);                           // land under the span + the ramp rise
+            for (int s = 0; s < 20; ++s) CHECK(steps[static_cast<std::size_t>(s)].direction == ((s >= 7 && s <= 13) ? 1u : 0u));
+            std::vector<int> possible;
+            CHECK(f.tool->GetPossibleBridges(possible) && possible.size() == 1 && possible[0] == 0);
+            CHECK(f.tool->GetMajorBridge() == 0);
+            // ramp, span, pylon (the first pylon step is the inset from the inner ramp end), spans, ramp
+            static const int kKinds[7] = {0, 2, 1, 2, 2, 2, 0};
+            CHECK(b.pieces.size() == 7);
+            for (std::size_t i = 0; i < b.pieces.size() && i < 7; ++i) {
+                CHECK(b.pieces[i].kind == kKinds[i]);
+                CHECK(b.pieces[i].x == 7 + i && b.pieces[i].z == 5);
+            }
+            if (b.pieces.size() == 7) {
+                // the drag direction 0 turns every piece by 3 quarter turns
+                CHECK(b.pieces[0].model == 0x20 && b.pieces[0].rotation == ((1 + 3) & 3));
+                CHECK(b.pieces[6].model == 0x20 && b.pieces[6].rotation == ((1 + 2 + 3) & 3));   // the far ramp is mirrored
+                CHECK(b.pieces[1].model == 0x30 && b.pieces[1].rotation == ((1 + 3) & 3));
+                CHECK(b.pieces[2].model == 0x40 && b.pieces[2].modelHeight == 305.5f && b.pieces[2].supportHeight == 12.0f);
+                CHECK(b.pieces[1].modelHeight == 304.0f && b.pieces[1].corners[0] == 304.0f && b.pieces[1].corners[3] == 304.0f);
+                // the near ramp: its low edge (corners 2, 3 for this direction) at the deck minus the whole rise
+                CHECK(b.pieces[0].modelHeight == 301.0f);
+                CHECK(b.pieces[0].corners[2] == 300.0f && b.pieces[0].corners[3] == 300.0f);
+                CHECK(b.pieces[0].corners[0] == 304.0f && b.pieces[0].corners[1] == 304.0f);
+            }
+
+            // the bridge cells leave the set of cells the regular solve places
+            std::unordered_set<std::uint32_t> solve = {6u | (5u << 16), 9u | (5u << 16), 14u | (5u << 16)};
+            f.tool->RemoveBridgePiecesFromSetOfCellsToBeSolved(solve);
+            CHECK(solve.size() == 2 && solve.count(9u | (5u << 16)) == 0);
+
+            // the pieces become immovable bridge occupants with their models
+            for (const tBridgePiece& piece : b.pieces) f.host.worldCache->cells[piece.x | (piece.z << 16)].x = piece.x;
+            NetworkToolTestAccess::SetPlacing(*f.tool, true);
+            std::list<cSC4NetworkOccupant*> placed;
+            f.tool->InsertBridgePieces(&placed);
+            CHECK(placed.size() == 7 && f.host.inserted == 7);
+            if (!placed.empty()) {
+                cSC4NetworkOccupant* first = placed.front();
+                CHECK(first->GetGZCLSID() == 0x49cc1bcd);
+                CHECK(first->PieceId() == 0x20 && first->IsImmovable());
+            }
+            for (cSC4NetworkOccupant* occupant : placed) occupant->Release();
+        }
+
+        // control: a step whose surroundings hold another network piece takes no bridge, and the drag stops there
+        Fixture g;
+        g.host.typeInfo.bridges = {bridge};
+        g.Init();
+        g.host.terrainAllows = false;
+        g.host.water = f.host.water;
+        g.host.occupiedRect = true;
+        NetworkToolTestAccess::Steps(*g.tool) = steps;
+        for (tDraggedStep& step : NetworkToolTestAccess::Steps(*g.tool)) step.direction = 0;
+        NetworkToolTestAccess::Cells(*g.tool) = cells;
+        NetworkToolTestAccess::SetDrag(*g.tool, 20, 20, 0);
+        count = 20;
+        g.tool->IdentifyBridgeCells(count, kNetworkRoad);
+        CHECK(g.tool->Bridges().empty() && count == 20);
     }
 
     // ---- Unregister the host and finish ---------------------------------------------------------------------

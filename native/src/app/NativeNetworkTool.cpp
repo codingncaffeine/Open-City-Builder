@@ -4,6 +4,8 @@
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
+#include <map>
 #include <vector>
 
 #include "app/NativeAudio.h"
@@ -38,6 +40,10 @@
 #include "sc4/cSTETerrain.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/PowerLineTool.h"
+#include "sc4/NetworkBridgeOccupant.h"
+#include "sc4/NetworkManager.h"
+#include "sc4/ResourceAsFile.h"
+#include "rz/cRZIniFile.h"
 
 namespace native {
 namespace {
@@ -78,9 +84,9 @@ SC4ViewUtilities* ViewUtilities() {
 }
 
 // sNetworkTypeInfo (i386 0x00c1fcc0, 13 records of 0x114 bytes) as cSC4NetworkTool::ReloadNetworkTypeInfo fills it
-// (i386 0x0012320a): the ids, cursors and pen widths it writes directly. The exemplar-loaded parts (LoadPlacementParams,
-// LoadSupports, LoadBridgeTypes, LoadEvaluator) are not ported yet: the placement block stays zero and there are no
-// bridge or support types.
+// (i386 0x0012320a): the ids, cursors and pen widths it writes directly, then LoadBridgeTypes (the type's section of the
+// network ini), LoadSupports (the support structure exemplars of group 0x8974f80f, for the types that have them) and
+// LoadPlacementParams. LoadEvaluator is the tile rules' (TileRules.cpp).
 struct TypeRecord {
     std::uint32_t vic, exemplar, toolView, cursor, directionalCursor;
     int penX, penZ;
@@ -115,6 +121,30 @@ public:
             sc4::LoadNetworkPlacementParams(exemplar->AsISCPropertyHolder(), params_);
             exemplar->Release();
         }
+        // LoadBridgeTypes(ini, kBridgeSections[type], 0x1000 + type, ...) from the network ini {0, 0x8a5971c5, 0x8a5993b9}
+        // ReloadRules opens; the power line has no section.
+        static constexpr const char* kBridgeSections[13] = {
+            "RoadBridgeExemplars", "RailBridgeExemplars", "HighwayBridgeExemplars", "StreetBridgeExemplars",
+            "PipeBridgeExemplars", nullptr, "AvenueBridgeExemplars", "SubwayBridgeExemplars", "LightRailBridgeExemplars",
+            "MonorailBridgeExemplars", "OneWayRoadBridgeExemplars", "DirtRoadBridgeExemplars", "GroundHighwayBridgeExemplars"};
+        if (kBridgeSections[type]) {
+            cIGZFile* file = nullptr;
+            if (sc4::SC4GetResourceAsFile(cGZPersistResourceKey{sc4::kNetworkManagerIniType, sc4::kNetworkManagerIniGroup, sc4::kNetworkManagerIniInstance}, &file, false) && file) {
+                cRZIniFile ini(file);
+                sc4::LoadNetworkBridgeTypes(ini, kBridgeSections[type], bridges_);
+                file->Release();
+            }
+        }
+        // LoadSupports(0x8974f80f): road, one-way road, dirt road, rail, light rail, monorail and street.
+        if (type == 0 || type == 10 || type == 11 || type == 1 || type == 8 || type == 9 || type == 3)
+            sc4::LoadNetworkSupportStructures(0x8974f80f, supports_);
+        if (!bridges_.empty()) std::printf("network type %u: %zu bridge types, %zu support structures\n", type, bridges_.size(), supports_.size());
+        if (std::getenv("SC4_BRIDGE_TYPES"))
+            for (const sc4::cSC4NetworkBridgeTypeInfo& b : bridges_)
+                std::printf("network type %u bridge %08x \"%s\": span %u..%u, width %u, ramp %u, pylons %u every %u, %s%s, depth %.1f..%.1f, clearance water %.1f land %.1f%s\n", type, b.id,
+                            b.name.c_str(), b.minSpan, b.maxSpan, b.width, b.rampLength, b.pylonLength, b.pylonSpacing, b.isWater ? "water" : "",
+                            b.isLand ? " land" : "", b.minWaterDepth, b.maxWaterDepth, b.waterClearance, b.landClearance,
+                            b.suspensionA && b.suspensionB ? ", suspension" : (b.hasCables ? ", cables" : ""));
     }
     std::uint32_t ViewInputControlId() const override { return kTypeRecords[type_].vic; }
     std::uint32_t ToolViewId() const override { return kTypeRecords[type_].toolView; }
@@ -125,12 +155,16 @@ public:
     int PenWidthZ() const override { return kTypeRecords[type_].penZ; }
     const std::vector<sc4::cSC4NetworkBridgeTypeInfo>& BridgeTypes() const override { return bridges_; }
     const sc4::cSC4NetworkPlacementParams& PlacementParams() const override { return params_; }
-    const sc4::cSC4NetworkSupportStructInfo* FindSupportStructure(std::uint32_t) const override { return nullptr; }
+    const sc4::cSC4NetworkSupportStructInfo* FindSupportStructure(std::uint32_t id) const override {
+        auto it = supports_.find(id);
+        return it == supports_.end() ? nullptr : &it->second;
+    }
     std::uint32_t PlacementExemplarId() const override { return sc4::kNetworkPlacementExemplarIDs[type_]; }
 
 private:
     std::uint32_t type_;
     std::vector<sc4::cSC4NetworkBridgeTypeInfo> bridges_;
+    std::map<std::uint32_t, sc4::cSC4NetworkSupportStructInfo> supports_;
     sc4::cSC4NetworkPlacementParams params_{};
 };
 
@@ -183,6 +217,27 @@ public:
     float TerrainCellSize() override { return 16.0f; }
     float TerrainVertexHeight(std::int32_t vertex) override { sc4::cSTETerrain* t = Terrain(); return t ? t->GetAltitude(vertex) : 0.0f; }
     bool TerrainAllowsNetwork(std::uint32_t x, std::uint32_t z) override { sc4::cSTETerrain* t = Terrain(); return t && t->CellHasWater(x, z); }
+    // The bridge solve: terrain vslot 0x48 / 0x44 and occupant manager vslot 0xa4 with the tool's cSC4NetworkORFilter.
+    float CellMaxSurfaceLevel(std::uint32_t x, std::uint32_t z) override { sc4::cSTETerrain* t = Terrain(); return t ? t->GetMaxSurfaceLevel(x, z) : 0.0f; }
+    void CellCornerAltitudes(std::uint32_t x, std::uint32_t z, float out[4]) override {
+        sc4::cSTETerrain* t = Terrain();
+        if (t) t->GetCellCornerAltitudes(x, z, out);
+        else out[0] = out[1] = out[2] = out[3] = 0.0f;
+    }
+    bool NetworkOccupantInRect(int x0, int z0, int x1, int z1, std::uint32_t typeMask) override {
+        sc4::cISC4OccupantManager* occupants = Occupants();
+        if (!occupants) return false;
+        const int a[2] = {x0, z0}, b[2] = {x1, z1};
+        sc4::OccupantList list;
+        if (!occupants->GetOccupantsByStandardCityCells(list, a, b, 0xc772bf98u, 0xffffffffu)) return false;
+        bool found = false;
+        for (sc4::cISC4Occupant* occupant : list) {
+            auto* network = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);
+            if (network && (network->GetNetworkFlag() & typeMask) != 0) found = true;
+        }
+        occupants->ReleaseOccupantList(list);
+        return found;
+    }
     int CityWidth() override { sc4::cSTETerrain* t = Terrain(); return t ? static_cast<int>(t->CellCountX()) : 0; }
     int CityHeight() override { sc4::cSTETerrain* t = Terrain(); return t ? static_cast<int>(t->CellCountZ()) : 0; }
     cIGZUnknown* AcquireOccupantManager() override { return nullptr; }
@@ -244,6 +299,9 @@ public:
     bool RemoveNetworkOccupant(sc4::cSC4NetworkOccupant* occupant) override {
         sc4::cISC4OccupantManager* occupants = Occupants();
         return occupants && occupant && occupants->RemoveOccupant(occupant, false, 0);
+    }
+    void RemovePreviewOccupant(sc4::cSC4NetworkOccupant* occupant) override {
+        if (sc4::cISC4OccupantManager* occupants = Occupants(); occupants && occupant) occupants->RemoveOccupant(occupant, true, 0);
     }
     void GetIntersectionPieces(sc4::cSC4NetworkOccupant* occupant, std::vector<sc4::cSC4NetworkOccupant*>& out) override {
         NetworkIntersectionPieces(occupant, out);
@@ -445,19 +503,20 @@ sc4::cSC4ViewInputControl* CreateNetworkTool(int type) {
 }  // namespace native
 
 namespace native {
-sc4::cSC4NetworkTool* NativeManagerNetworkTool(std::uint32_t type);   // NativeNetworkManager.cpp
-
-// Kit verb `netline TYPE X1 Z1 X2 Z2`: the network manager's tool of TYPE lays a line as the drag's release does
-// (cSC4NetworkToolUI::DoPlacement): a dry run with neighbour connections on, the possible connection, then the placement
-// with the connection. The player's confirmation dialog is skipped (kits have no input); the neighbour connections of the
+// Kit verb `netline TYPE X1 Z1 X2 Z2`: a tool of TYPE made as the drag's view input control makes its own (InputHost
+// CreateNetworkTool + Init; the network manager's shared tool re-solves the demolished pieces of a placement, so it may not
+// be the one placing) lays a line as the drag's release does (cSC4NetworkToolUI::DoPlacement): a dry run with neighbour
+// connections on, the possible connection, then the placement with the connection. The player's confirmation dialog is skipped (kits have no input); the neighbour connections of the
 // city are counted before and after.
 void NativeLayNetworkLine(std::uint32_t type, int x1, int z1, int x2, int z2) {
-    sc4::cSC4NetworkTool* tool = NativeManagerNetworkTool(type);
-    sc4::cSC4NeighborsSimulator* neighbors = CityNeighborsSimulator();
-    if (!tool) {
-        std::printf("netline: the network manager has no tool of type %u\n", type);
+    if (type >= 13 || type == 4 || type == sc4::kNetworkPowerLine || type == sc4::kNetworkSubway) {
+        std::printf("netline: no surface network tool of type %u\n", type);
         return;
     }
+    auto* tool = new sc4::cSC4NetworkTool(type);
+    tool->AddRef();
+    tool->Init();
+    sc4::cSC4NeighborsSimulator* neighbors = CityNeighborsSimulator();
     auto count = [&] {
         sc4::ConnectionList list;
         if (neighbors) neighbors->GetAllConnections(list);
@@ -475,6 +534,12 @@ void NativeLayNetworkLine(std::uint32_t type, int x1, int z1, int x2, int z2) {
     tool->SetAnchorPoints(anchors);
     tool->PlaceAllSegments(true, true, possible, type);
     const bool failed = tool->GetFailureState();
+    for (const sc4::tBridge& bridge : tool->Bridges()) {
+        cRZString name;
+        tool->GetBridgeName(name, bridge.bridgeType);
+        std::printf("netline: bridge %d \"%s\" steps %d..%d, deck %.2f (reference %.2f), %zu pieces\n", bridge.bridgeType, name.ToChar(),
+                    bridge.startStep, bridge.endStep, bridge.elevation, bridge.referenceAltitude, bridge.pieces.size());
+    }
     tool->ClearCellPreviews();
     tool->Reset();
     std::printf("netline %u %d,%d -> %d,%d: neighbor connection %s", type, x1, z1, x2, z2, possible ? "possible" : "none");
@@ -484,5 +549,59 @@ void NativeLayNetworkLine(std::uint32_t type, int x1, int z1, int x2, int z2) {
         sc4::cISC4NeighborConnection* made = neighbors->FindConnection(info.unknown8, static_cast<int>(info.x), static_cast<int>(info.z));
         std::printf("netline: connection at %d,%d %s\n", static_cast<int>(info.x), static_cast<int>(info.z), made ? "made" : "MISSING");
     }
+    tool->Shutdown();
+    tool->Release();
+}
+// Kit verb `bridges`: a water map of the rectangle (the whole city when no rectangle is given; one character per block of
+// cells so a row stays within 64 characters: '~' = a cell with water in the block) and every bridge piece in the city.
+void NativeBridgeReport(int x0, int z0, int x1, int z1) {
+    sc4::cSTETerrain* terrain = Terrain();
+    sc4::cISC4OccupantManager* occupants = Occupants();
+    if (!terrain || !occupants) {
+        std::printf("bridges: no city\n");
+        return;
+    }
+    const int w = static_cast<int>(terrain->CellCountX()), h = static_cast<int>(terrain->CellCountZ());
+    if (x0 < 0 || z0 < 0 || x1 < 0 || z1 < 0) {
+        x0 = 0;
+        z0 = 0;
+        x1 = w - 1;
+        z1 = h - 1;
+    }
+    x1 = std::min(x1, w - 1);
+    z1 = std::min(z1, h - 1);
+    const int block = std::max(1, (std::max(x1 - x0, z1 - z0) + 64) / 64);
+    std::printf("bridges: water map x %d..%d z %d..%d, %d cell(s) per character (rows = z, columns = x)\n", x0, x1, z0, z1, block);
+    for (int z = z0; z <= z1; z += block) {
+        std::string row;
+        for (int x = x0; x <= x1; x += block) {
+            bool water = false;
+            for (int dz = 0; dz < block && !water; ++dz)
+                for (int dx = 0; dx < block && !water; ++dx)
+                    if (x + dx <= x1 && z + dz <= z1)
+                        water = terrain->CellHasWater(static_cast<std::uint32_t>(x + dx), static_cast<std::uint32_t>(z + dz));
+            row += water ? '~' : '.';
+        }
+        std::printf("bridges: z %3d %s\n", z, row.c_str());
+    }
+    const int a[2] = {0, 0}, b[2] = {w - 1, h - 1};
+    sc4::OccupantList list;
+    int count = 0;
+    if (occupants->GetOccupantsByStandardCityCells(list, a, b, 0xc772bf98u, 0xffffffffu)) {
+        for (sc4::cISC4Occupant* occupant : list) {
+            auto* piece = dynamic_cast<sc4::cSC4NetworkBridgeOccupant*>(occupant);
+            if (!piece) continue;
+            ++count;
+            std::uint32_t cx = 0, cz = 0;
+            piece->GetOccupiedCell(cx, cz);
+            float position[3] = {0, 0, 0};
+            piece->GetPosition(position);
+            std::printf("bridges: piece at %u,%u model %08x rotation %u flags %08x position y %.2f model offset y %.2f water %.2f %s\n", cx, cz,
+                        piece->PieceId(), piece->GetRotation(), piece->GetNetworkFlag(), position[1], piece->ModelOffset().y,
+                        terrain->GetMaxSurfaceLevel(cx, cz), piece->IsUsable() ? "usable" : "not usable");
+        }
+        occupants->ReleaseOccupantList(list);
+    }
+    std::printf("bridges: %d bridge piece(s)\n", count);
 }
 }  // namespace native

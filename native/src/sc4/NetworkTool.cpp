@@ -498,27 +498,27 @@ void cSC4NetworkTool::SetPreferredBridge(int bridge) { preferredBridge_ = bridge
 float cSC4NetworkTool::GetBridgeAltitudeOverride() { return bridgeAltitudeOverride_; }
 void cSC4NetworkTool::SetBridgeAltitudeOverride(float altitude) { bridgeAltitudeOverride_ = altitude; }
 
-// 0x100187efc: the bridge type's name, a libc++ std::string at +0x1c8 of the 0x200-byte record.
+// 0x100187efc: the bridge type's name, the record's cRZString (i386 +0x158).
 void cSC4NetworkTool::GetBridgeName(cIGZString& out, int bridge) {
     if (typeInfo_ == nullptr) return;
-    const std::vector<cSC4NetworkBridgeTypeInfo>& types = typeInfo_->BridgeTypes();  // +0x40, stride 0x200
+    const std::vector<cSC4NetworkBridgeTypeInfo>& types = typeInfo_->BridgeTypes();
     out.AssignFromCString(types[static_cast<std::size_t>(bridge)].name.c_str());     // vtable +0x28
 }
 
 // 0x100187f42
-int cSC4NetworkTool::GetMajorBridge() { return bridges_.empty() ? -1 : bridges_.back().type; }
+int cSC4NetworkTool::GetMajorBridge() { return bridges_.empty() ? -1 : bridges_.back().bridgeType; }   // i386 back() +0xc
 
 // 0x100187f84
 bool cSC4NetworkTool::GetMajorBridgeAltitude(float& out) {
     if (bridges_.empty()) return false;
-    out = bridges_.back().altitude;
+    out = bridges_.back().elevation;   // i386 back() +0x10
     return true;
 }
 
 // 0x100187f62
 bool cSC4NetworkTool::GetMajorBridgeReferenceAltitude(float& out) {
     if (bridges_.empty()) return false;
-    out = bridges_.back().referenceAltitude;
+    out = bridges_.back().referenceAltitude;   // i386 back() +0x14
     return true;
 }
 
@@ -822,10 +822,16 @@ bool cSC4NetworkTool::GetUITool(cISC4NetworkToolUI** out) {
     return true;
 }
 
-// i386 0x0012563e: the preview layer and the preview occupants (+0x25c) go. The preview occupant set is not modelled
-// yet (unknown460_), so only the layer is cleared.
+// i386 0x0012563e: the preview layer is cleared and the preview occupants (+0x25c, the bridge pieces a preview inserts) leave
+// the occupant manager.
 void cSC4NetworkTool::ClearCellPreviews() {
     if (preview_) preview_->Clear();
+    INetworkToolHost* host = GetNetworkToolHost();
+    for (cSC4NetworkOccupant* occupant : previewOccupants_) {
+        if (host) host->RemovePreviewOccupant(occupant);
+        occupant->Release();
+    }
+    previewOccupants_.clear();
 }
 
 // i386 0x0012519a: every highlighted occupant (+0x23c) gets highlight 0 and the set and the cell map (+0x238) go.

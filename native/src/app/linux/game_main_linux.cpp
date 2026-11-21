@@ -1344,6 +1344,10 @@ int RunScenario(const std::string& path) {
             int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
             words >> x0 >> z0 >> x1 >> z1;
             native::NativePowerPoleReport(x0, z0, x1, z1);
+        } else if (command == "bridges") {   // bridges [X0 Z0 X1 Z1]: a water map of the city (or the rectangle) and every bridge piece
+            int x0 = -1, z0 = -1, x1 = -1, z1 = -1;
+            words >> x0 >> z0 >> x1 >> z1;
+            native::NativeBridgeReport(x0, z0, x1, z1);
         } else if (command == "netline") {   // netline TYPE X1 Z1 X2 Z2: a network tool lays a line as the drag's release does (neighbor connections too)
             std::uint32_t type = 0;
             int x1 = 0, z1 = 0, x2 = 0, z2 = 0;
@@ -1543,12 +1547,13 @@ int RunScenario(const std::string& path) {
             words >> hex;
             const std::uint32_t id = std::uint32_t(std::strtoul(hex.c_str(), nullptr, 16));
             std::printf("command %08x -> status %u\n", id, native::ExecuteGameCommand(id));
-        } else if (command == "viewcmd") {   // viewcmd HEXID: the city view's command switch, as its toolbar buttons reach it
+        } else if (command == "viewcmd") {   // viewcmd HEXID [P0]: the city view's command switch, as its toolbar buttons reach it (P0 = its first flag)
             std::string hex;
-            words >> hex;
+            int flag = 0;
+            words >> hex >> flag;
             const std::uint32_t id = std::uint32_t(std::strtoul(hex.c_str(), nullptr, 16));
             sc4::cSC4View3DWin* view = native::CityView3DWin();
-            std::printf("viewcmd %08x -> %s\n", id, view ? (view->ProcessViewCommand(id) ? "handled" : "not handled") : "no city view");
+            std::printf("viewcmd %08x -> %s\n", id, view ? (view->ProcessViewCommand(id, flag != 0) ? "handled" : "not handled") : "no city view");
         } else if (command == "key") {
             // key [ctrl+][shift+][alt+]NAME [FRAMES]: a key press and release as SDL events through the player's key path
             // (NAME as SDL names keys: X, Left, F1, Escape, /, Keypad 8 ...; "Keypad 8" is written Keypad_8), the key held

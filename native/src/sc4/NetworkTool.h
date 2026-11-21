@@ -49,6 +49,7 @@
 #include <cstdint>
 #include <cstring>
 #include <list>
+#include <map>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -58,6 +59,8 @@
 #include "gz/cIGZString.h"
 #include "gz/cIGZUnknown.h"
 #include "rz/cRZString.h"
+
+class cRZIniFile;
 
 namespace sc4 {
 
@@ -131,29 +134,92 @@ constexpr std::uint32_t kNetworkTuningProperty = 0xa52160f5;
 // SC4LoadString group used for the failure reasons (0x10018fe7a).
 constexpr std::uint32_t kFailureReasonStringGroup = 0x2a592fd1;
 
-// One entry of std::vector<cSC4NetworkBridgeTypeInfo> (element stride 0x200, filled by
-// cSC4NetworkTypeInfo::LoadBridgeTypes). Only the fields the recovered functions read are named.
-struct cSC4NetworkBridgeTypeInfo {
-    std::uint8_t unknown000[0x100];         // +0x000
-    // +0x100 / +0x101: "can this bridge be built over land / water". Which byte is which is inferred from the
-    // list each one feeds in IdentifyWaterAndLandBridgeTypes (0x1001c2c10) and the flag FindBestBridgeType
-    // (0x1001c077e) uses to pick the list.
-    bool isLand = false;                    // +0x100 (-> landBridgeTypes_, +0x600)
-    bool isWater = false;                   // +0x101 (-> waterBridgeTypes_, +0x5e8)
-    std::uint8_t unknown102[0x1b0 - 0x102]; // +0x102
-    std::uint32_t bitmapKeyA = 0;           // +0x1b0 (GetBridgeBitmapKey)
-    std::uint32_t bitmapKeyB = 0;           // +0x1b4
-    std::uint8_t unknown1b8[0x1c8 - 0x1b8]; // +0x1b8
-    std::string name;                       // +0x1c8 (libc++ std::string; +0x1d8 is its heap pointer)
-    std::uint8_t unknown1e0[0x200 - 0x1e0]; // +0x1e0
+// cSC4NetworkModelInfo (8 bytes in the i386 build): one model of a bridge piece and the rotation it is placed with.
+struct cSC4NetworkModelInfo {
+    std::uint32_t id = 0;        // +0x0 the model exemplar (group = the network type's default exemplar group)
+    std::uint8_t rotation = 0;   // +0x4
 };
 
-// cSC4NetworkSupportStructInfo, looked up by id in the network type info's map at +0x58
-// (GetSupportStructureInfo @ 0x100188c0e returns `&value`). The type itself is unrecovered; the recovered
-// function only hands the pointer out, so the size is not needed here.
-struct cSC4NetworkSupportStructInfo {
-    std::uint8_t unknown[0x40];
+// cSC4NetworkBridgeSpecialization: a fixed piece list for one exact span length, read from the bridge specialization
+// script ({0x0a5bcf4b, 0xaa5bcf57, 0x1000 + type}, ReadBridgeTypeSpecializations i386 0x0015616e). The script parser
+// (cBridgeSpecializationParser) and ConstructSpecializedBridge are not ported: the map stays empty, so every bridge
+// takes the parametric path, as the original does for a span the script does not list.
+struct cSC4NetworkBridgeSpecialization {};
+
+// cSC4NetworkBridgeTypeInfo (0x17c bytes in the i386 build; ctor 0x0068611a, filled by ReadBridgeTypeInfo 0x0015340c from the
+// bridge exemplar an entry of the network ini's "<Type>BridgeExemplars" section names). The comments carry the i386 offsets
+// and the exemplar properties; the names follow how ConstructParametricBridge, SelectBridgeElevation and FindBestBridgeType
+// use the values.
+struct cSC4NetworkBridgeTypeInfo {
+    std::uint32_t id = 0;                              // +0x00 the ini key
+    std::uint32_t minSpan = 0;                         // +0x04 0x482cb458 (default rampLength * 2 + 2)
+    std::uint32_t maxSpan = 0;                         // +0x08 0x482cb467 (default 100000)
+    std::uint32_t width = 1;                           // +0x0c 0x482cb45f: cells across the deck (default 1)
+    std::uint32_t rampLength = 0;                      // +0x10 0x482cb442: steps of end pieces at each side
+    std::vector<cSC4NetworkModelInfo> rampModels;      // +0x14 0x482cb443 ids / 0x482cb444 rotations (rampLength * width)
+    std::vector<float> rampSupportHeights;             // +0x20 0x482cb44d (rampLength)
+    std::uint32_t deckModel = 0;                       // +0x2c 0x482cb445: the span piece between pylons
+    std::uint8_t deckRotation = 0;                     // +0x30 0x482cb446
+    std::uint32_t pylonSpacing = 0;                    // +0x34 0x482cb447
+    std::uint32_t pylonInset = 0;                      // +0x38 0x482cb459 (default pylonSpacing)
+    float pylonSpacingFactor = 0.0f;                   // +0x3c 0x482cd465
+    std::uint32_t pylonLength = 0;                     // +0x40 0x482cb448: steps one pylon group covers
+    std::vector<cSC4NetworkModelInfo> pylonModels;     // +0x44 0x482cb449 ids / 0x482cb44a rotations (pylonLength * width)
+    std::vector<float> pylonSupportHeights;            // +0x50 0x482cb44c (pylonLength)
+    float waterClearance = 0.0f;                       // +0x5c 0x482cb441: deck height over a water cell's surface
+    std::vector<float> rampRise;                       // +0x60 rampLength + 1 entries, from the 0x482cb44b pairs
+    std::vector<float> rampDrop;                       // +0x6c rampLength entries, from the 0x482cb44b pairs
+    float landClearance = 0.0f;                        // +0x78 rampRise[0]: deck height over a land cell
+    std::uint32_t lastSupportedRamp = 0;               // +0x7c the last ramp step (>= 1) whose support height is >= 0
+    std::vector<float> rampFootprint;                  // +0x80 0x482cb44e: 4 corners, then the three quarter turns
+    std::vector<float> pylonFootprint;                 // +0x8c 0x482cb45e (default the 0x482cb44e corners), same layout
+    bool isLand = false;                               // +0x98 0x482cb44f (-> landBridgeTypes_)
+    bool isWater = false;                              // +0x99 0x482cb450 (-> waterBridgeTypes_)
+    float suspensionSag = 0.0f;                        // +0x9c 0x482cb455 (main span wires)
+    float suspensionEndSag = 0.0f;                     // +0xa0 0x482cb456 (end span wires)
+    float suspensionValue = 0.0f;                      // +0xa4 0x482cb457 (copied to every suspended piece +0x3c)
+    std::uint32_t minPylons = 0;                       // +0xa8 0x482cb45a
+    std::uint32_t maxPylons = 100;                     // +0xac 0x482cb45b
+    std::uint32_t suspensionA = 0;                     // +0xb0 0x482cb45c (suspension wires when this and +0xb4 are set)
+    std::uint32_t suspensionB = 0;                     // +0xb4 0x482cb45d
+    float unknownB8 = 0.0f;                            // +0xb8 0x482cb471
+    float unknownBC = 0.0f;                            // +0xbc 0x482cd460
+    float unknownC0 = 0.0f;                            // +0xc0 0x482cd461
+    float pylonDeckOffset = 0.0f;                      // +0xc4 0x482cd462: added to a pylon piece's model height
+    float minWaterDepth = 0.0f;                        // +0xc8 0x482cd463: FindBestBridgeType's clearance window
+    float maxWaterDepth = 10000.0f;                    // +0xcc 0x482cd464
+    float passageClearance = 0.0f;                     // +0xd0 0x482cb468: subtracted for the piece's passage ceiling
+    float deckOffset = 0.0f;                           // +0xd4 0x482cb472: added to every piece's model height
+    bool hasCables = false;                            // +0xd8 set when 0x482cb46b/6c/69/6a/6d/6e are all present
+    std::uint32_t cableCount = 0;                      // +0xdc 0x482cb46b
+    float cableSag = 0.0f;                             // +0xe0 0x482cb46c
+    float cableTowerA[2][3] = {};                      // +0xe4 0x482cb469
+    float cableTowerB[2][3] = {};                      // +0xfc 0x482cb46a
+    float cableDeck[2][3] = {};                        // +0x114 0x482cb46d
+    float cableDeckMirrored[2][3] = {};                // +0x12c 0x482cb46d with x negated
+    std::uint32_t cableTexture = 0;                    // +0x144 0x482cb46e
+    std::uint32_t bitmapKeyA = 0;                      // +0x148 0x482cb46f [0] (GetBridgeBitmapKey)
+    std::uint32_t bitmapKeyB = 0;                      // +0x14c 0x482cb46f [1]
+    std::uint32_t unknown150[2] = {};                  // +0x150 0x482cb470
+    std::string name;                                  // +0x158 cRZString: the ini entry's fourth field, or 0x482cd466
+    std::map<int, cSC4NetworkBridgeSpecialization> specializations;   // +0x164 by span length
 };
+
+// cSC4NetworkSupportStructInfo (ReadSupportStructureInfo i386 0x0015495c), keyed by property 0xe974eaa1 in the network type
+// info's hash map (LoadSupports reads every exemplar of group 0x8974f80f).
+struct cSC4NetworkSupportStructInfo {
+    std::vector<std::uint32_t> models;   // +0x00 0xe974eaa2
+    std::vector<float> footprint;        // +0x0c 0xe974eaa3: 4 corners, then the three quarter turns
+};
+
+class cISCPropertyHolder;
+// cSC4NetworkTypeInfo::LoadBridgeTypes (i386 0x00156290): every entry of the ini section ("<key>=<type>,<group>,<instance>,<name>")
+// names a bridge exemplar; ReadBridgeTypeInfo appends one record per entry (and drops it again when the line is malformed).
+void LoadNetworkBridgeTypes(::cRZIniFile& ini, const char* section, std::vector<cSC4NetworkBridgeTypeInfo>& out);
+// ReadBridgeTypeInfo (i386 0x0015340c) for one exemplar: false (and `out` untouched past its id and name) when it does not load.
+bool ReadNetworkBridgeTypeInfo(const cISCPropertyHolder* exemplar, cSC4NetworkBridgeTypeInfo& out);
+// cSC4NetworkTypeInfo::LoadSupports (i386 0x00151cda) -> ReadSupportStructureInfos: every exemplar of the group.
+void LoadNetworkSupportStructures(std::uint32_t group, std::map<std::uint32_t, cSC4NetworkSupportStructInfo>& out);
 
 // cISC4NetworkTool::tPlacementParams (0xe8 bytes): the block the network type info keeps at +0x80 and the tool
 // copies to +0x500 in Init, then hands back in GetPlacementParams (0x1002ed4e8).
@@ -206,14 +272,42 @@ struct tIntersection {
     std::uint8_t unknown18[0x38 - 0x18];
 };
 
-// cSC4NetworkTool::tBridge (0x2c bytes, vector at +0x190): the bridge the drag would build. The getters read
-// only the four leading fields of the *last* element.
+// cSC4NetworkTool::BridgeCablePiece (0x20 bytes in the i386 build): one straight cable stretch InsertBridgePiece draws as a
+// thin quad pair on the piece (PlotBridgeCable fills them; not ported yet, so the vectors stay empty).
+struct tBridgeCablePiece {
+    float from[3] = {};             // +0x00
+    float to[3] = {};               // +0x0c
+    float halfWidth = 0.0f;         // +0x18
+    std::uint32_t texture = 0;      // +0x1c
+};
+
+// cSC4NetworkTool::tBridgePiece (0x50 bytes in the i386 build): one cell of a bridge as ConstructParametricBridge lays it out.
+struct tBridgePiece {
+    int kind = 0;                   // +0x00 0 = ramp (end) piece, 1 = pylon piece, 2 = span piece
+    std::uint32_t x = 0;            // +0x04 the cell
+    std::uint32_t z = 0;            // +0x08
+    std::uint32_t model = 0;        // +0x0c the piece's model exemplar id
+    std::uint8_t rotation = 0;      // +0x10
+    float corners[4] = {};          // +0x14 the deck heights at the cell's corners (CopyBridgeElevationConstraintsIntoCellInfo)
+    float modelHeight = 0.0f;       // +0x24 the height the model is placed at
+    float supportHeight = -1.0f;    // +0x28 >= 0: a support column goes down from the piece (InsertBridgePiece)
+    float wire[4] = {};             // +0x2c suspension wire heights (1.0 until PlotBridgeSuspensionWires sets them)
+    float wireValue = 0.0f;         // +0x3c the bridge type's suspensionValue
+    std::uint8_t suspension = 0;    // +0x40 suspension flags (AddSuspendedBridgeStructures runs when non-zero)
+    std::vector<tBridgeCablePiece> cables;   // +0x44
+};
+
+// cSC4NetworkTool::tBridge (0x28 bytes in the i386 build, vector at i386 +0xd8): one bridge the drag builds (IdentifyBridgeCells /
+// CreateLandBridge). GetMajorBridge* read the last one.
 struct tBridge {
-    int type = 0;                   // +0x00
-    float altitude = 0.0f;          // +0x04
-    float referenceAltitude = 0.0f; // +0x08
-    bool landBridge = false;        // +0x0c
-    std::uint8_t unknown0d[0x2c - 0x0d];
+    std::uint32_t networkType = 0;  // +0x00
+    int startStep = 0;              // +0x04 the first dragged step of the bridge (a ramp)
+    int endStep = 0;                // +0x08 the last
+    int bridgeType = 0;             // +0x0c index into the network type's bridge types (GetMajorBridge)
+    float elevation = 0.0f;         // +0x10 the deck height (SelectBridgeElevation; GetMajorBridgeAltitude)
+    float referenceAltitude = 0.0f; // +0x14 AdjustBridgeSpan's altitude (GetMajorBridgeReferenceAltitude)
+    bool landBridge = false;        // +0x18 IsMajorBridgeLandBridge
+    std::vector<tBridgePiece> pieces;   // +0x1c
 };
 
 // One entry of the vector at +0x1c0 (CheckForReservedTiles walks it with a stride of 0x14).
@@ -483,6 +577,15 @@ public:
     virtual bool RemoveNetworkOccupant(cSC4NetworkOccupant* /*occupant*/) { return false; }
     virtual void GetIntersectionPieces(cSC4NetworkOccupant* /*occupant*/, std::vector<cSC4NetworkOccupant*>& /*out*/) {}
     virtual cSC4NetworkOccupant* TunnelOtherEnd(cSC4NetworkOccupant* /*portal*/) { return nullptr; }
+    // The bridge solve's terrain and occupant queries (i386 the tool's terrain +0x44 and occupant manager +0x48):
+    // terrain vslot 0x48 GetMaxSurfaceLevel (the highest corner of land or water), vslot 0x44 GetCellCornerAltitudes (the land
+    // corners), and occupant manager vslot 0xa4 GetOccupantsByStandardCityCells over a cell rectangle with the tool's
+    // cSC4NetworkORFilter (true when a network piece of `typeMask` stands in it).
+    virtual float CellMaxSurfaceLevel(std::uint32_t /*x*/, std::uint32_t /*z*/) { return 0.0f; }
+    virtual void CellCornerAltitudes(std::uint32_t /*x*/, std::uint32_t /*z*/, float out[4]) { out[0] = out[1] = out[2] = out[3] = 0.0f; }
+    virtual bool NetworkOccupantInRect(int /*x0*/, int /*z0*/, int /*x1*/, int /*z1*/, std::uint32_t /*typeMask*/) { return false; }
+    // ClearCellPreviews: SL::spOccupantManager vslot 0x54 RemoveOccupant(preview, true, 0).
+    virtual void RemovePreviewOccupant(cSC4NetworkOccupant* /*occupant*/) {}
 };
 
 void SetNetworkToolHost(INetworkToolHost* host);
@@ -716,6 +819,28 @@ public:
     // calls it: a piece of an intersection is replaced by a plain piece built from its cell.
     bool RemoveOrReplaceOccupant(cSC4NetworkOccupant* occupant, bool& replaced);
     const std::vector<tSolvedCell>& SolvedCells() const { return solvedCellList_; }
+    // --- bridges (src/sc4/NetworkBridges.cpp; i386 addresses) ---
+    void IdentifyBridgeCells(int& steps, std::uint32_t networkType);                                      // 0x0014f73a
+    bool IsStepGoodForBridge(int step);                                                                   // 0x0014c8ae
+    bool CheckBridgeStepEdgeTypes(int step, std::uint32_t networkType);                                   // 0x0014c4e0
+    bool SelectBridgeStartAndEnd(int step, int& start, int& end, int& bridgeType, float& altitude,
+                                 std::uint32_t networkType);                                              // 0x0014d654
+    bool AdjustBridgeSpan(int& start, int& end, float& depth, float& altitude, std::uint32_t networkType); // 0x0014c9b4
+    int FindBestBridgeType(int& start, int& end, bool water, float depth, std::uint32_t networkType);     // 0x0014d41c
+    bool PadStepsToMakeMinBridgeSpan(int minSpan, int& start, int& end, std::uint32_t networkType);       // 0x0014c73a
+    void SelectBridgeElevation(tBridge& bridge);                                                          // 0x0014c5e2
+    void ConstructParametricBridge(tBridge& bridge);                                                      // 0x0014e4a0
+    void RemoveBridgePiecesFromSetOfCellsToBeSolved(std::unordered_set<std::uint32_t>& cells) const;      // 0x004cbdfc
+    // SmoothenNetwork's bridge step (0x0014d1f2): each bridge's span is pinned at its deck height and the deck corners
+    // become the bridge cells' heights and height ranges.
+    void CopyBridgeElevationConstraintsIntoCellInfo(std::vector<tImmovablePortion>& portions);
+    void InsertBridgePieces(std::list<cSC4NetworkOccupant*>* out);                                        // 0x00151034
+    void InsertBridgePiece(const tBridgePiece& piece, cSC4NetworkCellInfo* cell, const cSC4NetworkBridgeTypeInfo& type,
+                           std::list<cSC4NetworkOccupant*>* out);                                         // 0x00150814
+    // 0x00124496: a pre-built model piece takes the model of exemplar `exemplarId` (group 0 = the type's default group).
+    void SetExemplarForOccupant(cSC4NetworkOccupant* occupant, std::uint32_t exemplarId, const float* offset,
+                                std::uint8_t rotation, std::uint32_t group);
+    const std::vector<tBridge>& Bridges() const { return bridges_; }
     void SetTerrainHilight(int param);                                    // 0x10018cd24
     // i386 0x004cc96a: the drag's cells (+0xb8) and steps (+0xa0); zMajor / xMajor = the splitter's two flags.
     void ComputeDraggedCells(const SC4PointU& start, const SC4PointU& end, int zMajor, int xMajor, std::uint32_t networkType);
