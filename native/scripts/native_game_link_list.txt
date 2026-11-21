@@ -443,6 +443,7 @@ src/app/hosts/StubBuildingDevelopmentSim.cpp
 src/app/hosts/StubCameraControl.cpp
 src/app/hosts/StubCatalogView.cpp
 src/app/NativeCitySituationAdvice.cpp
+src/app/NativeCitySituations.cpp
 src/app/NativeCivic.cpp
 src/app/NativeControllerManagerHost.cpp
 src/app/hosts/StubDemandSimulator.cpp

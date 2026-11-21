@@ -31,6 +31,7 @@ bool NativeHtmlLinkDoURL(const cIGZString& link);
 void NativeAdviceLinkProbe(int advisorId, const char* code);   // kit command `adlink`
 void NativeRunAppLua(const char* code);
 void NativePrintAdvisors();
+void NativeSituationsReport();   // NativeCitySituations.cpp: the city situation manager (kit verb `situations`)
 void NativeTickerReport();       // app/NativeWinHtml.cpp: the news ticker (kit command `ticker`)
 
 // The window changes LoadCity asks for once the file is read (the application window's DestroyCurrentScreen / CreateCityScreen).

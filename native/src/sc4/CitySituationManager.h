@@ -229,6 +229,10 @@ public:
     virtual cISC4GameDataRegistry* GameDataRegistry() = 0;
     // SL::ATM(): the automata manager that broadcasts automaton notifications (vslot 0x28 = add, 0x30 = remove).
     virtual ISituationAutomatonNotifier* AutomataNotifier() = 0;
+    // The messages carry the engine's own objects (void1 = the cISC4Occupant / cISC4Automaton the occupant manager and the
+    // automata post); the host answers the situation view of that object, or null when it has none.
+    virtual ISituationOccupant* OccupantOfMessage(void* engineOccupant) = 0;
+    virtual ISituationAutomaton* AutomatonOfMessage(void* engineAutomaton) = 0;
 };
 ICitySituationManagerHost* CitySituationManagerHost();
 void SetCitySituationManagerHost(ICitySituationManagerHost* host);
@@ -266,6 +270,8 @@ public:
     float GetCurrentSituationTime() const { return situationTime_; }  // @ 0x1006e5df4
     float GetCurrentTimeRemainingSeconds() const;                 // @ 0x1006e5e02
     std::uint32_t GetTrackedAutomataCount() const;                // @ 0x1006e5e20
+    const std::list<SituationTrack>& GetSituationTracks() const { return situationTracks_; }   // port: read-only status listing
+    bool IsInitialized() const { return initialized_; }           // port: read-only status listing
     bool CountdownIsInProgress() const { return countdown_ > 0.0f; }   // @ 0x1006e5e38
     void GetCurrentTargetName(cRZString& out) const;               // @ 0x1006d8a94 (returns through a hidden arg)
     bool GetSituationAura(float& radius, float& magnitude) const;  // @ 0x1006d8b54

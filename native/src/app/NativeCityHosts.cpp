@@ -35,6 +35,7 @@ void InstallBuildingDevelopmentSimStub();
 void InstallFeatureStub();
 void InstallCameraControlStub();
 void InstallCitySituationAdvice();   // NativeCitySituationAdvice.cpp
+void InstallCitySituationManager();  // NativeCitySituations.cpp
 void InstallCivicBuildingHost();
 void InstallDemandSimulatorStub();
 void InstallDisasterStub();
@@ -149,6 +150,7 @@ void InstallStubHosts() {
     InstallFeatureStub();
     InstallCameraControlStub();
     InstallCitySituationAdvice();
+    InstallCitySituationManager();
     InstallCivicBuildingHost();           // NativeCivic.cpp: the civic building simulator's services
     InstallDemandSimulatorStub();
     InstallDisasterStub();

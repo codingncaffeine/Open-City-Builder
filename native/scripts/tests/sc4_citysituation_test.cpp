@@ -12,6 +12,8 @@
 #include "rz/PortMemoryStreams.h"
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/CitySituationManager.h"
+#include "sc4/GameDataRegistry.h"
+#include "rz/cRZCOMDllDirector.h"
 
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
@@ -400,8 +402,11 @@ public:
     bool DoURL(const void*) override { return false; }
     std::vector<cISC4CitySituationAdvice*> AdvisorSituations() override { return advisorSituations; }
     void RetireAdvisorSituation(cISC4CitySituationAdvice* situation) override { retired.push_back(situation); }
-    sc4::cISC4GameDataRegistry* GameDataRegistry() override { return nullptr; }
+    sc4::cISC4GameDataRegistry* GameDataRegistry() override { return registry; }
     ISituationAutomatonNotifier* AutomataNotifier() override { return &notifier; }
+    ISituationOccupant* OccupantOfMessage(void* o) override { return static_cast<ISituationOccupant*>(o); }
+    ISituationAutomaton* AutomatonOfMessage(void* a) override { return static_cast<ISituationAutomaton*>(a); }
+    sc4::cISC4GameDataRegistry* registry = nullptr;
 
     FakeLua* lua = nullptr;
     FakeMessageServer messages;
@@ -422,6 +427,9 @@ cRZMessage2Standard* MakeMessage(std::uint32_t type) {
 }
 
 }  // namespace
+
+// The registry registers itself with the director framework only in Init, which the test does not call.
+IDirectorFramework* DirectorFramework() { return nullptr; }
 
 int main() {
     SetCitySituationManagerHost(nullptr);
@@ -486,6 +494,8 @@ int main() {
         host.app = &app;
         host.cheats = &cheats;
         host.dispatch = &dispatch;
+        sc4::cSC4GameDataRegistry registry;
+        host.registry = &registry;
         host.managers = {&vehicles, &pedestrians};
         SetCitySituationManagerHost(&host);
 
@@ -493,6 +503,11 @@ int main() {
         manager->AddRef();
         CHECK(manager->Init());
         CHECK(manager->Init());   // idempotent
+        // the "sitmgr" node hangs under the registry root and its two raw values under the node
+        {
+            const auto node = registry.GetEntryID(static_cast<cIGZUnknown*>(manager));
+            CHECK(node != 0 && registry.GetParentNodeEntry(node) == registry.GetRootNodeEntry());
+        }
         CHECK(host.messages.added.size() == 10);
         CHECK(cheats.notifications == 1);
         CHECK(cheats.registered.size() == 1 && cheats.registered[0].first == 0x8c4136db &&
