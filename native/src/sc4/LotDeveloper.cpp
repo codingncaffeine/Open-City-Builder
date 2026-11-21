@@ -500,6 +500,32 @@ std::uint32_t cSC4LotDeveloper::TestCondition(cSC4Lot& lot) const {
     return static_cast<std::uint32_t>(grade + 1);
 }
 
+void cSC4LotDeveloper::AbandonBuilding(cSC4Lot* lot, std::uint8_t vacateReason) {
+    if (lot) lot->SetState(kLotStateAbandoned, 0, vacateReason);                     // lot vslot 0x88 (4, 0, reason)
+}
+
+void cSC4LotDeveloper::ReoccupyBuilding(cSC4Lot* lot, std::uint32_t developerType) {
+    if (!lot) return;
+    // The building's wealth (BDS vslot 0x9c -> profile +4) against the moving-in developer's (BDS vslot 0x7c).
+    const BuildingProfile* profile = gates_ ? gates_->ProfileOfBuilding(lot->GetBuildingType(false)) : nullptr;   // lot vslot 0xb8
+    const std::uint32_t wealth = gates_ ? gates_->WealthOfDeveloperType(developerType) : 0;
+    const std::int32_t gap = static_cast<std::int32_t>(profile ? profile->wealth : 0) - static_cast<std::int32_t>(wealth);
+    // The condition: 1 while the lot counts failed power tests, else 0; a building one or two wealth levels above its new
+    // occupants starts at 2 or 3.
+    std::uint32_t condition = 0;
+    if (lot->Properties().HasProperty(kLotPropFailureCounter)) {                       // lot vslot 0xc -> holder vslot 0x14
+        std::uint32_t counter = 0;
+        cSCPropertyHelp::GetPropertyValue(&lot->Properties(), kLotPropFailureCounter, counter);
+        if (counter != 0) condition = 1;
+    }
+    if (gap == 1) condition = 2;
+    else if (gap == 2) condition = 3;
+    lot->SetState(kLotStateLivable, wealth, 0);                                       // lot vslot 0x88 (3, wealth, 0)
+    lot->SetCondition(condition);                                                     // lot vslot 0x90
+    const std::uint16_t capacity = lot->GetAvailableCapacity(developerType, false);   // lot vslot 0xd0
+    lot->SetPopulation(developerType, capacity);                                      // lot vslot 0xdc
+}
+
 }  // namespace sc4
 
 

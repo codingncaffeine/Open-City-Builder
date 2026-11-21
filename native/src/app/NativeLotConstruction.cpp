@@ -360,6 +360,7 @@ public:
 class GateServices final : public ILotGateServices {
 public:
     const BuildingProfile* ProfileOfBuilding(std::uint32_t type) override { return NativeBuildingProfile(type); }
+    std::uint32_t WealthOfDeveloperType(std::uint32_t type) override { return NativeDeveloperWealth(type); }
 } g_gates;
 
 // The daily pass's city (lot-developer.md §4.2, §5).

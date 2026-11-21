@@ -20,6 +20,7 @@
 #include <unordered_set>
 
 #include "sc4/BuildingZoneFit.h"
+#include "sc4/GrowthDeveloper.h"
 #include "sc4/LotConfiguration.h"
 #include "sc4/LotConfigurationManager.h"
 #include "sc4/Occupant.h"
@@ -1412,10 +1413,133 @@ int cSC4TractDeveloper::IsBuildingCompatible(std::uint32_t buildingType, Candida
 }
 
 //==================================================================================================
+// Taking over abandoned buildings (@ 0x1001369ae, Mac i386 0x000e9d9c)
+//==================================================================================================
+
+// Before any building is planned, the tract's abandoned lots, and (when take-overs are allowed) livable lots whose occupants
+// are poorer than this developer in a building rich enough for it, are offered to the developer: the lot's zone must be of the
+// developer's type, its building must have room for the developer (else 15) and IsLotSuitable must answer 27 or 18. Unless the
+// caps cheat is on, a lot whose growth stage is above the building's developer's power / water caps needs power (else 26) and
+// water (25), and above this developer's fire / park caps fire protection (23) and a park effect (24). When the candidates'
+// capacity passes what is still to grow (scaled by the +0x7c tunable) the best scored ones are reoccupied (a livable one is
+// abandoned first, reason 5) until the reoccupied capacity passes the +0x80-scaled remainder of the second limit: 27. Otherwise
+// the worst outcome seen is returned (1 when nothing was looked at).
+int cSC4TractDeveloper::TakeOverAbandoned() {
+    if (!growthDeveloper_ || !buildingDevelopment_ || !lotDeveloper_ || !g_host) return 1;
+    const std::int32_t type = growthDeveloper_->GetType();                                     // vslot 0x28
+    const std::uint32_t developerType = static_cast<std::uint32_t>(growthDeveloper_->GetDeveloperType());   // vslot 0x30
+    const std::int32_t built = builtCount_;
+    const std::int32_t maximumBuilds = maximumBuildAttempts_;
+    const std::int32_t secondLimit = secondAttemptLimit_;
+    std::vector<std::uint32_t>& histogram = currentAttempt_.histograms[kHistogramTakeOver];
+    auto record = [&histogram](int outcome, int& worst) {
+        ++histogram[static_cast<std::size_t>(outcome)];
+        if (worst < outcome) worst = outcome;
+    };
+    int total = 0;
+    int worst = 1;
+    for (cSC4Lot* lot : existingLots_) {
+        const int state = lot->GetState();                                                     // lot vslot 0x108
+        const std::int32_t occupantWealth = lot->GetOccupantWealth();                          // lot vslot 0x148
+        const std::uint32_t buildingType = lot->GetBuildingType(false);                        // lot vslot 0x170
+        const std::int32_t buildingWealth =
+            buildingType ? static_cast<std::int32_t>(buildingDevelopment_->GetBuildingProfile(buildingType).wealth) : 0;
+        const std::int32_t wealth = growthDeveloper_->GetWealth();                             // vslot 0x40
+        if (!(state == kLotStateAbandoned ||
+              (allowTakeOver_ && state == kLotStateLivable && occupantWealth < wealth && wealth <= buildingWealth))) continue;
+        if (cSC4GrowthDeveloper::ConvertZoneToType(lot->GetZoneType()) != type) continue;     // lot vslot 0xf8
+        int outcome;
+        if (lot->GetCapacity(developerType, true) == 0) {                                      // lot vslot 0x198
+            ++histogram[0xf];
+            outcome = 0xf;
+        } else {
+            outcome = IsLotSuitable(lot, false);
+            if (outcome == kTractOutcomeSuccess || outcome == 0x12) {
+                CandidateLot* candidate = NewCandidateLot();
+                candidate->kind = 1;
+                candidate->lot = lot;
+                lot->GetLocation(candidate->x, candidate->z);                                 // lot vslot 0xa8
+                lot->GetSize(candidate->sizeX, candidate->sizeZ);                              // lot vslot 0xb0
+                candidate->facing = lot->GetFacing();                                          // lot vslot 0xb8
+                FindExistingCapacity(candidate);
+                if (candidate->abandonedCapacity == 0) {
+                    candidate->abandonedCapacity = lot->GetAvailableCapacity(developerType, true);   // lot vslot 0x1a0
+                    if (candidate->abandonedCapacity == 0 && state == kLotStateLivable)
+                        candidate->abandonedCapacity = lot->GetCapacity(developerType, true);
+                }
+                bool keep = candidate->abandonedCapacity >= 1;
+                if (keep && !buildingDevelopment_->CheatIgnoreCaps()) {                        // BDS vslot 0x1c0
+                    cISC4LotConfigurationRef* reference = lot->GetLotConfiguration();          // lot vslot 0x48
+                    const cSC4LotConfiguration* configuration =
+                        reference && lotConfigurationManager_ ? lotConfigurationManager_->GetLotConfiguration(reference->GetID())
+                                                              : nullptr;
+                    if (configuration) {
+                        const std::uint8_t stage = configuration->GetGrowthStage();           // vslot 0x58
+                        const BuildingProfile& building = buildingDevelopment_->GetBuildingProfile(lot->GetBuildingType(false));
+                        // BDS vslot 0x100 GetDeveloper(purpose, wealth): the developer the building was grown for
+                        IGrowthDeveloperApi* owner = buildingDevelopment_->GetDeveloper(building.purpose,
+                                                                                        static_cast<std::int32_t>(building.wealth));
+                        const int x = candidate->x, z = candidate->z;
+                        bool serviced = true;
+                        if (owner && owner->GetPowerSupplyCap() < stage && !buildingDevelopment_->CheatIgnorePower() &&
+                            g_host->PoweredAt(x, z) <= 1) {                                    // power vslot 0x120 -> grid 0x38
+                            record(0x1a, worst);
+                            serviced = false;
+                        }
+                        if (owner && owner->GetWaterSupplyCap() < stage && !buildingDevelopment_->CheatIgnorePlumbing() &&
+                            !g_host->IsCellWatered(x, z)) {                                    // plumbing vslot 0x58
+                            record(0x19, worst);
+                            serviced = false;
+                        }
+                        if (growthDeveloper_->GetFireCoverageCap() < stage && !g_host->FireProtectedAt(x, z)) {
+                            record(0x17, worst);                                               // fire protection vslot 0x28 -> 0x38
+                            serviced = false;
+                        }
+                        if (growthDeveloper_->GetParkCap() < stage && g_host->ParkEffectAt(x, z) == 0) {
+                            record(0x18, worst);                                               // aura vslot 0x70 -> grid 0x38
+                            serviced = false;
+                        }
+                        keep = serviced;
+                    }
+                }
+                if (keep) {
+                    candidates_.push_back(candidate);
+                    total += candidate->abandonedCapacity;
+                } else {
+                    DeleteCandidateLot(candidate);
+                }
+                continue;
+            }
+        }
+        if (worst < outcome) worst = outcome;
+    }
+    if (!candidates_.empty()) {
+        if (static_cast<int>(static_cast<float>(maximumBuilds - built) * declineFactor_) < total) {
+            ScoreCandidateLots();
+            std::sort(candidates_.begin(), candidates_.end(), CompareCandidateLots);   // SortCandidateLots
+            int reoccupied = 0;
+            for (CandidateLot* candidate : candidates_) {
+                cSC4Lot* lot = candidate->lot;
+                if (lot->GetState() == kLotStateLivable) lotDeveloper_->AbandonBuilding(lot, 5);   // lot developer vslot 0x40
+                lotDeveloper_->ReoccupyBuilding(lot, developerType);                                // vslot 0x48
+                builtCount_ += candidate->abandonedCapacity;
+                reoccupied += candidate->abandonedCapacity;
+                if (static_cast<int>(static_cast<float>(secondLimit - built) * buildBias_) < reoccupied) break;
+            }
+            ClearCandidateList(candidates_);
+            ++histogram[kTractOutcomeSuccess];
+            return kTractOutcomeSuccess;
+        }
+        ClearCandidateList(candidates_);
+    }
+    if (worst == 1) ++histogram[1];
+    return worst;
+}
+
+//==================================================================================================
 // PARTIAL: the other growth decisions (see the file comment)
 //==================================================================================================
 
-int cSC4TractDeveloper::TakeOverAbandoned() { return 0; }        // PARTIAL (0x1001369ae)
 int cSC4TractDeveloper::ListCandidateLots_Aggregation() { return 0; }   // PARTIAL (0x100137b04)
 int cSC4TractDeveloper::ListCandidateLots_Subdivision() { return 0; }   // PARTIAL (0x100137f44)
 

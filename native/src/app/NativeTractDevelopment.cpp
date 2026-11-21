@@ -3,7 +3,7 @@
 // construction resources and network occupants are the city's, so cSC4TractDeveloper::Grow searches real lots and real lot
 // configurations and picks real buildings. Its last step is the city's lot developer's StartConstruction (layer 4).
 //
-// Neutral here (each named, PARTIAL): the tunables (the class's defaults stand); the abandon / reoccupy calls; the services the
+// Neutral here (each named, PARTIAL): the tunables (the class's defaults stand); the services the
 // port does not run natively answer "provided" so that the growth-stage caps do not hold growth back: power (2), water, fire
 // protection, park effect, the land value (0: inside every range test the profile skips) and the residential trip-length map
 // (the lot's own road access stands in); the lot developer's NeedsAnchorBuilding (false); DemolishLots (an empty lot has nothing
@@ -142,6 +142,9 @@ struct BuildingDevelopmentApi final : ITractBuildingDevelopmentApi {
     bool CheatIgnorePower() override { return NativeBuildingCheat(1); }
     bool CheatIgnoreCaps() override { return NativeBuildingCheat(2); }
     bool NeedsAnchorBuilding(const std::int32_t*, std::int32_t) override { return false; }   // PARTIAL: cSC4LotDeveloper vslot 0x120
+    IGrowthDeveloperApi* GetDeveloper(std::uint32_t purpose, std::int32_t wealth) override {
+        return ViewOf(GrowthDeveloperOfType(NativeDeveloperType(purpose, wealth)));
+    }
 } g_buildingDevelopment;
 
 struct LotManagerApi final : ITractLotManagerApi {   // SL::spLotManager: the port's lot map is the zone developer's
@@ -156,7 +159,8 @@ struct LotManagerApi final : ITractLotManagerApi {   // SL::spLotManager: the po
     }
 } g_lotManager;
 
-// SL::spLotDeveloper: layer 4. StartConstruction is where a building would begin.
+// SL::spLotDeveloper: layer 4. StartConstruction is where a building would begin; AbandonBuilding / ReoccupyBuilding are the city's
+// cSC4LotDeveloper's (the decline and the take-over of abandoned buildings).
 struct LotDeveloperApi final : ITractLotDeveloperApi {
     void StartConstruction(cSC4Lot* lot, cSC4LotConfiguration* configuration, std::uint32_t buildingType, bool flag) override {
         ++constructions;
@@ -171,10 +175,31 @@ struct LotDeveloperApi final : ITractLotDeveloperApi {
         const bool started = developer && developer->StartConstruction(lot, configuration, buildingType, flag);   // vslot 0x18
         if (std::getenv("SC4_SIMDEBUG")) std::fprintf(stderr, "tract developer: construction %s\n", started ? "started" : "FAILED");
     }
-    void AbandonBuilding(cSC4Lot*, int) override { SC4_UNWIRED("ITractLotDeveloperApi::AbandonBuilding (layer 4)"); }
-    void ReoccupyBuilding(cSC4Lot*, std::uint32_t) override { SC4_UNWIRED("ITractLotDeveloperApi::ReoccupyBuilding (layer 4)"); }
+    void AbandonBuilding(cSC4Lot* lot, int vacateReason) override {   // vslot 0x40
+        cSC4LotDeveloper* developer = LotDeveloper();
+        if (!developer) return;
+        ++abandoned;
+        if (std::getenv("SC4_SIMDEBUG")) TraceLot("abandon", lot, vacateReason);
+        developer->AbandonBuilding(lot, static_cast<std::uint8_t>(vacateReason));
+    }
+    void ReoccupyBuilding(cSC4Lot* lot, std::uint32_t developerType) override {   // vslot 0x48
+        cSC4LotDeveloper* developer = LotDeveloper();
+        ReadLotDeveloperTunables(developer);   // the building profiles and developer wealths it reads
+        if (!developer) return;
+        ++reoccupied;
+        if (std::getenv("SC4_SIMDEBUG")) TraceLot("reoccupy", lot, static_cast<int>(developerType));
+        developer->ReoccupyBuilding(lot, developerType);
+    }
+    static void TraceLot(const char* what, cSC4Lot* lot, int value) {
+        int x = 0, z = 0;
+        if (lot) lot->GetLocation(x, z);
+        std::fprintf(stderr, "tract developer: %s lot (%d,%d) building %08x state %u (%x)\n", what, x, z, lot ? lot->GetBuildingType(false) : 0,
+                     lot ? lot->GetState() : 0, value);
+    }
     float GetAreaSlope(const std::int32_t rect[4], bool includeWater) override { return NativeAreaSlope(rect, includeWater); }
     int constructions = 0;
+    int abandoned = 0;
+    int reoccupied = 0;
 } g_lotDeveloper;
 
 struct ZoneManagerApi final : ITractZoneManagerApi {
@@ -298,6 +323,26 @@ bool NativeLotConfigurationsByFilter(std::vector<sc4::cSC4LotConfiguration*>& ou
     manager->GetLotConfigurationsByFilter(set, filter);
     out.assign(set.begin(), set.end());
     return !out.empty();
+}
+
+// The kit verb "decline": the lots of the city by state, and what the tract developer abandoned and reoccupied since the city opened.
+void NativeDeclineReport() {
+    cSC4ZoneDeveloper* zones = ZoneDeveloper();
+    int states[8] = {};
+    int abandonedByReason[8] = {};
+    if (zones)
+        for (cSC4Lot* lot : zones->Lots()) {
+            if (!lot) continue;
+            ++states[lot->GetState() & 7];
+            if (lot->GetState() == kLotStateAbandoned) ++abandonedByReason[lot->GetVacateReason() & 7];
+        }
+    std::printf("decline: lots unbuilt %d, construction %d, occupied %d, livable %d, abandoned %d (reasons", states[0], states[1], states[2],
+                states[3], states[4]);
+    for (int reason = 0; reason < 8; ++reason)
+        if (abandonedByReason[reason]) std::printf(" %d:%d", reason, abandonedByReason[reason]);
+    std::printf("), reserved %d, demolishable %d\n", states[5], states[6]);
+    std::printf("decline: tract developer abandoned %d, reoccupied %d, constructions %d\n", g_lotDeveloper.abandoned,
+                g_lotDeveloper.reoccupied, g_lotDeveloper.constructions);
 }
 
 void InstallTractDeveloperHost() { sc4::SetTractDeveloperHost(&g_host); }

@@ -34,6 +34,45 @@ public:
         lo[0] = 32; lo[1] = 0; lo[2] = 48; hi[0] = 80; hi[1] = 9; hi[2] = 96;
     }
 };
+// The lot's own host: the building profile it reads (one building, purpose 1 wealth 2, room for developer 0x1010 and 0x1020)
+// and the state / condition messages it posts.
+struct FakeLotHost final : ILotHost {
+    LotBuildingProfile profile;
+    int day = 100;
+    std::vector<std::uint32_t> messages;
+    std::uint8_t ZoneTypeAt(int, int) override { return 2; }
+    std::int32_t SimulatorDay() override { return day; }
+    float TerrainAltitude(float, float) override { return 0.0f; }
+    const LotBuildingProfile* BuildingProfile(std::uint32_t type) override { return type ? &profile : nullptr; }
+    float SlopeOf(const cSC4Lot&) override { return 0.0f; }
+    std::uint32_t DeveloperType(std::uint32_t purpose, std::int32_t wealth) override { return 0x1000 + purpose * 0 + wealth * 0x10; }
+    void OnDeveloperLotAbandoned(std::uint16_t) override {}
+    std::uint8_t LandValueAt(int, int) override { return 0; }
+    std::uint32_t RandomPercent() override { return 0; }
+    cISC4LotConfigurationRef* LotConfigurationById(std::uint32_t) override { return nullptr; }
+    void PostLotMessage(std::uint32_t message, const cSC4Lot&, std::uint32_t, std::uint32_t, std::uint32_t, std::int32_t) override {
+        messages.push_back(message);
+    }
+    void SetLotHighlight(int, int, bool, float) override {}
+    std::int32_t TrafficJobs(const cSC4Lot&, int) override { return 0; }
+    void SetTrafficJobs(const cSC4Lot&, int, std::int32_t) override {}
+    float ResidentialTravelFactor(int, int) override { return 1.0f; }
+    float TravelVolumeFactor() override { return 1.0f; }
+    void TravelDistribution(int, float out[3]) override { out[0] = out[1] = out[2] = 0; }
+    void JobsPerOccupant(float out[4], int) override { for (int i = 0; i < 4; ++i) out[i] = 0; }
+    void ExemplarJobs(const cSC4Lot&, float*) override {}
+    bool ExemplarProperty(const cSC4Lot&, std::uint32_t, std::int32_t&) override { return false; }
+    bool PowerRequirementExceeded(const cSC4Lot&, const LotBuildingProfile&, bool& available) override { available = false; return false; }
+    bool TrafficHasJobAccess(const cSC4Lot&, int) override { return false; }
+    void NeighborLots(const cSC4Lot&, int, std::vector<cSC4Lot*>&) override {}
+    void GetLotOccupants(const cSC4Lot&, std::vector<cIGZUnknown*>&) override {}
+    bool RoadAccessCells(const cSC4Lot&, int) override { return false; }
+    bool IsFerryTerminal(const cSC4Lot&) override { return false; }
+    bool FerryTerminalRoadAccess(const cSC4Lot&) override { return false; }
+    cIGZUnknown* FindBuildingOccupant(const cSC4Lot&) override { return nullptr; }
+    void WriteSerializable(cIGZOStream&, cIGZUnknown*) override {}
+    cIGZUnknown* ReadSerializable(cIGZIStream&, std::uint32_t) override { return nullptr; }
+};
 }  // namespace
 
 int main() {
@@ -130,6 +169,7 @@ int main() {
         struct Gates final : ILotGateServices {
             BuildingProfile profile;
             const BuildingProfile* ProfileOfBuilding(std::uint32_t) override { return &profile; }
+            std::uint32_t WealthOfDeveloperType(std::uint32_t) override { return 1; }
         } gates;
         dev.SetGateServices(&gates);
         cSC4Lot lot(3, 2, 2, 4, 0);
@@ -151,6 +191,51 @@ int main() {
         cSCPropertyHelp::SetPropertyValue(&lot.Properties(), kLotPropFailureCounter, std::int32_t(5));
         CHECK(dev.TestCondition(lot) == 1);
         dev.SetGateServices(nullptr);
+    }
+    {   // AbandonBuilding / ReoccupyBuilding
+        FakeLotHost lotHost;
+        lotHost.profile.purpose = 1;
+        lotHost.profile.wealth = 2;
+        lotHost.profile.capacities = {{{0x1010, 12}, {0x1020, 8}}};
+        SetLotHost(&lotHost);
+        struct Gates final : ILotGateServices {
+            BuildingProfile profile;
+            const BuildingProfile* ProfileOfBuilding(std::uint32_t) override { return &profile; }
+            std::uint32_t WealthOfDeveloperType(std::uint32_t type) override { return type == 0x1010 ? 1 : 2; }
+        } gates;
+        gates.profile.purpose = 1;
+        gates.profile.wealth = 2;
+        dev.SetGateServices(&gates);
+        cSC4Lot lot(3, 2, 2, 2, 0);
+        lot.SetBuildingType(0x4567);
+        lot.SetState(kLotStateOccupied, 2, 0);                         // a finished building: its populations exist
+        lot.SetState(kLotStateLivable, 2, 0);
+        CHECK(lot.GetPopulation(0x1020) == 8);
+        lotHost.messages.clear();
+        dev.AbandonBuilding(&lot, 6);
+        CHECK(lot.GetState() == kLotStateAbandoned);
+        CHECK(lot.GetVacateReason() == 6);
+        CHECK(lot.GetPopulation(0x1020) == 0);                          // an abandoned building houses nobody
+        CHECK(lotHost.messages.size() == 1 && lotHost.messages[0] == kMessageLotStateChanged);
+        // a poorer developer (wealth 1) moves into the wealth-2 building: condition 2, its population at the free capacity
+        lotHost.messages.clear();
+        dev.ReoccupyBuilding(&lot, 0x1010);
+        CHECK(lot.GetState() == kLotStateLivable);
+        CHECK(lot.GetOccupantWealth() == 1);
+        CHECK(lot.GetCondition() == 2);
+        CHECK(lot.GetPopulation(0x1010) == 12);
+        CHECK(lot.GetPopulation(0x1020) == 0);
+        CHECK(lotHost.messages.size() == 2 && lotHost.messages[0] == kMessageLotStateChanged &&
+              lotHost.messages[1] == kMessageLotConditionChanged);
+        // the building's own wealth with failed power tests on the lot: condition 1
+        dev.AbandonBuilding(&lot, 2);
+        cSCPropertyHelp::SetPropertyValue(&lot.Properties(), kLotPropFailureCounter, std::uint32_t(2));
+        dev.ReoccupyBuilding(&lot, 0x1020);
+        CHECK(lot.GetCondition() == 1);
+        CHECK(lot.GetPopulation(0x1020) == 8);
+        CHECK(lot.GetPopulation(0x1010) == 0);
+        dev.SetGateServices(nullptr);
+        SetLotHost(nullptr);
     }
     std::printf(failures ? "FAILED\n" : "sc4_lotdeveloper: all passed\n");
     return failures ? 1 : 0;

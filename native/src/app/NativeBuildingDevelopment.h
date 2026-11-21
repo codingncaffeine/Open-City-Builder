@@ -24,6 +24,7 @@ float NativeMaxCapacity(int zoneType, std::uint32_t purpose, std::uint32_t wealt
 void NativeSpecialBuildings(std::list<cRZAutoRefCount<sc4::cISC4Occupant>>& out);              // vslot 0x160
 sc4::cSC4Demand* NativeDemandChannel(std::uint32_t type, std::uint32_t keyOffset);       // SL::spDemandSim vslot 0x30
 std::uint32_t NativeDeveloperType(std::uint32_t purpose, std::int32_t wealth);           // GetDeveloperType_Static
+std::uint32_t NativeDeveloperWealth(std::uint32_t developerType);                          // GetWealth_Static
 void NativeAllBuildingTypes(std::vector<std::uint32_t>& out);
 bool NativeBuildingKeyFromType(std::uint32_t type, cGZPersistResourceKey& key);
 std::int32_t NativeDayOfLastSuccessfulBuild(std::uint32_t developerType);

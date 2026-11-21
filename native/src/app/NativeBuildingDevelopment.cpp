@@ -478,6 +478,7 @@ sc4::cSC4Demand* NativeDemandChannel(std::uint32_t type, std::uint32_t keyOffset
     return demand ? demand->GetDemand(type, keyOffset) : nullptr;
 }
 std::uint32_t NativeDeveloperType(std::uint32_t purpose, std::int32_t wealth) { return cSC4BuildingDevelopmentSimulator::GetDeveloperType_Static(purpose, wealth); }
+std::uint32_t NativeDeveloperWealth(std::uint32_t developerType) { return cSC4BuildingDevelopmentSimulator::GetWealth_Static(developerType); }
 void NativeAllBuildingTypes(std::vector<std::uint32_t>& out) {
     out.clear();
     if (cSC4BuildingDevelopmentSimulator* simulator = CityBuildingDevelopment()) simulator->GetAllBuildingTypes(out);

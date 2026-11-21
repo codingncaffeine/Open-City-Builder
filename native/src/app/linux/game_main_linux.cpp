@@ -49,6 +49,7 @@
 #include "app/NativeGameData.h"
 #include "app/NativeBoot.h"
 #include "app/NativeCity.h"
+#include "app/NativeGrowthDevelopers.h"
 #include "app/NativeAnimationTicks.h"
 #include "app/NativeIntro.h"
 #include "platform/PerfLog.h"
@@ -1153,6 +1154,8 @@ int RunScenario(const std::string& path) {
             int limit = 8;
             words >> limit;
             native::NativeTrailerReport(limit);
+        } else if (command == "decline") {   // decline: the lots by state and what the tract developer abandoned / reoccupied
+            native::NativeDeclineReport();
         } else if (command == "trains") {   // trains [N]: the city's track cells, the trains and buses, and the first N engines with their cars
             int limit = 8;
             words >> limit;

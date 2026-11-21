@@ -76,6 +76,7 @@ class ILotGateServices {
 public:
     virtual ~ILotGateServices() = default;
     virtual const BuildingProfile* ProfileOfBuilding(std::uint32_t buildingType) = 0;     // vslot 0x138 (borrowed)
+    virtual std::uint32_t WealthOfDeveloperType(std::uint32_t developerType) = 0;          // vslot 0xf8 GetWealth (i386 0x7c)
 };
 constexpr std::uint32_t kLotPropFailureCounter = 0xe999b11f;       // lot property: consecutive failed power tests
 constexpr std::uint32_t kLotPropDesirabilityCounter = 0xc999e206;  // ... failed desirability tests
@@ -308,6 +309,11 @@ public:
     // wealth and its occupants' and by its occupancy; everything else keeps its condition.
     void SetGateServices(ILotGateServices* services) { gates_ = services; }
     std::uint32_t TestCondition(cSC4Lot& lot) const;
+    // ---- abandonment (vslots 0x40 / 0x48, i386 0x000ec736 / 0x000ec764): the tract developer's decline abandons a building
+    // (state 4 with the reason) and its take-over moves a developer back in (state 3 with the developer's wealth, a condition
+    // from the power failures and the wealth gap, the developer's population at the lot's free capacity).
+    void AbandonBuilding(cSC4Lot* lot, std::uint8_t vacateReason);
+    void ReoccupyBuilding(cSC4Lot* lot, std::uint32_t developerType);
 
     // ---- lot base textures (0x100145e4c..0x100148ec2)
     static void SetBaseTextureServices(ILotBaseTextureServices* services);

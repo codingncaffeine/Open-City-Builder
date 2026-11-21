@@ -68,8 +68,8 @@
 // Recovered growth path: Grow's pass loop, the existing-lot candidate search (ListCandidateLots_Existing, IsLotSuitable,
 // IsLotConfigurationCompatible, TestForCornerLot, FindNetworks) and the build (Build, PickBuilding, IsBuildingCompatible). They
 // are transcriptions of the decompile and disassembly; the engine calls go through ITractDeveloperHost, so they are not
-// byte-exact. Not recovered (PARTIAL, to-do TRACT-2): TakeOverAbandoned, the aggregation and subdivision searches and their
-// Perform* steps, IsAggregationLegal, BuildFarm and UpdatePopulation.
+// byte-exact. TakeOverAbandoned and Decline are recovered too. Not recovered (PARTIAL, to-do TRACT-2): the aggregation and
+// subdivision searches and their Perform* steps, IsAggregationLegal, BuildFarm and UpdatePopulation.
 #pragma once
 
 #include <cstddef>
@@ -237,6 +237,8 @@ public:
     virtual bool CheatIgnoreCaps() = 0;                                     // vslot 0x1c0
     // vslot 0x120 GetLotDeveloper() -> the lot developer's vslot 0x120 NeedsAnchorBuilding(rect, purpose).
     virtual bool NeedsAnchorBuilding(const std::int32_t rect[4], std::int32_t purpose) = 0;
+    // vslot 0x100 GetDeveloper(purpose, wealth): the growth developer of a building purpose and wealth (null when none).
+    virtual IGrowthDeveloperApi* GetDeveloper(std::uint32_t purpose, std::int32_t wealth) = 0;
 };
 
 class ITractZoneManagerApi : public ITractDeveloperService {
@@ -536,8 +538,8 @@ public:
     static bool TestForCornerLot(cSC4LotConfiguration* configuration, CandidateLot* candidate);  // @ 0x10013b318
     int IsBuildingCompatible(std::uint32_t buildingType, CandidateLot* candidate);       // @ 0x10013b436
 
+    int TakeOverAbandoned();                               // @ 0x1001369ae (Mac i386 0x000e9d9c)
     // PARTIAL: not recovered (see the header note and notes/ledger_pending/cSC4TractDeveloper.txt).
-    int TakeOverAbandoned();                               // @ 0x1001369ae
     int ListCandidateLots_Aggregation();                   // @ 0x100137b04
     int ListCandidateLots_Subdivision();                   // @ 0x100137f44
     int BuildFarm(CandidateLot* candidate);                // @ 0x10013845e

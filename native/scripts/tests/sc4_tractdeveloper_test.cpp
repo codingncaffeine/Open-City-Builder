@@ -130,6 +130,11 @@ struct FakeBuildingDevelopment : ITractBuildingDevelopmentApi {
     bool CheatIgnorePower() override { return false; }
     bool CheatIgnoreCaps() override { return true; }
     bool NeedsAnchorBuilding(const std::int32_t*, std::int32_t) override { return false; }
+    std::map<std::pair<std::uint32_t, std::int32_t>, IGrowthDeveloperApi*> developers;
+    IGrowthDeveloperApi* GetDeveloper(std::uint32_t purpose, std::int32_t wealth) override {
+        auto it = developers.find({purpose, wealth});
+        return it == developers.end() ? nullptr : it->second;
+    }
 };
 
 struct FakeZoneManager : ITractZoneManagerApi {
@@ -183,7 +188,8 @@ struct FakeGrowthDeveloper : IGrowthDeveloperApi {
     ITractValueMap* GetMaxCapacityMap() const override { return const_cast<FakeValueMap*>(&maxCapacity); }
     ITractDemandApi* GetSourceDemand() const override { return const_cast<FakeDemand*>(&demand); }
     std::map<std::uint32_t, SC4Percentage> styles;
-    std::int32_t GetType() const override { return 0; }
+    std::int32_t type = 0;
+    std::int32_t GetType() const override { return type; }
     std::uint8_t GetPowerSupplyCap() const override { return 0; }
     std::uint8_t GetWaterSupplyCap() const override { return 0; }
     std::uint8_t GetFireCoverageCap() const override { return 0; }
@@ -1162,6 +1168,73 @@ void TestBuildOnEmptyLot() {
     SetTractDeveloperHost(nullptr);
 }
 
+// An abandoned building in the tract is taken over before anything new is planned: Grow ends with 27 after the lot developer
+// reoccupies it for the developer, counting its capacity as built. A lot with no room for the developer is passed over (15).
+void TestTakeOverAbandoned() {
+    FakeHost host;
+    FakeLotHost lotHost;
+    SetTractDeveloperHost(&host);
+    SetLotHost(&lotHost);
+    host.growthDeveloper.developerType = 0x1010;
+    host.growthDeveloper.type = 1;                          // residential: zone 2 converts to type 1
+    host.growthDeveloper.purpose = 1;
+    host.growthDeveloper.wealth = 1;
+    host.growthDeveloper.construction.purpose = 1;
+    host.growthDeveloper.construction.value8 = std::bit_cast<float>(std::int32_t{1});
+    host.growthDeveloper.construction.value12 = 1;
+    host.growthDeveloper.desirability.tractSize = 1;
+    host.growthDeveloper.desirability.shift = 2;            // tract (1,1) covers cells x 4..7, z 4..7
+    lotHost.profile.purpose = 1;
+    lotHost.profile.wealth = 1;
+    lotHost.profile.capacities = {{{0x1010, 12}}};
+    BuildingProfile profile;
+    profile.purpose = 1;
+    profile.wealth = 1;
+    profile.capacity = 12;
+    host.buildingDevelopment.profiles[0x1234] = profile;
+
+    cSC4TractDeveloper developer;
+    CHECK(developer.Init());
+    auto* lot = new cSC4Lot(4, 4, 2, 2, 0);
+    lot->AddRef();
+    lot->UpdateZoneType();
+    lot->SetBuildingType(0x1234);
+    lot->SetState(kLotStateOccupied, 1, 0);
+    lot->SetState(kLotStateLivable, 1, 0);
+    lot->SetState(kLotStateAbandoned, 0, 6);
+    for (int x = 4; x < 6; ++x)
+        for (int z = 4; z < 6; ++z) host.lotManager.lots[{x, z}] = lot;
+
+    GrowthProfile grow;
+    grow.developer = &host.growthDeveloper;
+    grow.tractX = 1;
+    grow.tractZ = 1;
+    grow.growthStage = 2;
+    std::list<int> outcomes;
+    bool declined = false;
+    CHECK(developer.Grow(grow, outcomes, declined) == 12);
+    CHECK(outcomes.size() == 1 && outcomes.front() == kTractOutcomeSuccess);
+    CHECK(host.lotDeveloper.reoccupied.size() == 1 && host.lotDeveloper.reoccupied.front() == 0x1010);
+    CHECK(host.lotDeveloper.abandoned.empty());            // an abandoned lot is not abandoned again
+    CHECK(host.lotDeveloper.constructions == 0);
+    CHECK(developer.Histograms()[kHistogramTakeOver][kTractOutcomeSuccess] == 1);
+
+    // a developer the building has no room for: 15, nothing reoccupied
+    host.lotDeveloper.reoccupied.clear();
+    host.growthDeveloper.developerType = 0x1020;
+    host.growthDeveloper.wealth = 2;
+    outcomes.clear();
+    developer.Grow(grow, outcomes, declined);
+    CHECK(host.lotDeveloper.reoccupied.empty());
+    CHECK(developer.Histograms()[kHistogramTakeOver][0xf] >= 1);   // once per pass
+    CHECK(developer.Histograms()[kHistogramTakeOver][kTractOutcomeSuccess] == 0);
+
+    developer.Shutdown();
+    lot->Release();
+    SetLotHost(nullptr);
+    SetTractDeveloperHost(nullptr);
+}
+
 int main() {
     TestLayoutAndCom();
     TestStyles();
@@ -1178,6 +1251,7 @@ int main() {
     TestInitAndShutdown();
     TestNullHost();
     TestBuildOnEmptyLot();
+    TestTakeOverAbandoned();
     if (g_failures == 0) std::puts("sc4_tractdeveloper ok");
     return g_failures == 0 ? 0 : 1;
 }
