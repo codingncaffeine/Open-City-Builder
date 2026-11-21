@@ -132,15 +132,15 @@ constexpr std::uint32_t kMySimDispatchMsgNotify = kMessageMySimDispatchNotify;  
 
 // The automaton event ids DoMessage tests (cISC4Automaton::tAutomataEvent, Automaton.h): 1 animation done,
 // 2 removing, 5 route reached, 9 dispatched-returned.
-constexpr std::uint32_t kAutomataEventAnimationDone = 1;
-constexpr std::uint32_t kAutomataEventRemoving = 2;
-constexpr std::uint32_t kAutomataEventRouteReached = 5;
-constexpr std::uint32_t kAutomataEventReturned = 9;
+constexpr std::uint32_t kDispatchEventAnimationDone = 1;
+constexpr std::uint32_t kDispatchEventRemoving = 2;
+constexpr std::uint32_t kDispatchEventRouteReached = 5;
+constexpr std::uint32_t kDispatchEventReturned = 9;
 
 enum eState : std::int32_t {
-    kStateNone = -1,        // no trip
-    kStateTravelling = 2,   // following the route deque
-    kStateIdle = 3,         // waiting at the current location
+    kMySimTripNone = -1,        // no trip
+    kMySimTripTravelling = 2,   // following the route deque
+    kMySimTripIdle = 3,         // waiting at the current location
 };
 
 enum eModelType : std::int32_t {
@@ -276,6 +276,11 @@ public:
     virtual void OccupantsInCellRect(const int rect[4], std::deque<cISC4Occupant*>& out) = 0;
         // spOccupantManager 0x148(rect, &list) — the transit-switch search in switchTravel
     virtual void ClearOccupantList(std::deque<cISC4Occupant*>& list) = 0;   // spOccupantManager 0x180(&list)
+    // --- the automaton the sim rides, by its occupant (the original QIs the occupant at each call site) -----------
+    virtual IMySimDispatchAutomaton* AutomatonOf(cISC4Occupant* occupant) = 0;   // QueryInterface(0xa9b40f05), one reference
+    virtual IMySimDispatchRoute* RouteOf(cISC4Occupant* occupant) = 0;           // QueryInterface(0x8b99ee7c), one reference
+    virtual cISC4Occupant* CallbackOccupant(void* automaton) = 0;
+        // the automaton an automaton event message (0x09d92fc3) names in its first pointer, as its occupant (borrowed)
     // --- U-Drive-It view -------------------------------------------------------------------------------------
     virtual bool UDriveViewAvailable() = 0;                                   // SL::spCity 0x188 != null
     virtual void EnterUDriveView(IMySimDispatchAutomaton* automaton, cIGZMessageTarget2* target) = 0;
@@ -409,8 +414,8 @@ private:
     int changeCounter_ = 0;                                   // +0x44
     int trackedChangeCounter_ = 0;                            // +0x48
     int trackHandle_ = -1;                                    // +0x4c
-    int state_ = kStateNone;                                  // +0x50
-    int previousState_ = kStateNone;                          // +0x54
+    int state_ = kMySimTripNone;                                  // +0x50
+    int previousState_ = kMySimTripNone;                          // +0x54
     std::uint32_t flags_ = 0;                                 // +0x58
     int time_ = 0;                                            // +0x5c
     int travelType_ = kTravelTypeNone;                        // +0x60

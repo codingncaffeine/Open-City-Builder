@@ -24,18 +24,11 @@ int CellFromPosition(float value) {
     return static_cast<int>(std::floor(value * 0.0625f));
 }
 
-// Query the automaton's occupant view for one of the interfaces the dispatch needs (the original passes the automaton
-// pointer around as a cISC4Occupant and QIs it at the call site). Returns one counted reference.
-template <class Interface, std::uint32_t Iid>
-Interface* AcquireInterface(cISC4Occupant* occupant) {
-    if (!occupant) return nullptr;
-    void* out = nullptr;
-    if (!occupant->QueryInterface(Iid, &out)) return nullptr;
-    return static_cast<Interface*>(out);
-}
-
+// The automaton's traffic automaton view (the original QIs the occupant for 0x8b99ee7c at the call site); the host answers
+// it because the port's automaton classes and the dispatch seams are separate objects. One counted reference.
 IMySimDispatchRoute* AcquireRoute(cISC4Occupant* occupant) {
-    return AcquireInterface<IMySimDispatchRoute, kMySimDispatchIidTrafficAutomaton>(occupant);
+    IMySimDispatchHost* host = MySimDispatchHost();
+    return host && occupant ? host->RouteOf(occupant) : nullptr;
 }
 
 }  // namespace
@@ -205,7 +198,7 @@ bool cSC4MySimDispatch::Init() {
         commuteDestination_ = cLocation();
         commuteDestination_.commuteLocation = true;
         currentLocation_ = commuteDestination_;
-        setState(kStateIdle);
+        setState(kMySimTripIdle);
         resetPath();
         follow_ = false;
     }
@@ -256,7 +249,7 @@ bool cSC4MySimDispatch::Reset() {
 
     if (travelType_ != kTravelTypeNone) ++changeCounter_;
     travelType_ = kTravelTypeNone;
-    setState(kStateNone);
+    setState(kMySimTripNone);
     resetPath();
     automataOccupant_ = nullptr;
     return true;
@@ -267,7 +260,7 @@ bool cSC4MySimDispatch::setState(int state) {
     const int oldState = state_;
     previousState_ = oldState;
     state_ = state;
-    if (state == kStateIdle) setFlags(kMySimDispatchFlagDriveView, true);
+    if (state == kMySimTripIdle) setFlags(kMySimDispatchFlagDriveView, true);
     if (oldState != state_) {
         notifyMySim(kDispatchNotifyTripLeg, oldState, state_, 0);
         ++changeCounter_;
@@ -340,7 +333,7 @@ bool cSC4MySimDispatch::GoTo(const cLocation& location) {
     cLocation target = location;
     if (target.occupant && target.data24 < minTimeAtLocation_) target.data24 = minTimeAtLocation_;
 
-    if (state_ != kStateTravelling) {
+    if (state_ != kMySimTripTravelling) {
         currentLocation_.data28 = time_ - 1;
         destinationQueue_.clear();
         destinationQueue_.push_back(target);
@@ -374,7 +367,7 @@ bool cSC4MySimDispatch::SetCurrentCommuteDestination(const cLocation& location, 
     cLocation target = location;
     if (!MySimLocationIsValid(target)) {
         if (!notify) return false;
-        if (state_ != kStateTravelling) {
+        if (state_ != kMySimTripTravelling) {
             if (!validateCommuteLocation(target)) return false;
         }
     }
@@ -389,7 +382,7 @@ void cSC4MySimDispatch::TeleportToCommuteLocation() {
     travelType_ = kTravelTypeWalk;
     ++changeCounter_;
     currentLocation_.data28 = currentLocation_.data24 + time_;
-    setState(kStateIdle);
+    setState(kMySimTripIdle);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -425,7 +418,7 @@ void cSC4MySimDispatch::SetModelOffset(int modelType, int offset, bool snap) {
 cISC4Occupant* cSC4MySimDispatch::getOccupantToTrack() {
     if ((flags_ & 0x104) != 0x100) return nullptr;
     cISC4Occupant* result = automataOccupant_.get();
-    if (((flags_ & kMySimDispatchFlagAtBuilding) != 0) || state_ == kStateIdle) {
+    if (((flags_ & kMySimDispatchFlagAtBuilding) != 0) || state_ == kMySimTripIdle) {
         cISC4Occupant* occupant = currentLocation_.occupant.get();
         if (occupant) {
             void* pylon = nullptr;
@@ -531,7 +524,8 @@ bool cSC4MySimDispatch::setAutomataOccupant(cISC4Occupant* occupant) {
 }
 
 IMySimDispatchAutomaton* cSC4MySimDispatch::acquireAutomaton() const {
-    return AcquireInterface<IMySimDispatchAutomaton, kMySimDispatchIidAutomaton>(automataOccupant_.get());
+    IMySimDispatchHost* host = Host();
+    return host && automataOccupant_ ? host->AutomatonOf(automataOccupant_.get()) : nullptr;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -773,7 +767,7 @@ bool cSC4MySimDispatch::createAutomaton(int travelType, IMySimDispatchAutomaton*
 
     cGZPersistResourceKey key;
     int offset = -1;
-    getModelKey(kModelNone, key, offset);   // the original's fallback entry is keyed by the "no model" type (-1)
+    getModelKey(model, key, offset);        // GetModelBaseResKey / GetModelOffset of the model type (i386 0x00480624)
 
     float position[2] = {0.0f, 0.0f};
     if (MySimLocationIsValid(currentLocation_)) {
@@ -783,7 +777,7 @@ bool cSC4MySimDispatch::createAutomaton(int travelType, IMySimDispatchAutomaton*
     IMySimDispatchAutomataManager* manager = pickAutomataManager(group);
     if (!manager) return false;
     IMySimDispatchAutomaton* created =
-        manager->CreateAutomaton(0, position, kAutomataCreateFlags, key, this, 0xff, 0);
+        manager->CreateAutomaton(group, position, kAutomataCreateFlags, key, this, 0xff, 0);
     if (!created) return false;
     *automaton = created;   // one reference for the caller, like the original's two AddRefs and single Release
 
@@ -848,11 +842,12 @@ std::uint8_t cSC4MySimDispatch::basicDispatch(std::deque<RouteData>& path, IMySi
     if (!route) {
         success = false;
     } else if (noRoute) {
-        automaton->SetState(7, automaton, -1.0f, false, 0, offset < 0 ? 0u : static_cast<std::uint32_t>(offset), nullptr);
+        // SetState(7, no controller, -1, false, the model offset (0 when none), no sound, no behavior) (i386 0x004807aa)
+        automaton->SetState(7, nullptr, -1.0f, false, offset < 0 ? 0u : static_cast<std::uint32_t>(offset), 0, nullptr);
     } else {
         const bool routed = route->SetRouteInfo(path, true, false);
         if (offset >= 0) automaton->PlayAnim(static_cast<std::uint32_t>(offset));
-        automaton->SetState(0, automaton, -1.0f, false, 0, 0, nullptr);
+        automaton->SetState(0, nullptr, -1.0f, false, 0, 0, nullptr);
         if (!routed) success = false;
     }
     if (route) route->Release();
@@ -904,7 +899,7 @@ bool cSC4MySimDispatch::updateNeighborLocation(int attempt, cLocation& location)
 // updateState (0x1006aeb5a) — the state machine.
 // ---------------------------------------------------------------------------------------------------------------
 std::uint32_t cSC4MySimDispatch::updateState() {
-    if (state_ == kStateIdle) {   // 3: waiting at the current location
+    if (state_ == kMySimTripIdle) {   // 3: waiting at the current location
         currentDestination_ = cLocation();
         if (currentLocation_.occupant) setAutomataOccupant(nullptr);
 
@@ -951,23 +946,23 @@ std::uint32_t cSC4MySimDispatch::updateState() {
         }
         if (!MySimLocationIsValid(next)) {
             if ((flags_ & kMySimDispatchFlagHasDefault) == 0 || !(currentLocation_ == defaultDestination_)) {
-                setState(kStateNone);
+                setState(kMySimTripNone);
             }
         } else if (!(currentLocation_ == next)) {
             currentDestination_ = next;
             currentDestination_.data28 = time_ + currentDestination_.data24;
-            setState(kStateTravelling);
+            setState(kMySimTripTravelling);
             setFlags(0x5800, false);
         }
         return updateTrackingOccupant();
     }
 
-    if (state_ == kStateTravelling) {   // 2: following the route
+    if (state_ == kMySimTripTravelling) {   // 2: following the route
         const std::uint32_t savedFlags = flags_;
         if ((savedFlags & kMySimDispatchFlagTravelling) != 0) {
             if ((savedFlags & kMySimDispatchFlagUDriveIt) != 0) return updateTrackingOccupant();
             if ((savedFlags & kMySimDispatchFlagStuck) != 0) {
-                setState(kStateNone);
+                setState(kMySimTripNone);
             } else if ((savedFlags & kMySimDispatchFlagSwitchTravel) != 0) {
                 switchTravel();
             } else if ((savedFlags & kMySimDispatchFlagPathLeg) == 0) {
@@ -1059,12 +1054,12 @@ std::uint32_t cSC4MySimDispatch::updateState() {
                 return updateTrackingOccupant();
             }
         }
-        setState(kStateNone);
+        setState(kMySimTripNone);
         notifyMySim(kDispatchNotifyPylon, 0, 0, 0);
         return updateTrackingOccupant();
     }
 
-    if (state_ == kStateNone) {   // -1: no trip; fall back to the default destination once
+    if (state_ == kMySimTripNone) {   // -1: no trip; fall back to the default destination once
         setFlags(0xfe4d, false);
         if ((flags_ & kMySimDispatchFlagHasDefault) != 0) {
             if (!(currentLocation_ == defaultDestination_)) {
@@ -1082,14 +1077,14 @@ std::uint32_t cSC4MySimDispatch::updateState() {
                         automaton->Release();
                     }
                     automataOccupant_ = nullptr;
-                    setState(kStateIdle);
+                    setState(kMySimTripIdle);
                     return updateTrackingOccupant();
                 }
             } else {
-                setState(kStateIdle);
+                setState(kMySimTripIdle);
             }
         }
-        if (!destinationQueue_.empty()) setState(kStateIdle);
+        if (!destinationQueue_.empty()) setState(kMySimTripIdle);
     }
     return updateTrackingOccupant();
 }
@@ -1105,7 +1100,7 @@ void cSC4MySimDispatch::switchTravel() {
     std::uint32_t travelType = static_cast<std::uint32_t>(travelType_);
     std::uint32_t setFlagsMask = 0;
     std::uint32_t clearFlagsMask = 0;
-    int newState = kStateNone;
+    int newState = kMySimTripNone;
 
     if ((originalFlags & 0x41) == 0x40) {
         // stuck while not player-driving: nothing to switch
@@ -1170,7 +1165,7 @@ void cSC4MySimDispatch::switchTravel() {
 // U-Drive-It (0x1006b2dd6, 0x1006b2e9c, 0x1006b30a6)
 // ---------------------------------------------------------------------------------------------------------------
 bool cSC4MySimDispatch::CanUDriveIt() {
-    if (state_ == kStateTravelling) {
+    if (state_ == kMySimTripTravelling) {
         if (automataOccupant_ && travelType_ == 1) {
             if (IMySimDispatchAutomaton* automaton = acquireAutomaton()) {
                 automaton->Release();
@@ -1178,7 +1173,7 @@ bool cSC4MySimDispatch::CanUDriveIt() {
             }
         }
     }
-    if (state_ == kStateIdle) {
+    if (state_ == kMySimTripIdle) {
         if (currentLocation_ == defaultDestination_ || currentLocation_ == commuteDestination_) return true;
     }
     return false;
@@ -1186,7 +1181,7 @@ bool cSC4MySimDispatch::CanUDriveIt() {
 
 bool cSC4MySimDispatch::EnterUDriveIt() {
     if (!CanUDriveIt()) return false;
-    if (state_ == kStateIdle) {
+    if (state_ == kMySimTripIdle) {
         if (currentLocation_ == defaultDestination_) {
             setFlags(kMySimDispatchFlagUDriveItPending, true);
             GoTo(commuteDestination_);
@@ -1196,7 +1191,7 @@ bool cSC4MySimDispatch::EnterUDriveIt() {
         } else {
             return false;
         }
-    } else if (state_ == kStateTravelling) {
+    } else if (state_ == kMySimTripTravelling) {
         if (IMySimDispatchAutomaton* automaton = acquireAutomaton()) {
             IMySimDispatchHost* host = Host();
             if (host) {
@@ -1224,7 +1219,7 @@ bool cSC4MySimDispatch::ExitUDriveIt() {
         currentDestination_ = defaultDestination_;
         if (travelType_ != kTravelTypeNone) ++changeCounter_;
         travelType_ = kTravelTypeNone;
-        setState(kStateNone);
+        setState(kMySimTripNone);
         resetPath();
         automataOccupant_ = nullptr;
     }
@@ -1304,16 +1299,16 @@ bool cSC4MySimDispatch::DoMessage(cIGZMessage2* message) {
     auto* standard = static_cast<cIGZMessage2Standard*>(message);
     const std::uint32_t event = static_cast<std::uint32_t>(standard->GetData2());
     switch (event) {
-        case kAutomataEventAnimationDone:
+        case kDispatchEventAnimationDone:
             if ((flags_ & kMySimDispatchFlagPlayerDrive) != 0) {
                 setFlags(kMySimDispatchFlagTeleported, true);
                 updateState();
             }
             break;
-        case kAutomataEventRemoving: {
+        case kDispatchEventRemoving: {
             if (!automataOccupant_) break;
-            auto* automaton = static_cast<IMySimDispatchAutomaton*>(standard->GetVoid1());
-            if (!automaton || automaton->AsOccupant() != automataOccupant_.get()) break;
+            cISC4Occupant* sender = host ? host->CallbackOccupant(standard->GetVoid1()) : nullptr;
+            if (!sender || sender != automataOccupant_.get()) break;
             if ((flags_ & kMySimDispatchFlagUDriveIt) == 0) {
                 GoTo(currentDestination_);
                 setFlags(0x401, true);
@@ -1322,8 +1317,8 @@ bool cSC4MySimDispatch::DoMessage(cIGZMessage2* message) {
             }
             break;
         }
-        case kAutomataEventRouteReached: {
-            if (state_ != kStateTravelling || (flags_ & kMySimDispatchFlagStuck) != 0) break;
+        case kDispatchEventRouteReached: {
+            if (state_ != kMySimTripTravelling || (flags_ & kMySimDispatchFlagStuck) != 0) break;
             IMySimDispatchRoute* route = AcquireRoute(automataOccupant_.get());
             if (!route) break;
             std::deque<RouteData> path;
@@ -1347,10 +1342,10 @@ bool cSC4MySimDispatch::DoMessage(cIGZMessage2* message) {
             route->Release();
             break;
         }
-        case kAutomataEventReturned: {
+        case kDispatchEventReturned: {
             if (!automataOccupant_) break;
-            auto* automaton = static_cast<IMySimDispatchAutomaton*>(standard->GetVoid1());
-            if (!automaton || automaton->AsOccupant() != automataOccupant_.get()) break;
+            cISC4Occupant* sender = host ? host->CallbackOccupant(standard->GetVoid1()) : nullptr;
+            if (!sender || sender != automataOccupant_.get()) break;
             currentLocation_.occupant = nullptr;
             ++changeCounter_;
             if ((flags_ & kMySimDispatchFlagUDriveItPending) != 0) {

@@ -4,9 +4,8 @@
 //
 // Not native yet (the methods report SC4_UNWIRED with the missing class): the MySim UI neighbours (cSC4WinCalloutBox over the
 // residence, cSC4MySimBalloonWinProc, the four MySim input controls, the portrait bitmaps), the home sounds, the ghost
-// effect, the trip automata (cSC4MySimDispatch drives a car / pedestrian through the vehicle and pedestrian managers) and
-// the U-Drive-It view. A MySim without them still lives: it is stored and read back with its city, keeps its residence,
-// job and commute state, ages, and runs its advices.
+// effect and the U-Drive-It view. A MySim without them still lives: it is stored and read back with its city, keeps its
+// residence, job and commute state, ages, rides its trips and runs its advices.
 #include <cstdio>
 #include <cstring>
 #include <list>
@@ -14,6 +13,7 @@
 #include <vector>
 
 #include "app/NativeAnimationTicks.h"
+#include "app/NativeAutomataViews.h"
 #include "app/NativeBuildingDevelopment.h"
 #include "app/NativeCity.h"
 #include "app/NativeGameData.h"
@@ -23,7 +23,11 @@
 #include "gz/WinCtrlFactory.h"
 #include "gz/WinCtrlMgr.h"
 #include "gz/WinFont.h"
+#include "sc4/AutomataManager.h"
+#include "sc4/AutomataStates.h"
+#include "sc4/Automaton.h"
 #include "sc4/BuildingDevelopmentSimulator.h"
+#include "sc4/DispatchManager.h"
 #include "sc4/CrimeSimulator.h"
 #include "sc4/FireProtectionSimulator.h"
 #include "sc4/ISC4RegionalCity.h"
@@ -56,6 +60,8 @@
 #include "sc4/ResidentialSimulator.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/Simulator.h"
+#include "sc4/TrafficAutomaton.h"
+#include "sc4/TrafficNetworkMap.h"
 #include "sc4/TrafficSimulator.h"
 #include "sc4/ZoneDeveloper.h"
 #include "sc4/cSC4City.h"
@@ -67,6 +73,7 @@ const sc4::cISCPropertyHolder* NativeSimulatorExemplar(std::uint32_t instance); 
 bool NativeProjectToViewport(const float* xyz, float out[3]);                     // app/NativeAutomataManagerHost.cpp
 sc4::cSC4CrimeSimulator* NativeCrimeSimulator();                                  // app/NativeCrime.cpp
 sc4::IResidentialOccupant* NativeResidentialOccupant(cIGZUnknown* building);      // app/NativeSimHosts.cpp
+sc4::cSC4AutomataManager* NativeAutomataManagerAt(int index);                     // app/NativeAutomataManagerHost.cpp
 
 namespace {
 using namespace sc4;
@@ -517,7 +524,22 @@ public:
         *out = nullptr;
         return SL::spRM && SL::spRM->GetResource(key, iid, reinterpret_cast<void**>(out), 0, nullptr) && *out;
     }
-    bool PickRandomWalkModelKey(cGZPersistResourceKey&) override { SC4_UNWIRED("IMySimHost::PickRandomWalkModelKey (pedestrian manager walk model)"); return false; }
+    // GetRandomWalkModelKey (i386 0x00542410): a walking pedestrian (group 0x4149, flags 2) made by spPedestrianManager at
+    // (0, -100, 0) with no model key and no listener, its model resource key, then the pedestrian is removed at once.
+    bool PickRandomWalkModelKey(cGZPersistResourceKey& key) override {
+        key = cGZPersistResourceKey();
+        cSC4AutomataManager* pedestrians = NativeAutomataManagerAt(1);
+        if (!pedestrians) return false;
+        IAutomataAutomaton* made = pedestrians->CreateAutomaton(0x4149, cS3DVector3{0.0f, -100.0f, 0.0f}, 2, cGZPersistResourceKey(),
+                                                                nullptr, 0xff, nullptr);
+        cSC4Automaton* automaton = made ? native::AutomatonOf(made) : nullptr;
+        if (!automaton) return false;
+        automaton->AddRef();
+        key = automaton->GetModelResourceKey(0);
+        automaton->Remove(true);
+        automaton->Release();
+        return true;
+    }
     IMySimHomeSound* CreateHomeSound(std::uint32_t) override { SC4_UNWIRED("IMySimHost::CreateHomeSound (MySim home sounds)"); return nullptr; }
     void DestroyHomeSound(IMySimHomeSound*) override {}
     void PlayCitySound(IMySimHomeSound*, const float*) override {}
@@ -613,6 +635,121 @@ public:
 };
 
 // ---------------------------------------------------------------------------------------------------------------------
+// The trip automata: the dispatch's views of a cSC4Automaton (the cISC4Automaton slots it calls), of its traffic route
+// (cISC4TrafficAutomaton 0x4b8 / 0x4c0) and of the vehicle and pedestrian managers. In the original they are the same
+// objects; here each view holds one reference on the automaton and forwards to its method.
+// ---------------------------------------------------------------------------------------------------------------------
+class RouteView final : public IMySimDispatchRoute {
+public:
+    explicit RouteView(cSC4TrafficAutomaton* automaton) : automaton_(automaton) { automaton_->AddRef(); }
+    ~RouteView() { automaton_->Release(); }
+    bool QueryInterface(std::uint32_t iid, void** out) override { return automaton_->QueryInterface(iid, out); }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override { const std::uint32_t left = --refs_; if (left == 0) delete this; return left; }
+    bool GetRouteInfo(std::deque<RouteData>& out) const override { out = automaton_->GetRouteInfo(); return true; }
+    bool SetRouteInfo(const std::deque<RouteData>& route, bool begin, bool onlyStart) override {
+        return automaton_->SetRouteInfo(route, begin, onlyStart);
+    }
+private:
+    cSC4TrafficAutomaton* automaton_;
+    std::uint32_t refs_ = 0;
+};
+
+class DispatchAutomatonView final : public IMySimDispatchAutomaton {
+public:
+    explicit DispatchAutomatonView(cSC4Automaton* automaton) : automaton_(automaton) { automaton_->AddRef(); }
+    ~DispatchAutomatonView() { automaton_->Release(); }
+    bool QueryInterface(std::uint32_t iid, void** out) override { return automaton_->QueryInterface(iid, out); }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override { const std::uint32_t left = --refs_; if (left == 0) delete this; return left; }
+    cISC4Occupant* AsOccupant() override { return automaton_->AsOccupant(); }
+    void Remove(bool fade) override { automaton_->Remove(fade); }
+    bool PlayAnim(std::uint32_t animId) override { return automaton_->PlayAnim(animId); }
+    void SetAutomataFlag(std::uint32_t flag, bool on) override { automaton_->SetAutomataFlag(flag, on); }
+    bool CheckAutomataFlag(std::uint32_t flag) override { return automaton_->CheckAutomataFlag(flag); }
+    void AddCallback(cIGZMessageTarget2* target) override { automaton_->AddCallback(target); }
+    void RemoveCallback(cIGZMessageTarget2* target) override { automaton_->RemoveCallback(target); }
+    // 0x1c0 GetState -> +8: the state's behavior type (an automaton always has its base state; -1 without one)
+    int GetStateId() const override {
+        tAutomataState* state = automaton_->GetState();
+        return state ? static_cast<int>(state->stateType) : -1;
+    }
+    // 0x198 SetState: the dispatch never passes a controller (i386 0x004807aa passes null).
+    bool SetState(std::uint32_t state, IMySimDispatchAutomaton*, float timer, bool flag, std::uint32_t animOffset,
+                  std::uint32_t sfx, const void* behavior) override {
+        return automaton_->SetState(state, nullptr, timer, flag, animOffset, sfx, static_cast<const tBehaviorTemplate*>(behavior));
+    }
+    void SetPriority(std::uint8_t priority) override { automaton_->SetPriority(priority); }
+    IMySimDispatchRoute* RouteInterface() override {   // QueryInterface(0x8b99ee7c): only a traffic automaton answers
+        auto* traffic = dynamic_cast<cSC4TrafficAutomaton*>(automaton_);
+        if (!traffic) return nullptr;
+        auto* route = new RouteView(traffic);
+        route->AddRef();
+        return route;
+    }
+private:
+    cSC4Automaton* automaton_;
+    std::uint32_t refs_ = 0;
+};
+
+IMySimDispatchAutomaton* ViewOf(cSC4Automaton* automaton) {   // one reference
+    if (!automaton) return nullptr;
+    auto* view = new DispatchAutomatonView(automaton);
+    view->AddRef();
+    return view;
+}
+cSC4Automaton* AutomatonBehind(cISC4Occupant* occupant) {   // QueryInterface(0xa9b40f05), borrowed
+    void* raw = nullptr;
+    if (!occupant || !occupant->QueryInterface(kAutomatonIid, &raw) || !raw) return nullptr;
+    auto* automaton = static_cast<cSC4Automaton*>(raw);
+    automaton->Release();   // the occupant itself keeps the automaton
+    return automaton;
+}
+
+// spVehicleManager (index 0) / spPedestrianManager (index 1) as the dispatch uses them.
+class AutomataManagerView final : public IMySimDispatchAutomataManager {
+public:
+    explicit AutomataManagerView(int index) : index_(index) {}
+    // 0x78 CreateAutomaton(group, (x, 0, z), flags, key, target, 0xff, no velocity) (i386 0x00480624); the manager keeps the
+    // automaton, the view handed out holds one reference of its own.
+    IMySimDispatchAutomaton* CreateAutomaton(int group, const float position[2], std::uint32_t flags, const cGZPersistResourceKey& key,
+                                            cIGZMessageTarget2* target, std::uint8_t priority, int) override {
+        cSC4AutomataManager* manager = NativeAutomataManagerAt(index_);
+        if (!manager) return nullptr;
+        const cS3DVector3 where{position[0], 0.0f, position[1]};
+        IAutomataAutomaton* made = manager->CreateAutomaton(static_cast<std::uint32_t>(group), where, flags, key, target, priority, nullptr);
+        return ViewOf(made ? native::AutomatonOf(made) : nullptr);
+    }
+    bool PlayerDriveActive() override { cSC4AutomataManager* m = NativeAutomataManagerAt(index_); return m && m->IsCameraFollowUpdating(); }   // 0x118
+    bool DriveViewActive() override { cSC4AutomataManager* m = NativeAutomataManagerAt(index_); return m && m->IsDrivingMode(); }             // 0x68
+    void SetPlayerDriveAutomaton(IMySimDispatchAutomaton* automaton) override {   // 0x110 SetCameraFollow
+        cSC4AutomataManager* m = NativeAutomataManagerAt(index_);
+        if (!m) return;
+        cSC4Automaton* behind = automaton ? AutomatonBehind(automaton->AsOccupant()) : nullptr;
+        m->SetCameraFollow(behind ? native::AutomatonView(behind) : nullptr);
+    }
+private:
+    int index_;
+};
+
+// SL::spDispatchManager GetDispatchVehicleView (0xb0) as the dispatch tracks the sim's automaton.
+class VehicleViewForward final : public IMySimDispatchVehicleView {
+public:
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return 1; }
+    std::uint32_t Release() override { return 1; }
+    int TrackOccupant(cISC4Occupant* occupant, int trackerType, std::uint32_t callNumber, const cRZString* label) override {
+        IDispatchVehicleView* view = View();
+        return view ? view->TrackOccupant(occupant, trackerType, callNumber, label) : -1;
+    }
+    void UntrackOccupant(int trackId, bool force) override { if (IDispatchVehicleView* view = View()) view->UntrackOccupant(trackId, force); }
+    static IDispatchVehicleView* View() {
+        auto* manager = As<cSC4DispatchManager>(CityComponent::DispatchManager);
+        return manager ? manager->GetDispatchVehicleView() : nullptr;
+    }
+};
+
+// ---------------------------------------------------------------------------------------------------------------------
 // IMySimDispatchHost
 // ---------------------------------------------------------------------------------------------------------------------
 class DispatchHost final : public IMySimDispatchHost {
@@ -623,8 +760,18 @@ public:
     cISC4PathFinder* PathFinder() override { return SharedPathFinder(); }
     int FindPath(cISC4PathFinder* pathFinder) override { return pathFinder ? pathFinder->FindPath() : 0; }
     cIGZUnknown* Clock() override { return Component(CityComponent::Clock24Hour); }
-    IMySimDispatchVehicleView* DispatchVehicleView() override { SC4_UNWIRED("IMySimDispatchHost::DispatchVehicleView (dispatch view tracking of a MySim trip)"); return nullptr; }
-    IMySimDispatchAutomataManager* AutomataManager(std::uint32_t) override { SC4_UNWIRED("IMySimDispatchHost::AutomataManager (MySim trip automata)"); return nullptr; }
+    IMySimDispatchVehicleView* DispatchVehicleView() override {   // spDispatchManager GetDispatchVehicleView
+        static VehicleViewForward view;
+        return VehicleViewForward::View() ? &view : nullptr;
+    }
+    // pickAutomataManager: the dispatch has chosen the vehicle or the pedestrian manager by the group; the pedestrian groups
+    // (0x4149 / 0x414a / 0x4107) go to spPedestrianManager, the rest to spVehicleManager.
+    IMySimDispatchAutomataManager* AutomataManager(std::uint32_t group) override {
+        static AutomataManagerView vehicles(0), pedestrians(1);
+        const bool pedestrian = group == kAutomataGroupFootMale || group == kAutomataGroupFootFemale || group == kAutomataGroupTransit;
+        AutomataManagerView& view = pedestrian ? pedestrians : vehicles;
+        return NativeAutomataManagerAt(pedestrian ? 1 : 0) ? &view : nullptr;
+    }
     int CityCellsX() override { cSC4City* c = HostCity(); return c ? c->CellCountX() : 0; }
     int CityCellsZ() override { cSC4City* c = HostCity(); return c ? c->CellCountZ() : 0; }
     bool AnyTravelConnection(int cellX, int cellZ) override { return AnyTravelConnectionTo(cellX, cellZ); }
@@ -652,8 +799,29 @@ public:
         lot->GetBoundingRect(outRect);
         return true;
     }
-    bool TileHasNetwork(int cellX, int cellZ, std::uint32_t mask) override { (void)cellX; (void)cellZ; (void)mask; SC4_UNWIRED("IMySimDispatchHost::TileHasNetwork (MySim trips)"); return false; }
-    bool NetworkTilesInRect(const int rect[4], std::deque<std::pair<int, int>>& tiles) override { (void)rect; (void)tiles; SC4_UNWIRED("IMySimDispatchHost::NetworkTilesInRect (MySim trips)"); return false; }
+    // spTrafficNetworkMap FindNetworkOccupant(x, z, mask, false) (i386 0x28; snapToNearestRoadTile 0x0047df78)
+    bool TileHasNetwork(int cellX, int cellZ, std::uint32_t mask) override {
+        auto* map = As<cSC4TrafficNetworkMap>(CityComponent::TrafficNetwork);
+        return map && map->FindNetworkOccupant(cellX, cellZ, mask, false) != nullptr;
+    }
+    // spTrafficNetworkMap GetSurroundingRoads(rect, 1, 1, 0x849) (i386 0x68), each road's occupied cell; the list's
+    // references are released.
+    bool NetworkTilesInRect(const int rect[4], std::deque<std::pair<int, int>>& tiles) override {
+        auto* map = As<cSC4TrafficNetworkMap>(CityComponent::TrafficNetwork);
+        if (!map) return false;
+        std::vector<ITrafficNetworkMapOccupant*> roads;
+        const bool found = map->GetSurroundingRoads(roads, SC4RectInt32{rect[0], rect[1], rect[2], rect[3]}, 1, 1, 0x849);
+        for (ITrafficNetworkMapOccupant* road : roads) {
+            if (!road) continue;
+            if (found) {
+                std::uint32_t x = 0, z = 0;
+                road->GetOccupiedCell(x, z);
+                tiles.emplace_back(static_cast<int>(x), static_cast<int>(z));
+            }
+            road->Release();
+        }
+        return found;
+    }
     void OccupantsInCellRect(const int rect[4], std::deque<cISC4Occupant*>& out) override {
         cISC4OccupantManager* manager = Occupants();
         if (!manager) return;
@@ -666,10 +834,23 @@ public:
         for (cISC4Occupant* occupant : list) if (occupant) occupant->Release();
         list.clear();
     }
+    IMySimDispatchAutomaton* AutomatonOf(cISC4Occupant* occupant) override { return ViewOf(AutomatonBehind(occupant)); }
+    IMySimDispatchRoute* RouteOf(cISC4Occupant* occupant) override {
+        IMySimDispatchAutomaton* view = AutomatonOf(occupant);
+        IMySimDispatchRoute* route = view ? view->RouteInterface() : nullptr;
+        if (view) view->Release();
+        return route;
+    }
+    // The automaton event message names the cSC4Automaton that sent it (cSC4Automaton::SendCallbackMessage).
+    cISC4Occupant* CallbackOccupant(void* automaton) override {
+        return automaton ? static_cast<cSC4Automaton*>(automaton)->AsOccupant() : nullptr;
+    }
     bool UDriveViewAvailable() override { return false; }
     void EnterUDriveView(IMySimDispatchAutomaton*, cIGZMessageTarget2*) override { SC4_UNWIRED("IMySimDispatchHost::EnterUDriveView (U-Drive-It with a MySim)"); }
     void ShowUDriveAdvice() override {}
-    void ClearVehiclePlayerDrive() override {}
+    void ClearVehiclePlayerDrive() override {   // spVehicleManager SetCameraFollow(null)
+        if (cSC4AutomataManager* vehicles = NativeAutomataManagerAt(0)) vehicles->SetCameraFollow(nullptr);
+    }
     bool WriteSerializable(cIGZOStream& stream, const cIGZUnknown* object) override { return SC4WriteGZSerializable(stream, object); }
     bool ReadSerializable(cIGZIStream& stream, std::uint32_t iid, void** out) override { return SC4ReadGZSerializable(stream, iid, out, false); }
 };
@@ -797,8 +978,22 @@ void NativeMySimReport() {
                     xyz[0], xyz[1], xyz[2], sim->Retired() ? 1 : 0, dispatch ? "yes" : "no", dispatch ? dispatch->GetState() : 0,
                     dispatch ? static_cast<cSC4MySimDispatch*>(dispatch)->Flags() : 0u);
         if (sim->IsActive()) PrintOpinionFields(*sim, i);
+        if (sim->IsActive() && dispatch) {   // the automaton the sim rides, if any
+            auto* trip = static_cast<cSC4MySimDispatch*>(dispatch);
+            cISC4Occupant* rider = trip->AutomataOccupant();
+            float where[3] = {};
+            if (rider) rider->GetPosition(where);
+            void* automaton = nullptr;
+            const bool isAutomaton = rider && rider->QueryInterface(0xa9b40f05, &automaton) && automaton;
+            if (isAutomaton) static_cast<cIGZUnknown*>(automaton)->Release();
+            std::printf("mysims: slot %d trip travel %d route %zu automaton %s%s at %.0f,%.0f,%.0f groups 0x4149:%d 0x414a:%d 0x420b:%d\n", i,
+                        trip->GetTravelType(), trip->RouteSize(), rider ? "yes" : "no", isAutomaton ? "" : " (not an automaton)",
+                        where[0], where[1], where[2], rider && rider->IsOccupantGroup(0x4149) ? 1 : 0,
+                        rider && rider->IsOccupantGroup(0x414a) ? 1 : 0, rider && rider->IsOccupantGroup(0x420b) ? 1 : 0);
+        }
     }
-    std::printf("mysims: %d active of %d\n", active, kMySimAgentSlots);
+    cSC424HourClock* clock = Clock24();
+    std::printf("mysims: %d active of %d, hour %d\n", active, kMySimAgentSlots, clock ? static_cast<int>(clock->GetHour()) : -1);
 }
 
 // Kit command `mysimmovein NAME`: what the pick-sim window and the move-in tool do for the player, without input. The agent
