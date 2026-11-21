@@ -515,8 +515,8 @@ for entry in "${TESTS[@]}"; do
   objs=""; libs=""
   for w in "${words[@]}"; do
     case "$w" in
-      # the source's modification time is part of the key, so an edited source compiles again on a subset run
-      # (a header edit still needs a full run, which starts from an empty cache)
+      # the source's modification time is part of the key; the compiler's dependency file (OBJ.d) makes an object
+      # compile again when any header it was built from is newer (a subset run reuses the cache)
       *.cpp|*.c) key=$(printf '%s|%s|%s' "$w" "$inc" "$(stat -c %Y "$w" 2>/dev/null || stat -f %m "$w")" | cksum | cut -d' ' -f1); obj="$OUT/obj/$(basename "$w").$key.o"
                  wanted[$obj]="$w|$inc"; objs="$objs $obj" ;;
       -I*) ;;
@@ -525,12 +525,20 @@ for entry in "${TESTS[@]}"; do
   done
   printf '%s\t%s\t%s\n' "$name" "$objs" "$libs"
 done > "$OUT/links.tsv"
-compile() {   # OBJ SRC INCLUDES
-  [ -f "$1" ] && return 0
-  # shellcheck disable=SC2086
-  clang++ $FLAGS_LINE $3 -c "$2" -o "$1.tmp" 2> "$1.log" && mv "$1.tmp" "$1"
+stale() {   # OBJ: a file its dependency list names is newer than it (or the list is missing)
+  [ -f "$1.d" ] || return 0
+  local dep
+  while IFS= read -r dep; do
+    [ -n "$dep" ] && [ "$dep" -nt "$1" ] && return 0
+  done < <(sed -e 's/^[^:]*://' -e 's/\\$//' "$1.d" | sed -e 's/\\ /\x01/g' | tr -s ' \t' '\n' | tr '\001' ' ')
+  return 1
 }
-export -f compile
+compile() {   # OBJ SRC INCLUDES
+  if [ -f "$1" ]; then stale "$1" || return 0; rm -f "$1"; fi
+  # shellcheck disable=SC2086
+  clang++ $FLAGS_LINE $3 -MMD -MF "$1.d" -c "$2" -o "$1.tmp" 2> "$1.log" && mv "$1.tmp" "$1"
+}
+export -f stale compile
 for obj in "${!wanted[@]}"; do v="${wanted[$obj]}"; printf '%s\t%s\t%s\n' "$obj" "${v%%|*}" "${v#*|}"; done |
   tr '\n' '\0' | xargs -0 -n 1 -P "$JOBS" bash -c 'IFS=$'"'"'\t'"'"' read -r o s i <<< "$1"; compile "$o" "$s" "$i"' _
 
