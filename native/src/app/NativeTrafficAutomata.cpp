@@ -543,3 +543,68 @@ void NativeRouteParityReport(int limit) {
 }
 
 }  // namespace native
+
+namespace native {
+
+// Kit command `freightprobe X0 Z0 X1 Z1`: where the traffic simulator's freight trips may end (cells whose destination byte has the
+// freight bit 8, border cells included, and the border connections that carry freight types), then one search with SetupTrip's
+// freight settings (destination filter 0, destination flag 8, flag 1, travel types 0x30) from the lot rect, and one aimed (filter 3)
+// at each freight destination cell. Changes nothing.
+void NativeFreightReport(int x0, int z0, int x1, int z1) {
+    auto* simulator = Component<cSC4TrafficSimulator>(CityComponent::TrafficSimulator);
+    if (!simulator) {
+        std::printf("freightprobe: no traffic simulator\n");
+        return;
+    }
+    std::vector<std::pair<int, int>> cells;
+    const auto& flags = simulator->CellTripFlags();
+    for (std::size_t row = 0; row < flags.size(); ++row)
+        for (std::size_t column = 0; column < flags[row].size(); ++column)
+            if (flags[row][column] & 8) cells.emplace_back(int(row) - 1, int(column) - 1);
+    std::printf("freightprobe: %zu freight destination cells:", cells.size());
+    for (const auto& [x, z] : cells) std::printf(" %d,%d (byte %x)", x, z, simulator->DestinationByte(x, z));
+    std::printf("\n");
+    const auto& connections = simulator->NeighborConnections();
+    static const char* kSide[4] = {"west", "north", "east", "south"};
+    for (int side = 0; side < 4; ++side)
+        for (std::size_t i = 0; i < connections[std::size_t(side)].size(); ++i)
+            if (connections[std::size_t(side)][i].types)
+                std::printf("freightprobe: border %s %zu types %x pool %u cost %.2f\n", kSide[side], i, connections[std::size_t(side)][i].types,
+                            connections[std::size_t(side)][i].pool, connections[std::size_t(side)][i].cost);
+    auto search = [&](int filter, int ex, int ez) {
+        cISC4PathFinder* finder = simulator->CreatePathFinder();
+        if (!finder) return;
+        finder->SetTrafficDensity(1);
+        finder->SetTripDestinationFilter(filter);
+        if (filter == 3) {
+            finder->SetEndRect(SC4RectInt32{ex, ez, ex, ez});
+        } else {
+            finder->ClearAllDestinationFlags();
+            finder->SetDestinationFlag(8);
+        }
+        finder->SetMaxWorkTime(0);
+        finder->SetStartRect(SC4RectInt32{x0, z0, x1, z1});
+        finder->ClearAllFlags();
+        finder->ClearAllTravelTypeFlags();
+        finder->SetStartingCostArray(nullptr);
+        finder->SetMaxTripLength(simulator->GetTripScale());
+        finder->SetFlag(1);
+        finder->SetTravelTypeFlag(0x30, true);
+        const int found = finder->FindPath();
+        int cx = 0, cz = 0;
+        if (found == 1) finder->GetEndCell(cx, cz);
+        std::printf("freightprobe: from %d,%d..%d,%d filter %d%s: %s", x0, z0, x1, z1, filter, filter == 3 ? " to" : "", found == 1 ? "found" : "none");
+        if (filter == 3) std::printf(" (target %d,%d)", ex, ez);
+        if (found == 1) std::printf(" end %d,%d length %.2f", cx, cz, finder->GetTripLength());
+        std::printf("; walk-and-car search to the same target: ");
+        finder->ClearAllFlags();
+        finder->ClearAllTravelTypeFlags();
+        finder->SetTravelTypeFlag(0x3, true);
+        std::printf("%s\n", finder->FindPath() == 1 ? "found" : "none");
+        finder->Release();
+    };
+    search(0, 0, 0);
+    for (std::size_t i = 0; i < cells.size() && i < 4; ++i) search(3, cells[i].first, cells[i].second);
+}
+
+}  // namespace native
