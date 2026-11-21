@@ -656,6 +656,17 @@ void cSC4PowerPoleOccupant::DrawConnection(cSC4PowerPoleOccupant* pole, bool byC
 // 0x100320544: every connected pole forgets this one, and this one drops its connections (the entries stay).
 std::int64_t cSC4PowerPoleOccupant::GetCostOfDemolition() const { return snCostOfDemolition; }
 
+bool cSC4PowerPoleOccupant::SavedPointsMatchTable() const {
+    if (!connectionPoints_) return false;
+    for (int i = 0; i < 4; ++i)
+        for (int k = 0; k < 3; ++k) {
+            const cS3DVector3& p = savedPoints_[static_cast<std::size_t>(i)];
+            const float saved = k == 0 ? p.x : k == 1 ? p.y : p.z;
+            if (saved != connectionPoints_[0][i][k]) return false;
+        }
+    return true;
+}
+
 // i386 0x00255134: a pole the power funding leaves unmaintained sparks ("powerpolezap" at the pole's position); a maintained
 // one stops its sparks and drops the effect.
 void cSC4PowerPoleOccupant::SetDistressed(bool distressed) {
@@ -855,7 +866,12 @@ bool cSC4PowerPoleOccupant::Write(cIGZOStream& stream) const {
         stream.SetSint32(modelZoom_);
         stream.SetSint32(cellX_);
         stream.SetSint32(cellZ_);
-        for (const cS3DVector3& point : savedPoints_) stream << point;
+        // the first four points of the pole's connection point table (+0xe0 i386: the cardinal or diagonal table); the
+        // original reads them back into that static table, the port keeps them in savedPoints_ (a pole without a table)
+        for (int i = 0; i < 4; ++i) {
+            if (connectionPoints_) stream << cS3DVector3{connectionPoints_[0][i][0], connectionPoints_[0][i][1], connectionPoints_[0][i][2]};
+            else stream << savedPoints_[static_cast<std::size_t>(i)];
+        }
         WriteVertices(stream, floor_);
         WriteVertices(stream, walls_[0]);
         WriteVertices(stream, walls_[1]);

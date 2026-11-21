@@ -133,6 +133,8 @@ public:
     std::int64_t GetCostOfDemolition() const;                   // i386 0x006d910a: snCostOfDemolition (tuning 0x0a2eced8)
     bool GetDistressed() const { return distressed_; }          // i386 0x00254aa6
     bool HasDistressEffect() const { return effect_ != nullptr; }
+    // debug: the record's four connection points as read equal the first four of the pole's table (what Write writes)
+    bool SavedPointsMatchTable() const;
     void SetDistressed(bool distressed);                        // i386 0x00255134: the "powerpolezap" sparks
 
     // --- connections ---
@@ -177,7 +179,7 @@ private:
     bool boundsDirty_ = true;                       // +0x120
     std::int32_t boundsMinX_ = 0, boundsMinZ_ = 0, boundsMaxX_ = 0, boundsMaxZ_ = 0;   // +0x124..+0x130
     const float (*connectionPoints_)[4][3] = nullptr;   // +0x138 cardinal or diagonal table
-    std::array<cS3DVector3, 4> savedPoints_{};      // the record's four connection points (not read back)
+    std::array<cS3DVector3, 4> savedPoints_{};      // the record's four connection points as read (written back without a table)
     std::vector<UndergroundVertex> floor_;          // +0x140 the foundation's top
     std::vector<UndergroundVertex> walls_[2];       // +0x158 / +0x170 the two visible foundation sides
     float floorHeight_ = 0.0f;                      // +0x188 the lowest corner of the cell

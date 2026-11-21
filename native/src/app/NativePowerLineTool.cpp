@@ -354,10 +354,10 @@ void NativePowerPoleReport(int x0, int z0, int x1, int z1) {
                 }
                 cGZPersistResourceKey key{0, 0, 0};
                 if (cISCResExemplar* exemplar = pole->GetDefaultExemplar()) exemplar->GetKey(key);
-                std::printf("pole %d,%d at %.1f,%.1f,%.1f: mask 0x%x exemplar %08x connections %d (draws %d, curves %d, wire occupants %d) model %s preview %d distressed %d zap %d\n",
+                std::printf("pole %d,%d at %.1f,%.1f,%.1f: mask 0x%x exemplar %08x connections %d (draws %d, curves %d, wire occupants %d) model %s preview %d distressed %d zap %d points %s\n",
                             x, z, p[0], p[1], p[2], pole->Style(), key.instance, pole->GetNumberOfConnections(), drawn, curves, lines,
                             pole->HasModel() ? "yes" : "no", pole->IsPreview() ? 1 : 0, pole->GetDistressed() ? 1 : 0,
-                            pole->HasDistressEffect() ? 1 : 0);
+                            pole->HasDistressEffect() ? 1 : 0, pole->SavedPointsMatchTable() ? "as-table" : "differ");
                 ++poles;
                 if (pole->GetDistressed()) ++distressed;
             } else if (auto* line = dynamic_cast<cSC4PowerLineOccupant*>(occupant)) {
