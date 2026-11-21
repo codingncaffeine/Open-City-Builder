@@ -247,7 +247,7 @@ void cSC4TractDeveloper::ReadSimulatorTunableValues() {
     tunables.declineJitterLow = declineJitterLow_;
     tunables.declineJitterHigh = declineJitterHigh_;
     tunables.allowTakeOver = allowTakeOver_;
-    host->ReadTunables(tunables);   // resource manager -> exemplar (0xe7e2c2db 6534284a / 0xe8da7677)
+    const bool haveExemplar = host->ReadTunables(tunables);   // resource manager -> exemplar (0xe7e2c2db 6534284a / 0xe8da7677)
     capacityFactor_ = tunables.capacityFactor;
     declineFactor_ = tunables.declineFactor;
     buildBias_ = tunables.buildBias;
@@ -260,6 +260,7 @@ void cSC4TractDeveloper::ReadSimulatorTunableValues() {
     declineJitterLow_ = tunables.declineJitterLow;
     declineJitterHigh_ = tunables.declineJitterHigh;
     allowTakeOver_ = tunables.allowTakeOver;
+    if (!haveExemplar) return;                        // the style and years step runs only with the exemplar
     tunableStyles_ = tunables.styles;                 // +0xa8
     if (activeStyles_.empty()) {                      // +0x1a0 empty
         styleIndex_ = 0;

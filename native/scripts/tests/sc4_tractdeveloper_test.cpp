@@ -331,8 +331,9 @@ struct FakeHost : ITractDeveloperHost {
     void UnregisterLotConfigurationFilter(cISC4LotConfigurationFilter* filter) override {
         unregisteredFilters.push_back(filter);
     }
-    void ReadTunables(TractTunables& io) override {
+    bool ReadTunables(TractTunables& io) override {
         if (tunablesPresent) io = tunablesResult;
+        return tunablesPresent;
     }
     std::int32_t SimulatorDay() override { return day; }
     std::uint32_t RandomBelow(std::uint32_t range) override { return range ? 0 : 0; }

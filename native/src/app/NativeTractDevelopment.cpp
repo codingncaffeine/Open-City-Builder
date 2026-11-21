@@ -308,7 +308,7 @@ struct TractHost final : ITractDeveloperHost {
     }
     void RegisterLotConfigurationFilter(cISC4LotConfigurationFilter* filter) override { if (auto* m = LotConfigurations()) m->RegisterLotConfigurationFilter(filter); }
     void UnregisterLotConfigurationFilter(cISC4LotConfigurationFilter* filter) override { if (auto* m = LotConfigurations()) m->UnregisterLotConfigurationFilter(filter); }
-    void ReadTunables(TractTunables& io) override { ReadTractTunables(io); }
+    bool ReadTunables(TractTunables& io) override { return ReadTractTunables(io); }
     std::int32_t SimulatorDay() override {   // the simulator date (vslot 0x30 -> the date's day number)
         auto* simulator = Com<cSC4Simulator>(sc4::CityComponent::Simulator, kGZCLSID_cSC4Simulator);
         return simulator ? static_cast<std::int32_t>(simulator->GetSimDateNumber()) : 0;

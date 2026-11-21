@@ -26,7 +26,7 @@ struct StubTractDeveloper final : ITractDeveloperHost {
     bool LotConfigurationsByFilter(std::vector<cSC4LotConfiguration*>& out, cISC4LotConfigurationFilter* filter) override { SC4_UNWIRED("StubTractDeveloper::LotConfigurationsByFilter"); return {}; }
     void RegisterLotConfigurationFilter(cISC4LotConfigurationFilter* filter) override { SC4_UNWIRED("StubTractDeveloper::RegisterLotConfigurationFilter"); }
     void UnregisterLotConfigurationFilter(cISC4LotConfigurationFilter* filter) override { SC4_UNWIRED("StubTractDeveloper::UnregisterLotConfigurationFilter"); }
-    void ReadTunables(TractTunables& io) override { SC4_UNWIRED("StubTractDeveloper::ReadTunables"); }
+    bool ReadTunables(TractTunables& io) override { SC4_UNWIRED("StubTractDeveloper::ReadTunables"); return false; }
     std::int32_t SimulatorDay() override { SC4_UNWIRED("StubTractDeveloper::SimulatorDay"); return {}; }
     std::uint32_t RandomBelow(std::uint32_t range) override { SC4_UNWIRED("StubTractDeveloper::RandomBelow"); return {}; }
     void ForEachCellInTract(int tractX, int tractZ, int shift, const std::function<void(int, int)>& fn) override { SC4_UNWIRED("StubTractDeveloper::ForEachCellInTract"); }

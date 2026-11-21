@@ -310,7 +310,7 @@ public:
     virtual void RegisterLotConfigurationFilter(cISC4LotConfigurationFilter* filter) = 0;   // manager vslot 0x90
     virtual void UnregisterLotConfigurationFilter(cISC4LotConfigurationFilter* filter) = 0; // manager vslot 0x98
     // Resource manager + the tract developer's ini exemplar (0xe7e2c2db 6534284a / 0xe8da7677).
-    virtual void ReadTunables(TractTunables& io) = 0;
+    virtual bool ReadTunables(TractTunables& io) = 0;   // false: the exemplar is missing (the original then skips the style step)
     virtual std::int32_t SimulatorDay() = 0;                                  // simulator clock vslot 0x30
     virtual std::uint32_t RandomBelow(std::uint32_t range) = 0;               // cRZRandom::RandomUint32UniformBelow
     // cRZRandomIterator over one tract's city cells (rect [tract<<shift .. (tract+1)<<shift - 1]);
