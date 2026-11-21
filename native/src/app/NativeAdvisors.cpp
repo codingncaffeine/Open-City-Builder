@@ -29,6 +29,7 @@
 #include "sc4/Advice.h"
 #include "sc4/AdviceSubject.h"
 #include "sc4/Advisor.h"
+#include "sc4/MySim.h"
 #include "sc4/AdvisorConcrete.h"
 #include "sc4/AdviceDetokenizer.h"
 #include "sc4/AdvisorUIAdvisorWinProc.h"
@@ -343,9 +344,57 @@ int SubjectData1(lua_State* L, int onlyEvent) {
 }
 int L_event_building_distance(lua_State* L) { return SubjectData1(L, static_cast<int>(0xca4e8986u)); }
 int L_event_disaster_distance(lua_State* L) { return SubjectData1(L, 0); }
-// The MySim functions act on the context advice's advisor as a MySim (out of the advisor system's scope; PARTIAL: no value).
-int L_mysim_nil(lua_State* L) { HostOf(L)->PushNil(); return 1; }
-int L_mysim_dispatch_tool(lua_State*) { return 0; }
+// The MySim functions (i386 0x00307466 closest_building, 0x00307600 closest_special, 0x0030779a local_school_grade,
+// 0x00307922 local_hospital_grade): the context advice's advisor as a MySim (QueryInterface 0x0a1da42f) and a number
+// argument, clamped to [0, 4294967295] and truncated; nil without either. The distances answer as unsigned numbers (no
+// building: 4294967295), the grades in percent.
+cISC4MySim* ContextMySim(cISCLua* lua) {
+    cSC4AdvisorSystem* system = System();
+    cISC4Advice* ctx = Context();
+    cISC4Advisor* advisor = system && ctx ? system->GetAdvisor(ctx->GetAdvisorID()) : nullptr;
+    cISC4MySim* sim = nullptr;
+    if (!advisor || !HasNumberArg(lua)) return nullptr;
+    if (!advisor->QueryInterface(kGZIID_cISC4MySimLink, reinterpret_cast<void**>(&sim))) return nullptr;
+    return sim;
+}
+std::uint32_t MySimArgument(cISCLua* lua) {
+    double value = lua->ToNumber(-1);
+    if (value >= 4294967295.0) value = 4294967295.0;
+    if (value <= 0.0) value = 0.0;
+    return static_cast<std::uint32_t>(value);
+}
+template <class F> int MySimQuery(lua_State* L, F query) {
+    cISCLua* lua = HostOf(L);
+    cISC4MySim* sim = ContextMySim(lua);
+    if (!sim) { lua->PushNil(); return 1; }
+    lua->PushNumber(query(sim, MySimArgument(lua)));
+    sim->Release();
+    return 1;
+}
+int L_mysim_closest_building(lua_State* L) {
+    return MySimQuery(L, [](cISC4MySim* s, std::uint32_t a) { return static_cast<double>(static_cast<std::uint32_t>(s->DistanceToClosest(a))); });
+}
+int L_mysim_closest_special(lua_State* L) {
+    return MySimQuery(L, [](cISC4MySim* s, std::uint32_t a) { return static_cast<double>(s->DistanceToClosestSpecial(a)); });
+}
+int L_mysim_local_school_grade(lua_State* L) {
+    return MySimQuery(L, [](cISC4MySim* s, std::uint32_t a) { return static_cast<double>(s->LocalSchoolGrade(a) * 100.0f); });
+}
+int L_mysim_local_hospital_grade(lua_State* L) {
+    return MySimQuery(L, [](cISC4MySim* s, std::uint32_t a) { return static_cast<double>(s->LocalHospitalGrade(a) * 100.0f); });
+}
+// mysim_dispatch_tool (i386 0x00307aae): the context advice's advisor as a MySim starts its dispatch tool; no result.
+int L_mysim_dispatch_tool(lua_State*) {
+    cSC4AdvisorSystem* system = System();
+    cISC4Advice* ctx = Context();
+    cISC4Advisor* advisor = system && ctx ? system->GetAdvisor(ctx->GetAdvisorID()) : nullptr;
+    cISC4MySim* sim = nullptr;
+    if (advisor && advisor->QueryInterface(kGZIID_cISC4MySimLink, reinterpret_cast<void**>(&sim)) && sim) {
+        sim->CreateDispatchTool();
+        sim->Release();
+    }
+    return 0;
+}
 // random_chance(p): 1 when a draw in [0, 100) from the system's generator is below p (advisors.md 9).
 int L_random_chance(lua_State* L) {
     cISCLua* lua = HostOf(L);
@@ -523,10 +572,10 @@ const IAdvisorSystemHost::LuaExtension kExtensions[] = {
     {"trigger_event", &L_trigger_event, false},
     {"building_is_group", &L_building_is_group, false},
     {"event_building_distance", &L_event_building_distance, false},
-    {"mysim_distance_to_closest_building", &L_mysim_nil, false},
-    {"mysim_distance_to_closest_landmark_or_reward", &L_mysim_nil, false},
-    {"mysim_local_school_grade", &L_mysim_nil, false},
-    {"mysim_local_hospital_grade", &L_mysim_nil, false},
+    {"mysim_distance_to_closest_building", &L_mysim_closest_building, false},
+    {"mysim_distance_to_closest_landmark_or_reward", &L_mysim_closest_special, false},
+    {"mysim_local_school_grade", &L_mysim_local_school_grade, false},
+    {"mysim_local_hospital_grade", &L_mysim_local_hospital_grade, false},
     {"mysim_dispatch_tool", &L_mysim_dispatch_tool, false},
     {"event_disaster_distance", &L_event_disaster_distance, false},
     {"random_chance", &L_random_chance, false},

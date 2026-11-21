@@ -69,8 +69,8 @@ struct SimBase : cISC4MySim {
     void DoNeighborConnectionRemoved(int cellX, int cellZ) override {}
     int DistanceToClosest(std::uint32_t occupantGroup) override { return {}; }
     std::uint32_t DistanceToClosestSpecial(std::uint32_t buildingType) override { return {}; }
-    int LocalSchoolGrade(std::uint32_t buildingType) override { return {}; }
-    int LocalHospitalGrade(std::uint32_t buildingType) override { return {}; }
+    float LocalSchoolGrade(std::uint32_t) override { return {}; }
+    float LocalHospitalGrade(std::uint32_t) override { return {}; }
     void PlayNightSound() override {}
     bool GetCurrentScreenLocationXY(int* x, int* y) override { return {}; }
     void GetJobTitle(cISC4BuildingOccupant* building, cIGZString& out) override {}

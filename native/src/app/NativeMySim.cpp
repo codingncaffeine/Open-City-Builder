@@ -14,9 +14,24 @@
 #include <vector>
 
 #include "app/NativeAnimationTicks.h"
+#include "app/NativeBuildingDevelopment.h"
 #include "app/NativeCity.h"
 #include "app/NativeGameData.h"
+#include "app/NativeGrowthDevelopers.h"
+#include "app/NativePlumbing.h"
 #include "app/NativeUi.h"
+#include "gz/WinCtrlFactory.h"
+#include "gz/WinCtrlMgr.h"
+#include "gz/WinFont.h"
+#include "sc4/BuildingDevelopmentSimulator.h"
+#include "sc4/CrimeSimulator.h"
+#include "sc4/FireProtectionSimulator.h"
+#include "sc4/ISC4RegionalCity.h"
+#include "sc4/Occupant.h"
+#include "sc4/PlumbingSimulator.h"
+#include "sc4/PoliceSimulator.h"
+#include "sc4/PollutionSimulator.h"
+#include "sc4/RegionalCity.h"
 #include "gz/CommandParameterSet.h"
 #include "gz/cIGZVariant.h"
 #include "platform/Unwired.h"
@@ -50,6 +65,8 @@
 namespace native {
 const sc4::cISCPropertyHolder* NativeSimulatorExemplar(std::uint32_t instance);   // app/NativeSimHosts.cpp
 bool NativeProjectToViewport(const float* xyz, float out[3]);                     // app/NativeAutomataManagerHost.cpp
+sc4::cSC4CrimeSimulator* NativeCrimeSimulator();                                  // app/NativeCrime.cpp
+sc4::IResidentialOccupant* NativeResidentialOccupant(cIGZUnknown* building);      // app/NativeSimHosts.cpp
 
 namespace {
 using namespace sc4;
@@ -249,8 +266,23 @@ public:
         return building && filter.IsOccupantIncluded(building->AsOccupant());
     }
     void BuildingsNearResidence(int cellX, int cellZ, int radius, std::vector<cISC4BuildingOccupant*>& out) override {
+        // UpdateLocalBuildings (i386 0x00547eea): GetOccupantsByStandardCityCells with cMySimBuildingFilter(false).
+        out.clear();
+        cISC4OccupantManager* manager = Occupants();
+        if (!manager) return;
         const int a[2] = {cellX - radius, cellZ - radius}, b[2] = {cellX + radius, cellZ + radius};
-        FilteredBuildings(a, b, false, out);
+        cMySimBuildingFilter filter(false);
+        filter.AddRef();
+        OccupantList list;
+        manager->GetOccupantsByStandardCityCells(list, a, b, &filter, 0xffffffffu);
+        for (cISC4Occupant* occupant : list) {
+            cISC4BuildingOccupant* building = nullptr;
+            if (occupant->QueryInterface(kGZIID_cISC4BuildingOccupant, reinterpret_cast<void**>(&building)) && building) {
+                out.push_back(building);
+                building->Release();   // the occupant manager keeps the building alive
+            }
+            occupant->Release();
+        }
     }
     cISC4Occupant* OccupantAtCell(int, int) override {
         // spSC4 GetRegion (0x118) -> GetCity (0x58): the original's "job across a neighbour connection" is the regional city
@@ -319,30 +351,151 @@ public:
     }
     int HourOfDay() override { cSC424HourClock* c = Clock24(); return c ? static_cast<int>(c->GetHour()) : 12; }
     bool SimulatorTickEnabled() override { cSC4Simulator* s = Simulator(); return s && !s->IsAnyPaused(); }
-    void CityOccupants(std::vector<cISC4Occupant*>& out) override {
+    // spCity GetBuildingDevelopmentSimulator -> GetSpecialBuildings: the civic occupants, borrowed.
+    void SpecialBuildings(std::vector<cISC4Occupant*>& out) override {
         out.clear();
-        cISC4OccupantManager* manager = Occupants();
-        if (!manager) return;
-        int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
-        manager->GetOccupantManagerCellBounds(x0, z0, x1, z1);
-        const int a[2] = {x0, z0}, b[2] = {x1, z1};
-        OccupantList list;
-        manager->GetOccupantsByOccupantManagerCells(list, a, b, kOccupantTypeBuilding, 0xffffffffu);
-        for (cISC4Occupant* occupant : list) {
-            out.push_back(occupant);
-            occupant->Release();   // borrowed: the occupant manager keeps them
+        cSC4BuildingDevelopmentSimulator* development = NativeBuildingDevelopmentSimulator();
+        if (!development) return;
+        for (cIGZUnknown* object : development->GetSpecialBuildings()) {
+            cISC4Occupant* occupant = nullptr;
+            if (object && object->QueryInterface(kGZIID_cISC4Occupant, reinterpret_cast<void**>(&occupant)) && occupant) {
+                out.push_back(occupant);
+                occupant->Release();   // the simulator keeps the occupant alive
+            }
         }
     }
+    // UpdateLocalBuildings: spBuildingDevelopmentSim GetBuildingKeyFromType, then cSC4Occupant::GetOccupantGroups(key).
     void BuildingOccupantGroups(std::uint32_t buildingType, std::vector<std::uint32_t>& out) override {
         out.clear();
-        (void)buildingType;
-        SC4_UNWIRED("IMySimHost::BuildingOccupantGroups (building development simulator exemplar of a building type)");
+        cSC4BuildingDevelopmentSimulator* development = NativeBuildingDevelopmentSimulator();
+        cGZPersistResourceKey key;
+        if (development) development->GetBuildingKeyFromType(buildingType, key);
+        cSC4Occupant::GetOccupantGroups(key, out);
     }
-    bool GetLocalSchoolGrade(std::uint32_t buildingType, float x, float z, int& grade) override {
-        return LocalGrade(true, buildingType, x, z, grade);
+    // GetSchoolBuildings / GetHospitalBuildings(list, null): the residential simulator AddRefs each, the host hands them
+    // out borrowed.
+    void ResidentialServiceBuildings(bool hospital, std::vector<cISC4Occupant*>& out) override {
+        out.clear();
+        cSC4ResidentialSimulator* r = Residential();
+        if (!r) return;
+        cSC4ResidentialSimulator::OccupantList list;
+        if (hospital) r->GetHospitalBuildings(list, nullptr);
+        else r->GetSchoolBuildings(list, nullptr);
+        for (IResidentialOccupant* entry : list) {
+            cIGZUnknown* object = entry ? entry->Object() : nullptr;
+            cISC4Occupant* occupant = nullptr;
+            if (object && object->QueryInterface(kGZIID_cISC4Occupant, reinterpret_cast<void**>(&occupant)) && occupant) {
+                out.push_back(occupant);
+                occupant->Release();
+            }
+            if (entry) entry->Release();   // the reference the simulator added
+        }
     }
-    bool GetLocalHospitalGrade(std::uint32_t buildingType, float x, float z, int& grade) override {
-        return LocalGrade(false, buildingType, x, z, grade);
+    bool ResidentialServiceGrade(bool hospital, cISC4Occupant* building, float& grade) override {
+        cSC4ResidentialSimulator* r = Residential();
+        IResidentialOccupant* occupant = r && building ? NativeResidentialOccupant(building) : nullptr;
+        ResidentialQueryData data;
+        const bool ok = occupant && (hospital ? r->GetHospitalQueryData(occupant, data) : r->GetSchoolQueryData(occupant, data));
+        grade = data.grade;
+        return ok;
+    }
+    int ResidentialLifeExpectancy(int x, int z) override {   // GetCellLifeExpectancy
+        cSC4ResidentialSimulator* r = Residential();
+        return r ? r->GetCellLifeExpectancy(static_cast<unsigned>(x), static_cast<unsigned>(z)) : 0;
+    }
+    std::uint8_t BuildingCondition(cISC4BuildingOccupant* building) override {   // GetBuildingCondition (i386 0x005422a6)
+        cSC4Lot* lot = building ? LotOf(building->AsOccupant()) : nullptr;
+        return lot ? lot->GetCondition() : 0;
+    }
+    // cSC4PowerSimulator::IsOccupantPowered (i386 0x0018087a): the occupant's lot; powered when it has power or does not
+    // need it; no lot is not powered.
+    bool OccupantPowered(cISC4Occupant* occupant) override {
+        cSC4Lot* lot = LotOf(occupant);
+        if (!lot) return false;
+        return lot->GetHasPower() || !lot->GetNeedsPower();
+    }
+    bool BuildingWatered(cISC4Occupant* occupant) override {   // cSC4PlumbingSimulator::IsBuildingWatered
+        cSC4PlumbingSimulator* plumbing = NativePlumbingSimulator();
+        return plumbing && occupant && plumbing->IsBuildingWatered(occupant);
+    }
+    int CrimeAtCell(int x, int z) override {
+        cSC4CrimeSimulator* crime = NativeCrimeSimulator();
+        const cSC4SimGrid<std::uint8_t>* grid = crime ? crime->GetCrimeGrid() : nullptr;
+        return grid ? grid->GetCellValue(x, z) : 0;
+    }
+    // GetPolicePowerGrid / GetFireProtectionGrid: the protection simulator's adjusted grid, averaged over the cell rect.
+    int ProtectionCoverage(bool police, int x, int z, int width, int height) override {
+        const cSC4SimGrid<std::uint8_t>* grid = nullptr;
+        if (police) {
+            if (auto* p = Comp<cSC4PoliceSimulator>(CityComponent::PoliceSimulator)) grid = p->Protection().AdjustedGrid();
+        } else if (auto* f = Comp<cSC4FireProtectionSimulator>(CityComponent::FireProtectionSimulator)) {
+            grid = f->GetFireProtectionGrid();
+        }
+        return grid ? AverageInCellRectU8(*grid, x, z, width, height) : 0;
+    }
+    int PollutionAtCell(int type, int x, int z) override {
+        auto* pollution = Comp<cSC4PollutionSimulator>(CityComponent::PollutionSimulator);
+        cSC4SimGrid<std::int16_t>* grid = pollution ? pollution->GetPollutionGrid(static_cast<PollutionType>(type)) : nullptr;
+        return grid ? grid->GetCellValue(x, z) : 0;
+    }
+    bool DesirabilityAtCell(std::uint32_t developerType, int x, int z, int& value) override {
+        cSC4SimGrid<std::int16_t>* map = GrowthDeveloperDesirabilityMap(developerType);
+        if (!map) return false;
+        value = map->GetCellValue(x, z);
+        return true;
+    }
+    void ProtectionStations(bool police, std::vector<Station>& out) override {
+        out.clear();
+        auto add = [&out](IProtectionStation* station, bool funded, const SC4Percentage& fraction) {
+            Station s{};
+            station->Position(s.position);
+            s.funded = funded;
+            s.funding = fraction.value;
+            out.push_back(s);
+        };
+        if (police) {
+            auto* p = Comp<cSC4PoliceSimulator>(CityComponent::PoliceSimulator);
+            if (!p) return;
+            std::list<IProtectionStation*> stations;
+            p->GetPoliceStations(stations);
+            for (IProtectionStation* station : stations) {
+                SC4Percentage fraction;
+                const bool funded = station && p->GetStationFunding(static_cast<IPoliceOccupant*>(station), nullptr, &fraction);
+                if (station) add(station, funded, fraction);
+            }
+        } else {
+            auto* f = Comp<cSC4FireProtectionSimulator>(CityComponent::FireProtectionSimulator);
+            if (!f) return;
+            std::list<IFireOccupant*> stations;
+            f->GetFireStations(stations);
+            for (IFireOccupant* station : stations) {
+                SC4Percentage fraction;
+                const bool funded = station && f->GetStationFunding(station, nullptr, &fraction);
+                if (station) add(station, funded, fraction);
+            }
+        }
+    }
+    bool NeighborJobCityName(cIGZUnknown* city, cIGZString& out) override {   // the regional city's GetCityName
+        void* raw = nullptr;
+        if (!city || !city->QueryInterface(kGZIID_cISC4RegionalCity, &raw) || !raw) return false;
+        auto* unknown = static_cast<cIGZUnknown*>(raw);
+        auto* regional = dynamic_cast<cSC4RegionalCity*>(unknown);
+        if (regional) regional->GetCityName(out);
+        unknown->Release();
+        return regional != nullptr;
+    }
+    // The job building's name ellipsized to the width in the system font 0x68963c4c (RZ::WCM() SystemFont, its line height,
+    // DefaultText(0x5377be31) as the ellipsis, FormatForEllipsis(text, ellipsis, {0, 0, width, height}, false)).
+    void FitTextToWidth(cIGZString& text, int width) override {
+        gz::cIGZWinCtrlMgr* controls = gz::WinCtrlMgr();
+        gz::IWinFont* font = controls ? controls->SystemFont(0x68963c4c) : nullptr;
+        if (!font) return;
+        const cRZRect area{0, 0, width, font->GlyphHeight()};
+        cRZString ellipsis;
+        if (const cIGZString* e = controls->DefaultText(0x5377be31)) ellipsis.Copy(*e);
+        cRZString fitted(text);
+        font->FormatForEllipsis(fitted, ellipsis, area, false);
+        text.Copy(fitted);
     }
     bool GamePaused() override { cSC4Simulator* s = Simulator(); return s && s->IsAnyPaused(); }
     // --- UI / effects ---
@@ -456,16 +609,6 @@ public:
     static void RegisterAgentValues(cSC4MySimAgentSimulator& agent, sc4::cISC4GameDataRegistry* registry) {
         nsISC4GameDataRegistry::AddValue<cSC4MySimAgentSimulator>(reinterpret_cast<void*>(&GetSimCommand), "get_sim", &GetSimCommand, &agent, 0, &agent, registry);
         nsISC4GameDataRegistry::AddValue<cSC4MySimAgentSimulator>(reinterpret_cast<void*>(&GetSimCountCommand), "get_count", &GetSimCountCommand, &agent, 0, &agent, registry);
-    }
-
-private:
-    // GetLocalSchoolGrade / GetLocalHospitalGrade (spResidentialSim 0x178 / 0x188 school / hospital lists, then the grade of
-    // the nearest one of the building type through vslots 0xd0 / 0xd8): the residential simulator's per-building grade query
-    // is not exposed natively yet.
-    bool LocalGrade(bool, std::uint32_t, float, float, int& grade) {
-        SC4_UNWIRED("IMySimHost::GetLocalSchoolGrade / GetLocalHospitalGrade (residential vslots 0x178 / 0x188 -> 0xd0 / 0xd8)");
-        grade = 0;
-        return false;
     }
 };
 
@@ -587,6 +730,47 @@ void NativeRegisterMySimAgentGameData(sc4::cSC4MySimAgentSimulator& agent) {
     MySimHost::RegisterAgentValues(agent, registry);
 }
 
+// The opinion fields cSC4MySim::UpdateVariables writes into the sim's script table, as the scripts read them.
+static void PrintOpinionFields(cSC4MySim& sim, int slot) {
+    static const char* const kNumbers[] = {
+        "eq", "hq", "delta_eq", "delta_hq", "le", "home_condition", "home_has_road", "home_has_power", "home_has_water",
+        "local_crime", "home_police_coverage", "home_fire_coverage", "local_air_pollution", "local_water_pollution",
+        "local_garbage", "local_radiation", "last_player_trip_day", "desirability", "home_occupant_wealth",
+        "local_police_funding", "local_fire_funding", "local_traffic_congestion", "last_commute_time", "employed",
+        "unemployed_days", "job_is_neighbor", "job_condition", "job_has_power", "job_has_water", "trip_in_transit",
+        "trip_at_location"};
+    static const char* const kTexts[] = {"home_building", "job_building", "job_title", "job_city"};
+    cSC4AdvisorSystem* system = cSC4AdvisorSystem::Instance();
+    cISCLua* lua = system ? system->GetScriptingContext() : nullptr;
+    if (!lua || sim.LuaTableRef() < 1) { std::printf("mysims: slot %d opinions: no table\n", slot); return; }
+    const int top = lua->GetTop();
+    lua->GetRef(sim.LuaTableRef());
+    std::string line;
+    char buffer[96];
+    int missing = 0;
+    for (const char* key : kNumbers) {
+        lua->PushString(key);
+        lua->GetTable(-2);
+        if (lua->IsNumber(-1)) std::snprintf(buffer, sizeof(buffer), " %s=%g", key, lua->ToNumber(-1));
+        else { std::snprintf(buffer, sizeof(buffer), " %s=nil", key); ++missing; }
+        line += buffer;
+        lua->Pop(1);
+    }
+    for (const char* key : kTexts) {
+        lua->PushString(key);
+        lua->GetTable(-2);
+        auto* text = lua->IsUserData(-1) ? static_cast<cIGZString*>(lua->ToUserTag(-1)) : nullptr;
+        line += " ";
+        line += key;
+        line += "=\"";
+        line += text ? text->ToChar() : "<nil>";
+        line += "\"";
+        lua->Pop(1);
+    }
+    lua->SetTop(top);
+    std::printf("mysims: slot %d opinions (%d nil):%s\n", slot, missing, line.c_str());
+}
+
 // Kit command `mysims`: the agent simulator's sims and their state (read only).
 void NativeMySimReport() {
     cSC4MySimAgentSimulator* agent = Agent();
@@ -612,6 +796,7 @@ void NativeMySimReport() {
                     home ? home->GetExemplarName().Data() : "-", hx, hz, job ? job->GetExemplarName().Data() : "-",
                     xyz[0], xyz[1], xyz[2], sim->Retired() ? 1 : 0, dispatch ? "yes" : "no", dispatch ? dispatch->GetState() : 0,
                     dispatch ? static_cast<cSC4MySimDispatch*>(dispatch)->Flags() : 0u);
+        if (sim->IsActive()) PrintOpinionFields(*sim, i);
     }
     std::printf("mysims: %d active of %d\n", active, kMySimAgentSlots);
 }

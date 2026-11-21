@@ -31,6 +31,13 @@ void SetTableString(cISCLua* lua, const char* key, cIGZString* value) {
     lua->SetTable(-3);                                               // 0x170
 }
 
+// SetTableNumber(cISCLua*, char const*, long) (i386): the key, the integer as a Lua number, SetTable(-3) on the table on top.
+void SetTableNumber(cISCLua* lua, const char* key, long value) {
+    lua->PushString(key);                                            // 0x108
+    lua->PushNumber(static_cast<double>(value));                     // 0xf8
+    lua->SetTable(-3);                                               // 0x170
+}
+
 // 0x1007a5be9 SetTableBuilding(cISCLua*, char const*, cISC4BuildingOccupant*).
 void SetTableBuilding(cISCLua* lua, const char* key, cISC4BuildingOccupant* building) {
     lua->PushString(key);                                            // 0x108
@@ -883,14 +890,137 @@ bool cSC4MySim::is_pylon_location(const MySimLocation& location) {
 // UpdateQuickVariables, 0x1007a5d5e UpdateLocalBuildings, 0x1007a6160 UpdateJobTitle)
 // ---------------------------------------------------------------------------------------------------------------
 
-// PARTIAL: the original refreshes ~40 variables from the power, water, fire, police, crime, pollution, residential,
-// building development and traffic simulators (home_has_power, local_crime, ...), which are not recovered under
-// src/ yet. The port keeps the UpdateQuickVariables() call and the Lua guard; the per-simulator values are missing.
-// see the ledger PARTIAL entry for 0x10079fcb2.
+// 0x10079fcb2 UpdateVariables() (i386 0x005481e6): the script table's opinion fields. With a residence: the residential
+// EQ / HQ (kept when the new value is not positive), life expectancy, the home's condition, name, road access, power and
+// water, the crime, police and fire coverage and the four pollution maps around it, the desirability of the sim's wealth,
+// the lot's occupant wealth, the local building distances, the funding of the closest police and fire station, and the
+// highest congestion on the ring of cells around the lot. Then the job fields, with the job building's name fitted to
+// 200 pixels of the system font.
 void cSC4MySim::UpdateVariables() {
     UpdateQuickVariables();
-    if (!lua_ || luaTableRef_ < 1) return;
-    // The remaining fields need the simulators listed above; nothing is written after the guard.
+    if (luaTableRef_ == 0) CreateLuaTable();
+    cISCLua* lua = lua_.get();
+    IMySimHost* host = Host();
+    if (!lua || luaTableRef_ < 1 || !host) return;
+    lua->GetRef(luaTableRef_);                                               // 0xac
+    if (residence_) {
+        std::int32_t rect[4] = {0, 0, 0, 0};                                 // x0, z0, x1, z1
+        if (lot_) lot_->GetBoundingRect(rect);                               // lot 0x38
+        const float eq = host->ResidentialEducationQuotient(residenceCellX_, residenceCellZ_, wealth_);   // 0x94
+        if (0.0f < eq) eq_ = eq;
+        SetTableNumber(lua, "eq", static_cast<int>(eq_));
+        const float hq = host->ResidentialHealthQuotient(residenceCellX_, residenceCellZ_, wealth_);      // 0x98
+        if (0.0f < hq) hq_ = hq;
+        SetTableNumber(lua, "hq", static_cast<int>(hq_));
+        SetTableNumber(lua, "delta_eq", static_cast<int>(deltaEq_));
+        SetTableNumber(lua, "delta_hq", static_cast<int>(deltaHq_));
+        SetTableNumber(lua, "le", host->ResidentialLifeExpectancy(residenceCellX_, residenceCellZ_) & 0xff);
+        SetTableNumber(lua, "home_condition", host->BuildingCondition(residence_.get()));
+        if (!homeBuildingText_) {
+            homeBuildingText_ = new cRZString();
+            SetTableString(lua, "home_building", homeBuildingText_.get());
+        }
+        residence_->GetName(*homeBuildingText_);                             // building 0x4c
+        SetTableNumber(lua, "home_has_road", lot_ && lot_->HasRoadAccess() ? 1 : 0);   // lot 0x70
+        cISC4Occupant* home = residence_->AsOccupant();
+        SetTableNumber(lua, "home_has_power", host->OccupantPowered(home) ? 1 : 0);
+        SetTableNumber(lua, "home_has_water", host->BuildingWatered(home) ? 1 : 0);
+        SetTableNumber(lua, "local_crime", host->CrimeAtCell(residenceCellX_, residenceCellZ_) & 0xff);
+        const int width = rect[2] - rect[0] + 1, height = rect[3] - rect[1] + 1;
+        SetTableNumber(lua, "home_police_coverage", host->ProtectionCoverage(true, rect[0], rect[1], width, height) & 0xff);
+        SetTableNumber(lua, "home_fire_coverage", host->ProtectionCoverage(false, rect[0], rect[1], width, height) & 0xff);
+        static const char* const kPollution[4] = {"local_air_pollution", "local_water_pollution", "local_garbage",
+                                                  "local_radiation"};
+        for (int type = 0; type < 4; ++type) {
+            SetTableNumber(lua, kPollution[type],
+                           static_cast<std::int16_t>(host->PollutionAtCell(type, residenceCellX_, residenceCellZ_)));
+        }
+        SetTableNumber(lua, "last_player_trip_day", lastPlayerTripDay_);
+        // The residential developer of the sim's wealth: 0x1010 / 0x1020 / 0x1030; no field for any other wealth.
+        if (wealth_ >= 1 && wealth_ <= 3) {
+            int desirability = 0;
+            if (host->DesirabilityAtCell(0x1000u + 0x10u * static_cast<std::uint32_t>(wealth_), residenceCellX_,
+                                         residenceCellZ_, desirability)) {
+                SetTableNumber(lua, "desirability", static_cast<std::int16_t>(desirability));
+            }
+        }
+        SetTableNumber(lua, "home_occupant_wealth", lot_ ? lot_->GetOccupantWealth() : 0);   // lot 0xa4
+        UpdateLocalBuildings();
+        // The closest station whose funding answers sets the fraction (kSC4PercentageZero without one), in percent.
+        static const char* const kFunding[2] = {"local_police_funding", "local_fire_funding"};
+        for (int police = 1; police >= 0; --police) {
+            std::vector<IMySimHost::Station> stations;
+            host->ProtectionStations(police != 0, stations);
+            float funding = 0.0f;
+            std::uint32_t best = 0xffffffffu;
+            for (const IMySimHost::Station& station : stations) {
+                const std::uint32_t distance = DistanceToPosition(station.position);
+                if (distance < best && station.funded) {
+                    best = distance;
+                    funding = station.funding;
+                }
+            }
+            SetTableNumber(lua, kFunding[police ? 0 : 1], static_cast<int>(100.0f * funding));
+        }
+        // The ring one cell outside the lot, clamped to the city (both upper bounds use the X cell count, as the original).
+        const int last = host->CityCellsX() - 1;
+        const int x0 = std::max(rect[0] - 1, 0), z0 = std::max(rect[1] - 1, 0);
+        const int x1 = std::min(rect[2] + 1, last), z1 = std::min(rect[3] + 1, last);
+        int congestion = 0;
+        for (int x = x0; x <= x1; ++x) {
+            congestion = std::max(congestion, host->TrafficCongestion(x, z1) & 0xff);
+            congestion = std::max(congestion, host->TrafficCongestion(x, z0) & 0xff);
+        }
+        for (int z = z0 + 1; z < z1; ++z) {
+            congestion = std::max(congestion, host->TrafficCongestion(x0, z) & 0xff);
+            congestion = std::max(congestion, host->TrafficCongestion(x1, z) & 0xff);
+        }
+        SetTableNumber(lua, "local_traffic_congestion", congestion);
+    }
+    if (!jobTitleText_) {
+        jobTitleText_ = new cRZString();
+        SetTableString(lua, "job_title", jobTitleText_.get());
+    }
+    if (!jobBuildingText_) {
+        jobBuildingText_ = new cRZString();
+        SetTableString(lua, "job_building", jobBuildingText_.get());
+    }
+    if (!jobCityText_) {
+        jobCityText_ = new cRZString();
+        SetTableString(lua, "job_city", jobCityText_.get());
+    }
+    SetTableNumber(lua, "last_commute_time", lastCommuteTime_);
+    if (job_ || neighborJob_) {
+        SetTableNumber(lua, "employed", 1);
+        SetTableNumber(lua, "unemployed_days", 0);
+        UpdateJobTitle();
+    }
+    if (!job_) {
+        if (!neighborJob_) {
+            SetTableNumber(lua, "employed", 0);
+            SetTableNumber(lua, "unemployed_days", unemployedDays_);
+        } else {
+            SetTableNumber(lua, "job_is_neighbor", 1);
+            SetTableNumber(lua, "job_condition", 0);
+            SetTableNumber(lua, "job_has_power", 1);
+            SetTableNumber(lua, "job_has_water", 1);
+            cRZString text;
+            host->LoadString(kJobTitleGroup, 0x6a662504u, text);             // the "neighbor city" job building
+            jobBuildingText_->Copy(text);
+            host->NeighborJobCityName(static_cast<cIGZUnknown*>(neighborJob_.get()), *jobCityText_);
+        }
+    } else {
+        const BuildingProfile& profile = job_->GetBuildingProfile();         // building 0x2c
+        SetTableNumber(lua, "job_is_neighbor", 0);
+        SetTableNumber(lua, "job_condition", host->BuildingCondition(job_.get()));
+        cISC4Occupant* work = job_->AsOccupant();
+        SetTableNumber(lua, "job_has_power", host->OccupantPowered(work) ? 1 : 0);
+        // purpose 5 always has water
+        SetTableNumber(lua, "job_has_water", profile.purpose == 5 ? 1 : (host->BuildingWatered(work) ? 1 : 0));
+        job_->GetName(*jobBuildingText_);
+    }
+    host->FitTextToWidth(*jobBuildingText_, 200);
+    lua->Pop(1);                                                             // 0x2c
 }
 
 // PARTIAL: the original also writes the transit-switch / travel-type block (trip_at_transit_switch, trip_idle,
@@ -972,13 +1102,9 @@ void cSC4MySim::UpdateLocalBuildings() {
     host->BuildingsNearResidence(residenceCellX_, residenceCellZ_, 0x14, buildings);
     for (cISC4BuildingOccupant* building : buildings) {
         if (!building) continue;
-        cISC4Occupant* occupant = building->AsOccupant();
         float position[3] = {0.0f, 0.0f, 0.0f};
-        occupant->GetPosition(position);
-        const float dx = posX_ - position[0];
-        const float dz = posZ_ - position[2];
-        const std::uint32_t distance = static_cast<std::uint32_t>(
-            static_cast<long>(std::sqrt(dx * dx + dz * dz)));
+        building->AsOccupant()->GetPosition(position);
+        const std::uint32_t distance = DistanceToPosition(position);
         std::vector<std::uint32_t> groups;
         host->BuildingOccupantGroups(building->GetBuildingType(), groups);
         for (std::uint32_t group : groups) {
@@ -986,6 +1112,17 @@ void cSC4MySim::UpdateLocalBuildings() {
             if (value == 0 || distance < value) value = distance;
         }
     }
+}
+
+// DistanceToOccupant (i386 0x0054147a) from the occupant's position: the ground distance to the sim, clamped at 0 and
+// converted to an unsigned integer that saturates at 0xffffffff.
+std::uint32_t cSC4MySim::DistanceToPosition(const float* xyz) const {
+    const float dx = posX_ - xyz[0];
+    const float dz = posZ_ - xyz[2];
+    float distance = std::sqrt(dx * dx + dz * dz);
+    if (distance <= 0.0f) distance = 0.0f;
+    if (distance >= 4294967296.0f) return 0xffffffffu;
+    return static_cast<std::uint32_t>(distance);
 }
 
 // 0x1007a6160 UpdateJobTitle(): refreshes the cached job title text (+0x258), if one exists. Nothing in the recovered
@@ -1675,43 +1812,56 @@ int cSC4MySim::DistanceToClosest(std::uint32_t occupantGroup) {
     return static_cast<int>(it->second);
 }
 
+// i386 0x00547e30: the closest of the building development simulator's special buildings of the building type.
 std::uint32_t cSC4MySim::DistanceToClosestSpecial(std::uint32_t buildingType) {
     IMySimHost* host = Host();
     if (!host) return 0xffffffffu;
     std::vector<cISC4Occupant*> occupants;
-    host->CityOccupants(occupants);                                      // spCity 0x1a8 -> 0x160
+    host->SpecialBuildings(occupants);                                   // spCity 0x1a8 -> 0x160
     std::uint32_t best = 0xffffffffu;
     for (cISC4Occupant* occupant : occupants) {
         if (!occupant) continue;
         cISC4BuildingOccupant* building = nullptr;
-        if (!occupant->QueryInterface(kGZIID_cISC4BuildingOccupant, reinterpret_cast<void**>(&building)) || !building) {
-            continue;
+        if (occupant->QueryInterface(kGZIID_cISC4BuildingOccupant, reinterpret_cast<void**>(&building)) && building) {
+            if (building->GetBuildingType() == buildingType) {
+                float position[3] = {0.0f, 0.0f, 0.0f};
+                occupant->GetPosition(position);
+                const std::uint32_t distance = DistanceToPosition(position);
+                if (distance < best) best = distance;
+            }
         }
-        if (building->GetBuildingType() == buildingType) {
-            float position[3] = {0.0f, 0.0f, 0.0f};
-            occupant->GetPosition(position);
-            const float dx = posX_ - position[0];
-            const float dz = posZ_ - position[2];
-            const std::uint32_t distance = static_cast<std::uint32_t>(
-                static_cast<long>(std::sqrt(dx * dx + dz * dz)));
-            if (distance < best) best = distance;
-        }
-        building->Release();
+        if (building) building->Release();
     }
     return best;
 }
 
-int cSC4MySim::LocalSchoolGrade(std::uint32_t buildingType) {
-    int grade = 0;                                                       // kSC4PercentageZero
-    if (Host()) Host()->GetLocalSchoolGrade(buildingType, posX_, posZ_, grade);
+// i386 0x00543a48 / 0x0054392a: the grade of the closest school / hospital of the occupant group (the residential
+// simulator's buildings, then its query data of the closest), kSC4PercentageZero without one.
+float cSC4MySim::LocalServiceGrade(bool hospital, std::uint32_t occupantGroup) {
+    IMySimHost* host = Host();
+    float grade = 0.0f;
+    if (!host) return grade;
+    std::vector<cISC4Occupant*> buildings;
+    host->ResidentialServiceBuildings(hospital, buildings);
+    std::uint32_t best = 0xffffffffu;
+    for (cISC4Occupant* occupant : buildings) {
+        if (!occupant || !occupant->IsOccupantGroup(occupantGroup)) continue;   // occupant 0x58
+        float position[3] = {0.0f, 0.0f, 0.0f};
+        occupant->GetPosition(position);
+        const std::uint32_t distance = DistanceToPosition(position);
+        if (distance < best) {
+            float queried = 0.0f;
+            host->ResidentialServiceGrade(hospital, occupant, queried);
+            grade = queried;
+            best = distance;
+        }
+    }
     return grade;
 }
 
-int cSC4MySim::LocalHospitalGrade(std::uint32_t buildingType) {
-    int grade = 0;
-    if (Host()) Host()->GetLocalHospitalGrade(buildingType, posX_, posZ_, grade);
-    return grade;
-}
+float cSC4MySim::LocalSchoolGrade(std::uint32_t occupantGroup) { return LocalServiceGrade(false, occupantGroup); }
+
+float cSC4MySim::LocalHospitalGrade(std::uint32_t occupantGroup) { return LocalServiceGrade(true, occupantGroup); }
 
 
 // ---------------------------------------------------------------------------------------------------------------
