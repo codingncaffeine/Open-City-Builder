@@ -9,6 +9,7 @@
 #include "sc4/PackedRenderState.h"
 #include "sc4/PowerLineGeometry.h"
 #include "sc4/SCPropertyHelp.h"
+#include "sc4/ViewUtilities.h"
 
 #pragma STDC FP_CONTRACT OFF
 
@@ -655,6 +656,35 @@ void cSC4PowerPoleOccupant::DrawConnection(cSC4PowerPoleOccupant* pole, bool byC
 
 // 0x100320544: every connected pole forgets this one, and this one drops its connections (the entries stay).
 std::int64_t cSC4PowerPoleOccupant::GetCostOfDemolition() const { return snCostOfDemolition; }
+
+// i386 0x0025571c: the pole's model bounds at its position, widened by the foundation's two wall vertex lists; a ray that
+// meets the box nearer than the pick so far takes it. Without a model nothing is picked.
+bool cSC4PowerPoleOccupant::Pick(cSC4PickContext* context) {
+    if (!context || !model_) return false;
+    cS3DBoundingBox bounds;
+    model_->GetBounds(bounds);
+    float boxMin[3], boxMax[3];
+    for (int i = 0; i < 3; ++i) {
+        boxMin[i] = bounds.min[i] + position_[i];
+        boxMax[i] = bounds.max[i] + position_[i];
+    }
+    for (const std::vector<UndergroundVertex>& wall : walls_)
+        for (const UndergroundVertex& v : wall) {
+            const float p[3] = {v.x, v.y, v.z};
+            for (int i = 0; i < 3; ++i) {
+                if (p[i] < boxMin[i]) boxMin[i] = p[i];
+                if (boxMax[i] < p[i]) boxMax[i] = p[i];
+            }
+        }
+    float hit[3] = {0.0f, 0.0f, 0.0f};
+    if (!SC4GeometryUtilities::RayIntersectsBoundingBox(&context->origin.x, &context->direction.x, boxMin, boxMax, hit)) return false;
+    const float distance = SC4GeometryUtilities::LengthOfLine(&context->origin.x, hit);
+    if (distance < context->maxDistance) {
+        context->maxDistance = distance;
+        return true;
+    }
+    return false;
+}
 
 bool cSC4PowerPoleOccupant::SavedPointsMatchTable() const {
     if (!connectionPoints_) return false;

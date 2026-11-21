@@ -332,6 +332,14 @@ void NativeLayPowerLine(int x1, int z1, int x2, int z2) {
 
 // Kit verb `poles X0 Z0 X1 Z1`: every pole and wire occupant of the cell rectangle (cell, connections, which end draws the
 // wire, model, wire occupants) and the power simulator's grid for the cells (wired / powered).
+// A ray straight down onto the pole (offset metres along x): what the query tool's pick asks the pole.
+static bool PickStraightDown(cSC4PowerPoleOccupant* pole, const float* position, float offset) {
+    cSC4PickContext context;
+    context.origin = cS3DVector3{position[0] + offset, position[1] + 500.0f, position[2]};
+    context.direction = cS3DVector3{0.0f, -1.0f, 0.0f};
+    return pole->Pick(&context);
+}
+
 void NativePowerPoleReport(int x0, int z0, int x1, int z1) {
     cISC4OccupantManager* occupants = Occupants();
     if (!occupants) {
@@ -356,10 +364,11 @@ void NativePowerPoleReport(int x0, int z0, int x1, int z1) {
                 }
                 cGZPersistResourceKey key{0, 0, 0};
                 if (cISCResExemplar* exemplar = pole->GetDefaultExemplar()) exemplar->GetKey(key);
-                std::printf("pole %d,%d at %.1f,%.1f,%.1f: mask 0x%x exemplar %08x connections %d (draws %d, curves %d, wire occupants %d) model %s preview %d distressed %d zap %d points %s\n",
+                std::printf("pole %d,%d at %.1f,%.1f,%.1f: mask 0x%x exemplar %08x connections %d (draws %d, curves %d, wire occupants %d) model %s preview %d distressed %d zap %d points %s pick %d/%d\n",
                             x, z, p[0], p[1], p[2], pole->Style(), key.instance, pole->GetNumberOfConnections(), drawn, curves, lines,
                             pole->HasModel() ? "yes" : "no", pole->IsPreview() ? 1 : 0, pole->GetDistressed() ? 1 : 0,
-                            pole->HasDistressEffect() ? 1 : 0, pole->SavedPointsMatchTable() ? "as-table" : "differ");
+                            pole->HasDistressEffect() ? 1 : 0, pole->SavedPointsMatchTable() ? "as-table" : "differ", PickStraightDown(pole, p, 0.0f) ? 1 : 0,
+                            PickStraightDown(pole, p, 40.0f) ? 1 : 0);
                 ++poles;
                 if (pole->GetDistressed()) ++distressed;
             } else if (auto* line = dynamic_cast<cSC4PowerLineOccupant*>(occupant)) {

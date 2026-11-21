@@ -106,6 +106,7 @@ public:
     void GetTransform(cS3DTransform& out) override { out = transform_; }              // 0x1003222d8
     void SetTransform(const cS3DTransform& transform) override { transform_ = transform; }   // 0x10032236e
     int Draw(SC4DrawContext* context, bool highlight) override;     // 0x1003211ac
+    bool Pick(cSC4PickContext* context) override;                   // i386 0x0025571c
     void GetSortValue(std::uint32_t& out) const override { out = kPowerPoleSortValue; }          // 0x100323b48
     void SetDefaultExemplar(cISCResExemplar* exemplar) override;    // 0x100321e42
     bool DoMessage(cIGZMessage2* message) override;                 // 0x100323dbe
