@@ -541,10 +541,10 @@ __attribute__((weak)) void* GZCOM_CreatecSC4SignpostOccupant() { SC4_UNWIRED("GZ
 __attribute__((weak)) void* GZCOM_CreatecSC4TextDecalOccupant() { SC4_UNWIRED("GZCOM_CreatecSC4TextDecalOccupant"); return nullptr; }
 // original allocates 0x28 bytes; the class is not recovered yet
 void* GZCOM_CreatecSC4NetworkLayoutCustomView() { SC4_UNWIRED("GZCOM_CreatecSC4NetworkLayoutCustomView"); return nullptr; }
-// original allocates 0x58 bytes; the class is not recovered yet
-void* GZCOM_CreatecSC4FirePlaneDispatchSource() { SC4_UNWIRED("GZCOM_CreatecSC4FirePlaneDispatchSource"); return nullptr; }
-// original allocates 0x58 bytes; the class is not recovered yet
-void* GZCOM_CreatecSC4PoliceHelicopterDispatchSource() { SC4_UNWIRED("GZCOM_CreatecSC4PoliceHelicopterDispatchSource"); return nullptr; }
+// weak fallback: gzcom_creators/cSC4FirePlaneDispatchSource.cpp provides the real constructor-backed creator when linked
+__attribute__((weak)) void* GZCOM_CreatecSC4FirePlaneDispatchSource() { SC4_UNWIRED("GZCOM_CreatecSC4FirePlaneDispatchSource"); return nullptr; }
+// weak fallback: gzcom_creators/cSC4PoliceHelicopterDispatchSource.cpp provides the real constructor-backed creator when linked
+__attribute__((weak)) void* GZCOM_CreatecSC4PoliceHelicopterDispatchSource() { SC4_UNWIRED("GZCOM_CreatecSC4PoliceHelicopterDispatchSource"); return nullptr; }
 // original allocates 0xa8 bytes; the class is not recovered yet
 __attribute__((weak)) void* GZCOM_CreatecSTESurfaceWater() { SC4_UNWIRED("GZCOM_CreatecSTESurfaceWater"); return nullptr; }
 // weak fallback: GZCOMCreators*.cpp provide the real constructor-backed creator when linked

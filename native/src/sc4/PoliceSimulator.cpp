@@ -2,10 +2,13 @@
 #include "sc4/PoliceSimulator.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cmath>
 
 #include "gz/cIGZIStream.h"
 #include "gz/cIGZOStream.h"
+#include "sc4/AircraftDispatchSource.h"
 #include "sc4/DBSegment.h"
 
 namespace sc4 {
@@ -21,6 +24,8 @@ typename List::iterator FindIn(List& list, T* value) { return std::find(list.beg
 cSC4PoliceSimulator::cSC4PoliceSimulator(IPoliceHost* host) : host_(host), protection_(this, 2, 40) {
     ReadSimulatorTunableValues(nullptr);
 }
+
+cSC4PoliceSimulator::~cSC4PoliceSimulator() = default;
 
 // ---- identity -------------------------------------------------------------------------------------------
 
@@ -51,8 +56,9 @@ constexpr std::uint32_t kPoliceTuningInstance = 0x28dfcf89;
 }  // namespace
 
 // ProtectionInit: the coverage grids (police's instance ids), the sweep, the daily and monthly agents, the notifications.
-// The simulator registers as the police cars' dispatch source through the host. PARTIAL: the police department's budget lines,
-// the crime simulator reference and the helicopter dispatch source are not set up.
+// The simulator registers as the police cars' dispatch source through the host, then makes its helicopter dispatch source
+// (unless a city file named one) and initializes it. PARTIAL: the police department's budget lines and the crime simulator
+// reference are not set up.
 bool cSC4PoliceSimulator::Init() {
     if (running_) return true;
     running_ = true;
@@ -65,12 +71,18 @@ bool cSC4PoliceSimulator::Init() {
     host_->AddAgent(this, 6, kName, 2);
     for (std::uint32_t message : kPoliceNotifications) host_->AddNotification(this, message);
     host_->RegisterDispatchSource(true);
+    if (!helicopterSource_) helicopterSource_ = new cSC4PoliceHelicopterDispatchSource();
+    if (helicopterSource_) helicopterSource_->Init();
     return true;
 }
 
 bool cSC4PoliceSimulator::Shutdown() {
     if (!running_) return true;
     running_ = false;
+    if (helicopterSource_) {   // @ 0x000766e2: the helicopter source shuts down and is let go first
+        helicopterSource_->Shutdown();
+        helicopterSource_ = nullptr;
+    }
     host_->RemoveAgent(this);
     for (std::uint32_t message : kPoliceNotifications) host_->RemoveNotification(this, message);
     host_->RegisterDispatchSource(false);
@@ -181,7 +193,8 @@ bool cSC4PoliceSimulator::Write(cIGZOStream& stream) const {
     stream.SetSint32(unjailedAdded_);                                     // +0x164
     stream.SetSint32(crimesPrev_);                                        // +0x158
     stream.SetSint32(crimesThisMonth_);                                   // +0x160
-    fileDispatch_.Write(stream);                                          // +0x118 dispatch helper (unrecovered)
+    // +0x118 the helicopter dispatch source (its serializable view; null before Init).
+    SC4WriteGZSerializable(stream, helicopterSource_ ? static_cast<const cIGZSerializable*>(helicopterSource_.get()) : nullptr);
     return !stream.GetError();
 }
 
@@ -229,8 +242,17 @@ bool cSC4PoliceSimulator::Read(cIGZIStream& stream) {
     stream.GetSint32(unjailedAdded_);                                     // +0x164
     stream.GetSint32(crimesPrev_);                                        // +0x158
     stream.GetSint32(crimesThisMonth_);                                   // +0x160
-    fileDispatch_ = cRetainedReference();
-    if (version >= 8) fileDispatch_.Read(stream);                         // +0x118 dispatch helper
+    if (version >= 8) {                                                   // +0x118: the file's helicopter source replaces the held one
+        helicopterSource_ = nullptr;
+        void* raw = nullptr;
+        SC4ReadGZSerializable(stream, kGZIID_cISC4DispatchSource, &raw, false);
+        if (auto* source = static_cast<IDispatchSource*>(raw)) {
+            helicopterSource_ = dynamic_cast<cSC4PoliceHelicopterDispatchSource*>(source);
+            source->Release();   // the read's reference (helicopterSource_ holds its own)
+        }
+    }
+    if (std::getenv("SC4_DEBUG"))
+        std::fprintf(stderr, "police: record version %u, helicopter source from the file: %s\n", version, helicopterSource_ ? "yes" : "no");
     return !stream.GetError();
 }
 

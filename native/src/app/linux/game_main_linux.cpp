@@ -1299,7 +1299,7 @@ int RunScenario(const std::string& path) {
                 o->Release();
             }
             if (!sent) std::printf("dispatchfigure %d: no such figure (%d)\n", n, seen);
-        } else if (command == "dispatch") {   // dispatch TYPE X Z: send a unit (0 police car, 1 fire engine) to a world position
+        } else if (command == "dispatch") {   // dispatch TYPE X Z: send a unit (0 police car, 1 fire engine, 5 fire plane, 6 police helicopter) to a world position
             std::uint32_t type = 0;
             float x = 0.0f, z = 0.0f;
             words >> type >> x >> z;

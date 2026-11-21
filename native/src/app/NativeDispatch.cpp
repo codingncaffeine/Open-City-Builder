@@ -13,8 +13,10 @@
 #include "app/NativeAudio.h"
 #include "app/NativeAutomataViews.h"
 #include "app/NativeCity.h"
+#include "gz/GZCOM.h"
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/AutomataManager.h"
+#include "sc4/AircraftDispatchSource.h"
 #include "sc4/AircraftManager.h"
 #include "sc4/Automaton.h"
 #include "sc4/DBSegment.h"
@@ -268,6 +270,31 @@ private:
     std::uint32_t type_;
 };
 ProtectionSource g_fireSource(kDispatchTypeFire), g_policeSource(kDispatchTypePolice);
+
+// ---- the aircraft dispatch sources' services (SL::spCity, spMS2, spDispatchManager, the occupant manager's list release) -----
+class AircraftSourceHost final : public IAircraftDispatchSourceHost {
+public:
+    cIGZUnknown* City() override { cSC4City* city = HostCity(); return city ? static_cast<cISC4City*>(city) : nullptr; }
+    cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
+    cISC4DispatchManager* DispatchManager() override { return Manager(); }
+    void ReleaseOccupantList(std::list<cISC4Occupant*>& occupants) override {
+        for (cISC4Occupant* occupant : occupants) if (occupant) occupant->Release();
+        occupants.clear();
+    }
+} g_aircraftSourceHost;
+
+// The fire plane source (type 5) the fire protection simulator holds, the helicopter source (type 6) the police simulator holds.
+cSC4AircraftDispatchSource* AircraftSource(std::uint32_t type) {
+    if (type == kDispatchTypeFirePlane) {
+        cSC4FireProtectionSimulator* fire = FireSim();
+        return fire ? fire->PlaneDispatchSource() : nullptr;
+    }
+    if (type == kDispatchTypePoliceHelicopter) {
+        cSC4PoliceSimulator* police = PoliceSim();
+        return police ? police->HelicopterDispatchSource() : nullptr;
+    }
+    return nullptr;
+}
 
 // ---- the vehicle manager as the dispatch manager's automata manager ------------------------------------------------------
 class VehicleDispatch final : public IAutomataDispatchManager {
@@ -666,30 +693,35 @@ void NativeRegisterDispatchSource(std::uint32_t type, bool add) {
 std::uint32_t NativeDispatchAt(std::uint32_t type, float x, float z) {
     cSC4DispatchManager* manager = Manager();
     if (!manager) return 0;
-    if (Debug()) {
-        ProtectionSource& source = type == kDispatchTypeFire ? g_fireSource : g_policeSource;
+    IDispatchSource* registered = manager->GetDispatchSource(type);
+    if (Debug() && registered) {
         std::list<cISC4Occupant*> stations;
-        source.GetStations(stations);
+        registered->GetStations(stations);
         for (cISC4Occupant* station : stations) {
             float p[3] = {0, 0, 0};
             station->GetPosition(p);
             std::uint32_t mask = 0, base = 0, count = 0;
-            const bool ok = source.GetDispatchesAtStation(station, &mask, &base, &count);
+            const bool ok = registered->GetDispatchesAtStation(station, &mask, &base, &count);
             std::fprintf(stderr, "dispatch: station at (%.0f, %.0f): units %d mask 0x%x base %u count %u\n", p[0], p[2], ok ? 1 : 0, mask, base, count);
         }
         g_city.ReleaseStationList(stations);
+    }
+    if (Debug() && (type == kDispatchTypeFire || type == kDispatchTypePolice)) {
         cSC4ProtectionSimulator* p = nullptr;
         if (type == kDispatchTypeFire) { if (auto* f = FireSim()) p = &f->Protection(); }
         else if (auto* police = PoliceSim()) p = &police->Protection();
-        std::fprintf(stderr, "dispatch: source registered %d, simulator %d, stations %zu, in the file %zu\n", manager->GetDispatchSource(type) ? 1 : 0,
+        std::fprintf(stderr, "dispatch: source registered %d, simulator %d, stations %zu, in the file %zu\n", registered ? 1 : 0,
                      p ? 1 : 0, p ? p->Stations().size() : 0, p ? p->FileStationCount() : 0);
+    } else if (Debug()) {
+        cSC4AircraftDispatchSource* aircraft = AircraftSource(type);
+        std::fprintf(stderr, "dispatch: source registered %d (the simulator's own %d), stations %zu\n", registered ? 1 : 0,
+                     aircraft && registered == static_cast<IDispatchSource*>(aircraft) ? 1 : 0, aircraft ? aircraft->Stations().size() : 0);
     }
     const bool can = manager->CanDispatch(static_cast<tDispatchType>(type), x, z);
-    if (Debug()) {
+    if (Debug() && registered) {
         cSTETerrain* t = Terrain();
         bool busy = false;
-        ProtectionSource& source = type == kDispatchTypeFire ? g_fireSource : g_policeSource;
-        const bool sourceCan = source.CanDispatch(x, z, &busy);
+        const bool sourceCan = registered->CanDispatch(x, z, &busy);
         std::fprintf(stderr, "dispatch: terrain %d altitude %.1f sea %.1f; source can %d busy %d\n", t ? 1 : 0, t ? t->GetAltitude(x, z) : 0.0f,
                      t ? t->GetSeaLevel() : 0.0f, sourceCan ? 1 : 0, busy ? 1 : 0);
     }
@@ -703,7 +735,7 @@ std::uint32_t NativeDispatchAt(std::uint32_t type, float x, float z) {
 void NativeDispatchReport() {
     cSC4DispatchManager* manager = Manager();
     if (!manager) return;
-    for (std::uint32_t type : {0u, 1u}) {
+    for (std::uint32_t type : {0u, 1u, 5u, 6u}) {
         for (std::uint32_t id : NativeDispatchIds(type)) {
             DispatchInfo info;
             if (!manager->GetDispatchInfo(id, info)) continue;
@@ -728,7 +760,69 @@ void NativeDispatchReport() {
                         type, id, info.callNumber, info.active ? 1 : 0, info.x, info.z, info.automaton ? 1 : 0, p[0], p[1], p[2], state, opacity, models, inView);
         }
     }
-    std::printf("dispatches: %d fire, %d police\n", NativeDispatchCount(1), NativeDispatchCount(0));
+    std::printf("dispatches: %d fire, %d police, %d fire plane, %d police helicopter\n", NativeDispatchCount(1), NativeDispatchCount(0),
+                NativeDispatchCount(5), NativeDispatchCount(6));
+    // The aircraft sources: the one the dispatch manager answers for the type against the simulator's own, and their stations.
+    for (std::uint32_t type : {5u, 6u}) {
+        cSC4AircraftDispatchSource* source = AircraftSource(type);
+        IDispatchSource* registered = manager->GetDispatchSource(type);
+        std::printf("dispatches: source type %u class %08x initialized %d registered %d (the simulator's %d) stations %zu next call %u can %d\n", type,
+                    source ? source->GetGZCLSID() : 0u, source && source->IsInitialized() ? 1 : 0, registered ? 1 : 0,
+                    source && registered == static_cast<IDispatchSource*>(source) ? 1 : 0, source ? source->Stations().size() : 0,
+                    source ? source->NextCallNumber() : 0u, manager->CanDispatch(static_cast<tDispatchType>(type), 0.0f, 0.0f) ? 1 : 0);
+        if (!source) continue;
+        for (cISC4Occupant* station : source->Stations()) {
+            float p[3] = {0, 0, 0};
+            station->GetPosition(p);
+            std::uint32_t mask = 0, base = 0, count = 0;
+            const bool ok = source->GetDispatchesAtStation(station, &mask, &base, &count);
+            std::printf("dispatches:   station at (%.0f, %.0f) units %d mask 0x%x base %u count %u\n", p[0], p[2], ok ? 1 : 0, mask, base, count);
+        }
+    }
+    // What the GZCOM creators of the two classes make (the serializer creates a saved source through them).
+    for (std::uint32_t classId : {kGZCLSID_cSC4FirePlaneDispatchSource, kGZCLSID_cSC4PoliceHelicopterDispatchSource}) {
+        const gzcom::ClassFactoryInfo* info = gzcom::FindClassFactory(classId);
+        auto* made = static_cast<cIGZUnknown*>(info && info->create ? info->create() : nullptr);
+        cIGZSerializable* serializable = nullptr;
+        if (made) {
+            made->AddRef();
+            void* view = nullptr;
+            if (made->QueryInterface(kGZIID_cIGZSerializable, &view)) serializable = static_cast<cIGZSerializable*>(view);
+        }
+        std::printf("dispatches: creator %s makes %s class %08x\n", info ? info->className : "(none)", made ? "an object of" : "nothing,",
+                    serializable ? serializable->GetGZCLSID() : 0u);
+        if (serializable) serializable->Release();
+        if (made) made->Release();
+    }
+    // The city's buildings that declare aircraft units (what makes a building a station of either source).
+    cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(CityComponent::OccupantManager) : nullptr;
+    void* raw = nullptr;
+    if (object && object->QueryInterface(kGZIID_cISC4OccupantManager, &raw) && raw) {
+        auto* occupants = static_cast<cISC4OccupantManager*>(raw);
+        const float lo[3] = {0.0f, -1.0e9f, 0.0f}, hi[3] = {city->SizeX(), 1.0e9f, city->SizeZ()};
+        OccupantList all;
+        int declared[2] = {0, 0};
+        if (occupants->GetOccupantsByBBox(all, lo, hi, static_cast<cISC4OccupantFilter*>(nullptr), 0xffffffffu)) {
+            for (cISC4Occupant* occupant : all) {
+                sc4::cISCPropertyHolder* holder = occupant ? occupant->AsPropertyHolder() : nullptr;
+                if (!holder) continue;
+                const std::uint32_t ids[2] = {kFirePlaneDispatchTraits.countProperty, kPoliceHelicopterDispatchTraits.countProperty};
+                for (int i = 0; i < 2; ++i) {
+                    std::int32_t units = 0;
+                    if (!cSCPropertyHelp::GetPropertyValue(holder, ids[i], units)) continue;
+                    ++declared[i];
+                    float p[3] = {0, 0, 0};
+                    occupant->GetPosition(p);
+                    std::printf("dispatches:   building type %08x property %08x = %d at (%.0f, %.0f)\n", occupant->GetType(), ids[i], units, p[0], p[2]);
+                }
+            }
+        }
+        const std::size_t total = all.size();
+        occupants->ReleaseOccupantList(all);
+        occupants->Release();
+        std::printf("dispatches: buildings with fire plane units %d, police helicopter units %d (of %zu occupants)\n", declared[0], declared[1], total);
+    }
 }
 
 bool NativeIsSituationTarget(cIGZUnknown* occupant);                                             // app/NativeAdvisors.cpp
@@ -746,6 +840,7 @@ public:
 }  // namespace
 
 void InstallNativeDispatchHost() {
+    SetAircraftDispatchSourceHost(&g_aircraftSourceHost);
     sc4::SetGetawayVanHost(&g_getawayVanHost);
     SetDispatchHost(&g_host);
     g_loadEmergencyHost = &g_emergency;

@@ -274,6 +274,7 @@ src/tools/city_probe_creators_lotconfig.cpp
 src/gz/GZCOM.cpp
 src/gz/GZCOMCreators7.cpp
 src/sc4/DispatchManager.cpp
+src/sc4/AircraftDispatchSource.cpp
 src/sc4/cSC424HourClock.cpp
 src/sc4/BuildingDevelopmentSimulator.cpp
 src/sc4/BuildingZoneFit.cpp
@@ -331,6 +332,8 @@ src/gz/gzcom_creators/cSC4CivicBuildingSimulator.cpp
 src/gz/gzcom_creators/cSC4ConstructionOccupant.cpp
 src/gz/gzcom_creators/cSC4DemandSimulator.cpp
 src/gz/gzcom_creators/cSC4DispatchManager.cpp
+src/gz/gzcom_creators/cSC4FirePlaneDispatchSource.cpp
+src/gz/gzcom_creators/cSC4PoliceHelicopterDispatchSource.cpp
 src/gz/gzcom_creators/cSC4EffectsManager.cpp
 src/gz/gzcom_creators/cSC4FireOccupant.cpp
 src/gz/gzcom_creators/cSC4GrowthDeveloper.cpp

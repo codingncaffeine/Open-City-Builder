@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <map>
 
+#include "sc4/AircraftDispatchSource.h"
 #include "sc4/PoliceSimulator.h"
 #include "sc4/SCProperty.h"
 
@@ -172,6 +173,13 @@ int main() {
         sim.SetPoliceRawValues(0x1122334455667788ull, 0x99);
         CHECK(sim.GetJailDepartmentBudget() == 0x1122334455667788ull && sim.GetPolicePowerGrid() == 0x99);
     }
+    // Init makes the helicopter dispatch source (class 0x0c0b06e8) and initializes it; Shutdown shuts it down and lets it go.
+    CHECK(sim.HelicopterDispatchSource() == nullptr);
+    sim.Init();
+    CHECK(sim.HelicopterDispatchSource() && sim.HelicopterDispatchSource()->IsInitialized() && sim.HelicopterDispatchSource()->GetGZCLSID() == 0x0c0b06e8);
+    CHECK(sim.HelicopterDispatchSource() && sim.HelicopterDispatchSource()->CanHandleDispatchType(6));
+    sim.Shutdown();
+    CHECK(sim.HelicopterDispatchSource() == nullptr);
     std::printf(failures ? "FAILED\n" : "sc4_policesimulator: all passed\n");
     return failures ? 1 : 0;
 }

@@ -34,6 +34,8 @@ class cIGZOStream;
 
 namespace sc4 {
 
+class cSC4PoliceHelicopterDispatchSource;   // sc4/AircraftDispatchSource.h (that header clashes with the render headers its users include)
+
 constexpr std::uint32_t kGZCLSID_cSC4PoliceSimulator = 0x6990c04f;
 constexpr std::uint32_t kGZIID_cISC4PoliceSimulator = 0x67659895;
 
@@ -124,6 +126,7 @@ class cSC4PoliceSimulator : public cISC4PoliceSimulator,
                             private IProtectionHost {
 public:
     explicit cSC4PoliceSimulator(IPoliceHost* host);
+    ~cSC4PoliceSimulator();   // releases the helicopter source (out of line: the source class is complete only there)
 
     bool QueryInterface(std::uint32_t iid, void** out) override;
     std::uint32_t AddRef() override { return ++refCount_; }
@@ -134,6 +137,7 @@ public:
     bool DoMessage(cIGZMessage2* message) override;
     bool Init();       // @ cSC4PoliceSimulator::Init (with cSC4ProtectionSimulator::ProtectionInit @ 0x0007d4a0)
     bool Shutdown();
+    cSC4PoliceHelicopterDispatchSource* HelicopterDispatchSource() const { return helicopterSource_.get(); }
 
     // tunables from the simulator exemplar {type 0x6534284a, group 0xe7e2c2db, instance 0x28dfcf89}; null = defaults
     void ReadSimulatorTunableValues(const cISCPropertyHolder* exemplar);
@@ -264,8 +268,9 @@ private:
     cSC4ProtectionSimulator protection_;
     cSC4ResponseCurve stationEfficiency_, jailEfficiency_, strikeChance_, jailbreakChance_;
     std::list<IPoliceOccupant*> jails_, fundedJails_, jailbreakBuildings_;
-    // a city file's references (power grid +0x128, the jails, dispatch helper +0x118): not resolved yet, kept as read
-    cRetainedReference filePowerGrid_, fileDispatch_;
+    // a city file's references (power grid +0x128, the jails): not resolved yet, kept as read
+    cRetainedReference filePowerGrid_;
+    cRZAutoRefCount<cSC4PoliceHelicopterDispatchSource> helicopterSource_;   // +0x118 (i386 +0xc0): made by Init, or the one a file named
     cRetainedReferences fileFundedJails_, fileJails_;
     int jailCapacity_ = 0, jailPopulation_ = 0, criminals_ = 0;
     int arrestsPrev_ = 0, crimesPrev_ = 0, arrestsThisMonth_ = 0, crimesThisMonth_ = 0, unjailedAdded_ = 0;

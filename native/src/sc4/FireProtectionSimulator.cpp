@@ -1,6 +1,10 @@
 #include "sc4/FireProtectionSimulator.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
+
+#include "sc4/AircraftDispatchSource.h"
 
 #include "gz/cIGZIStream.h"
 #include "gz/cIGZOStream.h"
@@ -15,6 +19,8 @@ inline IFireOccupant* Fire(IProtectionStation* station) { return static_cast<IFi
 cSC4FireProtectionSimulator::cSC4FireProtectionSimulator(IFireHost* host) : host_(host), protection_(this, 2, 50) {
     ReadSimulatorTunableValues(nullptr);
 }
+
+cSC4FireProtectionSimulator::~cSC4FireProtectionSimulator() = default;
 
 // ---- identity -------------------------------------------------------------------------------------------
 
@@ -46,8 +52,9 @@ constexpr std::uint32_t kFireTuningInstance = 0x68f5524a;
 }  // namespace
 
 // @ 0x00237e72. ProtectionInit: the coverage grids (fire's instance ids), the sweep, the daily and monthly agents, the notifications.
-// The simulator registers as the fire engines' dispatch source through the host. PARTIAL: the fire department's budget line,
-// the flammability simulator reference and the fire plane dispatch source are not set up.
+// The simulator registers as the fire engines' dispatch source through the host, then makes its fire plane dispatch source
+// (unless a city file named one) and initializes it. PARTIAL: the fire department's budget line and the flammability simulator
+// reference are not set up.
 bool cSC4FireProtectionSimulator::Init() {
     if (running_) return true;
     running_ = true;
@@ -60,12 +67,18 @@ bool cSC4FireProtectionSimulator::Init() {
     host_->AddAgent(this, 6, kName, 2);
     for (std::uint32_t message : kProtectionNotifications) host_->AddNotification(this, message);
     host_->RegisterDispatchSource(true);
+    if (!planeSource_) planeSource_ = new cSC4FirePlaneDispatchSource();
+    if (planeSource_) planeSource_->Init();
     return true;
 }
 
 bool cSC4FireProtectionSimulator::Shutdown() {
     if (!running_) return true;
     running_ = false;
+    if (planeSource_) {   // @ 0x002370d6: the fire plane source shuts down and is let go first
+        planeSource_->Shutdown();
+        planeSource_ = nullptr;
+    }
     host_->RemoveAgent(this);
     for (std::uint32_t message : kProtectionNotifications) host_->RemoveNotification(this, message);
     host_->RegisterDispatchSource(false);
@@ -135,8 +148,8 @@ bool cSC4FireProtectionSimulator::ReadStation(cIGZIStream& stream, IProtectionSt
 bool cSC4FireProtectionSimulator::Write(cIGZOStream& stream) const {
     stream.SetUint16(3);
     if (!protection_.Write(stream)) return false;
-    // +0x120 the dispatch helper (cRZAutoRefCount<...>, iid 0xc9c00435) is not recovered: the one a file named, else null.
-    fileDispatch_.Write(stream);
+    // +0x120 the fire plane dispatch source (its serializable view; null before Init).
+    SC4WriteGZSerializable(stream, planeSource_ ? static_cast<const cIGZSerializable*>(planeSource_.get()) : nullptr);
     return !stream.GetError();
 }
 
@@ -151,8 +164,17 @@ bool cSC4FireProtectionSimulator::Read(cIGZIStream& stream) {
         static_cast<cIGZUnknown*>(occupant)->Release();   // the file reference keeps the occupant
         return host_->FireOccupant(occupant);
     });
-    fileDispatch_ = cRetainedReference();
-    if (version >= 3) fileDispatch_.Read(stream);                         // +0x120
+    if (version >= 3) {                                                   // +0x120: the file's fire plane source replaces the held one
+        planeSource_ = nullptr;
+        void* raw = nullptr;
+        SC4ReadGZSerializable(stream, kGZIID_cISC4DispatchSource, &raw, false);
+        if (auto* source = static_cast<IDispatchSource*>(raw)) {
+            planeSource_ = dynamic_cast<cSC4FirePlaneDispatchSource*>(source);
+            source->Release();   // the read's reference (planeSource_ holds its own)
+        }
+    }
+    if (std::getenv("SC4_DEBUG"))
+        std::fprintf(stderr, "fire: record version %u, fire plane source from the file: %s\n", version, planeSource_ ? "yes" : "no");
     return !stream.GetError();
 }
 

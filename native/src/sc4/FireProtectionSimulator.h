@@ -28,6 +28,8 @@ class cIGZOStream;
 
 namespace sc4 {
 
+class cSC4FirePlaneDispatchSource;   // sc4/AircraftDispatchSource.h (that header clashes with the render headers its users include)
+
 constexpr std::uint32_t kGZCLSID_cSC4FireProtectionSimulator = 0x2990c05a;
 constexpr std::uint32_t kGZIID_cISC4FireProtectionSimulator = 0x88f54c7b;
 
@@ -105,6 +107,7 @@ class cSC4FireProtectionSimulator : public cISC4FireProtectionSimulator,
                                     private IProtectionHost {
 public:
     explicit cSC4FireProtectionSimulator(IFireHost* host);
+    ~cSC4FireProtectionSimulator();   // releases the fire plane source (out of line: the source class is complete only there)
 
     bool QueryInterface(std::uint32_t iid, void** out) override;
     std::uint32_t AddRef() override { return ++refCount_; }
@@ -115,6 +118,7 @@ public:
     bool DoMessage(cIGZMessage2* message) override;
     bool Init();       // @ 0x00237e72 (with cSC4ProtectionSimulator::ProtectionInit @ 0x0007d4a0)
     bool Shutdown();   // @ 0x002370d6
+    cSC4FirePlaneDispatchSource* PlaneDispatchSource() const { return planeSource_.get(); }
 
     // tunables from the simulator exemplar {type 0x6534284a, group 0xe7e2c2db, instance 0x68f5524a}; null = defaults
     void ReadSimulatorTunableValues(const cISCPropertyHolder* exemplar);
@@ -201,7 +205,7 @@ private:
     std::uint32_t refCount_ = 0;   // +0x110 (COM identity)
     FireTunables tunables_;
     cSC4ProtectionSimulator protection_;
-    cRetainedReference fileDispatch_;   // +0x120 the dispatch helper a city file named (kept as read)
+    cRZAutoRefCount<cSC4FirePlaneDispatchSource> planeSource_;   // +0x120 (i386 +200): made by Init, or the one a file named
     cSC4ResponseCurve stationEfficiency_, strikeChance_;
     bool onStrike_ = false;
     bool running_ = false;              // this[0xb8]

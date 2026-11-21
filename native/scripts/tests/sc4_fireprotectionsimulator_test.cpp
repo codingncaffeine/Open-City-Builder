@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <map>
 
+#include "sc4/AircraftDispatchSource.h"
 #include "sc4/FireProtectionSimulator.h"
 #include "sc4/SCProperty.h"
 
@@ -175,6 +176,13 @@ int main() {
 
     sim.DoOccupantRemoved(&station);
     CHECK(sim.GetFireStationCount() == 0 && host.unregistered == 1);
+    // Init makes the fire plane dispatch source (class 0x4c0ae114) and initializes it; Shutdown shuts it down and lets it go.
+    CHECK(sim.PlaneDispatchSource() == nullptr);
+    sim.Init();
+    CHECK(sim.PlaneDispatchSource() && sim.PlaneDispatchSource()->IsInitialized() && sim.PlaneDispatchSource()->GetGZCLSID() == 0x4c0ae114);
+    CHECK(sim.PlaneDispatchSource() && sim.PlaneDispatchSource()->CanHandleDispatchType(5));
+    sim.Shutdown();
+    CHECK(sim.PlaneDispatchSource() == nullptr);
     std::printf(failures ? "FAILED\n" : "sc4_fireprotectionsimulator: all passed\n");
     return failures ? 1 : 0;
 }
