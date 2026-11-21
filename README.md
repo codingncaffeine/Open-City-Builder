@@ -16,11 +16,14 @@ the original's saved cities, plays them and saves them back. Running natively:
   night lights, and every disaster on the menu, including pipe bursts.
 - **Sound:** the game's own sound system: the radio stations and their playlists, effects placed in the city and
   heard left and right, sirens, the city's ambience, and the audio options.
-- **Around the city:** the tutorials, the cheat box, snapshots and their album, and starting a city over.
+- **Growth:** buildings decline, are abandoned and are taken over again; power lines are laid with the original's
+  pole tool, and helicopters, planes and the blimp fly.
+- **Around the city:** the tutorials, the cheat box, snapshots and their album, starting a city over, the loading
+  screen, the compass and the alert border.
 
 Still missing:
 
-- **Building:** bridges, tunnels, and the tools for power lines and subway tunnels; buildings are never abandoned.
+- **Building:** bridges, tunnels, the subway tool, and demolishing power poles.
 - **Screens:** the personal-sim and driving modes, the subway view, making and importing regions, and a few cheats.
 - **Display:** text is soft at fractional interface scales.
 
