@@ -192,6 +192,7 @@ public:
     virtual void UpdateAnimation(float seconds) = 0;                // slot 0x110 (cS3DModelProcessor::Update)
     virtual int GetFrame() const = 0;                               // slot 0xf0
     virtual int GetFrameCount() const = 0;                          // slot 0xf8
+    virtual void SetFrame(int) {}                                   // slot 0xe8 (cS3DModelInstanceAnimated::SetFrame)
     virtual void SetZoomAndRotation(int zoom, int rotation) = 0;    // slot 0xd8
     virtual void SetPlayMode(s3d::PlayMode mode) = 0;
     virtual float GetOpacity() const { return 1.0f; }               // slot 0x78: the draw attributes' opacity (+0x10)

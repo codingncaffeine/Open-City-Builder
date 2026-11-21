@@ -10,6 +10,7 @@
 // Port note: the original's sets are __gnu_cxx::hash_set; std::unordered_set walks them in another order. Where the
 // walk order matters (which unsolved cell ApplyNetworkRules picks first) a different but equally valid order results.
 #include "sc4/NetworkTool.h"
+#include "sc4/NetworkConstructionCrew.h"
 
 #include <cfloat>
 #include <cmath>
@@ -2128,7 +2129,8 @@ void cSC4NetworkTool::MarkOccupantsUsable(std::list<cSC4NetworkOccupant*>& occup
 
 // i386 0x004ceb..: solve the current line, retrying with neighbour-city connections when asked, then insert the solved
 // pieces (as previews when !place). The checks before the solve each cut the valid step count with a failure code.
-bool cSC4NetworkTool::PlaceNetwork(bool place, bool allowDiagonals, bool connectNeighbor, std::uint32_t networkType) {
+bool cSC4NetworkTool::PlaceNetwork(bool place, cSC4NetworkConstructionCrew* crew, bool allowDiagonals, bool connectNeighbor,
+                                   std::uint32_t networkType) {
     if (totalSteps_ == 0) return false;
     unknown98_ = place;
     pendingNeighborConnections_.clear();
@@ -2221,7 +2223,14 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, bool allowDiagonals, bool connect
         for (cSC4NetworkOccupant* occupant : placed) previewOccupants_.push_back(occupant);
         if (previewUpdateEnabled_) SetTerrainHilight(0);                         // the invalid rest of the drag in red
     } else {
-        // The construction crew (cSC4NetworkConstructionCrew::AddNetworkSegment) is not ported: the pieces are usable at once.
+        // The crew takes the segment's pieces when the whole drag solved (or nothing did), or always for a one-cell pen; the
+        // pieces it does not take are usable at once (cSC4NetworkConstructionCrew::MarkOccupantsUsable).
+        const auto onePen = [&] {   // sNetworkTypeInfo +0x1c / +0x20: the pen widths
+            INetworkToolHost* host = GetNetworkToolHost();
+            const INetworkTypeInfo* info = host ? host->NetworkTypeInfo(networkType) : nullptr;
+            return info && info->PenWidthX() == 1 && info->PenWidthZ() == 1;
+        };
+        if (crew && (totalSteps_ == validSteps_ || totalSteps_ == 0 || onePen())) crew->AddNetworkSegment(placed, steps_, cells_);
         MarkOccupantsUsable(placed, true);
     }
     return true;

@@ -100,7 +100,7 @@ struct ToolRecord {
 class NmFakeTool final : public INetworkManagerTool {
 public:
     NmFakeTool(std::shared_ptr<ToolRecord> record, int type) : record_(std::move(record)) { record_->type = type; }
-    bool QueryInterface(std::uint32_t iid, void** out) override {
+    bool QueryInterface(std::uint32_t iid, void** out)  {
         if (iid != 1) return false;
         *out = this;
         AddRef();
@@ -288,18 +288,12 @@ public:
 // ------------------------------------------------------------------------------------------------------------
 // fake construction crew (cSC4NetworkConstructionCrew)
 // ------------------------------------------------------------------------------------------------------------
-class NmFakeCrew final : public cSC4NetworkConstructionCrew {
+class NmFakeCrew final : public INetworkManagerCrew {
 public:
     int refs = 1;                       // the test keeps one reference
     int shutdowns = 0;
     cSC4NetworkManager* manager = nullptr;   // when set, Shutdown unregisters itself like the original
 
-    bool QueryInterface(std::uint32_t iid, void** out) override {
-        if (iid != 1) return false;
-        *out = this;
-        AddRef();
-        return true;
-    }
     std::uint32_t AddRef() override { return static_cast<std::uint32_t>(++refs); }
     std::uint32_t Release() override {
         if (refs > 1) return static_cast<std::uint32_t>(--refs);
@@ -307,9 +301,10 @@ public:
         delete this;
         return 0;
     }
-    void Shutdown() override {
+    bool Shutdown() override {
         ++shutdowns;
         if (manager != nullptr) manager->UnregisterConstructionCrew(this);
+        return true;
     }
 };
 

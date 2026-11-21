@@ -385,6 +385,7 @@ src/sc4/LotBaseTextureOccupant.cpp
 src/sc4/MySimBalloonAdvice.cpp
 src/sc4/NetworkLotManager.cpp
 src/sc4/NetworkManager.cpp
+src/sc4/NetworkConstructionCrew.cpp
 src/sc4/NetworkOccupant.cpp
 src/sc4/NetworkOccupantWithPreBuiltModel.cpp
 src/gz/gzcom_creators/cSC4NetworkBridgeOccupant.cpp
@@ -823,6 +824,8 @@ src/app/linux/StubClock.cpp
 src/app/linux/game_main_linux.cpp
 src/app/NativeNetworkTool.cpp
 src/app/NativeNetworkManager.cpp
+src/app/NativeNetworkConstructionCrew.cpp
+src/app/NativeNetworkCrewReport.cpp
 src/app/NativeTraffic.cpp
 src/sc4/NetworkToolUI.cpp
 src/sc4/ViewInputControlNetworkTool.cpp
