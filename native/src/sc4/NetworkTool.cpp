@@ -839,13 +839,10 @@ void cSC4NetworkTool::ClearCellPreviews() {
 // Not modelled yet (unknown460_): nothing is ever highlighted.
 void cSC4NetworkTool::ClearOccupantHighlights() {}
 
-// i386 0x0012b18c. Not ported yet: the multi-type intersection query (it only asks when the solve found some).
-void cSC4NetworkTool::QueryUserForPotentialIntersections() {}
-
 // i386 0x00124dbe. The per-cell part: each newly solved cell (status) that is not +0x5a costs the most expensive of
 // its network types' per-cell costs (type info +0xdc), and every corner the solve moved costs |terrain - solved| times
-// the terrain-change factor (params, i386 +0x368), plus the tunnels' length times the tunnel cost per cell. The bridge
-// and intersection terms read vectors the unported solver steps fill; they stay empty, so they add nothing yet. The rounding is (float)x + 1.5 * 2^23.
+// the terrain-change factor (params, i386 +0x368), plus the bridges, the tunnels and the recorded intersections. The
+// rounding is (float)x + 1.5 * 2^23.
 int cSC4NetworkTool::GetCostOfSolution() {
     INetworkToolHost* host = GetNetworkToolHost();
     std::int32_t cost = 0;
@@ -866,6 +863,15 @@ int cSC4NetworkTool::GetCostOfSolution() {
             const float solvedHeight = cell->vertexHeights[i];
             heightChange += terrain <= solvedHeight ? solvedHeight - terrain : terrain - solvedHeight;
         }
+    }
+    // every bridge costs its type's fixed cost plus its length in steps times its type's cost per step and the network's bridge
+    // cost per cell (property 0x482cb470 of the bridge type of the bridge's network type; i386 +0x360 = params +0x90)
+    for (const tBridge& bridge : bridges_) {
+        const INetworkTypeInfo* info = host ? host->NetworkTypeInfo(bridge.networkType) : nullptr;
+        if (!info || bridge.bridgeType < 0 || static_cast<std::size_t>(bridge.bridgeType) >= info->BridgeTypes().size()) continue;
+        const cSC4NetworkBridgeTypeInfo& type = info->BridgeTypes()[static_cast<std::size_t>(bridge.bridgeType)];
+        cost += static_cast<std::int32_t>(type.unknown150[0]) +
+                (bridge.endStep - bridge.startStep) * static_cast<std::int32_t>(type.unknown150[1] + placement_.unknownA8[6]);
     }
     // every tunnel costs its length in steps times the type's tunnel cost per cell (i386 +0x364 = params +0x94)
     for (const tTunnel& tunnel : tunnels_) cost += (tunnel.endStep - tunnel.startStep) * static_cast<std::int32_t>(placement_.unknownA8[7]);

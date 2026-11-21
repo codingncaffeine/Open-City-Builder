@@ -2092,26 +2092,240 @@ void cSC4NetworkTool::ClearNetworkOccsFromCell(std::uint32_t x, std::uint32_t z)
     if (INetworkToolHost* host = GetNetworkToolHost()) host->ClearCellForNetwork(x, z, placementFlagMask_, networkType_);
 }
 
-// i386 0x0012b6d8 (vslot 0x128). The plain-piece path: a new occupant with the solved piece and rotation, its triangles,
-// the old occupants of the cell removed, the new one inserted (its handle at +0x54), translucent until it is usable.
-// NOT PORTED YET: the pre-built model pieces (an exemplar {0x6534284a, type exemplar, piece} exists: support models,
-// shear transform), the support structures of raised pieces (AddSupportStructures) and SetExemplarForOccupant.
+// i386 0x0012306c: the cell above (z - 1) or below (z + 1) carries a network type outside `networkFlags`.
+bool cSC4NetworkTool::AdjacentVerticallyToMultitype(std::uint32_t x, std::uint32_t z, std::uint32_t networkFlags) {
+    if (z != 0) {
+        const cSC4NetworkCellInfo* cell = GetCellInfo(Key(x, z - 1));
+        if (cell && (~networkFlags & cell->networkFlags & 0x1fff) != 0) return true;
+    }
+    if (z < static_cast<std::uint32_t>(cityHeight_) - 1u) {
+        const cSC4NetworkCellInfo* cell = GetCellInfo(Key(x, z + 1));
+        if (cell && (~networkFlags & cell->networkFlags & 0x1fff) != 0) return true;
+    }
+    return false;
+}
+
+// i386 0x001230f2: the same along x.
+bool cSC4NetworkTool::AdjacentHorizontallyToMultitype(std::uint32_t x, std::uint32_t z, std::uint32_t networkFlags) {
+    if (x != 0) {
+        const cSC4NetworkCellInfo* cell = GetCellInfo(Key(x - 1, z));
+        if (cell && (~networkFlags & cell->networkFlags & 0x1fff) != 0) return true;
+    }
+    if (x < static_cast<std::uint32_t>(cityWidth_) - 1u) {
+        const cSC4NetworkCellInfo* cell = GetCellInfo(Key(x + 1, z));
+        if (cell && (~networkFlags & cell->networkFlags & 0x1fff) != 0) return true;
+    }
+    return false;
+}
+
+// The pre-built model half of InsertNetworkOccupant (i386 0x0012b8c9..0x0012c1fb). A piece of one network type marks its
+// split diagonal (0x1000000) for the end, curve and crossing patterns listed, gets its shear transform, and when the
+// type's placement block lists support models (0xe974eaa7; the tool's style index picks one, else the first) a support
+// model: a two-wide type (the elevated highway, the avenue) under the straight and the T patterns listed, at the middle of
+// the cell's corners 1 and 3, else under the piece's straight, diagonal or curve, offset to its middle and sunk by 0.65 of
+// the steeper corner normal's slope below the piece's altitude there.
+bool cSC4NetworkTool::ComputePreBuiltSupportModel(cSC4NetworkCellInfo& cell, const tSolvedCell& solved, cSC4NetworkOccupant* occupant,
+                                                  cSC4NetworkOccupantWithPreBuiltModel* prebuilt, const float (*corners)[3],
+                                                  std::uint32_t& modelId, float& rotation, float (&offset)[3]) {
+    constexpr float kQuarterPi = 0.785398f;          // i386 0x00a708ac
+    constexpr float kSixteenthPi = 0.19635f;         // 0x00a708c0
+    constexpr float kSlopeSink = 0.65f;              // 0x00a708b8
+    float position[3] = {0.0f, 0.0f, 0.0f};
+    prebuilt->GetPosition(position);                                                    // i386 vslot 0x148
+    const std::uint32_t flags = occupant->GetNetworkFlag() & 0x1fff;
+    if ((flags - 1) & flags) return false;                                              // two types: no support model
+    std::uint32_t type = 0;
+    while (type < 13 && !(kFlagForNetworkType[type] & flags)) ++type;
+    if (type >= 13) return false;
+    const std::uint32_t compact = cell.tileNeighborhoods[type];
+    const bool twoWide = flags == 4 || flags == 0x40;
+    // The connected edges: one bit per byte whose kind or minor type is set.
+    const std::uint32_t present = ((compact & 0x7070707u) + 0x7070707u) & 0x8080808u;
+    const std::uint32_t edgeCount = (present * 0x1010101u) >> 27;
+    const std::uint32_t edgeMask = (present * 0x1020408u) >> 27;
+    bool diagonal = false;
+    if (edgeCount == 1) {
+        const std::uint32_t kinds = compact & 0x3030303u;
+        diagonal = kinds == 0x100 || kinds == 3 || kinds == 0x30000 || kinds == 0x1000000;
+    } else if (edgeCount == 2) {
+        if (compact == 0x10300 || compact == 0x103 || compact == 0x1030000 || compact == 0x3000001) diagonal = edgeMask == 3 || edgeMask == 0xc;
+        else diagonal = edgeMask == 9 || edgeMask == 6;
+    } else if (edgeCount == 4) {
+        diagonal = compact == 0x1030103;
+    }
+    if (diagonal) occupant->SetNetworkFlag(0x1000000);
+    prebuilt->RecomputeShearTransform();
+    INetworkToolHost* host = GetNetworkToolHost();
+    const INetworkTypeInfo* info = host ? host->NetworkTypeInfo(type) : nullptr;
+    if (!info) return false;
+    const std::vector<std::uint32_t>& models = info->PlacementParams().listD0;          // record +0x50 + 0xa0
+    if (models.empty()) return false;
+    modelId = rendererAltitudeScale_ < models.size() ? models[rendererAltitudeScale_] : models[0];   // i386 +0xfc
+    const float middle = (cell.vertexHeights[1] + cell.vertexHeights[3]) * 0.5f - position[1];
+    if (twoWide) {
+        switch (compact) {
+        case 0x1030103: case 0x3010301: case 0x3000001: case 0x103: case 0x10300: case 0x1030000:
+            rotation = kQuarterPi;
+            offset[0] = 0.0f; offset[1] = middle; offset[2] = 0.0f;
+            return true;
+        case 0x2040200:
+            if (!(cell.z & 1) && !AdjacentVerticallyToMultitype(cell.x, cell.z, cell.networkFlags)) return false;
+            [[fallthrough]];
+        case 0x40200: case 0x2040000:
+            rotation = 0.0f;
+            offset[0] = 8.0f; offset[1] = middle; offset[2] = 0.0f;
+            return true;
+        case 0x4020002:
+            if (!(cell.x & 1) && !AdjacentHorizontallyToMultitype(cell.x, cell.z, cell.networkFlags)) return false;
+            [[fallthrough]];
+        case 0x4000002: case 0x4020000:
+            rotation = 0.0f;
+            offset[0] = 0.0f; offset[1] = middle; offset[2] = 8.0f;
+            return true;
+        default:
+            return false;
+        }
+    }
+    float v[3] = {0.0f, 0.0f, 0.0f};
+    rotation = 0.0f;
+    bool none = false;   // the piece stands on its own: no offset, no rotation
+    if (edgeCount == 1 && (compact & 0x1010101u)) {
+        // A diagonal end piece: the support sits off the diagonal toward its open corner.
+        float a = -4.0f, b = 4.0f, c = 4.0f, d = -4.0f;   // XMM0, XMM3, XMM1, XMM2 of the original
+        if (compact & 0xffff00u) { a = 4.0f; b = -4.0f; }
+        float e = 0.0f;
+        if (compact & 0xffff0000u) { e = c; c = 2.6f; }
+        else { e = d; c = -2.6f; }
+        if ((compact & 0x2020202u) == 0) {
+            d = c;
+            c = b * kSlopeSink;
+        } else {
+            d = a * kSlopeSink;
+            a = e;
+            e = b;
+        }
+        v[0] = a + d;
+        v[2] = c + e;
+        rotation = kQuarterPi;
+    } else if (compact == 0x301) {
+        v[0] = -4.0f; v[2] = -4.0f;
+        rotation = -kQuarterPi;
+    } else if (compact == 0x30100) {
+        v[0] = 4.0f; v[2] = -4.0f;
+        rotation = -kQuarterPi;
+    } else if (edgeCount == 2 && ((1u << edgeMask) & 0x1248u) && ((compact & 0xf8f8f8f8u) || (~(compact * 2) & compact & 0x2020202u))) {
+        // A curve: the support turns to the mean of the two edge directions (in sixteenths of a turn) of the piece as it
+        // is drawn (mirrored, then rotated), and sits toward the curve's inner corner.
+        std::uint32_t d = compact;
+        if (solved.rotationFlip & 0x80) {
+            cSC4TileNeighborhoodCompact mirrored;
+            cSC4TileNeighborhoodCompact(compact).GetMirrorImageEquivalent(mirrored);
+            d = mirrored.Packed();
+        }
+        const std::uint32_t turn = solved.rotationFlip & 3;
+        if (turn) d = (d >> (turn * 8)) | (d << (32 - turn * 8));
+        int base = 0;
+        while ((d & 0xff) == 0 || (d & 0xff00) == 0) {
+            base -= 4;
+            d = (d >> 8) | (d << 24);
+        }
+        const int kindA = static_cast<int>(d & 3), kindB = static_cast<int>((d >> 8) & 3);
+        int dirA = (base - 2 * kindA + 4) & 0xf;
+        int dirB = (base - 2 * kindB + 8) & 0xf;
+        if (d & 0xf8) {
+            if (kindA == 2) dirA += (d & 0x10) ? -1 : 1;
+            else dirA = kindA + dirA - 2;
+        }
+        if (d & 0xf800) {
+            if (kindB == 2) dirB += (d & 0x1000) ? -1 : 1;
+            else dirB = kindB + dirB - 2;
+        }
+        if (dirB < dirA) std::swap(dirA, dirB);
+        if (dirB - dirA >= 9) dirA += 16;
+        rotation = static_cast<float>(dirA + dirB + 8) * kSixteenthPi;
+        switch (edgeMask) {
+        case 6: v[0] = 4.0f; v[2] = -4.0f; break;
+        case 3: v[0] = -4.0f; v[2] = -4.0f; break;
+        case 9: v[0] = -4.0f; v[2] = 4.0f; break;
+        case 0xc: v[0] = 4.0f; v[2] = 4.0f; break;
+        default: break;
+        }
+    } else if (edgeCount > 2 || (edgeCount == 2 && (compact & 0xf8f8f8f8u)) || (edgeCount == 1 && (compact & ~(compact * 2) & 0x2020202u))) {
+        none = true;
+    } else if (compact == 0x2000200) {
+        if (!(cell.z & 1) && !AdjacentVerticallyToMultitype(cell.x, cell.z, cell.networkFlags)) return false;
+        none = true;
+    } else if (compact == 0x20002) {
+        if (!(cell.x & 1) && !AdjacentHorizontallyToMultitype(cell.x, cell.z, cell.networkFlags)) return false;
+        none = true;
+    } else {
+        return false;
+    }
+    if (none) {
+        v[0] = v[1] = v[2] = 0.0f;
+        rotation = 0.0f;
+    }
+    // The steeper of the two corner normals along the piece's split diagonal.
+    float normalA[3] = {0, 1, 0}, normalB[3] = {0, 1, 0};
+    if (prebuilt->HasNetworkFlag(0x1000000)) {                                          // i386 vslot 0x20
+        prebuilt->GetNormal(corners[0][0], corners[0][2], normalA);                     // vslot 0xe4
+        prebuilt->GetNormal(corners[2][0], corners[2][2], normalB);
+    } else {
+        prebuilt->GetNormal(corners[1][0], corners[1][2], normalA);
+        prebuilt->GetNormal(corners[3][0], corners[3][2], normalB);
+    }
+    const float slopeA = static_cast<float>((static_cast<double>(std::fabs(normalA[0])) + std::fabs(normalA[2])) / std::fabs(normalA[1]));
+    const float slopeB = static_cast<float>((static_cast<double>(std::fabs(normalB[0])) + std::fabs(normalB[2])) / std::fabs(normalB[1]));
+    const float altitude = occupant->GetAltitude(position[0] + v[0], position[2] + v[2]);   // vslot 0xe0
+    offset[0] = v[0];
+    offset[1] = altitude - position[1] - kSlopeSink * (slopeB > slopeA ? slopeB : slopeA);
+    offset[2] = v[2];
+    return true;
+}
+
+// i386 0x0012b6d8 (vslot 0x128). A piece whose exemplar {0x6534284a, the group of one of the cell's network types, piece}
+// exists is a pre-built model occupant: no quad triangles, its model from that exemplar (SetExemplarForOccupant) and the
+// support model ComputePreBuiltSupportModel picks; any other piece is a plain occupant drawn as the piece's quad with the
+// triangles SetQuadTrianglesToDraw picks. Then the old occupants of the cell leave, the new one is inserted (its handle at
+// +0x54), translucent until it is usable.
+// NOT PORTED YET: the support structures of a raised piece whose support record exists (AddSupportStructures 0x00316a68:
+// side lips, retaining walls and pylons; GetSupportStructureInfo answers for roads, streets, rails, light rail, monorail).
 void cSC4NetworkTool::InsertNetworkOccupant(cSC4NetworkCellInfo& cell, const tSolvedCell& solved, std::list<cSC4NetworkOccupant*>* out) {
     INetworkToolHost* host = GetNetworkToolHost();
+    std::uint32_t group = 0;
+    bool prebuiltPiece = false;
     if (host) {
         for (std::uint32_t type = 0; type < 13; ++type) {
-            if ((kFlagForNetworkType[type] & cell.networkFlags) && host->HasPrebuiltModelExemplar(type, solved.pieceType)) {
-                static int warned = 0;
-                if (warned++ < 4) std::fprintf(stderr, "network tool: piece %08x has a pre-built model (not ported), drawn as a quad\n", solved.pieceType);
+            if (!(kFlagForNetworkType[type] & cell.networkFlags)) continue;
+            const INetworkTypeInfo* info = host->NetworkTypeInfo(type);
+            group = info ? info->DefaultExemplarId() : 0;                               // sNetworkTypeInfo[type] +0xc
+            if (host->HasPrebuiltModelExemplar(type, solved.pieceType)) {               // spRM vslot 0xc, iid 0xa52160f5
+                prebuiltPiece = true;
                 break;
             }
         }
     }
     float corners[4][3];
     cSC4NetworkOccupant* occupant = nullptr;
-    CreateNetworkOccupant(&cell, &occupant, corners, 0);
-    occupant->SetQuadDraw(solved.pieceType, solved.rotationFlip);                      // vslot 0x78
-    SetQuadTrianglesToDraw(occupant, cell.tileNeighborhoods[networkType_]);
+    if (!prebuiltPiece) {
+        CreateNetworkOccupant(&cell, &occupant, corners, 0);
+        occupant->SetQuadDraw(solved.pieceType, solved.rotationFlip);                  // vslot 0x78
+    } else {
+        CreateNetworkOccupant(&cell, &occupant, corners, kGZCLSID_cSC4NetworkOccupantWithPreBuiltModel);
+        occupant->SetQuadDraw(solved.pieceType, solved.rotationFlip);
+        occupant->ClearNetworkFlag(0x2000000);
+        occupant->ClearNetworkFlag(0x4000000);
+        occupant->SetNetworkFlag(0x8000000);
+        const float offset[3] = {0.0f, 0.0f, 0.0f};
+        if (auto* prebuilt = dynamic_cast<cSC4NetworkOccupantWithPreBuiltModel*>(occupant)) {   // QI 0x49c1a034
+            std::uint32_t modelId = 0;
+            float rotation = 0.0f, supportOffset[3] = {0.0f, 0.0f, 0.0f};
+            if (ComputePreBuiltSupportModel(cell, solved, occupant, prebuilt, corners, modelId, rotation, supportOffset))
+                prebuilt->AddSupportModel(modelId, rotation, cS3DVector3(supportOffset[0], supportOffset[1], supportOffset[2]));
+        }
+        SetExemplarForOccupant(occupant, solved.pieceType, offset, solved.rotationFlip, group);
+    }
+    if (!prebuiltPiece) SetQuadTrianglesToDraw(occupant, cell.tileNeighborhoods[networkType_]);   // vslot 0x148
     occupant->ClearNetworkFlag(0x400000);
     ClearNetworkOccsFromCell(cell.x, cell.z);
     if (host) cell.occupantId = static_cast<std::uint8_t>(host->InsertNetworkOccupant(occupant, static_cast<std::uint32_t>(unknown458_)));
@@ -2181,12 +2395,16 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, cSC4NetworkConstructionCrew* crew
             AssignEdgeMajorTypes(networkType);
             AddGroupingInfo(networkType);
             DoAdditionalDraws();
-            // IdentifyHighwayIntersections: not ported (no highway crossings); the valid count stays.
-            BuildSetOfCellsToBeSolved();
-            if (networkType == kNetworkOneWayRoad) ResolveOneWayConflicts(networkType);
-            MarkNeighborConnections();
-            const int solvedSteps = SolveNetwork(networkType, false);
-            if (solvedSteps < validSteps_) {
+            const int crossingSteps = IdentifyHighwayIntersections(validSteps_, networkType);
+            const int solvedSteps = crossingSteps < validSteps_ ? crossingSteps : [&] {
+                BuildSetOfCellsToBeSolved();
+                if (networkType == kNetworkOneWayRoad) ResolveOneWayConflicts(networkType);
+                MarkNeighborConnections();
+                return SolveNetwork(networkType, false);
+            }();
+            if (crossingSteps < validSteps_) {
+                failureReason_ = static_cast<int>(0xf0000005);
+            } else if (solvedSteps < validSteps_) {
                 if (std::getenv("SC4_NETDEBUG")) std::fprintf(stderr, "network solve: %d of %d steps solved\n", solvedSteps, validSteps_);
                 failureReason_ = kFailSolve;
             } else {
@@ -2211,7 +2429,7 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, cSC4NetworkConstructionCrew* crew
         }
         // the whole drag solved: when it ends at the city edge, solve it again with the neighbour connections' edges open
         if (anchors_.size() < 2 || !AttemptNeighborConnections(allowDiagonals, networkType)) break;
-        // MarkHighwayIntersectionPieces(false) here walks the highway intersections, which are not identified yet (none)
+        MarkHighwayIntersectionPieces(false);
         connected = true;
     }
     std::list<cSC4NetworkOccupant*> placed;
@@ -2230,6 +2448,7 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, cSC4NetworkConstructionCrew* crew
             InsertOccupantsForSolvedCells(solvedCellList_, &placed, false);
             InsertBridgePieces(&placed);
             InsertTunnelPieces(networkType);
+            InsertHighwayIntersectionPieces(&placed);
         }
     }
     if (!place) {

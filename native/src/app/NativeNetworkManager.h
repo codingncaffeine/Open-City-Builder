@@ -1,6 +1,7 @@
 // The network manager's native side: its host (the services the original's cSC4NetworkManager reaches directly), its view of
 // the network pieces and its road-class tools, through which demolition reaches cSC4NetworkTool::DestroyOccupantsAndResolve.
 #pragma once
+#include <cstdint>
 #include <vector>
 
 namespace sc4 { class cSC4NetworkOccupant; class cSC4NetworkTool; }
@@ -22,5 +23,7 @@ sc4::cSC4NetworkTool* NativePipeTool();
 sc4::cSC4NetworkTool* NativeSubwayTool();
 // The network manager's GetAllIntersectionPieces for a piece: the other network pieces, one reference each.
 void NetworkIntersectionPieces(sc4::cSC4NetworkOccupant* occupant, std::vector<sc4::cSC4NetworkOccupant*>& out);
+// The city network manager's MapShadowTexture (its shadow remap tables), or 0 without a city.
+std::uint32_t CityMapShadowTexture(std::uint32_t instance, std::uint8_t& rotation, std::uint32_t networkFlags, std::uint32_t raisedEdges);
 
 }  // namespace native

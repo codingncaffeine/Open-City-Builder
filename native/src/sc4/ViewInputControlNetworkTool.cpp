@@ -155,7 +155,7 @@ bool cSC4ViewInputControlNetworkTool::DoMessage(cIGZMessage2* message) {
         next = static_cast<cSC4ViewInputControl*>(static_cast<cIGZMessage2Standard*>(standard)->GetVoid2());
         static_cast<cIGZMessage2Standard*>(standard)->Release();
     }
-    if (next && next != this && next->GetID() != kNetworkIntxToolId) {
+    if (next && next != this && next->GetID() != kCityScrollControlId) {
         if (ui_) ui_->CancelInput();
         OnMouseExit();
         mouseDown_ = false;

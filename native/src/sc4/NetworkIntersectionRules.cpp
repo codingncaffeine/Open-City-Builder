@@ -424,6 +424,54 @@ bool ParseCheckType(const std::string& value, std::uint8_t& tag, cIntRule::Check
     return true;
 }
 
+namespace {
+// The SGI hashtable's __stl_prime_list.
+constexpr std::uint32_t kHashPrimes[] = {53u, 97u, 193u, 389u, 769u, 1543u, 3079u, 6151u, 12289u, 24593u, 49157u, 98317u, 196613u,
+                                         393241u, 786433u, 1572869u, 3145739u, 6291469u, 12582917u, 25165843u, 50331653u,
+                                         100663319u, 201326611u, 402653189u, 805306457u, 1610612741u, 3221225473u, 4294967291u};
+// __stl_next_prime: the first prime not below n (the last one when none is).
+std::size_t NextHashSize(std::size_t n) {
+    for (std::uint32_t prime : kHashPrimes)
+        if (prime >= n) return prime;
+    return kHashPrimes[sizeof kHashPrimes / sizeof kHashPrimes[0] - 1];
+}
+}  // namespace
+
+cHashMapOrder::cHashMapOrder(std::size_t hint) : buckets_(NextHashSize(hint)) {}
+
+void cHashMapOrder::Insert(std::uint32_t key) {
+    // resize(size + 1), as find_or_insert does before it looks for the key
+    const std::size_t oldCount = buckets_.size();
+    if (size_ + 1 > oldCount) {
+        const std::size_t count = NextHashSize(size_ + 1);
+        if (count > oldCount) {
+            std::vector<std::vector<std::uint32_t>> grown(count);
+            for (std::vector<std::uint32_t>& bucket : buckets_)
+                for (std::uint32_t moved : bucket) {   // front first, each to the front of its new bucket
+                    std::vector<std::uint32_t>& target = grown[moved % count];
+                    target.insert(target.begin(), moved);
+                }
+            buckets_.swap(grown);
+        }
+    }
+    std::vector<std::uint32_t>& bucket = buckets_[key % buckets_.size()];
+    if (std::find(bucket.begin(), bucket.end(), key) != bucket.end()) return;
+    bucket.insert(bucket.begin(), key);
+    ++size_;
+}
+
+void cHashMapOrder::Clear() {
+    for (std::vector<std::uint32_t>& bucket : buckets_) bucket.clear();
+    size_ = 0;
+}
+
+std::vector<std::uint32_t> cHashMapOrder::Keys() const {
+    std::vector<std::uint32_t> keys;
+    keys.reserve(size_);
+    for (const std::vector<std::uint32_t>& bucket : buckets_) keys.insert(keys.end(), bucket.begin(), bucket.end());
+    return keys;
+}
+
 void ReadHighwayIntersectionRules(cRZIniFile& ini, IntersectionRuleMap& rules) {
     IntersectionCallbackData data;
     data.ini = &ini;

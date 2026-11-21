@@ -19,6 +19,9 @@ sc4::cSC4ViewInputControl* CreateNetworkIntxTool(std::uint32_t ruleId);
 void NativePuzzleReport(std::uint32_t only);
 void NativePlacePuzzle(std::uint32_t id, int x, int z, int rotation);
 void NativeIntersectionPieceReport();
+// Kit verb `prebuiltpieces X0 Z0 X1 Z1` (read-only): the pre-built model network pieces of a rectangle, their support models
+// and the shadow texture the network manager maps each to at the current zoom.
+void NativePreBuiltPieceReport(int x0, int z0, int x1, int z1);
 // Kit verb `terrainheights X0 Z0 X1 Z1` (read-only): the terrain altitude of every vertex in the inclusive rectangle, one
 // line per vertex row.
 void NativeTerrainHeightsReport(int x0, int z0, int x1, int z1);

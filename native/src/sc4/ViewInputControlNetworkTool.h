@@ -21,7 +21,10 @@ namespace sc4 {
 class cISC4NetworkTool;
 class cISC4NetworkToolUI;
 
-constexpr std::uint32_t kNetworkIntxToolId = 0x48e2a1f8;   // the intersection tool keeps the drag alive
+// The city scroll control's id (cSC4ViewInputControlCityScroll::Init, i386 0x002065dc): DoMessage (i386 0x002ae6fe) keeps
+// the drag alive while the right-button scroll control takes over. (The intersection tool has no id of its own: its
+// constructor leaves the id unset and its Init sets only the cursor.)
+constexpr std::uint32_t kCityScrollControlId = 0x48e2a1f8;
 
 class INetworkInputToolTerrainView : public cIGZUnknown {
 public:
