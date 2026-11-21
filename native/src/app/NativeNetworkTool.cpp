@@ -28,6 +28,8 @@
 #include "app/NativeDemolition.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "app/NativeUi.h"
+#include "gz/WinBtn.h"
+#include "sc4/SC4UI.h"
 #include "gz/cGZPersistResourceKey.h"
 #include <string>
 #include "sc4/Render3D.h"
@@ -549,6 +551,24 @@ public:
         return neighbors && neighbors->RequestCreateConnection(info.unknown8, static_cast<int>(info.x), static_cast<int>(info.z), info.unknownC != 0);
     }
     void RefreshCursor() override {}
+    // The bridge chooser: SC4CreateWindowFromScript on the UI script group, its alignment, the bridge pictures (cSLBuffer)
+    // and the screen colour format (ARGB8888).
+    cIGZWin* CreateWindowFromScript(std::uint32_t instance, cIGZWin* parent, std::uint32_t id) override {
+        return native::CreateWindowFromScript(cGZPersistResourceKey{0, 0x96a006b0, instance}, parent, id);
+    }
+    void AlignWindow(std::uint32_t windowId) override { nSC4UI::AlignWindowToWindow(windowId, 0xaaaa, 0, nullptr); }
+    void SetButtonBitmap(cIGZWin* button, std::uint32_t group, std::uint32_t instance) override {
+        gz::cIGZWinBtn* btn = nullptr;
+        if (!button || !button->QueryInterface(gz::kGZIID_cIGZWinBtn, reinterpret_cast<void**>(&btn)) || !btn) return;
+        if (cIGZBuffer* image = LoadBitmapResource(group, instance)) {
+            btn->SetStyle(btn->GetStyle(), image, nullptr);
+            image->Release();
+        }
+        btn->Release();
+    }
+    std::uint32_t NativeColor(cIGZWin*, std::uint8_t r, std::uint8_t g, std::uint8_t b) override {
+        return 0xff000000u | (std::uint32_t(r) << 16) | (std::uint32_t(g) << 8) | b;
+    }
 };
 
 class TerrainViewAdapter final : public sc4::INetworkInputToolTerrainView {
@@ -877,4 +897,88 @@ sc4::cSC4NetworkOccupant* ToolHost::TunnelOtherEnd(sc4::cSC4NetworkOccupant* por
     return other;
 }
 }  // namespace
+}  // namespace native
+
+namespace native {
+// Kit verb `bridgechoose TYPE X1 Z1 X2 Z2 [ROW]`: the network tool UI's drag from cell 1 to cell 2 as the mouse would make it
+// (BeginDrag / DragTo are what OnMouseDownL / OnMouseMove do once the cell under the mouse is picked), then its mouse-up, which
+// opens the bridge chooser when the drag crosses water. Prints the chooser's rows, then the chosen row's button and the Place
+// button send the chooser window their command messages (what their activation sends), and the bridge is built.
+// Without a ROW the chooser stays open (for a picture) until the next `bridgechoose`.
+sc4::cSC4NetworkTool* g_chooserTool = nullptr;
+sc4::cSC4NetworkToolUI* g_chooserUi = nullptr;
+
+void NativeBridgeChooser(std::uint32_t type, int x1, int z1, int x2, int z2, int row) {
+    if (g_chooserUi) {
+        g_chooserUi->Shutdown();
+        g_chooserUi->Release();
+        g_chooserTool->Shutdown();
+        g_chooserTool->Release();
+        g_chooserUi = nullptr;
+        g_chooserTool = nullptr;
+    }
+    if (!g_view || type >= 13) {
+        std::printf("bridgechoose: no city view or no network type %u\n", type);
+        return;
+    }
+    auto* tool = new sc4::cSC4NetworkTool(type);
+    tool->AddRef();
+    tool->Init();
+    sc4::cISC4NetworkToolUI* raw = nullptr;
+    if (!tool->GetUITool(&raw) || !raw) {
+        std::printf("bridgechoose: no UI tool\n");
+        tool->Shutdown();
+        tool->Release();
+        return;
+    }
+    auto* ui = static_cast<sc4::cSC4NetworkToolUI*>(raw);
+    ui->AttachToView(g_view);
+    ui->BeginDrag(sc4::SC4PointU{static_cast<std::uint32_t>(x1), static_cast<std::uint32_t>(z1)});
+    ui->DragTo(sc4::SC4PointU{static_cast<std::uint32_t>(x2), static_cast<std::uint32_t>(z2)});
+    ui->OnMouseUpL(0, 0, 0);
+    cIGZWin* chooser = ui->BridgeChooser();
+    std::printf("bridgechoose %u %d,%d -> %d,%d: chooser %s, %zu row(s)\n", type, x1, z1, x2, z2, chooser ? "open" : "not open",
+                ui->BridgeEntries().size());
+    if (chooser) {
+        for (std::size_t i = 0; i < ui->BridgeEntries().size(); ++i) {
+            const sc4::cSC4NetworkToolUI::BridgeEntry& entry = ui->BridgeEntries()[i];
+            cRZString name;
+            tool->GetBridgeName(name, entry.bridge);
+            cIGZWin* button = chooser->GetChildWindowFromIDRecursive(0xa1000u + static_cast<std::uint32_t>(i));
+            // the row holding the button (id 0xa0000) and its cost text
+            cIGZWin* rowWin = button ? button->GetParentWin() : nullptr;
+            while (rowWin && rowWin->GetID() != 0xa0000u) rowWin = rowWin->GetParentWin();
+            cIGZWin* cost = rowWin ? rowWin->GetChildWindowFromIDRecursive(0xa0003) : nullptr;
+            const cRZRect area = button ? button->GetAreaAbsolute() : cRZRect{};
+            std::printf("bridgechoose: row %zu bridge %d \"%s\" reference altitude %.2f, button %s at %d,%d..%d,%d, cost \"%s\"\n", i,
+                        entry.bridge, name.ToChar(), entry.altitude, button ? "present" : "MISSING", area.left, area.top, area.right,
+                        area.bottom, cost ? cRZString(cost->GetCaption()).ToChar() : "?");
+        }
+        if (row >= 0) {
+            cGZMessage choose;
+            choose.type = kGZMsgCommand;
+            choose.param1 = 0x287259f6;
+            choose.param2 = 0xa1000u + static_cast<std::uint32_t>(row);
+            chooser->DoMessage(choose);
+            cRZString name;
+            tool->GetBridgeName(name, ui->PreferredBridge());
+            std::printf("bridgechoose: chose row %d -> preferred bridge %d \"%s\"\n", row, ui->PreferredBridge(), name.ToChar());
+            cGZMessage place;
+            place.type = kGZMsgCommand;
+            place.param1 = 0x287259f6;
+            place.param2 = 0x2000;
+            chooser->DoMessage(place);
+            std::printf("bridgechoose: placed, chooser %s\n", ui->BridgeChooser() ? "still open" : "closed");
+        }
+    }
+    if (row < 0 && chooser) {
+        g_chooserUi = ui;
+        g_chooserTool = tool;
+        return;
+    }
+    ui->Shutdown();
+    ui->Release();
+    tool->Shutdown();
+    tool->Release();
+}
 }  // namespace native

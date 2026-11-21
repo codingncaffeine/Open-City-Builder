@@ -23,6 +23,7 @@ sc4::cSC4NetworkManager* CityNetworkManager();   // the city's network manager, 
 sc4::cSC4NeighborsSimulator* CityNeighborsSimulator();   // the city's neighbours simulator, or null
 void NativeLayNetworkLine(std::uint32_t type, int x1, int z1, int x2, int z2);   // kit verb `netline` (NativeNetworkTool.cpp)
 void NativeBridgeReport(int x0, int z0, int x1, int z1);   // kit verb `bridges` (NativeNetworkTool.cpp)
+void NativeBridgeChooser(std::uint32_t type, int x1, int z1, int x2, int z2, int row);   // kit verb `bridgechoose` (NativeNetworkTool.cpp)
 void NativeTunnelParams(std::uint32_t type);                 // kit verb `tunnelparams` (NativeNetworkTool.cpp)
 void NativeTerrainLine(int x1, int z1, int x2, int z2);     // kit verb `heights`
 void NativeTunnelReport();                                  // kit verb `tunnels`

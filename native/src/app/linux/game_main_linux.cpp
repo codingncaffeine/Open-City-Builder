@@ -1349,6 +1349,11 @@ int RunScenario(const std::string& path) {
             int x0 = -1, z0 = -1, x1 = -1, z1 = -1;
             words >> x0 >> z0 >> x1 >> z1;
             native::NativeBridgeReport(x0, z0, x1, z1);
+        } else if (command == "bridgechoose") {   // bridgechoose TYPE X1 Z1 X2 Z2 [ROW]: the network tool UI's drag and bridge chooser (rows, then ROW and Place)
+            std::uint32_t type = 0;
+            int x1 = 0, z1 = 0, x2 = 0, z2 = 0, row = -1;
+            words >> type >> x1 >> z1 >> x2 >> z2 >> row;
+            native::NativeBridgeChooser(type, x1, z1, x2, z2, row);
         } else if (command == "netline") {   // netline TYPE X1 Z1 X2 Z2: a network tool lays a line as the drag's release does (neighbor connections too)
             std::uint32_t type = 0;
             int x1 = 0, z1 = 0, x2 = 0, z2 = 0;
