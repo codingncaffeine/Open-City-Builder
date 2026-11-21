@@ -26,6 +26,7 @@
 #include "sc4/NetworkOccupant.h"
 #include "sc4/NetworkWorldCache.h"
 #include "sc4/NetworkPreview.h"
+#include "sc4/NetworkTunnelOccupant.h"
 #include "sc4/TileRules.h"
 
 namespace sc4 {
@@ -505,8 +506,9 @@ void cSC4NetworkTool::BuildSetOfCellsToBeSolved() {
         solvedCells_.insert(key);
     }
     ExpandToSolveSetBasedOnConnectivity(seeds, 4);
-    // RemoveHighwayIntersectionPieces / RemoveTunnelPieces / RemoveBridgePiecesFromSetOfCellsToBeSolved: no such pieces
-    // exist until bridges, tunnels and highway intersections are ported.
+    // RemoveHighwayIntersectionPieces / RemoveBridgePiecesFromSetOfCellsToBeSolved: no such pieces exist until bridges and
+    // highway intersections are ported.
+    RemoveTunnelPiecesFromSetOfCellsToBeSolved(solvedCells_);
 }
 
 // i386: `rings` times, every cell connected to the frontier that is not fixed (and not a short step) joins the set.
@@ -1127,7 +1129,13 @@ bool cSC4NetworkTool::CanTilesBeSupportedOnTerrain(std::uint32_t) { return true;
 
 // i386 SmoothenNetwork. NOT PORTED YET: the vertex height solve (ComputeInitialSmoothingSet + the constraint inserters +
 // cSC4VertexHtConstraintSatisfier); the cells keep their terrain heights.
-bool cSC4NetworkTool::SmoothenNetwork(int) { return true; }
+bool cSC4NetworkTool::SmoothenNetwork(int) {
+    // Step 2 of the original: the bridge and tunnel elevation constraints go into the cell infos (the tunnel portals are
+    // pinned at their heights) before the satisfier is fed.
+    std::vector<tImmovablePortion> portions;
+    CopyTunnelElevationConstraintsIntoCellInfo(portions);
+    return true;
+}
 
 // i386 0x00124878 (vslot 0xe4). The preview half (not placing) asks AddCellPreview for every solved cell, the placement
 // half inserts a network occupant per cell, or updates the occupant already there.
@@ -1201,9 +1209,11 @@ void cSC4NetworkTool::CreateNetworkOccupant(cSC4NetworkCellInfo* cell, cSC4Netwo
     cSC4NetworkOccupant* occupant = nullptr;
     if (clsid == 0) {
         occupant = new cSC4NetworkOccupant();
+    } else if (clsid == kGZCLSID_cSC4NetworkTunnelOccupant) {
+        occupant = new cSC4NetworkTunnelOccupant();
     } else {
-        // cSC4NetworkBridgeOccupant (0x49cc1bcd), cSC4NetworkTunnelOccupant (0x8a4bd52b), cSC4NetworkOccupantWithPreBuiltModel
-        // (0x49c1a034): not created by the land path yet.
+        // cSC4NetworkBridgeOccupant (0x49cc1bcd), cSC4NetworkOccupantWithPreBuiltModel (0x49c1a034): not created by the
+        // land path yet.
         std::fprintf(stderr, "network tool: occupant class %08x not ported, using a plain network occupant\n", clsid);
         occupant = new cSC4NetworkOccupant();
     }
@@ -1329,7 +1339,8 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, bool allowDiagonals, bool connect
         validSteps_ = steps;
         IdentifyStartingConditions(steps);                                          // vslot 0x110
         if (steps < validSteps_) { failureReason_ = kFailStart; validSteps_ = 0; }
-        // IdentifyTunnelCells: not ported (no tunnels).
+        IdentifyTunnelCells(steps);                                                 // the count is read, never cut
+        if (steps < validSteps_) { failureReason_ = kFailTunnel; validSteps_ = 0; }
         CheckForReservedTiles(steps, networkType, false);                           // vslot 0x114
         if (steps < validSteps_) { failureReason_ = kFailReserved; validSteps_ = 0; }
         steps = UpdateOccupantHighlights(validSteps_);                              // vslot 0xf4
@@ -1388,7 +1399,10 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, bool allowDiagonals, bool connect
             DestroyHilightedOccupants();                                             // vslot 0xf8
             // UpdateTerrainHeights / Mark*ExistingOccupantsAsNewlySolved: not ported yet.
         }
-        if (previewUpdateEnabled_) InsertOccupantsForSolvedCells(solvedCellList_, &placed, false);
+        if (previewUpdateEnabled_) {
+            InsertOccupantsForSolvedCells(solvedCellList_, &placed, false);
+            InsertTunnelPieces(networkType);
+        }
     }
     if (!place) {
         // The preview occupants (+0x25c) are kept so ClearCellPreviews can take them out again.

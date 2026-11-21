@@ -73,7 +73,7 @@ void InstallNetworkLotManagerStub();
 void InstallNetworkManagerHost();   // NativeNetworkManager.cpp
 void InstallNetworkOccupantStub();
 void InstallNetworkLotHosts();   // NativeNetworkLots.cpp
-void InstallPreBuiltModelOccupantStub();
+void InstallPreBuiltModelOccupantHost();   // NativePreBuiltModel.cpp
 void InstallNetworkToolStub();
 void InstallOrdinanceStub();
 void InstallOrdinanceHost();   // app/NativeOrdinance.cpp
@@ -187,7 +187,7 @@ void InstallStubHosts() {
     InstallNetworkManagerHost();          // the network manager's real host (before the city's manager is made)
     InstallNetworkOccupantStub();
     InstallNetworkLotHosts();             // the lot manager's and the pieces' real hosts replace the two stubs
-    InstallPreBuiltModelOccupantStub();
+    InstallPreBuiltModelOccupantHost();
     InstallNetworkToolStub();
     InstallOrdinanceStub();
     InstallOrdinanceHost();               // the real ordinance host replaces the stub above

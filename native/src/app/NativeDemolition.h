@@ -22,6 +22,10 @@ sc4::cISC4Occupant* DemolitionOccupant(sc4::IDemolishable* occupant);
 sc4::cSC4NetworkManager* CityNetworkManager();   // the city's network manager, or null
 sc4::cSC4NeighborsSimulator* CityNeighborsSimulator();   // the city's neighbours simulator, or null
 void NativeLayNetworkLine(std::uint32_t type, int x1, int z1, int x2, int z2);   // kit verb `netline` (NativeNetworkTool.cpp)
+void NativeTunnelParams(std::uint32_t type);                 // kit verb `tunnelparams` (NativeNetworkTool.cpp)
+void NativeTerrainLine(int x1, int z1, int x2, int z2);     // kit verb `heights`
+void NativeTunnelReport();                                  // kit verb `tunnels`
+void NativeTrafficTunnelReport();                           // kit verb `tunnels`, the traffic simulator's half (NativeTraffic.cpp)
 bool DemolishLots(bool commit, sc4::cSC4Lot* const* lots, int count, int privilege, std::uint32_t flags, bool dezone,
                   std::int64_t* cost);
 

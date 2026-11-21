@@ -16,6 +16,7 @@
 
 #include "sc4/Lot.h"
 #include "sc4/NetworkOccupant.h"
+#include "sc4/NetworkTunnelOccupant.h"
 #include "sc4/PathFinder.h"
 #include "sc4/PathInfo.h"
 #include "sc4/SCProperty.h"
@@ -147,6 +148,14 @@ public:
     std::uint16_t Switches(int t, int x, int z) override { return InCity(x, z) && t < 9 ? s_.CellConnections(x, z).switches[t] : 0xffff; }
     std::uint16_t PriorCar(int side, int x, int z) override { return InCity(x, z) ? s_.CellConnections(x, z).priorCar[side & 3] : 0xffff; }
     std::uint8_t Wormhole(int x, int z) override { return InCity(x, z) ? s_.CellConnections(x, z).wormhole : 0; }
+    bool Tunnel(int x, int z, int t, int& otherX, int& otherZ, float& cost) override {
+        const TunnelInfo* tunnel = s_.TunnelAt(x, z);
+        if (!tunnel || unsigned(t) >= 9 || !(tunnel->travelTypes & (1u << t))) return false;
+        otherX = tunnel->otherX;
+        otherZ = tunnel->otherZ;
+        cost = tunnel->cost[std::size_t(t)];
+        return true;
+    }
     bool CellNetwork(int n, int x, int z, float& inverse, std::uint8_t& type, float& extra) override {
         const NetworkInfo* info = s_.GetNetworkInfo(n, x, z);
         if (!info) return false;
@@ -466,6 +475,11 @@ void cSC4TrafficSimulator::DoConnectionsChanged(int x1, int z1, int x2, int z2) 
     }
     // 4. the transit switches over R grown by one more
     ApplyTransitSwitches(SC4RectInt32{std::max(r.x0 - 1, 0), std::max(r.z0 - 1, 0), std::min(r.x1 + 1, cellsX_ - 1), std::min(r.z1 + 1, cellsZ_ - 1)});
+    // 5. the tunnels: every cell of the same rectangle that is a tunnel record's key is a portal (wormhole bit 2), whatever the
+    // record carries (TN29)
+    for (int x = std::max(r.x0 - 1, 0); x <= std::min(r.x1 + 1, cellsX_ - 1); ++x)
+        for (int z = std::max(r.z0 - 1, 0); z <= std::min(r.z1 + 1, cellsZ_ - 1); ++z)
+            if (TunnelAt(x, z)) CellConnections(x, z).wormhole |= 2;
     networkChanged_ = subnetworksStale_ = true;
     continueSearch_ = false;
 }
@@ -775,6 +789,52 @@ void cSC4TrafficSimulator::NetworkBookkeeping(cSC4NetworkOccupant* occupant, boo
     }
 }
 
+// traffic-network.md §4.8 (0x007140E0, Mac i386 0x0005dcd6). The key is the portal's cell. Removed: the record goes (the rebuild
+// that follows clears the wormhole bit). Inserted: nothing without a paired portal or without one of the network types 2, 6, 0,
+// 1, 10, 12, 9; otherwise the record (found or made, then overwritten) holds the other portal's cell, the travel-type mask (every
+// type but Walk: the test meant to use the type's transit networks always passes) and per travel type the straight-line length
+// between the portals x 1 / max speed x 1/16.
+void cSC4TrafficSimulator::DoTunnelChanged(cSC4NetworkOccupant* portal, bool inserted) {
+    float position[3] = {};
+    static_cast<const cSC4NetworkOccupant*>(portal)->GetPosition(position);   // vslot 0x148
+    int x = 0, z = 0;
+    host_->PositionToCell(position[0], position[2], x, z);
+    const std::uint16_t key = std::uint16_t((x << 8) | (z & 0xff));
+    if (!inserted) {
+        tunnels_.erase(key);
+        return;
+    }
+    void* raw = nullptr;
+    if (!portal->QueryInterface(kGZCLSID_cSC4NetworkTunnelOccupant, &raw) || !raw) return;
+    auto* tunnel = static_cast<cSC4NetworkTunnelOccupant*>(raw);
+    cSC4NetworkOccupant* other = tunnel->GetOtherEndOccupant();   // the member read directly (no interface), as the original does
+    tunnel->Release();
+    if (!other) return;
+    other->AddRef();
+    float far[3] = {};
+    static_cast<const cSC4NetworkOccupant*>(other)->GetPosition(far);
+    int ox = 0, oz = 0;
+    host_->PositionToCell(far[0], far[2], ox, oz);
+    other->Release();
+    int type = -1;
+    for (int candidate : {2, 6, 0, 1, 10, 12, 9}) {
+        if (portal->IsOfType(std::uint32_t(candidate))) {
+            type = candidate;
+            break;
+        }
+    }
+    if (type < 0) return;
+    TunnelInfo record;
+    record.otherX = std::uint8_t(ox);
+    record.otherZ = std::uint8_t(oz);
+    for (int t = 1; t < 9; ++t) record.travelTypes = std::uint16_t(record.travelTypes | (1u << t));
+    const float dx = position[0] - far[0], dy = position[1] - far[1], dz = position[2] - far[2];
+    const float length = std::sqrt(dz * dz + dy * dy + dx * dx);
+    for (int t = 0; t < 9; ++t) record.cost[std::size_t(t)] = length * tunables_.inverseMaximumSpeed[std::size_t(t)][std::size_t(type)] * 0.0625f;
+    record.networkType = std::uint16_t(type);
+    tunnels_[key] = record;
+}
+
 // §3.6 bookkeeping, then the network part (traffic-network.md §3).
 void cSC4TrafficSimulator::DoNetworkOccupantChanged(cSC4NetworkOccupant* occupant, bool inserted) {
     NetworkBookkeeping(occupant, inserted, true);
@@ -784,6 +844,13 @@ void cSC4TrafficSimulator::DoNetworkOccupantChanged(cSC4NetworkOccupant* occupan
     host_->PositionToCell(position[0], position[2], x, z);
     bool takesPart = false;
     for (int k = 0; k < 13 && !takesPart; ++k) takesPart = kTakesPart[k] && occupant->IsOfType(std::uint32_t(k));
+    if (takesPart) {   // a tunnel portal (QI 0x8a4bd52b)
+        void* raw = nullptr;
+        if (occupant->QueryInterface(kGZCLSID_cSC4NetworkTunnelOccupant, &raw) && raw) {
+            DoTunnelChanged(occupant, inserted);
+            static_cast<cSC4NetworkTunnelOccupant*>(raw)->Release();
+        }
+    }
     if (!takesPart || unsigned(x) >= unsigned(cellsX_) || unsigned(z) >= unsigned(cellsZ_)) return;
     if (!inserted)
         for (int t = 0; t < 9; ++t) {

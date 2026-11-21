@@ -13,6 +13,7 @@
 #include "sc4/BuildingOccupant.h"
 #include "sc4/Lot.h"
 #include "sc4/NetworkOccupant.h"
+#include "sc4/NetworkTunnelOccupant.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/PathInfo.h"
 #include "sc4/ServiceLocator.h"
@@ -62,17 +63,45 @@ public:
         cISC4PathInfo* p = Info();
         return p && p->GetJunctionKeys(pathType, entry, keys);
     }
-    void MakeTunnelPaths(ITrafficNetworkMapOccupant*, ITrafficNetworkMapOccupant*) override {}   // PARTIAL: no tunnels natively
+    // cISC4PathInfo::MakeTunnelPaths (vslot 0x100) with the two portals as the path info sees them.
+    void MakeTunnelPaths(ITrafficNetworkMapOccupant* from, ITrafficNetworkMapOccupant* to) override {
+        cISC4PathInfo* p = Info();
+        auto* a = from ? dynamic_cast<IPathNetworkOccupant*>(from->AsOccupant()) : nullptr;
+        auto* b = to ? dynamic_cast<IPathNetworkOccupant*>(to->AsOccupant()) : nullptr;
+        if (p && a && b) p->MakeTunnelPaths(a, b);
+    }
 private:
     cISC4PathInfo* Info() const { return occupant_->GetPathInfo(); }   // the piece caches its path info
     cSC4NetworkOccupant* occupant_;
 };
 
 // ---- network pieces --------------------------------------------------------------------------------------------------
+// cISC4NetworkTunnelOccupant as the map reads it: the portal at the other end (borrowed, as GetOtherEndOccupant returns it).
+class TunnelView final : public ITrafficNetworkMapTunnel {
+public:
+    explicit TunnelView(cSC4NetworkTunnelOccupant* tunnel) : tunnel_(tunnel) {}
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return tunnel_->AddRef(); }
+    std::uint32_t Release() override { return tunnel_->Release(); }
+    ITrafficNetworkMapOccupant* GetOtherEndOccupant() override;
+private:
+    cSC4NetworkTunnelOccupant* tunnel_;
+};
 class PieceView final : public ITrafficAutomatonOccupant {
 public:
     explicit PieceView(cSC4NetworkOccupant* occupant) : occupant_(occupant), path_(occupant) {}
-    bool QueryInterface(std::uint32_t iid, void** out) override { return occupant_->QueryInterface(iid, out); }
+    // A tunnel portal answers cISC4NetworkTunnelOccupant (0x8a4bd52b) with the map's view of it (its other end).
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid == kGZCLSID_cSC4NetworkTunnelOccupant) {
+            auto* tunnel = dynamic_cast<cSC4NetworkTunnelOccupant*>(occupant_);
+            if (!tunnel) return false;
+            if (!tunnel_) tunnel_ = std::make_unique<TunnelView>(tunnel);
+            tunnel_->AddRef();
+            *out = static_cast<ITrafficNetworkMapTunnel*>(tunnel_.get());
+            return true;
+        }
+        return occupant_->QueryInterface(iid, out);
+    }
     std::uint32_t AddRef() override { return occupant_->AddRef(); }
     std::uint32_t Release() override { return occupant_->Release(); }
     bool HasNetworkFlag(std::uint32_t flags) const override { return occupant_->HasNetworkFlag(flags); }
@@ -95,8 +124,16 @@ public:
 private:
     cSC4NetworkOccupant* occupant_;
     mutable PathInfoView path_;
+    std::unique_ptr<TunnelView> tunnel_;
 };
 std::map<cSC4NetworkOccupant*, std::unique_ptr<PieceView>> g_pieces;
+ITrafficNetworkMapOccupant* TunnelView::GetOtherEndOccupant() {
+    cSC4NetworkOccupant* other = tunnel_->GetOtherEndOccupant();
+    if (!other) return nullptr;
+    auto& slot = g_pieces[other];
+    if (!slot) slot = std::make_unique<PieceView>(other);
+    return slot.get();
+}
 
 // ---- lots and buildings ----------------------------------------------------------------------------------------------
 class LotView final : public ITrafficNetworkMapLot {
@@ -173,7 +210,9 @@ public:
     void GetViewTarget(float& x, float& y, float& z) override { x = y = z = 0.0f; }
     void SubscribeMessage(std::uint32_t message) override { if (SL::spMS2 && map_) SL::spMS2->AddNotification(map_, message); }
     void UnsubscribeMessage(std::uint32_t message) override { if (SL::spMS2 && map_) SL::spMS2->RemoveNotification(map_, message); }
-    void MakeTunnelPaths(ITrafficNetworkMapPathInfo*, ITrafficNetworkMapOccupant*, ITrafficNetworkMapOccupant*) override {}
+    void MakeTunnelPaths(ITrafficNetworkMapPathInfo* pathInfo, ITrafficNetworkMapOccupant* from, ITrafficNetworkMapOccupant* to) override {
+        if (pathInfo) pathInfo->MakeTunnelPaths(from, to);
+    }
     ITrafficNetworkMapOccupant* AsMapOccupant(cISC4Occupant* occupant) override {
         auto* piece = dynamic_cast<cSC4NetworkOccupant*>(occupant);
         if (!piece) return nullptr;

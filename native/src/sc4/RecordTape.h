@@ -6,6 +6,7 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -77,6 +78,13 @@ public:
         return *items_.back().holder;
     }
 
+    // A variable-length section the reader keeps in its own state: skipped on the tape, written by `write` on save.
+    void Live(std::function<void(cIGZOStream&)> write) {
+        Item item{kLive, 0, nullptr, {}};
+        item.write = std::move(write);
+        items_.push_back(std::move(item));
+    }
+
     // every object reference read, in record order (borrowed)
     template <class F> void ForEachRef(F f) const {
         for (const Item& item : items_)
@@ -100,19 +108,21 @@ public:
                 case kBool: s.SetUint8(item.live ? (*static_cast<const bool*>(item.live) ? 1 : 0) : Load<std::uint8_t>(from)); break;
                 case kRef: item.ref.Write(s); break;
                 case kHolder: item.holder->Write(s); break;
+                case kLive: if (item.write) item.write(s); break;
             }
         }
         return !s.GetError();
     }
 
 private:
-    enum Kind : std::uint8_t { kU8, kS8, kS16, kU16, kU32, kS32, kU64, kS64, kF32, kF64, kBool, kRef, kHolder };
+    enum Kind : std::uint8_t { kU8, kS8, kS16, kU16, kU32, kS32, kU64, kS64, kF32, kF64, kBool, kRef, kHolder, kLive };
     struct Item {
         Kind kind;
         std::uint64_t bits;
         void* live;
         cRetainedReference ref;
         std::shared_ptr<cSCPropertyHolder> holder = {};
+        std::function<void(cIGZOStream&)> write = {};
     };
     template <class T> static T Load(const void* p) { T v; std::memcpy(&v, p, sizeof v); return v; }
     template <class T> void Put(Kind kind, const T* value, T* live) {

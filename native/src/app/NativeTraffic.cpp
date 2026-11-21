@@ -361,3 +361,28 @@ cSC4SimGrid<std::uint8_t>* NativeTrafficTripLengthMap() {
 }
 
 }  // namespace native
+
+namespace native {
+// Kit verb `tunnels` (second half): the traffic simulator's tunnel records (traffic-network.md §2.5), each portal cell's
+// wormhole bits and the car subnetwork labels of both portals (a tunnel joins them into one).
+void NativeTrafficTunnelReport() {
+    sc4::cSC4TrafficSimulator* traffic = Traffic();
+    if (!traffic) {
+        std::printf("traffic tunnels: no simulator\n");
+        return;
+    }
+    std::printf("traffic tunnels: %zu records\n", traffic->TunnelCount());
+    for (int x = 0; x < 256; ++x)
+        for (int z = 0; z < 256; ++z) {
+            const sc4::cSC4TrafficSimulator::TunnelInfo* tunnel = traffic->TunnelAt(x, z);
+            if (!tunnel) continue;
+            const sc4::NetworkInfo* here = traffic->GetNetworkInfo(1, x, z);
+            const sc4::NetworkInfo* far = traffic->GetNetworkInfo(1, tunnel->otherX, tunnel->otherZ);
+            std::printf("traffic tunnel %d,%d -> %u,%u types %03x network %u car cost %.4f wormhole %u, car subnetworks %u/%u/%u/%u -> %u/%u/%u/%u\n",
+                        x, z, tunnel->otherX, tunnel->otherZ, tunnel->travelTypes, tunnel->networkType, tunnel->cost[1],
+                        traffic->CellConnections(x, z).wormhole, here ? here->subnetwork[0] : 0, here ? here->subnetwork[1] : 0,
+                        here ? here->subnetwork[2] : 0, here ? here->subnetwork[3] : 0, far ? far->subnetwork[0] : 0,
+                        far ? far->subnetwork[1] : 0, far ? far->subnetwork[2] : 0, far ? far->subnetwork[3] : 0);
+        }
+}
+}  // namespace native

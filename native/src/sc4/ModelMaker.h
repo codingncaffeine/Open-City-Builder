@@ -177,10 +177,15 @@ public:
 IModelMakerUtility* ModelMakerUtility();
 void SetModelMakerUtility(IModelMakerUtility* utility);
 
-// The model instance a network occupant hands out from GetModelInstances (cISC4NetworkOccupant vslot 0x108, the
-// occupant's own cS3DModelInstanceBasic subobject in the original; see sc4/NetworkOccupantModel.h). One reference.
-using NetworkModelFactory = s3d::cIS3DModelInstance* (*)(cISC4Occupant* occupant);
+// The model instances a network occupant hands out from GetModelInstances (cISC4NetworkOccupant vslot 0x108: the
+// occupant's own cS3DModelInstanceBasic subobject in the original, see sc4/NetworkOccupantModel.h, and a pre-built model
+// piece's model and support model). One reference each; returns how many were written to `out` (at most `capacity`).
+using NetworkModelFactory = int (*)(cISC4Occupant* occupant, int zoom, int rotation, s3d::cIS3DModelInstance** out, int capacity);
 void SetNetworkModelFactory(NetworkModelFactory factory);
+// cISC4NetworkOccupant i386 vslot 0x80 HasViewDependentModel as AddModels asks it: true for a piece whose models differ by zoom
+// and rotation (the pre-built model pieces), which the model maker then rebuilds when the view changes. Unset: false.
+using NetworkViewDependence = bool (*)(cISC4Occupant* occupant);
+void SetNetworkViewDependence(NetworkViewDependence query);
 
 // ---- seam: cSC4ModelBackgroundLoader (unrecovered owner of the background load tasks) -----------------------
 class IModelBackgroundLoader : public cIGZUnknown {

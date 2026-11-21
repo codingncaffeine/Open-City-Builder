@@ -1300,6 +1300,17 @@ int RunScenario(const std::string& path) {
             int x1 = 0, z1 = 0, x2 = 0, z2 = 0;
             words >> type >> x1 >> z1 >> x2 >> z2;
             native::NativeLayNetworkLine(type, x1, z1, x2, z2);
+        } else if (command == "tunnelparams") {   // tunnelparams TYPE: a network type's tunnel rules (slopes, portal exemplars, clearances)
+            std::uint32_t type = 0;
+            words >> type;
+            native::NativeTunnelParams(type);
+        } else if (command == "heights") {   // heights X1 Z1 X2 Z2: the mean terrain height of each cell along a row or column
+            int x1 = 0, z1 = 0, x2 = 0, z2 = 0;
+            words >> x1 >> z1 >> x2 >> z2;
+            native::NativeTerrainLine(x1, z1, x2, z2);
+        } else if (command == "tunnels") {   // tunnels: every tunnel portal, its model, its other end and its paths
+            native::NativeTunnelReport();
+            native::NativeTrafficTunnelReport();
         } else if (command == "powerfunding") {   // powerfunding PERCENT: the power department's funding (as the budget window sets it)
             int percent = 100;
             words >> percent;
@@ -1556,6 +1567,9 @@ int RunScenario(const std::string& path) {
         } else if (command == "savecity") {   // savecity: what the Save menu item does (cSC4App::RequestSaveCity) without the "saved" message box
             cSC4App* app = native::BootApplication();
             std::printf("savecity: %s\n", app && app->RequestSaveCity(false, false) ? "saved" : "not saved");
+        } else if (command == "regionview") {   // regionview: back to the region view as the menu item does after the save question (no dialog)
+            cSC4App* app = native::BootApplication();
+            std::printf("regionview: %s\n", app && app->RequestGoToRegionView(false) ? "ok" : "refused");
         } else if (command == "regioncity") {   // regioncity: the open city's regional record (what the region view and the neighbors read)
             auto* record = dynamic_cast<cSC4RegionalCity*>(native::NativeCurrentRegionalCity());
             std::vector<cISC4RegionalCity::PointOfInterest> airports, seaports;

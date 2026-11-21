@@ -120,6 +120,8 @@ public:
     virtual std::uint16_t Switches(int t, int x, int z) { (void)t; (void)x; (void)z; return 0xffff; }    // switch[t]
     virtual std::uint16_t PriorCar(int side, int x, int z) { (void)side; (void)x; (void)z; return 0xffff; }
     virtual std::uint8_t Wormhole(int x, int z) { (void)x; (void)z; return 0; }
+    // The tunnel record of a portal cell when it carries travel type t: the other portal's cell and the passage cost.
+    virtual bool Tunnel(int x, int z, int t, int& otherX, int& otherZ, float& cost) { (void)x; (void)z; (void)t; (void)otherX; (void)otherZ; (void)cost; return false; }
     // The first network-info record of transit network n at the cell: inverse capacity, piece type, extra step cost.
     virtual bool CellNetwork(int n, int x, int z, float& inverseCapacity, std::uint8_t& type, float& extraCost) {
         (void)n; (void)x; (void)z; (void)inverseCapacity; (void)type; (void)extraCost; return false;

@@ -508,6 +508,16 @@ public:
     }
 };
 
+}  // namespace
+
+// The lighting a network piece takes when it enters the city (cSC4NetworkOccupant::UpdateLighting with the lighting manager).
+sc4::INetworkOccupantLighting& NativeNetworkLighting() {
+    static NetworkLighting lighting;
+    return lighting;
+}
+
+namespace {
+
 // GetTexture's binding factory: the network textures live in the S3D texture group.
 class NetworkModelHost final : public sc4::INetworkModelHost {
 public:
@@ -803,28 +813,39 @@ void InstallModelMakerHosts(sc4::cSC43DRender& render) {
     static CellTextureHost cellTextureHost;
     static NetworkModelHost networkModelHost;
     sc4::SetNetworkModelHost(&networkModelHost);
-    sc4::SetNetworkModelFactory([](sc4::cISC4Occupant* occupant) -> s3d::cIS3DModelInstance* {
+    sc4::SetNetworkModelFactory([](sc4::cISC4Occupant* occupant, int zoom, int rotation, s3d::cIS3DModelInstance** out, int capacity) -> int {
+        if (capacity <= 0) return 0;
         // A power pole is its own model instance (cSC4PowerPoleOccupant::GetModelInstances): it draws its model, its
         // foundation and its wires.
         if (auto* pole = dynamic_cast<sc4::cSC4PowerPoleOccupant*>(occupant)) {
             s3d::cIS3DModelInstance* instances[1] = {nullptr};
             int count = 0;
             pole->GetModelInstances(instances, count);
-            return count > 0 ? instances[0] : nullptr;
+            out[0] = count > 0 ? instances[0] : nullptr;
+            return out[0] ? 1 : 0;
         }
         if (auto* underground = dynamic_cast<sc4::cSC4UndergroundOccupant*>(occupant)) {   // pipes and subway pieces
             auto* model = new UndergroundPieceModel(*underground);
             model->AddRef();
-            return model;
+            out[0] = model;
+            return 1;
         }
+        // A pre-built model piece (tunnel portals, bridges): its own tile model (the host's GetOccupantModelInstances), its
+        // pre-built model and its support model (cSC4NetworkOccupantWithPreBuiltModel::GetModelInstances, vslot 0x108).
+        const int prebuilt = NativePreBuiltModelInstances(occupant, zoom, rotation, out, capacity);
+        if (prebuilt >= 0) return prebuilt;
         auto* network = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);
-        if (!network) return nullptr;
+        if (!network) return 0;
         // The lighting manager lights a network piece when it enters the city (cSC4NetworkOccupant::UpdateLighting).
-        static NetworkLighting lighting;
-        network->UpdateLighting(lighting);
+        network->UpdateLighting(NativeNetworkLighting());
         auto* model = new sc4::cSC4NetworkOccupantModel(*network);
         model->AddRef();
-        return model;
+        out[0] = model;
+        return 1;
+    });
+    sc4::SetNetworkViewDependence([](sc4::cISC4Occupant* occupant) {
+        auto* network = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);
+        return network && network->HasViewDependentModel();
     });
     sc4::SetCellTextureModelHost(&cellTextureHost);
     sc4::SetLotBaseTextureHost(&g_lotBaseTextureHost);
@@ -967,4 +988,19 @@ bool ShowPreviewOccupant(sc4::cISC4Occupant* occupant, bool show) {
     return true;
 }
 
+}  // namespace native
+
+namespace native {
+int NativeShadowRenderQuality() {
+    sc4::IModelMakerHost* host = sc4::ModelMakerHost();
+    return host ? host->ShadowRenderQuality() : 0;
+}
+std::uint32_t NativeMapShadowTexture(std::uint32_t instance, std::uint8_t& rotation, std::uint32_t flags, std::uint32_t raised) {
+    sc4::IModelMakerHost* host = sc4::ModelMakerHost();
+    return host ? host->MapShadowTexture(instance, rotation, flags, raised) : 0;
+}
+std::uint32_t NativeModelInstanceID(sc4::cISC4Occupant* occupant, int zoom, int rotation, int state, bool flag, std::uint32_t* a, std::uint32_t* b) {
+    sc4::IModelMakerHost* host = sc4::ModelMakerHost();
+    return host && occupant ? host->GetModelInstanceID(occupant, zoom, rotation, state, flag, a, b) : 0;
+}
 }  // namespace native

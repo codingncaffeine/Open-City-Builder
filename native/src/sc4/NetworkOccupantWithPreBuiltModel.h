@@ -213,7 +213,7 @@ public:
     bool IsManagedGlobally() const { return true; }                           // 0x1001a2964 (vslot 0x28)
 
     // the render / model slots of the original (see the vtable order in the .cpp)
-    virtual bool HasViewDependentModel() const { return true; }               // 0x1001bbf56 (vslot 0x100)
+    bool HasViewDependentModel() const override { return true; }              // 0x1001bbf56 (vslot 0x100)
     virtual void GetModelInstances(int zoom, int rotation, s3d::cIS3DModelInstance** out, int capacity,
                                    int& count);                               // 0x1001bb032 (vslot 0x108)
     float GetAltitude(float x, float z) const override;                       // 0x1001bc0a4 (vslot 0x1c0)

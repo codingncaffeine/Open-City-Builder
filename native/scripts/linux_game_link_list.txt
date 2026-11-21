@@ -525,7 +525,7 @@ src/app/hosts/StubPlaceable.cpp
 src/app/hosts/StubPortDeveloper.cpp
 src/app/NativePowerLineTool.cpp
 src/sc4/PowerLineGeometry.cpp
-src/app/hosts/StubPreBuiltModelOccupant.cpp
+src/app/NativePreBuiltModel.cpp
 src/app/hosts/StubProp.cpp
 src/app/hosts/StubPropController.cpp
 src/app/hosts/StubPropDeveloper.cpp
@@ -825,6 +825,7 @@ src/sc4/ViewInputControlNetworkTool.cpp
 src/sc4/NetworkWorldCache.cpp
 src/rz/RZTime.cpp
 src/sc4/NetworkToolSolve.cpp
+src/sc4/NetworkToolTunnels.cpp
 src/sc4/TileRules.cpp
 src/sc4/NetworkPreview.cpp
 src/gz/LegacyControlListBox.cpp

@@ -331,7 +331,7 @@ bool cSC4TrafficSimulator::WriteFreshCityRecord(cIGZOStream& stream) const {
     };
     stats(statsPublished_, std::uint16_t(statRoadPotholes_), freightByte_);
     stats(statsWork_, 0, 0);
-    stream.SetUint32(0);                                     // tunnels
+    WriteTunnelTable(stream, kTravelTypes);
     stream.SetFloat32(avgCarCommute_);
     stream.SetFloat32(carLenSum_);
     stream.SetUint32(carLenCount_);
@@ -523,11 +523,21 @@ bool cSC4TrafficSimulator::Read(cIGZIStream& stream) {
         t.GetFloat32(stream, f32);
         if (version >= 0x15) t.GetUint8(stream, u8);
     }
-    t.GetUint32(stream, u32);                                        // tunnels
+    // The tunnel table (row 17) is kept live: read here, written from the table on save (the tape keeps its place only).
+    tunnels_.clear();
+    stream.GetUint32(u32);
     many(u32, [&] {
-        t.GetUint16(stream, u16); t.GetUint8(stream, u8); t.GetUint8(stream, u8); t.GetUint16(stream, u16); t.GetUint16(stream, u16);
-        for (std::int32_t i = 0; i < tunnelWidth; ++i) t.GetFloat32(stream, f32);
+        std::uint16_t key = 0;
+        TunnelInfo tunnel;
+        stream.GetUint16(key); stream.GetUint8(tunnel.otherX); stream.GetUint8(tunnel.otherZ);
+        stream.GetUint16(tunnel.travelTypes); stream.GetUint16(tunnel.networkType);
+        for (std::int32_t i = 0; i < tunnelWidth; ++i) {
+            stream.GetFloat32(f32);
+            if (i < 9) tunnel.cost[std::size_t(i)] = f32;
+        }
+        tunnels_[key] = tunnel;
     });
+    t.Live([this, tunnelWidth](cIGZOStream& out) { WriteTunnelTable(out, tunnelWidth); });
     t.GetFloat32(stream, f32);                                       // average car commute (recomputed)
     t.GetFloat32(stream, L.carLenSum); t.GetUint32(stream, L.carLenCount);
     if (version >= 0x15) { t.GetFloat32(stream, L.freightLenSum); t.GetUint32(stream, L.freightCount); }
@@ -1107,8 +1117,8 @@ void cSC4TrafficSimulator::UpdateSubnetworks() {
 }
 
 // §4.11 Fill (0x00717EC0): the states reachable along directed car connections (bit exit + 4 * entry of travel type 1) get the
-// current label; a state resumes at its stored k (0..3 the sides, 4 the tunnel step, 5 done). PARTIAL: tunnel portals are never
-// followed (the port keeps no tunnel table), so a tunnel's two ends get separate labels.
+// current label; a state resumes at its stored k (0..3 the sides, 4 the tunnel step, 5 done). A tunnel portal
+// leads on to the other portal, entered from the same side.
 void cSC4TrafficSimulator::FloodSubnetwork(int startX, int startZ, int startEntry) {
     const NetworkInfo* start = GetNetworkInfo(1, startX, startZ);
     if (!start || start->subnetwork[std::size_t(startEntry)] != 0 || start->connectionCount > 2) return;
@@ -1152,7 +1162,21 @@ void cSC4TrafficSimulator::FloodSubnetwork(int startX, int startZ, int startEntr
             }
         }
         if (moved) continue;
-        if (cur.k == 4) cur.k = 5;   // the tunnel step (see above)
+        if (cur.k == 4) {
+            // the tunnel step: k becomes 5 before the record is looked up, so the pushed state never redoes it (TN16)
+            cur.k = 5;
+            const TunnelInfo* tunnel = (CellConnections(cur.x, cur.z).wormhole & 2) ? TunnelAt(cur.x, cur.z) : nullptr;
+            if (info && tunnel && (tunnel->travelTypes & (1u << 1))) {
+                info->subnetwork[std::size_t(cur.e)] = label;
+                labelled = true;
+                const NetworkInfo* far = GetNetworkInfo(1, tunnel->otherX, tunnel->otherZ);
+                if (far && far->subnetwork[std::size_t(cur.e)] == 0) {
+                    stack.push_back(cur);
+                    cur = State{tunnel->otherX, tunnel->otherZ, cur.e, 0};
+                    continue;
+                }
+            }
+        }
         if (stack.empty()) break;
         cur = stack.back();
         stack.pop_back();
@@ -1812,4 +1836,18 @@ bool cSC4TrafficSimulator::SetupPathFinderForLot(cISC4PathFinder* pathFinder, IT
     return false;
 }
 
+}  // namespace sc4
+
+namespace sc4 {
+void cSC4TrafficSimulator::WriteTunnelTable(cIGZOStream& stream, int costs) const {
+    stream.SetUint32(std::uint32_t(tunnels_.size()));
+    for (const auto& [key, tunnel] : tunnels_) {
+        stream.SetUint16(key);
+        stream.SetUint8(tunnel.otherX);
+        stream.SetUint8(tunnel.otherZ);
+        stream.SetUint16(tunnel.travelTypes);
+        stream.SetUint16(tunnel.networkType);
+        for (int i = 0; i < costs; ++i) stream.SetFloat32(i < 9 ? tunnel.cost[std::size_t(i)] : 0.0f);
+    }
+}
 }  // namespace sc4

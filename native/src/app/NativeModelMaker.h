@@ -7,8 +7,9 @@
 #include <vector>
 
 namespace gd { class cIGZGDriver; }
+namespace s3d { class cIS3DModelInstance; }
 class cIGZUnknown;
-namespace sc4 { class cSC43DRender; class cSC4City; class cISC4Occupant; class cSC4ModelMaker; }
+namespace sc4 { class cSC43DRender; class cSC4City; class cISC4Occupant; class cSC4ModelMaker; class INetworkOccupantLighting; }
 
 namespace native {
 
@@ -47,6 +48,16 @@ void DetachModelMaker();
 // The place-lot tool's preview building: an occupant outside the occupant manager whose models the model maker makes (show) or
 // drops (hide) as for a created + shown / hidden + destroyed occupant. False without a model maker.
 bool ShowPreviewOccupant(sc4::cISC4Occupant* occupant, bool show);
+
+// The lighting a network piece takes when it enters the city (cSC4NetworkOccupant::UpdateLighting's lighting manager).
+sc4::INetworkOccupantLighting& NativeNetworkLighting();
+// The model maker host's answers the pre-built network pieces use (NativePreBuiltModel.cpp): the shadow quality word, the
+// network manager's shadow texture remap and cSC4ModelMakerUtility::GetModelInstanceID.
+int NativeShadowRenderQuality();
+// A pre-built model network piece's model instances (GetModelInstances, one reference each), or -1 for any other occupant.
+int NativePreBuiltModelInstances(sc4::cISC4Occupant* occupant, int zoom, int rotation, s3d::cIS3DModelInstance** out, int capacity);
+std::uint32_t NativeMapShadowTexture(std::uint32_t instance, std::uint8_t& rotation, std::uint32_t flags, std::uint32_t raised);
+std::uint32_t NativeModelInstanceID(sc4::cISC4Occupant* occupant, int zoom, int rotation, int state, bool flag, std::uint32_t* a, std::uint32_t* b);
 
 void NativeTerrainHidingReport();   // kit command `terrainflags`
 
