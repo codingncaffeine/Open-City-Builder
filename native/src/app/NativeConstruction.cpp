@@ -36,6 +36,9 @@
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
 #include "app/NativeAnimationTicks.h"
+#include "app/NativeAutomataViews.h"
+#include "sc4/AutomataManager.h"
+#include "sc4/Automaton.h"
 
 namespace native {
 
@@ -46,6 +49,31 @@ void CrewSetOrientation(cIGZUnknown* automaton, const float* direction);
 
 namespace {
 using namespace sc4;
+
+// A construction worker as the lot's construction occupant drives it (IConstructionAutomaton over the automaton).
+class LotCrewAutomaton final : public IConstructionAutomaton {
+public:
+    explicit LotCrewAutomaton(cSC4Automaton* automaton) : automaton_(automaton) {}
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override {
+        if (refs_ > 1) return --refs_;
+        delete this;
+        return 0;
+    }
+    cISC4Occupant* AsOccupant() override { return static_cast<cISC4Occupant*>(automaton_); }
+    void SetAutomataFlag(std::uint32_t flag, bool on) override { automaton_->SetAutomataFlag(flag, on); }
+    void SetOrientation(const float* direction) override { automaton_->SetOrientation(direction); }
+    cSC4Automaton* Automaton() const { return automaton_; }
+private:
+    cSC4Automaton* automaton_;
+    std::uint32_t refs_ = 0;
+};
+
+cSC4AutomataManager* PedestrianManager() {
+    cSC4City* city = HostCity();
+    return city ? dynamic_cast<cSC4AutomataManager*>(city->GetComponent(CityComponent::PedestrianManager)) : nullptr;
+}
 
 constexpr std::uint32_t kGZIID_cIS3DResModel = 0x9ad0e7e3;
 
@@ -246,7 +274,10 @@ public:
         occupants->InsertOccupant(occupant, 0);
     }
     void RemoveProp(cISC4Occupant* occupant) override { if (cISC4OccupantManager* o = Occupants(); o && occupant) o->RemoveOccupant(occupant, true, 0); }
-    void RemoveAutomaton(IConstructionAutomaton*) override {}
+    void RemoveAutomaton(IConstructionAutomaton* automaton) override {
+        auto* manager = PedestrianManager();
+        if (manager && automaton) manager->RemoveAutomaton(AutomatonView(static_cast<LotCrewAutomaton*>(automaton)->Automaton()), false);
+    }
     IConstructionEffect* CreatePropEffect() override {
         auto* effect = new cSC4PropOccupantVisualEffect();
         effect->AddRef();
@@ -263,8 +294,19 @@ public:
         return true;
     }
     cISC4BuildingOccupant* LotBuilding(IConstructionLot* lot) override { return lot ? lot->GetBuilding() : nullptr; }
-    IConstructionAutomaton* CreateAutomaton(std::uint32_t, const float[3], std::uint32_t, const cGZPersistResourceKey&, std::uint8_t) override {
-        return nullptr;   // PARTIAL: no automata manager natively, so no construction crew
+    // SL::spCity vslot 0x160, the pedestrian manager: the construction workers (group 0x4101) on the lot. The manager
+    // owns the automaton; the view starts without a reference of its own (the crew list takes one).
+    IConstructionAutomaton* CreateAutomaton(std::uint32_t group, const float position[3], std::uint32_t flags,
+                                            const cGZPersistResourceKey& key, std::uint8_t priority) override {
+        auto* manager = PedestrianManager();
+        if (!manager) return nullptr;
+        const cS3DVector3 where{position[0], position[1], position[2]};
+        IAutomataAutomaton* view = manager->CreateAutomaton(group, where, flags, key, nullptr, priority, nullptr);
+        cSC4Automaton* automaton = view ? AutomatonOf(view) : nullptr;
+        if (std::getenv("SC4_CREWDEBUG"))
+            std::fprintf(stderr, "lot crew: worker model 0x%08x at (%.1f, %.1f, %.1f) -> %p\n", key.instance, position[0], position[1],
+                         position[2], static_cast<void*>(automaton));
+        return automaton ? new LotCrewAutomaton(automaton) : nullptr;
     }
     bool InsertOccupant(cISC4Occupant* occupant, std::uint32_t data) override { cISC4OccupantManager* o = Occupants(); return o && o->InsertOccupant(occupant, data); }
     bool RemoveOccupant(cISC4Occupant* occupant, bool shutdown, std::uint32_t data) override { cISC4OccupantManager* o = Occupants(); return o && o->RemoveOccupant(occupant, shutdown, data); }
