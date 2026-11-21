@@ -1284,7 +1284,7 @@ bool cSC4AutomataManager::HandleInsertOccupant(IAutomataOccupant* occupant) {
     void* raw = nullptr;
     if (!occupant->QueryInterface(kGZIID_cISC4BuildingOccupant, &raw) || !raw) return true;
     auto* building = g_host ? g_host->BuildingView(raw) : static_cast<IAutomataBuildingOccupant*>(raw);
-    if (building && building->GetCompletionPercent() >= 100.0f) HandleNewBuilding(building);
+    if (building && building->GetCompletionPercent() >= 1.0f) HandleNewBuilding(building);   // kSC4PercentageOneHundred (a fraction)
     if (g_host) g_host->ReleaseObject(static_cast<cIGZUnknown*>(raw));
     return true;
 }
@@ -1540,7 +1540,7 @@ bool cSC4AutomataManager::DoMessage(cIGZMessage2* message) {
         case kMsgBuildingCompleted: {
             void* city = standard->GetVoid1();
             auto* building = city && g_host ? g_host->BuildingView(city) : static_cast<IAutomataBuildingOccupant*>(city);
-            if (building && building->GetCompletionPercent() >= 100.0f) HandleNewBuilding(building);
+            if (building && building->GetCompletionPercent() >= 1.0f) HandleNewBuilding(building);   // kSC4PercentageOneHundred (a fraction)
             break;
         }
         case kMsgControllerRemoved:

@@ -70,7 +70,7 @@ struct FakeOccupant final : IAutomataOccupant {
 struct FakeBuilding final : IAutomataBuildingOccupant {
     int refs = 1;
     FakeOccupant* occupant = nullptr;
-    float completion = 100.0f;
+    float completion = 1.0f;   // kSC4PercentageOneHundred (a fraction)
     bool QueryInterface(std::uint32_t, void**) override { return false; }
     std::uint32_t AddRef() override { return static_cast<std::uint32_t>(++refs); }
     std::uint32_t Release() override { return static_cast<std::uint32_t>(--refs); }
