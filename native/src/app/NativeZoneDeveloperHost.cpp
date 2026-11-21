@@ -338,14 +338,6 @@ struct BaseTextureServices final : ILotBaseTextureServices {
     std::uint8_t ZoneDisplayAlpha() override { cSC4ZoneManager* m = Zones(); return m ? m->GetZoneDisplayAlpha() : 0xff; }
     int CityCellsX() override { return CurrentCity() ? CurrentCity()->CellCountX() : 0; }
     int CityCellsZ() override { return CurrentCity() ? CurrentCity()->CellCountZ() : 0; }
-    void BoundaryLotTexture(const int sides[4], std::uint32_t& texture, std::uint8_t& rotation, bool& flag) override {
-        BoundaryType boundary;
-        for (int i = 0; i < 4; ++i) boundary.sides[i] = sides[i];
-        texture = 0;
-        rotation = 0;
-        flag = false;
-        if (cSC4ZoneDeveloper* d = Developer()) d->GetBoundaryLotTexture(boundary, texture, rotation, flag);
-    }
     cISC4LotBaseTextureOccupant* CreateBaseTextureOccupant() override {
         auto* occupant = new cSC4LotBaseTextureOccupant();
         occupant->AddRef();
@@ -367,14 +359,12 @@ struct LotHost final : ILotHost {
     std::uint8_t LandValueAt(int x, int z) override { return {}; }
     std::uint32_t RandomPercent() override { static cRZRandom random(0x107u); return random.RandomUint32Uniform(100); }
     cISC4LotConfigurationRef* LotConfigurationById(std::uint32_t id) override { return NativeLotConfigurationRef(id); }
-    // The state change (0xe8bda2e7) goes to the lot developer directly (it turns a built lot's base texture) and to SL::spMS2's subscribers
-    // (the growth developers add the lot's capacity to their maps; data1/2 old/new state, data3 building type, data4 wealth, the lot as
-    // the message object). The lot travels as a copy. PARTIAL: the condition change is not posted.
+    // The state change (0xe8bda2e7) and the condition change (0xe99b3d4d) go to SL::spMS2's subscribers (the lot developer turns a
+    // built lot's base texture, the growth developers add the lot's capacity to their maps; data1/2 old/new value, data3 building
+    // type, data4 wealth, the lot as the message object). The lot travels as a copy.
     void PostLotMessage(std::uint32_t message, const cSC4Lot& snapshot, std::uint32_t oldValue, std::uint32_t newValue, std::uint32_t buildingType,
                         std::int32_t wealth) override {
         if (message != sc4::kMessageLotStateChanged && message != sc4::kMessageLotConditionChanged) return;
-        if (message == sc4::kMessageLotStateChanged)
-            if (cSC4LotDeveloper* developer = LotDeveloper()) developer->DoLotStateChanged(snapshot, oldValue, newValue);
         if (!SL::spMS2) return;
         // Reference counted and on the heap: a message sent while the server is dispatching may be delivered later.
         struct LotObject final : cIGZUnknown {   // the plain lot behind the message's object slot (a copy it owns)
@@ -585,9 +575,9 @@ bool InstallZoneDeveloperHost(sc4::cSC4City* city) {
     // The city's component pass has initialized the developer with these services; Init again only answers whether it is up.
     cSC4ZoneDeveloper* developer = Developer();
     const bool ok = developer && developer->Init();
-    // The lot developer's daily lot pass (lot-developer.md §4.1; agent level 4, flags 2): its lots are the zone developer's.
-    if (cSC4LotDeveloper* lots = LotDeveloper()) AddCitySimulatorAgent(static_cast<cIGZMessageTarget2*>(lots), 4, "cSC4LotDeveloper", 2);
-    std::printf("city view: zone developer %s (lot developer %s)\n", ok ? "up" : "NOT initialised", LotDeveloper() ? "found" : "MISSING");
+    cSC4LotDeveloper* lots = LotDeveloper();
+    std::printf("city view: zone developer %s (lot developer %s)\n", ok ? "up" : "NOT initialised",
+                lots ? (lots->IsInitialized() ? "up" : "NOT initialised") : "MISSING");
     installedOk = ok;
     return ok;
 }

@@ -208,6 +208,7 @@ the caller fills (see `scripts/terrain_shot.mm`).
 | `ILotConfigurationManagerHost` | `src/sc4/LotConfigurationManager.h` | src/sc4/LotConfigurationManager.cpp | implemented | scripts/tests/sc4_lotconfigurationmanager_test.cpp, src/app/NativeLotConfigHost.cpp |
 | `ILotConstructionServices` | `src/sc4/LotDeveloper.h` | src/sc4/LotDeveloper.cpp | implemented | scripts/tests/sc4_businessunit_test.cpp, src/app/NativeLotConstruction.cpp |
 | `ILotDailyServices` | `src/sc4/LotDeveloper.h` | src/sc4/LotDeveloper.cpp | implemented | src/app/NativeLotConstruction.cpp |
+| `ILotDeveloperCityServices` | `src/sc4/LotDeveloper.h` | src/sc4/LotDeveloper.cpp | implemented | scripts/tests/sc4_lotdevlife_test.cpp, src/app/NativeLotConstruction.cpp |
 | `ILotGateServices` | `src/sc4/LotDeveloper.h` |  | implemented | scripts/tests/sc4_lotdeveloper_test.cpp, src/app/NativeLotConstruction.cpp |
 | `ILotHost` | `src/sc4/Lot.h` | src/sc4/Lot.cpp, src/sc4/LotDeveloper.cpp | implemented | scripts/tests/sc4_aurasimulator_test.cpp, scripts/tests/sc4_businessunit_test.cpp |
 | `ILotRetainingWallHost` | `src/sc4/LotRetainingWallOccupant.h` | src/sc4/LotRetainingWallOccupant.cpp | implemented | scripts/tests/sc4_lotretainingwalloccupant_test.cpp, src/app/NativeLotWalls.cpp |

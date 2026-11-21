@@ -23,6 +23,7 @@
 #include "app/NativeTraffic.h"
 #include "app/NativeGrowthDevelopers.h"
 #include "app/NativeCityView.h"
+#include "app/NativeAnimationTicks.h"
 #include "app/NativeZoneDeveloperHost.h"
 #include "gz/SimHostRegistry.h"
 #include "gz/cGZPersistResourceManager.h"
@@ -51,6 +52,9 @@
 #include "sc4/ServiceLocator.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
+#include "sc4/cSC424HourClock.h"
+#include "sc4/AnimationTickManager.h"
+#include "rz/cRZAutoRefCount.h"
 
 namespace native {
 void NativeAddRetainingWallOccupant(sc4::cSC4Lot* lot);           // app/NativeLotWalls.cpp
@@ -226,12 +230,12 @@ public:
         else { px = static_cast<float>(x) * 16.0f; pz = static_cast<float>(z) * 16.0f; }
     }
     float TerrainAltitude(float x, float z) override { cSTETerrain* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
-    // The blocking-lot filter takes flora only (cSC4BlockingLotOccupantFilter); cSC4Demolition's flora case removes the occupant from
-    // the manager at no cost (the network tool's interim demolition does the same).
-    void DemolishBlockingOccupants(const float minimum[3], const float maximum[3]) override {
+    // The lot developer's blocking-lot filter (+0x58, made by its Init) takes flora only (cSC4BlockingLotOccupantFilter); cSC4Demolition's
+    // flora case removes the occupant from the manager at no cost (the network tool's interim demolition does the same). PORT GUARD:
+    // without the filter (a developer that was never initialized) nothing is taken, where the original would query unfiltered.
+    void DemolishBlockingOccupants(const float minimum[3], const float maximum[3], cISC4OccupantFilter* blocking) override {
         cISC4OccupantManager* occupants = Occupants();
-        if (!occupants) return;
-        static cSC4BlockingLotOccupantFilter* blocking = [] { auto* f = new cSC4BlockingLotOccupantFilter(); f->AddRef(); return f; }();   // +0x58
+        if (!occupants || !blocking) return;
         std::vector<cISC4Occupant*> found;
         occupants->IterateOccupantsByBBox(
             [](cISC4Occupant* occupant, void* out) {
@@ -477,22 +481,85 @@ public:
     }
 } g_daily;
 
-// The lot developer's subscriptions (lot-developer.md §3.2): delivered to the city's current lot developer, so a city switch never
-// leaves a dangling target.
-class LotDeveloperTarget final : public cIGZMessageTarget2 {
+// What cSC4LotDeveloper::Init, Shutdown and its message handlers reach in the city (lot-developer.md §1.3, §3.2, §8, §9): the
+// services the original takes from its globals are the current city's components; the lot manager is the zone developer.
+class CityServices final : public ILotDeveloperCityServices {
 public:
-    bool QueryInterface(std::uint32_t iid, void** out) override {
-        if (iid != kGZIID_cIGZMessageTarget2 && iid != 1) return false;
-        *out = static_cast<cIGZMessageTarget2*>(this);
-        return true;
+    const char* MissingService() override {
+        if (!HostCity()) return "city";
+        static const std::pair<sc4::CityComponent, const char*> kServices[] = {
+            {sc4::CityComponent::ZoneDeveloper, "lot manager"}, {sc4::CityComponent::OccupantManager, "occupant manager"},
+            {sc4::CityComponent::PropManager, "prop manager"}, {sc4::CityComponent::BuildingDevelopmentSimulator, "building development"},
+            {sc4::CityComponent::PowerSimulator, "power"}, {sc4::CityComponent::PlumbingSimulator, "plumbing"},
+            {sc4::CityComponent::FloraSimulator, "flora"}, {sc4::CityComponent::Terrain, "terrain"},
+            {sc4::CityComponent::TrafficSimulator, "traffic"}};
+        for (const auto& [component, name] : kServices)
+            if (!Component(component)) return name;
+        return nullptr;
     }
-    std::uint32_t AddRef() override { return 1; }
-    std::uint32_t Release() override { return 1; }   // static
-    bool DoMessage(cIGZMessage2* message) override {
-        cSC4LotDeveloper* developer = CityComponent<cSC4LotDeveloper>(sc4::CityComponent::LotDeveloper, kGZCLSID_cSC4LotDeveloper);
-        return developer ? developer->DoMessage(message) : true;
+    void CityCellCounts(int& x, int& z) override {
+        cSC4City* city = HostCity();
+        x = city ? city->CellCountX() : 0;
+        z = city ? city->CellCountZ() : 0;
     }
-} g_lotDeveloperTarget;
+    ILotGateServices* GateServices() override { return &g_gates; }
+    const cISCPropertyHolder* AcquireTunables() override {
+        if (!SL::spRM) return nullptr;
+        const cGZPersistResourceKey key{kLotDeveloperTunablesKeyType, kLotDeveloperTunablesKeyGroup, kLotDeveloperTunablesKeyInstance};
+        void* raw = nullptr;
+        if (!SL::spRM->GetResource(key, 0xa52160f5, &raw, 0, nullptr) || !raw) return nullptr;
+        auto* exemplar = static_cast<cISCResExemplar*>(raw);
+        const cISCPropertyHolder* holder = exemplar->AsISCPropertyHolder();
+        held_[holder] = exemplar;
+        return holder;
+    }
+    void ReleaseTunables(const cISCPropertyHolder* holder) override {
+        auto it = held_.find(holder);
+        if (it == held_.end()) return;
+        it->second->Release();
+        held_.erase(it);
+        if (std::getenv("SC4_SIMDEBUG")) std::fprintf(stderr, "lot developer: tunables read\n");
+    }
+    bool AddSimulatorAgent(cIGZMessageTarget2* target, int level, const char* name, std::uint32_t flags) override {
+        return AddCitySimulatorAgent(target, level, name, flags);
+    }
+    void RemoveSimulatorAgent(cIGZMessageTarget2* target) override { RemoveCitySimulatorAgent(target); }
+    bool MessageServerPresent() override { return SL::spMS2 != nullptr; }
+    void AddNotification(cIGZMessageTarget2* target, std::uint32_t type) override { if (SL::spMS2) SL::spMS2->AddNotification(target, type); }
+    void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t type) override { if (SL::spMS2) SL::spMS2->RemoveNotification(target, type); }
+    void PostMessage(std::uint32_t type) override {
+        if (!SL::spMS2) return;
+        auto* message = new cRZMessage2Standard();
+        message->AddRef();
+        message->SetType(type);
+        SL::spMS2->MessagePost(message, false);
+        message->Release();
+    }
+    void AddTickable(cIGZMessageTarget2* target, std::uint32_t priority) override {
+        if (cSC4AnimationTickManager* atm = AnimationTickManager()) atm->AddTickableObject(target, priority);
+    }
+    void RemoveTickable(cIGZMessageTarget2* target, std::uint32_t priority) override {
+        if (cSC4AnimationTickManager* atm = AnimationTickManager()) atm->RemoveTickableObject(target, priority);
+    }
+    int VisualTimeMode() override {
+        cIGZUnknown* object = Component(sc4::CityComponent::Clock24Hour);
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(kGZIID_PlainObject, &raw) || !raw) return 0;
+        return static_cast<int>(static_cast<cSC424HourClock*>(raw)->GetVisualTimeMode());
+    }
+    cSC4Lot* LotAt(int x, int z, bool exact) override { return NativeLotAtCell(x, z, exact); }
+    void LotsInCellRect(int x1, int z1, int x2, int z2, std::vector<cSC4Lot*>& out) override {
+        auto* lots = CityComponent<cSC4ZoneDeveloper>(sc4::CityComponent::ZoneDeveloper, cSC4ZoneDeveloper::kZoneDeveloperClassId);
+        if (!lots) return;
+        std::list<cRZAutoRefCount<cSC4Lot>> found;
+        lots->GetLotsInCellRect(found, x1, z1, x2, z2, true);
+        for (const cRZAutoRefCount<cSC4Lot>& lot : found)
+            if (lot) out.push_back(lot.get());   // the lot manager keeps them
+    }
+    cISC4OccupantManager* OccupantManager() override { return Occupants(); }
+private:
+    std::map<const cISCPropertyHolder*, cISCResExemplar*> held_;
+} g_cityServices;
 
 }  // namespace
 
@@ -504,33 +571,11 @@ sc4::IPortLotConfiguration* NativePortLotConfiguration(std::uint32_t id) {
     return it->second.get();
 }
 
-void ReadLotDeveloperTunables(cSC4LotDeveloper* developer) {   // cSC4LotDeveloper::Init reads the tunable exemplar
-    static cSC4LotDeveloper* tuned = nullptr;
-    if (!developer || developer == tuned || !SL::spRM) return;
-    tuned = developer;
-    developer->SetGateServices(&g_gates);
-    static bool subscribed = false;
-    if (!subscribed && SL::spMS2) {
-        subscribed = true;
-        for (std::uint32_t type : {0x99ef1142u, 0x99ef1143u, 0x26d31ec4u, 0x69247dc7u}) SL::spMS2->AddNotification(&g_lotDeveloperTarget, type);
-    }
-    const cGZPersistResourceKey key{kLotDeveloperTunablesKeyType, kLotDeveloperTunablesKeyGroup, kLotDeveloperTunablesKeyInstance};
-    void* raw = nullptr;
-    if (!SL::spRM->GetResource(key, 0xa52160f5, &raw, 0, nullptr) || !raw) return;
-    auto* exemplar = static_cast<cISCResExemplar*>(raw);
-    developer->ReadSimulatorTunableValues(exemplar->AsISCPropertyHolder());
-    exemplar->Release();
-    if (std::getenv("SC4_SIMDEBUG")) {
-        const LotDeveloperTunables& t = developer->Tunables();
-        std::fprintf(stderr, "lot developer: tunables slope %.3f level-for-slope %d level-interior %d levelling %.3f\n", t.value12c, t.flag138,
-                     t.flag139, t.maxLevelling);
-    }
-}
-
 void InstallLotConstructionHosts() {
     gzcom::GetSimHosts().lotDeveloper = &g_host;
     cSC4LotDeveloper::SetConstructionServices(&g_services);
     cSC4LotDeveloper::SetDailyServices(&g_daily);
+    cSC4LotDeveloper::SetCityServices(&g_cityServices);
     InstallConstructionOccupantHost();
 }
 
@@ -539,4 +584,22 @@ sc4::cSC4LotConfiguration* NativeLotConfiguration(sc4::cISC4LotConfigurationRef*
     return reference && manager ? manager->GetLotConfiguration(reference->GetID()) : nullptr;
 }
 
+}  // namespace native
+
+namespace native {
+// Kit verb "lotdev": the city's lot developer as its life cycle left it (initialized, the messages its agents and subscriptions
+// delivered by type, the night-light deque and the lots its power handler visited). Read-only.
+void NativeLotDeveloperReport() {
+    cSC4LotDeveloper* developer = CityComponent<cSC4LotDeveloper>(sc4::CityComponent::LotDeveloper, kGZCLSID_cSC4LotDeveloper);
+    if (!developer) {
+        std::printf("lotdev: no lot developer\n");
+        return;
+    }
+    std::printf("lotdev: initialized %d, night deque %zu (mode %u, cursor %u, lit %d), power-changed lots %u, tunables batch %u\n",
+                int(developer->IsInitialized()), developer->NightBuildingCount(), developer->NightMode(), developer->NightCursor(),
+                int(developer->LitFlag()), developer->PowerChangedLots(), developer->Tunables().nightBatch);
+    std::printf("lotdev: messages");
+    for (const auto& [type, count] : developer->MessageCounts()) std::printf(" %08x:%u", type, count);
+    std::printf("\n");
+}
 }  // namespace native

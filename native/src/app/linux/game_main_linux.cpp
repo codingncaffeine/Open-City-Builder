@@ -51,6 +51,7 @@
 #include "app/NativeBoot.h"
 #include "app/NativeCity.h"
 #include "app/NativeGrowthDevelopers.h"
+#include "app/NativeLotConstruction.h"
 #include "app/NativeAnimationTicks.h"
 #include "app/NativeIntro.h"
 #include "platform/PerfLog.h"
@@ -1214,6 +1215,8 @@ int RunScenario(const std::string& path) {
             native::NativeTrailerReport(limit);
         } else if (command == "decline") {   // decline: the lots by state and what the tract developer abandoned / reoccupied
             native::NativeDeclineReport();
+        } else if (command == "lotdev") {   // lotdev: the lot developer's life cycle (initialized, messages by type, night-light deque)
+            native::NativeLotDeveloperReport();
         } else if (command == "aircraft") {   // aircraft: the aircraft manager's airports, runway markers and every aircraft
             native::NativeAircraftReport();
         } else if (command == "trains") {   // trains [N]: the city's track cells, the trains and buses, and the first N engines with their cars

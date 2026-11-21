@@ -52,6 +52,7 @@ void InstallGraphsViewHost();   // app/NativeGraphsView.cpp
 void InstallGrowthDeveloperStub();
 void InstallLandfillDeveloperStub();
 void InstallLandfillDeveloperHost();   // NativeLandfill.cpp
+void InstallLotBaseTextureHost();      // NativeModelMaker.cpp
 void InstallLightingManagerStub();
 void InstallLocalGridHost();
 void InstallLotStub();
@@ -169,6 +170,7 @@ void InstallStubHosts() {
     InstallLocalGridHost();               // NativeLocalGrid.cpp: the cursor grid's effect and cell size
     InstallLotStub();
     InstallLotBaseTextureStub();
+    InstallLotBaseTextureHost();          // the real host replaces the stub above (the lot developer's Init refits base textures)
     InstallLotConfigurationStub();
     InstallLotConfigurationManagerStub();
     InstallLotRetainingWallModelStub();

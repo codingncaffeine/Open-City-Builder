@@ -574,6 +574,9 @@ public:
         return model;
     }
 };
+// One for the process: in place before the city's components Init (the lot developer's Init refits every lot's base texture), and
+// again when the model maker attaches.
+LotBaseTextureHost g_lotBaseTextureHost;
 
 std::vector<std::uint8_t> g_savedCellFlags;   // SC4_TERRAINHIDEDEBUG: every cell's flags before the first change
 int g_savedCellsX = 0;
@@ -787,6 +790,8 @@ sc4::cSC4ModelMaker* g_maker = nullptr;
 
 sc4::cSC4ModelMaker* CityModelMaker() { return g_maker; }
 
+void InstallLotBaseTextureHost() { sc4::SetLotBaseTextureHost(&g_lotBaseTextureHost); }
+
 void DetachModelMaker() {
     DetachDecalOverlays();   // after DetachEffects stopped the decal effects
     if (!g_maker) return;
@@ -832,9 +837,8 @@ bool AttachModelMaker(sc4::cSC43DRender& render, sc4::cSC4City& city) {
         model->AddRef();
         return model;
     });
-    static LotBaseTextureHost lotBaseTextureHost;
     sc4::SetCellTextureModelHost(&cellTextureHost);
-    sc4::SetLotBaseTextureHost(&lotBaseTextureHost);
+    sc4::SetLotBaseTextureHost(&g_lotBaseTextureHost);
     s3d::SetModelInstanceHost(&instanceHost);
     sc4::SetPlaceableHost(&placeableHost);
     sc4::SetPlaceableObjectFactory([] {

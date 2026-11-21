@@ -12,6 +12,7 @@
 #pragma once
 #include <deque>
 #include <list>
+#include <map>
 #include <vector>
 #include <cstdint>
 #include <functional>
@@ -47,8 +48,8 @@ constexpr std::uint32_t kLotDevPropBool138 = 0xe900ea27;
 constexpr std::uint32_t kLotDevPropBool139 = 0xe900ea28;
 constexpr std::uint32_t kLotDevPropLevelTolerance = 0xe900ea29;        // -> +0x13c
 constexpr std::uint32_t kLotDevPropMaxLevelling = 0xe900ea2a;          // -> +0x140
-constexpr std::uint32_t kLotDevPropU32_0f0 = 0xe900ea2b;
-constexpr std::uint32_t kLotDevPropU32_0ec = 0xe900ea2c;
+constexpr std::uint32_t kLotDevPropNightAccumulator = 0xe900ea2b;   // -> the night-light accumulator (i386 +0xa4)
+constexpr std::uint32_t kLotDevPropNightBatch = 0xe900ea2c;         // -> buildings lit per batch (i386 +0xa0)
 constexpr std::uint32_t kLotDevPropCostCurve = 0x2a2d7824;             // interleaved x,y floats
 
 constexpr float kLotMaxLevelling = 3.4028235e+38f;                     // "use the tunable" sentinel
@@ -68,7 +69,10 @@ struct LotDeveloperTunables {
     bool flag138 = false, flag139 = false;
     float levelTolerance = 0;               // +0x13c
     float maxLevelling = 0;                 // +0x140
-    std::uint32_t value0f0 = 0, value0ec = 0;
+    // The night lights (lot-developer.md §8): the constructor sets 200 and 8; the tunables overwrite them when present. The
+    // accumulator is the running animation time of the batches (the 200 ms threshold itself is fixed).
+    std::uint32_t nightAccumulator = 200;   // i386 +0xa4
+    std::uint32_t nightBatch = 8;           // i386 +0xa0
 };
 
 // The building development simulator calls the Test* gates make (this+0x28 in the original).
@@ -137,6 +141,7 @@ public:
 };
 
 class cISC4OccupantManager;
+class cISC4OccupantFilter;
 class cISC4LotBaseTextureOccupant;
 // What the base-texture functions reach outside the class: SL::spZoneDeveloper (+0x40), SL::spOccupantManager (+0x48),
 // SL::spZoneManager, SL::spCity and the occupant's class factory.
@@ -149,9 +154,6 @@ public:
     virtual std::uint8_t ZoneDisplayAlpha() = 0;                        // zone manager vslot 0x80
     virtual int CityCellsX() = 0;                                       // city vslot 0x2e8 (also +0x88)
     virtual int CityCellsZ() = 0;                                       // city vslot 0x2f0 (also +0x84)
-    // this vslot 0x150 GetBoundaryLotTexture: the lot developer's rule map (+0x170) holds the same 47 rules as the zone
-    // developer's (both InitBoundaryRules build the identical table), so the host answers from the recovered one.
-    virtual void BoundaryLotTexture(const int sides[4], std::uint32_t& texture, std::uint8_t& rotation, bool& flag) = 0;
     // GZCOM()->CreateInstance(0xc97f987c, 0x97f6d98) or new cSC4LotBaseTextureOccupant; the caller's reference
     virtual cISC4LotBaseTextureOccupant* CreateBaseTextureOccupant() = 0;
 };
@@ -176,8 +178,9 @@ public:
     virtual cISC4BuildingOccupant* AddNewBuildingOccupant(std::uint32_t type, float position[3], int rotation) = 0;
     virtual void CellCornerToPosition(int cellX, int cellZ, float& x, float& z) = 0;          // +0x1c vslot 0x180
     virtual float TerrainAltitude(float x, float z) = 0;                                      // +0x3c vslot 0x30
-    // +0x28 vslot 0x94 GetOccupantsByBBox(min, max, +0x58 blocking filter), each demolished by +0x20 vslot 0x20(1, occupant, 0, 1, 0, 0, 0).
-    virtual void DemolishBlockingOccupants(const float minimum[3], const float maximum[3]) = 0;
+    // +0x28 vslot 0x94 GetOccupantsByBBox(min, max, filter: the +0x58 blocking filter), each demolished by +0x20 vslot 0x20(1, occupant,
+    // 0, 1, 0, 0, 0).
+    virtual void DemolishBlockingOccupants(const float minimum[3], const float maximum[3], cISC4OccupantFilter* filter) = 0;
     // GZCOM cSC4ConstructionOccupant (0xa97f909e / 0x496e7636), its SetLot(lot) and +0x28 vslot 0x50 InsertOccupant(it, 0).
     virtual void StartConstructionOccupant(cSC4Lot* lot) = 0;
     virtual cSC4Lot* LotAt(int x, int z) = 0;                                                 // +0x24 vslot 0x14 GetLot(x, z, true)
@@ -233,6 +236,41 @@ public:
     virtual void UpdateSurroundingRetainingWalls(cSC4Lot* lot) { (void)lot; }
 };
 
+// What Init, Shutdown and the message handlers (lot-developer.md §1.3, §1.4, §3.2, §8, §9) reach outside the class: the services
+// Init takes from the city (Mac i386 +0x14 message server, +0x18 building development simulator, +0x1c city, +0x20 demolition,
+// +0x24 lot manager, +0x28 occupant manager, +0x2c plumbing, +0x30 prop manager, +0x34 power, +0x38 flora, +0x3c terrain, +0x54
+// traffic), the simulator's agents, the animation-tick manager and the 24-hour clock.
+class ILotDeveloperCityServices {
+public:
+    virtual ~ILotDeveloperCityServices() = default;
+    // Init takes each of SL::spCity, spLotManager, spOccupantManager, spPropManager, spBuildingDevelopmentSim, spPowerSim,
+    // spPlumbingSim, spFloraSim, spTerrain and spTrafficSim and fails when one is null (spDemolition is taken unchecked): the
+    // name of the first one missing, null when all are there.
+    virtual const char* MissingService() = 0;
+    virtual void CityCellCounts(int& x, int& z) = 0;                       // city vslots 0x174 / 0x178
+    virtual ILotGateServices* GateServices() = 0;                          // the building development simulator (+0x18)
+    // ReadSimulatorTunableValues: the exemplar {0x6534284a, 0xe7e2c2db, 0xe8da7677} (null when absent), released after reading
+    virtual const cISCPropertyHolder* AcquireTunables() = 0;
+    virtual void ReleaseTunables(const cISCPropertyHolder* tunables) = 0;
+    // SL::spSimulator vslot 0x4c AddAgent(target, level, name, flags) / city vslot 200 (the simulator) vslot 0x54 RemoveAgent;
+    // false when there is no simulator
+    virtual bool AddSimulatorAgent(cIGZMessageTarget2* target, int level, const char* name, std::uint32_t flags) = 0;
+    virtual void RemoveSimulatorAgent(cIGZMessageTarget2* target) = 0;
+    // SL::spMS2 vslots 0x14 / 0x18; MessageServerPresent: SL::spMS2 is not null
+    virtual bool MessageServerPresent() = 0;
+    virtual void AddNotification(cIGZMessageTarget2* target, std::uint32_t type) = 0;
+    virtual void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t type) = 0;
+    virtual void PostMessage(std::uint32_t type) = 0;                      // a new standard message of that type, MessagePost(m, false)
+    // SL::ATM() vslot 0x14 AddTickableObject / vslot 0x18 RemoveTickableObject (target, priority)
+    virtual void AddTickable(cIGZMessageTarget2* target, std::uint32_t priority) = 0;
+    virtual void RemoveTickable(cIGZMessageTarget2* target, std::uint32_t priority) = 0;
+    virtual int VisualTimeMode() = 0;                                      // sp24HourClock vslot 0x18 (0 real, 1 noon, 2 midnight)
+    virtual cSC4Lot* LotAt(int x, int z, bool exact) = 0;                  // lot manager (+0x24) vslot 0x14 GetLot (borrowed)
+    // lot manager vslot 0x1c GetLotsInCellRect(list, x1, z1, x2, z2, true): the lots touching the rectangle, borrowed
+    virtual void LotsInCellRect(int x1, int z1, int x2, int z2, std::vector<cSC4Lot*>& out) = 0;
+    virtual cISC4OccupantManager* OccupantManager() = 0;                   // +0x28 (borrowed)
+};
+
 // The lot developer's own interface (class id 0xa990bfe0, iid 0x4818e5d2). Only the COM identity is
 // recovered; the concrete methods are called directly, so the interface carries no extra slots.
 class cISC4LotDeveloper : public cIGZUnknown {
@@ -247,7 +285,36 @@ public:
     bool QueryInterface(std::uint32_t iid, void** out) override;
     std::uint32_t AddRef() override { return ++refCount_; }
     std::uint32_t Release() override;
-    bool DoMessage(cIGZMessage2* message) override;   // the day agent (0x66956814) runs the daily pass; the rest: true
+    // Mac i386 0x000f1c6c / 0x000f5034 (lot-developer.md §1.3, §1.4): the services, the three agents, the nine subscriptions, the
+    // animation tick, the boundary rules and a refresh of every lot's base texture; Shutdown undoes them.
+    static void SetCityServices(ILotDeveloperCityServices* services);
+    bool Init();
+    bool Shutdown();
+    bool IsInitialized() const { return initialized_; }
+    // Mac i386 0x000f5d6a (§3.2): the day agent, the occupant, lot, power, clock, city-established, traffic-map and animation
+    // messages. 0x278e6003 (terrain heights) reads its data and does nothing; the level 0 and level 6 agents fall to the default.
+    bool DoMessage(cIGZMessage2* message) override;
+    // ---- the night lights (§8; Mac i386 0x000f2dd0 / 0x000f5ac8 / 0x000f5726 / 0x000f57f0 / 0x000f1398)
+    void DoOccupantInserted(cISC4Occupant* occupant);
+    void DoOccupantRemoved(cISC4Occupant* occupant);
+    void DoAnimationTick(std::uint32_t milliseconds);
+    void SwitchNightChangeBuildings(int mode);                  // eNightChangeMode: 1 day, 2 night
+    void LightBuildingAndProps(cISC4BuildingOccupant* building, bool night);
+    // §9 (Mac i386 0x000f323e): the lots of a rectangle whose power changed
+    void DoPowerChanged(const std::int32_t rect[4]);
+    // slot 47 (Mac i386 0x000f0196): a changed flag walks every lot (empty textures when forced, else the configuration's)
+    void SetForceEmptyLotBaseTextures(bool force);
+    // slot 42 (Mac i386 0x000f1bee / 0x000ef524): the rule keyed by the four sides (0 own lot, 1 other, 2 the front), else key 0
+    void InitBoundaryRules();
+    void GetBoundaryLotTexture(const int sides[4], std::uint32_t& texture, std::uint8_t& rotation, bool& flag) const;
+    // Read-only views for the native diagnostics: the night deque, its mode and cursor, and how many of each message DoMessage saw
+    // (a port counter, not in the original).
+    std::size_t NightBuildingCount() const { return nightBuildings_.size(); }
+    std::uint32_t NightMode() const { return nightMode_; }
+    std::uint32_t NightCursor() const { return nightCursor_; }
+    bool LitFlag() const { return litFlag_; }
+    const std::map<std::uint32_t, std::uint32_t>& MessageCounts() const { return messageCounts_; }
+    std::uint32_t PowerChangedLots() const { return powerChangedLots_; }
     // lot-developer.md §4.1 (0x006CD770): perDay = lots / 28 + 1 lots a day, in the lot manager's list order; false = not done today.
     bool DoDailySimulation();
     // §4.2 (0x006CD3A0, Mac i386 0x000f4116): the network refresh, the state tests (desirability, power, water, travel), the
@@ -277,6 +344,7 @@ public:
     std::uint32_t GetGZCLSID() const override { return kGZCLSID_cSC4LotDeveloper; }
 
     // tunables (ReadSimulatorTunableValues): reads from the simulator exemplar when it exists
+    void ReadSimulatorTunableValues();                                  // through the city services (Init)
     void ReadSimulatorTunableValues(const cISCPropertyHolder* exemplar);
     LotDeveloperTunables& Tunables() { return tunables_; }
     const LotDeveloperTunables& Tunables() const { return tunables_; }
@@ -382,27 +450,42 @@ private:
     std::uint32_t refCount_ = 0;               // COM refcount (shared by the three sub-objects)
     LotDeveloperTunables tunables_;
     cSC4ResponseCurve developmentCostCurve_;                           // +0x148
-    // What the city file keeps of the developer (stream version 1): the extent it was working on and the queue of buildings it
-    // was constructing with the position of the one in progress.
-    std::int32_t streamVerticesPerRow_ = 0;                            // +0x78
-    float streamCityWidth_ = 0.0f, streamCityDepth_ = 0.0f;            // +0x7c / +0x80
-    std::deque<cIGZUnknown*> constructionQueue_;                       // +0xa8 (one reference each)
-    std::uint32_t queueCursor_ = 0;                                    // +0xd8/+0xe0: the iterator, as an index into the queue
-    std::uint32_t stage_ = 0;                                          // +0xe8
-    bool forceEmptyLotBaseTextures_ = false;                           // +0xa0
-    bool flagF4_ = false;                                              // +0xf4
+    // What the city file keeps of the developer (stream version 1): the vertices per row and the city extent Init takes from the
+    // terrain (Mac i386 +0x40 / +0x44 / +0x48), and the night-light deque (+0x64: every building, one reference each) with its
+    // cursor (+0x8c, kept as an index), its mode (+0x9c: 0 idle, 1 switching to day, 2 switching to night) and the lit state new
+    // buildings get (+0xa8).
+    std::int32_t streamVerticesPerRow_ = 0;
+    float streamCityWidth_ = 0.0f, streamCityDepth_ = 0.0f;
+    std::deque<cISC4BuildingOccupant*> nightBuildings_;
+    std::uint32_t nightCursor_ = 0;
+    std::uint32_t nightMode_ = 0;
+    bool forceEmptyLotBaseTextures_ = false;                           // i386 +0x5c
+    bool litFlag_ = false;
     int dailyState_ = 0;                                               // §4.1: 0 / 3 start a cycle, 1 working
     std::uint32_t visited_ = 0;
     cSC4Lot* nextLot_ = nullptr;                                       // the iterator: the next lot to visit (one reference)
     // §2.2: the network / unit latches (set by network inserts and removals) and their cycle snapshots, the zot embargo after a
     // city is established and the commute check the traffic map enables
-    bool netChanged_ = true, unitChanged_ = true;
+    bool netChanged_ = true, unitChanged_ = true;                      // i386 +0x5d / +0x5e
     bool netSnap_ = false, unitSnap_ = false, zotsAllowed_ = false;    // i386 +0xb8 / +0xb9 / +0xba
-    std::uint32_t noZotUntilDay_ = 0;
+    std::uint32_t noZotUntilDay_ = 0;                                  // i386 +0x60
     bool canCheckCommute_ = false;                                     // i386 +0x5f
+    // Init (i386 +0xc): the services it holds (+0x14 the message server; the others are the city services' to answer), the cell
+    // counts (+0x50 / +0x4c), the blocking-lot filter (+0x58) and the boundary rules (+0xfc).
+    bool initialized_ = false;
+    bool messageServerHeld_ = false;
+    int cellCountX_ = 0, cellCountZ_ = 0;
+    cISC4OccupantFilter* blockingFilter_ = nullptr;
+    struct BoundaryLotTextureRule {
+        std::uint32_t texture = 0;
+        std::uint8_t rotation = 0;
+        bool flag = false;
+    };
+    std::map<int, BoundaryLotTextureRule> boundaryRules_;
+    std::map<std::uint32_t, std::uint32_t> messageCounts_;
+    std::uint32_t powerChangedLots_ = 0;
 public:
-    ~cSC4LotDeveloper() { for (cIGZUnknown* occupant : constructionQueue_) if (occupant) occupant->Release(); }
-private:
+    ~cSC4LotDeveloper();
 };
 
 }  // namespace sc4

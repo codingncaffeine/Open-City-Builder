@@ -35,8 +35,7 @@ bool Skipped(const char* name, bool init) {
 }
 
 // Components whose recovered class has a no-argument Init (the list in citycomp/CityComponentInit.h, one TU per class), plus the
-// disaster layer, the crime simulator and the effects manager (their own files). Not dispatched yet (each is a to-do, PLAN.md 3a
-// item A): the lot developer.
+// disaster layer, the crime simulator and the effects manager (their own files).
 bool Dispatch(cIGZUnknown* object, bool init) {
     if (CityComponentInit_cSC4DisasterLayer(object, init)) return true;   // NativeDisasters.cpp
     if (CityComponentInit_cSC4CrimeSimulator(object, init)) return true;  // NativeCrime.cpp

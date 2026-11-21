@@ -176,7 +176,6 @@ struct LotDeveloperApi final : ITractLotDeveloperApi {
                          configuration ? configuration->GetID() : 0, buildingType, flag ? " (keep)" : "");
         }
         cSC4LotDeveloper* developer = LotDeveloper();
-        ReadLotDeveloperTunables(developer);
         const bool started = developer && developer->StartConstruction(lot, configuration, buildingType, flag);   // vslot 0x18
         if (std::getenv("SC4_SIMDEBUG")) std::fprintf(stderr, "tract developer: construction %s\n", started ? "started" : "FAILED");
     }
@@ -189,7 +188,6 @@ struct LotDeveloperApi final : ITractLotDeveloperApi {
     }
     void ReoccupyBuilding(cSC4Lot* lot, std::uint32_t developerType) override {   // vslot 0x48
         cSC4LotDeveloper* developer = LotDeveloper();
-        ReadLotDeveloperTunables(developer);   // the building profiles and developer wealths it reads
         if (!developer) return;
         ++reoccupied;
         if (std::getenv("SC4_SIMDEBUG")) TraceLot("reoccupy", lot, static_cast<int>(developerType));

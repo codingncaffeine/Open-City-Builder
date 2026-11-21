@@ -16,13 +16,13 @@
 #include "sc4/Lot.h"
 #include "sc4/LotBaseTextureOccupant.h"
 #include "sc4/LotConfiguration.h"
+#include "sc4/OccupantFilters.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/SCPropertyHelp.h"
 
 namespace sc4 {
 
 namespace {
-constexpr std::uint32_t kGZIID_cISC4BuildingOccupantQueue = 0x87dda3a9;   // the reference iid of the queue entries (0x100140242)
 constexpr std::uint32_t kMaxStreamedQueue = 1u << 20;
 }  // namespace
 
@@ -38,43 +38,383 @@ bool cSC4LotDeveloper::QueryInterface(std::uint32_t iid, void** out) {
     return true;
 }
 
-// 0x10013ee38
+// 0x10013ee38: the last reference shuts the developer down (slot 4) before it is deleted (lot-developer.md §1.4).
 std::uint32_t cSC4LotDeveloper::Release() {
     if (refCount_ < 2) {
+        Shutdown();
         delete this;
         return 0;
     }
     return --refCount_;
 }
 
+// The deleting destructor destroys the night deque (each entry holds a reference).
+cSC4LotDeveloper::~cSC4LotDeveloper() {
+    for (cISC4BuildingOccupant* building : nightBuildings_) if (building) building->Release();
+    if (nextLot_) nextLot_->Release();
+    if (blockingFilter_) blockingFilter_->Release();
+}
+
 namespace {
 const std::list<cSC4Lot*>* (*g_lotList)() = nullptr;
 ILotDailyServices* g_daily = nullptr;
+ILotDeveloperCityServices* g_city = nullptr;
+ILotConstructionServices* g_construction = nullptr;
+ILotBaseTextureServices* g_textureServices = nullptr;
 constexpr std::uint32_t kOccupantTypeNetwork = 0xc772bf98;
+constexpr std::uint32_t kOccupantTypeProp = 0xa823821e;
+constexpr std::uint32_t kAnimationTickPriority = 0xc0;           // the every-frame bucket of the animation-tick manager
+constexpr std::uint32_t kPropPropNightLight = 0x4a9f188b;        // a prop that turns on and off with its building's lights
+constexpr std::uint32_t kMessageLotsRelit = 0xa6b79621;          // posted after an immediate whole-city light switch
+// Init's subscriptions, in its order (Shutdown removes them in its own order below).
+constexpr std::uint32_t kSubscriptions[] = {0x44778234, 0x99ef1142, 0x99ef1143, 0xe8bda2e7, 0xe99b3d4d,
+                                             0x278e6003, 0x8a07ae00, 0x26d31ec4, 0x69247dc7};
+constexpr std::uint32_t kUnsubscriptions[] = {0xe8bda2e7, 0xe99b3d4d, 0x99ef1143, 0x99ef1142, 0x44778234,
+                                               0x278e6003, 0x8a07ae00, 0x26d31ec4, 0x69247dc7};
+// The lot a lot message carries: the copy the lot posted, as its plain view (the message owns it).
+const cSC4Lot* MessageLot(cIGZMessage2Standard* message) {
+    cIGZUnknown* object = message->GetIGZUnknown();                                  // vslot 0x80
+    void* plain = nullptr;
+    if (!object || !object->QueryInterface(kGZIID_PlainObject, &plain) || !plain) return nullptr;   // QueryInterface(0xe818fced)
+    return static_cast<const cSC4Lot*>(plain);
+}
 }  // namespace
 
 void cSC4LotDeveloper::SetDailyServices(ILotDailyServices* services) { g_daily = services; }
+void cSC4LotDeveloper::SetCityServices(ILotDeveloperCityServices* services) { g_city = services; }
 
-// §3.2 (0x006CD940). PARTIAL: the day pass, the network latches, the zot embargo and the commute switch; night lights (0x44778234,
-// the animation tick), the power-changed rectangle (0x8a07ae00, §9) and the building night deque are not ported.
+// Mac i386 0x000f1c6c (lot-developer.md §1.3).
+bool cSC4LotDeveloper::Init() {
+    if (initialized_) return true;
+    static const bool trace = std::getenv("SC4_SIMDEBUG") != nullptr;
+    ILotDeveloperCityServices* city = g_city;
+    if (!city) return false;
+    ReadSimulatorTunableValues();
+    // The services: the city first (its cell counts are read on every Init), then the lot, occupant and prop managers, the building
+    // development, power, plumbing and flora simulators, the terrain and the traffic simulator. One missing fails Init with nothing
+    // registered.
+    if (const char* missing = city->MissingService()) {
+        if (trace) std::fprintf(stderr, "lot developer: Init failed, no %s\n", missing);
+        return false;
+    }
+    city->CityCellCounts(cellCountX_, cellCountZ_);                                   // city vslots 0x174 / 0x178
+    if (!gates_) gates_ = city->GateServices();                                       // +0x18
+    // The terrain's vertex row and extent (terrain vslots 0x1c / 0x20 cell counts times vslot 0x18 the cell width).
+    if (host_) {
+        streamVerticesPerRow_ = host_->VerticesPerRow();
+        streamCityWidth_ = host_->CityWidthMetres();
+        streamCityDepth_ = host_->CityDepthMetres();
+    }
+    if (!blockingFilter_) {                                                           // +0x58
+        blockingFilter_ = new cSC4BlockingLotOccupantFilter();
+        blockingFilter_->AddRef();
+    }
+    dailyState_ = 0;
+    // The original also makes a ScanningIterator (+0xbc) over the city's 4x4 blocks, {0, 0, cells / 4 - 1}; nothing reads it, so
+    // the port does not keep one.
+    cIGZMessageTarget2* target = static_cast<cIGZMessageTarget2*>(this);
+    if (!city->AddSimulatorAgent(target, 0, "cSC4LotDeveloper", 2)) return false;   // no simulator
+    city->AddSimulatorAgent(target, 4, "cSC4LotDeveloper", 2);
+    city->AddSimulatorAgent(target, 6, "cSC4LotDeveloper", 2);
+    if (!messageServerHeld_) {
+        if (!city->MessageServerPresent()) return false;
+        messageServerHeld_ = true;
+        for (std::uint32_t type : kSubscriptions) city->AddNotification(target, type);
+    }
+    city->AddTickable(target, kAnimationTickPriority);                                // SL::ATM() vslot 0x14
+    InitBoundaryRules();
+    // Flip the force-empty flag and set it back: the changed value walks every lot and refits its base texture.
+    const bool force = forceEmptyLotBaseTextures_;
+    forceEmptyLotBaseTextures_ = !force;
+    SetForceEmptyLotBaseTextures(force);                                              // vslot 0xbc
+    canCheckCommute_ = false;
+    noZotUntilDay_ = 0;
+    initialized_ = true;
+    if (trace)
+        std::fprintf(stderr, "lot developer: Init ok (cells %dx%d, %zu lots refit, %zu night buildings, tunables batch %u)\n", cellCountX_,
+                     cellCountZ_, g_lotList && g_lotList() ? g_lotList()->size() : std::size_t(0), nightBuildings_.size(),
+                     tunables_.nightBatch);
+    return true;
+}
+
+// Mac i386 0x000f5034 (§1.4).
+bool cSC4LotDeveloper::Shutdown() {
+    if (!initialized_) return true;
+    initialized_ = false;
+    for (cISC4BuildingOccupant* building : nightBuildings_) if (building) building->Release();
+    nightBuildings_.clear();
+    nightCursor_ = 0;
+    cIGZMessageTarget2* target = static_cast<cIGZMessageTarget2*>(this);
+    if (g_city) {
+        g_city->RemoveSimulatorAgent(target);                                         // the simulator (city vslot 200) vslot 0x54
+        g_city->RemoveTickable(target, kAnimationTickPriority);                       // the animation-tick manager vslot 0x18
+        if (messageServerHeld_)
+            for (std::uint32_t type : kUnsubscriptions) g_city->RemoveNotification(target, type);
+    }
+    messageServerHeld_ = false;
+    if (blockingFilter_) {
+        blockingFilter_->Release();
+        blockingFilter_ = nullptr;
+    }
+    boundaryRules_.clear();
+    if (nextLot_) {                                                                   // the safe lot iterator (+0xb0)
+        nextLot_->Release();
+        nextLot_ = nullptr;
+    }
+    gates_ = nullptr;                                                                 // +0x18 released last
+    return true;
+}
+
+// Mac i386 0x000f5d6a (§3.2).
 bool cSC4LotDeveloper::DoMessage(cIGZMessage2* message) {
     if (!message) return true;
     auto* standard = static_cast<cIGZMessage2Standard*>(message);
-    switch (message->GetType()) {
-    case 0x66956814: return DoDailySimulation();
-    case 0x99ef1142:                                     // an occupant inserted / removed: a network piece marks both latches
-    case 0x99ef1143:
-        if (static_cast<std::uint32_t>(standard->GetData3()) == kOccupantTypeNetwork) netChanged_ = unitChanged_ = true;
-        break;
+    const std::uint32_t type = message->GetType();
+    ++messageCounts_[type];
+    switch (type) {
+    case 0x86ad10ee:                                     // the animation tick (data2: the frame time in microseconds)
+        if (nightMode_ == 0) return false;
+        DoAnimationTick(static_cast<std::uint32_t>(standard->GetData2()) / 1000);
+        return true;
+    case 0x99ef1142:                                     // an occupant inserted: a building joins the night deque
+    case 0x99ef1143: {                                   // ... removed: it leaves it
+        const std::uint32_t occupantType = static_cast<std::uint32_t>(standard->GetData3());
+        if (occupantType == kOccupantTypeBuilding) {
+            auto* occupant = static_cast<cISC4Occupant*>(standard->GetVoid1());
+            if (type == 0x99ef1142) DoOccupantInserted(occupant);
+            else DoOccupantRemoved(occupant);
+        } else if (occupantType == kOccupantTypeNetwork) {
+            netChanged_ = unitChanged_ = true;            // a network piece marks both latches
+        }
+        return true;
+    }
+    case 0xe8bda2e7: {                                   // a lot's state changed (data1 old, data2 new)
+        const auto oldState = static_cast<std::uint32_t>(standard->GetData1());
+        const auto newState = static_cast<std::uint32_t>(standard->GetData2());
+        if (newState - 3 >= 2 && !(oldState == 2 && newState == 3)) return true;
+        if (const cSC4Lot* snapshot = MessageLot(standard)) DoLotStateChanged(*snapshot, oldState, newState);
+        return true;
+    }
+    case 0xe99b3d4d: {                                   // a lot's condition changed: an occupied or abandoned lot re-picks its texture
+        const cSC4Lot* snapshot = MessageLot(standard);
+        if (!snapshot || !g_city) return true;
+        int x = 0, z = 0;
+        snapshot->GetLocation(x, z);                                                  // vslot 0x54
+        cSC4Lot* lot = g_city->LotAt(x, z, true);                                     // lot manager vslot 0x14
+        if (lot && static_cast<std::uint32_t>(lot->GetState()) - 3 < 2 && g_construction)   // vslot 0x84
+            SetNormalLotBaseTexture(lot, g_construction->Configuration(lot->GetLotConfiguration()));   // vslot 0xb0 (lot, cfg, 1)
+        return true;
+    }
+    case 0x8a07ae00: {                                   // the power of a cell rectangle changed (data1..4: x1, z1, x2, z2)
+        const std::int32_t rect[4] = {static_cast<std::int32_t>(standard->GetData1()), static_cast<std::int32_t>(standard->GetData2()),
+                                      static_cast<std::int32_t>(standard->GetData3()), static_cast<std::int32_t>(standard->GetData4())};
+        DoPowerChanged(rect);
+        return true;
+    }
+    case 0x44778234: {                                   // the 24-hour clock crossed the night boundary (data2: 0 night, 1 day begins)
+        const std::uint64_t begins = standard->GetData2();
+        if (begins > 1) return true;
+        const int mode = begins == 0 ? 2 : 1;            // eNightChangeMode
+        // A clock held at midnight (visual mode 2) or noon (1) switches every building at once; otherwise the buildings switch in
+        // batches on the animation tick, in a shuffled order.
+        if (!g_city || g_city->VisualTimeMode() != mode) {
+            nightMode_ = static_cast<std::uint32_t>(mode);
+            for (std::size_t i = 1; i < nightBuildings_.size(); ++i)                 // std::random_shuffle (libc rand)
+                std::swap(nightBuildings_[i], nightBuildings_[static_cast<std::size_t>(std::rand()) % (i + 1)]);
+            nightCursor_ = 0;
+            return true;
+        }
+        SwitchNightChangeBuildings(mode);
+        g_city->PostMessage(kMessageLotsRelit);
+        return true;
+    }
+    case 0x66956814: return DoDailySimulation();         // the day agent
     case 0x26d31ec4:                                     // the city was established: no zots for a month
         noZotUntilDay_ = g_daily ? static_cast<std::uint32_t>(g_daily->SimDateNumber()) + 31 : 0;
-        break;
+        return true;
     case 0x69247dc7:                                     // the traffic maps changed: empty lots test the commute when there are jobs
         canCheckCommute_ = g_daily && g_daily->CityHasJobs();
-        break;
-    default: break;
+        return true;
+    default: return true;                                // 0x278e6003 (read, unused), the level 0 / 6 agents and the rest
     }
-    return true;
+}
+
+// Mac i386 0x000f2dd0 (§8.1): the building joins the back of the deque with one reference and takes the remembered lit state; the
+// cursor keeps its index.
+void cSC4LotDeveloper::DoOccupantInserted(cISC4Occupant* occupant) {
+    void* raw = nullptr;
+    if (!occupant || !occupant->QueryInterface(kGZIID_cISC4BuildingOccupant, &raw) || !raw) return;
+    auto* building = static_cast<cISC4BuildingOccupant*>(raw);                         // the query's reference is the deque's
+    nightBuildings_.push_back(building);
+    building->SetLit(litFlag_);                                                        // vslot 0x44
+}
+
+// Mac i386 0x000f5ac8 (§8.1): the building's first entry leaves the deque; the cursor on it moves to the next one, a cursor after
+// it keeps pointing at the same building.
+void cSC4LotDeveloper::DoOccupantRemoved(cISC4Occupant* occupant) {
+    void* raw = nullptr;
+    if (!occupant || !occupant->QueryInterface(kGZIID_cISC4BuildingOccupant, &raw) || !raw) return;
+    auto* building = static_cast<cISC4BuildingOccupant*>(raw);
+    const auto found = std::find(nightBuildings_.begin(), nightBuildings_.end(), building);
+    if (found != nightBuildings_.end()) {
+        const auto index = static_cast<std::uint32_t>(found - nightBuildings_.begin());
+        if (index < nightCursor_) --nightCursor_;
+        nightBuildings_.erase(found);
+        building->Release();                                                           // the deque's reference
+    }
+    building->Release();                                                               // the query's
+}
+
+// Mac i386 0x000f5726 (§8.3): every 200 ms of animation time the next batch of buildings switches; the end of the deque ends the run.
+void cSC4LotDeveloper::DoAnimationTick(std::uint32_t milliseconds) {
+    const std::uint32_t accumulated = tunables_.nightAccumulator + milliseconds;
+    tunables_.nightAccumulator = accumulated;
+    if (accumulated <= 200) return;
+    tunables_.nightAccumulator = 0;
+    const bool night = nightMode_ == 2;
+    for (std::uint32_t i = 0; i != tunables_.nightBatch; ++i) {
+        if (nightCursor_ >= nightBuildings_.size()) {
+            nightMode_ = 0;
+            return;
+        }
+        LightBuildingAndProps(nightBuildings_[nightCursor_++], night);
+    }
+}
+
+// Mac i386 0x000f57f0: every building at once, from the front; the run (if any) ends.
+void cSC4LotDeveloper::SwitchNightChangeBuildings(int mode) {
+    for (nightCursor_ = 0; nightCursor_ < nightBuildings_.size(); ++nightCursor_)
+        LightBuildingAndProps(nightBuildings_[nightCursor_], mode == 2);
+    nightMode_ = 0;
+    nightCursor_ = 0;
+}
+
+// Mac i386 0x000f1398 (§8.4): the building's lights, then every night-light prop on the lot at the building's centre cell (the lot's
+// own rectangle, not the building's) is told to switch (the same message for day and night).
+void cSC4LotDeveloper::LightBuildingAndProps(cISC4BuildingOccupant* building, bool night) {
+    if (!building) return;
+    building->SetLit(night);                                                           // vslot 0x44
+    if (!g_city) return;
+    SC4CellRect cells;
+    building->AsOccupant()->GetBoundingCityCells(cells);                               // occupant vslot 0x2c
+    cSC4Lot* lot = g_city->LotAt((cells.x0 + cells.x1) >> 1, (cells.z0 + cells.z1) >> 1, false);   // lot manager vslot 0x14
+    cISC4OccupantManager* occupants = g_city->OccupantManager();
+    if (!lot || !occupants) return;
+    std::int32_t rect[4] = {};
+    lot->GetBoundingRect(rect);                                                        // lot vslot 0x38
+    const int a[2] = {rect[0], rect[1]}, b[2] = {rect[2], rect[3]};
+    OccupantList props;
+    if (occupants->GetOccupantsByStandardCityCells(props, a, b, kOccupantTypeProp, 0xffffffffu)) {   // vslot 0xa0
+        for (cISC4Occupant* prop : props) {
+            bool nightLight = false;
+            cISCPropertyHolder* holder = prop ? prop->AsPropertyHolder() : nullptr;   // vslot 0x18
+            if (holder && cSCPropertyHelp::GetPropertyValue(holder, kPropPropNightLight, nightLight) && nightLight)
+                prop->PostOccupantMessage(kMessageBuildingLitChanged, 0);             // vslot 0x3c (0x09d8e0b6)
+        }
+    }
+    occupants->ReleaseOccupantList(props);
+}
+
+// Mac i386 0x000f323e (§9): each lot of the rectangle takes its power at the building's centre (the lot's cell without a building),
+// with the condition step and the power zot of TestPower but no counters.
+void cSC4LotDeveloper::DoPowerChanged(const std::int32_t rect[4]) {
+    if (!g_city || !g_daily) return;
+    std::vector<cSC4Lot*> lots;
+    g_city->LotsInCellRect(rect[0], rect[1], rect[2], rect[3], lots);                 // lot manager vslot 0x1c (..., true)
+    for (cSC4Lot* lot : lots) lot->AddRef();                                           // the list holds references
+    for (cSC4Lot* lot : lots) {
+        ++powerChangedLots_;
+        float lo[3] = {}, hi[3] = {};
+        const bool hasBuilding = g_daily->BuildingBounds(*lot, lo, hi);                // lot vslot 0xc0, occupant vslot 0x28
+        int x = 0, z = 0;
+        if (hasBuilding) {
+            float widthX = 16.0f, widthZ = 16.0f;
+            g_daily->CellWidths(widthX, widthZ);                                       // city vslots 0x16c / 0x170
+            x = static_cast<int>((lo[0] + hi[0]) / (widthX + widthX));
+            z = static_cast<int>((lo[2] + hi[2]) / (widthZ + widthZ));
+        } else {
+            lot->GetLocation(x, z);                                                    // vslot 0x54
+        }
+        const bool powered = g_daily->CheatIgnorePower() || g_daily->IsPowered(x, z);  // BDS vslot 0xdc, power vslot 0x94
+        if (powered != lot->GetHasPower()) {                                           // vslot 0x108
+            lot->SetHasPower(powered);                                                 // vslot 0x10c
+            if (!powered) {
+                if (lot->GetCondition() == 0) lot->SetCondition(1);                    // vslots 0x8c / 0x90
+            } else if (lot->GetCondition() == 1) {
+                lot->SetCondition(0);
+            }
+        }
+        const bool needs = !hasBuilding || lot->GetNeedsPower();                       // vslot 0x104
+        if (!powered && needs) {
+            if (hasBuilding || IsEmptyLotSuitableForZot(*lot, x, z)) AddBuildingZotProp(*lot, 0x0fd10000, 4);
+        } else {
+            RemoveBuildingZotProp(*lot, 4);
+        }
+    }
+    for (cSC4Lot* lot : lots) lot->Release();
+}
+
+// Mac i386 0x000f0196: a changed flag walks every lot (the lot manager's safe iterator: the lots as they stand when it starts, each
+// held while it is visited).
+void cSC4LotDeveloper::SetForceEmptyLotBaseTextures(bool force) {
+    if (forceEmptyLotBaseTextures_ == force) return;
+    forceEmptyLotBaseTextures_ = force;
+    const std::list<cSC4Lot*>* list = g_lotList ? g_lotList() : nullptr;
+    if (!list) return;
+    std::vector<cSC4Lot*> lots(list->begin(), list->end());
+    for (cSC4Lot* lot : lots) lot->AddRef();
+    for (cSC4Lot* lot : lots) {
+        if (!forceEmptyLotBaseTextures_) {
+            if (g_construction) SetNormalLotBaseTexture(lot, g_construction->Configuration(lot->GetLotConfiguration()));   // vslot 0xb0
+        } else {
+            SetEmptyLotBaseTexture(lot);                                               // vslot 0xac
+        }
+    }
+    for (cSC4Lot* lot : lots) lot->Release();
+}
+
+// Mac i386 0x000ef524 (§17.7): the 47 rules keyed by ((s0 * 16 + s1) * 16 + s2) * 16 + s3; texture, rotation, flip. The lot
+// developer's own table: four flipped entries per corner shape differ from the zone developer's.
+void cSC4LotDeveloper::InitBoundaryRules() {
+    struct Entry {
+        int key;
+        std::uint32_t texture;
+        std::uint8_t rotation;
+        bool flag;
+    };
+    static const Entry kRules[] = {
+        {0x0000, 0x3000, 0, false},
+        {0x1000, 0x2000, 0, false}, {0x0100, 0x2000, 1, false}, {0x0010, 0x2000, 2, false}, {0x0001, 0x2000, 3, false},
+        {0x2000, 0x2600, 0, false}, {0x0200, 0x2600, 1, false}, {0x0020, 0x2600, 2, false}, {0x0002, 0x2600, 3, false},
+        {0x1100, 0x2100, 1, false}, {0x0110, 0x2100, 2, false}, {0x0011, 0x2100, 3, false}, {0x1001, 0x2100, 0, false},
+        {0x1200, 0x2400, 1, false}, {0x0120, 0x2400, 2, false}, {0x0012, 0x2400, 3, false}, {0x2001, 0x2400, 0, false},
+        {0x2100, 0x2400, 0, true},  {0x0210, 0x2400, 1, true},  {0x0021, 0x2400, 2, true},  {0x1002, 0x2400, 3, true},
+        {0x1010, 0x2500, 0, false}, {0x0101, 0x2500, 1, false},
+        {0x1020, 0x2900, 2, false}, {0x0102, 0x2900, 3, false}, {0x2010, 0x2900, 0, false}, {0x0201, 0x2900, 1, false},
+        {0x1110, 0x2200, 1, false}, {0x0111, 0x2200, 2, false}, {0x1011, 0x2200, 3, false}, {0x1101, 0x2200, 0, false},
+        {0x1120, 0x2700, 2, false}, {0x0112, 0x2700, 3, false}, {0x2011, 0x2700, 0, false}, {0x1201, 0x2700, 1, false},
+        {0x1210, 0x2800, 1, false}, {0x0121, 0x2800, 2, false}, {0x1012, 0x2800, 3, false}, {0x2101, 0x2800, 0, false},
+        {0x2110, 0x2700, 0, true},  {0x0211, 0x2700, 1, true},  {0x1021, 0x2700, 2, true},  {0x1102, 0x2700, 3, true},
+        {0x1112, 0x2300, 3, false}, {0x2111, 0x2300, 0, false}, {0x1211, 0x2300, 1, false}, {0x1121, 0x2300, 2, false},
+    };
+    for (const Entry& entry : kRules) boundaryRules_[entry.key] = BoundaryLotTextureRule{entry.texture, entry.rotation, entry.flag};
+}
+
+// Mac i386 0x000f1bee: an absent key takes rule 0. PORT GUARD: before Init (an empty map) the outputs are zero, where the original
+// reads the map's uninitialised head node.
+void cSC4LotDeveloper::GetBoundaryLotTexture(const int sides[4], std::uint32_t& texture, std::uint8_t& rotation, bool& flag) const {
+    const int key = ((sides[0] * 16 + sides[1]) * 16 + sides[2]) * 16 + sides[3];
+    auto it = boundaryRules_.find(key);
+    if (it == boundaryRules_.end()) it = boundaryRules_.find(0);
+    if (it == boundaryRules_.end()) {
+        texture = 0;
+        rotation = 0;
+        flag = false;
+        return;
+    }
+    texture = it->second.texture;
+    rotation = it->second.rotation;
+    flag = it->second.flag;
 }
 
 void cSC4LotDeveloper::SetLotListProvider(const std::list<cSC4Lot*>* (*provider)()) { g_lotList = provider; }
@@ -208,18 +548,18 @@ bool cSC4LotDeveloper::UpdateLot(cSC4Lot* lot) {
     return changed;
 }
 
-// 0x10014009a: version 1, the vertices per row, the city extent, the construction queue (one serializable reference each), the
-// position of the building in progress, the stage byte and a flag.
+// 0x10014009a: version 1, the vertices per row, the city extent, the night-light deque (one serializable reference each), its
+// cursor, its mode byte and the lit state new buildings take.
 bool cSC4LotDeveloper::Write(cIGZOStream& stream) const {
     stream.SetUint16(1);
     stream.SetSint32(streamVerticesPerRow_);
     stream.SetFloat32(streamCityWidth_);
     stream.SetFloat32(streamCityDepth_);
-    stream.SetUint32(static_cast<std::uint32_t>(constructionQueue_.size()));
-    for (const cIGZUnknown* occupant : constructionQueue_) SC4WriteGZSerializable(stream, occupant);
-    stream.SetUint32(queueCursor_);
-    stream.SetUint8(static_cast<std::uint8_t>(stage_));
-    stream << flagF4_;
+    stream.SetUint32(static_cast<std::uint32_t>(nightBuildings_.size()));
+    for (const cISC4BuildingOccupant* building : nightBuildings_) SC4WriteGZSerializable(stream, building);
+    stream.SetUint32(nightCursor_);
+    stream.SetUint8(static_cast<std::uint8_t>(nightMode_));
+    stream << litFlag_;
     return !stream.GetError();
 }
 
@@ -233,21 +573,30 @@ bool cSC4LotDeveloper::Read(cIGZIStream& stream) {
     stream.GetFloat32(streamCityDepth_);
     std::uint32_t count = 0;
     stream.GetUint32(count);
-    for (cIGZUnknown* occupant : constructionQueue_) if (occupant) occupant->Release();
-    constructionQueue_.clear();
+    for (cISC4BuildingOccupant* building : nightBuildings_) if (building) building->Release();
+    nightBuildings_.clear();
     if (count > kMaxStreamedQueue) return false;
-    constructionQueue_.resize(count, nullptr);
-    for (cIGZUnknown*& slot : constructionQueue_) {
+    nightBuildings_.resize(count, nullptr);
+    for (cISC4BuildingOccupant*& slot : nightBuildings_) {
         void* raw = nullptr;
-        SC4ReadGZSerializable(stream, kGZIID_cISC4BuildingOccupantQueue, &raw, false);   // one reference
-        slot = static_cast<cIGZUnknown*>(raw);
+        SC4ReadGZSerializable(stream, kGZIID_cISC4BuildingOccupant, &raw, false);   // one reference
+        slot = static_cast<cISC4BuildingOccupant*>(raw);
     }
-    stream.GetUint32(queueCursor_);
-    std::uint8_t stage = 0;
-    stream.GetUint8(stage);
-    stage_ = stage;
-    stream >> flagF4_;
+    stream.GetUint32(nightCursor_);
+    std::uint8_t mode = 0;
+    stream.GetUint8(mode);
+    nightMode_ = mode;
+    stream >> litFlag_;
     return !stream.GetError();
+}
+
+// Mac i386 0x000eef60: the exemplar {0x6534284a, 0xe7e2c2db, 0xe8da7677} through the city services.
+void cSC4LotDeveloper::ReadSimulatorTunableValues() {
+    if (!g_city) return;
+    const cISCPropertyHolder* tunables = g_city->AcquireTunables();
+    if (!tunables) return;
+    ReadSimulatorTunableValues(tunables);
+    g_city->ReleaseTunables(tunables);
 }
 
 void cSC4LotDeveloper::ReadSimulatorTunableValues(const cISCPropertyHolder* exemplar) {
@@ -272,8 +621,8 @@ void cSC4LotDeveloper::ReadSimulatorTunableValues(const cISCPropertyHolder* exem
     cSCPropertyHelp::GetPropertyValue(exemplar, kLotDevPropBool139, t.flag139);
     cSCPropertyHelp::GetPropertyValue(exemplar, kLotDevPropLevelTolerance, t.levelTolerance);
     cSCPropertyHelp::GetPropertyValue(exemplar, kLotDevPropMaxLevelling, t.maxLevelling);
-    cSCPropertyHelp::GetPropertyValue(exemplar, kLotDevPropU32_0f0, t.value0f0);
-    cSCPropertyHelp::GetPropertyValue(exemplar, kLotDevPropU32_0ec, t.value0ec);
+    cSCPropertyHelp::GetPropertyValue(exemplar, kLotDevPropNightAccumulator, t.nightAccumulator);
+    cSCPropertyHelp::GetPropertyValue(exemplar, kLotDevPropNightBatch, t.nightBatch);
     std::vector<float> curve;
     if (exemplar->HasProperty(kLotDevPropCostCurve) &&
         cSCPropertyHelp::GetPropertyValue(exemplar, kLotDevPropCostCurve, curve))
@@ -533,7 +882,6 @@ void cSC4LotDeveloper::ReoccupyBuilding(cSC4Lot* lot, std::uint32_t developerTyp
 
 namespace sc4 {
 namespace {
-ILotBaseTextureServices* g_textureServices = nullptr;
 constexpr std::uint32_t kLotBaseTextureOccupantType = 0x497f6d9d;
 constexpr std::uint32_t kOccupantInsertedFlag = 1;                 // cISC4Occupant vslot 0x100 IsFlagSet(1)
 constexpr std::uint32_t kMsgLotBaseTextureChanged = 0x99ef1145;    // occupant vslot 0x78 after a move
@@ -615,7 +963,7 @@ void cSC4LotDeveloper::SetEmptyLotBaseTexture(cSC4Lot* lot) {
             spec.cellX = static_cast<std::uint8_t>(x);
             spec.cellZ = static_cast<std::uint8_t>(z);
             bool flip = false;
-            services->BoundaryLotTexture(sides, spec.textureId, spec.rotation, flip);   // this vslot 0x150
+            GetBoundaryLotTexture(sides, spec.textureId, spec.rotation, flip);         // this vslot 0x150
             spec.flip = flip ? 1 : 0;
             spec.red = red;
             spec.green = green;
@@ -662,9 +1010,6 @@ void cSC4LotDeveloper::RemoveLotBaseTexture(cSC4Lot* lot) {
 
 // ------------------------------------------------------------------------------------------------ construction
 
-namespace {
-ILotConstructionServices* g_construction = nullptr;
-}  // namespace
 
 void cSC4LotDeveloper::SetConstructionServices(ILotConstructionServices* services) { g_construction = services; }
 
@@ -1423,7 +1768,7 @@ void cSC4LotDeveloper::ClearLotBlockingObjects(cSC4Lot* lot) {
     const float highest = GetLowestOrHighestAreaAltitude(rect, false, true);        // vslot 0x40
     const float minimum[3] = {static_cast<float>(rect.x0 << 4) + 0.5f, 0.0f, static_cast<float>(rect.z0 << 4) + 0.5f};
     const float maximum[3] = {static_cast<float>(rect.x1 * 16 + 16) - 0.5f, highest + 32.0f, static_cast<float>(rect.z1 * 16 + 16) - 0.5f};
-    g_construction->DemolishBlockingOccupants(minimum, maximum);
+    g_construction->DemolishBlockingOccupants(minimum, maximum, blockingFilter_);   // +0x58 (Init makes it)
 }
 
 // @ i386 0x000ec6de. The position of the lot configuration's primary building (configuration vslot 0x60).

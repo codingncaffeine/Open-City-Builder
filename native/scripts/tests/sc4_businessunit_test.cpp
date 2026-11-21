@@ -72,7 +72,7 @@ public:
     std::uint32_t BuildingWealth(std::uint32_t) override { return 1; }
     cISC4BuildingOccupant* AddNewBuildingOccupant(std::uint32_t, float[3], int) override { return nullptr; }
     void CellCornerToPosition(int, int, float&, float&) override {}
-    void DemolishBlockingOccupants(const float[3], const float[3]) override {}
+    void DemolishBlockingOccupants(const float[3], const float[3], cISC4OccupantFilter*) override {}
     void StartConstructionOccupant(cSC4Lot*) override {}
     cSC4Lot* LotAt(int, int) override { return nullptr; }
     std::uint32_t RandomBelow(std::uint32_t range) override { return pick < range ? pick : 0; }

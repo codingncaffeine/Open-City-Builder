@@ -734,6 +734,7 @@ src/app/citycomp/cSC4VehicleManager.cpp
 src/app/citycomp/cSC4PedestrianManager.cpp
 src/app/citycomp/cSC4AircraftManager.cpp
 src/app/citycomp/cSC4Demolition.cpp
+src/app/citycomp/cSC4LotDeveloper.cpp
 src/app/citycomp/cSC4WatercraftManager.cpp
 src/app/citycomp/cSC4TrafficNetworkMap.cpp
 src/app/citycomp/cSC4TrafficSimulator.cpp
