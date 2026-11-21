@@ -156,8 +156,9 @@ public:
     virtual void GarbageDeals(std::uint32_t kind, std::vector<IPollutionDeal*>& out) = 0;   // 0x4773ffe5 import, 0x4773ffe4 export
     virtual void SetSanitationLineItemCost(int item, std::int64_t cost) = 0;               // the sanitation department's line item
     virtual bool OccupantFootprint(void* occupant, PollutionOccupantFootprint& out) = 0;    // false: not a city occupant
-    virtual bool PowerAvailable() = 0;                                 // power simulator vslot 0xf8
-    virtual bool OccupantPowered(IPollutionOccupant* occupant) = 0;    // this+0x60 vslot 0xf8
+    // cSC4PowerSimulator::IsOccupantPowered (i386 vslot 0x7c): GetCurrentOccupantEfficiency asks SL::spPowerSim, GetCurrentCapacity
+    // the power simulator it keeps at +0x34; both pass the occupant.
+    virtual bool OccupantPowered(IPollutionOccupant* occupant) = 0;
     virtual float SanitationFunding() = 0;                             // budget department +0x50 -> float
     virtual void LandfillRange(int& low, int& high) = 0;               // landfill developer vslot 0x50
     virtual int LandfillTransportLoad() = 0;                           // landfill developer vslot 0x58

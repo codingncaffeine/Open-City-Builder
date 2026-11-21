@@ -58,6 +58,7 @@ sc4::IPedestrianHost* NativePedestrianHost();
 int NativeDispatchCount(std::uint32_t type);
 std::vector<std::uint32_t> NativeDispatchIds(std::uint32_t type);
 bool NativeDispatchRecord(std::uint32_t id, sc4::ProtectionDispatchInfo& info);
+bool NativeIsOccupantPowered(sc4::cISC4Occupant* occupant);   // app/NativeAnimationCoordinator.cpp
 void NativeRegisterDispatchSource(std::uint32_t type, bool add);
 void InstallNativeDispatchHost();
 }
@@ -212,9 +213,9 @@ private:
 
 class PollutionHost final : public IPollutionHost {
 public:
-    // PARTIAL: the power simulator is not wired natively; every plant counts as powered.
-    bool PowerAvailable() override { return true; }
-    bool OccupantPowered(IPollutionOccupant*) override { return true; }
+    bool OccupantPowered(IPollutionOccupant* occupant) override {
+        return occupant && NativeIsOccupantPowered(static_cast<PollutionOccupant*>(occupant)->Occupant());
+    }
     // The sanitation department (0x6a42a8f5): its funding share; full funding while the department does not exist.
     void AddPropRequester(cISC4PropRequester* requester) override { NativeAddPropRequester(requester); }
     float SanitationFunding() override {

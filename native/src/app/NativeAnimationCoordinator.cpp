@@ -45,6 +45,16 @@ template <class T> T* Component(CityComponent c, std::uint32_t clsid) {
     return out;
 }
 cSC4ZoneDeveloper* Lots() { return Component<cSC4ZoneDeveloper>(CityComponent::ZoneDeveloper, cSC4ZoneDeveloper::kZoneDeveloperClassId); }
+}  // namespace
+
+// cSC4PowerSimulator::IsOccupantPowered (i386 0x00180878): the occupant's lot has power, or does not need it; no lot = no.
+bool NativeIsOccupantPowered(sc4::cISC4Occupant* occupant) {
+    sc4::cSC4ZoneDeveloper* lots = Lots();
+    sc4::cSC4Lot* lot = lots && occupant ? lots->GetOccupantLot(occupant) : nullptr;
+    return lot && (lot->GetHasPower() || !lot->GetNeedsPower());
+}
+
+namespace {
 
 bool Trace() { static const bool on = std::getenv("SC4_ANIMDEBUG") != nullptr; return on; }
 
@@ -68,12 +78,7 @@ public:
         if (Trace()) std::fprintf(stderr, "anim: tick remove %p -> %d\n", static_cast<void*>(target), ok ? 1 : 0);
         return ok;
     }
-    // cSC4PowerSimulator::IsOccupantPowered (i386 0x00180878): the occupant's lot has power, or does not need it; no lot = no.
-    bool IsOccupantPowered(cISC4Occupant* occupant) override {
-        cSC4ZoneDeveloper* lots = Lots();
-        cSC4Lot* lot = lots && occupant ? lots->GetOccupantLot(occupant) : nullptr;
-        return lot && (lot->GetHasPower() || !lot->GetNeedsPower());
-    }
+    bool IsOccupantPowered(cISC4Occupant* occupant) override { return NativeIsOccupantPowered(occupant); }
     bool OccupantFunding(cISC4Occupant* occupant, std::uint32_t purpose, float& funding) override {
         cSC4ZoneDeveloper* lots = Lots();
         cSC4Lot* lot = lots && occupant ? lots->GetOccupantLot(occupant) : nullptr;

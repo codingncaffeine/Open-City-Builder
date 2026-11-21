@@ -98,12 +98,11 @@ std::vector<std::uint8_t> WithoutObjectIds(std::vector<std::uint8_t> bytes) {
 }
 class Host final : public IPollutionHost {
 public:
-    bool power = true, poweredOccupants = true;
+    bool poweredOccupants = true;
     float funding = 0.5f, slots = 2.0f;
     int low = 0, high = 100, load = 5;
     std::vector<std::pair<std::uint32_t, std::uint32_t>> messages;
     std::vector<std::pair<std::uint32_t, std::int64_t>> history;
-    bool PowerAvailable() override { return power; }
     bool OccupantPowered(IPollutionOccupant*) override { return poweredOccupants; }
     float SanitationFunding() override { return funding; }
     float RecyclingCapacitySlots() override { return slots; }
@@ -187,9 +186,9 @@ int main() {
     CHECK(sim.GetCurrentOccupantCondition(&incinerator, cond) && std::fabs(cond - 0.5f) < 1e-6f);
     float eff = 0;
     CHECK(sim.GetCurrentOccupantEfficiency(&incinerator, eff) && std::fabs(eff - 0.25f) < 1e-6f);
-    host.power = false;
+    host.poweredOccupants = false;
     CHECK(!sim.GetCurrentOccupantEfficiency(&incinerator, eff) && eff == 0.0f);
-    host.power = true;
+    host.poweredOccupants = true;
     CHECK(std::list<IPollutionOccupant*>().empty());
     CHECK(sim.AddOrRemoveOccupant(sim.IncineratorList(), &incinerator, true) && sim.IncineratorList().size() == 1);
     CHECK(sim.AddOrRemoveOccupant(sim.IncineratorList(), &incinerator, false) && sim.IncineratorList().empty());

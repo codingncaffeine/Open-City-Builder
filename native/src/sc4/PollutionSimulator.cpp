@@ -643,7 +643,7 @@ bool cSC4PollutionSimulator::GetCurrentOccupantCondition(IPollutionOccupant* occ
 }
 
 bool cSC4PollutionSimulator::GetCurrentOccupantEfficiency(IPollutionOccupant* occupant, float& percentage) const {
-    if (host_->PowerAvailable()) {
+    if (host_->OccupantPowered(occupant)) {
         percentage = efficiency_;
         float condition = 0.0f;
         if (GetCurrentOccupantCondition(occupant, condition)) {

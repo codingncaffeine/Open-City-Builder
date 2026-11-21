@@ -367,7 +367,6 @@ Probe10 g_ITrafficNetworkMapHost;
 namespace sc4 {
 class Probe11 final : public IPollutionHost {
 public:
-    bool PowerAvailable() override { Seam("IPollutionHost::PowerAvailable"); return false; }
     bool OccupantPowered(IPollutionOccupant* occupant) override { Seam("IPollutionHost::OccupantPowered"); return false; }
     float SanitationFunding() override { Seam("IPollutionHost::SanitationFunding"); return 0; }
     void LandfillRange(int& low, int& high) override { Seam("IPollutionHost::LandfillRange");}
