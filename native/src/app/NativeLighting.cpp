@@ -151,10 +151,8 @@ public:
     ILightingTerrain* TerrainMap() override { return &terrain_; }
     ILightingTerrain* Terrain() override { return &terrain_; }
     SC4ViewUtilities* ViewUtilities() override { return g_render ? g_render->GetViewUtilities() : nullptr; }
-    cSC4RenderProperties* RenderProperties() override {
-        static cSC4RenderProperties* properties = [] { auto* p = new cSC4RenderProperties(); p->AddRef(); return p; }();
-        return properties;
-    }
+    // SL::spRenderProperties: the application's render property set (published by SL::OnAppInit1), so the graphic options reach lighting
+    cSC4RenderProperties* RenderProperties() override { return dynamic_cast<cSC4RenderProperties*>(SL::spRenderProperties); }
     int CurrentSeasonMonth() override {
         int year = 0, month = 1, day = 0, dayOfYear = 0, weekDay = 0;
         if (g_simulator) g_simulator->GetSimDate(&year, &month, &day, &dayOfYear, &weekDay);

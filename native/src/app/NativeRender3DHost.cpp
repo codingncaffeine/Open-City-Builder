@@ -7,6 +7,7 @@
 #include "app/NativeCity.h"
 #include "app/NativeLighting.h"
 #include "sc4/Render3D.h"
+#include "sc4/RenderProperties.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrainView3D.h"
@@ -23,7 +24,8 @@ struct StubRender3D final : IRender3DHost {
     cIGZUnknown* TerrainView() override { return {}; }
     cIGZUnknown* City() override { return {}; }
     IRender3DSettings* Settings() override { return {}; }
-    sc4::cSC4RenderProperties* RenderProperties() override { return {}; }
+    // SL::spRenderProperties: the application's render property set; Init takes its own reference
+    sc4::cSC4RenderProperties* RenderProperties() override { return dynamic_cast<sc4::cSC4RenderProperties*>(SL::spRenderProperties); }
     bool PickTerrainView(const float* origin, const float* direction, float* out, bool includeWater) override {
         return g_terrainView && g_terrainView->Pick(origin, direction, out, includeWater);
     }
