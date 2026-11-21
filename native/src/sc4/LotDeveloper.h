@@ -32,8 +32,8 @@ class cISC4Occupant;
 struct BuildingProfile;
 constexpr std::uint32_t kGZCLSID_cSC4LotDeveloper = 0xa990bfe0;
 constexpr std::uint32_t kGZIID_cISC4LotDeveloper = 0x4818e5d2;
-constexpr std::uint32_t kLotDeveloperTunablesKeyType = 0xe7e2c2db;     // exemplar key {type, group, instance}
-constexpr std::uint32_t kLotDeveloperTunablesKeyGroup = 0x6534284a;
+constexpr std::uint32_t kLotDeveloperTunablesKeyType = 0x6534284a;     // exemplar key {type, group, instance} (Mac i386 0x000eef60)
+constexpr std::uint32_t kLotDeveloperTunablesKeyGroup = 0xe7e2c2db;
 constexpr std::uint32_t kLotDeveloperTunablesKeyInstance = 0xe8da7677;
 
 // tunable property ids

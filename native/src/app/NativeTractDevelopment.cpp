@@ -3,14 +3,14 @@
 // construction resources and network occupants are the city's, so cSC4TractDeveloper::Grow searches real lots and real lot
 // configurations and picks real buildings. Its last step is the city's lot developer's StartConstruction (layer 4).
 //
-// Neutral here (each named, PARTIAL): the tunables (the class's defaults stand); the services the
-// port does not run natively answer "provided" so that the growth-stage caps do not hold growth back: power (2), water, fire
-// protection, park effect, the land value (0: inside every range test the profile skips) and the residential trip-length map
-// (the lot's own road access stands in); the lot developer's NeedsAnchorBuilding (false); DemolishLots (an empty lot has nothing
+// The cell services are the city's simulators: the land value simulator's total map, the fire protection grid, the aura
+// simulator's park map, the traffic simulator's trip length map, power and water; the tunables are the simulator exemplar's.
+// Neutral here (each named, PARTIAL): the lot developer's NeedsAnchorBuilding (false); DemolishLots (an empty lot has nothing
 // to demolish; a built one is reported).
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <string>
 #include <unordered_set>
 
 #include "app/NativeDemolition.h"
@@ -20,11 +20,16 @@
 #include "app/NativeLotConstruction.h"
 #include "app/NativePlumbing.h"
 #include "app/NativePower.h"
+#include "app/NativeTraffic.h"
 #include "platform/Unwired.h"
 #include "app/NativeZoneDeveloperHost.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "rz/cRZRandom.h"
+#include "sc4/AuraSimulator.h"
 #include "sc4/CommonIIDs.h"
+#include "sc4/FireProtectionSimulator.h"
+#include "sc4/LandValueSimulator.h"
+#include "sc4/cSC4SimGrid.h"
 #include "sc4/GrowthDeveloper.h"
 #include "sc4/Exemplar.h"
 #include "sc4/LotConfigurationManager.h"
@@ -221,6 +226,68 @@ struct NetworkManagerApi final : ITractNetworkManagerApi {
     }
 } g_networkManager;
 
+// ---- the cell services the growth predicates read (the simulators the original reaches through its SL:: globals)
+template <class T> T* Simulator(sc4::CityComponent c) {
+    cSC4City* city = HostCity();
+    return city ? dynamic_cast<T*>(city->GetComponent(c)) : nullptr;
+}
+template <class T> bool CellOf(const cSC4SimGrid<T>* grid, int x, int z, T& out) {
+    if (!grid || x < 0 || z < 0 || (x >> grid->GetTractShift()) >= grid->GetTractCountX() ||
+        (z >> grid->GetTractShift()) >= grid->GetTractCountZ()) return false;
+    out = grid->GetCellValue(x, z);   // grid vslot 0x38
+    return true;
+}
+cSC4SimGrid<std::uint8_t>* LandValueMap() {   // SL::spLandValueSim (GetLandValue reads its total land value map)
+    auto* simulator = Simulator<cSC4LandValueSimulator>(sc4::CityComponent::LandValueSimulator);
+    return simulator ? simulator->GetTotalLandValueMap() : nullptr;
+}
+cSC4SimGrid<std::uint8_t>* FireProtectionMap() {   // SL::spFireProtectionSim vslot 0x28 GetFireProtectionGrid
+    auto* simulator = Simulator<cSC4FireProtectionSimulator>(sc4::CityComponent::FireProtectionSimulator);
+    return simulator ? simulator->GetFireProtectionGrid() : nullptr;
+}
+cSC4SimGrid<std::int16_t>* ParkMap() {   // SL::spAuraSim vslot 0x70 GetParkMap
+    auto* simulator = Simulator<cSC4AuraSimulator>(sc4::CityComponent::AuraSimulator);
+    return simulator ? simulator->GetParkMap() : nullptr;
+}
+
+// The tract developer's tunables: the simulator exemplar {0x6534284a, 0xe7e2c2db, 0xe8da7677} (ReadSimulatorTunableValues,
+// Mac i386 0x000ebf4c). Each value is reset to its default and replaced by the exemplar's when it has the property; nothing
+// changes without the exemplar.
+bool ReadTractTunables(TractTunables& io) {
+    const cISCPropertyHolder* exemplar = NativeSimulatorExemplar(0xe8da7677);
+    if (!exemplar) return false;
+    const TractTunables defaults;
+    auto single = [exemplar](std::uint32_t id, float& value, float initial) {
+        value = initial;
+        cSCPropertyHelp::GetPropertyValue(exemplar, id, value);
+    };
+    auto pair = [exemplar](std::uint32_t id, float& first, float& second, float initialFirst, float initialSecond) {
+        first = initialFirst;
+        second = initialSecond;
+        std::vector<float> values;
+        if (cSCPropertyHelp::GetPropertyValue(exemplar, id, values) && values.size() >= 2) {
+            first = values[0];
+            second = values[1];
+        }
+    };
+    single(0x47e2c500, io.capacityFactor, defaults.capacityFactor);
+    pair(0x47e2c501, io.declineFactor, io.buildBias, defaults.declineFactor, defaults.buildBias);
+    single(0x47e2c502, io.capacityFactor2, defaults.capacityFactor2);
+    pair(0x47e2c510, io.existingCapacityWeight, io.abandonedCapacityWeight, defaults.existingCapacityWeight,
+         defaults.abandonedCapacityWeight);
+    pair(0x47e2c511, io.aggregationPenalty, io.subdivisionPenalty, defaults.aggregationPenalty, defaults.subdivisionPenalty);
+    single(0x47e2c530, io.populationJitter, defaults.populationJitter);
+    pair(0x47e2c531, io.declineJitterLow, io.declineJitterHigh, defaults.declineJitterLow, defaults.declineJitterHigh);
+    io.allowTakeOver = true;
+    cSCPropertyHelp::GetPropertyValue(exemplar, 0x47e2c540, io.allowTakeOver);
+    io.styles.clear();
+    cSCPropertyHelp::GetPropertyValue(exemplar, 0x47e2c550, io.styles);
+    std::int32_t years = 0;
+    io.hasYearsBetweenStyleChanges = cSCPropertyHelp::GetPropertyValue(exemplar, 0x47e2c551, years);
+    if (io.hasYearsBetweenStyleChanges) io.yearsBetweenStyleChanges = years;
+    return true;
+}
+
 struct TractHost final : ITractDeveloperHost {
     cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
     bool SimulatorPresent() override { return CitySimulatorPresent(); }
@@ -241,7 +308,7 @@ struct TractHost final : ITractDeveloperHost {
     }
     void RegisterLotConfigurationFilter(cISC4LotConfigurationFilter* filter) override { if (auto* m = LotConfigurations()) m->RegisterLotConfigurationFilter(filter); }
     void UnregisterLotConfigurationFilter(cISC4LotConfigurationFilter* filter) override { if (auto* m = LotConfigurations()) m->UnregisterLotConfigurationFilter(filter); }
-    void ReadTunables(TractTunables&) override {}   // PARTIAL: the class's defaults stand (the tunable exemplar is not read here)
+    void ReadTunables(TractTunables& io) override { ReadTractTunables(io); }
     std::int32_t SimulatorDay() override {   // the simulator date (vslot 0x30 -> the date's day number)
         auto* simulator = Com<cSC4Simulator>(sc4::CityComponent::Simulator, kGZCLSID_cSC4Simulator);
         return simulator ? static_cast<std::int32_t>(simulator->GetSimDateNumber()) : 0;
@@ -252,15 +319,25 @@ struct TractHost final : ITractDeveloperHost {
             for (int z = tractZ << shift; z < ((tractZ + 1) << shift); ++z) fn(x, z);
     }
     ITractNetworkManagerApi* NetworkManager() override { return &g_networkManager; }
-    std::uint8_t LandValueAt(int, int) override { return 0; }          // PARTIAL: the land value simulator is not run natively
+    std::uint8_t LandValueAt(int x, int z) override {                   // land value sim vslot 0x30 GetLandValue
+        std::uint8_t value = 0;
+        CellOf(LandValueMap(), x, z, value);
+        return value;
+    }
     bool IsCellWatered(int x, int z) override { return NativeCellWatered(x, z); }
     std::uint8_t PoweredAt(int x, int z) override { return NativePowerSupplyAt(x, z); }
-    bool FireProtectedAt(int, int) override { return true; }           // PARTIAL: no fire protection simulator natively
-    std::int16_t ParkEffectAt(int, int) override { return 1; }         // PARTIAL: no aura simulator natively
-    bool HasTripLengthAt(int x, int z) override {                      // PARTIAL: no traffic simulator; the lot's road access stands in
-        cSC4ZoneDeveloper* d = ZoneDeveloper();
-        cSC4Lot* lot = d ? d->GetLot(x, z, false) : nullptr;
-        return lot && lot->HasRoadAccess();
+    bool FireProtectedAt(int x, int z) override {                       // fire protection grid at the cell (grid vslot 0x38)
+        std::uint8_t value = 0;
+        return CellOf(FireProtectionMap(), x, z, value) && value != 0;
+    }
+    std::int16_t ParkEffectAt(int x, int z) override {                  // park map at the cell (grid vslot 0x38)
+        std::int16_t value = 0;
+        CellOf(ParkMap(), x, z, value);
+        return value;
+    }
+    bool HasTripLengthAt(int x, int z) override {                       // traffic sim vslot 0x68 GetTripLengthMap at the cell
+        std::uint8_t value = 0;
+        return CellOf(NativeTrafficTripLengthMap(), x, z, value) && value != 0;
     }
     // spDemolition DemolishLots(true, lots, privilege 0, flags, false, null, null, null) (tract-developer.md: 0x800 keeps the zone).
     void DemolishLots(const std::list<cRZAutoRefCount<cSC4Lot>>& lots, std::uint32_t flags) override {
@@ -377,6 +454,31 @@ void NativeDeclineReport() {
     std::printf("decline: tract developer abandoned %d, reoccupied %d, constructions %d\n", g_lotDeveloper.abandoned,
                 g_lotDeveloper.reoccupied, g_lotDeveloper.constructions);
     std::printf("decline: plan outcomes executed %d, capacity declined %d\n", g_declineOutcomes, g_declinedCapacity);
+    // The inputs the growth predicates read: each map, how many of its tracts are non-zero, and the tunables in use.
+    auto coverage = [](auto* grid) {
+        if (!grid) return std::string("missing");
+        int set = 0;
+        for (int tx = 0; tx < grid->GetTractCountX(); ++tx)
+            for (int tz = 0; tz < grid->GetTractCountZ(); ++tz)
+                if (grid->GetCellValue(tx << grid->GetTractShift(), tz << grid->GetTractShift()) != 0) ++set;
+        return std::to_string(set) + "/" + std::to_string(grid->GetTractCountX() * grid->GetTractCountZ());
+    };
+    std::printf("decline: inputs land value %s, fire protection %s, park %s, trip length %s (non-zero tracts)\n",
+                coverage(LandValueMap()).c_str(), coverage(FireProtectionMap()).c_str(), coverage(ParkMap()).c_str(),
+                coverage(NativeTrafficTripLengthMap()).c_str());
+    if (auto* fire = Simulator<cSC4FireProtectionSimulator>(sc4::CityComponent::FireProtectionSimulator))
+        std::printf("decline: fire protection stations %zu (file %zu), unadjusted %s\n", fire->Protection().Stations().size(),
+                    fire->Protection().FileStationCount(), coverage(fire->Protection().UnadjustedGrid()).c_str());
+    TractTunables tunables;
+    const bool read = ReadTractTunables(tunables);
+    std::printf("decline: tunables %s: capacity %.2f, take-over %.2f/%.2f, weights %.2f/%.2f, penalties %.1f/%.1f, take over %d, "
+                "styles %zu, years %d\n", read ? "from the exemplar" : "DEFAULTS (no exemplar)", tunables.capacityFactor,
+                tunables.declineFactor, tunables.buildBias, tunables.existingCapacityWeight, tunables.abandonedCapacityWeight,
+                tunables.aggregationPenalty, tunables.subdivisionPenalty, tunables.allowTakeOver ? 1 : 0, tunables.styles.size(),
+                tunables.hasYearsBetweenStyleChanges ? tunables.yearsBetweenStyleChanges : -1);
+    if (cSC4LotDeveloper* lots = LotDeveloper())
+        std::printf("decline: lot developer condition threshold %u days, ratios %.2f/%.2f/%.2f\n", lots->Tunables().conditionThreshold,
+                    lots->Tunables().ratioA, lots->Tunables().ratioB, lots->Tunables().ratioC);
     std::printf("decline: developers (type:growth/decline lists, demand)%s\n", GrowthDevelopersSummary().c_str());
 }
 
