@@ -28,6 +28,7 @@
 #include "app/NativeAnimationTicks.h"
 #include "app/NativeAudio.h"
 #include "app/NativeCity.h"
+#include "app/NativeDecalOverlay.h"
 #include "app/NativeModelMaker.h"
 #include "app/NativeUi.h"
 #include "gz/cGZPersistResourceManager.h"
@@ -37,6 +38,7 @@
 #include "sc4/CameraControl.h"
 #include "sc4/EffectsManager.h"
 #include "rz/cRZAutoRefCount.h"
+#include "rz/cRZCmdLine.h"
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/WeatherSimulator.h"
 #include "sc4/Simulator.h"
@@ -51,6 +53,7 @@
 #include "sc4/cSC4City.h"
 #include "sc4/ViewUtilities.h"
 #include "sc4/cSTETerrain.h"
+#include "sc4/OverlayManager.h"
 
 namespace native {
 sc4::cSC43DRender* CityRenderer();   // app/NativeCityView.cpp
@@ -58,6 +61,7 @@ namespace {
 
 constexpr std::uint32_t kGZIID_cIS3DResModel = 0x9ad0e7e3;
 constexpr std::uint32_t kModelType = 0x5ad0e817, kModelGroup = 0xbadb57f1;
+constexpr std::uint32_t kSnowlineTexture = 0x07f94207;   // the snowline height map (terrain FSH)
 
 sc4::cSC4EffectsManager* g_manager = nullptr;
 sc4::cSC43DRender* g_render = nullptr;   // the renderer the effects pass is in (the manager's AttachRenderable)
@@ -292,9 +296,19 @@ public:
     void ClearLightingTint() override {
         if (sc4::cISC4LightingManager* lighting = Lighting()) lighting->ResetLightingTint();
     }
-    std::int32_t AddSnowlineEffect() override { return -1; }
-    void RemoveSnowlineEffect(std::int32_t) override {}
-    void SetSnowlineAltitude(std::int32_t, float, float) override {}
+    // The snowline is a height-map overlay of the terrain view's overlay manager 0 (SL::TerrainView() vslot 0x48 with 0):
+    // AddHeightMap(0x7f94207) (vslot 0x20 i386), RemoveOverlay (0x3c) and SetHeightMapParams(id, bias, altitude) (0x54).
+    std::int32_t AddSnowlineEffect() override {
+        sc4::cSTEOverlayManager* overlays = DecalOverlayManager(0);
+        return overlays ? static_cast<std::int32_t>(overlays->AddHeightMap(kSnowlineTexture)) : -1;
+    }
+    void RemoveSnowlineEffect(std::int32_t handle) override {
+        if (sc4::cSTEOverlayManager* overlays = DecalOverlayManager(0)) overlays->RemoveOverlay(static_cast<std::uint32_t>(handle));
+    }
+    void SetSnowlineAltitude(std::int32_t handle, float altitude, float bias) override {
+        if (sc4::cSTEOverlayManager* overlays = DecalOverlayManager(0))
+            overlays->SetHeightMapParams(static_cast<std::uint32_t>(handle), bias, altitude);
+    }
     int SimulatorDayOfYear() override {   // SL::spSimulator's date, day of the year
         sc4::cSC4Simulator* simulator = CitySimulatorObject();
         if (!simulator) return 0;
@@ -495,6 +509,15 @@ public:
 ParticlesEffectsHost g_particleEffects;
 
 }  // namespace
+
+bool RunSnowCheat(const char* text) {
+    if (!g_manager || !text) return false;
+    cRZCmdLine line(text);
+    const bool done = g_manager->DoSnowCheat(line);
+    std::printf("snowline: overlay %d altitude %.1f (low %.1f high %.1f bias %.1f)\n", g_manager->SnowlineEffectId(),
+                g_manager->SnowlineAltitude(), g_manager->SnowlineLow(), g_manager->SnowlineHigh(), g_manager->SnowlineBias());
+    return done;
+}
 
 namespace {
 // SC4_EFFECTDUMP=name,name: what the named effects are made of (their records, the component descriptions behind them and the

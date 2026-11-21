@@ -83,6 +83,8 @@
 #include "sc4/ServiceLocator.h"
 #include "sc4/WinLocationSaver.h"
 #include "rz/cRZMessage2Standard.h"
+#include "app/NativeEffects.h"
+#include "sc4/WinRegionScreen.h"
 #include "sc4/WinSC4App.h"
 #include "sc4/WinSplashScreen.h"
 #include "app/NativeZoneTool.h"
@@ -1448,8 +1450,29 @@ int RunScenario(const std::string& path) {
             std::printf("cheats: %u registered:", count);
             for (std::uint32_t i = 0; i < got && i < count; ++i) std::printf(" \"%s\"", names[i]->ToChar());
             std::printf("\n");
-        } else if (command == "cheat") {   // cheat TEXT: what the cheat box does with its text on Enter
-            std::string text; words >> text;
+        } else if (command == "open-city") {   // open-city NAME: enters a region city the way the region screen's launch does (no input)
+            std::string want; std::getline(words >> std::ws, want);   // the rest of the line (names have spaces)
+            auto lower = [](std::string t) { for (char& c : t) c = char(std::tolower(static_cast<unsigned char>(c))); return t; };
+            sc4::IRegionScreenHost* host = sc4::RegionScreenHost();
+            auto* screen = gAppWindow ? dynamic_cast<sc4::cSC4WinRegionScreen*>(gAppWindow->CurrentScreen()) : nullptr;
+            std::vector<cISC4Region::cLocation> locations;
+            if (host) host->CityLocations(locations);
+            sc4::RegionCityRef* found = nullptr;
+            for (const cISC4Region::cLocation& at : locations) {
+                sc4::RegionCityRef* ref = host->FindCity(at.x, at.z);
+                cRZString name;
+                if (ref && ref->get()) ref->get()->GetName(name);
+                std::printf("open-city: city at %d,%d \"%s\"\n", at.x, at.z, name.ToChar());
+                if (!found && ref && lower(name.ToChar()) == lower(want)) found = ref;
+            }
+            const bool launched = screen && found && screen->LaunchRegionalCity(found);
+            std::printf("open-city %s: %s\n", want.c_str(), launched ? "launched" : (!screen ? "no region screen" : !found ? "no such city" : "refused"));
+        } else if (command == "snow") {   // snow [low high bias]: the effects manager's Snow cheat (a debug cheat the cheat box only takes in debug mode)
+            std::string rest; std::getline(words >> std::ws, rest);
+            const std::string text = "Snow " + rest;
+            std::printf("snow: %s\n", native::RunSnowCheat(text.c_str()) ? "done" : "no effects manager");
+        } else if (command == "cheat") {   // cheat TEXT: what the cheat box does with its text on Enter (the rest of the line)
+            std::string text; std::getline(words >> std::ws, text);
             auto* cheats = dynamic_cast<cGZCheatCodeManager*>(SL::spCCM);
             std::uint32_t id = 0;
             const bool done = cheats && cheats->DoDefaultCheatCodeProcessing(cRZString(text.c_str()), id);

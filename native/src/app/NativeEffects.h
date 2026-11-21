@@ -21,4 +21,7 @@ sc4::cSC4VisualEffect* CreateNamedEffect(const char* name);
 // The effect bound to a (group, type) key (cSC4EffectsManager::CreateVisualEffect(uint, uint)); one reference, null when unbound.
 sc4::cSC4VisualEffect* CreateKeyedEffect(std::uint32_t group, std::uint32_t type);
 
+// The effects manager's Snow cheat with its command line ("Snow [low] [high] [bias]"), as the cheat box runs it; prints
+// the snowline state after it. False without an effects manager.
+bool RunSnowCheat(const char* text);
 }  // namespace native
