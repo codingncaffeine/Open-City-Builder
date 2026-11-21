@@ -1781,11 +1781,13 @@ bool cSC4Vehicle::DoPlayerDriveTick(float milliseconds) {
                 std::uint32_t key = 0;
                 int index = 0;
                 cS3DVector3 near = pathPos_;
+                // Any entry edge, leaving through the edge the steered heading points at; then any edge at all (i386
+                // 0x000a5e44 / 0x000a5ef0).
                 std::vector<std::uint32_t> keys =
-                    pathInfo->GetPathsNearStartPoint(1, near, edge, kPathEdgeWildcard, 16.0f);
+                    pathInfo->GetPathsNearStartPoint(1, near, kPathEdgeWildcard, edge, 16.0f);
                 const tPath* path = ChoosePathFromKeyArray(pathInfo, keys, near, key, index);
                 if (!path) {
-                    keys = pathInfo->GetPathsNearStartPoint(1, near, edge, kPathEdgeWildcard, 16.0f);
+                    keys = pathInfo->GetPathsNearStartPoint(1, near, kPathEdgeWildcard, kPathEdgeWildcard, 16.0f);
                     path = ChoosePathFromKeyArray(pathInfo, keys, near, key, index);
                 }
                 SetPath(occupant, path ? key : pathKey_, path ? &path->points : nullptr, true);
