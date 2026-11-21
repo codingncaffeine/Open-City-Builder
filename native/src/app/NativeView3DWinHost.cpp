@@ -1,7 +1,10 @@
 // The native IView3DWinHost (started from scripts/gen_stub_hosts.py's neutral host, now hand edited and skipped by the
-// generator): the city exists once the view is up, the zoom stops at the last level, the right-button scroll tool
-// is the recovered cSC4ViewInputControlCityScroll, and AddGUI builds its windows through the UI-script service and
-// nSC4UI's window-set helpers. Everything else is still neutral.
+// generator): the services the city view reaches outside itself. AddGUI builds its windows through the UI-script service and
+// nSC4UI's window-set helpers; the compass, the alert border, the progress screen, the building style selector, the render
+// properties, the scroll lighting tint and the contour overlay are the original's classes and calls. Still neutral: the
+// framework command table, the city mouse router, the graphics system's self-scroll query, the change-terrain dialog, the
+// level-terrain tool, the animation recorder, the simulation frame marker and the render-stack shutdown hooks (the native
+// render stack owns those objects).
 #include <cstring>
 #include <functional>
 #include <string>
