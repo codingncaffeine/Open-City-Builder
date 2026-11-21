@@ -939,6 +939,11 @@ void NativeBridgeChooser(std::uint32_t type, int x1, int z1, int x2, int z2, int
     cIGZWin* chooser = ui->BridgeChooser();
     std::printf("bridgechoose %u %d,%d -> %d,%d: chooser %s, %zu row(s)\n", type, x1, z1, x2, z2, chooser ? "open" : "not open",
                 ui->BridgeEntries().size());
+    if (!chooser && tool->GetFailureState()) {
+        cRZString reason;
+        tool->GetFailureReasonString(reason);
+        std::printf("bridgechoose: failure reason \"%s\"\n", reason.ToChar());
+    }
     if (chooser) {
         for (std::size_t i = 0; i < ui->BridgeEntries().size(); ++i) {
             const sc4::cSC4NetworkToolUI::BridgeEntry& entry = ui->BridgeEntries()[i];

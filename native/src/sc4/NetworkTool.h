@@ -288,7 +288,7 @@ struct tIntersection {
 };
 
 // cSC4NetworkTool::BridgeCablePiece (0x20 bytes in the i386 build): one straight cable stretch InsertBridgePiece draws as a
-// thin quad pair on the piece (PlotBridgeCable fills them; not ported yet, so the vectors stay empty).
+// thin quad pair on the piece (PlotBridgeCable fills them).
 struct tBridgeCablePiece {
     float from[3] = {};             // +0x00
     float to[3] = {};               // +0x0c
@@ -306,7 +306,7 @@ struct tBridgePiece {
     float corners[4] = {};          // +0x14 the deck heights at the cell's corners (CopyBridgeElevationConstraintsIntoCellInfo)
     float modelHeight = 0.0f;       // +0x24 the height the model is placed at
     float supportHeight = -1.0f;    // +0x28 >= 0: a support column goes down from the piece (InsertBridgePiece)
-    float wire[4] = {};             // +0x2c suspension wire heights (1.0 until PlotBridgeSuspensionWires sets them)
+    float wire[4] = {};             // +0x2c suspension wire heights as a fraction of wireValue (PlotBridgeSuspensionWires)
     float wireValue = 0.0f;         // +0x3c the bridge type's suspensionHeight
     std::uint8_t suspension = 0;    // +0x40 suspension flags (AddSuspendedBridgeStructures runs when non-zero)
     std::vector<tBridgeCablePiece> cables;   // +0x44
