@@ -197,6 +197,16 @@ void NativeStartRiot(int cellX, int cellZ) {
                 static_cast<unsigned>(g_riotHost.PolicePower(cellX, cellZ)));
 }
 
+// Kit command `policepower X0 Z0 X1 Z1 STEP`: the police power map the riots read, sampled every STEP cells (read-only).
+void NativePolicePowerReport(int x0, int z0, int x1, int z1, int step) {
+    if (step < 1) step = 1;
+    for (int z = z0; z <= z1; z += step) {
+        std::printf("policepower z %3d:", z);
+        for (int x = x0; x <= x1; x += step) std::printf(" %3u", static_cast<unsigned>(g_riotHost.PolicePower(x, z)));
+        std::printf("\n");
+    }
+}
+
 // Kit command `riots`: every riot's phase and leaders.
 void NativeRiotReport() {
     cSC4DisasterManagerRiot* manager = RiotManager();

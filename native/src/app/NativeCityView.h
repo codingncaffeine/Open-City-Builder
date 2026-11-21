@@ -60,6 +60,7 @@ void NativeToxicReport();                          // kit command `toxics`
 void NativePortReport();                           // kit command `ports` (app/NativePorts.cpp)
 void NativeWallReport();                           // kit command `walls` (app/NativeLotWalls.cpp)
 void NativeStartRiot(int cellX, int cellZ);       // kit command `riot` (app/NativeRiot.cpp)
+void NativePolicePowerReport(int x0, int z0, int x1, int z1, int step);   // kit command `policepower` (app/NativeRiot.cpp)
 void NativeRiotReport();                          // kit command `riots`
 void NativeQueryReport(std::uint32_t skipUi, int limit);   // the query tool's buildings (querylist kit command; app/NativeQuery.cpp)
 void NativeTrailerReport(int limit);  // the trailer vehicles on screen and the cars they pull (app/NativeAutomataGenerator.cpp)

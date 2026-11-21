@@ -1317,6 +1317,10 @@ int RunScenario(const std::string& path) {
             native::NativeUndergroundCellsReport(x, z);
         } else if (command == "fires") {   // fires: the fire disaster's state, one line per fire
             native::NativeFireReport();
+        } else if (command == "policepower") {   // policepower X0 Z0 X1 Z1 STEP: the police power map the riots read (read-only)
+            int x0 = 0, z0 = 0, x1 = 0, z1 = 0, step = 8;
+            words >> x0 >> z0 >> x1 >> z1 >> step;
+            native::NativePolicePowerReport(x0, z0, x1, z1, step);
         } else if (command == "riot") {   // riot X Z: a riot starts on the road nearest to a city cell (what a mayor rating hotspot does)
             int x = 0, z = 0;
             words >> x >> z;
