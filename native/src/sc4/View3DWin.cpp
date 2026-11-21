@@ -1855,6 +1855,13 @@ void cSC4View3DWin::CreateProgressScreen(bool flag) {                       // 0
     host_->InitProgressScreen(progressScreen_);
 }
 
+void cSC4View3DWin::DeleteProgressScreen() {                                // Mac i386 0x0051c8f2
+    if (!progressScreen_) return;
+    if (host_) host_->ShutdownProgressScreen(progressScreen_);
+    progressScreen_->Release();
+    progressScreen_ = nullptr;
+}
+
 void cSC4View3DWin::UpdateProgressMessage() {                               // 0x100788d98
     if (!progressScreen_ || !host_) return;
     cRZString empty;                        // the original passes a default-constructed string
@@ -3367,17 +3374,41 @@ bool cSC4View3DWin::DoMessage(cIGZMessage2* message) {
 }
 
 // ---- DoMessage's helpers that are not recovered yet: the host's hooks stand in (PARTIAL) -------------------------------------------
-void cSC4View3DWin::DoPreCityInit() { if (host_) host_->PreCityInit(); }                                   // 0x10078616c
+// DoPreCityInit (0x10078616c): the camera, its control and the renderer (the host's), then the progress screen's title: the
+// "loading" text and the city's name for a city whose view record was read, the "new city" text otherwise.
+void cSC4View3DWin::DoPreCityInit() {
+    if (host_) host_->PreCityInit();
+    if (progressScreen_ && host_) {
+        cRZString title;
+        if (!viewStateUnread_) {
+            cRZString name;
+            host_->GetCityName(name);                                       // SL::spCity vslot 0x60
+            host_->LocalisedString(kProgressTitleGroup, kProgressLoadingInstance, title);
+            title.AppendChars(" ", 1);
+            title.AppendString(name);
+        } else {
+            host_->LocalisedString(kProgressTitleGroup, kProgressNewCityInstance, title);
+        }
+        host_->SetProgressCaption(progressScreen_, 0, title);
+    }
+    UpdateProgressMessage();
+}
 // DoPostCityInit (0x1007867d8): the view keeps SL::spSimulator at +0x238 (the speed buttons and the hidden pause use it); the rest of
-// the body (the camera's city size, the clock, the panels) is the host's.
+// the body (the camera's city size, the clock, the panels) is the host's. The progress screen moves on at its start and is
+// deleted at its end.
 void cSC4View3DWin::DoPostCityInit() {
+    UpdateProgressMessage();
     if (!simulatorToPause_ && host_) {
         simulatorToPause_ = host_->Simulator();
         if (simulatorToPause_) simulatorToPause_->AddRef();
     }
     if (host_) host_->PostCityInit();
+    UpdateProgressMessage();
+    DeleteProgressScreen();
 }
-void cSC4View3DWin::DoLoad(cIGZPersistDBSegment* segment, cIGZVariant* version) { if (host_) host_->LoadViewState(segment, version); }   // 0x100787092
+void cSC4View3DWin::DoLoad(cIGZPersistDBSegment* segment, cIGZVariant* version) {   // 0x100787092
+    if (host_ && host_->LoadViewState(segment, version)) viewStateUnread_ = false;
+}
 void cSC4View3DWin::DoSave(cIGZPersistDBSegment* segment) { if (host_) host_->SaveViewState(segment); }   // 0x1007871e4
 void cSC4View3DWin::DoBudgetFailure() { if (host_) host_->BudgetFailure(); }                               // 0x100788d0e
 void cSC4View3DWin::Update24HourClock(std::uint32_t hour, std::uint32_t minute) { if (host_) host_->ClockChanged(hour, minute); }   // 0x100788912

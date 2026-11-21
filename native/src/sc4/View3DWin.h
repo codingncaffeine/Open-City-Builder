@@ -34,7 +34,7 @@
 //   +0x5c8 the cost-indicator text window +0x5d0 the cursor-text window
 //   +0x5d8 list<CursorTextInfo>           +0x5f0 the cursor-text icon image
 //   +0x5f8 cSC4CoverageRadiusEffectHelper +0x628 show-mission flag  +0x62c current panel (-1)
-//   +0x630 cSC4ProgressScreen             +0x638 "loaded from stream" flag
+//   +0x630 cSC4ProgressScreen             +0x638 "view state not read" flag
 //   +0x640 the mission status panel       +0x648 a second validation window
 //   +0x650 the error-report string        +0x678 unordered_map<u32,u32> global effect triggers
 //   +0x698 1.0f                           +0x6a0/+0x6a4 last selected building / lot
@@ -274,6 +274,8 @@ constexpr std::uint32_t kCostIndicatorBufferW = 0x80;         // the cost indica
 constexpr std::uint32_t kCostIndicatorBufferH = 0x20;
 constexpr std::uint32_t kCostIndicatorColorType = 1;
 // The alert border's three images (UpdateAlertBorder): a disaster going on / a city situation / the simulator paused.
+// The progress screen's title strings (DoPreCityInit): "loading" (followed by the city's name) and "new city".
+constexpr std::uint32_t kProgressTitleGroup = 0x6a231eaa, kProgressLoadingInstance = 0xaa765647, kProgressNewCityInstance = 0xaa76563a;
 constexpr std::uint32_t kAlertImageDisaster = 0x14315e60;
 constexpr std::uint32_t kAlertImageSituation = 0x14315e62;
 constexpr std::uint32_t kAlertImagePaused = 0x14315e61;
@@ -677,7 +679,8 @@ public:
     // --- DoMessage(cIGZMessage2*)'s unrecovered helpers (each one the view's member of the same name runs)
     virtual void PreCityInit() {}                                       // DoPreCityInit (the camera, the renderer: the native view builds them)
     virtual void PostCityInit() {}                                      // DoPostCityInit
-    virtual void LoadViewState(cIGZPersistDBSegment* segment, cIGZVariant* version) { (void)segment; (void)version; }   // DoLoad
+    // DoLoad: reads the view record (0xa9c8647c, 0xe9c8647e, 1); true when it was there with a version below 5.
+    virtual bool LoadViewState(cIGZPersistDBSegment* segment, cIGZVariant* version) { (void)segment; (void)version; return false; }
     virtual void SaveViewState(cIGZPersistDBSegment* segment) { (void)segment; }   // DoSave
     virtual void BudgetFailure() {}                                     // DoBudgetFailure: the scripted dialog 0xa5cf71d / 0x2a5cfb2c
     virtual void ClockChanged(std::uint32_t hour, std::uint32_t minute) { (void)hour; (void)minute; }   // Update24HourClock
@@ -920,6 +923,11 @@ public:
     void UpdateCostIndicator(float dt);                            // @ 0x10078178a (PARTIAL: the cost-indicator windows)
     void CreateProgressScreen(bool flag);                          // @ 0x100780910
     void UpdateProgressMessage();                                  // @ 0x100788d98
+    void DeleteProgressScreen();                                   // Mac i386 0x0051c8f2
+    // DoLoad's flag: the city's view record (0xa9c8647c, 0xe9c8647e, 1, version below 5) was read, so the progress screen titles
+    // the load with the city's name (a new city keeps the "new city" title).
+    void MarkViewStateRead() { viewStateUnread_ = false; }
+    bool ViewStateRead() const { return !viewStateUnread_; }
     void InvokeZoningTool(std::uint32_t type);                     // @ 0x100783d86
     void InvokeLandscapeTool(std::uint32_t type, bool flag);       // @ 0x10078408e
     void ApplyDefaultTerrainBrush(int brush, bool flag);           // @ 0x100790b4a
@@ -1045,7 +1053,7 @@ protected:
     cSC4RenderProperties renderProperties_;             // +0x540 (the scroll snapshot)
     std::uint32_t renderPropertiesAux_ = 0;             // +0x550 (the dword next to the property vectors)
     cIGZUnknown* progressScreen_ = nullptr;             // +0x630 (referenced)
-    bool loadedFromStream_ = true;                      // +0x638 (constructor; DoLoad clears it)
+    bool viewStateUnread_ = true;                       // +0x638 (set by the constructor; DoLoad clears it when the city's view record is read)
     cIGZWin* missionPanel_ = nullptr;                   // +0x640 (referenced; HideMissionStatusPanel ChildDeletes it)
     cIGZUnknown* validationWindow_ = nullptr;           // +0x648 (referenced)
     cRZString errorReport_;                             // +0x650

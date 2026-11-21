@@ -9,6 +9,8 @@ namespace gz { class cIGZDrawContext; }
 namespace s3d { class cIS3DModelInstance; }
 namespace sc4 { class cSC4View3DWin; class cSC43DRender; class cISC4Occupant; }
 class cISC4City;
+class cIGZBuffer;
+struct cRZRect;
 
 namespace native {
 
@@ -26,6 +28,15 @@ int CityViewZoom();
 int CityViewRotation();   // SC4ViewUtilities +0x18 (i386 +0x10): the view rotation 0..3
 // The kit's `cityview`: the view's compass faces, alert border, progress screen and style selector (app/NativeView3DWinHost.cpp).
 void NativeCityViewReport();
+// The screen the progress screen paints on while a city loads (the frame loop is not running then): its buffer copied onto the
+// frame, the frame cleared to a colour, and the frame shown. The application sets it (linux/game_main_linux.cpp).
+struct LoadingScreenPresenter {
+    virtual ~LoadingScreenPresenter() = default;
+    virtual void Show(cIGZBuffer* buffer, const cRZRect& source, const cRZRect& target) = 0;
+    virtual void Clear(float r, float g, float b, float a) = 0;
+    virtual void Present() = 0;
+};
+void SetLoadingScreenPresenter(LoadingScreenPresenter* presenter);
 // The vehicle or pedestrian automata layer is active (NativeCityQueries.cpp).
 bool CityAutomataLayersActive();
 // Builds the stack for the city that is loaded and attaches it to the view; true when the renderer came up.

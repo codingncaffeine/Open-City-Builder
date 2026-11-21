@@ -803,6 +803,27 @@ void WritePng(const std::string& path) {
     else std::printf("cannot write %s\n", path.c_str());
 }
 
+// The progress screen's frames while a city loads (the frame loop is not running then): its buffer through the primary buffer's
+// draw context onto the frame, the frame shown. SC4_LOADINGSHOT=PREFIX also writes each shown frame to PREFIX_N.png (the first
+// 16): a scenario cannot take a shot in the middle of a load.
+struct LoadingPresenter final : native::LoadingScreenPresenter {
+    void Show(cIGZBuffer* buffer, const cRZRect& source, const cRZRect& target) override {
+        auto* context = static_cast<gz::cIGZDrawContext*>(gGraphics->Primary()->GetDrawContext());
+        if (context && buffer) context->Blt(buffer, source, target);
+    }
+    void Clear(float r, float g, float b, float a) override {
+        gDriver->SetViewport();
+        gDriver->ClearColor(r, g, b, a);
+        gDriver->Clear(gd::kClearColor);
+    }
+    void Present() override {
+        static const char* prefix = std::getenv("SC4_LOADINGSHOT");
+        static int shots = 0;
+        if (prefix && shots < 16) WritePng(std::string(prefix) + "_" + std::to_string(shots++) + ".png");
+        ::Present();
+    }
+} gLoadingPresenter;
+
 // ---- input ------------------------------------------------------------------------------------------------------------------
 
 std::uint32_t Flags() {
@@ -1640,6 +1661,7 @@ int main(int argc, char** argv) {
     if (!gDriver) { std::printf("no usable OpenGL driver\n"); return 1; }
     gAudioWanted = interactive || std::getenv("SC4_AUDIO");
     Boot();
+    native::SetLoadingScreenPresenter(&gLoadingPresenter);
     // A modal dialog (RunModalLoop) keeps the windows painting: interactively the events go on being dispatched; a scenario
     // shows the dialog for 30 frames, writes work/shots/modal<N>.png and cancels it (the scenario cannot press its buttons).
     // The simulation does not tick under a dialog (the original holds a game pause around every one).

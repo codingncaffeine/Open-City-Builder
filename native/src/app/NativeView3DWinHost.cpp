@@ -80,6 +80,9 @@
 #include "sc4/RenderProperties.h"
 #include "sc4/CameraControl.h"
 #include "sc4/LightingManager.h"
+#include "sc4/ProgressScreen.h"
+#include "sc4/Region.h"
+#include "dbpf/DBPFReader.h"
 #include "gz/GZCOMDirector.h"
 
 namespace native { void GoToNextDisaster(); bool NativeDisasterOngoing(); }   // NativeDisasters.cpp, NativeRiot.cpp
@@ -193,6 +196,62 @@ public:
 };
 CompassHost g_compassHost;
 
+LoadingScreenPresenter* g_loadingPresenter = nullptr;
+
+// cSC4ProgressScreen's services. The original paints the screen through the graphics system (SL::spGS2) and the driver; natively
+// the application's presenter copies the buffer onto the frame and shows it.
+class ProgressScreenServices final : public IProgressScreenHost {
+public:
+    void AddNotification(cIGZMessageTarget2* target, std::uint32_t type) override { if (SL::spMS2) SL::spMS2->AddNotification(target, type); }
+    void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t type) override { if (SL::spMS2) SL::spMS2->RemoveNotification(target, type); }
+    cIGZFont* Font(std::uint32_t id) override {   // RZ::WCM() vslot 0x14: the window control manager's font of that style
+        gz::IWinFontSource* fonts = gz::WinFontSource();
+        gz::IWinFont* style = fonts ? fonts->Font(id) : nullptr;
+        return style ? style->AsFont() : nullptr;
+    }
+    cIGZBuffer* CreateScreenBuffer() override { auto* buffer = new cGZBuffer(); buffer->AddRef(); return buffer; }
+    cIGZBuffer* LoadImage(std::uint32_t group, std::uint32_t instance) override { return native::LoadBitmapResource(group, instance); }
+    bool LoadString(std::uint32_t group, std::uint32_t instance, cIGZString& out) override { return native::LoadLocalizedString(group, instance, out); }
+    // SC4ReadCityRegionViewThumbnails(path): the city file's region-view picture {0x8a2482b9, 0x4a2482bb, 0} and its mask (instance 2).
+    bool ReadCityThumbnails(cIGZBuffer** image, cIGZBuffer** mask) override {
+        *image = nullptr;
+        *mask = nullptr;
+        cSC4City* city = LoadedCity();
+        if (!city || !native::DecodeFunction()) return false;
+        cRZString path;
+        city->GetCitySaveFilePath(path);
+        dbpf::Package package;
+        if (path.Strlen() == 0 || !package.Open(path.ToChar())) return false;
+        auto load = [&](std::uint32_t instance) -> cIGZBuffer* {
+            const dbpf::Entry* entry = package.Find(0x8a2482b9, 0x4a2482bb, instance);
+            std::vector<std::uint8_t> bytes;
+            if (!entry || !package.Read(*entry, bytes)) return nullptr;
+            return native::DecodeFunction()(bytes);
+        };
+        *image = load(0);
+        *mask = *image ? load(2) : nullptr;
+        if (*image && *mask) return true;
+        if (*image) (*image)->Release();
+        *image = nullptr;
+        return false;
+    }
+    int BaseTerrainType() override {
+        cSC4App* app = BootApplication();
+        cISC4Region* region = app ? app->GetRegion() : nullptr;
+        return region ? static_cast<int>(region->GetBaseTerrainType()) : 0;
+    }
+    int CitySizeType() override { cSC4City* city = LoadedCity(); return city ? city->GetCitySizeType() : 0; }
+    void BeginScreenDraw() override {}   // nothing natively: the presenter draws into the frame directly
+    void ShowBuffer(cIGZBuffer* buffer, const cRZRect& source, const cRZRect& target) override {
+        if (g_loadingPresenter) g_loadingPresenter->Show(buffer, source, target);
+    }
+    void ClearScreen(float r, float g, float b, float a) override { if (g_loadingPresenter) g_loadingPresenter->Clear(r, g, b, a); }
+    void EndScreenDraw() override { if (g_loadingPresenter) g_loadingPresenter->Present(); }
+};
+ProgressScreenServices g_progressServices;
+
+cSC4ProgressScreen* AsProgressScreen(cIGZUnknown* screen) { return static_cast<cSC4ProgressScreen*>(static_cast<cIGZMessageTarget2*>(screen)); }
+
 struct StubView3DWin final : IView3DWinHost {
     View3DNotifications notifications_;
     cIGZMessageServer2* MessageServer2() override { return SL::spMS2; }   // SL::spMS2: erosion, view filter / level and tool changes
@@ -239,11 +298,22 @@ struct StubView3DWin final : IView3DWinHost {
     void RestoreLighting() override { if (auto* lighting = SceneLighting()) lighting->ResetLightingTint(); }
     static cISC4LightingManager* SceneLighting() { return SL::spLightingManager ? static_cast<cISC4LightingManager*>(SL::spLightingManager) : nullptr; }
     int VirtualZoomLimit() override { return 4; }
-    bool CityBeingObliterated() override { return {}; }
-    cIGZUnknown* CreateProgressScreen(cIGZWin* parent, const cRZRect& area, bool flag) override { return {}; }
-    void InitProgressScreen(cIGZUnknown* screen) override {}
-    void SetProgressCaption(cIGZUnknown* screen, int id, const cIGZString& text) override {}
-    void ShutdownProgressScreen(cIGZUnknown* screen) override {}
+    // The new-city specification's obliterated-city segment: the city being made is an obliterated one.
+    bool CityBeingObliterated() override { cSC4App* app = BootApplication(); return app && app->ObliterationSegment() != nullptr; }
+    // new cSC4ProgressScreen(area, obliterating) (the view takes the first reference), its Init, SetCaption and Shutdown.
+    cIGZUnknown* CreateProgressScreen(cIGZWin*, const cRZRect& area, bool obliterating) override {
+        return static_cast<cIGZMessageTarget2*>(new cSC4ProgressScreen(&g_progressServices, area, obliterating));
+    }
+    void InitProgressScreen(cIGZUnknown* screen) override { AsProgressScreen(screen)->Init(); }
+    void SetProgressCaption(cIGZUnknown* screen, int id, const cIGZString& text) override {
+        cSC4ProgressScreen* progress = AsProgressScreen(screen);
+        progress->SetCaption(static_cast<std::uint32_t>(id), text);
+        static const bool debug = std::getenv("SC4_DEBUG") != nullptr;
+        if (debug)
+            std::printf("progress screen: caption %d -> \"%s\" / \"%s\" thumbnail %d tips left %zu\n", id, progress->Caption(0).ToChar(),
+                        progress->Caption(1).ToChar(), progress->HasThumbnail() ? 1 : 0, progress->TipsLeft());
+    }
+    void ShutdownProgressScreen(cIGZUnknown* screen) override { AsProgressScreen(screen)->Shutdown(); }
     void ShutdownValidationWindow(cIGZUnknown* window) override {}
     void ShutdownLotConfigurationEditors() override {}
     void ShutdownModelMaker(cIGZUnknown* modelMaker) override {}
@@ -291,7 +361,10 @@ struct StubView3DWin final : IView3DWinHost {
         border->Release();
         return window;
     }
-    void LocalisedString(std::uint32_t group, std::uint32_t instance, cRZString& out) override {}
+    // cSLString(group, instance, true): the localized string (empty when there is none).
+    void LocalisedString(std::uint32_t group, std::uint32_t instance, cRZString& out) override {
+        if (!native::LoadLocalizedString(group, instance, out)) out.Erase(0, 0xffffffffu);
+    }
     // new cSC4PanelUIWinProc (AddGUI @ 0x1007892fc): the options bar's save / region / quit / snapshot buttons become view commands
     gz::cIGZWinProc* CreatePanelUIWinProc() override {
         PanelServices& services = GetPanelServices();
@@ -774,6 +847,8 @@ sc4::IAdvisorPopupQueue* CreateAdvisorPopupQueue() {
     queue->AddRef();   // the view's reference (it Releases after Shutdown)
     return queue;
 }
+
+void SetLoadingScreenPresenter(LoadingScreenPresenter* presenter) { g_loadingPresenter = presenter; }
 
 void InstallView3DWinStub() {
     sc4::SetView3DWinHost(&InstalledHost());

@@ -323,6 +323,8 @@ public:
         g_savedView.pending = false;
         sc4::cSC4AutoLoadStream load(segment, 0xa9c8647c, 0xe9c8647e, 1);
         if (!load.IsOpen() || load.GetVersion() >= 5) return true;
+        // DoLoad's flag: the record was read, so the progress screen titles the load with the city's name
+        if (sc4::cSC4View3DWin* view = CityView3DWin()) view->MarkViewStateRead();
         void* object = nullptr;
         // The save's version (narrow 32-bit object ids before the wide format), as a counted copy: the stream releases its user
         // data, and the message's variant lives on LoadCity's stack.

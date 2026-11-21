@@ -303,6 +303,7 @@ src/sc4/ResidentialSimulator.cpp
 src/sc4/TrafficSimulator.cpp
 src/sc4/TrafficCycle.cpp
 src/sc4/WinAuraAlert.cpp
+src/sc4/ProgressScreen.cpp
 src/sc4/cSC4ZoneManager.cpp
 src/sc4/LotDeveloper.cpp
 src/gz/Bit1.cpp
