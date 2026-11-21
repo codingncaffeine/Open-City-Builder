@@ -273,6 +273,10 @@ sc4::cSC4ZoneDeveloper* LotManager() {
 class ToolHost final : public sc4::INetworkToolHost {
 public:
     void RegisterShutdownCallback(bool (*)(void*), void*) override {}
+    cIGZFile* OpenResourceFile(const cGZPersistResourceKey& key) override {
+        cIGZFile* file = nullptr;
+        return sc4::SC4GetResourceAsFile(key, &file, false) ? file : nullptr;
+    }
     // SL::spTerrain, borrowed (the tool counts its own reference); the solver reads the terrain through this host.
     cIGZUnknown* AcquireTerrain() override { return CurrentCity() ? CurrentCity()->GetComponent(sc4::CityComponent::Terrain) : nullptr; }
     float TerrainCellSize() override { return 16.0f; }
@@ -856,4 +860,176 @@ sc4::cSC4NetworkOccupant* ToolHost::TunnelOtherEnd(sc4::cSC4NetworkOccupant* por
     return other;
 }
 }  // namespace
+}  // namespace native
+
+// ============================================================================================================
+// the pre-built intersection tool ("puzzle pieces")
+// ============================================================================================================
+
+#include "app/NativeWinMgr.h"
+#include "sc4/NetworkOccupantWithPreBuiltModel.h"
+#include "sc4/ViewInputControlNetworkIntxTool.h"
+
+namespace native {
+namespace {
+
+class IntxHost final : public sc4::INetworkIntxToolHost {
+public:
+    sc4::cISC4View3DWin* View() override { return g_view; }
+    float CellSize() override { return 16.0f; }
+    sc4::INetworkInputToolTerrainView* TerrainView() override { return &terrainView_; }
+    int TerrainCellsX() override { sc4::cSTETerrain* t = Terrain(); return t ? static_cast<int>(t->CellCountX()) : 0; }
+    int TerrainCellsZ() override { sc4::cSTETerrain* t = Terrain(); return t ? static_cast<int>(t->CellCountZ()) : 0; }
+    float TerrainAltitude(float x, float z) override { sc4::cSTETerrain* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
+    std::uint32_t CityCellsX() override { return static_cast<std::uint32_t>(TerrainCellsX()); }
+    std::uint32_t CityCellsZ() override { return static_cast<std::uint32_t>(TerrainCellsZ()); }
+    sc4::cSC4NetworkTool* HighwayTool() override { return NativeManagerNetworkTool(sc4::kNetworkHighway); }
+    std::int64_t Funds() override { sc4::cSC4BudgetSimulator* b = Budget(); return b ? b->GetTotalFunds() : 0; }
+    void SpendFunds(std::int64_t amount) override { if (sc4::cSC4BudgetSimulator* b = Budget()) b->WithdrawFunds(amount); }
+    void PlaySound(std::uint32_t id) override { PlayGameSound(id); }
+    bool LoadString(std::uint32_t group, std::uint32_t instance, cIGZString& out) override { return LoadLocalizedString(group, instance, out); }
+    bool CursorPosition(int& x, int& y) override {
+        WinMgr* manager = ActiveWinMgr();
+        cIGZWin* window = g_view ? g_view->AsIGZWin() : nullptr;
+        if (!manager || !window) return false;
+        manager->GetCursorPos(window, x, y);
+        return true;
+    }
+    // The graphics system object behind SL::spGS is not recovered; its two calls have nothing to reach here.
+    void GraphicsSystemUpdate() override {}
+
+private:
+    class TerrainView final : public sc4::INetworkInputToolTerrainView {
+    public:
+        bool QueryInterface(std::uint32_t, void**) override { return false; }
+        std::uint32_t AddRef() override { return 2; }
+        std::uint32_t Release() override { return 1; }
+        bool GridShown() override { return g_gridShown; }
+    } terrainView_;
+};
+
+IntxHost g_intxHost;
+
+// The network occupants of the cells, one line each.
+void PrintCellPieces(const char* verb, int x0, int z0, int x1, int z1) {
+    sc4::cISC4OccupantManager* occupants = Occupants();
+    if (!occupants) return;
+    const int cell0[2] = {x0, z0}, cell1[2] = {x1, z1};
+    sc4::OccupantList list;
+    if (!occupants->GetOccupantsByStandardCityCells(list, cell0, cell1, 0xc772bf98u, 0xffffffffu)) return;
+    for (sc4::cISC4Occupant* occupant : list) {
+        auto* network = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);
+        if (!network) continue;
+        std::uint32_t x = 0, z = 0;
+        network->GetOccupiedCell(x, z);
+        auto* prebuilt = dynamic_cast<sc4::cSC4NetworkOccupantWithPreBuiltModel*>(network);
+        int ox = -1, oz = -1;
+        const bool origin = network->GetComplexPieceOrigin(ox, oz);
+        std::printf("%s: piece %u,%u %s id %08x rot %02x flags %08x origin %s%d,%d model %s path %08x\n", verb, x, z,
+                    prebuilt ? "prebuilt" : "plain", network->PieceId(), network->GetRotationAndFlip(), network->GetNetworkFlag(),
+                    origin ? "" : "(none) ", ox, oz, prebuilt && prebuilt->PreBuiltModel() ? "yes" : "none", network->GetPathIDOverride());
+    }
+    occupants->ReleaseOccupantList(list);
+}
+
+}  // namespace
+
+sc4::cSC4ViewInputControl* CreateNetworkIntxTool(std::uint32_t ruleId) {
+    sc4::SetNetworkIntxToolHost(&g_intxHost);
+    auto* tool = new sc4::cSC4ViewInputControlNetworkIntxTool(ruleId);
+    tool->AddRef();
+    return tool;
+}
+
+// Kit verb `puzzles [ID]` (read-only): the intersection rules (or one), their rings and what they take.
+void NativePuzzleReport(std::uint32_t only) {
+    const auto& rules = sc4::cSC4NetworkTool::IntersectionRules();
+    std::vector<std::uint32_t> ids;
+    for (const auto& entry : rules) ids.push_back(entry.first);
+    std::sort(ids.begin(), ids.end());
+    int autoPlace = 0;
+    for (std::uint32_t id : ids) {
+        const sc4::nSC4Networks::cIntRule& rule = rules.at(id);
+        if (rule.autoPlace) ++autoPlace;
+        if (only != 0 && id != only) continue;
+        std::printf("puzzle rule %04x: rotation %04x<>%04x type %04x<>%04x origin type %d mask %04x cells %zu new %zu checks %zu pieces %zu "
+                    "tile base %08x path base %08x handle %d,%d bounds %d..%d x %d..%d cost %d place %08x convert %08x auto %d effect \"%s\"\n",
+                    id, rule.rotationPrev, rule.rotationNext, rule.typePrev, rule.typeNext, rule.GetTypeAtOrigin(), rule.typeMask,
+                    rule.occupiedCells.size(), rule.newCells.size(), rule.checkCells.size(), rule.pieces.size(), rule.autoTileBase,
+                    rule.autoPathBase, rule.handleX, rule.handleZ, rule.minX, rule.maxX, rule.minZ, rule.maxZ, rule.cost, rule.placeQueryId,
+                    rule.convertQueryId, rule.autoPlace ? 1 : 0, rule.previewEffect.c_str());
+    }
+    std::printf("puzzles: %zu rules, %d auto-placed\n", rules.size(), autoPlace);
+}
+
+// Kit verb `puzzle ID X Z ROT`: the intersection tool of catalog item 0x6a47<ID> (as the view's catalog makes it) steps its
+// rotation ring ROT times (End), takes cell X,Z as the cursor's cell (the move's own search and dry run) and is clicked (its
+// own placement and payment). No input reaches the window. The cells of the placed rule are listed afterwards.
+void NativePlacePuzzle(std::uint32_t id, int x, int z, int rotation) {
+    sc4::cSC4BudgetSimulator* budget = Budget();
+    const std::int64_t before = budget ? budget->GetTotalFunds() : 0;
+    if (!g_view) {
+        std::printf("puzzle: no city view\n");
+        return;
+    }
+    // The catalog item 0x6a47<ID> as a click on it in the highway catalog invokes it: the view stacks the tool it gets from
+    // its host's CreateNetworkIntxTool as the current input control.
+    g_view->InvokeCatalogItemCommand(0x4a2b2467u, 0x6a470000u | (id & 0xffffu), true);
+    auto* tool = dynamic_cast<sc4::cSC4ViewInputControlNetworkIntxTool*>(g_view->GetCurrentViewInputControl());
+    if (!tool) {
+        std::printf("puzzle: the catalog item did not make the intersection tool current\n");
+        return;
+    }
+    tool->AddRef();
+    for (int i = 0; i < rotation; ++i) tool->StepRotationRing(true);
+    const std::uint32_t asked = tool->RuleId();
+    const bool fits = tool->UpdatePlacement(x, z);
+    std::printf("puzzle %04x (rotation %d -> rule %04x) at %d,%d: %s, rule %04x anchor %d,%d cost %lld, text \"%s\", preview \"%s\"\n", id,
+                rotation, asked, x, z, fits ? "fits" : "does not fit", tool->RuleId(), tool->AnchorX(), tool->AnchorZ(),
+                static_cast<long long>(tool->Cost()), tool->CursorText().c_str(), tool->PreviewEffectName().c_str());
+    const std::uint32_t placedId = tool->RuleId();
+    const int ax = tool->AnchorX(), az = tool->AnchorZ();
+    tool->PlaceOrRefuse();
+    const sc4::nSC4Networks::cIntRule* rule = sc4::cSC4NetworkTool::GetIntersectionRule(placedId);
+    if (fits && rule) {
+        std::printf("puzzle: placed rule %04x at %d,%d, funds %lld -> %lld\n", placedId, ax, az, static_cast<long long>(before),
+                    static_cast<long long>(budget ? budget->GetTotalFunds() : 0));
+        PrintCellPieces("puzzle", ax + rule->minX - 1, az + rule->minZ - 1, ax + rule->maxX + 1, az + rule->maxZ + 1);
+    }
+    tool->EndInput();                                                          // as Escape ends it
+    tool->Release();
+}
+
+// Kit verb `intxpieces` (read-only): every network piece of the city marked as part of a pre-built intersection (0x100000).
+void NativeIntersectionPieceReport() {
+    sc4::cISC4OccupantManager* occupants = Occupants();
+    sc4::cSTETerrain* terrain = Terrain();
+    if (!occupants || !terrain) {
+        std::printf("intxpieces: no city\n");
+        return;
+    }
+    const int cell0[2] = {0, 0};
+    const int cell1[2] = {static_cast<int>(terrain->CellCountX()) - 1, static_cast<int>(terrain->CellCountZ()) - 1};
+    sc4::OccupantList list;
+    int count = 0, prebuilt = 0;
+    if (occupants->GetOccupantsByStandardCityCells(list, cell0, cell1, 0xc772bf98u, 0xffffffffu)) {
+        for (sc4::cISC4Occupant* occupant : list) {
+            auto* network = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);
+            if (!network || !network->HasNetworkFlag(0x100000)) continue;
+            ++count;
+            auto* model = dynamic_cast<sc4::cSC4NetworkOccupantWithPreBuiltModel*>(network);
+            if (model) ++prebuilt;
+            std::uint32_t x = 0, z = 0;
+            network->GetOccupiedCell(x, z);
+            int ox = -1, oz = -1;
+            network->GetComplexPieceOrigin(ox, oz);
+            std::printf("intxpiece %u,%u %s id %08x rot %02x flags %08x origin %d,%d model %s\n", x, z, model ? "prebuilt" : "plain",
+                        network->PieceId(), network->GetRotationAndFlip(), network->GetNetworkFlag(), ox, oz,
+                        model && model->PreBuiltModel() ? "yes" : "none");
+        }
+        occupants->ReleaseOccupantList(list);
+    }
+    std::printf("intxpieces: %d intersection pieces (%d pre-built)\n", count, prebuilt);
+}
+
 }  // namespace native

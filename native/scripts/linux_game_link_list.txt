@@ -828,12 +828,15 @@ src/app/NativeNetworkManager.cpp
 src/app/NativeTraffic.cpp
 src/sc4/NetworkToolUI.cpp
 src/sc4/ViewInputControlNetworkTool.cpp
+src/sc4/ViewInputControlNetworkIntxTool.cpp
 src/sc4/NetworkWorldCache.cpp
 src/rz/RZTime.cpp
 src/sc4/NetworkToolSolve.cpp
 src/sc4/NetworkBridges.cpp
 src/sc4/NetworkBridgeTypes.cpp
 src/sc4/NetworkToolTunnels.cpp
+src/sc4/NetworkToolIntersections.cpp
+src/sc4/NetworkIntersectionRules.cpp
 src/sc4/TileRules.cpp
 src/sc4/NetworkPreview.cpp
 src/gz/LegacyControlListBox.cpp

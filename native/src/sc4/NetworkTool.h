@@ -59,8 +59,11 @@
 #include "gz/cIGZString.h"
 #include "gz/cIGZUnknown.h"
 #include "rz/cRZString.h"
+#include "sc4/NetworkIntersectionRules.h"
 
 class cRZIniFile;
+class cIGZFile;
+struct cGZPersistResourceKey;
 
 namespace sc4 {
 
@@ -261,15 +264,18 @@ struct tDraggedStep {
     std::uint32_t direction = 0;   // +0x8: 0 = regular step (IsRegularStep), 3 = stepped/short step
 };
 
-// cSC4NetworkTool::tIntersection (0x38 bytes, vector at +0x178): a highway intersection to place.
+// cSC4NetworkTool::tIntersection (0x28 bytes in the i386 build, vector at i386 +0xcc): one pre-built intersection the drag or the
+// intersection tool places: the rule, its anchor cell, the drag step it starts at and the two step offsets of the rule after it
+// (the records whose second offset lies within the valid steps are marked, kept out of the solve and placed), and the cells
+// RemoveHighwayIntersectionPiecesFromSetOfCellsToBeSolved took out of the solve set.
 struct tIntersection {
-    int type = 0;                  // +0x00
-    float altitude = 0.0f;         // +0x04 GetMajorBridgeAltitude reads [end-0x28]
-    float referenceAltitude = 0.0f;// +0x08 GetMajorBridgeReferenceAltitude reads [end-0x24]
-    bool landBridge = false;       // +0x0c IsMajorBridgeLandBridge reads [end-0x20]
-    std::uint8_t unknown0d[0x14 - 0x0d];
-    int step = 0;                  // +0x14 MarkHighwayIntersectionPieces compares it with validSteps
-    std::uint8_t unknown18[0x38 - 0x18];
+    std::uint32_t ruleId = 0;      // +0x00
+    int x = 0;                     // +0x04
+    int z = 0;                     // +0x08
+    int step = 0;                  // +0x0c
+    int stepA = 0;                 // +0x10 step + StepOffsets a
+    int stepB = 0;                 // +0x14 step + StepOffsets b
+    std::vector<std::uint32_t> cells;   // +0x1c
 };
 
 // cSC4NetworkTool::BridgeCablePiece (0x20 bytes in the i386 build): one straight cable stretch InsertBridgePiece draws as a
@@ -648,6 +654,9 @@ public:
     virtual void StartTerrainTextureUpdates() {}
     virtual void RedisplayTerrain(std::int32_t /*x0*/, std::int32_t /*z0*/, std::int32_t /*x1*/, std::int32_t /*z1*/) {}
     virtual void StopTerrainTextureUpdates() {}
+    // SC4GetResourceAsFile(key, &file, false): a database record read as a file (ReloadRules reads the rule ini files this way),
+    // one reference, or null.
+    virtual cIGZFile* OpenResourceFile(const cGZPersistResourceKey& /*key*/) { return nullptr; }
 };
 
 void SetNetworkToolHost(INetworkToolHost* host);
@@ -913,6 +922,31 @@ public:
     // and last cells, as IdentifyTunnelCells and FindTunnelEnd compute it inline.
     float StepEdgeMeanHeight(int step, int direction);
     const std::vector<tTunnel>& Tunnels() const { return tunnels_; }
+    // --- pre-built intersections ("puzzle pieces", src/sc4/NetworkToolIntersections.cpp; i386 addresses) ---
+    // 0x0066dac2: the rule of that id in sIntersectionRules, or null.
+    static const nSC4Networks::cIntRule* GetIntersectionRule(std::uint32_t id);
+    static const nSC4Networks::IntersectionRuleMap& IntersectionRules();
+    // ReloadRules' last step (ReadHighwayIntersectionRules into sIntersectionRules) for an ini already open.
+    static void ReloadIntersectionRules(::cRZIniFile& ini);
+    // 0x001259d8: an additional draw (the cells the intersection tool's auto-complete adds to the drag).
+    void AddEdgesToTile(std::uint32_t x, std::uint32_t z, std::uint32_t edges, std::uint32_t networkType, std::uint8_t oneWayBits,
+                        std::uint8_t oneWayMask);
+    // 0x0012acbe: rule `id` placed alone at (x, z), as the intersection tool does; `real` places it, else only tests it (the cost
+    // is then GetCostOfSolution). False with the failure reason set when it does not fit.
+    bool InsertIsolatedHighwayIntersection(int x, int z, std::uint32_t id, bool real);
+    void InsertHighwayIntersectionPieces(std::list<cSC4NetworkOccupant*>* out);                       // 0x001282ac
+    void InsertHighwayIntersection(int x, int z, std::uint32_t id, std::list<cSC4NetworkOccupant*>* out, bool real,
+                                   bool usable);                                                     // 0x00128186
+    void InsertHighwayIntersectionPiece(cSC4NetworkCellInfo* cell, std::list<cSC4NetworkOccupant*>* out, bool usable,
+                                        std::uint32_t pieceId, std::uint8_t orientation, int x, int z,
+                                        std::uint32_t pathId);                                       // 0x00127f2e
+    void MarkIntersection(const tIntersection& intersection, bool mark);                              // 0x004ce724
+    void MarkHighwayIntersectionPieces(bool mark);                                                    // 0x004ce7ae
+    void RemoveHighwayIntersectionPiecesFromSetOfCellsToBeSolved(std::unordered_set<std::uint32_t>& cells);   // 0x004ce63c
+    void InsertIntersectionCellsIntoSolvedSet();                                                      // 0x00143f6a
+    void InsertIntersectionConstraints(INetworkConstraintSatisfier& satisfier);                       // 0x00144e56
+    const std::vector<tIntersection>& Intersections() const { return intersections_; }
+    int FailureReason() const { return failureReason_; }                     // +0x45c (i386 +0x234)
     // The network manager's RemoveOrReplaceOccupant (slot 8, i386 0x006110b0, network-manager.md §7.4) as this tool
     // calls it: a piece of an intersection is replaced by a plain piece built from its cell.
     bool RemoveOrReplaceOccupant(cSC4NetworkOccupant* occupant, bool& replaced);

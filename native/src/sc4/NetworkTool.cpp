@@ -868,6 +868,9 @@ int cSC4NetworkTool::GetCostOfSolution() {
     }
     // every tunnel costs its length in steps times the type's tunnel cost per cell (i386 +0x364 = params +0x94)
     for (const tTunnel& tunnel : tunnels_) cost += (tunnel.endStep - tunnel.startStep) * static_cast<std::int32_t>(placement_.unknownA8[7]);
+    // every recorded intersection adds its rule's cost (Costs, i386 rule +0xac)
+    for (const tIntersection& intersection : intersections_)
+        if (const nSC4Networks::cIntRule* rule = GetIntersectionRule(intersection.ruleId)) cost += rule->cost;
     float rounded = heightChange * placement_.floatA8[8] + 12582912.0f;
     std::int32_t bits;
     std::memcpy(&bits, &rounded, sizeof bits);

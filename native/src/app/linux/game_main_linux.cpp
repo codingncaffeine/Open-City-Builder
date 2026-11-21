@@ -1354,6 +1354,17 @@ int RunScenario(const std::string& path) {
             int x1 = 0, z1 = 0, x2 = 0, z2 = 0;
             words >> type >> x1 >> z1 >> x2 >> z2;
             native::NativeLayNetworkLine(type, x1, z1, x2, z2);
+        } else if (command == "puzzles") {   // puzzles [ID]: the intersection rules (puzzle pieces), their rings and cells (read-only)
+            std::string id;
+            words >> id;
+            native::NativePuzzleReport(id.empty() ? 0u : static_cast<std::uint32_t>(std::strtoul(id.c_str(), nullptr, 16)));
+        } else if (command == "puzzle") {   // puzzle ID X Z ROT: the intersection tool's own search, dry run and placement at a cell (hex ID)
+            std::string id;
+            int x = 0, z = 0, rotation = 0;
+            words >> id >> x >> z >> rotation;
+            native::NativePlacePuzzle(static_cast<std::uint32_t>(std::strtoul(id.c_str(), nullptr, 16)), x, z, rotation);
+        } else if (command == "intxpieces") {   // intxpieces: every pre-built intersection piece of the city (read-only)
+            native::NativeIntersectionPieceReport();
         } else if (command == "terrainheights") {   // terrainheights X0 Z0 X1 Z1: the terrain altitude at every vertex of a rectangle (read-only)
             int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
             words >> x0 >> z0 >> x1 >> z1;
