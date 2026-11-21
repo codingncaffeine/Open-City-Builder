@@ -27,6 +27,10 @@
 
 #include "sc4/NetworkOccupant.h"
 #include "sc4/NetworkBridgeOccupant.h"
+#include "sc4/NetworkOccupantWithPreBuiltModel.h"
+#include "gz/cGZPersistResourceKey.h"
+#include "gz/cIGZFile.h"
+#include "rz/cRZIniFile.h"
 #include "sc4/NetworkWorldCache.h"
 #include "sc4/NetworkPreview.h"
 #include "sc4/NetworkTunnelOccupant.h"
@@ -511,7 +515,7 @@ void cSC4NetworkTool::BuildSetOfCellsToBeSolved() {
         solvedCells_.insert(key);
     }
     ExpandToSolveSetBasedOnConnectivity(seeds, 4);
-    // RemoveHighwayIntersectionPieces: no such pieces exist until highway intersections are ported.
+    RemoveHighwayIntersectionPiecesFromSetOfCellsToBeSolved(solvedCells_);
     RemoveBridgePiecesFromSetOfCellsToBeSolved(solvedCells_);
     RemoveTunnelPiecesFromSetOfCellsToBeSolved(solvedCells_);
 }
@@ -974,10 +978,17 @@ void cSC4NetworkTool::PlaceNeighborConnections() {
 }
 
 // i386 0x00125220 (0x100186d56). PORTED: the multitype rules {0x0a5bcf4b, 0xaa5bcf57, 0x10000001}
-// (ReadAllMultiTypeIntersectionSolutions + SC4NetworkLoadOverrideMatrix). Not yet: the network type info ini
-// (0x8a5971c5/0x8a5993b9, the host holds those records), the tile-conflict overrides (0x10000002) and the highway
-// intersection rules (0x10000000).
+// (ReadAllMultiTypeIntersectionSolutions + SC4NetworkLoadOverrideMatrix) and the highway intersection rules (0x10000000,
+// ReadHighwayIntersectionRules). Not yet: the network type info ini (0x8a5971c5/0x8a5993b9, the host holds those records)
+// and the tile-conflict overrides (0x10000002).
 void cSC4NetworkTool::ReloadRules() {
+    if (INetworkToolHost* host = GetNetworkToolHost()) {
+        if (cIGZFile* file = host->OpenResourceFile(cGZPersistResourceKey{kNetworkRulesType, kNetworkRulesGroup, 0x10000000})) {
+            cRZIniFile ini(file);
+            ReloadIntersectionRules(ini);
+            file->Release();
+        }
+    }
     std::string text;
     if (!LoadTileRuleResourceText(cGZPersistResourceKey{kNetworkRulesType, kNetworkRulesGroup, 0x10000001}, text)) return;
     const IniSections sections = ParseIni(text);
@@ -1761,12 +1772,13 @@ void cSC4NetworkTool::InsertConstraintsForCellsToBeSmoothed(const std::unordered
     for (std::uint32_t key : cells) InsertNetworkSpecificConstraintsForCell(key);                // vslot 0x140
 }
 
-// i386 0x001444ae. The bridges' deck heights and the tunnel portals' heights become immovable portions.
-// NOT PORTED (no input yet): InsertIntersectionCellsIntoSolvedSet / InsertIntersectionConstraints walk the highway
-// intersections (+0x178) through their cIntRule, which PlaceNetwork does not identify yet.
+// i386 0x001444ae. The recorded intersections' cells join the solved list for the smoothing set only (cut back after it); the
+// bridges' deck heights and the tunnel portals' heights become immovable portions; the intersections' constraint layouts
+// come after the cells' own constraints.
 bool cSC4NetworkTool::SmoothenNetwork(int pad) {
     if (!constraintA_) return true;
     const std::size_t solvedCount = solvedCellList_.size();
+    InsertIntersectionCellsIntoSolvedSet();
     PropagateSolvedCellsForSmoothing();                                                          // vslot 0x134
     ComputeInitialSmoothingSet(pad);
     solvedCellList_.resize(solvedCount);
@@ -1778,6 +1790,7 @@ bool cSC4NetworkTool::SmoothenNetwork(int pad) {
     constraintA_->Shutdown();
     constraintA_->Init(0.0f, (host ? host->TerrainMaxAllowedHeight() : 0.0f) + kSmoothingHeadroom);   // terrain vslot 0x60
     InsertConstraintsForCellsToBeSmoothed(unknown128_);
+    InsertIntersectionConstraints(*constraintA_);
     return constraintA_->Solve();
 }
 
@@ -1840,7 +1853,7 @@ bool cSC4NetworkTool::CanTilesBeSupportedOnTerrain(std::uint32_t networkType) {
             support->InsertFixedVertex(vertex, fixed);
         }
     }
-    // InsertIntersectionConstraints(support): the highway intersections are not identified yet (see SmoothenNetwork).
+    InsertIntersectionConstraints(*support);
     for (std::uint32_t vertex : unknown150_) {
         const std::int32_t id = static_cast<std::int32_t>(vertex);
         if (support->IsInToSolveSet(id)) continue;
@@ -2018,8 +2031,9 @@ void cSC4NetworkTool::CreateNetworkOccupant(cSC4NetworkCellInfo* cell, cSC4Netwo
         occupant = new cSC4NetworkBridgeOccupant();
     } else if (clsid == kGZCLSID_cSC4NetworkTunnelOccupant) {
         occupant = new cSC4NetworkTunnelOccupant();
+    } else if (clsid == kGZCLSID_cSC4NetworkOccupantWithPreBuiltModel) {
+        occupant = new cSC4NetworkOccupantWithPreBuiltModel();                           // the intersection pieces
     } else {
-        // cSC4NetworkOccupantWithPreBuiltModel (0x49c1a034): not created by the land path yet.
         std::fprintf(stderr, "network tool: occupant class %08x not ported, using a plain network occupant\n", clsid);
         occupant = new cSC4NetworkOccupant();
     }

@@ -531,7 +531,7 @@ struct StubView3DWin final : IView3DWinHost {
     cSC4ViewInputControl* CreateSignLabelDemolishTool() override { return native::CreateSignLabelDemolishTool(); }   // NativeSignLabel.cpp
     cSC4ViewInputControl* CreateObliterateCityTool() override { return native::CreateObliterateCityTool(); }   // NativeObliterate.cpp
     cSC4ViewInputControl* CreateFloraTool(std::uint32_t type) override { return native::CreateFloraTool(type); }
-    cSC4ViewInputControl* CreateNetworkIntxTool(std::uint32_t) override { SC4_UNWIRED("IView3DWinHost::CreateNetworkIntxTool (not recovered)"); return nullptr; }
+    cSC4ViewInputControl* CreateNetworkIntxTool(std::uint32_t rule) override { return native::CreateNetworkIntxTool(rule); }   // the puzzle pieces
     bool CursorOverView(cIGZWin* view, int& x, int& y) override {
         WinMgr* manager = ActiveWinMgr();
         if (!manager) return false;

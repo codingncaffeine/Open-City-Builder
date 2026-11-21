@@ -12,6 +12,13 @@ namespace native {
 void InstallNetworkTool(sc4::cSC4View3DWin& view, cISC4City* city);
 // cSC4View3DWin's catalog branch: new cSC4ViewInputControlNetworkTool(type), one reference.
 sc4::cSC4ViewInputControl* CreateNetworkTool(int type);
+// cSC4View3DWin's catalog branch for the items 0x6a47xxxx: new cSC4ViewInputControlNetworkIntxTool(item & 0xffff), one reference.
+sc4::cSC4ViewInputControl* CreateNetworkIntxTool(std::uint32_t ruleId);
+// Kit verbs: `puzzles [ID]` (read-only) lists the intersection rules, `puzzle ID X Z ROT` runs the intersection tool's own
+// search, dry run and placement at a cell (no input), `intxpieces` (read-only) lists the city's intersection pieces.
+void NativePuzzleReport(std::uint32_t only);
+void NativePlacePuzzle(std::uint32_t id, int x, int z, int rotation);
+void NativeIntersectionPieceReport();
 // Kit verb `terrainheights X0 Z0 X1 Z1` (read-only): the terrain altitude of every vertex in the inclusive rectangle, one
 // line per vertex row.
 void NativeTerrainHeightsReport(int x0, int z0, int x1, int z1);
