@@ -1111,4 +1111,43 @@ void NativeIntersectionPieceReport() {
     std::printf("intxpieces: %d intersection pieces (%d pre-built)\n", count, prebuilt);
 }
 
+void NativePreBuiltPieceReport(int x0, int z0, int x1, int z1) {
+    sc4::cISC4OccupantManager* occupants = Occupants();
+    if (!occupants) {
+        std::printf("prebuiltpieces: no city\n");
+        return;
+    }
+    int zoom = 0, rotation = 0;
+    if (SC4ViewUtilities* v = ViewUtilities()) v->GetZoomAndRotation(zoom, rotation);
+    const int cell0[2] = {x0, z0}, cell1[2] = {x1, z1};
+    sc4::OccupantList list;
+    int count = 0, supported = 0, shadowed = 0;
+    if (occupants->GetOccupantsByStandardCityCells(list, cell0, cell1, 0xc772bf98u, 0xffffffffu)) {
+        for (sc4::cISC4Occupant* occupant : list) {
+            auto* piece = dynamic_cast<sc4::cSC4NetworkOccupantWithPreBuiltModel*>(occupant);
+            if (!piece) continue;
+            ++count;
+            if (piece->SupportModelId() != 0) ++supported;
+            // UpdateShadow's mapping: the shadow override or the piece, plus the zoom
+            std::uint32_t id = piece->PieceId();
+            std::uint8_t turn = piece->GetRotationAndFlip();
+            if (piece->ShadowPieceId() != 0) {
+                id = piece->ShadowPieceId();
+                turn = piece->ShadowRotation();
+            }
+            const std::uint32_t shadow = NativeMapShadowTexture(id + static_cast<std::uint32_t>(zoom), turn, piece->GetNetworkFlag() & 0x1fffu,
+                                                                piece->GetEdgeStore().GetRaisedEdgeTypeConfig());
+            if (shadow != 0) ++shadowed;
+            std::uint32_t x = 0, z = 0;
+            piece->GetOccupiedCell(x, z);
+            const cS3DVector3& offset = piece->SupportOffset();
+            std::printf("prebuiltpiece %u,%u id %08x rot %02x flags %08x model %s support %08x rotation %.3f offset %.2f %.2f %.2f shadow %08x/%02x\n", x, z,
+                        piece->PieceId(), piece->GetRotationAndFlip(), piece->GetNetworkFlag(), piece->PreBuiltModel() ? "yes" : "none",
+                        piece->SupportModelId(), piece->SupportRotation(), offset.x, offset.y, offset.z, shadow, turn);
+        }
+        occupants->ReleaseOccupantList(list);
+    }
+    std::printf("prebuiltpieces: %d pre-built pieces, %d with a support model, %d with a shadow texture (zoom %d)\n", count, supported, shadowed, zoom);
+}
+
 }  // namespace native

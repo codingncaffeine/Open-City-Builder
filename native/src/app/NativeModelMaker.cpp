@@ -41,6 +41,7 @@
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
 #include "sc4/UndergroundConnectionOccupant.h"
+#include "app/NativeNetworkManager.h"
 
 namespace native {
 bool NativeAddRetainingWallModels(sc4::cISC4Occupant* occupant, bool create, bool addToRenderer);   // app/NativeLotWalls.cpp
@@ -720,7 +721,10 @@ public:
         sc4::cSC4ModelMakerUtility::GetAllModelInstanceIDs(ids, nullptr, occupant->AsPropertyHolder(), false, zoom, rotation, state, lit, 0, outA, outB);
         return ids.empty() ? 0 : ids[0];
     }
-    std::uint32_t MapShadowTexture(std::uint32_t, std::uint8_t&, std::uint32_t, std::uint32_t) override { return 0; }
+    // cSC4NetworkManager::MapShadowTexture (SL::NetworkManager() vslot 0x70): the city network manager's shadow remap tables.
+    std::uint32_t MapShadowTexture(std::uint32_t instance, std::uint8_t& rotation, std::uint32_t flags, std::uint32_t raised) override {
+        return CityMapShadowTexture(instance, rotation, flags, raised);
+    }
     std::uint32_t AddShadowDecal(int, const cGZPersistResourceKey&, float, float, float, float, bool) override { return 0; }
 
 private:

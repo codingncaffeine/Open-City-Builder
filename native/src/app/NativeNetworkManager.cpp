@@ -368,3 +368,10 @@ sc4::cSC4NetworkTool* NativeManagerNetworkTool(std::uint32_t type) {
 }
 
 }  // namespace native
+
+namespace native {
+std::uint32_t CityMapShadowTexture(std::uint32_t instance, std::uint8_t& rotation, std::uint32_t networkFlags, std::uint32_t raisedEdges) {
+    sc4::cSC4NetworkManager* manager = CityNetworkManager();
+    return manager ? manager->MapShadowTexture(instance, rotation, networkFlags, raisedEdges) : 0;
+}
+}  // namespace native

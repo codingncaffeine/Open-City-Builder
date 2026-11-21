@@ -1375,6 +1375,10 @@ int RunScenario(const std::string& path) {
             native::NativePlacePuzzle(static_cast<std::uint32_t>(std::strtoul(id.c_str(), nullptr, 16)), x, z, rotation);
         } else if (command == "intxpieces") {   // intxpieces: every pre-built intersection piece of the city (read-only)
             native::NativeIntersectionPieceReport();
+        } else if (command == "prebuiltpieces") {   // prebuiltpieces X0 Z0 X1 Z1: the pre-built model pieces, support models, shadow textures (read-only)
+            int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
+            words >> x0 >> z0 >> x1 >> z1;
+            native::NativePreBuiltPieceReport(x0, z0, x1, z1);
         } else if (command == "terrainheights") {   // terrainheights X0 Z0 X1 Z1: the terrain altitude at every vertex of a rectangle (read-only)
             int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
             words >> x0 >> z0 >> x1 >> z1;
