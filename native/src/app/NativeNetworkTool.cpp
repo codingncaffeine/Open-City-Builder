@@ -371,7 +371,7 @@ public:
         if (!SL::spRM || !SL::spRM->GetResource(cGZPersistResourceKey{type, group, instance}, iid, &raw, 0, nullptr) || !raw) return nullptr;
         return static_cast<cIGZUnknown*>(raw);
     }
-    bool LoadString(std::uint32_t, std::uint32_t, cIGZString&) override { return false; }
+    bool LoadString(std::uint32_t group, std::uint32_t instance, cIGZString& out) override { return LoadLocalizedString(group, instance, out); }
     // GetNetworkOccupant (i386 0x00126b82): the first occupant of the cell the tool's cSC4NetworkORFilter takes (a network
     // occupant with one of the tool's network flags), one reference.
     sc4::cSC4NetworkOccupant* NetworkOccupantAt(std::uint32_t x, std::uint32_t z, std::uint32_t typeMask) override {
