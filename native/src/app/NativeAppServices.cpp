@@ -11,7 +11,10 @@
 #include <utility>
 #include <vector>
 
+#include "app/NativeBoot.h"
+#include "gz/RZServices.h"
 #include "gz/cIGZFile.h"
+#include "rz/LanguageManager.h"
 #include "rz/cRZIniFile.h"
 #include "rz/cRZString.h"
 #include "sc4/App.h"
@@ -21,6 +24,8 @@
 #include "sc4/GamePreferencesWinProc.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/ResourceAsFile.h"
+#include "sc4/TimeDisplayMiniWindowWinProc.h"
+#include "sc4/WinSC4App.h"
 #include "sc4/ToolTipManager.h"
 #include "sc4/WinCalloutBox.h"
 #include "sc4/WinLocationSaver.h"
@@ -66,6 +71,23 @@ void InstallAppServices(cSC4App& app) {
     auto saver = [] { return static_cast<cSLWinLocationSaver*>(SL::spWinLocationSaver); };
     sc4::GetDialogServices().locationSaver = saver;
     sc4::GetGamePreferencesServices().locationSaver = saver;
+    // The wall clock window (the ShowTime cheat): under the app window, its place kept by the location saver, the time
+    // formatted by the language utility (MakeTimeString(hour, minute, -1): no seconds).
+    sc4::TimeDisplayServices& clock = sc4::GetTimeDisplayServices();
+    clock.appWindow = []() -> cIGZWin* {   // SL::spWinSC4AppWin: the app window under the window manager's root
+        cIGZWinMgr* windows = RZ::WM();
+        cIGZWin* root = windows ? windows->GetMainWindow() : nullptr;
+        return root ? root->GetChildWindowFromID(sc4::kWinSC4AppId) : nullptr;
+    };
+    clock.locationSaver = saver;
+    clock.preferences = []() -> std::uint8_t* { return native::BootApplication() ? native::BootApplication()->GetPreferences() : nullptr; };
+    clock.formatTime = [](std::uint32_t hour, std::uint32_t minute) {
+        cRZString text;
+        cIGZLanguageManager* languages = RZ::LM();
+        cIGZLanguageUtility* utility = languages ? languages->GetLanguageUtility(0) : nullptr;
+        if (utility) utility->MakeTimeString(static_cast<int>(hour), static_cast<int>(minute), -1, text);
+        return std::string(text.ToChar(), text.Strlen());
+    };
     app.SetServiceFactory("cSLWinLocationSaver", []() -> cIGZUnknown* { return new cSLWinLocationSaver(); });
     app.SetServiceFactory("cSC4FeatureManager", []() -> cIGZUnknown* { return static_cast<sc4::cISC4FeatureManager*>(new sc4::cSC4FeatureManager()); });
     app.StartupHooks().initializeManager = [](const char* name, cIGZUnknown* object) {

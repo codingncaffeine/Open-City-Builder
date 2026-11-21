@@ -12,6 +12,7 @@
 #include "app/NativeIntro.h"
 #include "app/NativeKeyboard.h"
 #include "gz/WinKeyAcceleratorRes.h"
+#include "sc4/TimeDisplayMiniWindowWinProc.h"
 #include "sc4/WinSC4App.h"
 
 namespace native {
@@ -33,12 +34,16 @@ public:
     cIGZMessageServer2* MessageServer2() override { return messageServer_; }
     void SetMessageServer(cIGZMessageServer2* server) { messageServer_ = server; }
 
-    // The application's cheat code manager, the framework command server and the cheat code box (Ctrl+X). The clock
-    // preference and its window are not built yet; the window skips that path.
+    // The application's cheat code manager, the framework command server and the cheat code box (Ctrl+X); the clock
+    // window (preference byte 0x4ee: it was open when the game last closed).
     cGZCheatCodeManager* CheatCodeManager() override { return native::GameCheatCodeManager(); }
     void ExecuteCommand(std::uint32_t command) override { native::ExecuteGameCommand(command); }
-    bool ClockWindowPreference() override { return false; }
-    void DoModelessClockWindow() override {}
+    bool ClockWindowPreference() override {
+        auto& clock = sc4::GetTimeDisplayServices();
+        std::uint8_t* preferences = clock.preferences ? clock.preferences() : nullptr;
+        return preferences && preferences[0x4ee] != 0;
+    }
+    void DoModelessClockWindow() override { sc4::cSC4TimeDisplayMiniWindowWinProc::DoModelessWin(); }
     cIGZWin* CreateCheatCodeEntryDialog() override { return native::CreateCheatCodeEntryDialog(); }
     void AppFocus(bool) override {}
 
