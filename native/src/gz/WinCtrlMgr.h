@@ -163,6 +163,14 @@ public:
     cIGZString* GetFontMapping(int id) override;
     int GetFontMappingID(const cIGZString* name) override;
     void SetFontMapping(int id, const cIGZString* name) override { SetString(fontMapping_, id, name); }
+    // The style id whose font mapping equals `name` without regard to case (0 when none): how the font-style script
+    // vocabulary, which holds the same names, resolves them (cGZScriptVocab compares without case).
+    std::size_t FontMappingCount() const { return fontMapping_.size(); }
+    int FontMappingIDIgnoringCase(const cIGZString& name) const {
+        for (const auto& entry : fontMapping_)
+            if (entry.second && name.IsEqualToStringPointer(entry.second, false)) return entry.first;
+        return 0;
+    }
     std::uint32_t GetDoubleClickTimeMilliseconds() const override { return doubleClickMs_; }
     void SetDoubleClickTimeMilliseconds(std::uint32_t ms) override { doubleClickMs_ = ms; }
     std::uint32_t DoubleClickMilliseconds() override { return doubleClickMs_; }   // IWinCtrlFactory

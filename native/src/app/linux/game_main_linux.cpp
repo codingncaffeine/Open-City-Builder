@@ -20,6 +20,7 @@
 #include <cstring>
 #include <strings.h>
 #include <filesystem>
+#include <fnmatch.h>
 #include <fstream>
 #include <iterator>
 #include <map>
@@ -73,7 +74,11 @@
 #include "gz/DrawFontRenderer.h"
 #include "gz/GZFont.h"
 #include "gz/GZFramework.h"
+#include "gz/FontSys.h"
+#include "gz/RZServices.h"
+#include "gz/WinCtrlMgr.h"
 #include "gz/WinFont.h"
+#include "rz/COMDirectors.h"
 #include "gz/WinTextEdit.h"
 #include "gz/WinStyle.h"
 #include "render/gd/GLGDriver.h"
@@ -134,7 +139,6 @@ void Nap() {
 
 // ---- fonts: the recovered cGZFont over FreeType, drawing through the surface's context --------------------------------------
 native::FreeTypeFontHost* gFontHost;
-cGZFont* gFont;
 
 struct DrawFontHost final : IDrawFontRendererHost {
     cIGZFontRenderer* CreateBufferFontRenderer() override { auto* r = new cGZBufferFontRenderer(); r->AddRef(); return r; }
@@ -142,10 +146,10 @@ struct DrawFontHost final : IDrawFontRendererHost {
     void NativeColorToRGB(std::uint32_t n, std::uint8_t& r, std::uint8_t& g, std::uint8_t& b) override { r = n >> 16; g = n >> 8; b = n; }
 } gDrawFontHost;
 
-// The game's fonts: the .mxf files of GameData/Fonts (FreeType reads them through NativeFonts' MXF decoder) and the
-// [Font Styles] table of the font-style resource {0, 0x4a87bfe8, 0x2a87bffc} ("<name> = <faces>, <size>, <params>,
-// <guid>"), the specifications cSC4App::SetFontStyle hands CreateFontStyleFromSpecification (0x1003d9360). Each style
-// becomes one cGZFont; the windows ask for their style by guid.
+// The game's fonts: the .mxf files of GameData/Fonts (FreeType reads them through NativeFonts' MXF decoder). The font
+// system service (cGZFontSys, RZ::FO()) and the window control manager (RZ::WCM()) are the original's; cSC4App::
+// SetupWinCtrlMgr fills the manager with the system fonts and the [Font Styles] of FontStyle.ini. The HTML windows keep
+// their own per-size fonts (HtmlFont below).
 std::string GameFontsDirectory() {
     return platform::GameDataDir() + "Fonts/";
 }
@@ -198,10 +202,6 @@ std::string FindFontFile(const std::string& faces, bool bold, bool italic) {
     return {};
 }
 
-struct StyleFont { cGZFont* font = nullptr; };
-std::map<std::uint32_t, StyleFont> gStyleFonts;
-std::map<std::string, std::uint32_t> gStyleNames;   // "GenBodyLight" -> its guid (lower case: scripts vary the case)
-
 cGZFont* MakeFont(const std::string& path, std::uint32_t size) {
     auto* font = new cGZFont(gFontHost);
     font->AddRef();
@@ -213,92 +213,66 @@ cGZFont* MakeFont(const std::string& path, std::uint32_t size) {
     return font;
 }
 
-// One [Font Styles] line: the quoted faces, size and parameters, then the guid.
-void AddFontStyle(const std::string& line) {
-    std::vector<std::string> quoted;
-    std::size_t at = line.find('=');
-    if (at == std::string::npos) return;
-    std::size_t pos = at + 1;
-    while (quoted.size() < 3) {
-        const std::size_t open = line.find('"', pos);
-        if (open == std::string::npos) return;
-        const std::size_t close = line.find('"', open + 1);
-        if (close == std::string::npos) return;
-        quoted.push_back(line.substr(open + 1, close - open - 1));
-        pos = close + 1;
+// What the font system service (cGZFontSys) needs from the platform: files and directories through the standard
+// library, the FreeType host for faces, and new cGZFont objects drawn through the surface's context.
+class FontSysHost final : public IFontSysHost {
+public:
+    IFontRasterizer* Rasterizer() override { return gFontHost->Rasterizer(); }
+    bool FileExists(const cIGZString& path) override { return gFontHost->FileExists(path); }
+    bool GetPathExtension(const cIGZString& path, cIGZString& extension) override { return gFontHost->GetPathExtension(path, extension); }
+    std::uint32_t GetCurrentLanguage() override { return gFontHost->GetCurrentLanguage(); }
+    void NativeColorToRGB(std::uint32_t n, std::uint8_t& r, std::uint8_t& g, std::uint8_t& b) override { gFontHost->NativeColorToRGB(n, r, g, b); }
+    std::uint32_t RGBToNativeColor(std::uint8_t r, std::uint8_t g, std::uint8_t b) override { return gFontHost->RGBToNativeColor(r, g, b); }
+    bool ReadFileHeader(const cIGZString& path, void* buffer, std::uint32_t count) override {
+        std::ifstream file(std::string(path.ToChar(), path.Strlen()), std::ios::binary);
+        return file.read(static_cast<char*>(buffer), count) && std::uint32_t(file.gcount()) == count;
     }
-    const std::size_t guidAt = line.find("0x", pos);
-    if (guidAt == std::string::npos) return;
-    const std::uint32_t guid = std::uint32_t(std::strtoul(line.c_str() + guidAt, nullptr, 16));
-    std::string params = quoted[2];
-    for (char& c : params) c = char(std::tolower(static_cast<unsigned char>(c)));
-    auto has = [&](const char* word) { return params.find(word) != std::string::npos; };
-    auto number = [&](const char* key, float fallback) {
-        const std::size_t k = params.find(key);
-        return k == std::string::npos ? fallback : std::strtof(params.c_str() + k + std::strlen(key), nullptr);
-    };
-    const std::string path = FindFontFile(quoted[0], has("bold"), has("italic"));
-    if (path.empty()) return;
-    cGZFont* font = MakeFont(path, std::uint32_t(std::atoi(quoted[1].c_str())));
-    font->SetScaling(number("xscale=", 1.0f), number("yscale=", 1.0f));
-    font->SetAdvanceScaling(number("xadvancescale=", 1.0f), 1.0f);
-    font->SetSpacingAdjustment(0, int(number("linespacing=", 0.0f)));
-    if (has("aa=none")) font->SetAntialiasing(1);
-    if (has("underline") || has("under|") ) font->SetStyle(4, true);
-    if (has("strikethrough")) font->SetStyle(8, true);
-    if (has("gamma=")) font->SetAntialiasingGammaCorrection(number("gamma=", 1.0f));
-    if (!font->Init()) { font->Release(); return; }
-    if (gStyleFonts[guid].font) gStyleFonts[guid].font->Release();
-    gStyleFonts[guid].font = font;
-    std::string name = line.substr(0, at);
-    name.erase(0, name.find_first_not_of(" \t`"));
-    name.erase(name.find_last_not_of(" \t") + 1);
-    for (char& c : name) c = char(std::tolower(static_cast<unsigned char>(c)));
-    if (!name.empty()) gStyleNames[name] = guid;
-}
-
-void LoadFontStyles() {
-    static bool loaded = false;
-    if (loaded) return;
-    std::vector<std::uint8_t> bytes;
-    if (!native::LoadResourceBytes(0, 0x4a87bfe8, 0x2a87bffc, bytes)) return;   // the resources are not up yet: try again later
-    loaded = true;
-    std::stringstream text(std::string(bytes.begin(), bytes.end()));
-    std::string line;
-    bool inStyles = false;
-    while (std::getline(text, line)) {
-        const std::size_t first = line.find_first_not_of(" \t\r`");
-        if (first == std::string::npos || line[first] == ';') continue;
-        if (line[first] == '[') { inStyles = line.find("[Font Styles]") != std::string::npos; continue; }
-        if (inStyles) AddFontStyle(line);
+    // cRZDirectory's entry filter: '*' any run, '?' any one character, compared without case.
+    void ListDirectoryFiles(const cIGZString& directory, const cIGZString& filter, std::list<cRZString>& out) override {
+        std::string pattern(filter.ToChar(), filter.Strlen());
+        for (char& c : pattern) c = char(std::tolower(static_cast<unsigned char>(c)));
+        std::error_code error;
+        std::vector<std::string> names;
+        for (const auto& entry : std::filesystem::directory_iterator(std::string(directory.ToChar(), directory.Strlen()), error)) {
+            if (!entry.is_regular_file(error)) continue;
+            std::string name = entry.path().filename().string();
+            std::string lower = name;
+            for (char& c : lower) c = char(std::tolower(static_cast<unsigned char>(c)));
+            if (fnmatch(pattern.c_str(), lower.c_str(), 0) == 0) names.push_back(name);
+        }
+        std::sort(names.begin(), names.end());   // directory order varies between file systems
+        for (const std::string& name : names) out.emplace_back(name.c_str());
     }
-    std::printf("font: %zu game font styles\n", gStyleFonts.size());
-}
+    cIGZFont* CreateFontObject() override {
+        auto* font = new cGZFont(gFontHost);
+        font->AddRef();
+        return font;
+    }
+    int GetCurrentFrameworkCodePage() override { return 8; }
+} gFontSysHost;
 
 bool InitFont() {
     gFontHost = new native::FreeTypeFontHost();
-    // Until the font-style resource can be read (it needs the game's resources), the default style's face and size.
-    std::string path = FindFontFile("Arta", false, true);
-    for (const char* fallback : {"/usr/share/fonts/TTF/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                                 "/usr/share/fonts/dejavu/DejaVuSans.ttf", "/usr/share/fonts/liberation/LiberationSans-Regular.ttf"}) {
-        if (!path.empty()) break;
-        std::error_code error;
-        if (std::filesystem::exists(fallback, error)) path = fallback;
-    }
-    if (path.empty()) return false;
-    gFont = MakeFont(path, 13);
-    return gFont->Init();
+    return gFontHost->Ok();
 }
 
+// The window font of a cIGZFont (gz::MakeWinFont): the controls draw on the platform's surfaces through it. The text and
+// shadow colors are the font's own (cIGZFont vslots 0x60 / 0x68 of the original's controls).
 class WinFont final : public gz::IWinFont {
 public:
-    cGZFont* font = nullptr;
+    explicit WinFont(cIGZFont* f) : font(f) { font->AddRef(); }
+    cIGZFont* font;
     bool QueryInterface(std::uint32_t, void**) override { return false; }
-    std::uint32_t AddRef() override { return 1; }
-    std::uint32_t Release() override { return 1; }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override {
+        if (--refs_ != 0) return refs_;
+        font->Release();
+        delete this;
+        return 0;
+    }
     cIGZFont* AsFont() override { return font; }
-    std::uint32_t DefaultTextColor() override { return 0xffffffffu; }
-    std::uint32_t DefaultShadowColor() override { return 0xff000000u; }
+    std::uint32_t DefaultTextColor() override { return font->GetFontColor(); }
+    std::uint32_t DefaultShadowColor() override { return font->GetFontBackgroundColor(); }
     std::int16_t LineHeight(int, int) override { return std::int16_t(font->GetLineHeight()); }
     int CountLines(const char* t, std::uint32_t n, int width) override { return int(font->CalculateNumberOfLines(t, n, std::uint32_t(width))); }
     int WrappedWidth(const char* t, std::uint32_t n, int width) override { return int(font->CalculateWidthOfLines(t, n, std::uint32_t(width))); }
@@ -314,31 +288,35 @@ public:
         font->DrawTextParagraph(static_cast<native::Buffer*>(target)->AsBuffer(), box, t, n, int(alignment), color & 0xffffffu,
                                 color2 == gz::kWinUnsetTextColor ? kFontDefaultColor : (color2 & 0xffffffu), clip, nullptr);
     }
+private:
+    std::uint32_t refs_ = 1;
 };
+gz::IWinFont* MakeWinFont(cIGZFont* font) { return new WinFont(font); }
+
+// The controls' font seam (gz::WinFontSource) answers from RZ::WCM(): the system font of a style id (RZ::WCM() vslot 0x28),
+// a style id by name from the manager's font mappings. The port's controls ask for a style even when it was never
+// registered; those get the default system font 0x68963c4c.
 struct FontSource final : gz::IWinFontSource {
-    // never destroyed: windows still hold their fonts while the process exits
-    std::map<std::uint32_t, WinFont>& fonts = *new std::map<std::uint32_t, WinFont>();
     gz::IWinFont* Font(std::uint32_t style) override {
-        if (!gFont) return nullptr;
-        LoadFontStyles();
-        auto it = gStyleFonts.find(style);
-        if (it == gStyleFonts.end()) it = gStyleFonts.find(gz::kWinDefaultFontStyle);
-        WinFont& f = fonts[it == gStyleFonts.end() ? 0u : it->first];
-        f.font = it == gStyleFonts.end() ? gFont : it->second.font;
-        return &f;
+        gz::cIGZWinCtrlMgr* controls = RZ::WCM();
+        if (!controls) return nullptr;
+        gz::IWinFont* font = controls->SystemFont(static_cast<int>(style));
+        return font ? font : controls->SystemFont(static_cast<int>(gz::kWinDefaultFontStyle));
     }
-    bool Available() override { return gFont != nullptr; }
+    bool Available() override { return RZ::WCM() && RZ::WCM()->SystemFont(static_cast<int>(gz::kWinDefaultFontStyle)); }
     gz::IWinFont* FontByName(const char* name) override {
         const std::uint32_t id = StyleId(name);
         return id ? Font(id) : nullptr;
     }
+    // The names are the [Font Styles] keys SetFontStyle registered as font mappings and as words of the font-style
+    // vocabulary; the vocabulary compares without case (cGZScriptVocab), and so does this.
     std::uint32_t StyleId(const char* name) override {
-        if (!gFont || !name) return 0;
-        LoadFontStyles();
-        std::string key(name);
-        for (char& c : key) c = char(std::tolower(static_cast<unsigned char>(c)));
-        auto it = gStyleNames.find(key);
-        return it == gStyleNames.end() ? 0 : it->second;
+        gz::cIGZWinCtrlMgr* controls = RZ::WCM();
+        if (!controls || !name) return 0;
+        const cRZString wanted(name);
+        if (const int id = controls->GetFontMappingID(&wanted)) return static_cast<std::uint32_t>(id);
+        auto* manager = dynamic_cast<gz::cGZWinCtrlMgr*>(controls);
+        return manager ? static_cast<std::uint32_t>(manager->FontMappingIDIgnoringCase(wanted)) : 0;
     }
 } gFontSource;
 
@@ -692,6 +670,7 @@ bool Boot() {
     SetWinClock([]() -> std::uint32_t { return static_cast<std::uint32_t>(SDL_GetTicks()); });   // the windows' fade clock (ms)
     if (!InitFont()) std::printf("font: FAILED to initialise\n");
     gz::SetWinFontSource(&gFontSource);
+    gz::SetWinFontMaker(&MakeWinFont);
     gz::SetWinStyleManager(&gStyleManager);
     native::InstallButtonSounds();   // the window buttons' host: caption fonts (and sounds, once there is audio output)
 
@@ -699,6 +678,13 @@ bool Boot() {
         SL::SetFramework(&framework);             // the locator's RZGetFramework(): without it every SL:: service stays null
         if (gAudioWanted) native::InstallAudioDirector(app, platform::GameDataDir());   // cSC4App::AddCOMDirectors adds it
         framework.AddSystemService(gMgr.get());   // RZ::WM(): the application finds the main window through it
+        // The font system and the window control manager, made by cSC4App::AddSystemServices as the original makes them;
+        // the draw font renderer is the class the font system gets as its default renderer (SetupWinCtrlMgr).
+        app.SetServiceFactory("cGZFontSys", []() -> cIGZUnknown* { return static_cast<cIGZFontSys*>(new cGZFontSys(&gFontSysHost)); });
+        app.SetServiceFactory("cGZWinCtrlMgr", []() -> cIGZUnknown* { return static_cast<gz::cIGZWinCtrlMgr*>(new gz::cGZWinCtrlMgr(gMgr.get())); });
+        gz::RegisterDirectorMaker("cGZDrawFontRenderer", []() -> cIGZUnknown* { return new cGZDrawFontRenderer(&gDrawFontHost); });
+        app.StartupHooks().drawSystemAvailable = [] { return true; };   // the platform's surfaces draw the text
+        app.StartupHooks().graphicSystemColor = [](std::uint8_t r, std::uint8_t g, std::uint8_t b) { return gFontHost->RGBToNativeColor(r, g, b); };
         // The second message server (service 0x04fa845b): the splash timer, the screen swaps and every posted command go through it.
         // The frame loop ticks it by hand (RunMessageServer2Pump), so the framework tick registration is a no-op.
         static struct : IMessageServerFramework {
@@ -1067,18 +1053,16 @@ cGZFont* HtmlFont(const std::string& faces, std::uint32_t size, bool bold, bool 
 // the style's own font file, scaling, advance scaling and line spacing at the page's pixel size, one cGZFont per
 // (style, size). Null when no style has that name.
 cGZFont* HtmlStyleFont(const std::string& styleName, std::uint32_t size) {
-    if (!gFont || size == 0) return nullptr;
-    LoadFontStyles();
+    if (size == 0) return nullptr;
+    const std::uint32_t id = gFontSource.StyleId(styleName.c_str());
+    gz::IWinFont* style = id && RZ::WCM() ? RZ::WCM()->SystemFont(static_cast<int>(id)) : nullptr;
+    cIGZFont* source = style ? style->AsFont() : nullptr;
+    if (!source) return nullptr;
     std::string key = styleName;
     for (char& c : key) c = char(std::tolower(static_cast<unsigned char>(c)));
-    auto named = gStyleNames.find(key);
-    if (named == gStyleNames.end()) return nullptr;
-    auto style = gStyleFonts.find(named->second);
-    if (style == gStyleFonts.end() || !style->second.font) return nullptr;
     static auto& cache = *new std::map<std::pair<std::string, std::uint32_t>, cGZFont*>();
     cGZFont*& font = cache[{key, size}];
     if (font) return font;
-    cGZFont* source = style->second.font;
     cRZString path;
     source->GetFilePath(path);
     font = MakeFont(std::string(path.ToChar(), path.Strlen()), size);
@@ -1095,12 +1079,11 @@ cGZFont* HtmlStyleFont(const std::string& styleName, std::uint32_t size) {
     return font;
 }
 
-// The [Font Styles] name of a style guid ("" when unknown).
+// The [Font Styles] name of a style id: the control manager's font mapping ("" when unknown).
 std::string FontStyleName(std::uint32_t guid) {
-    LoadFontStyles();
-    for (const auto& entry : gStyleNames)
-        if (entry.second == guid) return entry.first;
-    return {};
+    gz::cIGZWinCtrlMgr* controls = RZ::WCM();
+    cIGZString* name = controls ? controls->GetFontMapping(static_cast<int>(guid)) : nullptr;
+    return name ? std::string(name->ToChar(), name->Strlen()) : std::string();
 }
 }  // namespace native
 namespace {

@@ -270,7 +270,7 @@ public:
         return g_services.createWindowFromScript ? g_services.createWindowFromScript(key, parent, id) : nullptr;
     }
     bool CreateRegionEffect(const char*, sc4::IRegionViewEffect**) override { return false; }
-    // The native build has no window control manager (RZ::WCM() is null); its system fonts come through the font seam.
+    // RZ::WCM()'s system font; a host without the control manager service (the Mac viewer) has the font seam.
     cIGZFont* LabelFont(std::uint32_t id) override {
         if (gz::cIGZWinCtrlMgr* controls = RZ::WCM()) {
             gz::IWinFont* font = controls->SystemFont(static_cast<int>(id));

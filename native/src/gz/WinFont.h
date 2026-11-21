@@ -57,6 +57,13 @@ public:
 IWinFontSource* WinFontSource();
 void SetWinFontSource(IWinFontSource* source);
 
+// The window font of a cIGZFont. The original's control manager and controls hold the cIGZFont itself; the port's
+// controls draw through IWinFont, whose surfaces are the platform's, so the platform supplies the maker. The view holds
+// a reference on the font and comes back with one reference of its own; null without a maker or font.
+using WinFontMaker = IWinFont* (*)(cIGZFont* font);
+IWinFont* MakeWinFont(cIGZFont* font);
+void SetWinFontMaker(WinFontMaker maker);
+
 constexpr std::uint32_t kWinDefaultFontStyle = 0x68963c4c;
 constexpr std::uint32_t kWinUnsetTextColor = 0xdeadbeef;
 

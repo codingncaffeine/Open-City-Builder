@@ -35,6 +35,8 @@
 
 class cIGZFrameWork;
 class cRZCOMDllDirector;
+class cIGZFont;
+class IScriptVocab;
 
 class cSC4App;
 
@@ -129,11 +131,11 @@ struct AppStartupHooks {
     std::function<void()> registerSegmentCategoryCallback;
     // the WWW system was created: set its cache directory, enable it and hook the HTML UI
     std::function<void(cIGZUnknown* wwwSystem, const cIGZString& cacheDirectory)> configureWWWSystem;
-    // CreateFontStyleFromSpecification(specification, styleId) @ 0x1003d9360: the font style of a [Font Styles] entry
-    // (one reference; null when the specification is unusable)
-    std::function<gz::IWinFont*(const cRZString& specification, std::uint32_t& styleId)> createFontStyleFromSpecification;
-    // the font style script vocabulary (COM class 0xba2e7954 / iid 0x1a2bdebb) vslot 0x20: a script variable per style
-    std::function<void(const cRZString& name, std::uint32_t styleId)> addFontStyleScriptVariable;
+    // cRZSysServPtr<cIGZDrawSystem>: whether the draw system service exists (SetupWinCtrlMgr gives the font system the
+    // draw font renderer only then)
+    std::function<bool()> drawSystemAvailable;
+    // RZ::GS() vslot 0x8c (i386): the display's native color of r, g, b; without the hook the 32-bit XRGB packing
+    std::function<std::uint32_t(std::uint8_t r, std::uint8_t g, std::uint8_t b)> graphicSystemColor;
     // RZSpawnWait(program, program, 0) @ 0x1000274df: start a program and wait for it
     std::function<void(const std::string& path)> spawnWait;
 };
@@ -372,6 +374,13 @@ public:
     static void SetFontAliasStatic(const cRZString& key, const cRZString& value, void* context);   // @ 0x10000ab6c
     static void SetFontStyleStatic(const cRZString& key, const cRZString& value, void* context);   // @ 0x10000aba8
     void SetFontStyle(const cRZString& name, const cRZString& specification);                      // @ 0x10000abbc
+    // CreateFontStyleFromSpecification (Mac i386 0x002ecc7c, a free function there): the font a [Font Styles] value
+    // describes ("<faces>, <size>, <param|param...>, <style id hex>"), one reference; null without the font system.
+    cIGZFont* CreateFontStyleFromSpecification(const cRZString& specification, std::uint32_t& styleId);
+    // RZ::GS() vslot 0x8c through the graphicSystemColor hook
+    std::uint32_t GraphicSystemColor(std::uint8_t r, std::uint8_t g, std::uint8_t b) const;
+    // _spFontStyleScriptVocabulary: set while SetupWinCtrlMgr reads [Font Styles] (SetFontStyle adds each style to it)
+    static void SetFontStyleVocabulary(IScriptVocab* vocabulary);
     bool PreFrameWorkShutdown() override;
     // the city life cycle (AppCity.cpp)
     bool NewCity();                                                // @ 0x1000453d4

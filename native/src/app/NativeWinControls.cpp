@@ -1,8 +1,8 @@
 // The window control manager of the native build. The original's cSC4App::SetupWinCtrlMgr fills RZ::WCM() with the control
 // colors, the stock images (dialog background, button, slider and scroll bar art) and a captions table (seven localized
-// button captions and the ellipsis). Natively the RZ::WCM() service does not exist yet; the generic dialog
-// (cGZWinGenDlg: the cheat code box), the message box and the text window reach the manager through gz::WinCtrlMgr(), and
-// this installs a cGZWinCtrlMgr filled the same way there.
+// button captions and the ellipsis). The Linux build has the RZ::WCM() service and fills it; a host without it (the Mac
+// viewer) gets a cGZWinCtrlMgr of its own filled the same way. The generic dialog (cGZWinGenDlg: the cheat code box), the
+// message box and the text window reach the manager through gz::WinCtrlMgr().
 #include "app/NativeWinControls.h"
 
 #include <cstdio>
@@ -50,7 +50,10 @@ void InstallWindowControlManager(cIGZWinMgr* windows, gz::cIGZWinCtrlMgr* existi
     }
     controls->SetDefaultText(static_cast<int>(kEllipsisCaption), new cRZString("\xe2\x80\xa6"));   // a literal U+2026
     gz::SetWinCtrlMgr(controls);
-    std::printf("window controls: %d stock images, %d captions (%s manager)\n", images, captions, existing ? "the framework's" : "own");
+    auto* manager = dynamic_cast<gz::cGZWinCtrlMgr*>(controls);
+    std::printf("window controls: %d stock images, %d captions, %zu font styles, default font %s (%s manager)\n", images, captions,
+                manager ? manager->FontMappingCount() : std::size_t(0), controls->SystemFont(0x68963c4c) ? "set" : "MISSING",
+                existing ? "the framework's" : "own");
 }
 
 }  // namespace native

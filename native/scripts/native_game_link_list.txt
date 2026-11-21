@@ -60,6 +60,9 @@ src/html/HTMLDrawContext.cpp
 src/sc4/SimStreamOps.cpp
 src/sc4/AutoHelpers.cpp
 src/sc4/DBSegment.cpp
+src/sc4/DBSegmentFiles.cpp
+src/sc4/FontStyleSpec.cpp
+src/gz/WinFontMaker.cpp
 src/sc4/ResourceAsFile.cpp
 src/rz/cRZMessage2Standard.cpp
 src/rz/RZStringUtils.cpp

@@ -299,5 +299,10 @@ bool SC4ReadGZPersistRef(cIGZIStream& stream, std::uint32_t iid, void** out);
 // maxSize, or short).
 bool SC4ReadBinaryRecord(cIGZPersistDBSegment* segment, const cGZPersistResourceKey& key,
                          std::vector<std::uint8_t>& data, std::uint32_t maxSize);
+// SC4ReadBinaryRecord (Mac i386 0x00163106): the record written to the file at `path` (truncated first); the byte count,
+// or 0xffffffff when the record is absent or a step fails. A file the call created is removed again on failure.
+std::uint32_t SC4ReadBinaryRecord(cIGZPersistDBSegment* segment, const cGZPersistResourceKey& key, const cIGZString& path);
+// SC4ReadBinaryRecord (Mac i386 0x00163240): the same from whichever segment of the resource manager holds the key.
+std::uint32_t SC4ReadBinaryRecord(const cGZPersistResourceKey& key, const cIGZString& path);
 
 }  // namespace sc4

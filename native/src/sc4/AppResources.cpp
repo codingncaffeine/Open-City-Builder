@@ -1,6 +1,7 @@
 #include "sc4/AppResources.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <list>
@@ -13,6 +14,9 @@
 #include "gz/cGZDBSegmentPackedFile.h"
 #include "gz/cGZPersistDBSegmentMultiPackedFiles.h"
 #include "gz/FontSys.h"
+#include "gz/ScriptTerp.h"
+#include "gz/WinCtrlMgr.h"
+#include "gz/WinFont.h"
 #include "gz/cIGZFileSystem.h"
 #include "gz/cIGZFrameWork.h"
 #include "gz/cIGZPersistDBSegment.h"
@@ -25,6 +29,7 @@
 #include "rz/cRZIniFile.h"
 #include "sc4/App.h"
 #include "sc4/DBSegment.h"
+#include "sc4/FontStyleSpec.h"
 #include "sc4/ServiceLocator.h"
 
 namespace {
@@ -329,22 +334,57 @@ void cSC4App::SetFontStyleStatic(const cRZString& key, const cRZString& value, v
     static_cast<cSC4App*>(context)->SetFontStyle(key, value);
 }
 
-// One [Font Styles] entry ("<name> = <specification>"): register the described style as the system font of its style id
-// and under its name, then hand it to the font-style script vocabulary. PARTIAL: CreateFontStyleFromSpecification
-// (0x1003d9360, 4.5 KB) and the script vocabulary are not recovered; both are host hooks.
+namespace {
+// The vocabulary the font styles are added to while SetupWinCtrlMgr reads [Font Styles] (_spFontStyleScriptVocabulary);
+// the UI script interpreter holds it, so scripts name the styles ("font=GenBodyLight").
+IScriptVocab* gFontStyleScriptVocabulary = nullptr;
+
+constexpr std::uint32_t kFontNoBackground = 0x8000000;   // the background color "none"
+}  // namespace
+
+void cSC4App::SetFontStyleVocabulary(IScriptVocab* vocabulary) { gFontStyleScriptVocabulary = vocabulary; }
+
+std::uint32_t cSC4App::GraphicSystemColor(std::uint8_t r, std::uint8_t g, std::uint8_t b) const {
+    if (startupHooks_.graphicSystemColor) return startupHooks_.graphicSystemColor(r, g, b);
+    return std::uint32_t(r) << 16 | std::uint32_t(g) << 8 | b;
+}
+
+// The parsed specification (sc4/FontStyleSpec.h): the faces and size acquire the font with the style flags; the other
+// parameters are set on the acquired font.
+cIGZFont* cSC4App::CreateFontStyleFromSpecification(const cRZString& specification, std::uint32_t& styleId) {
+    auto* fonts = static_cast<cIGZFontSys*>(RZ::FO());
+    if (!fonts) return nullptr;
+    const sc4::FontStyleSpec spec = sc4::ParseFontStyleSpecification(
+        specification, [this](std::uint8_t r, std::uint8_t g, std::uint8_t b) { return GraphicSystemColor(r, g, b); });
+    styleId = spec.styleId;
+    cIGZFont* font = fonts->FontAcquire(spec.faces, 0, spec.size, static_cast<int>(spec.styleFlags), true);
+    if (!font || !RZ::WCM()) return font;   // the parameters are set only when the control manager exists
+    if (spec.antialiasing != 0) font->SetAntialiasing(spec.antialiasing);
+    if (spec.colorsGiven) font->SetFontColor(spec.textColor, spec.backgroundColor);
+    else font->SetFontColor(GraphicSystemColor(0, 0, 0), kFontNoBackground);
+    if (spec.gamma != 0.0f) font->SetAntialiasingGammaCorrection(spec.gamma);
+    if (spec.sharpness != 0.0f) font->SetAntialiasingSharpness(spec.sharpness);
+    if (spec.scaleX != 1.0f || spec.scaleY != 1.0f) font->SetScaling(spec.scaleX, spec.scaleY);
+    if (spec.charSpacing != 0 || spec.lineSpacing != 0) font->SetSpacingAdjustment(spec.charSpacing, spec.lineSpacing);
+    if (spec.advanceScaleX != 1.0f) font->SetAdvanceScaling(spec.advanceScaleX, 1.0f);
+    return font;
+}
+
+// One [Font Styles] entry ("<name> = <specification>"): the described font becomes the control manager's system font of
+// its style id, the name its font mapping, and the name a word of the font-style vocabulary.
 void cSC4App::SetFontStyle(const cRZString& name, const cRZString& specification) {
     if (!RZ::FO()) return;
     std::uint32_t styleId = 0;
-    gz::IWinFont* style = startupHooks_.createFontStyleFromSpecification
-                              ? startupHooks_.createFontStyleFromSpecification(specification, styleId)
-                              : nullptr;
-    if (!style) return;
+    cIGZFont* font = CreateFontStyleFromSpecification(specification, styleId);
+    if (!font) return;
     if (gz::cIGZWinCtrlMgr* controls = RZ::WCM()) {
+        gz::IWinFont* style = gz::MakeWinFont(font);
         controls->SetSystemFont(static_cast<int>(styleId), style);
-        controls->SetFontMapping(static_cast<int>(styleId), &name);
-        if (startupHooks_.addFontStyleScriptVariable) startupHooks_.addFontStyleScriptVariable(name, styleId);
+        if (style) style->Release();
+        controls->SetFontMapping(static_cast<int>(styleId), new cRZString(name));
+        if (gFontStyleScriptVocabulary) gFontStyleScriptVocabulary->AddTranslation(name, styleId);
     }
-    style->Release();
+    font->Release();
 }
 
 // The application's font set: every font of the plugin directory and of "<data directory>/Fonts/" is added to the font

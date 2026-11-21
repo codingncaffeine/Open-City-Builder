@@ -170,7 +170,7 @@ bool cSC4NewsTickerWinProc::Init(gz::cIGZWinGen* window) {
     if (gz::cIGZWinCtrlMgr* controls = RZ::WCM()) {
         font = controls->SystemFont(kNewsTickerFontId);
     } else if (gz::IWinFontSource* fonts = gz::WinFontSource()) {
-        font = fonts->Font(kNewsTickerFontId);   // port: the native build has no control manager; its font seam
+        font = fonts->Font(kNewsTickerFontId);   // port: a host without the control manager service (the Mac viewer)
     }
     if (font) lineHeight_ = font->GlyphHeight();   // IWinFont vslot 0x118 (the cIGZFont line height)
     flipperArea_.bottom = lineHeight_ * 3 + flipperArea_.top;

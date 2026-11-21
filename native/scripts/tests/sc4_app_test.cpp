@@ -423,7 +423,7 @@ int main() {
         };
         struct Fonts final : cRZSystemService, cIGZFontSys {
             Fonts() : cRZSystemService(kGZFontSysDefaultServiceID, 100) {}
-            std::vector<std::string> directories, aliases, removed;
+            std::vector<std::string> directories, aliases, removed, acquired;
             bool QueryInterface(std::uint32_t iid, void** out) override {
                 if (iid == kGZIID_cIGZFontSys) { *out = static_cast<cIGZFontSys*>(this); AddRef(); return true; }
                 return cRZSystemService::QueryInterface(iid, out);
@@ -436,7 +436,11 @@ int main() {
             void SetDefaultFontRenderer(cIGZFontRenderer*) override {}
             void SetDefaultFontAntialiasing(int) override {}
             void SetDefaultUnantialiasedSizeRange(int, int, const cIGZString*) override {}
-            cIGZFont* FontAcquire(const cIGZString&, int, std::uint32_t, int, bool) override { return nullptr; }
+            cIGZFont* FontAcquire(const cIGZString& names, int type, std::uint32_t size, int style, bool reuse) override {
+                acquired.push_back(std::string(names.ToChar()) + "/" + std::to_string(type) + "/" + std::to_string(size) + "/" +
+                                   std::to_string(style) + "/" + (reuse ? "reuse" : "new"));
+                return nullptr;
+            }
             cIGZFont* FontAcquire(const cIGZString&, std::uint32_t, int, bool) override { return nullptr; }
             cIGZFont* FontAcquire(int, std::uint32_t, int, std::uint32_t, bool) override { return nullptr; }
             int FontRelease(cIGZFont*) override { return 0; }
@@ -451,21 +455,6 @@ int main() {
             std::uint32_t EnumerateFontSubstitutions(const cIGZString&, cIGZString**, std::uint32_t) override { return 0; }
             bool IsFontAvailable(const cIGZString&, std::uint32_t, int) override { return false; }
             bool IsSubstitutionAvailable(const cIGZString&, cIGZString&) override { return false; }
-        };
-        struct Style final : gz::IWinFont {
-            int refs = 1;
-            bool QueryInterface(std::uint32_t, void**) override { return false; }
-            std::uint32_t AddRef() override { return ++refs; }
-            std::uint32_t Release() override { return --refs; }
-            std::uint32_t DefaultTextColor() override { return 0; }
-            std::uint32_t DefaultShadowColor() override { return 0; }
-            std::int16_t LineHeight(int, int) override { return 0; }
-            int CountLines(const char*, std::uint32_t, int) override { return 0; }
-            int WrappedWidth(const char*, std::uint32_t, int) override { return 0; }
-            void MeasureText(const char*, std::uint32_t, cRZRect&) override {}
-            int TextWidth(const char*, std::uint32_t) override { return 0; }
-            void DrawText(IWinBuffer*, int, int, const char*, std::uint32_t, std::uint32_t, std::uint32_t, const cRZRect*, int) override {}
-            void DrawTextBox(IWinBuffer*, const cRZRect&, const char*, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, const cRZRect*, int) override {}
         };
         struct City final : cISC4City {
             std::string name = "Twin Peaks", path, newPath;
@@ -529,21 +518,12 @@ int main() {
         a->SetupFontSet();
         CHECK(fonts->directories.size() == 2 && fonts->directories[0] == root + "/Data/Plugins/" && fonts->directories[1] == root + "/Data/Fonts/");
 
-        // [Font Styles]: the style object is registered and released; without a control manager only the release is seen
-        Style style;
-        std::uint32_t styleId = 0;
-        a->StartupHooks().createFontStyleFromSpecification = [&](const cRZString& spec, std::uint32_t& id) -> gz::IWinFont* {
-            CHECK(std::strcmp(spec.ToChar(), "arial mt|12") == 0);
-            id = 0x68963c4c;
-            styleId = id;                      // what the application registered the style under
-            return &style;
-        };
-        style.refs = 1;
-        a->SetFontStyle(cRZString("Status"), cRZString("arial mt|12"));
-        CHECK(style.refs == 0 && styleId == 0x68963c4c);   // the style is released once it is registered
-        style.refs = 1;
-        cSC4App::SetFontStyleStatic(cRZString("Status"), cRZString("arial mt|12"), a);
-        CHECK(style.refs == 0);
+        // [Font Styles]: the specification's faces, size and style flags acquire the font (type 0, reused); this font
+        // system has no such font, so nothing is registered
+        a->SetFontStyle(cRZString("Status"), cRZString("\"Arta\", \"14\", \"italic|aa=bg|underline\", 0x5a809915"));
+        CHECK(fonts->acquired.size() == 1 && fonts->acquired[0] == "Arta/0/14/6/reuse");
+        cSC4App::SetFontStyleStatic(cRZString("Status"), cRZString("\"StocletITC TT\", \"15\", \"bold\", 0xea85d303"), a);
+        CHECK(fonts->acquired.size() == 2 && fonts->acquired[1] == "StocletITC TT/0/15/1/reuse");
 
         // the exception report uploader: found in the user plugin directory, then the plugin directory, then the app's
         std::vector<std::string> spawned;

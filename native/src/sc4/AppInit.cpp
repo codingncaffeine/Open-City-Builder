@@ -1,9 +1,19 @@
 // cSC4App::Init and PostFrameWorkInit: bringing the application up once the services exist.
 #include <cstring>
+#include <initializer_list>
 
 #include "gz/CheatCodeManager.h"
 #include "gz/GZCOMDirector.h"
+#include "gz/FontRenderer.h"
+#include "gz/FontSys.h"
 #include "gz/RZServices.h"
+#include "gz/ScriptTerp.h"
+#include "gz/UIScriptService.h"
+#include "gz/WinCtrlMgr.h"
+#include "gz/WinFont.h"
+#include "rz/cRZFile.h"
+#include "rz/cRZIniFile.h"
+#include "sc4/DBSegment.h"
 #include "gz/cIGZFrameWork.h"
 #include "lua/ISCLua.h"
 #include "render/gd/VideoModes.h"
@@ -312,11 +322,73 @@ bool cSC4App::OnTick(std::uint32_t) { return true; }
 
 // ---- window control manager ---------------------------------------------------------------------------------
 
-// The default control colors (id -> r, g, b), then the fonts / bitmaps (host hook: the font system, the font-style
-// script and the resource bitmaps are not recovered).
+// The default control colors (id -> r, g, b); the font system's defaults and font set; the two system fonts ("Arta" 12
+// under four ids, "Arta" 20); FontStyle.ini (the plug-in directory's, else the data directory's, else the built-in
+// resource {0, 0x4a87bfe8, 0x2a87bffc} through a temporary file): its [Font Aliases] as font substitutions and its
+// [Font Styles] as system fonts, font mappings and a script vocabulary; then the stock images (host hook).
 void cSC4App::SetupWinCtrlMgr() {
     gz::cIGZWinCtrlMgr* controls = RZ::WCM();
     ApplyControlColors(controls);
+    if (auto* fonts = static_cast<cIGZFontSys*>(RZ::FO())) {
+        cRZString path;
+        fonts->SetDefaultFontAntialiasing(3);
+        if (startupHooks_.drawSystemAvailable && startupHooks_.drawSystemAvailable()) {
+            void* renderer = nullptr;
+            if (GZCOM()->CreateInstance(0x8b3255f9, kGZIID_cIGZFontRenderer, &renderer))
+                fonts->SetDefaultFontRenderer(static_cast<cIGZFontRenderer*>(renderer));
+            if (renderer) static_cast<cIGZFontRenderer*>(renderer)->Release();
+        }
+        SetupFontSet();
+        auto systemFont = [&](std::uint32_t size, std::initializer_list<std::uint32_t> ids) {
+            cIGZFont* font = fonts->FontAcquire(cRZString("Arta"), 0, size, 2, true);
+            if (!font) return;
+            font->SetFontColor(GraphicSystemColor(0, 0, 0), 0x8000000);
+            gz::IWinFont* view = gz::MakeWinFont(font);
+            if (controls)
+                for (std::uint32_t id : ids) controls->SetSystemFont(static_cast<int>(id), view);
+            if (view) view->Release();
+            font->Release();
+        };
+        systemFont(12, {0x68963c4c, 0xc8963c5c, 0x68963c54, 0xa2cae9df});
+        systemFont(20, {0x28963c70});
+
+        GetPluginDirectory(path);
+        path.AppendChars("FontStyle.ini", 13);
+        if (!cRZFile::FileExists(path)) {
+            GetDataDirectory(path, 0);
+            path.AppendChars("FontStyle.ini", 13);
+        }
+        bool temporary = false;
+        if (!cRZFile::FileExists(path)) {
+            path.AssignFromCString("");
+            if (cRZFile::MakeTempPathName(path, nullptr)) {
+                if (sc4::SC4ReadBinaryRecord(cGZPersistResourceKey{0, 0x4a87bfe8, 0x2a87bffc}, path) == 0xffffffffu)
+                    path.AssignFromCString("");
+                temporary = true;
+            }
+        }
+        if (path.Strlen() != 0) {
+            cRZIniFile ini(path);
+            ini.EnumEntries(cRZString("Font Aliases"), SetFontAliasStatic, this);
+            void* service = nullptr;
+            if (framework_ && framework_->GetSystemService(kGZSID_cGZUIScriptService, kGZIID_cIGZUIScriptService, &service) && service) {
+                if (cIGZScriptTerp* terp = static_cast<cIGZUIScriptService*>(service)->GetScriptInterpreter()) {
+                    terp->AddRef();
+                    void* vocabulary = nullptr;
+                    if (GZCOM()->CreateInstance(0xba2e7954, kGZIID_cIGZScriptVocab, &vocabulary) && vocabulary) {
+                        SetFontStyleVocabulary(static_cast<IScriptVocab*>(static_cast<cIGZUnknown*>(vocabulary)));
+                        terp->PushVocabulary(static_cast<IScriptVocab*>(static_cast<cIGZUnknown*>(vocabulary)));
+                        ini.EnumEntries(cRZString("Font Styles"), SetFontStyleStatic, this);
+                        static_cast<cIGZUnknown*>(vocabulary)->Release();
+                        SetFontStyleVocabulary(nullptr);
+                    }
+                    terp->Release();
+                }
+                static_cast<cIGZUnknown*>(service)->Release();
+            }
+        }
+        if (temporary) cRZFile::Remove(path);
+    }
     if (startupHooks_.setupWinCtrlResources) startupHooks_.setupWinCtrlResources(controls);
 }
 
