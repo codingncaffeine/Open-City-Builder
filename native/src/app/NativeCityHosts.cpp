@@ -40,6 +40,7 @@ void InstallDemandSimulatorStub();
 void InstallDisasterStub();
 void InstallDisasterHosts();   // NativeDisasters.cpp
 void InstallDisasterTools();   // NativeDisasterTools.cpp
+void InstallPlayerDrive();     // NativePlayerDrive.cpp
 void InstallEffectsStub();
 void InstallEffectsManagerHost();   // NativeEffects.cpp
 void InstallCityPanelHosts();
@@ -220,6 +221,7 @@ void InstallStubHosts() {
     InstallViewInputStub();
     InstallEffectToolStub();
     InstallDisasterTools();               // the disaster menu's tools; the effect tools' cursor effects replace the stub
+    InstallPlayerDrive();                 // U-Drive-It: the player-drive tool's services
     InstallPlaceLotStub();
     InstallQueryStub();
     InstallQueryHost();                   // the real query host replaces the stub above

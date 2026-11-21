@@ -3,9 +3,11 @@
 // (app/hosts/StubAutomataManager.cpp) for the native game: the framework (messages, the animation ticks), the city (script
 // groups, the 24 hour clock, cells, terrain), resources (tuning, exemplars), creation of automata by class id and the
 // managers' views of loaded automata.
-//   PARTIAL: cheats, the debug view, player drive, the camera and view utilities, path views, the dispatch view, the group
+//   PARTIAL: cheats, the debug view, path views, the dispatch view, the group
 //   budget, the network manager's cell masks, the traffic simulator's edge counts and the response occupants answer
 //   neutrally; the population pass therefore spawns nothing yet.
+#include <cstdio>
+#include <cstdlib>
 #include <list>
 #include <vector>
 
@@ -30,6 +32,7 @@
 #include "sc4/ServiceLocator.h"
 #include "sc4/Simulator.h"
 #include "sc4/TrafficAutomataManager.h"
+#include "sc4/TrafficNetworkMap.h"
 #include "sc4/VehicleManager.h"
 #include "sc4/cSC424HourClock.h"
 #include "sc4/cSC4City.h"
@@ -43,6 +46,15 @@ float NativeAttractionCommotion(const float* xyz);   // app/NativeAutomataScript
 }
 
 namespace native { int NativeViewZoom(); }
+namespace native {
+sc4::IAutomataPlayerDriveControl* NativeCreatePlayerDriveControl();   // app/NativePlayerDrive.cpp
+void NativeSetPlayerDriveControl(sc4::IAutomataPlayerDriveControl* control);
+sc4::IAutomataPlayerDriveControl* NativePlayerDriveControl();
+void NativeAddPlayerDriveControl(sc4::IAutomataPlayerDriveControl* control, int operation);
+bool NativeCurrentInputControlIsPlayerDrive();
+sc4::IAutomataCameraControl* NativeAutomataCameraControl();
+sc4::ITrafficNetworkMapLot* NativeTrafficLotAt(int cellX, int cellZ);   // app/NativeTrafficNetworkMap.cpp
+}
 namespace native {
 sc4::ITrafficSimulatorApi* NativeTrafficSimulatorApi();          // app/NativeTrafficAutomata.cpp
 sc4::ITrafficNetworkManagerApi* NativeTrafficNetworkApi();
@@ -271,14 +283,17 @@ public:
     // ---- views / rendering
     IAutomataViewUtilities* ViewUtilities() override { return CityRenderer() ? &g_viewUtilities : nullptr; }
     IAutomataPlayerDriveControl* ActiveInputControl() override { return nullptr; }
-    IAutomataPlayerDriveControl* PlayerDriveControl() override { return nullptr; }
-    void SetPlayerDriveControl(IAutomataPlayerDriveControl*) override {}
-    IAutomataPlayerDriveControl* CreatePlayerDriveControl() override { return nullptr; }
-    void AddViewInputControl(IAutomataPlayerDriveControl*, int) override {}
-    void SetVehicleManagerSpeed(float) override {}
+    IAutomataPlayerDriveControl* PlayerDriveControl() override { return NativePlayerDriveControl(); }
+    void SetPlayerDriveControl(IAutomataPlayerDriveControl* control) override { NativeSetPlayerDriveControl(control); }
+    IAutomataPlayerDriveControl* CreatePlayerDriveControl() override { return NativeCreatePlayerDriveControl(); }
+    void AddViewInputControl(IAutomataPlayerDriveControl* control, int operation) override { NativeAddPlayerDriveControl(control, operation); }
+    // SL::spVehicleManager vslot 0xb8 SetMaxCount: the count limit while the player drives, and the tuning's one after.
+    void SetVehicleManagerSpeed(float count) override {
+        if (auto* m = Concrete<cSC4AutomataManager>(CityComponent::VehicleManager)) m->SetMaxCount(static_cast<int>(count));
+    }
     void SetGhostModels(bool) override {}
-    bool CurrentInputControlIsPlayerDrive() override { return false; }
-    IAutomataCameraControl* CameraControl() override { return nullptr; }
+    bool CurrentInputControlIsPlayerDrive() override { return NativeCurrentInputControlIsPlayerDrive(); }
+    IAutomataCameraControl* CameraControl() override { return NativeAutomataCameraControl(); }
     bool CameraFollowFast() override { return false; }
     float TerrainHeight(float x, float z) override { cSTETerrain* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
     bool TerrainShadowEnabled() override { return false; }
@@ -293,7 +308,7 @@ public:
         static SimulatorView view;
         return CitySimulatorObject() ? &view : nullptr;
     }
-    bool VehicleManagerPaused() override { return false; }   // IsDrivingMode: the native game has no driving mode yet
+    bool VehicleManagerPaused() override { return NativeCurrentInputControlIsPlayerDrive(); }   // the vehicle manager's IsDrivingMode
     bool LandfillDeveloperPresent() override { return false; }
     int LandfillSourceBuildingCount() override { return 0; }
     bool GetTuningProperties(cISCPropertyHolder** out) override {
@@ -371,6 +386,24 @@ public:
     cISC4Occupant* AsCityOccupant(IAutomataOccupant* view) override { return CityOccupantOf(view); }   // a dispatch's source station
     IAutomataOccupant* AsAutomataOccupant(cISC4Occupant*) override { return nullptr; }
     ITrafficNetworkOccupant* AsTrafficNetworkOccupant(IAutomataNetworkOccupant*) override { return nullptr; }
+    // GetRandomCreationPoint's network path: the lot at a cell and the traffic network map's surrounding roads.
+    bool LotCellRectAt(int cellX, int cellZ, SC4RectInt32& rect) override {
+        ITrafficNetworkMapLot* lot = NativeTrafficLotAt(cellX, cellZ);
+        if (!lot) return false;
+        std::int32_t r[4] = {0, 0, 0, 0};
+        lot->GetBoundingRect(r);
+        rect.x0 = r[0]; rect.z0 = r[1]; rect.x1 = r[2]; rect.z1 = r[3];
+        return true;
+    }
+    bool SurroundingRoads(std::vector<ITrafficNetworkMapOccupant*>& out, const SC4RectInt32& rect, int maxCells, int minCells,
+                          std::uint32_t networkFlags) override {
+        auto* map = Concrete<cSC4TrafficNetworkMap>(CityComponent::TrafficNetwork);
+        const bool found = map && map->GetSurroundingRoads(out, rect, maxCells, minCells, networkFlags);
+        if (std::getenv("SC4_UDIDEBUG"))
+            std::fprintf(stderr, "udi: roads around (%d, %d)-(%d, %d) within %d cells, flags 0x%x: %zu (map %s)\n", rect.x0, rect.z0, rect.x1, rect.z1,
+                         maxCells, networkFlags, out.size(), map ? "yes" : "no");
+        return found;
+    }
     // ---- IVehicleManagerHost
     bool HasRenderProperties() const override { return false; }
     float AutomataDensityFactor() override { return 1.0f; }
