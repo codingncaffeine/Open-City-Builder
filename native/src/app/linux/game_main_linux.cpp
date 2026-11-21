@@ -1182,6 +1182,8 @@ int RunScenario(const std::string& path) {
         } else if (command == "wintree") {   // wintree [DEPTH]: the window tree under the main window (id, visible, area, kids)
             int depth = 4; words >> depth;
             DumpTree(gMgr->GetMainWindow(), 0, depth);
+        } else if (command == "cityview") {   // cityview: the city view's compass, alert border and other parts as they stand
+            native::NativeCityViewReport();
         } else if (command == "registry") {   // registry: the game-data registry's entry tree
             native::NativeRegistryReport();
         } else if (command == "hour") {   // hour N: the city clock jumps to hour N (its hour, minute and day/night messages)

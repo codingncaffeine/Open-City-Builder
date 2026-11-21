@@ -273,10 +273,10 @@ constexpr std::uint32_t kCursorTextIconInstance = 0x14416160;
 constexpr std::uint32_t kCostIndicatorBufferW = 0x80;         // the cost indicator's backing buffer
 constexpr std::uint32_t kCostIndicatorBufferH = 0x20;
 constexpr std::uint32_t kCostIndicatorColorType = 1;
-// The alert border's three images (UpdateAlertBorder): disaster layer / city situation / simulator busy.
+// The alert border's three images (UpdateAlertBorder): a disaster going on / a city situation / the simulator paused.
 constexpr std::uint32_t kAlertImageDisaster = 0x14315e60;
 constexpr std::uint32_t kAlertImageSituation = 0x14315e62;
-constexpr std::uint32_t kAlertImageBusy = 0x14315e61;
+constexpr std::uint32_t kAlertImagePaused = 0x14315e61;
 // The three simulation-speed buttons of the toolbar (ids 0x100a2a818, modes 0x100a2a830).
 constexpr std::uint32_t kSpeedButtonIds[3] = {0x6a4fbb31, 0x4a4fbb60, 0x8998bbdf};
 constexpr int kSpeedButtonModes[3] = {0, 1, 2};
@@ -566,7 +566,7 @@ public:
     virtual void RestoreLighting() = 0;                               // lighting manager vslot 0x40
     // --- limits taken from the app object
     virtual int VirtualZoomLimit() = 0;                               // SL::spSC4 vslot 0x130: null -> 5, else 5 - (byte 0xf10 == 0)
-    virtual bool ProgressScreenWanted() = 0;                          // SL::spSC4 vslot 0x138 -> +0x208 != nullptr
+    virtual bool CityBeingObliterated() = 0;                          // SL::spSC4 vslot 0x138 (the new-city specification) -> +0x208 (its obliterated-city segment) != nullptr
     // --- objects Init creates and Shutdown tears down (each stands for one original call block)
     virtual cIGZUnknown* CreateProgressScreen(cIGZWin* parent, const cRZRect& area, bool flag) = 0;   // new cSC4ProgressScreen(area, flag)
     virtual void InitProgressScreen(cIGZUnknown* screen) = 0;         // cSC4ProgressScreen::Init @ 0x10032d23e
@@ -698,12 +698,12 @@ public:
     virtual void AddAutomataToItemList(cIGZUnknown* manager, std::multimap<int, cISC4CatalogItem*>& items) { (void)manager; (void)items; }
     // cSC4View3DWin::DoEstablishCityDialog @ 0x10078ff30 (PARTIAL: builds the modal city dialog).
     virtual bool ShowEstablishCityDialog() = 0;
-    // SL::spCity vslot 0x240 (cSC4City::GetDisasterLayer) -> the disaster layer's vslot 0x50.
+    // SL::spCity vslot 0x240 (cSC4City::GetDisasterLayer) -> the disaster layer's vslot 0x50 (IsADisasterOngoing).
     virtual bool DisasterAlertActive() = 0;
-    // SL::spCity vslot 0x188 (cSC4City::GetCitySituationManager) -> the manager's vslot 0x30 (non-null).
+    // SL::spCity vslot 0x188 (cSC4City::GetCitySituationManager) -> the manager's vslot 0x30 (GetActiveSituation) is non-null.
     virtual bool SituationAlertActive() = 0;
-    // SL::spSimulator vslot 0x78.
-    virtual bool SimulatorBusy() = 0;
+    // SL::spSimulator vslot 0x78 (IsPaused).
+    virtual bool SimulatorPaused() = 0;
     // SL::spGS vslot 0x20 @ 0x10078a53c: a graphics buffer for the cost indicator (+0x5c0), or null.
     virtual cIGZBuffer* CreateImageBuffer() = 0;
     // SL::spCity vslot 0x288 (cSC4City::GetAdvisorSystem): the mayor sub-panel's advisor window.

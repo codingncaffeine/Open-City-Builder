@@ -75,8 +75,14 @@
 #include "sc4/AnimationTickManager.h"
 #include "app/NativeAnimationTicks.h"
 #include "app/NativeWinMgr.h"
+#include "sc4/WinProcs.h"
+#include "sc4/WinAuraAlert.h"
+#include "sc4/RenderProperties.h"
+#include "sc4/CameraControl.h"
+#include "sc4/LightingManager.h"
+#include "gz/GZCOMDirector.h"
 
-namespace native { void GoToNextDisaster(); }   // NativeDisasters.cpp
+namespace native { void GoToNextDisaster(); bool NativeDisasterOngoing(); }   // NativeDisasters.cpp, NativeRiot.cpp
 #include "app/NativeDisasterTools.h"
 namespace native {
 sc4::INewsTickerWindow* CreateNewsTickerWindow();     // app/NativeWinHtml.cpp
@@ -154,6 +160,39 @@ private:
     static cSC4Simulator* Sim() { return CityComponentAs<cSC4Simulator>(CityComponent::Simulator, kGZCLSID_cSC4Simulator); }
 };
 
+// SL::spRenderProperties: the application's render property set (cSC4App's, published by SL::OnAppInit1); null before it.
+cSC4RenderProperties* AppRenderPropertySet() { return dynamic_cast<cSC4RenderProperties*>(SL::spRenderProperties); }
+
+// kDisplayAlertBorders: bool render property 34 (the record at +0x8b8 the alert border reads), on by default.
+constexpr std::uint32_t kPropDisplayAlertBorders = 34;
+
+// The alert border's SL::spRenderProperties (cSC4WinAlertBorder keeps it from its constructor and paints its frame only while
+// kDisplayAlertBorders is on).
+class AlertBorderProperties final : public IRenderProperties {
+public:
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return 2; }   // static: the border's reference never frees it
+    std::uint32_t Release() override { return 1; }
+    bool AlertBordersEnabled() override {
+        cSC4RenderProperties* properties = AppRenderPropertySet();
+        return properties && properties->BoolValue(kPropDisplayAlertBorders);
+    }
+};
+
+// cSC4CompassWinProc's services: the camera control's rotation (SL::spRenderer vslot 0x80 -> +0x114) and SL::spMS2, where the
+// proc listens for the city-ready (0x26d31ec1) and view-changed (0xa6b79602) messages.
+class CompassHost final : public ICompassHost {
+public:
+    int CameraRotation() override {
+        auto* renderer = SL::spRenderer ? static_cast<cISC43DRender*>(SL::spRenderer) : nullptr;
+        cSC4CameraControl* control = renderer ? renderer->GetCameraControl() : nullptr;
+        return control ? control->Rotation() : 0;
+    }
+    void AddNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->AddNotification(target, message); }
+    void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->RemoveNotification(target, message); }
+};
+CompassHost g_compassHost;
+
 struct StubView3DWin final : IView3DWinHost {
     View3DNotifications notifications_;
     cIGZMessageServer2* MessageServer2() override { return SL::spMS2; }   // SL::spMS2: erosion, view filter / level and tool changes
@@ -187,12 +226,20 @@ struct StubView3DWin final : IView3DWinHost {
     bool CheatCodeManagerPresent() override { return native::GameCheatCodeManager() != nullptr; }
     bool LotPlopCheatsEnabled() override { return native::GameDebugMode(); }
     cIGZWinKeyAccelerator* CreateKeyAccelerator() override { return native::CreateGameKeyAccelerator(gz::kKeyAcceleratorCityView); }
-    cSC4RenderProperties* GlobalRenderProperties() override { return {}; }
-    cSC4RenderProperties* AppRenderProperties() override { return {}; }
-    void SetScrollLightingHighlight() override {}
-    void RestoreLighting() override {}
+    cSC4RenderProperties* GlobalRenderProperties() override { return AppRenderPropertySet(); }   // SL::spRenderProperties
+    cSC4RenderProperties* AppRenderProperties() override {   // SL::spSC4 vslot 0x160 GetRenderProperties: the same set
+        cSC4App* app = BootApplication();
+        return app ? dynamic_cast<cSC4RenderProperties*>(app->GetRenderProperties()) : nullptr;
+    }
+    // While the view scrolls without partial backing-store copies, the lighting manager tints the scene: SetLightingTint(nS3D::kColorYellow
+    // (1, 1, 0), 0.1), and ResetLightingTint when the scroll ends.
+    void SetScrollLightingHighlight() override {
+        if (auto* lighting = SceneLighting()) lighting->SetLightingTint(cS3DVector3{1.0f, 1.0f, 0.0f}, 0.1f);
+    }
+    void RestoreLighting() override { if (auto* lighting = SceneLighting()) lighting->ResetLightingTint(); }
+    static cISC4LightingManager* SceneLighting() { return SL::spLightingManager ? static_cast<cISC4LightingManager*>(SL::spLightingManager) : nullptr; }
     int VirtualZoomLimit() override { return 4; }
-    bool ProgressScreenWanted() override { return {}; }
+    bool CityBeingObliterated() override { return {}; }
     cIGZUnknown* CreateProgressScreen(cIGZWin* parent, const cRZRect& area, bool flag) override { return {}; }
     void InitProgressScreen(cIGZUnknown* screen) override {}
     void SetProgressCaption(cIGZUnknown* screen, int id, const cIGZString& text) override {}
@@ -233,7 +280,17 @@ struct StubView3DWin final : IView3DWinHost {
         button->AddRef();
         return static_cast<cIGZWin*>(static_cast<cGZWin*>(button));
     }
-    cIGZWin* CreateCompassWindow() override { return {}; }
+    // GZCOM()->CreateInstance(0xca5d3294, 0xca5d3290): the alert border (cSC4WinAlertBorder) the view lays over its whole area; its
+    // window with one reference.
+    cIGZWin* CreateCompassWindow() override {
+        void* raw = nullptr;
+        if (!GZCOM() || !GZCOM()->CreateInstance(kCompassWindowExemplar, kCompassWindowIid, &raw) || !raw) return nullptr;
+        auto* border = static_cast<cISC4WinAlertBorder*>(raw);
+        cIGZWin* window = border->AsIGZWin();
+        window->AddRef();
+        border->Release();
+        return window;
+    }
     void LocalisedString(std::uint32_t group, std::uint32_t instance, cRZString& out) override {}
     // new cSC4PanelUIWinProc (AddGUI @ 0x1007892fc): the options bar's save / region / quit / snapshot buttons become view commands
     gz::cIGZWinProc* CreatePanelUIWinProc() override {
@@ -256,7 +313,16 @@ struct StubView3DWin final : IView3DWinHost {
     IGraphsViewWindow* CreateGraphsViewWinProc(cIGZWin* window) override { return native::CreateGraphsViewWindow(window); }
     IBuildingSelectWindow* CreateBuildingSelectWinProc(cIGZWin* window) override { return {}; }
     IAdvisorPopupQueue* CreateAdvisorPopupTracker() override { return CreateAdvisorPopupQueue(); }
-    void AttachCompassWinProc(gz::cIGZWinGen* window) override {}
+    // new cSC4CompassWinProc; gen->SetWinProc(proc): the window holds the only reference. The original builds the GUI on the city's
+    // init-begins message, so the proc is listening when the city-ready message (0x26d31ec1) shows the face of the camera's rotation;
+    // natively AddGUI runs on the city-ready message itself, after its delivery list was made, so the proc takes that update here.
+    void AttachCompassWinProc(gz::cIGZWinGen* window) override {
+        auto* proc = new cSC4CompassWinProc(&g_compassHost);
+        proc->AddRef();
+        window->SetWinProc(proc);
+        if (CityExists() && window->GetWinProc() == proc) proc->UpdateRotation();
+        proc->Release();
+    }
     cISC4WinCalloutBox* CreateCalloutBox() override { return native::CreateCalloutBox(); }
     gz::cIGZWinBMP* CreateWinBMP() override { return {}; }
     void InitMapView(cIGZWin* window) override { native::NativeInitMapView(window); }   // cSC4WinMapView::InitWindow
@@ -350,9 +416,12 @@ struct StubView3DWin final : IView3DWinHost {
         sc4::cSC4View3DWin* view = CityView3DWin();
         return view && native::RunEstablishCityDialog(static_cast<cIGZWin*>(static_cast<cGZWin*>(view)));
     }
-    bool DisasterAlertActive() override { return {}; }
-    bool SituationAlertActive() override { return {}; }
-    bool SimulatorBusy() override { return {}; }
+    bool DisasterAlertActive() override { return native::NativeDisasterOngoing(); }   // the disaster layer's IsADisasterOngoing
+    bool SituationAlertActive() override {   // the situation manager's GetActiveSituation is set
+        auto* m = SituationManager();
+        return m && m->GetActiveSituation() != nullptr;
+    }
+    bool SimulatorPaused() override { auto* s = CityComponentAs<cSC4Simulator>(CityComponent::Simulator, kGZCLSID_cSC4Simulator); return s && s->IsPaused(); }
     cIGZBuffer* CreateImageBuffer() override { return {}; }
     IAdvisorWindow* AdvisorWindow() override { return native::NativeAdvisorWindow(); }
     cSC4ViewInputControl* CreateZoningTool(std::uint32_t type) override { return native::CreateZoneTool(static_cast<int>(type)); }
@@ -433,6 +502,7 @@ struct StubView3DWin final : IView3DWinHost {
 private:
     bool rewardsUnlocked_ = false;   // the view's +0x456
 };
+StubView3DWin& InstalledHost() { static StubView3DWin host; return host; }
 }  // namespace
 
 // new cSC4GamePreferencesWinProc; AddRef; ShowDialog(kGameOptions); DoModalWin: the "Game Options" dialog, from the city view's
@@ -706,14 +776,52 @@ sc4::IAdvisorPopupQueue* CreateAdvisorPopupQueue() {
 }
 
 void InstallView3DWinStub() {
-    static StubView3DWin s;
-    sc4::SetView3DWinHost(&s);
+    sc4::SetView3DWinHost(&InstalledHost());
     static DetokenizerHost detokenizer;
     sc4::SetDetokenizerHost(&detokenizer);
     static AdvisorPopupHost popups;
     sc4::SetAdvisorPopupTrackerHost(&popups);
     static AdvisorHeadHost heads;
     sc4::SetAdvisorUIImageHost(&heads);
+    static AlertBorderProperties alertBorderProperties;
+    sc4::SetWinRenderProperties(&alertBorderProperties);
+}
+
+// The kit's `cityview`: what the city view's parts show, for the checks pixels cannot make.
+void NativeCityViewReport() {
+    sc4::cSC4View3DWin* view = CityView3DWin();
+    if (!view) { std::printf("cityview: no city view\n"); return; }
+    auto* viewWin = static_cast<cIGZWin*>(static_cast<cGZWin*>(view));
+    cIGZWin* compass = viewWin->GetChildWindowFromIDRecursive(sc4::kCompassChildId);
+    std::printf("cityview: compass %s rotation %d", compass ? "present" : "missing", g_compassHost.CameraRotation());
+    if (compass) {
+        void* proc = nullptr;
+        void* genRaw = nullptr;
+        if (compass->QueryInterface(sc4::kGZIID_cIGZWinGenView, &genRaw) && genRaw) {
+            auto* gen = static_cast<gz::cIGZWinGen*>(genRaw);
+            proc = gen->GetWinProc();
+            gen->Release();
+        }
+        const cRZRect& ca = compass->GetAreaAbsolute();
+        std::printf(" at %d,%d,%d,%d visible %d proc %s faces", ca.left, ca.top, ca.right, ca.bottom, compass->IsVisible() ? 1 : 0, proc ? "attached" : "none");
+        std::uint32_t id = compass->GetID() + 1;
+        for (cIGZWin* face = compass->GetChildWindowFromID(id); face; face = compass->GetChildWindowFromID(++id))
+        {
+            const cRZRect& a = face->GetArea();
+            std::printf(" %08x:%d(%d,%d,%d,%d)", id, face->IsVisible() ? 1 : 0, a.left, a.top, a.right, a.bottom);
+        }
+    }
+    std::printf("\n");
+    cIGZWin* border = viewWin->GetChildWindowFromID(sc4::kCompassWindowId);
+    StubView3DWin& host = InstalledHost();
+    std::printf("cityview: alert border %s", border ? "present" : "missing");
+    if (border) {
+        const cRZRect& area = border->GetArea();
+        std::printf(" area %d,%d,%d,%d visible %d", area.left, area.top, area.right, area.bottom, border->IsVisible() ? 1 : 0);
+    }
+    cSC4RenderProperties* properties = AppRenderPropertySet();
+    std::printf(" disaster %d situation %d paused %d borders-on %d\n", host.DisasterAlertActive() ? 1 : 0, host.SituationAlertActive() ? 1 : 0,
+                host.SimulatorPaused() ? 1 : 0, properties && properties->BoolValue(kPropDisplayAlertBorders) ? 1 : 0);
 }
 
 }  // namespace native

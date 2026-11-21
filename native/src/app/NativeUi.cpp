@@ -350,6 +350,8 @@ bool InitUiScripts(WinMgr* mgr) {
     gz::RegisterDirectorMaker("cSC4WinRCI", +[]() -> cIGZUnknown* { return MakeWin<sc4::cSC4WinRCI>(); });
     gz::RegisterDirectorMaker("cSC4WinTrendBar", +[]() -> cIGZUnknown* { return MakeWin<sc4::cSC4WinTrendBar>(); });
     gz::RegisterDirectorMaker("cSC4WinAuraBar", +[]() -> cIGZUnknown* { return MakeWin<sc4::cSC4WinAuraBar>(); });
+    // The city view's alert border (clsid 0xca5d3294): the frame over the whole view that a disaster, a city situation or the pause shows.
+    gz::RegisterDirectorMaker("cSC4WinAlertBorder", +[]() -> cIGZUnknown* { return MakeWin<sc4::cSC4WinAlertBorder>(); });
     // The slider (clsid 0x21325208) and the grid (0xdaa6b9bf): without makers the scripts built bare windows in their place
     // (the audio options' volume sliders drew as filled boxes and its playlist took no rows).
     gz::RegisterDirectorMaker("cGZWinSlider", +[]() -> cIGZUnknown* { return MakeWin<gz::cGZWinSlider>(); });

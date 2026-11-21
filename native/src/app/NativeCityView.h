@@ -24,6 +24,8 @@ void ListenForSavedView();
 const float* CityViewEye();
 int CityViewZoom();
 int CityViewRotation();   // SC4ViewUtilities +0x18 (i386 +0x10): the view rotation 0..3
+// The kit's `cityview`: the view's compass faces, alert border, progress screen and style selector (app/NativeView3DWinHost.cpp).
+void NativeCityViewReport();
 // The vehicle or pedestrian automata layer is active (NativeCityQueries.cpp).
 bool CityAutomataLayersActive();
 // Builds the stack for the city that is loaded and attaches it to the view; true when the renderer came up.

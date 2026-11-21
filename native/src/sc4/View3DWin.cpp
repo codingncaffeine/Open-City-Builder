@@ -150,7 +150,7 @@ bool cSC4View3DWin::Init() {
     frameTimer_.Start();
     if (host_) {
         keyAccelerator_ = host_->CreateKeyAccelerator();                     // exemplar 0x42e3ea4b + GZCOM
-        CreateProgressScreen(host_->ProgressScreenWanted());                 // @ 0x100780910
+        CreateProgressScreen(host_->CityBeingObliterated());                 // @ 0x100780910
     }
     return initialized_;
 }
@@ -2451,7 +2451,7 @@ void cSC4View3DWin::UpdateSpeedButtons() {
 }
 
 // UpdateAlertBorder (0x100787a1c): the compass window's alert border shows one of three images - the disaster
-// layer (0x14315e60), the city situation manager (0x14315e62) or the simulator being busy (0x14315e61) - in
+// layer (0x14315e60), the city situation manager (0x14315e62) or the simulator being paused (0x14315e61) - in
 // that order, and no image at all when none applies.
 void cSC4View3DWin::UpdateAlertBorder() {
     void* view = nullptr;
@@ -2461,7 +2461,7 @@ void cSC4View3DWin::UpdateAlertBorder() {
     if (host_) {
         if (host_->DisasterAlertActive()) image = kAlertImageDisaster;          // spCity 0x240 -> 0x50
         else if (host_->SituationAlertActive()) image = kAlertImageSituation;   // spCity 0x188 -> 0x30
-        else if (host_->SimulatorBusy()) image = kAlertImageBusy;               // spSimulator 0x78
+        else if (host_->SimulatorPaused()) image = kAlertImagePaused;             // spSimulator 0x78 IsPaused
     }
     if (image) {
         if (cIGZBuffer* buffer = host_->LoadImageBuffer(kView3DImageType, kView3DImageGroup, image)) {

@@ -779,7 +779,7 @@ struct FakeHost final : IView3DWinHost {
     FakePauseSink pauseSink;
     FakeProgressScreen progress;
     std::uint8_t preferences[0x1734] = {};
-    bool cityExists = false, cheatPresent = false, lotPlop = false, progressWanted = false;
+    bool cityExists = false, cheatPresent = false, lotPlop = false, cityObliterated = false;
     int virtualZoomLimit = 5;
     int onView3DCreate = 0, onView3DShutdown = 0;
     std::vector<std::uint32_t> registeredCheats, unregisteredCheats;
@@ -853,7 +853,7 @@ struct FakeHost final : IView3DWinHost {
     void SetScrollLightingHighlight() override { ++lightingHighlights; }
     void RestoreLighting() override { ++lightingRestores; }
     int VirtualZoomLimit() override { return virtualZoomLimit; }
-    bool ProgressScreenWanted() override { return progressWanted; }
+    bool CityBeingObliterated() override { return cityObliterated; }
     cIGZUnknown* CreateProgressScreen(cIGZWin*, const cRZRect&, bool) override { return &progress; }
     void InitProgressScreen(cIGZUnknown*) override { ++progressInits; }
     void SetProgressCaption(cIGZUnknown*, int id, const cIGZString& text) override {
@@ -923,7 +923,7 @@ struct FakeHost final : IView3DWinHost {
     FakePanelButton* toolbarButton = nullptr;
     int imageBuffers = 0;
     std::vector<FakeBuffer*> createdBuffers;   // owned here: the view only holds counted references
-    bool disasterAlert = false, situationAlert = false, simulatorBusy = false;
+    bool disasterAlert = false, situationAlert = false, simulatorPaused = false;
     bool keysDown[0x20] = {};
     std::vector<std::uint32_t> commands;
     int establishDialogs = 0;
@@ -1024,7 +1024,7 @@ struct FakeHost final : IView3DWinHost {
     bool ShowEstablishCityDialog() override { ++establishDialogs; return establishDialog; }
     bool DisasterAlertActive() override { return disasterAlert; }
     bool SituationAlertActive() override { return situationAlert; }
-    bool SimulatorBusy() override { return simulatorBusy; }
+    bool SimulatorPaused() override { return simulatorPaused; }
     IAdvisorWindow* AdvisorWindow() override { advisorWindow.AddRef(); return &advisorWindow; }
     cIGZBuffer* CreateImageBuffer() override {
         ++imageBuffers;
@@ -1233,7 +1233,7 @@ int main() {
     // ------------------------------------------------------------------ Init
     host.cheatPresent = true;
     host.lotPlop = true;
-    host.progressWanted = true;
+    host.cityObliterated = true;
     CHECK(view->Init());
     CHECK(host.notifications.addAll == 1);
     CHECK(host.registerTables == 1);
@@ -2564,7 +2564,7 @@ int main() {
         host.images[kCursorTextIconInstance] = &icon;
         host.images[kAlertImageDisaster] = &alertImage;
         host.images[kAlertImageSituation] = &alertImage;
-        host.images[kAlertImageBusy] = &alertImage;
+        host.images[kAlertImagePaused] = &alertImage;
         skin.width = 96; skin.height = 32;
         background.AddRef();
         icon.AddRef();
@@ -2744,7 +2744,7 @@ int main() {
         // ---- UpdateAlertBorder: the three images in the disaster / situation / busy order.
         host.disasterAlert = false;
         host.situationAlert = false;
-        host.simulatorBusy = false;
+        host.simulatorPaused = false;
         view->UpdateAlertBorder();
         CHECK(host.compassWindow->images == 1 && host.compassWindow->image == nullptr);
         host.disasterAlert = true;
@@ -2755,10 +2755,10 @@ int main() {
         view->UpdateAlertBorder();
         CHECK(host.compassWindow->image == &alertImage);
         host.situationAlert = false;
-        host.simulatorBusy = true;
+        host.simulatorPaused = true;
         view->UpdateAlertBorder();
         CHECK(host.compassWindow->image == &alertImage);
-        host.simulatorBusy = false;
+        host.simulatorPaused = false;
         // ---- DoMessage(cIGZWin*, cGZMessage&): the button notifications and the filter's answer.
         cGZMessage message;
         message.type = kGZMsgCommand;
