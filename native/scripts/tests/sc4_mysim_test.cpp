@@ -1497,6 +1497,49 @@ int main() {
         for (FakeBuilding* b : pool) b->Release();
     }
 
+    // ---- UpdateTripVariables: the trip state and the flag / travel-type block (i386 0x00546b1a) ----
+    {
+        sim->SetStateForTest(2);
+        if (sim->LuaTableRef() < 1) sim->UpdateVariables();
+        CHECK(sim->LuaTableRef() >= 1);
+        auto num = [&](const char* key) {
+            if (sim->LuaTableRef() < 1) return -99999.0;
+            const LuaTable& t = *host.lua.refs[static_cast<std::size_t>(sim->LuaTableRef() - 1)].table;
+            const auto it = t.fields.find(key);
+            return it != t.fields.end() && it->second.kind == LuaValue::Number ? it->second.number : -99999.0;
+        };
+        auto notify = [&](std::uint32_t event, std::uint64_t data2, std::uint64_t data3) {
+            auto* message = new cRZMessage2Standard();
+            message->AddRef();
+            message->SetType(kMessageMySimDispatchNotify);
+            message->SetData1(event);
+            message->SetData2(data2);
+            message->SetData3(data3);
+            sim->DoMessage(message);
+            message->Release();
+        };
+        host.dispatchLog.travelType = 1;
+        host.dispatchLog.checkFlags = true;
+        const std::size_t events = sim->Events().size();
+        notify(kDispatchNotifyTripEnd, 0x1000, 0x9000);   // old flags, new flags: 0x8000 (near the destination) set
+        CHECK(num("trip_idle") == 1.0 && num("trip_at_transit_switch") == 1.0);
+        CHECK(num("trip_in_car") == 1.0 && num("trip_on_foot") == 0.0 && num("trip_on_bus") == 0.0);
+        CHECK(num("last_trip_type") == 1.0);
+        CHECK(sim->Events().size() == events + 1 && sim->Events().back().first == static_cast<int>(kEventMySimLeftWork));
+        host.dispatchLog.travelType = 0xfe;
+        notify(kDispatchNotifyTripEnd, 0x9000, 0x9100);   // only the tracking bit: the block is skipped
+        CHECK(num("trip_in_car") == 1.0);
+        notify(kDispatchNotifyTripEnd, 0x9100, 0x1100);
+        CHECK(num("trip_in_car") == 0.0 && num("last_trip_type") == 255.0);
+        CHECK(sim->Events().size() == events + 1);
+        notify(kDispatchNotifyTripLeg, 3, 2);              // old state, new state: leaving
+        CHECK(num("trip_in_transit") == 1.0 && num("trip_at_location") == 0.0);
+        notify(kDispatchNotifyTripLeg, 2, 3);              // arriving
+        CHECK(num("trip_in_transit") == 0.0 && num("trip_at_location") == 1.0);
+        host.dispatchLog.travelType = 0;
+        host.dispatchLog.checkFlags = false;
+    }
+
     // ---- Shutdown ----
     CHECK(host.registryAdds == 2);
     CHECK(sim->Shutdown());

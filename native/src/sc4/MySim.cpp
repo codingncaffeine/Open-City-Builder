@@ -1023,31 +1023,27 @@ void cSC4MySim::UpdateVariables() {
     lua->Pop(1);                                                             // 0x2c
 }
 
-// PARTIAL: the original also writes the transit-switch / travel-type block (trip_at_transit_switch, trip_idle,
-// trip_on_bus/foot/subway/car/train/elevated train/monorail, last_trip_type) and the traffic simulator's local-area
-// congestion sweep (0x1007a41xx..0x1007a5690). Only the first block (trip_in_transit, trip_at_location and the
-// destination subject) is ported; the rest is missing. see the ledger PARTIAL entry for 0x1007a3e66.
-void cSC4MySim::UpdateTripVariables(int fromState, int toState, int legFlags, int travelFlags, bool force) {
-    (void)legFlags;
-    (void)travelFlags;
+// UpdateTripVariables (i386 0x00546b1a): state = the dispatch's new and old trip state (0x4bb2cfc0), flags = its new and
+// old flag word (0x4bb2d020). PARTIAL: the arrival bookkeeping of the state block (MySim state 2/3, PlayHomeSound,
+// UpdateQuickVariables, the pylon kind) and the sampling of the trip's surroundings (trip_traffic_congestion,
+// trip_time_ratio, trip_wait_length, the pollution / crime / mayor rating / eq / hq / distress / wealth / landmark /
+// fire / riot / disaster fields around the current cell) are not ported; the trip state, the transit-switch / idle
+// flags and the travel-type block are.
+void cSC4MySim::UpdateTripVariables(int newState, int oldState, int newFlags, int oldFlags, bool force) {
     cISCLua* lua = lua_.get();
     if (!lua) return;
     if (luaTableRef_ < 1) return;
     if (!IsActive()) return;
-    lua->GetRef(luaTableRef_);                                               // 0x158
-    if (fromState != toState || force) {
-        lua->PushString("trip_in_transit");                                  // 0x108
-        lua->PushNumber(fromState != toState ? 1.0 : 0.0);                   // 0xf8
-        lua->SetTable(-3);                                                   // 0x170
-        lua->PushString("trip_at_location");
-        lua->PushNumber(fromState == 3 ? 1.0 : 0.0);
-        lua->SetTable(-3);
-        if (fromState == 2) {
+    lua->GetRef(luaTableRef_);                                               // 0xac
+    if (newState != oldState || force) {
+        SetTableNumber(lua, "trip_in_transit", newState == 2 ? 1 : 0);
+        SetTableNumber(lua, "trip_at_location", newState == 3 ? 1 : 0);
+        if (newState == 2) {
             if (dispatch_) {
                 const MySimLocation& destination = dispatch_->GetCurrentDestination();
                 MySimSetTableOccupantSubject(lua, "destination_subject", destination.occupant.get());
             }
-        } else if (fromState == 3) {
+        } else if (newState == 3) {
             if (dispatch_) {
                 const MySimLocation& location = dispatch_->GetCurrentLocation();
                 if (!(location == dispatch_->GetCurrentCommuteDestination()) &&
@@ -1058,6 +1054,26 @@ void cSC4MySim::UpdateTripVariables(int fromState, int toState, int legFlags, in
                 }
             }
         }
+    }
+    // the flag block: any change other than the tracking bit (0x100) alone
+    if (dispatch_ && ((newFlags != oldFlags && (newFlags ^ oldFlags) != 0x100) || force)) {
+        SetTableNumber(lua, "trip_at_transit_switch", dispatch_->CheckFlags(0x10) ? 1 : 0);
+        SetTableNumber(lua, "trip_idle", dispatch_->CheckFlags(0x1) ? 1 : 0);
+        // the sim came near its destination (flag 0x8000 set)
+        if (static_cast<std::int16_t>(oldFlags) >= 0 && static_cast<std::int16_t>(newFlags) < 0) {
+            cSC4Advisor::PushEvent(static_cast<int>(kEventMySimLeftWork), nullptr);   // vslot 0x58
+        }
+        // the travel-type flags; last_trip_type is the matching type, 0xff for none of them
+        static constexpr struct { const char* key; int type; } kTypes[] = {
+            {"trip_on_bus", 2}, {"trip_on_foot", 0}, {"trip_on_subway", 6}, {"trip_in_car", 1},
+            {"trip_on_train", 3}, {"trip_on_elevated_train", 7}, {"trip_on_monorail", 8}};
+        long lastType = 0xff;
+        for (const auto& entry : kTypes) {
+            const bool on = dispatch_->GetTravelType() == entry.type;
+            if (on) lastType = entry.type;
+            SetTableNumber(lua, entry.key, on ? 1 : 0);
+        }
+        SetTableNumber(lua, "last_trip_type", lastType);
     }
     lua->Pop(1);                                                             // 0x58
 }

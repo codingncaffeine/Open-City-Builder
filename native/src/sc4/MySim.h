@@ -646,7 +646,7 @@ public:
 
     // Non-virtual helpers (private in the original; public for the subclass and the test).
     void UpdateVariables();                                        // @ 0x10079fcb2 (i386 0x005481e6)
-    void UpdateTripVariables(int fromState, int toState, int legFlags, int travelFlags, bool force);   // @ 0x1007a3e66 (PARTIAL)
+    void UpdateTripVariables(int newState, int oldState, int newFlags, int oldFlags, bool force);   // @ 0x1007a3e66 (PARTIAL)
     void UpdateQuickVariables();                                   // @ 0x1007a5800
     void UpdateLocalBuildings();                                   // @ 0x1007a5d5e
     std::uint32_t DistanceToPosition(const float* xyz) const;      // DistanceToOccupant (i386 0x0054147a), from the position
