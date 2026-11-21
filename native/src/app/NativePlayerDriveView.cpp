@@ -11,6 +11,7 @@
 #include "sc4/View3DWin.h"
 #include "sc4/ViewInputControl.h"
 #include "sc4/CameraControl.h"
+#include "sc4/CommonIIDs.h"
 #include "sc4/CitySituationManager.h"
 #include "sc4/Render3D.h"
 #include "sc4/cSC4City.h"
@@ -21,7 +22,11 @@ sc4::cSC4CameraControl* Camera() { return CityRenderer() ? CityRenderer()->GetCa
 sc4::cSC4CitySituationManager* Situations() {
     sc4::cSC4City* city = HostCity();
     cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::CitySituationManager) : nullptr;
-    return object ? dynamic_cast<sc4::cSC4CitySituationManager*>(object) : nullptr;
+    if (!object) return nullptr;
+    if (auto* manager = dynamic_cast<sc4::cSC4CitySituationManager*>(object)) return manager;
+    void* raw = nullptr;   // the component is a COM wrapper: its plain-object view is the manager
+    if (!object->QueryInterface(sc4::kGZIID_PlainObject, &raw) || !raw) return nullptr;
+    return static_cast<sc4::cSC4CitySituationManager*>(raw);
 }
 }  // namespace
 

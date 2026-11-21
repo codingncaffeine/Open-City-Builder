@@ -52,7 +52,13 @@ std::uint32_t CitySituationAdviceClassId() { return kGZCLSID_cSC4CitySituationAd
 cSC4CitySituationAdvice::cSC4CitySituationAdvice(ISituationAdviceBase* base) : base_(base) {}
 cSC4CitySituationAdvice::~cSC4CitySituationAdvice() = default;
 
+std::uint32_t cSC4CitySituationAdvice::AddRef() {
+    if (cIGZUnknown* outer = base_ ? base_->Outer() : nullptr) return outer->AddRef();
+    return ++refCount_;
+}
+
 std::uint32_t cSC4CitySituationAdvice::Release() {
+    if (cIGZUnknown* outer = base_ ? base_->Outer() : nullptr) return outer->Release();
     if (refCount_ > 1) return --refCount_;
     delete this;
     return 0;

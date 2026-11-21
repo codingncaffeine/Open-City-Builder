@@ -1294,6 +1294,8 @@ int RunScenario(const std::string& path) {
             native::NativeRunAppLua(code.c_str());
         } else if (command == "advisors") {   // advisors: every advisor and its active advices
             native::NativePrintAdvisors();
+        } else if (command == "situations") {   // situations: the city situation manager (tracks, active mission, status, timers)
+            native::NativeSituationsReport();
         } else if (command == "ticker") {   // ticker: the news ticker's queue, flipper ring and scroll
             native::NativeTickerReport();
         } else if (command == "terrainflags") {   // terrainflags: hidden-terrain cell flags against the city file's (SC4_TERRAINHIDEDEBUG=1)

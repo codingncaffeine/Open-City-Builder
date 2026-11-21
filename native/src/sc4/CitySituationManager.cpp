@@ -474,9 +474,10 @@ bool cSC4CitySituationManager::Init() {
         mySim_ = nullptr;
         lua_ = host->Lua();
         if (sc4::cISC4GameDataRegistry* registry = host->GameDataRegistry()) {
-            registry->AddChildEntry(static_cast<cIGZUnknown*>(this), "sitmgr", 0, 0, nullptr);
-            registry->AddChildEntry(&numTargets_, "num_targets", &ExchangeUint32, 0, 2, nullptr);
-            registry->AddChildEntry(&currentTargetIndex_, "cur_target_index", &ExchangeUint32, 0, 2, nullptr);
+            // nsISC4GameDataRegistry::AddNode with a null parent hangs the node under the root; the values hang under it.
+            const auto node = registry->AddChildEntry(static_cast<cIGZUnknown*>(this), "sitmgr", registry->GetRootNodeEntry(), 0, nullptr);
+            registry->AddChildEntry(&numTargets_, "num_targets", &ExchangeUint32, node, 2, nullptr);
+            registry->AddChildEntry(&currentTargetIndex_, "cur_target_index", &ExchangeUint32, node, 2, nullptr);
         }
         if (ISituationMySim* mySim = host->MySimActor() ? nullptr : nullptr) mySim_ = mySim;   // (no MySim source yet)
     }
@@ -748,7 +749,7 @@ bool cSC4CitySituationManager::DoMessage(cIGZMessage2* message) {
             return true;
         }
         case kSituationMsgOccupantInserted:
-            HandleInsertOccupant(static_cast<ISituationOccupant*>(StandardMessage(message).GetVoid1()));
+            if (g_host) HandleInsertOccupant(g_host->OccupantOfMessage(StandardMessage(message).GetVoid1()));
             return true;
         case kSituationMsgAdviceEnabled: {
             // Re-trigger every city-situation advice (only after a load from an old save and with an advisor system).
@@ -758,7 +759,7 @@ bool cSC4CitySituationManager::DoMessage(cIGZMessage2* message) {
         }
         case kSituationMsgAutomatonStatus: {
             // Status 2 = the active automaton got stuck: it fails unless the situation is already in a final state.
-            ISituationAutomaton* automaton = static_cast<ISituationAutomaton*>(StandardMessage(message).GetVoid1());
+            ISituationAutomaton* automaton = g_host ? g_host->AutomatonOfMessage(StandardMessage(message).GetVoid1()) : nullptr;
             const std::uint32_t code = static_cast<std::uint32_t>(StandardMessage(message).GetData2());
             if (code == 2 && activeAutomaton_ && activeAutomaton_.get() == automaton) {
                 const std::uint32_t status = (activeSituation_ && status_ != kSituationRunning) ? kSituationTimeout : status_;
