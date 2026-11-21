@@ -7,6 +7,7 @@
 #include <vector>
 
 namespace gd { class cIGZGDriver; }
+class cIGZUnknown;
 namespace sc4 { class cSC43DRender; class cSC4City; class cISC4Occupant; class cSC4ModelMaker; }
 
 namespace native {
@@ -28,13 +29,20 @@ void DeleteDriverTexture(unsigned int id);
 std::string DescribeOccupantModels(sc4::cISC4Occupant* occupant);
 // Debug: building models in the renderer made for another zoom, and whether their owners still hold them (scenario `audit`).
 void AuditRendererModels();
-// The city view's model maker (null without a city view).
+// The city view's model maker (cSC4View3DWin +0x190; null without a city view).
 sc4::cSC4ModelMaker* CityModelMaker();
-// Builds and initialises the model maker for the loaded city; its models go into `render`.
-bool AttachModelMaker(sc4::cSC43DRender& render, sc4::cSC4City& city);
-// Shuts the model maker of the city being left down (before its renderer goes): the original keeps one model maker for the
-// application, the port makes one per city, and a stale one stays subscribed to the view messages with the old city's
-// occupants (their models point into the old renderer).
+// The model maker's hosts and factories, and the renderer its models go into: before the view makes the model maker
+// (DoPreCityInit).
+void InstallModelMakerHosts(sc4::cSC43DRender& render);
+// cSC4View3DWin::DoPreCityInit's model maker: made (AddRef'd), then initialized; its Shutdown when the view shuts down.
+cIGZUnknown* CreateModelMaker();
+void InitModelMaker(cIGZUnknown* modelMaker);
+void ShutdownModelMaker(cIGZUnknown* modelMaker);
+// The loaded city's shadow and decal overlays (the view's DoPostCityInit, before the model maker's: its shadows go there).
+void AttachModelMakerOverlays(sc4::cSC43DRender& render, sc4::cSC4City& city);
+// "city view: model maker up: ..." (after the model maker's DoPostCityInit).
+void ReportModelMaker();
+// The overlays go with the city's renderer.
 void DetachModelMaker();
 // The place-lot tool's preview building: an occupant outside the occupant manager whose models the model maker makes (show) or
 // drops (hide) as for a created + shown / hidden + destroyed occupant. False without a model maker.

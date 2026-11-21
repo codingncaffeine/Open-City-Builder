@@ -45,6 +45,7 @@
 #include "app/NativeUi.h"
 #include "app/NativeBoot.h"
 #include "app/NativeCityView.h"
+#include "app/NativeModelMaker.h"
 #include "sc4/App.h"
 #include "sc4/BudgetSimulator.h"
 #include "sc4/ResidentialSimulator.h"
@@ -380,7 +381,9 @@ struct StubView3DWin final : IView3DWinHost {
     void ShutdownProgressScreen(cIGZUnknown* screen) override { AsProgressScreen(screen)->Shutdown(); }
     void ShutdownValidationWindow(cIGZUnknown* window) override {}
     void ShutdownLotConfigurationEditors() override {}
-    void ShutdownModelMaker(cIGZUnknown* modelMaker) override {}
+    void ShutdownModelMaker(cIGZUnknown* modelMaker) override { native::ShutdownModelMaker(modelMaker); }
+    cIGZUnknown* CreateModelMaker() override { return native::CreateModelMaker(); }
+    void InitModelMaker(cIGZUnknown* modelMaker) override { native::InitModelMaker(modelMaker); }
     void ShutdownCameraObject(cIGZUnknown* camera) override {}
     void ShutdownSimulationClock(cIGZUnknown* clock) override {}
     bool UserDataDirectory(cIGZString& out) override { SL::UserDataDirectory(out); return SL::spSC4 != nullptr; }   // SL::UserDataDirectory
@@ -629,7 +632,8 @@ struct StubView3DWin final : IView3DWinHost {
     void UpdateCursorTextPositions(int x, int y) override {}
     void SetDrawContextFrameMarker(void* drawContext, std::uint32_t frame) override {}
     void OnView3DCreate(cISC4View3DWin* view) override {}
-    void OnView3DShutdown() override {}
+    void OnView3DShutdown() override { SL::OnView3DShutdown(); }
+    void OnView3DInit() override { native::CityViewInit(); }   // SL::OnView3DInit with the view's objects
     void GetCityName(cIGZString& out) override { if (cSC4City* city = LoadedCity()) city->GetCityName(out); }
     int VisualTimeMode() override { return native::NativeVisualTimeMode(); }   // SL::sp24HourClock vslot 0x30
     int CityPopulation() override { auto* r = CityComponentAs<cSC4ResidentialSimulator>(CityComponent::ResidentialSimulator, kGZCLSID_cSC4ResidentialSimulator); return r ? r->GetPopulation() : 0; }

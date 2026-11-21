@@ -113,7 +113,7 @@ public:
     SL::IView3DSystems* View3D() override { return this; }
     cIGZUnknown* View3DWin() override { return view_ ? static_cast<cIGZUnknown*>(static_cast<sc4::cISC4View3DWin*>(view_)) : nullptr; }
     cIGZUnknown* Renderer() override { return render_ ? static_cast<cIGZUnknown*>(static_cast<::cISC43DRender*>(render_)) : nullptr; }
-    cIGZUnknown* ModelMaker() override { return nullptr; }         // the model maker object is not published natively yet
+    cIGZUnknown* ModelMaker() override { return view_ ? view_->GetModelMaker() : nullptr; }   // the view's (+0x190)
     cIGZUnknown* ViewManager() override { return nullptr; }
     SC4ViewUtilities* RendererViewUtilities() override { return render_ ? render_->GetViewUtilities() : nullptr; }
     cIGZUnknown* RendererLightingManager() override { return SL::spLightingManager; }

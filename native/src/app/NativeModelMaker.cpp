@@ -792,21 +792,10 @@ sc4::cSC4ModelMaker* CityModelMaker() { return g_maker; }
 
 void InstallLotBaseTextureHost() { sc4::SetLotBaseTextureHost(&g_lotBaseTextureHost); }
 
-void DetachModelMaker() {
-    DetachDecalOverlays();   // after DetachEffects stopped the decal effects
-    if (!g_maker) return;
-    g_maker->Shutdown();
-    g_maker->Release();
-    g_maker = nullptr;
-}
+void DetachModelMaker() { DetachDecalOverlays(); }   // after DetachEffects stopped the decal effects
 
-bool AttachModelMaker(sc4::cSC43DRender& render, sc4::cSC4City& city) {
-    DetachModelMaker();
+void InstallModelMakerHosts(sc4::cSC43DRender& render) {
     g_render = &render;
-    if (sc4::cSTETerrain* terrain = Terrain()) {
-        AttachShadowOverlay(render, *terrain);
-        AttachDecalOverlays(render, city, *terrain);
-    }
     static ModelInstanceHost instanceHost;
     static PlaceableHost placeableHost;
     static ModelMakerHost makerHost;
@@ -848,13 +837,34 @@ bool AttachModelMaker(sc4::cSC43DRender& render, sc4::cSC4City& city) {
     });
     sc4::SetModelMakerUtility(&utility);
     sc4::SetModelMakerHost(&makerHost);
+}
+
+cIGZUnknown* CreateModelMaker() {
     auto* maker = new sc4::cSC4ModelMaker();
     maker->AddRef();
     g_maker = maker;
-    const bool ok = maker->Init();
-    maker->DoPostCityInit();
-    std::printf("city view: model maker %s: %d models loaded, %d failed, %d instances, %d inserted\n", ok ? "up" : "FAILED", g_modelsLoaded, g_modelsFailed, g_instances, g_inserted);
-    return ok;
+    return static_cast<cIGZMessageTarget2*>(maker);
+}
+
+void InitModelMaker(cIGZUnknown* modelMaker) {
+    if (modelMaker && modelMaker == static_cast<cIGZMessageTarget2*>(g_maker)) g_maker->Init();
+}
+
+void ShutdownModelMaker(cIGZUnknown* modelMaker) {
+    if (!modelMaker || modelMaker != static_cast<cIGZMessageTarget2*>(g_maker)) return;
+    g_maker->Shutdown();
+    g_maker = nullptr;   // the view releases it
+}
+
+void AttachModelMakerOverlays(sc4::cSC43DRender& render, sc4::cSC4City& city) {
+    if (sc4::cSTETerrain* terrain = Terrain()) {
+        AttachShadowOverlay(render, *terrain);
+        AttachDecalOverlays(render, city, *terrain);
+    }
+}
+
+void ReportModelMaker() {
+    std::printf("city view: model maker %s: %d models loaded, %d failed, %d instances, %d inserted\n", g_maker ? "up" : "MISSING", g_modelsLoaded, g_modelsFailed, g_instances, g_inserted);
 }
 
 }  // namespace native

@@ -583,6 +583,9 @@ public:
     virtual void ShutdownValidationWindow(cIGZUnknown* window) = 0;   // +0x648 vslot 0x20 + Release
     virtual void ShutdownLotConfigurationEditors() = 0;               // +0x270 / +0x278 Shutdown + Release
     virtual void ShutdownModelMaker(cIGZUnknown* modelMaker) = 0;     // +0x190 Shutdown + Release
+    // DoPreCityInit's model maker (+0x190): GZCOM create of cSC4ModelMaker (0xa9c741b3), AddRef'd, or null; then its Init.
+    virtual cIGZUnknown* CreateModelMaker() = 0;
+    virtual void InitModelMaker(cIGZUnknown* modelMaker) = 0;         // cSC4ModelMaker::Init
     virtual void ShutdownCameraObject(cIGZUnknown* camera) = 0;       // +0x178 cS3DCamera::Shutdown + Release
     virtual void ShutdownSimulationClock(cIGZUnknown* clock) = 0;     // +0x170 vslot 0x20 + Release
     // --- the animation recorder (cSC4WinAnimationRecorder, unrecovered)
@@ -747,6 +750,7 @@ public:
     // --- service locator (src/sc4/ServiceLocator.cpp)
     virtual void OnView3DCreate(cISC4View3DWin* view) = 0;            // SL::OnView3DCreate  @ 0x100040fec
     virtual void OnView3DShutdown() = 0;                              // SL::OnView3DShutdown @ 0x10004107c
+    virtual void OnView3DInit() = 0;                                  // SL::OnView3DInit (DoPreCityInit, after the model maker)
     // --- the panel refresh functions (UpdateCityName / UpdatePopulation / UpdateDayNightButtons / RemoveGUI)
     virtual void GetCityName(cIGZString& out) = 0;                    // SL::spCity vslot 0x60 (0x100787032)
     virtual int VisualTimeMode() = 0;                                 // SL::sp24HourClock vslot 0x30 (0x10078aa70)

@@ -71,6 +71,8 @@ void NativeTrainReport(int limit);    // track cells, trains and buses, the firs
 // DoPostCityInit (after it: the city's size, terrain view, lighting, models, automata, effects, tools, city UI).
 void SetCityRenderTarget(sc4::cSC4View3DWin& view, gd::cIGZGDriver* driver, gz::cIGZDrawContext* screen, int viewportWidth, int viewportHeight);
 bool PrepareCityRenderStack(cISC4City* city);
+// DoPreCityInit after the model maker's Init: SL::OnView3DInit, and the native steps that follow the model maker's models.
+void CityViewInit();
 bool FinishCityRenderStack(cISC4City* city);
 
 }  // namespace native

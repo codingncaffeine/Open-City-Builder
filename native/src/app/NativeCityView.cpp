@@ -13,6 +13,8 @@
 #include "sc4/cSC424HourClock.h"
 #include "sc4/Simulator.h"
 #include "app/NativeCityView.h"
+#include "app/NativeBoot.h"
+#include "sc4/App.h"
 
 #include <cmath>
 #include <cstdio>
@@ -438,10 +440,50 @@ bool PrepareCityRenderStack(cISC4City* cityInterface) {
     g_cityRender = render;
     g_target.renderOk = render->Init();
     std::printf("city view: renderer %s\n", g_target.renderOk ? "up" : "FAILED");
-    // SL::OnView3DInit (DoPreCityInit, i386 after the model maker's Init): the view, its renderer and the view utilities are
-    // published before cSC4City::Init, whose components reach them (the effects manager attaches its pass to SL::spRenderer).
-    native::BindView3DServices(g_target.view, render);
+    native::InstallModelMakerHosts(*render);   // the view makes its model maker next (DoPreCityInit)
     return g_target.renderOk;
+}
+
+namespace {
+// The native steps that need the model maker's models (it builds every loaded occupant in its DoPostCityInit): they hear the
+// city's "init done" message (0x26d31ec1) after the model maker, as the city's own components do in the original (they
+// subscribe in the city's Init, after DoPreCityInit made the model maker). One message per city.
+class AfterModelsTarget final : public cIGZMessageTarget2 {
+public:
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid != sc4::kGZIID_cIGZMessageTarget2 && iid != 1) return false;
+        *out = static_cast<cIGZMessageTarget2*>(this);
+        AddRef();
+        return true;
+    }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override { return refs_ > 1 ? --refs_ : 1; }   // static: lives as long as the process
+    bool DoMessage(cIGZMessage2* message) override {
+        if (!message || message->GetType() != 0x26d31ec1) return true;
+        if (SL::spMS2) SL::spMS2->RemoveNotification(this, 0x26d31ec1);
+        auto* city = dynamic_cast<sc4::cSC4City*>(native::BootApplication() ? native::BootApplication()->GetCity() : nullptr);
+        if (!city || !g_cityRender || !g_target.renderOk) return true;
+        native::ReportModelMaker();
+        // Occupant messages (inserted / shown / changed / removed: cSC4Occupant::PostOccupantMessage) go to SL::spMS2. Bound only
+        // now: the model maker has just built every loaded occupant itself, so announcing them during the load would double them.
+        sc4::SetDBSegmentMessageServer(SL::spMS2);
+        native::SetAutomataRenderer(g_cityRender, city);
+        native::PostCityInitToAutomataManagers(city);
+        return true;
+    }
+
+private:
+    std::uint32_t refs_ = 1;
+} g_afterModels;
+}  // namespace
+
+// cSC4View3DWin::DoPreCityInit after the model maker's Init: SL::OnView3DInit publishes the view, its renderer, the view
+// utilities and the model maker before cSC4City::Init, whose components reach them (the effects manager attaches its pass to
+// SL::spRenderer).
+void CityViewInit() {
+    if (!g_target.view || !g_cityRender) return;
+    native::BindView3DServices(g_target.view, g_cityRender);
+    if (SL::spMS2) SL::spMS2->AddNotification(&g_afterModels, 0x26d31ec1);
 }
 
 // cSC4View3DWin::DoPostCityInit (i386 0x0052bac8) and the native hook-up that needs the initialised city: the camera learns the
@@ -495,12 +537,8 @@ bool FinishCityRenderStack(cISC4City* cityInterface) {
         // retaining walls of a city file look their lots up while their models are built.
         native::BindSimGridCity(cityInterface);
         native::InstallZoneDeveloperHost(city);
-        native::AttachModelMaker(*render, *city);
-        // Occupant messages (inserted / shown / changed / removed: cSC4Occupant::PostOccupantMessage) go to SL::spMS2. Bound only
-        // now: the model maker has just built every loaded occupant itself, so announcing them during the load would double them.
-        sc4::SetDBSegmentMessageServer(SL::spMS2);
-        native::SetAutomataRenderer(render, city);
-        native::PostCityInitToAutomataManagers(city);
+        // the model maker (made in DoPreCityInit) builds the city's models on this same message, after the view
+        native::AttachModelMakerOverlays(*render, *city);
     }
 
     auto* adapter = new RendererAdapter(render, control, driver, g_target.screen);

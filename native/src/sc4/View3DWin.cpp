@@ -3475,8 +3475,11 @@ bool cSC4View3DWin::DoMessage(cIGZMessage2* message) {
 }
 
 // ---- DoMessage's helpers that are not recovered yet: the host's hooks stand in (PARTIAL) -------------------------------------------
-// DoPreCityInit (0x10078616c): the camera, its control and the renderer (the host's), then the progress screen's title: the
-// "loading" text and the city's name for a city whose view record was read, the "new city" text otherwise.
+// DoPreCityInit (0x10078616c, i386 0x00528030): the camera, its control and the renderer (the host's), then the progress screen's
+// title: the "loading" text and the city's name for a city whose view record was read, the "new city" text otherwise; then the
+// model maker is made (once per view) and initialized, and SL::OnView3DInit publishes the view's objects (the model maker with
+// them) before the city's Init. The model maker hears the city's "init done" message (0x26d31ec1) after the view does: it
+// subscribes in its Init, later than the view.
 void cSC4View3DWin::DoPreCityInit() {
     if (host_) host_->PreCityInit();
     if (progressScreen_ && host_) {
@@ -3492,6 +3495,11 @@ void cSC4View3DWin::DoPreCityInit() {
         }
         host_->SetProgressCaption(progressScreen_, 0, title);
     }
+    UpdateProgressMessage();
+    UpdateProgressMessage();   // after the animation tick manager's Init (the host's, not recovered)
+    if (!modelMaker_ && host_) modelMaker_ = host_->CreateModelMaker();
+    if (modelMaker_ && host_) host_->InitModelMaker(modelMaker_);
+    if (host_) host_->OnView3DInit();
     UpdateProgressMessage();
 }
 // DoPostCityInit (0x1007867d8): the view keeps SL::spSimulator at +0x238 (the speed buttons and the hidden pause use it); the rest of

@@ -1078,6 +1078,8 @@ struct FakeHost final : IView3DWinHost {
     void ShutdownValidationWindow(cIGZUnknown*) override { ++validationShutdowns; }
     void ShutdownLotConfigurationEditors() override { ++lotConfigShutdowns; }
     void ShutdownModelMaker(cIGZUnknown*) override { ++modelMakerShutdowns; }
+    cIGZUnknown* CreateModelMaker() override { return nullptr; }
+    void InitModelMaker(cIGZUnknown*) override {}
     void ShutdownCameraObject(cIGZUnknown*) override { ++cameraShutdowns; }
     void ShutdownSimulationClock(cIGZUnknown*) override { ++clockShutdowns; }
     bool PopupModalDialogsSafe() override { return popupSafe; }
@@ -1112,6 +1114,7 @@ struct FakeHost final : IView3DWinHost {
     }
     void OnView3DCreate(cISC4View3DWin* view) override { ++onView3DCreate; lastView = view; }
     void OnView3DShutdown() override { ++onView3DShutdown; }
+    void OnView3DInit() override {}
     cISC4View3DWin* lastView = nullptr;
 };
 
