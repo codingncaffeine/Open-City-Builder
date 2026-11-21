@@ -798,18 +798,20 @@ void TestBoundaryRules() {
     CHECK(developer->Init());
 
     auto checkRule = [&](BoundaryType boundary, std::uint32_t expectedTexture,
-                         std::uint8_t expectedShape) {
+                         std::uint8_t expectedShape, bool expectedFlag = false) {
         std::uint32_t texture = 0xffffffff;
         std::uint8_t shape = 0xff;
         bool flag = true;
         developer->GetBoundaryLotTexture(boundary, texture, shape, flag);
         CHECK(texture == expectedTexture);
         CHECK(shape == expectedShape);
-        CHECK(!flag);
+        CHECK(flag == expectedFlag);
     };
     checkRule(BoundaryType{{0, 0, 0, 0}}, 0x3000, 0);
     checkRule(BoundaryType{{1, 0, 0, 0}}, 0x2000, 0);
-    checkRule(BoundaryType{{0, 2, 1, 0}}, 0x2400, 3);       // key 0x210, 16-bit rule 0x103 truncated
+    checkRule(BoundaryType{{0, 2, 1, 0}}, 0x2400, 3, true);  // key 0x210, rule 0x103: rotation 3, flipped
+    checkRule(BoundaryType{{2, 1, 0, 0}}, 0x2400, 0, true);  // key 0x2100, rule 0x100: rotation 0, flipped
+    checkRule(BoundaryType{{1, 1, 0, 0}}, 0x2100, 1);        // key 0x1100: not flipped
     checkRule(BoundaryType{{0, 0, 0, 2}}, 0x2600, 3);       // key 2
     checkRule(BoundaryType{{5, 5, 5, 5}}, 0x3000, 0);        // falls back to key 0
 

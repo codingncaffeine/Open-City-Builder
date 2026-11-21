@@ -602,8 +602,10 @@ void cSC4ZoneDeveloper::GetBoundaryLotTexture(const BoundaryType& boundary, std:
         return;
     }
     texture = it->second.texture;
-    shape = static_cast<std::uint8_t>(it->second.shape);   // GetBoundaryLotTexture truncates the 16-bit rule
-    flag = it->second.flag;
+    // The rule's 16-bit word is two bytes of the original's map node: the rotation (+0x18) and the flip flag (+0x19), so the
+    // 0x100..0x103 entries are the flipped rotations.
+    shape = static_cast<std::uint8_t>(it->second.shape & 0xff);
+    flag = (it->second.shape >> 8) != 0 || it->second.flag;
 }
 
 // @ 0x1001312a8. Clamps the rectangle, clears the list and pushes every lot that touches the cells. In

@@ -628,7 +628,7 @@ private:
     };
     struct BoundaryLotTextureRule {
         std::uint32_t texture = 0;   // +0
-        std::uint16_t shape = 0;     // +4 (the getter exposes only its low byte)
+        std::uint16_t shape = 0;     // +4 low byte the rotation, high byte the flip flag (node +0x18 / +0x19)
         bool flag = false;           // +6
     };
     using PendingLot = std::pair<SC4Point<int>, int>;       // origin + facing
