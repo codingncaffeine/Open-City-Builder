@@ -39,6 +39,7 @@
 #include "app/NativeSnapshot.h"
 #include "app/NativeCheats.h"
 #include "app/NativeKeyboard.h"
+#include "rz/cRZKeyboard.h"
 #include "gz/CommandServer.h"
 #include "app/NativeNetworkManager.h"
 #include "app/NativeWinControls.h"
@@ -823,6 +824,41 @@ struct LoadingPresenter final : native::LoadingScreenPresenter {
         ::Present();
     }
 } gLoadingPresenter;
+
+// cRZKeyboard's key state (the original asks the system by Windows virtual-key code: GetAsyncKeyState / GetKeyState): SDL's
+// keyboard answers for the modifiers, letters, digits, function keys, arrows and editing keys; the toggle state is the lock
+// keys'. Bit 15 is "down now", bit 0 "toggled on", as the system calls answer.
+std::int16_t AsyncKeyState(std::uint32_t vk) {
+    const SDL_Keymod mod = SDL_GetModState();
+    bool down = false;
+    if (vk == 0x10) down = (mod & SDL_KMOD_SHIFT) != 0;
+    else if (vk == 0x11) down = (mod & SDL_KMOD_CTRL) != 0;
+    else if (vk == 0x12) down = (mod & SDL_KMOD_ALT) != 0;
+    else {
+        SDL_Scancode code = SDL_SCANCODE_UNKNOWN;
+        if (vk >= 'A' && vk <= 'Z') code = SDL_Scancode(SDL_SCANCODE_A + (vk - 'A'));
+        else if (vk >= '1' && vk <= '9') code = SDL_Scancode(SDL_SCANCODE_1 + (vk - '1'));
+        else if (vk == '0') code = SDL_SCANCODE_0;
+        else if (vk >= 0x70 && vk <= 0x7b) code = SDL_Scancode(SDL_SCANCODE_F1 + (vk - 0x70));
+        else {
+            static constexpr std::pair<std::uint32_t, SDL_Scancode> kKeys[] = {
+                {0x08, SDL_SCANCODE_BACKSPACE}, {0x09, SDL_SCANCODE_TAB}, {0x0d, SDL_SCANCODE_RETURN}, {0x1b, SDL_SCANCODE_ESCAPE},
+                {0x20, SDL_SCANCODE_SPACE}, {0x21, SDL_SCANCODE_PAGEUP}, {0x22, SDL_SCANCODE_PAGEDOWN}, {0x23, SDL_SCANCODE_END},
+                {0x24, SDL_SCANCODE_HOME}, {0x25, SDL_SCANCODE_LEFT}, {0x26, SDL_SCANCODE_UP}, {0x27, SDL_SCANCODE_RIGHT},
+                {0x28, SDL_SCANCODE_DOWN}, {0x2d, SDL_SCANCODE_INSERT}, {0x2e, SDL_SCANCODE_DELETE}};
+            for (const auto& [key, scancode] : kKeys) if (key == vk) code = scancode;
+        }
+        int count = 0;
+        const bool* keys = SDL_GetKeyboardState(&count);
+        down = code != SDL_SCANCODE_UNKNOWN && keys && int(code) < count && keys[code];
+    }
+    return down ? std::int16_t(-0x8000) : std::int16_t(0);
+}
+std::int16_t ToggleKeyState(std::uint32_t vk) {
+    const SDL_Keymod mod = SDL_GetModState();
+    const bool on = (vk == 0x14 && (mod & SDL_KMOD_CAPS)) || (vk == 0x90 && (mod & SDL_KMOD_NUM)) || (vk == 0x91 && (mod & SDL_KMOD_SCROLL));
+    return static_cast<std::int16_t>((on ? 1 : 0) | (AsyncKeyState(vk) & 0x8000));
+}
 
 // ---- input ------------------------------------------------------------------------------------------------------------------
 
@@ -1662,6 +1698,7 @@ int main(int argc, char** argv) {
     gAudioWanted = interactive || std::getenv("SC4_AUDIO");
     Boot();
     native::SetLoadingScreenPresenter(&gLoadingPresenter);
+    cRZKeyboard::SetKeyStateFunctions(&AsyncKeyState, &ToggleKeyState);
     // A modal dialog (RunModalLoop) keeps the windows painting: interactively the events go on being dispatched; a scenario
     // shows the dialog for 30 frames, writes work/shots/modal<N>.png and cancels it (the scenario cannot press its buttons).
     // The simulation does not tick under a dialog (the original holds a game pause around every one).

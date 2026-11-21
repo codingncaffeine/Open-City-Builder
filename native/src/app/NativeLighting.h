@@ -28,5 +28,6 @@ void NativeSetClockHour(int hour);   // the kit's `hour N`: the city clock jumps
 int NativeClockHour();               // the city clock's hour (-1 without a clock)
 // The day / night menu (cSC4View3DWin::DoDayNightMenu through the host): the clock's visual time mode (0 cycle, 1 day, 2 night; -1 keeps it).
 void SetCityDayNightMode(int mode);
+int NativeVisualTimeMode();   // the clock's visual time mode (SL::sp24HourClock vslot 0x30; 0 without a clock)
 
 }  // namespace native

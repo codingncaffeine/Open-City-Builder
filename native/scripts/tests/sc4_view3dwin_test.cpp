@@ -2661,6 +2661,8 @@ int main() {
         CHECK(View3DWinTestAccess::CostIndicatorText(*view) == host.bmpWindow);
         CHECK(host.bmpWindow->setBmps == 1 && host.bmpWindow->imageAreas == 1);
         CHECK(View3DWinTestAccess::CostIndicatorBuffer(*view) != nullptr);
+        // the view keeps the creator's reference on the buffer (the bitmap's own is separate): 1 here, as the fake bitmap takes none
+        CHECK(!host.createdBuffers.empty() && View3DWinTestAccess::CostIndicatorBuffer(*view) == host.createdBuffers.back() && host.createdBuffers.back()->refs == 1);
         CHECK(host.bmpWindow->GetWinBMPFlag(6));
         CHECK(host.bmpWindow->imageArea.right == 0x80 && host.bmpWindow->imageArea.bottom == 0x20);
         // 8. the advisor popup queue, the compass window and the compass win proc.

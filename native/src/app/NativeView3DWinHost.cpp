@@ -82,6 +82,8 @@
 #include "sc4/LightingManager.h"
 #include "sc4/ProgressScreen.h"
 #include "sc4/BuildingSelectWinProc.h"
+#include "gz/WinBMP.h"
+#include "rz/cRZKeyboard.h"
 #include "sc4/TractDeveloper.h"
 #include "sc4/Region.h"
 #include "dbpf/DBPFReader.h"
@@ -374,7 +376,7 @@ struct StubView3DWin final : IView3DWinHost {
     void ShutdownModelMaker(cIGZUnknown* modelMaker) override {}
     void ShutdownCameraObject(cIGZUnknown* camera) override {}
     void ShutdownSimulationClock(cIGZUnknown* clock) override {}
-    bool UserDataDirectory(cIGZString& out) override { return {}; }
+    bool UserDataDirectory(cIGZString& out) override { SL::UserDataDirectory(out); return SL::spSC4 != nullptr; }   // SL::UserDataDirectory
     cIGZWin* CreateWinAnimationRecorder() override { return {}; }
     void RecorderSetAnimationOutputDirectory(cIGZWin* recorder, const cIGZString& directory, bool create) override {}
     ICityMouseRouter* CityMouseRouter() override { return {}; }
@@ -460,9 +462,13 @@ struct StubView3DWin final : IView3DWinHost {
         proc->Release();
     }
     cISC4WinCalloutBox* CreateCalloutBox() override { return native::CreateCalloutBox(); }
-    gz::cIGZWinBMP* CreateWinBMP() override { return {}; }
+    gz::cIGZWinBMP* CreateWinBMP() override {   // new cGZWinBMP (+ AddRef): its cIGZWinBMP view
+        auto* bmp = new gz::cGZWinBMP(ActiveWinMgr());
+        bmp->AddRef();
+        return static_cast<gz::cIGZWinBMP*>(bmp);
+    }
     void InitMapView(cIGZWin* window) override { native::NativeInitMapView(window); }   // cSC4WinMapView::InitWindow
-    bool IsKeyDownNow(std::uint32_t key) override { return {}; }
+    bool IsKeyDownNow(std::uint32_t key) override { return cRZKeyboard::IsKeyDownNowStatic(key); }
     // SL::spCommandServer vslot 0x98(command, 0, 0). The command server is not set up natively: a command goes to the city view, the
     // handler of every command its buttons send (ProcessCommand via its DoMessage in the original). COMMAND-1.
     void ExecuteCommand(std::uint32_t command) override {
@@ -558,7 +564,7 @@ struct StubView3DWin final : IView3DWinHost {
         return m && m->GetActiveSituation() != nullptr;
     }
     bool SimulatorPaused() override { auto* s = CityComponentAs<cSC4Simulator>(CityComponent::Simulator, kGZCLSID_cSC4Simulator); return s && s->IsPaused(); }
-    cIGZBuffer* CreateImageBuffer() override { return {}; }
+    cIGZBuffer* CreateImageBuffer() override { auto* buffer = new cGZBuffer(); buffer->AddRef(); return buffer; }   // SL::spGS vslot 0x20: an uninitialised buffer
     IAdvisorWindow* AdvisorWindow() override { return native::NativeAdvisorWindow(); }
     cSC4ViewInputControl* CreateZoningTool(std::uint32_t type) override { return native::CreateZoneTool(static_cast<int>(type)); }
     cSC4ViewInputControl* CreateTerrainScrubberTool(std::uint32_t type, bool flag) override { return native::CreateTerrainScrubberTool(type, flag); }
@@ -577,7 +583,15 @@ struct StubView3DWin final : IView3DWinHost {
     }
     int AddContourCallback() override { return {}; }
     void RemoveContourCallback(int handle) override {}
-    bool ProjectPointToViewport(cS3DVector3& point) override { return {}; }
+    bool ProjectPointToViewport(cS3DVector3& point) override {
+        if (!SL::spViewUtilities) return false;
+        float xyz[3] = {point.x, point.y, point.z};
+        SL::spViewUtilities->ProjectPointToViewportCoordinates2D(xyz);
+        point.x = xyz[0];
+        point.y = xyz[1];
+        point.z = xyz[2];
+        return true;
+    }
     void UpdateCostIndicator(float dt) override {}
     bool PopupModalDialogsSafe() override { return ActiveWinMgr() && ActiveWinMgr()->modalDialogs; }
     bool PopupModalDialogsEnabled() override { return ActiveWinMgr() && ActiveWinMgr()->modalDialogs; }
@@ -601,7 +615,7 @@ struct StubView3DWin final : IView3DWinHost {
     void OnView3DCreate(cISC4View3DWin* view) override {}
     void OnView3DShutdown() override {}
     void GetCityName(cIGZString& out) override { if (cSC4City* city = LoadedCity()) city->GetCityName(out); }
-    int VisualTimeMode() override { return {}; }
+    int VisualTimeMode() override { return native::NativeVisualTimeMode(); }   // SL::sp24HourClock vslot 0x30
     int CityPopulation() override { auto* r = CityComponentAs<cSC4ResidentialSimulator>(CityComponent::ResidentialSimulator, kGZCLSID_cSC4ResidentialSimulator); return r ? r->GetPopulation() : 0; }
     std::int64_t CityFunds() override { auto* b = CityComponentAs<cSC4BudgetSimulator>(CityComponent::BudgetSimulator, kGZCLSID_cSC4BudgetSimulator); return b ? b->GetTotalFunds() : 0; }
     void FormatNumber(std::int64_t value, cIGZString& out) override { out.AssignFromCString(GroupDigits(value).c_str()); }

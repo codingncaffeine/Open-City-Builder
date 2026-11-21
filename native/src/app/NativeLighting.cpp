@@ -195,6 +195,8 @@ void SetCityDayNightMode(int mode) {
     if (mode >= 0) g_clock->SetVisualTimeMode(static_cast<sc4::cSC424HourClock::VisualTimeMode>(mode));
 }
 
+int NativeVisualTimeMode() { return g_clock ? static_cast<int>(g_clock->GetVisualTimeMode()) : 0; }
+
 // The city's 24-hour clock is made by the city's class factory with this host (its messages reach the message server).
 void InstallClockHost() { sc4::SetCityProbeClockHost(&g_clockHost); }
 

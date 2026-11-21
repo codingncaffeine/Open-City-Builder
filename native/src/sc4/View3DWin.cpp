@@ -2218,7 +2218,7 @@ void cSC4View3DWin::AddGUI() {
                     cRZRect image{0, 0, area->right - area->left, area->bottom - area->top};
                     bmp->SetImageArea(image);                           // vslot 0x40
                 }
-                buffer->Release();
+                // +0x5c0 keeps the creator's reference (the original's cRZAutoRefCount out-parameter); the bitmap holds its own
             }
             if (cIGZWin* bmpWindow = bmp->AsIGZWin()) parent->ChildAdd(bmpWindow);
         }
