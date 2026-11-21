@@ -103,10 +103,11 @@ constexpr std::int32_t kShadowCheckNextX[4] = {0, 0, 1, 1};
 constexpr std::int32_t kShadowCheckNextZ[4] = {0, 1, 1, 0};
 
 // ---- seams --------------------------------------------------------------------------------------------------
-// cISTEOverlayManager (the land / water shadow layer, unrecovered): the two calls UpdateShadow makes.
-class IShadowOverlay {
+// cISTEOverlayManager (the land / water shadow layer) as UpdateShadow uses it: the two calls it makes (named apart from the
+// model maker's IShadowOverlay, which wraps a different call of the same manager).
+class IShadowDecalOverlay {
 public:
-    virtual ~IShadowOverlay() = default;
+    virtual ~IShadowDecalOverlay() = default;
     // cSTEOverlayManager::AddShadowDecal(cGZPersistResourceKey const&, cS3DVector2 const&, float, float, bool)
     // @ 0x1007292c6 (vslot 0x50). The float arguments are 16.0f and the shadow rotation; returns the overlay id.
     virtual std::uint32_t AddShadowDecal(const cGZPersistResourceKey& key, const cS3DVector2& position,
@@ -165,7 +166,7 @@ public:
     virtual bool WaterSurfaceDisplayed() = 0;                                  // terrain vslot 0x298
     // SL::spCity 0x2a0 -> cSTETerrain::GetView @ 0x100739a1e (terrain vslot 0x210) -> cISTETerrainView
     // vslot 0x90 GetOverlayManager(0 = land, 1 = water) @ 0x10074ce10. False when the chain is incomplete.
-    virtual bool GetShadowOverlays(IShadowOverlay** land, IShadowOverlay** water) = 0;
+    virtual bool GetShadowOverlays(IShadowDecalOverlay** land, IShadowDecalOverlay** water) = 0;
 
     // ---- cSC4NetworkManager::MapShadowTexture(unsigned int, unsigned char&, unsigned int, unsigned int) @
     // 0x10016ece4 (SL::NetworkManager() vslot 0x70); returns the remapped instance ----

@@ -28,6 +28,8 @@
 #include "app/NativeDemolition.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "app/NativeUi.h"
+#include "gz/WinBtn.h"
+#include "sc4/SC4UI.h"
 #include "gz/cGZPersistResourceKey.h"
 #include <string>
 #include "sc4/Render3D.h"
@@ -126,7 +128,7 @@ public:
             sc4::LoadNetworkPlacementParams(exemplar->AsISCPropertyHolder(), params_);
             exemplar->Release();
         }
-        // LoadBridgeTypes(ini, kBridgeSections[type], 0x1000 + type, ...) from the network ini {0, 0x8a5971c5, 0x8a5993b9}
+        // LoadBridgeTypes(ini, kBridgeSections[type], 0x1000 + type, the pen width) from the network ini {0, 0x8a5971c5, 0x8a5993b9}
         // ReloadRules opens; the power line has no section.
         static constexpr const char* kBridgeSections[13] = {
             "RoadBridgeExemplars", "RailBridgeExemplars", "HighwayBridgeExemplars", "StreetBridgeExemplars",
@@ -136,7 +138,7 @@ public:
             cIGZFile* file = nullptr;
             if (sc4::SC4GetResourceAsFile(cGZPersistResourceKey{sc4::kNetworkManagerIniType, sc4::kNetworkManagerIniGroup, sc4::kNetworkManagerIniInstance}, &file, false) && file) {
                 cRZIniFile ini(file);
-                sc4::LoadNetworkBridgeTypes(ini, kBridgeSections[type], bridges_);
+                sc4::LoadNetworkBridgeTypes(ini, kBridgeSections[type], bridges_, 0x1000 + type, kTypeRecords[type].penX);
                 file->Release();
             }
         }
@@ -149,7 +151,15 @@ public:
                 std::printf("network type %u bridge %08x \"%s\": span %u..%u, width %u, ramp %u, pylons %u every %u, %s%s, depth %.1f..%.1f, clearance water %.1f land %.1f%s\n", type, b.id,
                             b.name.c_str(), b.minSpan, b.maxSpan, b.width, b.rampLength, b.pylonLength, b.pylonSpacing, b.isWater ? "water" : "",
                             b.isLand ? " land" : "", b.minWaterDepth, b.maxWaterDepth, b.waterClearance, b.landClearance,
-                            b.suspensionA && b.suspensionB ? ", suspension" : (b.hasCables ? ", cables" : ""));
+                            b.suspensionTopTexture && b.suspensionHangerTexture ? ", suspension" : (b.hasCables ? ", cables" : ""));
+            for (const sc4::cSC4NetworkBridgeTypeInfo& b : bridges_) {
+                if (!std::getenv("SC4_BRIDGE_TYPES")) break;
+                std::string text;
+                for (float s : b.rampSupportHeights) text += " " + std::to_string(s);
+                text += " |";
+                for (float s : b.pylonSupportHeights) text += " " + std::to_string(s);
+                std::printf("network type %u bridge %08x supports ramp/pylon:%s, specializations %zu\n", type, b.id, text.c_str(), b.specializations.size());
+            }
         sc4::LoadNetworkSlopeLimits(params_, slopeLimits_);   // the tail of LoadPlacementParams, run with or without the exemplar
     }
     std::uint32_t ViewInputControlId() const override { return kTypeRecords[type_].vic; }
@@ -289,6 +299,8 @@ public:
         if (t) t->GetCellCornerAltitudes(x, z, out);
         else out[0] = out[1] = out[2] = out[3] = 0.0f;
     }
+    // InsertBridgePiece splits a support column at the water surface (terrain vslot 0x7c).
+    float WaterLevelAt(float x, float z) override { sc4::cSTETerrain* t = Terrain(); return t ? t->GetWaterLevel(x, z) : 0.0f; }
     bool NetworkOccupantInRect(int x0, int z0, int x1, int z1, std::uint32_t typeMask) override {
         sc4::cISC4OccupantManager* occupants = Occupants();
         if (!occupants) return false;
@@ -371,7 +383,8 @@ public:
         if (!SL::spRM || !SL::spRM->GetResource(cGZPersistResourceKey{type, group, instance}, iid, &raw, 0, nullptr) || !raw) return nullptr;
         return static_cast<cIGZUnknown*>(raw);
     }
-    bool LoadString(std::uint32_t group, std::uint32_t instance, cIGZString& out) override { return LoadLocalizedString(group, instance, out); }
+    // SC4LoadString: the failure reasons (group 0x2a592fd1) come from the localized string tables.
+    bool LoadString(std::uint32_t group, std::uint32_t instance, cIGZString& out) override { return native::LoadLocalizedString(group, instance, out); }
     // GetNetworkOccupant (i386 0x00126b82): the first occupant of the cell the tool's cSC4NetworkORFilter takes (a network
     // occupant with one of the tool's network flags), one reference.
     sc4::cSC4NetworkOccupant* NetworkOccupantAt(std::uint32_t x, std::uint32_t z, std::uint32_t typeMask) override {
@@ -542,6 +555,24 @@ public:
         return neighbors && neighbors->RequestCreateConnection(info.unknown8, static_cast<int>(info.x), static_cast<int>(info.z), info.unknownC != 0);
     }
     void RefreshCursor() override {}
+    // The bridge chooser: SC4CreateWindowFromScript on the UI script group, its alignment, the bridge pictures (cSLBuffer)
+    // and the screen colour format (ARGB8888).
+    cIGZWin* CreateWindowFromScript(std::uint32_t instance, cIGZWin* parent, std::uint32_t id) override {
+        return native::CreateWindowFromScript(cGZPersistResourceKey{0, 0x96a006b0, instance}, parent, id);
+    }
+    void AlignWindow(std::uint32_t windowId) override { nSC4UI::AlignWindowToWindow(windowId, 0xaaaa, 0, nullptr); }
+    void SetButtonBitmap(cIGZWin* button, std::uint32_t group, std::uint32_t instance) override {
+        gz::cIGZWinBtn* btn = nullptr;
+        if (!button || !button->QueryInterface(gz::kGZIID_cIGZWinBtn, reinterpret_cast<void**>(&btn)) || !btn) return;
+        if (cIGZBuffer* image = LoadBitmapResource(group, instance)) {
+            btn->SetStyle(btn->GetStyle(), image, nullptr);
+            image->Release();
+        }
+        btn->Release();
+    }
+    std::uint32_t NativeColor(cIGZWin*, std::uint8_t r, std::uint8_t g, std::uint8_t b) override {
+        return 0xff000000u | (std::uint32_t(r) << 16) | (std::uint32_t(g) << 8) | b;
+    }
 };
 
 class TerrainViewAdapter final : public sc4::INetworkInputToolTerrainView {
@@ -726,9 +757,19 @@ void NativeBridgeReport(int x0, int z0, int x1, int z1) {
             piece->GetOccupiedCell(cx, cz);
             float position[3] = {0, 0, 0};
             piece->GetPosition(position);
+            // The added parts (support columns, suspension wires, cables) by texture.
+            std::map<std::uint32_t, int> parts;
+            for (const sc4::SC4AddOnPart& part : piece->AddOnParts()) ++parts[part.id];
+            std::string partText;
+            for (const auto& [texture, n] : parts) {
+                char item[32];
+                std::snprintf(item, sizeof item, " %08x x%d", texture, n);
+                partText += item;
+            }
             std::printf("bridges: piece at %u,%u model %08x rotation %u flags %08x position y %.2f model offset y %.2f water %.2f %s\n", cx, cz,
                         piece->PieceId(), piece->GetRotation(), piece->GetNetworkFlag(), position[1], piece->ModelOffset().y,
                         terrain->GetMaxSurfaceLevel(cx, cz), piece->IsUsable() ? "usable" : "not usable");
+            if (!partText.empty()) std::printf("bridges:   parts%s\n", partText.c_str());
         }
         occupants->ReleaseOccupantList(list);
     }
@@ -895,8 +936,7 @@ void NativeOneWayReport(int x0, int z0, int x1, int z1) {
 }
 }  // namespace native
 
-// ============================================================================================================
-// the pre-built intersection tool ("puzzle pieces")
+// =====================================================================================================// the pre-built intersection tool ("puzzle pieces")
 // ============================================================================================================
 
 #include "app/NativeWinMgr.h"
@@ -1065,4 +1105,90 @@ void NativeIntersectionPieceReport() {
     std::printf("intxpieces: %d intersection pieces (%d pre-built)\n", count, prebuilt);
 }
 
+// Kit verb `bridgechoose TYPE X1 Z1 X2 Z2 [ROW]`: the network tool UI's drag from cell 1 to cell 2 as the mouse would make it
+// (BeginDrag / DragTo are what OnMouseDownL / OnMouseMove do once the cell under the mouse is picked), then its mouse-up, which
+// opens the bridge chooser when the drag crosses water. Prints the chooser's rows, then the chosen row's button and the Place
+// button send the chooser window their command messages (what their activation sends), and the bridge is built.
+// Without a ROW the chooser stays open (for a picture) until the next `bridgechoose`.
+sc4::cSC4NetworkTool* g_chooserTool = nullptr;
+sc4::cSC4NetworkToolUI* g_chooserUi = nullptr;
+
+void NativeBridgeChooser(std::uint32_t type, int x1, int z1, int x2, int z2, int row) {
+    if (g_chooserUi) {
+        g_chooserUi->Shutdown();
+        g_chooserUi->Release();
+        g_chooserTool->Shutdown();
+        g_chooserTool->Release();
+        g_chooserUi = nullptr;
+        g_chooserTool = nullptr;
+    }
+    if (!g_view || type >= 13) {
+        std::printf("bridgechoose: no city view or no network type %u\n", type);
+        return;
+    }
+    auto* tool = new sc4::cSC4NetworkTool(type);
+    tool->AddRef();
+    tool->Init();
+    sc4::cISC4NetworkToolUI* raw = nullptr;
+    if (!tool->GetUITool(&raw) || !raw) {
+        std::printf("bridgechoose: no UI tool\n");
+        tool->Shutdown();
+        tool->Release();
+        return;
+    }
+    auto* ui = static_cast<sc4::cSC4NetworkToolUI*>(raw);
+    ui->AttachToView(g_view);
+    ui->BeginDrag(sc4::SC4PointU{static_cast<std::uint32_t>(x1), static_cast<std::uint32_t>(z1)});
+    ui->DragTo(sc4::SC4PointU{static_cast<std::uint32_t>(x2), static_cast<std::uint32_t>(z2)});
+    ui->OnMouseUpL(0, 0, 0);
+    cIGZWin* chooser = ui->BridgeChooser();
+    std::printf("bridgechoose %u %d,%d -> %d,%d: chooser %s, %zu row(s)\n", type, x1, z1, x2, z2, chooser ? "open" : "not open",
+                ui->BridgeEntries().size());
+    if (!chooser && tool->GetFailureState()) {
+        cRZString reason;
+        tool->GetFailureReasonString(reason);
+        std::printf("bridgechoose: failure reason \"%s\"\n", reason.ToChar());
+    }
+    if (chooser) {
+        for (std::size_t i = 0; i < ui->BridgeEntries().size(); ++i) {
+            const sc4::cSC4NetworkToolUI::BridgeEntry& entry = ui->BridgeEntries()[i];
+            cRZString name;
+            tool->GetBridgeName(name, entry.bridge);
+            cIGZWin* button = chooser->GetChildWindowFromIDRecursive(0xa1000u + static_cast<std::uint32_t>(i));
+            // the row holding the button (id 0xa0000) and its cost text
+            cIGZWin* rowWin = button ? button->GetParentWin() : nullptr;
+            while (rowWin && rowWin->GetID() != 0xa0000u) rowWin = rowWin->GetParentWin();
+            cIGZWin* cost = rowWin ? rowWin->GetChildWindowFromIDRecursive(0xa0003) : nullptr;
+            const cRZRect area = button ? button->GetAreaAbsolute() : cRZRect{};
+            std::printf("bridgechoose: row %zu bridge %d \"%s\" reference altitude %.2f, button %s at %d,%d..%d,%d, cost \"%s\"\n", i,
+                        entry.bridge, name.ToChar(), entry.altitude, button ? "present" : "MISSING", area.left, area.top, area.right,
+                        area.bottom, cost ? cRZString(cost->GetCaption()).ToChar() : "?");
+        }
+        if (row >= 0) {
+            cGZMessage choose;
+            choose.type = kGZMsgCommand;
+            choose.param1 = 0x287259f6;
+            choose.param2 = 0xa1000u + static_cast<std::uint32_t>(row);
+            chooser->DoMessage(choose);
+            cRZString name;
+            tool->GetBridgeName(name, ui->PreferredBridge());
+            std::printf("bridgechoose: chose row %d -> preferred bridge %d \"%s\"\n", row, ui->PreferredBridge(), name.ToChar());
+            cGZMessage place;
+            place.type = kGZMsgCommand;
+            place.param1 = 0x287259f6;
+            place.param2 = 0x2000;
+            chooser->DoMessage(place);
+            std::printf("bridgechoose: placed, chooser %s\n", ui->BridgeChooser() ? "still open" : "closed");
+        }
+    }
+    if (row < 0 && chooser) {
+        g_chooserUi = ui;
+        g_chooserTool = tool;
+        return;
+    }
+    ui->Shutdown();
+    ui->Release();
+    tool->Shutdown();
+    tool->Release();
+}
 }  // namespace native

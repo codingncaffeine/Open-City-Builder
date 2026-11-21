@@ -235,6 +235,14 @@ void Pause(int ms) { g_ticks += static_cast<std::uint32_t>(ms); }   // the stub 
 
 }  // namespace
 
+// The bridge specialization script loader the network tool links: no resources here.
+namespace sc4 {
+bool SC4GetResourceAsFile(const cGZPersistResourceKey&, cIGZFile** out, bool) {
+    *out = nullptr;
+    return false;
+}
+}  // namespace sc4
+
 int main() {
     g_ticks = 1000;
     // ---- a line of fewer than five steps is usable at once and the crew goes away ---------------------------------------

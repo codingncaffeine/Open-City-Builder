@@ -5,6 +5,10 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "gz/WinBtn.h"
+#include "gz/WinGen.h"
+#include "gz/WinSlider.h"
+#include "gz/WinText.h"
 #include "rz/RZTime.h"
 #include "rz/cRZKeyboard.h"
 #include "sc4/SC4Utilities.h"
@@ -29,6 +33,13 @@ constexpr float kBridgeIndicatorClearance = 30.0f;       // cSC4Tank::sfBarrelMi
 // Bridge chooser control ids.
 constexpr std::uint32_t kButtonPlace = 0x2000, kButtonCancel = 0x2001, kBridgeButtonBase = 0xa1000;
 constexpr std::uint32_t kIndicatorAbove = 0x4000, kIndicatorBelow = 0x4001, kCostText = 0x3003, kBridgeName = 0x3002;
+constexpr std::uint32_t kAltitudeSlider = 0x3000, kListScrollBar = 0x3001, kAltitudeSliderLabel = 0x3004, kListFrame = 0x1000, kList = 0x1001;
+// The chooser (UI script 0xebd0d36c, window id 0x0c525b9e) and one row of its list (0xebd0d36d, id 0xa0000: the picture button
+// 0xa0002 and the cost 0xa0003).
+constexpr std::uint32_t kChooserScript = 0xebd0d36c, kChooserId = 0x0c525b9e;
+constexpr std::uint32_t kBridgeRowScript = 0xebd0d36d, kBridgeRowId = 0xa0000, kBridgeRowButton = 0xa0002, kBridgeRowCost = 0xa0003;
+// The sender classes of the command messages: a button, a slider or scroll bar.
+constexpr std::uint64_t kSenderButton = 0x287259f6, kSenderSlider = 0x887113a3;
 
 void Play(const std::uint32_t* table, std::uint32_t type) {
     if (g_host && type < 13 && table[type] != 0) g_host->PlaySound(table[type]);
@@ -56,8 +67,10 @@ bool cSC4NetworkToolUI::QueryInterface(std::uint32_t iid, void** out) {
         *out = static_cast<cIGZMessageTarget2*>(this);
     } else if (iid == 1 || iid == kGZIID_cISC4NetworkToolUI) {
         *out = static_cast<cISC4NetworkToolUI*>(this);
+    } else if (iid == gz::kGZIID_cIGZWinProc) {
+        *out = static_cast<gz::cIGZWinProc*>(this);
     } else {
-        return false;   // 0x22e85d8e (cIGZWinProc, the bridge chooser's proc) is not ported
+        return false;
     }
     AddRef();
     return true;
@@ -97,9 +110,12 @@ void cSC4NetworkToolUI::AttachToView(cISC4View3DWin* view) {
     view_ = view;
 }
 
+// The view window's ChildDelete (vslot 0x40) on the chooser, then its reference goes.
 void cSC4NetworkToolUI::CloseBridgeChooser() {
     if (!bridgeChooser_) return;
-    if (g_host) g_host->RemoveWindow(bridgeChooser_);
+    if (view_) {
+        if (cIGZWin* window = view_->AsIGZWin()) window->ChildDelete(bridgeChooser_);
+    }
     bridgeChooser_->Release();
     bridgeChooser_ = nullptr;
 }
@@ -232,8 +248,17 @@ void cSC4NetworkToolUI::OnButtonActivated(std::uint32_t id) {
     } else if (id == kButtonCancel) {
         AbortPlacement();
     } else if (bridgeChooser_ && id - kBridgeButtonBase < bridges_.size()) {
-        // The bridge rows (AddBridgeEntry) are not ported yet, so bridges_ stays empty and this branch does not run.
-        const BridgeEntry& entry = bridges_[id - kBridgeButtonBase];
+        const std::uint32_t row = id - kBridgeButtonBase;
+        // Only the chosen row's button stays checked.
+        for (std::uint32_t i = 0;; ++i) {
+            gz::cIGZWinBtn* button = nullptr;
+            if (!bridgeChooser_->GetChildAsRecursive(kBridgeButtonBase + i, gz::kGZIID_cIGZWinBtn, reinterpret_cast<void**>(&button)) ||
+                !button)
+                break;
+            button->SetChecked(i == row);
+            button->Release();
+        }
+        const BridgeEntry& entry = bridges_[row];
         if (entry.bridge != preferredBridge_) {
             preferredBridge_ = entry.bridge;
             bridgeAltitude_ = entry.altitude;
@@ -246,6 +271,98 @@ void cSC4NetworkToolUI::OnButtonActivated(std::uint32_t id) {
             UpdateIndicators(UpdatePreview());
         }
     }
+}
+
+// i386 0x004d1300
+bool cSC4NetworkToolUI::DoWinProcMessage(cIGZWin*, cGZMessage& message) {
+    if (message.type != kGZMsgCommand) return false;
+    if (message.param1 == kSenderButton) {
+        OnButtonActivated(static_cast<std::uint32_t>(message.param2));
+    } else if (message.param1 == kSenderSlider && bridgeChooser_) {
+        gz::cIGZWinSlider* slider = nullptr;
+        if (message.param2 == kAltitudeSlider) {
+            // The altitude slider moves the deck by a tenth of its value from the chosen bridge's reference altitude.
+            if (bridgeChooser_->GetChildAs(kAltitudeSlider, gz::kGZIID_cIGZWinSlider, reinterpret_cast<void**>(&slider)) && slider) {
+                bridgeAltitudeOffset_ = static_cast<float>(slider->GetValue()) / 10.0f;
+                bridgeAltitudeOverride_ = bridgeAltitudeOffset_ + bridgeAltitude_;
+                previewDirty_ = true;
+            }
+        } else if (message.param2 == kListScrollBar) {
+            // The scroll bar slides the rows inside the list frame.
+            if (bridgeChooser_->GetChildAs(kListScrollBar, gz::kGZIID_cIGZWinSlider, reinterpret_cast<void**>(&slider)) && slider) {
+                cIGZWin* frame = bridgeChooser_->GetChildWindowFromID(kListFrame);
+                cIGZWin* list = frame ? frame->GetChildWindowFromID(kList) : nullptr;
+                if (list) {
+                    list->GZWinMoveTo(0, -slider->GetValue());
+                    frame->InvalidateSelfAndParents();
+                }
+            }
+        }
+        if (slider) slider->Release();
+    }
+    return true;
+}
+
+// i386 0x004d0874. The rows fill the list frame's width left to right, then top to bottom; the list grows to hold them and the
+// scroll bar covers what the frame cannot show.
+void cSC4NetworkToolUI::AddBridgeEntry(const cRZString& name, std::int64_t cost, int bridge, float altitude) {
+    cIGZWin* frame = bridgeChooser_ ? bridgeChooser_->GetChildWindowFromID(kListFrame) : nullptr;
+    cIGZWin* list = frame ? frame->GetChildWindowFromID(kList) : nullptr;
+    if (!list || !g_host) return;
+    const cRZRect frameArea = frame->GetArea();
+    const cRZRect listArea = list->GetArea();
+    cIGZWin* row = g_host->CreateWindowFromScript(kBridgeRowScript, list, kBridgeRowId);
+    if (!row) return;
+    const cRZRect rowArea = row->GetArea();
+    const int rowW = rowArea.right - rowArea.left, rowH = rowArea.bottom - rowArea.top;
+    const std::uint32_t perLine = rowW > 0 ? static_cast<std::uint32_t>((listArea.right - listArea.left) / rowW) : 1u;
+    const std::uint32_t index = static_cast<std::uint32_t>(bridges_.size());
+    row->GZWinMoveTo(static_cast<int>(index % (perLine ? perLine : 1)) * rowW, static_cast<int>(index / (perLine ? perLine : 1)) * rowH);
+    cRZRect grown = listArea;
+    grown.bottom = row->GetB();
+    list->SetArea(grown);
+    const std::int64_t funds = g_host->Funds();
+    const bool tooDear = funds < cost;
+    if (cIGZWin* buttonWin = row->GetChildWindowFromID(kBridgeRowButton)) {
+        buttonWin->SetID(kBridgeButtonBase + index);
+        buttonWin->SetNotificationTarget(bridgeChooser_);
+        gz::cIGZWinBtn* button = nullptr;
+        if (buttonWin->QueryInterface(gz::kGZIID_cIGZWinBtn, reinterpret_cast<void**>(&button)) && button) {
+            if (tooDear) button->SetFontColor(0, gz::cRZColor{0xffff0000u});
+            std::uint32_t group = 0, instance = 0;
+            if (tool_->GetBridgeBitmapKey(bridge, group, instance)) g_host->SetButtonBitmap(buttonWin, group, instance);
+            cRZString tip;
+            tool_->GetBridgeName(tip, bridge);
+            button->SetTipText(tip);
+            button->Release();
+        }
+    }
+    bridges_.push_back({bridge, altitude});
+    if (cIGZWin* costWin = row->GetChildWindowFromID(kBridgeRowCost)) {
+        cRZString text;
+        SC4MakeMoneyString(cost, text);
+        costWin->SetCaption(text);
+        if (tooDear) {
+            gz::cIGZWinText* label = nullptr;
+            if (costWin->QueryInterface(gz::kGZIID_cIGZWinText, reinterpret_cast<void**>(&label)) && label) {
+                label->SetTextColor(gz::cIGZWinText::kColorText, g_host->NativeColor(costWin, 0xff, 0, 0));
+                label->Release();
+            }
+        }
+    }
+    (void)name;
+    gz::cIGZWinSlider* scroll = nullptr;
+    if (bridgeChooser_->GetChildAs(kListScrollBar, gz::kGZIID_cIGZWinSlider, reinterpret_cast<void**>(&scroll)) && scroll) {
+        const int hidden = row->GetB() - (frameArea.bottom - frameArea.top);
+        if (hidden < 1) {
+            scroll->AsIGZWin()->SetFlag(1, false);
+        } else {
+            scroll->AsIGZWin()->SetFlag(1, true);
+            scroll->SetMaximumValue(hidden);
+        }
+        scroll->Release();
+    }
+    row->Release();
 }
 
 bool cSC4NetworkToolUI::DoMessage(cIGZMessage2* message) {
@@ -323,24 +440,7 @@ bool cSC4NetworkToolUI::OnMouseDownL(int x, int y, std::uint32_t modifiers) {
     const bool picked = ScreenToCell(x, y, cell, &startAltitude_, false, 0.0f, 0.0f, 0.0f);
     if (Trace()) std::fprintf(stderr, "network ui: mouse down at %d,%d picked %d cell %u,%u this %p\n", x, y, picked ? 1 : 0, cell.x, cell.z, static_cast<void*>(this));
     if (picked) {
-        placing_ = true;
-        mouseDown_ = true;
-        preferredBridge_ = -1;
-        bridgeAltitudeOverride_ = -1.0f;
-        bridgeAltitudeOffset_ = 0.0f;
-        if (g_host) g_host->BeginNetworkDrag();
-        tool_->ForceReload();
-        Play(kNetworkDragSound, networkType_);
-        cell_ = cell;
-        startCell_ = cell;
-        gridWasShown_ = g_host && g_host->SetGridShown(false);
-        anchors_.clear();
-        anchors_.push_back(cell);
-        anchors_.push_back(cell);
-        tool_->SetAnchorPoints(anchors_);
-        anchorTime_ = cRZTime::GetMillisecondSystemTime();
-        failureText_.AssignFromChars("", 0);
-        cell_ = SC4PointU{0xffffffffu, 0xffffffffu};
+        BeginDrag(cell);
         OnMouseMove(x, y, modifiers);
     }
     return true;
@@ -362,15 +462,25 @@ bool cSC4NetworkToolUI::OnMouseUpL(int, int, std::uint32_t) {
         DoPlacement();
         return true;
     }
-    // The drag crosses water: the bridge chooser lists every bridge type the drag can take.
-    CloseBridgeChooser();
-    bridgeChooser_ = g_host ? g_host->CreateBridgeChooser(view_->AsIGZWin()) : nullptr;
-    if (!bridgeChooser_) {
-        // Port gap (AddBridgeEntry / the chooser's proc not ported): place with the tool's own bridge choice.
-        DoPlacement();
-        return true;
+    // The drag crosses water: the bridge chooser lists every bridge type the drag can take, the tool's own choice first.
+    if (bridgeChooser_) {
+        bridgeChooser_->Release();
+        bridgeChooser_ = nullptr;
     }
+    bridgeChooser_ = g_host ? g_host->CreateWindowFromScript(kChooserScript, view_->AsIGZWin(), kChooserId) : nullptr;
+    if (!bridgeChooser_) return true;
+    gz::cIGZWinGen* frame = nullptr;
+    if (bridgeChooser_->QueryInterface(gz::kGZIID_cIGZWinGen, reinterpret_cast<void**>(&frame)) && frame) {
+        frame->SetWinProc(this);
+        frame->Release();
+    }
+    g_host->AlignWindow(bridgeChooser_->GetID());
     majorLandBridge_ = tool_->IsMajorBridgeLandBridge();
+    if (majorLandBridge_) {
+        // A land bridge has no altitude slider.
+        if (cIGZWin* w = bridgeChooser_->GetChildWindowFromID(kAltitudeSlider)) w->HideWindow();
+        if (cIGZWin* w = bridgeChooser_->GetChildWindowFromID(kAltitudeSliderLabel)) w->HideWindow();
+    }
     const int major = tool_->GetMajorBridge();
     if (major >= 0) {
         auto it = std::find(possible.begin(), possible.end(), major);
@@ -381,15 +491,53 @@ bool cSC4NetworkToolUI::OnMouseUpL(int, int, std::uint32_t) {
         preferredBridge_ = bridge;
         bridgeAltitudeOverride_ = -1.0f;
         if (TestPlacement(false)) {
+            cRZString name;
+            tool_->GetBridgeName(name, bridge);
             float altitude = 0.0f;
             tool_->GetMajorBridgeReferenceAltitude(altitude);
-            bridges_.push_back({bridge, altitude});   // AddBridgeEntry(name, cost, 0, bridge) adds the row's button
+            AddBridgeEntry(name, tool_->GetCostOfSolution(), bridge, altitude);
+        }
+    }
+    // The list is at least as tall as its frame.
+    if (cIGZWin* listFrame = bridgeChooser_->GetChildWindowFromID(kListFrame)) {
+        const cRZRect frameArea = listFrame->GetArea();
+        const int frameH = frameArea.bottom - frameArea.top;
+        if (cIGZWin* list = listFrame->GetChildWindowFromID(kList)) {
+            cRZRect area = list->GetArea();
+            if (area.bottom < frameH) {
+                area.bottom = frameH;
+                list->SetArea(area);
+                listFrame->InvalidateSelfAndParents();
+            }
         }
     }
     preferredBridge_ = -1;
     OnButtonActivated(kBridgeButtonBase);
     return true;
 }
+
+// OnMouseDownL (i386 0x004d0580) once the cell under the mouse is picked: the drag starts there.
+void cSC4NetworkToolUI::BeginDrag(const SC4PointU& cell) {
+    placing_ = true;
+    mouseDown_ = true;
+    preferredBridge_ = -1;
+    bridgeAltitudeOverride_ = -1.0f;
+    bridgeAltitudeOffset_ = 0.0f;
+    if (g_host) g_host->BeginNetworkDrag();
+    tool_->ForceReload();
+    Play(kNetworkDragSound, networkType_);
+    cell_ = cell;
+    startCell_ = cell;
+    gridWasShown_ = g_host && g_host->SetGridShown(false);
+    anchors_.clear();
+    anchors_.push_back(cell);
+    anchors_.push_back(cell);
+    tool_->SetAnchorPoints(anchors_);
+    anchorTime_ = cRZTime::GetMillisecondSystemTime();
+    failureText_.AssignFromChars("", 0);
+    cell_ = SC4PointU{0xffffffffu, 0xffffffffu};
+}
+
 
 void cSC4NetworkToolUI::UpdateAnchorPoint(const SC4PointU& cell) {
     const std::size_t n = anchors_.size();
@@ -425,7 +573,13 @@ bool cSC4NetworkToolUI::OnMouseMove(int x, int y, std::uint32_t) {
     SC4PointU cell;
     if (!ScreenToCell(x, y, cell, &altitude_, true, altitude_, startAltitude_ - kPickAltitudeWindow, startAltitude_ + kPickAltitudeWindow))
         return true;
-    if (cell == cell_) return true;
+    DragTo(cell);
+    return true;
+}
+
+// OnMouseMove (i386 0x004d1a42) once the cell under the mouse is picked: the drag reaches `cell`.
+void cSC4NetworkToolUI::DragTo(const SC4PointU& cell) {
+    if (cell == cell_) return;
     cell_ = cell;
     const SC4PointU lastAnchor = anchors_.back();
     const bool ok = UpdatePreview();
@@ -457,7 +611,6 @@ bool cSC4NetworkToolUI::OnMouseMove(int x, int y, std::uint32_t) {
     }
     Play(ok ? kNetworkDragSound : kNetworkDragErrorSound, networkType_);
     if (g_host) g_host->RefreshCursor();
-    return true;
 }
 
 }  // namespace sc4

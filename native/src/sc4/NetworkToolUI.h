@@ -24,14 +24,13 @@
 //    absolute), as the original does (0x004cfc2c..0x004cfc6e).
 //  * LastDragDirection rounds with the 12582912.0f trick: (atan2(dx, -dz) * 4 / pi) + 1.5 * 2^23, low 3 bits.
 //
-// Not ported yet (named so the gap is visible): AddBridgeEntry (the bridge chooser's button rows, 0x004d0874) and the
-// bridge window half of DoWinProcMessage / OnButtonActivated; the host's CreateBridgeChooser answers null until then.
 #pragma once
 #include <cstdint>
 #include <string>
 #include <vector>
 
 #include "gz/WinInterfaces.h"
+#include "gz/WinProc.h"
 #include "gz/cIGZMessage2.h"
 #include "rz/cRZString.h"
 #include "sc4/NetworkTool.h"
@@ -92,14 +91,20 @@ public:
     // SL::spNeighborsSim vslot 0x14: ask whether to connect the drag to the neighbour city.
     virtual bool ConfirmNeighborConnection(const NeighborConnectionInfo& info) = 0;
     virtual void RefreshCursor() = 0;                                     // RZ::WM() vslot 0x4c
-    // SC4CreateWindowFromScript(0xebd0d36c, view window, 0x0c525b9e, 0x5386d516): the bridge chooser, one reference.
-    virtual cIGZWin* CreateBridgeChooser(cIGZWin* /*parent*/) { return nullptr; }
-    virtual void RemoveWindow(cIGZWin* /*window*/) {}                     // view window vslot 0x40(child)
+    // SC4CreateWindowFromScript(instance, parent, id, iid): the window of UI script `instance` inside `parent`, one reference
+    // (the bridge chooser 0xebd0d36c, a row of its list 0xebd0d36d).
+    virtual cIGZWin* CreateWindowFromScript(std::uint32_t /*instance*/, cIGZWin* /*parent*/, std::uint32_t /*id*/) { return nullptr; }
+    // nSC4UI::AlignWindowToWindow(id, 0xaaaa, 0, null): the chooser placed by its alignment child.
+    virtual void AlignWindow(std::uint32_t /*windowId*/) {}
+    // cSLBuffer(0, group, instance, 1, 0): the bitmap of a bridge type as a button image (GetStyle / SetStyle(style, image, 0)).
+    virtual void SetButtonBitmap(cIGZWin* /*button*/, std::uint32_t /*group*/, std::uint32_t /*instance*/) {}
+    // The window's draw buffer's native colour of r, g, b (window vslot 0x178 -> buffer vslot 0x78).
+    virtual std::uint32_t NativeColor(cIGZWin* /*window*/, std::uint8_t /*r*/, std::uint8_t /*g*/, std::uint8_t /*b*/) { return 0; }
 };
 INetworkToolUIHost* NetworkToolUIHost();
 void SetNetworkToolUIHost(INetworkToolUIHost* host);
 
-class cSC4NetworkToolUI final : public cISC4NetworkToolUI, public cIGZMessageTarget2 {
+class cSC4NetworkToolUI final : public cISC4NetworkToolUI, public gz::cIGZWinProc, public cIGZMessageTarget2 {
 public:
     struct BridgeEntry {
         int bridge = 0;          // +0 bridge index for SetPreferredBridge
@@ -132,6 +137,8 @@ public:
     void AttachToView(cISC4View3DWin* view) override;                     // @ 0x004cf88c
 
     bool DoMessage(cIGZMessage2* message) override;                       // @ 0x004d01c4
+    // cIGZWinProc of the bridge chooser: its buttons (0x287259f6), the altitude slider and the list's scroll bar (0x887113a3).
+    bool DoWinProcMessage(cIGZWin* window, cGZMessage& message) override;   // @ 0x004d1300
 
     void AbortPlacement();                                                // @ 0x004cf784
     void DoPlacement();                                                   // @ 0x004cf8f8
@@ -143,6 +150,16 @@ public:
                       float minAltitude, float maxAltitude);              // @ 0x004d0210
     bool LiesOnSegment(const SC4PointU& cell, const SC4PointU& from, const SC4PointU& to);   // @ 0x004d0456
     void UpdateAnchorPoint(const SC4PointU& cell);                        // @ 0x004d1864
+    // One row of the bridge chooser's list: the bridge's picture button (id 0xa1000 + row, its name as the tip) and its cost,
+    // both red when the city cannot pay it.
+    void AddBridgeEntry(const cRZString& name, std::int64_t cost, int bridge, float altitude);   // @ 0x004d0874
+    // What OnMouseDownL / OnMouseMove do once the mouse is over `cell` (they pick the cell under the mouse first).
+    void BeginDrag(const SC4PointU& cell);
+    void DragTo(const SC4PointU& cell);
+    // The open bridge chooser (null when none) and its rows.
+    cIGZWin* BridgeChooser() const { return bridgeChooser_; }
+    const std::vector<BridgeEntry>& BridgeEntries() const { return bridges_; }
+    int PreferredBridge() const { return preferredBridge_; }
 
     // Inspection for the tests / the owner.
     const std::vector<SC4PointU>& Anchors() const { return anchors_; }

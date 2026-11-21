@@ -271,8 +271,8 @@ void cSC4NetworkOccupantWithPreBuiltModel::UpdateShadow(bool force) {
         }
         if (!create && !remove) return;
     }
-    IShadowOverlay* land = nullptr;
-    IShadowOverlay* water = nullptr;
+    IShadowDecalOverlay* land = nullptr;
+    IShadowDecalOverlay* water = nullptr;
     if (!g_host->GetShadowOverlays(&land, &water)) return;
     if (remove) {
         if (shadowLand_ == -2) {
