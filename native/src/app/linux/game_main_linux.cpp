@@ -82,6 +82,7 @@
 #include "sc4/View3DWin.h"
 #include "gz/FontServices.h"
 #include "sc4/App.h"
+#include "sc4/RegionalCity.h"
 #include "sc4/SC4UI.h"
 #include "sc4/SLBuffer.h"
 #include "sc4/ServiceLocator.h"
@@ -1468,6 +1469,18 @@ int RunScenario(const std::string& path) {
             std::printf("cheats: %u registered:", count);
             for (std::uint32_t i = 0; i < got && i < count; ++i) std::printf(" \"%s\"", names[i]->ToChar());
             std::printf("\n");
+        } else if (command == "savecity") {   // savecity: what the Save menu item does (cSC4App::RequestSaveCity) without the "saved" message box
+            cSC4App* app = native::BootApplication();
+            std::printf("savecity: %s\n", app && app->RequestSaveCity(false, false) ? "saved" : "not saved");
+        } else if (command == "regioncity") {   // regioncity: the open city's regional record (what the region view and the neighbors read)
+            auto* record = dynamic_cast<cSC4RegionalCity*>(native::NativeCurrentRegionalCity());
+            std::vector<cISC4RegionalCity::PointOfInterest> airports, seaports;
+            if (!record) std::printf("regioncity: none\n");
+            else record->GetPointsOfInterest(cISC4RegionalCity::kPointOfInterestAirport, airports);
+            if (record) record->GetPointsOfInterest(cISC4RegionalCity::kPointOfInterestSeaport, seaports);
+            if (record) std::printf("regioncity: population %d (R$ %d), workforce %.3f, commercial jobs %d, industrial jobs %d, mayor rating %d, tax R$ %.2f, tutorial %d, airports %zu, seaports %zu\n",
+                        record->GetPopulation(), record->GetPopulation(0x1010), record->GetWorkforcePercentage(), record->GetCommercialJobs(), record->GetIndustrialJobs(),
+                        record->GetMayorRating(), record->GetTaxRate(0x1010), record->GetTutorialGUID(), airports.size(), seaports.size());
         } else if (command == "open-region") {   // open-region NAME: switches the region screen to a region the way the Load Region dialog does (no input)
             std::string want; std::getline(words >> std::ws, want);
             auto* screen = gAppWindow ? dynamic_cast<sc4::cSC4WinRegionScreen*>(gAppWindow->CurrentScreen()) : nullptr;

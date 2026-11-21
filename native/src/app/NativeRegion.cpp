@@ -18,6 +18,13 @@
 #include "sc4/BudgetSimulator.h"
 #include "app/NativeCity.h"
 #include "sc4/NeighborsSimulator.h"
+#include "sc4/AirportDeveloper.h"
+#include "sc4/AuraSimulator.h"
+#include "sc4/DemandSimulator.h"
+#include "sc4/Lot.h"
+#include "sc4/ResidentialSimulator.h"
+#include "sc4/SeaportDeveloper.h"
+#include "sc4/TutorialSystem.h"
 #include "sc4/Simulator.h"
 #include "sc4/Region.h"
 #include "sc4/RegionalCity.h"
@@ -55,9 +62,41 @@ bool ReadRegionalCityFile(const cIGZString& path, cISC4RegionalCity*& out) {
 
 // ---- cSC4RegionalCity -----------------------------------------------------------------------------------------------------
 // The live city (name, mayor, difficulty, serial, established, save path) is the app's open city: on the save-started message
-// the application's regional city refreshes itself from it (UpdateCityCache) before cSC4App::Write stores it. What needs
-// the simulators (rating, taxes, connections, populations, jobs) still answers neutrally and keeps the record's values.
+// the application's regional city refreshes itself from it (UpdateCityCache) before cSC4App::Write stores it, including what the
+// city's simulators know (rating, taxes, connections, populations, jobs, ports), through the city's component slots as the original.
 sc4::cSC4City* LiveCity(const cISC4City* city) { return dynamic_cast<sc4::cSC4City*>(const_cast<cISC4City*>(city)); }
+
+// The city's component `c` as its recovered class (city vslots 0xcc aura, 0xd0 budget, 0xe0 demand, 0xf8 neighbors, 0x110
+// residential, 0x148 tutorial system); null when the city has no such component or it is not that class.
+template <class T> T* CityPart(const cISC4City* city, sc4::CityComponent c) {
+    sc4::cSC4City* live = LiveCity(city);
+    cIGZUnknown* object = live ? live->GetComponent(c) : nullptr;
+    if (!object) return nullptr;
+    if (T* direct = dynamic_cast<T*>(object)) return direct;
+    void* raw = nullptr;
+    if (!object->QueryInterface(0xe4fda3d4, &raw) || !raw) return nullptr;   // cIGZSerializable: the component's own object
+    auto* serializable = static_cast<cIGZSerializable*>(raw);
+    T* concrete = dynamic_cast<T*>(serializable);
+    serializable->Release();
+    return concrete;
+}
+
+// SL::spAirportDeveloper / spSeaportDeveloper vslot 0x20 GetAllPortLots: every lot in its livable state adds its centre
+// (lot vslots 0x94 IsInLivableState, 0x3c GetCenter); each lot's reference is released (vslot 8).
+template <class Developer> void PortPointsOfInterest(cIGZUnknown* service, std::vector<cISC4RegionalCity::PointOfInterest>& out) {
+    auto* developer = dynamic_cast<Developer*>(service);
+    if (!developer) return;
+    std::vector<sc4::cSC4Lot*> lots;
+    developer->GetAllPortLots(lots);
+    for (sc4::cSC4Lot* lot : lots) {
+        if (lot->IsInLivableState()) {
+            float xyz[3] = {0.0f, 0.0f, 0.0f};
+            lot->GetCenter(xyz);
+            out.push_back(cISC4RegionalCity::PointOfInterest{xyz[0], xyz[1], xyz[2]});
+        }
+        lot->Release();
+    }
+}
 
 cISC4RegionalCity* RegionCity(int x, int z);
 // SL::spNeighborsSim: the city's neighbours simulator, bound before the simulators' Init (SL::OnCityInit).
@@ -117,17 +156,49 @@ public:
     void SetCitySize(cISC4City* city, float sizeX, float sizeZ) override { if (auto* live = LiveCity(city)) live->SetSize(sizeX, sizeZ); }
     std::uint32_t CitySerialNumber(const cISC4City* city) override { auto* live = LiveCity(city); return live ? live->GetCitySerialNumber() : 0; }
     bool CityEstablished(const cISC4City* city) override { auto* live = LiveCity(city); return live && live->GetEstablished(); }
-    // (no live mayor rating yet: the record's value is kept)
-    int CityMayorRating(const cISC4City*) override { cISC4RegionalCity* current = CurrentRegionalCity(); return current ? Concrete(current)->GetMayorRating() : 0; }
-    void CityTaxRates(const cISC4City*, float (&rates)[12]) override { for (float& r : rates) r = 7.0f; }
-    void CityConnections(const cISC4City*, NeighborConnectionList&) override {}
-    void CityUpdateCommodityStats(cISC4City*) override {}
-    bool CityTutorialGUID(const cISC4City*, int&) override { return false; }
-    bool CityPopulationStats(const cISC4City*, int&, float&) override { return false; }
-    void CityLocalPopulationSummary(const cISC4City*, std::map<std::uint32_t, int>&) override {}
-    void CityJobsPerUnitOfDemand(const cISC4City*, float*, std::uint32_t) override {}
-    void AirportPointsOfInterest(std::vector<cISC4RegionalCity::PointOfInterest>&) override {}
-    void SeaportPointsOfInterest(std::vector<cISC4RegionalCity::PointOfInterest>&) override {}
+    // city vslot 0xcc -> aura simulator vslot 0x20 GetMayorRating
+    int CityMayorRating(const cISC4City* city) override {
+        if (auto* aura = CityPart<sc4::cSC4AuraSimulator>(city, sc4::CityComponent::AuraSimulator)) return aura->GetMayorRating();
+        cISC4RegionalCity* current = CurrentRegionalCity();
+        return current ? Concrete(current)->GetMayorRating() : 0;
+    }
+    // city vslot 0xd0 -> budget simulator vslot 0x90 GetTaxRate(i) for the twelve tax types
+    void CityTaxRates(const cISC4City* city, float (&rates)[12]) override {
+        auto* budget = CityPart<sc4::cSC4BudgetSimulator>(city, sc4::CityComponent::BudgetSimulator);
+        if (!budget) return;
+        for (int i = 0; i < 12; ++i) rates[i] = budget->GetTaxRate(i);
+    }
+    // city vslot 0xf8 -> neighbors simulator vslot 0x40 GetAllConnections / vslot 0x88 UpdateCommodityStats
+    void CityConnections(const cISC4City* city, NeighborConnectionList& out) override {
+        if (auto* neighbors = CityPart<sc4::cSC4NeighborsSimulator>(city, sc4::CityComponent::NeighborsSimulator)) neighbors->GetAllConnections(out);
+    }
+    void CityUpdateCommodityStats(cISC4City* city) override {
+        if (auto* neighbors = CityPart<sc4::cSC4NeighborsSimulator>(city, sc4::CityComponent::NeighborsSimulator)) neighbors->UpdateCommodityStats(city);
+    }
+    // city vslot 0x148 -> tutorial system vslot 0x30 GetTutorialGUID (no tutorial system: nothing)
+    bool CityTutorialGUID(const cISC4City* city, int& guid) override {
+        auto* tutorials = CityPart<sc4::cSC4TutorialSystem>(city, sc4::CityComponent::TutorialSystem);
+        if (!tutorials) return false;
+        guid = tutorials->GetTutorialGUID();
+        return true;
+    }
+    // city vslot 0x110 -> residential simulator vslot 0x40 GetPopulation and vslot 0x7c GetGlobalWorkforcePercent
+    bool CityPopulationStats(const cISC4City* city, int& population, float& workforce) override {
+        auto* residential = CityPart<sc4::cSC4ResidentialSimulator>(city, sc4::CityComponent::ResidentialSimulator);
+        if (!residential) return false;
+        population = residential->GetPopulation();
+        workforce = residential->GetGlobalWorkforcePercent();
+        return true;
+    }
+    // city vslot 0xe0 -> demand simulator vslot 0x2c GetLocalPopulationSummary / vslot 0x20 CalculateJobsPerUnitOfDemand(units, id, 0)
+    void CityLocalPopulationSummary(const cISC4City* city, std::map<std::uint32_t, int>& out) override {
+        if (auto* demand = CityPart<sc4::cSC4DemandSimulator>(city, sc4::CityComponent::DemandSimulator)) demand->GetLocalPopulationSummary(out);
+    }
+    void CityJobsPerUnitOfDemand(const cISC4City* city, float* units, std::uint32_t purpose) override {
+        if (auto* demand = CityPart<sc4::cSC4DemandSimulator>(city, sc4::CityComponent::DemandSimulator)) demand->CalculateJobsPerUnitOfDemand(units, purpose, 0);
+    }
+    void AirportPointsOfInterest(std::vector<cISC4RegionalCity::PointOfInterest>& out) override { PortPointsOfInterest<sc4::cSC4AirportDeveloper>(SL::spAirportDeveloper, out); }
+    void SeaportPointsOfInterest(std::vector<cISC4RegionalCity::PointOfInterest>& out) override { PortPointsOfInterest<sc4::cSC4SeaportDeveloper>(SL::spSeaportDeveloper, out); }
 } g_cityHost;
 
 // ---- cSC4Region -----------------------------------------------------------------------------------------------------------

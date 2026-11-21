@@ -1715,6 +1715,10 @@ float cSC4ResidentialSimulator::GlobalQuotient(const SimGridPtr<float> (&values)
 float cSC4ResidentialSimulator::GetGlobalEQ() const { return GlobalQuotient(eq_); }
 float cSC4ResidentialSimulator::GetGlobalHQ() const { return GlobalQuotient(hq_); }
 
+float cSC4ResidentialSimulator::GetGlobalWorkforcePercent() {
+    return GetGlobalWorkforcePercent(host_ ? host_->SimulatorExemplar() : nullptr);
+}
+
 std::uint8_t cSC4ResidentialSimulator::GetCellLifeExpectancy(unsigned x, unsigned z) {
     return static_cast<std::uint8_t>(GetCellLifeExpectancy(host_ ? host_->SimulatorExemplar() : nullptr, x, z));
 }

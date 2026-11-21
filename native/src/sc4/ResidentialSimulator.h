@@ -291,6 +291,7 @@ public:
     static std::uint8_t GetAverageNewAgeByWealth(const cISCPropertyHolder* exemplar, int wealth);
     float GetCellWorkforcePercent(const cISCPropertyHolder* exemplar, unsigned x, unsigned z);
     float GetGlobalWorkforcePercent(const cISCPropertyHolder* exemplar);
+    float GetGlobalWorkforcePercent();   // slot 31 (vslot 0x7c): the tuning exemplar from the host
     std::uint32_t GetCellLifeExpectancy(const cISCPropertyHolder* exemplar, unsigned x, unsigned z);
 
     // ---- tunables kept outside the departments (REH 4.13) ----
