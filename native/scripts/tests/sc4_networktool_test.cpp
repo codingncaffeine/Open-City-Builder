@@ -210,6 +210,13 @@ struct FakeHost : INetworkToolHost {
         for (int i = 0; i != 4; ++i) out[i] = water.count(x | (z << 16)) ? waterBed : landLevel;
     }
     bool NetworkOccupantInRect(int, int, int, int, std::uint32_t) override { return occupiedRect; }
+    bool anyOccupant = false;
+    bool OccupantInRect(int, int, int, int) override { return anyOccupant; }
+    std::map<std::int32_t, float> vertexHeights;   // the terrain the land bridge scan reads (others 100)
+    float TerrainVertexHeight(std::int32_t vertex) override {
+        auto it = vertexHeights.find(vertex);
+        return it == vertexHeights.end() ? 100.0f : it->second;
+    }
     int inserted = 0;
     int InsertNetworkOccupant(cSC4NetworkOccupant*, std::uint32_t) override { return ++inserted; }
     int CityWidth() override { return width; }
@@ -1326,6 +1333,58 @@ int main() {
         A::ComputeSmoothingSet(*f.tool, 0);
         CHECK(A::FixedVertices(*f.tool).size() == 12 && A::FixedVertices(*f.tool).count(7 + 5 * 1000));
         SetNetworkToolHost(nullptr);
+    }
+
+    // ---- bridges: a straight drag over a valley gets a land bridge ------------------------------------------
+    {
+        cSC4NetworkBridgeTypeInfo land;
+        land.isLand = true;
+        land.minSpan = 4;
+        land.maxSpan = 100000;
+        land.deckModel = 0x50;
+        land.name = "Land Test Bridge";
+        // a V-shaped valley under the leading edge (vertex x + 1) of the cells x = 5..11 along z = 5
+        static const float kValley[] = {95.0f, 85.0f, 75.0f, 70.0f, 75.0f, 85.0f, 95.0f};   // vertex x = 6..12
+        const auto run = [&](bool occupied, std::vector<tBridge>& out, std::vector<tDraggedStep>& stepsOut) {
+            Fixture f;
+            f.host.typeInfo.bridges = {land};
+            f.host.typeInfo.placement.float40[2] = 10.0f;   // the dip must sink more than this below the deck
+            f.host.typeInfo.placement.float40[3] = 5.0f;    // the far bank within this of the deck
+            f.Init();
+            f.host.anyOccupant = occupied;
+            const std::int32_t row = 41;                    // the fixture city is 40 cells wide
+            for (int i = 0; i < 7; ++i) {
+                f.host.vertexHeights[5 * row + 6 + i] = kValley[i];
+                f.host.vertexHeights[6 * row + 6 + i] = kValley[i];
+            }
+            auto& steps = NetworkToolTestAccess::Steps(*f.tool);
+            auto& cells = NetworkToolTestAccess::Cells(*f.tool);
+            steps.clear();
+            cells.clear();
+            for (std::uint32_t i = 0; i < 20; ++i) {
+                cells.push_back(SC4PointU{i, 5});
+                steps.push_back(tDraggedStep{i, i, 0});
+            }
+            NetworkToolTestAccess::SetDrag(*f.tool, 20, 20, 0);
+            f.tool->IdentifyLandBridgeCells(20, kNetworkRoad);
+            out = f.tool->Bridges();
+            stepsOut = steps;
+        };
+        std::vector<tBridge> bridges;
+        std::vector<tDraggedStep> steps;
+        run(false, bridges, steps);
+        CHECK(bridges.size() == 1);
+        if (bridges.size() == 1) {
+            const tBridge& b = bridges[0];
+            // from the first step down (at its edge height) to the step that climbs back to it
+            CHECK(b.startStep == 5 && b.endStep == 11 && b.landBridge && b.elevation == 95.0f && b.referenceAltitude == 95.0f);
+            CHECK(b.pieces.size() == 7 && b.pieces[3].model == 0x50);
+            for (int s = 0; s < 20; ++s) CHECK(steps[static_cast<std::size_t>(s)].direction == ((s >= 5 && s <= 11) ? 1u : 0u));
+        }
+        // control: anything standing in the span's rectangle prevents the land bridge
+        run(true, bridges, steps);
+        CHECK(bridges.empty());
+        for (const tDraggedStep& step : steps) CHECK(step.direction == 0);
     }
 
     // ---- Unregister the host and finish ---------------------------------------------------------------------

@@ -8,6 +8,8 @@
 #include "sc4/NetworkTool.h"
 
 #include <algorithm>
+#include <cfloat>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -483,6 +485,95 @@ void cSC4NetworkTool::IdentifyBridgeCells(int& steps, std::uint32_t networkType)
         ConstructParametricBridge(bridge);
     }
     steps = step;
+}
+
+// i386 0x0014fa90: a land bridge over steps [start, end] at the deck height of the bank it leaves. The best land bridge type
+// (padding the span to its minimum), then no occupant of any kind may stand in the span's cell rectangle grown by one cell;
+// otherwise the possible bridges are forgotten and there is no bridge.
+bool cSC4NetworkTool::CreateLandBridge(int start, int end, float deck, std::uint32_t networkType) {
+    const int bridgeType = FindBestBridgeType(start, end, false, 0.0f, networkType);
+    if (bridgeType < 0) return false;
+    const SC4PointU& a = cells_[steps_[static_cast<std::size_t>(start)].firstCell];
+    const SC4PointU& b = cells_[steps_[static_cast<std::size_t>(end)].lastCell];
+    const int x0 = static_cast<int>(std::min(a.x, b.x)) - 1, z0 = static_cast<int>(std::min(a.z, b.z)) - 1;
+    const int x1 = static_cast<int>(std::max(a.x, b.x)) + 1, z1 = static_cast<int>(std::max(a.z, b.z)) + 1;
+    INetworkToolHost* host = GetNetworkToolHost();
+    if (host && host->OccupantInRect(x0, z0, x1, z1)) {
+        possibleBridges_.clear();
+        return false;
+    }
+    for (int k = start; k <= end; ++k) steps_[static_cast<std::size_t>(k)].direction = 1;
+    bridges_.emplace_back();
+    tBridge& bridge = bridges_.back();
+    bridge.networkType = networkType_;   // i386 +0x39c, the tool's own type
+    bridge.startStep = start;
+    bridge.endStep = end;
+    bridge.bridgeType = bridgeType;
+    bridge.elevation = deck;
+    bridge.referenceAltitude = deck;
+    bridge.landBridge = true;
+    // ConstructSpecializedBridge for a span the specialization script lists (none: the parser is not ported).
+    ConstructParametricBridge(bridge);
+    return true;
+}
+
+// i386 0x0014fd56. Along the straight regular steps that allow a bridge, each step's cross-section edge (the two vertices of
+// the step's first cell on the drag direction's side, Init's corner table) gives a low and a high terrain height. A step whose
+// high is below the previous step's low starts a dip at the previous step (the deck at that step's high). Inside the dip the
+// lowest point is tracked; the dip ends at the first step that climbs back to the deck (or above the first step down): when it
+// spans more than three steps, sinks deeper than the placement's +0x3c below the deck and its far bank is within +0x40 of the
+// deck, it becomes a land bridge. An irregular step or one whose edges forbid a bridge ends the dip.
+void cSC4NetworkTool::IdentifyLandBridgeCells(int validSteps, std::uint32_t networkType) {
+    if (!AllowBridges()) return;
+    const int last = std::min(straightSteps_, validSteps) - 1;
+    if (last <= 3) return;
+    INetworkToolHost* host = GetNetworkToolHost();
+    const int corner = directionA_ & 3;
+    const float minDepth = placement_.float40[2];      // i386 +0x30c
+    const float bankTolerance = placement_.float40[3]; // i386 +0x310
+    int start = 0x7fffffff;
+    bool inDip = false;
+    float prevLow = 0.0f, prevHigh = 0.0f;
+    float deck = 0.0f, firstDrop = 0.0f;
+    float lowest = FLT_MAX;
+    for (int s = 1; s != last; ++s) {
+        if (steps_[static_cast<std::size_t>(s)].direction != 0 || !CheckBridgeStepEdgeTypes(s, networkType)) {
+            inDip = false;
+            continue;
+        }
+        const SC4PointU& cell = cells_[steps_[static_cast<std::size_t>(s)].firstCell];
+        const std::int32_t base = static_cast<std::int32_t>(cell.z) * widthPlusOne_ + static_cast<std::int32_t>(cell.x);
+        const float a = host ? host->TerrainVertexHeight(base + initScratch_[corner]) : 0.0f;
+        const float b = host ? host->TerrainVertexHeight(base + initScratch_[8 + corner]) : 0.0f;
+        const float high = std::max(b, a > -FLT_MAX ? a : -FLT_MAX);
+        const float low = std::min(b, a >= FLT_MAX ? FLT_MAX : a);
+        if (!inDip) {
+            if (prevLow > high) {
+                start = s - 1;
+                deck = prevHigh;
+                firstDrop = high;
+                inDip = true;
+                lowest = FLT_MAX;
+            } else {
+                prevLow = low;
+                prevHigh = high;
+            }
+            continue;
+        }
+        if (!(high >= deck) && (prevHigh < firstDrop || high < firstDrop)) {
+            if (lowest > low) lowest = low;
+            inDip = true;
+            continue;
+        }
+        // the dip ends at this step
+        if (deck > high) {
+            ++start;
+            deck = firstDrop;
+        }
+        if (s - start + 1 > 3 && deck - lowest > minDepth && !(bankTolerance < std::fabs(deck - high)))
+            CreateLandBridge(start, s, deck, networkType);
+        inDip = false;
+    }
 }
 
 // i386 0x004cbdfc: the cells of the bridges within the valid steps are not solved as regular pieces.

@@ -638,6 +638,8 @@ public:
     virtual float CellMaxSurfaceLevel(std::uint32_t /*x*/, std::uint32_t /*z*/) { return 0.0f; }
     virtual void CellCornerAltitudes(std::uint32_t /*x*/, std::uint32_t /*z*/, float out[4]) { out[0] = out[1] = out[2] = out[3] = 0.0f; }
     virtual bool NetworkOccupantInRect(int /*x0*/, int /*z0*/, int /*x1*/, int /*z1*/, std::uint32_t /*typeMask*/) { return false; }
+    // CreateLandBridge: the same query without a filter (true when any occupant stands in the rectangle).
+    virtual bool OccupantInRect(int /*x0*/, int /*z0*/, int /*x1*/, int /*z1*/) { return false; }
     // ClearCellPreviews: SL::spOccupantManager vslot 0x54 RemoveOccupant(preview, true, 0).
     virtual void RemovePreviewOccupant(cSC4NetworkOccupant* /*occupant*/) {}
     // InsertTunnelPiece's terrain cut (SL::spTerrain i386 vslots 0xc4 SetAltitude(vertex, height), 0x15c
@@ -917,6 +919,9 @@ public:
     const std::vector<tSolvedCell>& SolvedCells() const { return solvedCellList_; }
     // --- bridges (src/sc4/NetworkBridges.cpp; i386 addresses) ---
     void IdentifyBridgeCells(int& steps, std::uint32_t networkType);                                      // 0x0014f73a
+    // 0x0014fd56 / 0x0014fa90: a straight drag over a dip in the land (a valley, a road below) gets a land bridge.
+    void IdentifyLandBridgeCells(int validSteps, std::uint32_t networkType);
+    bool CreateLandBridge(int start, int end, float deck, std::uint32_t networkType);
     bool IsStepGoodForBridge(int step);                                                                   // 0x0014c8ae
     bool CheckBridgeStepEdgeTypes(int step, std::uint32_t networkType);                                   // 0x0014c4e0
     bool SelectBridgeStartAndEnd(int step, int& start, int& end, int& bridgeType, float& altitude,
