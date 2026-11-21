@@ -62,6 +62,7 @@
 #include "gz/cIGZOStream.h"
 #include "rz/cRZIniFile.h"
 #include "rz/cRZString.h"
+#include "sc4/NetworkConstructionCrew.h"
 #include "sc4/Occupant.h"
 
 namespace sc4 {
@@ -144,13 +145,7 @@ static_assert(sizeof(PathRemapEntry) == 0x10, "PathRemapEntry is 0x10 bytes");
 template <typename T>
 using ilist = std::list<T>;
 
-// cSC4NetworkConstructionCrew (vtable 0x100a84160) is not recovered. The manager only keeps a counted
-// reference and calls its vslot 0x28 (Shutdown) when a game reset destroys the crews. This placeholder holds
-// the two cIGZUnknown counters; replace it with the real class when that is recovered.
-class cSC4NetworkConstructionCrew : public cIGZUnknown {
-public:
-    virtual void Shutdown() = 0;   // [5] +0x28; the original implementation unregisters itself
-};
+// INetworkManagerCrew (sc4/NetworkConstructionCrew.h): the construction crew as the manager sees it.
 
 class cSC4PipeOccupant;             // forward: the manager only hands the out-parameter through
 class cSC4PipeConnectionOccupant;   // forward: ditto
@@ -258,8 +253,8 @@ public:
     virtual std::uint32_t MapShadowTexture(std::uint32_t texture, std::uint8_t& alpha, std::uint32_t network,
                                            std::uint32_t piece) = 0;           // [14] 0x070
     virtual std::uint32_t MapPath(std::uint32_t path) = 0;                     // [15] 0x078
-    virtual void RegisterConstructionCrew(cSC4NetworkConstructionCrew* crew) = 0;    // [16] 0x080
-    virtual void UnregisterConstructionCrew(cSC4NetworkConstructionCrew* crew) = 0;  // [17] 0x088
+    virtual void RegisterConstructionCrew(INetworkManagerCrew* crew) = 0;    // [16] 0x080
+    virtual void UnregisterConstructionCrew(INetworkManagerCrew* crew) = 0;  // [17] 0x088
     virtual cISC4OccupantFilter* GetWaterOccupantFilter() = 0;                 // [18] 0x090
     virtual cISC4OccupantFilter* GetSubwayOccupantFilter() = 0;                // [19] 0x098
     virtual bool CreateConnectionNode(cISC4Occupant*& out, eNetworkType type, const SC4PointT<int>& cell,
@@ -316,8 +311,9 @@ public:
     std::uint32_t MapShadowTexture(std::uint32_t texture, std::uint8_t& alpha, std::uint32_t network,
                                    std::uint32_t piece) override;                  // 0x10016ece4
     std::uint32_t MapPath(std::uint32_t path) override;                            // 0x10016ee44
-    void RegisterConstructionCrew(cSC4NetworkConstructionCrew* crew) override;     // 0x10016f1dc
-    void UnregisterConstructionCrew(cSC4NetworkConstructionCrew* crew) override;   // 0x10016f226
+    void RegisterConstructionCrew(INetworkManagerCrew* crew) override;     // 0x10016f1dc
+    void UnregisterConstructionCrew(INetworkManagerCrew* crew) override;   // 0x10016f226
+    const std::vector<INetworkManagerCrew*>& ConstructionCrews() const { return constructionCrews_; }   // the running crews (read-only)
     cISC4OccupantFilter* GetWaterOccupantFilter() override;                        // 0x10016f2da
     cISC4OccupantFilter* GetSubwayOccupantFilter() override;                       // 0x10016f332
     bool CreateConnectionNode(cISC4Occupant*& out, eNetworkType type, const SC4PointT<int>& cell,
@@ -371,7 +367,7 @@ private:
     std::vector<cISC4Occupant*> removalQueue_;                 // +0xb8
     bool removalQueueActive_ = false;                         // +0xd0
     std::list<cISC4Occupant*> retrofitList_;                  // +0xd8
-    std::vector<cSC4NetworkConstructionCrew*> constructionCrews_;  // +0xf0
+    std::vector<INetworkManagerCrew*> constructionCrews_;  // +0xf0
     INetworkManagerTool* networkTools_[kNetworkToolCount] = {};    // +0x108 (13 pointers, 0x108..0x16c)
 };
 

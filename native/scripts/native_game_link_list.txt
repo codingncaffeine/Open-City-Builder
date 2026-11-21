@@ -372,6 +372,7 @@ src/sc4/LotBaseTextureOccupant.cpp
 src/sc4/MySimBalloonAdvice.cpp
 src/sc4/NetworkLotManager.cpp
 src/sc4/NetworkManager.cpp
+src/sc4/NetworkConstructionCrew.cpp
 src/sc4/NetworkOccupant.cpp
 src/sc4/NetworkOccupantWithPreBuiltModel.cpp
 src/sc4/ParkManager.cpp
@@ -758,6 +759,8 @@ src/sc4/AudioPreferencesWinProc.cpp
 src/sc4/VideoPreferencesWinProc.cpp
 src/app/NativeNetworkTool.cpp
 src/app/NativeNetworkManager.cpp
+src/app/NativeNetworkConstructionCrew.cpp
+src/app/NativeNetworkCrewReport.cpp
 src/sc4/NetworkToolUI.cpp
 src/sc4/ViewInputControlNetworkTool.cpp
 src/sc4/NetworkWorldCache.cpp

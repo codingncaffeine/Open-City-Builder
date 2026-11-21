@@ -71,6 +71,7 @@ void InstallNeighborConnectionStub();
 void InstallNeighborDealStub();
 void InstallNetworkLotManagerStub();
 void InstallNetworkManagerHost();   // NativeNetworkManager.cpp
+void InstallNetworkConstructionCrewHost();   // NativeNetworkConstructionCrew.cpp
 void InstallNetworkOccupantStub();
 void InstallNetworkLotHosts();   // NativeNetworkLots.cpp
 void InstallPreBuiltModelOccupantHost();   // NativePreBuiltModel.cpp
@@ -185,6 +186,7 @@ void InstallStubHosts() {
     InstallNeighborDealStub();
     InstallNetworkLotManagerStub();
     InstallNetworkManagerHost();          // the network manager's real host (before the city's manager is made)
+    InstallNetworkConstructionCrewHost(); // the network construction crews' services
     InstallNetworkOccupantStub();
     InstallNetworkLotHosts();             // the lot manager's and the pieces' real hosts replace the two stubs
     InstallPreBuiltModelOccupantHost();

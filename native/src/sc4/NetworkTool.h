@@ -66,6 +66,7 @@ namespace sc4 {
 
 class cISC4NetworkToolUI;
 class cSC4NetworkOccupant;
+class cSC4NetworkConstructionCrew;
 class cSC4TileEvaluator;
 
 // SC4Point<unsigned int>: two u32 at +0x0 (x) and +0x4 (z). The engine's template also has AddClamped etc.,
@@ -943,8 +944,9 @@ public:
     void SetTerrainHilight(int param);                                    // 0x10018cd24
     // i386 0x004cc96a: the drag's cells (+0xb8) and steps (+0xa0); zMajor / xMajor = the splitter's two flags.
     void ComputeDraggedCells(const SC4PointU& start, const SC4PointU& end, int zMajor, int xMajor, std::uint32_t networkType);
-    // i386: solve the current line and insert its occupants (or previews). Not ported yet.
-    bool PlaceNetwork(bool place, bool allowDiagonals, bool connectNeighbor, std::uint32_t networkType);
+    // i386 0x004ceb..: solve the current line and insert its occupants (or previews); a real placement hands the pieces to
+    // `crew` when there is one.
+    bool PlaceNetwork(bool place, cSC4NetworkConstructionCrew* crew, bool allowDiagonals, bool connectNeighbor, std::uint32_t networkType);
     // 0x10071aa64: split the drag from `start` to `end` into straight and diagonal parts and move `end` to the
     // end of the allowed part. See the .cpp for the meaning of every out-parameter.
     void BreakIntoStraightAndDiagSegments(const SC4PointU& start, SC4PointU& end, int& totalSteps,

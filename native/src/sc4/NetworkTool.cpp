@@ -12,6 +12,7 @@
 //  * GetLastValidPoint indexes the step array with validSteps-1 without a bounds check (0x100190668).
 //  * GetMajorBridge* read the last element of the bridge vector through the vector's end pointer (0x100187f42).
 #include "sc4/NetworkTool.h"
+#include "sc4/NetworkConstructionCrew.h"
 #include "sc4/NetworkOccupant.h"
 #include "sc4/NetworkToolUI.h"
 #include "sc4/SCPropertyHelp.h"
@@ -994,18 +995,35 @@ void cSC4NetworkTool::ComputeDraggedCells(const SC4PointU& start, const SC4Point
     }
 }
 
-// i386 0x004cf1ce: every anchor segment is drawn, its previews cleared and solved (and placed when `place`).
-// Not ported yet: the construction crew a real placement of a crewed type (mask 0x1f4f) builds the segments with
-// (cSC4NetworkConstructionCrew, new(0x58)); the occupants are placed directly.
+// i386 0x004cf1ce: every anchor segment is drawn, its previews cleared and solved (and placed when `place`). A real
+// placement of a crewed network type (mask 0x1f4f) builds its segments with a construction crew: PlaceNetwork hands it each
+// segment's pieces and BeginConstruction starts it after the last one. The crew is set up from the type's record (i386
+// sNetworkTypeInfo +0x1c pen width X; +0xc8..+0xd8, the placement block's crew duration, speed, lead / follower vehicle
+// models and crew path type).
 void cSC4NetworkTool::PlaceAllSegments(bool place, bool allowDiagonals, bool connectNeighbor, std::uint32_t networkType) {
     const bool savedFlag = unknown9a_;
     unknown9a_ = false;
     ReloadCheck();
+    cSC4NetworkConstructionCrew* crew = nullptr;
+    if (place && networkType <= 12 && ((1u << networkType) & kNetworkCrewNetworkMask) != 0) {
+        INetworkToolHost* host = GetNetworkToolHost();
+        const INetworkTypeInfo* info = host ? host->NetworkTypeInfo(networkType) : nullptr;
+        const cSC4NetworkPlacementParams* params = info ? &info->PlacementParams() : nullptr;
+        crew = new cSC4NetworkConstructionCrew();
+        crew->AddRef();
+        crew->Init(info ? static_cast<std::uint32_t>(info->PenWidthX()) : 0, params ? params->floatA8[0] : 0.0f,
+                   params ? params->floatA8[1] : 0.0f, params ? params->unknownA8[2] : 0, params ? params->unknownA8[3] : 0,
+                   params ? params->unknownA8[4] : 0);
+    }
     for (std::size_t i = 0; i + 1 < anchors_.size(); ++i) {
         SC4PointU from = anchors_[i], to = anchors_[i + 1];
         DrawNetworkLine(from, to, allowDiagonals, networkType);
         ClearCellPreviews();
-        PlaceNetwork(place, allowDiagonals, connectNeighbor, networkType);
+        PlaceNetwork(place, crew, allowDiagonals, connectNeighbor, networkType);
+    }
+    if (crew) {
+        crew->BeginConstruction();
+        crew->Release();
     }
     unknown9a_ = savedFlag;
 }
@@ -1027,7 +1045,7 @@ bool cSC4NetworkTool::PlaceNetworkOccupants(int x0, int z0, int x1, int z1, std:
         anchors_.clear();
         anchors_.push_back(from);
         anchors_.push_back(to);
-        return DrawNetworkLine(from, to, false, type) && PlaceNetwork(place, false, false, type);
+        return DrawNetworkLine(from, to, false, type) && PlaceNetwork(place, nullptr, false, false, type);
     };
     // The network occupant of one of `flags`' types on a cell (the original's cSC4NetworkORFilter lookup).
     INetworkToolHost* host = GetNetworkToolHost();

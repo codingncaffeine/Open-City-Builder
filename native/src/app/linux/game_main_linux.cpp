@@ -1366,6 +1366,10 @@ int RunScenario(const std::string& path) {
             int x1 = 0, z1 = 0, x2 = 0, z2 = 0;
             words >> x1 >> z1 >> x2 >> z2;
             native::NativeTerrainLine(x1, z1, x2, z2);
+        } else if (command == "crews") {   // crews [X0 Z0 X1 Z1]: the running network construction crews, their vehicles, the pieces in a rectangle
+            int x0 = -1, z0 = -1, x1 = -1, z1 = -1;
+            words >> x0 >> z0 >> x1 >> z1;
+            native::NativeConstructionCrewReport(x0, z0, x1, z1);
         } else if (command == "tunnels") {   // tunnels: every tunnel portal, its model, its other end and its paths
             native::NativeTunnelReport();
             native::NativeTrafficTunnelReport();

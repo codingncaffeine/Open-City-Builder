@@ -476,14 +476,14 @@ void cSC4NetworkManager::AddToRetrofitList(cISC4Occupant* occupant) {
 // ============================================================================================================
 
 // 0x10016f1dc
-void cSC4NetworkManager::RegisterConstructionCrew(cSC4NetworkConstructionCrew* crew) {
+void cSC4NetworkManager::RegisterConstructionCrew(INetworkManagerCrew* crew) {
     if (crew == nullptr) return;
     constructionCrews_.push_back(crew);
     crew->AddRef();
 }
 
 // 0x10016f226: remove the first match and drop its reference. A crew that is not registered is ignored.
-void cSC4NetworkManager::UnregisterConstructionCrew(cSC4NetworkConstructionCrew* crew) {
+void cSC4NetworkManager::UnregisterConstructionCrew(INetworkManagerCrew* crew) {
     const auto it = std::find(constructionCrews_.begin(), constructionCrews_.end(), crew);
     if (it == constructionCrews_.end()) return;
     constructionCrews_.erase(it);
@@ -709,7 +709,7 @@ bool cSC4NetworkManager::DoMessage(cIGZMessage2* message) {
     case 0x26d31ec2: {
         // Quirk kept: the crew is only shutdown; it has to unregister itself or this loop never ends.
         while (!constructionCrews_.empty()) {
-            cSC4NetworkConstructionCrew* crew = constructionCrews_.front();
+            INetworkManagerCrew* crew = constructionCrews_.front();
             if (crew == nullptr) {
                 constructionCrews_.erase(constructionCrews_.begin());
                 continue;

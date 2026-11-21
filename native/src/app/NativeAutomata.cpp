@@ -78,6 +78,7 @@ public:
     void UpdateAnimation(float elapsed) override { if (animated_) animated_->DoAutoFrameUpdate(elapsed); }
     int GetFrame() const override { return animated_ ? animated_->GetFrame() : 0; }
     int GetFrameCount() const override { return animated_ ? animated_->GetFrameCount() : 1; }
+    void SetFrame(int frame) override { if (animated_) animated_->SetFrame(frame); }
     void SetZoomAndRotation(int zoom, int rotation) override { if (animated_) animated_->SetZoomAndRotation(zoom, rotation); }
     void SetPlayMode(s3d::PlayMode mode) override { if (animated_) animated_->SetPlayMode(mode); }
     float GetOpacity() const override { return instance_->GetDrawAttributes().shade[3]; }

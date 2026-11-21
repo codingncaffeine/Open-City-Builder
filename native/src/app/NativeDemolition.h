@@ -26,6 +26,7 @@ void NativeBridgeReport(int x0, int z0, int x1, int z1);   // kit verb `bridges`
 void NativeTunnelParams(std::uint32_t type);                 // kit verb `tunnelparams` (NativeNetworkTool.cpp)
 void NativeTerrainLine(int x1, int z1, int x2, int z2);     // kit verb `heights`
 void NativeTunnelReport();                                  // kit verb `tunnels`
+void NativeConstructionCrewReport(int x0, int z0, int x1, int z1);   // kit verb `crews [X0 Z0 X1 Z1]` (NativeNetworkCrewReport.cpp)
 void NativeTrafficTunnelReport();                           // kit verb `tunnels`, the traffic simulator's half (NativeTraffic.cpp)
 bool DemolishLots(bool commit, sc4::cSC4Lot* const* lots, int count, int privilege, std::uint32_t flags, bool dezone,
                   std::int64_t* cost);
