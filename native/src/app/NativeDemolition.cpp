@@ -82,9 +82,7 @@ cSTETerrain* Terrain() {
 }
 cSC4PropManager* Props() { return Plain<cSC4PropManager>(CityComponent::PropManager); }
 cSC4Demolition* Service() {
-    cSC4Demolition* demolition = Plain<cSC4Demolition>(CityComponent::DemolitionUtility);
-    if (demolition) demolition->Init();   // the plain wrapper never initialises it; Init is idempotent
-    return demolition;
+    return Plain<cSC4Demolition>(CityComponent::DemolitionUtility);   // initialised by the city's Init (component dispatch)
 }
 cSC4LotDeveloper* LotDeveloper() { return Serializable<cSC4LotDeveloper>(CityComponent::LotDeveloper, kGZCLSID_cSC4LotDeveloper); }
 cSC4ZoneDeveloper* ZoneDeveloper() { return Serializable<cSC4ZoneDeveloper>(CityComponent::ZoneDeveloper, cSC4ZoneDeveloper::kZoneDeveloperClassId); }
@@ -252,11 +250,25 @@ bool PhiIncludes(cISC4Occupant* occupant, const DemolitionFilterState& state) {
     return true;
 }
 
+// The demolition utility as a message target: the original registers its +4 view on SL::spMS2 in Init for the tuning reload
+// (0xc53d10aa), city init (0x26d31ec1) and demolish request (0xa9ded179) messages; cSC4Demolition::DoMessage answers them.
+class DemolitionTarget final : public cIGZMessageTarget2 {
+public:
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return 2; }
+    std::uint32_t Release() override { return 1; }
+    bool DoMessage(cIGZMessage2* message) override {
+        if (cSC4Demolition* demolition = Service()) demolition->DoMessage(message->GetType());
+        return true;   // the original answers true for every message
+    }
+};
+DemolitionTarget g_demolitionTarget;
+
 // ---- the host ------------------------------------------------------------------------------------------------------------
 class Host final : public IDemolitionHost {
 public:
-    void AddNotification(std::uint32_t) override {}      // the plain wrapper is not a message target; the tuning is read at Init
-    void RemoveNotification(std::uint32_t) override {}
+    void AddNotification(std::uint32_t message) override { if (SL::spMS2) SL::spMS2->AddNotification(&g_demolitionTarget, message); }
+    void RemoveNotification(std::uint32_t message) override { if (SL::spMS2) SL::spMS2->RemoveNotification(&g_demolitionTarget, message); }
     void PostOccupantMessage(std::uint32_t message, IDemolishable* occupant, bool) override { Raw(occupant)->PostOccupantMessage(message, 0); }
     sc4::cISCPropertyHolder* TuningExemplar(std::uint32_t group, std::uint32_t instance) override {
         static std::map<std::uint64_t, cISCResExemplar*> cache;   // kept for the process, like the original's tuning reads
