@@ -19,6 +19,7 @@
 #include <list>
 #include <map>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -720,6 +721,24 @@ private:
     std::vector<std::uint8_t> savedCongestion_, savedTripLength_;   // the file's maps as loaded (SC4_TRAFFICDEBUG scoring)
     void ScoreAgainstSaved();
     void DumpTrips(const char* path);                // SC4_TRAFFICDUMP: every lot's trips, one line each
+public:
+    // The commute mode split of the trips the lots hold now: commuter trips (type 0-2) holding a route (status 0, 1 or 3: the
+    // route of their last search), weighted by their counts, per travel type the route used out and back (bit t of the trip's
+    // used-types word); also the walk-only and mass-transit totals, and freight. Read-only.
+    struct ModeSplit {
+        std::uint64_t commuters = 0, routed = 0, walkOnly = 0, transit = 0, freight = 0, unrouted = 0;
+        std::array<std::uint64_t, 9> byType{};
+        std::array<std::array<std::uint64_t, 3>, 3> byStrategy{};   // [strategy][0 routed, 1 any transit, 2 car]
+    };
+    ModeSplit CommuteModeSplit() const;
+    // The first LIMIT routed commuter trips the lots hold, each searched again with SetupTrip's commuter settings toward its own
+    // destination by a separate path finder: how many come out with the same travel types and the same route. Changes nothing.
+    struct RouteParityResult {
+        std::uint32_t compared = 0, notFound = 0, sameTypes = 0, sameRoute = 0, savedWalkOnly = 0, oursWalkOnly = 0;
+        double lengthDiff = 0, signedDiffSame = 0;   // summed |ours - stored|, and ours - stored over the same-type trips
+        std::vector<std::string> mismatches;   // the first travel-type mismatches, one line each
+    };
+    RouteParityResult RouteParity(std::uint32_t limit);
 };
 
 }  // namespace sc4
