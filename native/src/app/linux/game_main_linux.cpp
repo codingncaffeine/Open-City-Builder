@@ -98,7 +98,8 @@
 #include "app/NativeRegionExtras.h"
 #include "app/NativeAudio.h"
 #include "app/NativeAudioDirector.h"
-#include "app/NativeAudioDirector.h"
+#include "app/NativeDemolition.h"
+#include "sc4/Demolition.h"
 
 namespace linuxapp {   // StubClock.cpp: the game's stub SDL clock and timer
 double NowMs();
@@ -1293,6 +1294,13 @@ int RunScenario(const std::string& path) {
             int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
             words >> x0 >> z0 >> x1 >> z1;
             native::NativePowerPoleReport(x0, z0, x1, z1);
+        } else if (command == "demolish") {   // demolish X0 Z0 X1 Z1: the bulldozer's commit on a cell rectangle (the player's privilege, effects on)
+            sc4::DemolitionRegion region;
+            words >> region.bounds.x0 >> region.bounds.z0 >> region.bounds.x1 >> region.bounds.z1;
+            std::int64_t cost = 0;
+            const bool ok = native::DemolishRegion(true, region, 1, 1, false, &cost);
+            std::printf("demolish %d,%d..%d,%d -> %s, cost %lld\n", region.bounds.x0, region.bounds.z0, region.bounds.x1, region.bounds.z1,
+                        ok ? "ok" : "refused", static_cast<long long>(cost));
         } else if (command == "walls") {   // walls: the lot retaining walls and their models
             native::NativeWallReport();
         } else if (command == "ports") {   // ports: the airport and seaport developers' ports
