@@ -77,6 +77,17 @@ sc4::cSTETerrain* CityTerrain() {
     return terrain;
 }
 
+// The terrain map cSC4EffectMaps reads (its +0x18, the city's cSTETerrain: vslots 0x30 CellWidth, 0x38 / 0x40 CellCountX / Z,
+// 0x70 GetAltitudeAtVertex, 0xe8 GetSeaLevel).
+class TerrainMapSource final : public sc4::ITerrainMapSource {
+public:
+    float WaterLevel() override { sc4::cSTETerrain* t = CityTerrain(); return t ? t->GetSeaLevel() : 0.0f; }
+    int CellsX() override { sc4::cSTETerrain* t = CityTerrain(); return t ? static_cast<int>(t->CellCountX()) : 0; }
+    int CellsZ() override { sc4::cSTETerrain* t = CityTerrain(); return t ? static_cast<int>(t->CellCountZ()) : 0; }
+    float CellSize() override { return sc4::cSTETerrain::CellWidth(); }
+    float VertexHeight(int x, int z) override { sc4::cSTETerrain* t = CityTerrain(); return t ? t->GetAltitudeAtVertex(x, z) : 0.0f; }
+} g_terrainMapSource;
+
 class TypeFilter final : public cIGZPersistResourceKeyFilter {
 public:
     explicit TypeFilter(std::uint32_t type) : type_(type) {}
@@ -218,8 +229,9 @@ public:
         object->AddRef();
         return object;
     }
-    // new cSC4EffectMaps (the manager Inits it).
+    // new cSC4EffectMaps (the manager Inits it); the maps read the city's terrain.
     sc4::cSC4EffectMaps* CreateEffectMaps() override {
+        sc4::SetTerrainMapSource(CityTerrain() ? &g_terrainMapSource : nullptr);
         auto* maps = new sc4::cSC4EffectMaps();
         maps->AddRef();
         return maps;
