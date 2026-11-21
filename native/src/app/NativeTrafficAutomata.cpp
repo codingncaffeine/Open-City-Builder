@@ -160,8 +160,11 @@ public:
     void GetVisibleCellRect(int rect[4]) override {   // the managers' view rectangle in cells (set by NativeAutomataManagerHost)
         for (int i = 0; i < 4; ++i) rect[i] = visible_[i];
     }
-    bool GetResponseOccupants(cISC4Occupant*, int, int, std::uint32_t, std::vector<ITrafficNetworkMapOccupant*>&) override { return false; }
-    bool ResponseAllowed(ITrafficNetworkMapOccupant*) override { return false; }
+    bool GetResponseOccupants(cISC4Occupant* occupant, int maxCells, int minCells, std::uint32_t mask,
+                              std::vector<ITrafficNetworkMapOccupant*>& out) override {
+        cSC4TrafficNetworkMap* m = Map();
+        return m && m->GetSurroundingRoads(out, occupant, maxCells, minCells, mask);
+    }
     float& OccupantPathDensity(ITrafficNetworkMapOccupant* o, std::uint32_t layer, std::uint32_t type) override {
         return densities_[{o, (layer << 8) | type}];
     }

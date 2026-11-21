@@ -60,6 +60,11 @@ constexpr std::uint32_t kVehicleTuningChangedToken = 0xa9918d0b;
 constexpr std::uint32_t kVehicleExemplarGroup = 0x16;   // i386 constructor: +0xa50 = 0x16 (the 64-bit store also writes the next word)
 constexpr std::uint32_t kVehicleDefaultGroup = 0x4000;
 constexpr std::uint32_t kVehicleFallbackGroup = 0x896e714a;      // the cISC4Vehicle class id
+// HandleNewBuilding: the building properties naming its response automata groups (uint32 list) and their counts (uint8 list), and
+// the group a new residence may get when it has none.
+constexpr std::uint32_t kResponseGroupsProperty = 0xe9aee3da;
+constexpr std::uint32_t kResponseCountsProperty = 0xe9aee3db;
+constexpr std::uint32_t kNewResidenceResponseGroup = 0x4206;
 
 // ---- seams -------------------------------------------------------------------------------------------------------------
 // Everything the vehicle manager reached through an engine global or the cSC4Vehicle it creates.

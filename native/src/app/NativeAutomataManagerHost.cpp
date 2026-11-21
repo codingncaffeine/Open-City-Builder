@@ -384,7 +384,7 @@ public:
     }
     ITrafficAutomataAutomaton* AsTrafficAutomaton(IAutomataAutomaton* automaton) override { return TrafficAutomatonView(automaton); }
     cISC4Occupant* AsCityOccupant(IAutomataOccupant* view) override { return CityOccupantOf(view); }   // a dispatch's source station
-    IAutomataOccupant* AsAutomataOccupant(cISC4Occupant*) override { return nullptr; }
+    IAutomataOccupant* AsAutomataOccupant(cISC4Occupant* occupant) override { return CityOccupantView(occupant); }   // a response's road and building
     ITrafficNetworkOccupant* AsTrafficNetworkOccupant(IAutomataNetworkOccupant*) override { return nullptr; }
     // GetRandomCreationPoint's network path: the lot at a cell and the traffic network map's surrounding roads.
     bool LotCellRectAt(int cellX, int cellZ, SC4RectInt32& rect) override {

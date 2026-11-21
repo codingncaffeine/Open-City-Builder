@@ -72,11 +72,11 @@ struct tResponseAutomataInfo {
     std::uint32_t group = 0;                    // +0x00
     cRZAutoRefCount<cISC4Occupant> occupant;     // +0x08 (counted)
     std::uint32_t count = 0;                    // +0x10 remaining automata
-    bool forced = false;                        // +0x14 spawn even if a path already exists
+    bool forced = false;                        // +0x14 spawned on a road next to the occupant instead of driving to it
     std::uint8_t pathType = 0;                  // +0x15
     std::uint32_t flags = 0;                    // +0x18 (DispatchResponseAutomata ORs 0x02000000 in)
     float timeLeft = 0.0f;                      // +0x1c milliseconds
-    std::uint32_t retries = 0;                  // +0x20 failed lookups (retire at 6)
+    std::uint32_t retries = 0;                  // +0x20 passes that left it unfinished (retire at 6)
 };
 
 // One entry of the populate-layer list: the original's std::list node carries the layer at +0x10 and the elapsed
@@ -161,11 +161,11 @@ public:
     virtual TrafficTileInfo* GetTileInfoAtCell(int cellX, int cellZ) = 0;          // 0x38
     virtual TrafficTileInfo* GetFirstTileInfoAtCell(int cellX, int cellZ) = 0;     // 0x68 (0x70 in the spawn paths)
     virtual void GetVisibleCellRect(int rect[4]) = 0;                              // 0x88 (x0, z0, x1, z1)
-    // 0xc8: occupants that can be the target of a response automaton; out entries are AddRef'd by the callee.
-    virtual bool GetResponseOccupants(cISC4Occupant* occupant, int networkTypeA, int networkTypeB,
+    // 0xc8 (i386 0x64): the traffic network map's GetSurroundingRoads(out, occupant, maxCells, minCells, networkFlags): the usable
+    // network occupants of the flags within maxCells of the occupant's lot, leaving out those within minCells (UpdateResponseList's
+    // targets); out entries are AddRef'd by the callee.
+    virtual bool GetResponseOccupants(cISC4Occupant* occupant, int maxCells, int minCells,
                                       std::uint32_t mask, std::vector<ITrafficNetworkMapOccupant*>& out) = 0;
-    // 0x110: "this occupant's request may be served" (the original's per-occupant gate in PopulateNetworkOccupant).
-    virtual bool ResponseAllowed(ITrafficNetworkMapOccupant* occupant) = 0;
     // 0xa0 / 0xb0: the per-occupant rolling edge-density accumulators (float) and per-edge counters (ushort) that
     // PopulateNetworkOccupant(0x2a0) ages and reads.
     virtual float& OccupantPathDensity(ITrafficNetworkMapOccupant* occupant, std::uint32_t layer,

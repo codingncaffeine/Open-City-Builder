@@ -1,9 +1,14 @@
 // cSC4VehicleManager — see VehicleManager.h for the layout, the messages, the seams and the quirks. Every function here is
-// a hand port of the exported decompile; the two parts that still depend on an unrecovered neighbour (the funds sweep and
-// the building property arrays) are listed under PARTIAL in notes/ledger_pending/cPedestrian-vehicle.txt.
+// a hand port of the exported decompile; the part that still depends on an unrecovered neighbor (the funds sweep) is listed
+// under PARTIAL in notes/ledger_pending/cPedestrian-vehicle.txt.
 #include "sc4/VehicleManager.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <vector>
+
+#include "sc4/SCPropertyHelp.h"
 
 namespace sc4 {
 
@@ -197,9 +202,35 @@ float cSC4VehicleManager::GetMaxAutosPerSecond(PopulateLayer layer) {
     return AutomataTuning().f218d0;
 }
 
-// 0x1000da9a0 PARTIAL: the building property arrays (0xe9aee3da / 0xe9aee3db) that name the response groups and flags are
-// unrecovered; only the base traffic handling runs.
+// 0x1000da9a0 (i386 0x000a039a): a finished building asks for its response automata. The building's property 0xe9aee3da lists
+// automata groups and 0xe9aee3db their counts (1 where the list is shorter or missing); each group is queued as a forced response
+// (DispatchResponseAutomata: spawned on a road next to the building, path type 5, flags 2) while the manager is below its
+// automaton limit. A building without such a list that is residential (profile purpose 1) gets, with the tuning probability of
+// property 0xc9c18eae, one automaton of group 0x4206 that drives in from a road 8 to 10 cells away. Then the base handling.
 bool cSC4VehicleManager::HandleNewBuilding(IAutomataBuildingOccupant* building) {
+    IAutomataOccupant* occupant = building ? building->AsOccupant() : nullptr;
+    if (occupant) {
+        ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
+        cISC4Occupant* cityOccupant = host ? host->AsCityOccupant(occupant) : nullptr;
+        cISCPropertyHolder* holder = occupant->AsPropertyHolder();
+        bool queued = false;
+        std::vector<std::uint32_t> groups;
+        if (holder && cSCPropertyHelp::GetPropertyValue(holder, kResponseGroupsProperty, groups)) {
+            std::vector<std::uint8_t> counts;
+            cSCPropertyHelp::GetPropertyValue(holder, kResponseCountsProperty, counts);
+            for (std::size_t i = 0; i < groups.size() && static_cast<std::uint32_t>(GetAutomataCount()) < MaxCount(); ++i) {
+                DispatchResponseAutomata(groups[i], cityOccupant, i < counts.size() ? counts[i] : 1, true, 5, 2);
+                queued = true;
+            }
+        }
+        static const bool trace = std::getenv("SC4_DISPATCHDEBUG") != nullptr;
+        if (trace)
+            std::fprintf(stderr, "response: new building, purpose %u, %zu response groups, automata %d of %u\n", building->GetProfilePurpose(),
+                         groups.size(), GetAutomataCount(), static_cast<unsigned>(MaxCount()));
+        if (!queued && building->GetProfilePurpose() == 1 && static_cast<std::uint32_t>(GetAutomataCount()) < MaxCount() &&
+            static_cast<float>(Random().RandomDoubleUniform()) <= AutomataTuning().f21a00)
+            DispatchResponseAutomata(kNewResidenceResponseGroup, cityOccupant, 1, false, 8, 2);
+    }
     return cSC4TrafficAutomataManager::HandleNewBuilding(building);
 }
 

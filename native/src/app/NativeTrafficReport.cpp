@@ -11,6 +11,7 @@
 #include "sc4/AutomataManager.h"
 #include "sc4/Automaton.h"
 #include "sc4/PathInfo.h"
+#include "sc4/TrafficAutomataManager.h"
 #include "sc4/TrafficAutomaton.h"
 #include "sc4/Vehicle.h"
 
@@ -73,6 +74,14 @@ void NativeCarReport(int samples) {
     std::printf("\ncars: groups");
     for (auto& [id, n] : byGroup) std::printf(" 0x%x:%d/%d", id, n.second, n.first);
     std::printf("\n");
+    // the response list (DispatchResponseAutomata entries waiting for UpdateResponseList) and the new-residence probability
+    if (auto* traffic = dynamic_cast<cSC4TrafficAutomataManager*>(manager)) {
+        std::printf("cars: responses %u pending (new-residence probability %.3f)", traffic->DispatchResponseCount(), AutomataTuning().f21a00);
+        for (const auto& r : traffic->Responses())
+            std::printf("; group 0x%x count %u forced %d path type %u retries %u time left %.0f", r.group, r.count, r.forced ? 1 : 0, r.pathType,
+                        r.retries, r.timeLeft);
+        std::printf("\n");
+    }
     // The samples: keep the ones still held, refill with on-path automata (then any) up to `samples`.
     g_samples.erase(std::remove_if(g_samples.begin(), g_samples.end(),
                                    [&](cSC4TrafficAutomaton* a) { return std::find(held.begin(), held.end(), a) == held.end(); }),

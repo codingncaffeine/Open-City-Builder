@@ -232,6 +232,8 @@ class IAutomataBuildingOccupant : public cIGZUnknown {
 public:
     virtual IAutomataOccupant* AsOccupant() const = 0;                          // 0x18
     virtual const float& GetCompletionPercent() = 0;                            // 0x48
+    // 0x58 GetBuildingProfile: the profile's purpose (+0; 1 = residential). Zero for a view without a profile.
+    virtual std::uint32_t GetProfilePurpose() { return 0; }
 };
 
 // cISC4NetworkOccupant: the manager's network occupant handlers never touch it.
