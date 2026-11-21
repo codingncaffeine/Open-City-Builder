@@ -1,6 +1,8 @@
 #include <cstdio>
 
+#include "sc4/BuildingOccupant.h"
 #include "sc4/MySimFilters.h"
+#include "sc4/PylonOccupant.h"
 
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
@@ -14,45 +16,79 @@ struct Link final : cIGZUnknown {
     std::uint32_t AddRef() override { return ++refs; }
     std::uint32_t Release() override { return --refs; }
 };
-struct Facts final : IMySimBuildingFacts {
-    float completion = 1.0f; int kind = 1; std::uint32_t lot = 7;
+// cISC4BuildingOccupant as the building filter reads it: completion (slot 9) and the profile's purpose (slot 11).
+struct Building final : cISC4BuildingOccupant {
+    float completion = 1.0f;
+    BuildingProfile profile;
     int refs = 1;
+    cISC4Occupant* occupant = nullptr;
     bool QueryInterface(std::uint32_t, void**) override { return false; }
     std::uint32_t AddRef() override { return ++refs; }
     std::uint32_t Release() override { return --refs; }
-    std::uint32_t LotKey() override { return lot; }
-    const float* Completion() override { return &completion; }
-    const int* OccupancyKind() override { return &kind; }
+    cISC4Occupant* AsOccupant() override { return occupant; }
+    std::uint32_t GetBuildingType() const override { return 0; }
+    void SetBuildingType(std::uint32_t) override {}
+    std::int32_t GetBuildingAge() const override { return 0; }
+    void SetBuildingAge(std::int32_t) override {}
+    void SetBoundingBox(const float*, const float*) override {}
+    const float& GetCompletionPercent() override { return completion; }
+    void SetCompletionPercent(float) override {}
+    const BuildingProfile& GetBuildingProfile() const override { return profile; }
+    const cRZString& GetBuildingName() const override { return name; }
+    const cRZString& GetExemplarName() const override { return name; }
+    std::int32_t GetOrientation() const override { return 0; }
+    bool SetOrientation(std::int32_t) override { return false; }
+    bool IsLit() const override { return false; }
+    void SetLit(bool) override {}
+    void SetName(const cRZString&) override {}
+    bool GetName(cRZString&) override { return false; }
+    cRZString name;
 };
-// An occupant that hands out the facts for the two interfaces.
 struct Occ final : cSC4Occupant {
-    Facts* facts; std::uint32_t kindOfOccupant;
-    Occ(Facts* f, std::uint32_t t) : facts(f), kindOfOccupant(t) { type_ = t; }
+    Building* building;
+    Occ(Building* b, std::uint32_t t) : building(b) { type_ = t; b->occupant = this; }
     bool QueryInterface(std::uint32_t iid, void** out) override {
-        if (iid == kIidMySimBuilding) { *out = static_cast<IMySimBuildingFacts*>(facts); return true; }
+        if (iid == kIidMySimBuilding) { *out = static_cast<cISC4BuildingOccupant*>(building); building->AddRef(); return true; }
         return cSC4Occupant::QueryInterface(iid, out);
     }
 };
-struct Pylon final : IMySimPylonFacts {
-    int kind = 3; bool isBlocked = false; Link* link = nullptr; int refs = 1;
+// cISC4PylonOccupant as the pylon filter reads it: UI state (slot 7), drag state (slot 16), owner (slot 20).
+struct Pylon final : cISC4PylonOccupant {
+    int uiState = 3; bool dragging = false; Link* owner = nullptr; int refs = 1;
     bool QueryInterface(std::uint32_t, void**) override { return false; }
     std::uint32_t AddRef() override { return ++refs; }
     std::uint32_t Release() override { return --refs; }
-    int Kind() override { return kind; }
-    bool Blocked() override { return isBlocked; }
-    cIGZUnknown* LinkedObject() override { return link; }
+    cISC4Occupant* AsOccupant() override { return nullptr; }
+    bool Init() override { return true; }
+    bool Shutdown() override { return true; }
+    void SetUIState(std::int32_t) override {}
+    std::int32_t GetUIState() const override { return uiState; }
+    void SetBitmapInfo(std::int32_t, const cIGZString&) override {}
+    void SetDispatchType(std::int32_t) override {}
+    std::int32_t GetDispatchType() const override { return 0; }
+    void SetDispatchState(std::int32_t) override {}
+    std::int32_t GetDispatchState() const override { return 0; }
+    void SetCallNumber(std::uint16_t) override {}
+    std::uint16_t GetCallNumber() const override { return 0; }
+    void SetDragState(bool) override {}
+    bool GetDragState() const override { return dragging; }
+    void SetSourceOccupant(cISC4Occupant*) override {}
+    cISC4Occupant* GetSourceOccupant() const override { return nullptr; }
+    void SetPylonOwner(cIGZUnknown*) override {}
+    cIGZUnknown* GetPylonOwner() const override { return owner; }
 };
 struct PylonOcc final : cSC4Occupant {
     Pylon* pylon;
     PylonOcc(Pylon* p, std::uint32_t t) : pylon(p) { type_ = t; }
     bool QueryInterface(std::uint32_t iid, void** out) override {
-        if (iid == kIidMySimPylon) { *out = static_cast<IMySimPylonFacts*>(pylon); ++pylon->refs; return true; }
+        if (iid == kIidMySimPylon) { *out = static_cast<cISC4PylonOccupant*>(pylon); ++pylon->refs; return true; }
         return cSC4Occupant::QueryInterface(iid, out);
     }
 };
 struct Host final : IMySimFilterHost {
-    bool hasLot = false; std::uint8_t stage = 0;
-    bool LotStage(std::uint32_t, std::uint8_t& s) override { s = stage; return hasLot; }
+    std::uint8_t condition = 0;
+    cISC4BuildingOccupant* asked = nullptr;
+    std::uint8_t BuildingCondition(cISC4BuildingOccupant* building) override { asked = building; return condition; }
 };
 }  // namespace
 
@@ -60,22 +96,27 @@ int main() {
     Host host;
     SetMySimFilterHost(&host);
     // building
-    Facts facts;
+    Building facts;
+    facts.profile.purpose = 1;
     auto* b = new Occ(&facts, kOccupantTypeBuilding);
     b->AddRef();
     cMySimBuildingFilter any, kindOne(true);
     CHECK(any.IsOccupantIncluded(b) && kindOne.IsOccupantIncluded(b));
-    facts.kind = 2;
+    CHECK(host.asked == &facts);                       // the condition is asked of the building itself
+    CHECK(facts.refs == 1);                            // the building reference is returned
+    facts.profile.purpose = 2;
     CHECK(any.IsOccupantIncluded(b) && !kindOne.IsOccupantIncluded(b));
     facts.completion = 0.99f;
     CHECK(!any.IsOccupantIncluded(b));
     facts.completion = 1.0f;
-    host.hasLot = true; host.stage = 3;
+    host.condition = 3;
     CHECK(any.IsOccupantIncluded(b));
-    host.stage = 4;
+    host.condition = 4;
     CHECK(!any.IsOccupantIncluded(b));
-    host.hasLot = false;
-    auto* wrongType = new Occ(&facts, 0x1234);
+    host.condition = 0;
+    CHECK(facts.refs == 1);
+    Building other;
+    auto* wrongType = new Occ(&other, 0x1234);
     wrongType->AddRef();
     CHECK(!any.IsOccupantIncluded(wrongType));
     auto* noInterface = new cSC4Occupant();
@@ -84,7 +125,7 @@ int main() {
     // pylon
     Pylon p;
     Link link;
-    p.link = &link;
+    p.owner = &link;
     auto* po = new PylonOcc(&p, kOccupantTypePylon);
     po->AddRef();
     cMySimPylonFilter pf;
@@ -92,11 +133,11 @@ int main() {
     link.answers = false;
     CHECK(!pf.IsOccupantIncluded(po));
     link.answers = true;
-    p.isBlocked = true;
+    p.dragging = true;
     CHECK(!pf.IsOccupantIncluded(po));
-    p.isBlocked = false; p.kind = 0;
+    p.dragging = false; p.uiState = 0;
     CHECK(!pf.IsOccupantIncluded(po));
-    p.kind = 1; p.link = nullptr;
+    p.uiState = 1; p.owner = nullptr;
     CHECK(!pf.IsOccupantIncluded(po));
     auto* notPylon = new PylonOcc(&p, kOccupantTypeBuilding);
     notPylon->AddRef();

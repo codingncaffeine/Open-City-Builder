@@ -526,8 +526,8 @@ __attribute__((weak)) void* GZCOM_CreatecSC4AdvisorCitySituations() { SC4_UNWIRE
 __attribute__((weak)) void* GZCOM_CreatecSC4CitySituationAdvice() { SC4_UNWIRED("GZCOM_CreatecSC4CitySituationAdvice"); return nullptr; }
 // weak fallback: gzcom_creators/cSC4MySimBalloonAdvice.cpp provides the real constructor-backed creator when linked
 __attribute__((weak)) void* GZCOM_CreatecSC4MySimBalloonAdvice() { SC4_UNWIRED("GZCOM_CreatecSC4MySimBalloonAdvice"); return nullptr; }
-// original allocates 0x210 bytes; the class is not recovered yet
-void* GZCOM_CreatecSC4MySimDispatch() { SC4_UNWIRED("GZCOM_CreatecSC4MySimDispatch"); return nullptr; }
+// weak fallback: gzcom_creators/cSC4MySimDispatch.cpp provides the real constructor-backed creator when linked
+__attribute__((weak)) void* GZCOM_CreatecSC4MySimDispatch() { SC4_UNWIRED("GZCOM_CreatecSC4MySimDispatch"); return nullptr; }
 // original allocates 0x448 bytes; the class is not recovered yet
 // weak fallback: gzcom_creators/cSC4MyStreetSim.cpp provides the real creator when linked
 __attribute__((weak)) void* GZCOM_CreatecSC4MyStreetSim() { SC4_UNWIRED("GZCOM_CreatecSC4MyStreetSim"); return nullptr; }

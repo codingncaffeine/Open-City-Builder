@@ -144,7 +144,8 @@ cSC4MySim::~cSC4MySim() {
 bool cSC4MySim::QueryInterface(std::uint32_t iid, void** out) {
     *out = nullptr;
     if (iid == kGZIID_cISC4MySim) {
-        *out = static_cast<cIGZUnknown*>(static_cast<cRZUnknown*>(this));
+        // the primary interface: the view cSC4MySimDispatch keeps as its owner (DoMessage / GetWealth / IsMale)
+        *out = static_cast<IMySimDispatchOwner*>(this);
     } else if (iid == kGZIID_cISC4MySimLink) {
         *out = static_cast<cISC4MySim*>(this);
     } else {

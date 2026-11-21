@@ -503,7 +503,18 @@ public:
     virtual bool ActivateLuaContext() = 0;                                              // 0x220
 };
 
-class cSC4MySim : public cSC4Advisor, public cISC4MySim {
+// cSC4MySim's primary vtable (0x100aeef70) as cSC4MySimDispatch uses it: DoMessage delivers the 0x2ba06b99
+// notifications, GetWealth (0x170) and IsMale (0x178) pick the walking automata group. The original hands the dispatch the
+// sim's primary interface (iid 0x8bc01ffe); cSC4MySim answers that iid with this view so a dispatch read back from a
+// save reaches its owner through the same three slots.
+class IMySimDispatchOwner : public cIGZUnknown {
+public:
+    virtual bool DoMessage(cIGZMessage2* message) = 0;   // 0xc8 @ 0x1007a3364
+    virtual int GetWealth() const = 0;                   // 0x170 @ 0x1007a7f7c
+    virtual bool IsMale() const = 0;                     // 0x178 @ 0x1007a7f74 (walking group: 0x4149 / 0x414a)
+};
+
+class cSC4MySim : public cSC4Advisor, public cISC4MySim, public IMySimDispatchOwner {
 public:
     cSC4MySim();                                       // @ 0x10079ebcc
     ~cSC4MySim() override;                             // @ 0x10079f23c (deleting 0x10079f7ba, thunks)
@@ -646,6 +657,10 @@ public:
 
     // Layout / state accessors (for the subclasses and the test).
     std::int32_t State() const { return state_; }                       // +0x154
+    std::uint16_t Generation() const { return generation_; }            // +0x1bc
+    // The game data registry handles init_balloons registers: the age byte ("age", +0x1e8) and the personal name ("name").
+    std::uint8_t* AgeField() { return &age_; }
+    void* NameHandle() { return &cSC4Advisor::GetPersonalName(); }
     bool Retired() const { return retired_; }                           // +0x238
     bool BalloonsEnabled() const { return balloonsEnabled_; }           // +0x330
     bool PylonLocked() const { return pylonLocked_; }                   // +0x3b1

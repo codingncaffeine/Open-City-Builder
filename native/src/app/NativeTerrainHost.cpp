@@ -41,6 +41,7 @@
 #include <map>
 
 namespace native {
+void NativeRegisterMySimAgentGameData(sc4::cSC4MySimAgentSimulator& agent);   // app/NativeMySim.cpp
 bool NeighborsHasConnection(cIGZUnknown* component, std::uint32_t type, int x, int z);      // NativeSurfaceWaterNeighbors.cpp
 void NeighborsDeleteConnection(cIGZUnknown* component, std::uint32_t type, int x, int z);
 void NeighborsCreateConnection(cIGZUnknown* component, std::uint32_t type, int x, int z);
@@ -174,7 +175,7 @@ struct NativeMySimAgentHost final : IMySimAgentHost {
         return static_cast<cISC4MySim*>(raw);
     }
     cIGZMessageServer2* Messages() override { return SL::spMS2; }
-    void RegisterGameData(cSC4MySimAgentSimulator&) override { SC4_UNWIRED("cSC4MySimAgentSimulator game data registry (get_sim / get_count for Lua): cISC4GameDataRegistry is not recovered"); }
+    void RegisterGameData(cSC4MySimAgentSimulator& agent) override { native::NativeRegisterMySimAgentGameData(agent); }   // app/NativeMySim.cpp
     void UnregisterGameData(cSC4MySimAgentSimulator&) override {}
     bool RiotInProgress() override { SC4_UNWIRED("IMySimAgentHost::RiotInProgress (spCity vslot 0x240 -> 0x50)"); return false; }
     void CellCenter(int cellX, int cellZ, float& x, float& z) override {

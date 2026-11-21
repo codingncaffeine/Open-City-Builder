@@ -938,7 +938,14 @@ int main() {
     {
         void* out = nullptr;
         CHECK(sim->QueryInterface(kGZIID_cISC4MySim, &out));
-        CHECK(out == static_cast<cIGZUnknown*>(static_cast<cRZUnknown*>(sim)));
+        // the primary interface is the view the dispatch keeps as its owner (a dispatch read from a save gets it this way)
+        CHECK(out == static_cast<IMySimDispatchOwner*>(sim));
+        if (out == static_cast<IMySimDispatchOwner*>(sim)) {
+            auto* owner = static_cast<IMySimDispatchOwner*>(out);
+            CHECK(owner->IsMale() == sim->IsMale());
+            CHECK(owner->GetWealth() == sim->GetWealth());
+            owner->Release();
+        }
         out = nullptr;
         CHECK(sim->QueryInterface(kGZIID_cISC4MySimLink, &out));
         CHECK(out == static_cast<cISC4MySim*>(sim));

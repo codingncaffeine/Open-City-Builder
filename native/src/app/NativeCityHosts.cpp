@@ -63,10 +63,7 @@ void InstallLotRetainingWallModelStub();
 void InstallLotRetainingWallStub();
 void InstallLotRetainingWallHosts();   // NativeLotWalls.cpp
 void InstallModelMakerStub();
-void InstallMySimStub();
-void InstallMySimAdviceStub();
-void InstallMySimDispatchStub();
-void InstallMySimFilterStub();
+void InstallMySimHosts();   // NativeMySim.cpp: cSC4MySim, its dispatch, filters and advice
 void InstallNeighborConnectionStub();
 void InstallNeighborDealStub();
 void InstallNetworkLotManagerStub();
@@ -177,10 +174,7 @@ void InstallStubHosts() {
     InstallLotRetainingWallStub();
     InstallLotRetainingWallHosts();       // the walls' and their models' real hosts replace the two stubs above
     InstallModelMakerStub();
-    InstallMySimStub();
-    InstallMySimAdviceStub();
-    InstallMySimDispatchStub();
-    InstallMySimFilterStub();
+    InstallMySimHosts();
     InstallNeighborConnectionStub();
     InstallNeighborDealStub();
     InstallNetworkLotManagerStub();
