@@ -180,6 +180,7 @@ private:
     cRetainedReferences fileStations_;
     bool fromCityFile_ = false;
     bool WriteCityRecord(cIGZOStream& stream) const;
+    void AdoptFileGrids();
     int zonedCount_ = 0, protectionSum_ = 0, protectedCount_ = 0;
     float averageProtection_ = 0.0f, coverageShare_ = 0.0f;
 };

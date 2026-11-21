@@ -335,6 +335,22 @@ bool cSC4ProtectionSimulator::Write(cIGZOStream& stream) const {
 // 0x1000aa362: the record of a city file. The grids and the station occupants are references (consumed here: the grids belong to the
 // unrecovered coverage model, the stations are resolved by the host elsewhere); the walk iterator and the counters are kept. A stream that is
 // not a city-file segment stream (the unit tests) carries the port's own reduced format, read below.
+// The original's Read stores the saved adjusted (+0x70) and unadjusted (+0x74) grids as the live ones, so a loaded city keeps
+// its coverage until a station, its funding or a strike changes it. The port reads them as references (kept for writing the
+// record back); a reference whose object is a grid of the live grid's element type becomes the live grid (one reference held).
+void cSC4ProtectionSimulator::AdoptFileGrids() {
+    cIGZUnknown* adjusted = fileAdjusted_.get();
+    cIGZUnknown* unadjusted = fileUnadjusted_.get();
+    if (auto* grid = adjusted ? dynamic_cast<cSC4SimGrid<std::uint8_t>*>(adjusted) : nullptr) {
+        grid->AddRef();
+        adjusted_ = SimGridPtr<std::uint8_t>(grid);
+    }
+    if (auto* grid = unadjusted ? dynamic_cast<cSC4SimGrid<std::int16_t>*>(unadjusted) : nullptr) {
+        grid->AddRef();
+        unadjusted_ = SimGridPtr<std::int16_t>(grid);
+    }
+}
+
 bool cSC4ProtectionSimulator::ReadCityRecord(cIGZIStream& stream) {
     std::uint16_t version = 0;
     stream.GetUint16(version);
@@ -370,6 +386,7 @@ bool cSC4ProtectionSimulator::ReadCityRecord(cIGZIStream& stream) {
     stream.GetUint8(flag); flagE8_ = flag != 0;                           // +0xe8
     stream.GetUint32(valueEC_);                                           // +0xec
     stream.GetUint32(dispatchBitsInUse);                                  // +0xf0
+    AdoptFileGrids();
     return !stream.GetError();
 }
 
