@@ -1452,6 +1452,11 @@ int RunScenario(const std::string& path) {
             std::printf("cheats: %u registered:", count);
             for (std::uint32_t i = 0; i < got && i < count; ++i) std::printf(" \"%s\"", names[i]->ToChar());
             std::printf("\n");
+        } else if (command == "open-region") {   // open-region NAME: switches the region screen to a region the way the Load Region dialog does (no input)
+            std::string want; std::getline(words >> std::ws, want);
+            auto* screen = gAppWindow ? dynamic_cast<sc4::cSC4WinRegionScreen*>(gAppWindow->CurrentScreen()) : nullptr;
+            const bool loaded = screen && screen->LoadRegion(cRZString(want.c_str()));
+            std::printf("open-region %s: %s\n", want.c_str(), loaded ? "loaded" : (!screen ? "no region screen" : "not loaded"));
         } else if (command == "open-city") {   // open-city NAME: enters a region city the way the region screen's launch does (no input)
             std::string want; std::getline(words >> std::ws, want);   // the rest of the line (names have spaces)
             auto lower = [](std::string t) { for (char& c : t) c = char(std::tolower(static_cast<unsigned char>(c))); return t; };
