@@ -1023,36 +1023,57 @@ void cSC4MySim::UpdateVariables() {
     lua->Pop(1);                                                             // 0x2c
 }
 
-// UpdateTripVariables (i386 0x00546b1a): state = the dispatch's new and old trip state (0x4bb2cfc0), flags = its new and
-// old flag word (0x4bb2d020). PARTIAL: the arrival bookkeeping of the state block (MySim state 2/3, PlayHomeSound,
-// UpdateQuickVariables, the pylon kind) and the sampling of the trip's surroundings (trip_traffic_congestion,
-// trip_time_ratio, trip_wait_length, the pollution / crime / mayor rating / eq / hq / distress / wealth / landmark /
-// fire / riot / disaster fields around the current cell) are not ported; the trip state, the transit-switch / idle
-// flags and the travel-type block are.
+// UpdateTripVariables (i386 0x00546994): state = the dispatch's new and old trip state (0x4bb2cfc0), flags = its new and
+// old flag word (0x4bb2d020), force = the full refresh CreateLuaTable asks for. Three blocks, in the original's order:
+//   * the trip state: trip_in_transit / trip_at_location; arriving (state 3) does the arrival bookkeeping (home: MySim
+//     state 2, the move-in announcement or the home sound; work: state 3; elsewhere: the pylon) and the quick variables,
+//     then destination_subject;
+//   * the flag word: trip_at_transit_switch, trip_idle, the "left work" event and the travel-type fields;
+//   * the surroundings of the current location (sampled every call): congestion, travel time ratio and transit wait while
+//     travelling, pollution / crime / mayor rating / EQ / HQ, and over the lots of the local area (localAreaSize_ cells
+//     wide) the distress and wealth shares, the first landmark, and the nearby fire / riot / disaster flags.
+// A state change that did not also run the flag block posts "this sim changed" at the end.
 void cSC4MySim::UpdateTripVariables(int newState, int oldState, int newFlags, int oldFlags, bool force) {
     cISCLua* lua = lua_.get();
     if (!lua) return;
     if (luaTableRef_ < 1) return;
-    if (!IsActive()) return;
+    if (!IsActive()) return;                                                 // vslot 0xc0
+    IMySimHost* host = Host();
+    const int top = lua->GetTop();                                           // 0x18
     lua->GetRef(luaTableRef_);                                               // 0xac
-    if (newState != oldState || force) {
+    bool postChanged = newState != oldState;
+    if (dispatch_ && (newState != oldState || force)) {
         SetTableNumber(lua, "trip_in_transit", newState == 2 ? 1 : 0);
-        SetTableNumber(lua, "trip_at_location", newState == 3 ? 1 : 0);
-        if (newState == 2) {
-            if (dispatch_) {
-                const MySimLocation& destination = dispatch_->GetCurrentDestination();
-                MySimSetTableOccupantSubject(lua, "destination_subject", destination.occupant.get());
-            }
-        } else if (newState == 3) {
-            if (dispatch_) {
-                const MySimLocation& location = dispatch_->GetCurrentLocation();
-                if (!(location == dispatch_->GetCurrentCommuteDestination()) &&
-                    !(location == dispatch_->GetCurrentDefaultDestination())) {
-                    MySimSetTableOccupantSubject(lua, "destination_subject", location.occupant.get());
+        const bool arrived = newState == 3;
+        SetTableNumber(lua, "trip_at_location", arrived ? 1 : 0);
+        if (arrived) {
+            if (dispatch_->GetCurrentLocation() == dispatch_->GetCurrentDefaultDestination()) {
+                if (state_ == 1) {                                           // the first arrival at the new home
+                    state_ = 2;
+                    AnnounceMoveIn();                                        // vslot 0x10c
                 } else {
-                    MySimSetTableOccupantSubject(lua, "destination_subject", nullptr);
+                    state_ = 2;
+                    PlayHomeSound(male_ ? kSoundNoCommuteMale : kSoundNoCommuteFemale);   // the "home again" sound
                 }
+            } else if (dispatch_->GetCurrentLocation() == dispatch_->GetCurrentCommuteDestination()) {
+                state_ = 3;
+            } else if (pylon_ && pylonLocked_ && is_pylon_location(dispatch_->GetCurrentDestination())) {
+                PostChangedMessage();
+                pylon_->SetKind(4);                                          // pylon 0x2c
+                pylonTimer_.Restart();
             }
+            UpdateQuickVariables();
+        }
+        if (newState == 2) {
+            MySimSetTableOccupantSubject(lua, "destination_subject", dispatch_->GetCurrentDestination().occupant.get());
+        } else if (arrived) {
+            const MySimLocation location = dispatch_->GetCurrentLocation();
+            cISC4Occupant* subject = nullptr;
+            if (!(location == dispatch_->GetCurrentCommuteDestination()) &&
+                !(location == dispatch_->GetCurrentDefaultDestination())) {
+                subject = location.occupant.get();
+            }
+            MySimSetTableOccupantSubject(lua, "destination_subject", subject);
         }
     }
     // the flag block: any change other than the tracking bit (0x100) alone
@@ -1074,8 +1095,100 @@ void cSC4MySim::UpdateTripVariables(int newState, int oldState, int newFlags, in
             SetTableNumber(lua, entry.key, on ? 1 : 0);
         }
         SetTableNumber(lua, "last_trip_type", lastType);
+        postChanged = false;
     }
-    lua->Pop(1);                                                             // 0x58
+    if (!dispatch_ || !host) {
+        lua->SetTop(top);
+        return;
+    }
+
+    // ---- the surroundings of the current location ----
+    MySimLocation location = dispatch_->GetCurrentLocation();
+    if (force) location.SetCellPosition(0, 0);
+    const int half = localAreaSize_ / 2;
+    const int x0 = location.cellX - half, z0 = location.cellZ - half;
+    const int x1 = location.cellX + half, z1 = location.cellZ + half;
+    // Quirk kept: without the traffic, pollution and crime simulators the original returns with the table still pushed.
+    if (!host->TripSimulatorsPresent()) return;
+    using Grid = IMySimHost::TripGrid;
+    auto grid = [host, &location](Grid which) { return host->TripGridValue(which, location.x, location.z); };
+    if (dispatch_->GetState() == 2 || force) {
+        if (!dispatch_->CheckFlags(1) || force) {                            // moving (not idling)
+            SetTableNumber(lua, "trip_traffic_congestion", static_cast<long>(grid(Grid::Congestion)) & 0xff);
+            const int travelType = dispatch_->GetTravelType();
+            long ratio = 1;                                                  // 0xfe / 0xff (walking to / no vehicle)
+            if (static_cast<unsigned>(travelType - 0xfe) >= 2u) {
+                ratio = static_cast<long>(host->TravelTimeRatio(location.cellX, location.cellZ, travelType));
+            }
+            SetTableNumber(lua, "trip_time_ratio", ratio);
+            SetTableNumber(lua, "trip_wait_length", dispatch_->GetTransitSwitchWaitTimeMunutes());
+        }
+        SetTableNumber(lua, "trip_pollution_air", static_cast<std::int16_t>(static_cast<long>(grid(Grid::PollutionAir))));
+        SetTableNumber(lua, "trip_pollution_water", static_cast<std::int16_t>(static_cast<long>(grid(Grid::PollutionWater))));
+        SetTableNumber(lua, "trip_pollution_garbage", static_cast<std::int16_t>(static_cast<long>(grid(Grid::PollutionGarbage))));
+        SetTableNumber(lua, "trip_crime", static_cast<long>(grid(Grid::Crime)) & 0xff);
+        SetTableNumber(lua, "trip_mayor_rating", static_cast<std::int8_t>(static_cast<long>(grid(Grid::MayorRating))));
+        SetTableNumber(lua, "trip_eq", static_cast<int>(grid(Grid::EducationQuotient)));
+        SetTableNumber(lua, "trip_hq", static_cast<int>(grid(Grid::HealthQuotient)));
+    }
+    // the local area: at a location, on foot, by car, idling, or forced
+    if (force || dispatch_->GetState() == 3 || dispatch_->GetTravelType() == 0 || dispatch_->GetTravelType() == 1 ||
+        dispatch_->CheckFlags(1)) {
+        std::vector<IMySimHost::TripLot> lots;
+        host->LotsInCellRect(x0, z0, x1, z1, lots);
+        int buildings = 0;
+        int distress[3] = {0, 0, 0};                                         // condition 2, 3, 4 and up
+        int wealth[3] = {0, 0, 0};                                           // wealth 1, 2, 3 and up
+        cISC4BuildingOccupant* landmark = nullptr;
+        for (auto it = lots.rbegin(); it != lots.rend(); ++it) {             // the original pops from the back
+            if (!it->building) continue;
+            ++buildings;
+            if (it->condition >= 4) ++distress[2];
+            else if (it->condition == 3) ++distress[1];
+            else if (it->condition >= 2) ++distress[0];
+            if (it->wealth >= 3) ++wealth[2];
+            else if (it->wealth == 2) ++wealth[1];
+            else if (it->wealth >= 1) ++wealth[0];
+            if (!landmark && it->building->AsOccupant()->IsOccupantGroup(kOccupantGroupLandmark)) landmark = it->building;
+        }
+        const float share = static_cast<float>(1.0 / (static_cast<double>(buildings) + 1.0e-4));
+        auto percent = [share](int count) { return static_cast<long>(static_cast<float>(count) * share * 100.0f); };
+        SetTableNumber(lua, "trip_distress1_p", percent(distress[0]));
+        SetTableNumber(lua, "trip_distress2_p", percent(distress[1]));
+        SetTableNumber(lua, "trip_distress3_p", percent(distress[2]));
+        SetTableNumber(lua, "trip_wealth_low_p", percent(wealth[0]));
+        SetTableNumber(lua, "trip_wealth_med_p", percent(wealth[1]));
+        SetTableNumber(lua, "trip_wealth_high_p", static_cast<long>(100.0f * static_cast<float>(wealth[2]) * share));
+        SetTableNumber(lua, "trip_landmark_nearby", landmark ? 1 : 0);
+        long funding = 0;
+        if (!landmark) {
+            cRZAutoRefCount<cRZString> name(new cRZString());
+            SetTableString(lua, "trip_landmark_name", name.get());
+        } else {
+            cRZString buildingName;
+            landmark->GetName(buildingName);                                 // building 0x30 GetBuildingName
+            cRZAutoRefCount<cRZString> name(new cRZString(buildingName));
+            SetTableString(lua, "trip_landmark_name", name.get());
+            funding = static_cast<long>(100.0f * host->BuildingLocalFunding(landmark, kBudgetPurposeLandmark));
+        }
+        SetTableNumber(lua, "trip_landmark_funding_p", funding);
+
+        std::vector<IMySimHost::TripDisaster> disasters;
+        host->DisasterLocations(disasters);
+        bool fire = false, riot = false, any = false;
+        for (const IMySimHost::TripDisaster& disaster : disasters) {
+            if (disaster.x < x0 || disaster.z < z0 || x1 < disaster.x || z1 < disaster.z) continue;
+            riot = riot || disaster.id == kDisasterIdRiot;
+            fire = fire || disaster.id == kDisasterIdFire;
+            any = true;
+            if (fire && riot) break;
+        }
+        SetTableNumber(lua, "trip_fire_nearby", fire ? 1 : 0);
+        SetTableNumber(lua, "trip_riot_nearby", riot ? 1 : 0);
+        SetTableNumber(lua, "trip_any_disaster_nearby", any ? 1 : 0);
+    }
+    lua->SetTop(top);                                                        // 0x1c
+    if (postChanged) PostChangedMessage();
 }
 
 // 0x1007a5800 UpdateQuickVariables()
@@ -1544,6 +1657,14 @@ void cSC4MySim::PlayHomeSound(std::uint32_t soundId) {
     host->PlayCitySound(homeSound_.get(), &posX_);                       // spCity 0x110 -> 0xa0
 }
 
+// "this sim changed" (0x4bc42c48) with the sim's cISC4MySim view as the object: DoMessage answers it for that sim only
+// (UpdateVariables + simulate_balloons).
+void cSC4MySim::PostChangedMessage() {
+    IMySimHost* host = Host();
+    if (!host) return;
+    host->PostMessage2(kMessageMySimChanged, 0, 0, 0, 0, static_cast<cIGZUnknown*>(static_cast<cISC4MySim*>(this)));
+}
+
 void cSC4MySim::PlayNightSound() {
     if (state_ != 2) return;
     PlayHomeSound(male_ ? kSoundNightMale : kSoundNightFemale);
@@ -1931,9 +2052,7 @@ bool cSC4MySim::DoMessage(cIGZMessage2* message) {
     if (!dispatch_) return true;
 
     const std::uint32_t event = static_cast<std::uint32_t>(standard->GetData1());
-    auto postChanged = [host]() {
-        if (host) host->PostMessage2(kMessageMySimChanged, 0, 0, 0, 0, nullptr);
-    };
+    auto postChanged = [this]() { PostChangedMessage(); };
     if (event == kDispatchNotifyTripEnd) {                               // 0x4bb2d020
         UpdateTripVariables(-1, -1, static_cast<int>(standard->GetData3()),
                             static_cast<int>(standard->GetData2()), false);
@@ -2246,7 +2365,7 @@ bool cSC4MySim::DispatchToolLockPylon(bool lock) {
         if (go) {
             if (dispatch_->GoTo(location)) {                             // 0x1006afb8c
                 pylon_->SetKind(3);                                      // 0x58
-                if (host) host->PostMessage2(kMessageMySimChanged, 0, 0, 0, 0, nullptr);
+                PostChangedMessage();
                 state_ = 6;
                 lastPlayerTripDay_ = DayNumber();                        // +0x410
             } else {
