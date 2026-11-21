@@ -50,22 +50,22 @@ struct tWaterInfo {                        // 0x24 bytes
 };
 static_assert(sizeof(tWaterInfo) == 0x24);
 
-// A network occupant (interface 0xa821ef94) as the surface water uses it.
+// A network occupant (interface 0xa821ef94) as the surface water uses it (the cISC4NetworkOccupant slots it calls).
 class IWaterNetworkOccupant {
 public:
     virtual ~IWaterNetworkOccupant() = default;
     virtual bool HasNetworkFlag(std::uint32_t flag) = 0;                   // vslot 0x40
-    virtual bool IsRemoved() = 0;                                           // vslot 0x98
+    virtual bool IsUsable() = 0;                                            // vslot 0x98 IsUsable
     virtual void GetPosition(float xyz[3]) = 0;                             // vslot 0x180 -> vslot 0x40
-    virtual std::uint8_t ConnectionMask() = 0;                              // vslot 0x140
-    virtual bool BridgeHeight(float& height) = 0;                           // vslot 0x218
+    virtual std::uint8_t ActiveEdges() = 0;                                 // vslot 0x140 GetActiveEdges
+    virtual bool PassageCeiling(float& height) = 0;                         // vslot 0x218 GetPassageCeiling (the clearance under a bridge)
 };
-// An occupant of group 0x2890d4de asked for iid 0xa8c86142.
+// An occupant of group 0x2890d4de asked for iid 0xa8c86142 (cISC4PowerPoleOccupant: a power pole).
 class IWaterCellOccupant {
 public:
     virtual ~IWaterCellOccupant() = default;
     virtual void GetCell(int& x, int& z) = 0;                               // vslot 0x40
-    virtual bool IsRemoved() = 0;                                           // vslot 0x68
+    virtual bool IsPreview() = 0;                                           // vslot 0x68 (the power line tool's preview pole)
 };
 
 class cSTESurfaceWater;

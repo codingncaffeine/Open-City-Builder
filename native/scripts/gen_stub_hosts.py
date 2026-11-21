@@ -2,7 +2,7 @@
 """Generates src/app/NativeCityHosts.cpp: a neutral stub for every recovered host interface (IxxxHost with a SetxxxHost
 setter), installed once so a city file's Read paths can run. Usage: gen_stub_hosts.py [--skip Name,Name] [--only Name,...]"""
 import re, sys, glob, os
-skip = set("Terrain Region Nation SplashScreen SLString SLBuffer Dispatch Detokenizer RegionalCity RegionScreen RegionView RegionScroll RegionClouds Host View3DWin Render3D Simulator ControllerManager DemandSimulator Aura GrowthDeveloper LandfillDeveloper CivicBuilding TractDeveloper".split())
+skip = set("Terrain Region Nation SplashScreen SLString SLBuffer Dispatch Detokenizer RegionalCity RegionScreen RegionView RegionScroll RegionClouds Host View3DWin Render3D Simulator ControllerManager DemandSimulator Aura GrowthDeveloper LandfillDeveloper CivicBuilding TractDeveloper NetworkManager".split())
 only = None
 for i, a in enumerate(sys.argv):
     if a == '--skip': skip |= set(sys.argv[i+1].split(','))

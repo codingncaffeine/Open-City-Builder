@@ -11,7 +11,7 @@
 //   * the retrofit list (+0xd8): network occupants whose old intersection piece has to be replaced,
 //   * the batch removal queue (+0xb8, QueueRemovals) and the running construction crews (+0xf0),
 //   * the texture / shadow / path remap tables Reload reads from the game's ini resource
-//     {0x8a5971c5, 0, 0x8a5993b9} (same resource cSC4PowerLineTool reads its poles from).
+//     {0, 0x8a5971c5, 0x8a5993b9} (same resource cSC4PowerLineTool reads its poles from).
 //
 // Object layout (0x170 bytes, the size GZCOM records for the class; offsets are the original ones):
 //   +0x000 vtable cISC4NetworkManager   +0x008 vtable cIGZMessageTarget2   +0x010 vtable cIGZSerializable
@@ -20,10 +20,10 @@
 //   +0x020 int32 region minX   +0x024 int32 region minZ  +0x028 int32 region maxX  +0x02c int32 region maxZ
 //        (INT_MAX, INT_MAX, -1, -1 from the ctor; messages grow/shrink the rectangle)
 //   +0x030 std::vector<cISC4NetworkOccupant*> tracked occupants (one reference each)
-//   +0x048 std::unordered_multimap<uint32, ShadowRemapByEdgesEntry>  ("Shadow remap by edges")
+//   +0x048 std::unordered_multimap<uint32, ShadowRemapByEdgesEntry>  ("Shadow edge remapping")
 //   +0x070 std::vector<TextureRemapEntry> preview remaps              ("Texture remapping")
-//   +0x088 std::vector<TextureRemapEntry> shadow remaps               ("Shadow remap")
-//   +0x0a0 std::vector<PathRemapEntry> path remaps                    ("UK path mapping")
+//   +0x088 std::vector<TextureRemapEntry> shadow remaps               ("Shadow remapping")
+//   +0x0a0 std::vector<PathRemapEntry> path remaps                    ("UK path remapping")
 //   +0x0b8 std::vector<cISC4Occupant*> pending removal queue (each entry has one reference)
 //   +0x0d0 bool the removal queue is active (QueueRemovals argument)
 //   +0x0d8 std::list<cISC4NetworkOccupant*> retrofit list (one reference each)
@@ -83,8 +83,8 @@ constexpr std::uint32_t kGZIID_cSC4NetworkOccupantWithPreBuiltModel = 0x49c1a034
 
 // The ini resource the remap tables come from (SC4GetResourceAsFile @ 0x10003a3d2; the call site is
 // 0x10016e22e) and the occupant type the network pieces report.
-constexpr std::uint32_t kNetworkManagerIniType = 0x8a5971c5;
-constexpr std::uint32_t kNetworkManagerIniGroup = 0;
+constexpr std::uint32_t kNetworkManagerIniType = 0;
+constexpr std::uint32_t kNetworkManagerIniGroup = 0x8a5971c5;
 constexpr std::uint32_t kNetworkManagerIniInstance = 0x8a5993b9;
 constexpr std::uint32_t kNetworkOccupantType = 0xc772bf98;
 
@@ -99,10 +99,10 @@ constexpr std::uint32_t kNetworkManagerMessages[11] = {
 };
 
 // The name table GetEnglishNetworkName returns (cSC4NetworkTool::kNetworkTypeNames @ 0x100a7a8a0, the same
-// 13 strings the "Shadow remap by edges" section matches by name). The array itself lives in the .cpp.
+// 13 strings the "Shadow edge remapping" section matches by name). The array itself lives in the .cpp.
 extern const char* const kNetworkTypeNameTable[kNetworkToolCount];
 
-// One "Texture remapping"/"Shadow remap" line: mask match, transform, alpha delta, stop flag (0x18 bytes, the
+// One "Texture remapping"/"Shadow remapping" line: mask match, transform, alpha delta, stop flag (0x18 bytes, the
 // stride is the original's; +0x16/+0x17 are uninitialised stack bytes in the binary).
 struct TextureRemapEntry {
     std::uint32_t matchValue = 0;    // +0x00  (value & matchMask) == matchValue selects the entry
@@ -118,7 +118,7 @@ static_assert(sizeof(TextureRemapEntry) == 0x18, "TextureRemapEntry is the origi
 static_assert(offsetof(TextureRemapEntry, alphaDelta) == 0x14, "alpha delta is at +0x14");
 static_assert(offsetof(TextureRemapEntry, stop) == 0x15, "the stop flag is at +0x15");
 
-// One "Shadow remap by edges" value: the map key is the first hex number of the line (the piece id).
+// One "Shadow edge remapping" value: the map key is the first hex number of the line (the piece id).
 struct ShadowRemapByEdgesEntry {
     std::uint32_t networkType = 0;   // +0x00 inside the value (node +0x14): index of the type name
     std::uint32_t addValue = 0;      // +0x04 (node +0x18)
@@ -129,7 +129,7 @@ struct ShadowRemapByEdgesEntry {
 static_assert(sizeof(ShadowRemapByEdgesEntry) == 0x10, "the map value is 0x10 bytes");
 static_assert(offsetof(ShadowRemapByEdgesEntry, alphaDelta) == 0xc, "alpha delta is value+0xc");
 
-// One "UK path mapping" line (0x10 bytes).
+// One "UK path remapping" line (0x10 bytes).
 struct PathRemapEntry {
     std::uint32_t matchValue = 0;   // +0x00
     std::uint32_t matchMask = 0;    // +0x04
@@ -204,10 +204,10 @@ public:
     virtual ~INetworkManagerHost() = default;
 
     virtual cIGZMessageServer2* MessageServer() = 0;            // SL::spMS2 (0x100041... ; null is allowed)
-    // RZGetFramework service 0x441e5070 / iid 0x54b7d5 -> vslot 0x128(0) -> vslot 0xc8: the language flag
-    // Init inverts into +0x1d (the UK path-remap switch).
+    // The language manager (service 0x441e5070, iid 0x54b7d5) GetLanguageUtility(0) -> GetLanguageRoadDrivingSide: non-zero
+    // (right-hand traffic) for most languages; Init stores its inverse in +0x1d, the UK (left-hand) path-remap switch.
     virtual bool LanguageFlag() = 0;
-    // SC4GetResourceAsFile({0x8a5971c5, 0, 0x8a5993b9}, &file, false) opened as an ini file. The caller
+    // SC4GetResourceAsFile({0, 0x8a5971c5, 0x8a5993b9}, &file, false) opened as an ini file. The caller
     // deletes it (cRZIniFile holds one reference to the file and releases it in its destructor).
     virtual cRZIniFile* OpenNetworkIni() = 0;
     // The constructor GetNetworkTool(type, true) / Init performs: new cSC4NetworkTool(0x638) for the road
@@ -221,8 +221,7 @@ public:
     virtual void FindPipeOccupant(int x, int z, cSC4PipeOccupant*& out) = 0;   // cSC4PipeTool::FindPipeOccupant
     virtual void FindPipeConnectionOccupant(int x, int z, cSC4PipeConnectionOccupant*& out) = 0;
     virtual INetworkManagerOccupantManager* OccupantManager() = 0;   // SL::spOccupantManager
-    // SL::sp24HourClock vslot 0xe0. The message branch 0x26d31ec1 sets the lights on when it is non-zero; that
-    // it means "night" is inferred from the branch (the clock class is not recovered).
+    // SL::sp24HourClock vslot 0xe0 (cSC424HourClock::IsNight): the message branch 0x26d31ec1 lights the tracked pieces at night.
     virtual bool IsNight() = 0;
     // SC4WriteGZSerializable(stream, object) @ 0x1000435e3 and SC4ReadGZSerializable(stream, iid, &out, false)
     // @ 0x100043267. Both need a DB segment stream, so they stay a seam.
@@ -300,9 +299,9 @@ public:
     bool Init() override;                                                          // 0x100170928
     bool Shutdown() override;                                                      // 0x100170ee6
     INetworkManagerTool* GetNetworkTool(eNetworkType type, bool create) override;  // 0x10016e6c8
-    // PORT: a tool the host supplies after Init ran (the city loads before the view's hosts are installed); an
-    // occupied slot keeps its tool.
-    void AdoptNetworkTool(eNetworkType type, INetworkManagerTool* tool);
+    // PORT (diagnostics, read-only): the sizes of the four remap tables (texture, shadow, shadow by edges, UK path), the
+    // UK path-remap switch Init stored and the number of tracked occupants.
+    void GetDiagnostics(std::size_t remapSizes[4], bool& ukPathMapping, std::size_t& tracked) const;
     void DestroyNetworkOccupants(const ilist<cISC4Occupant*>& occupants) override; // 0x10016e8d8
     void QueueRemovals(bool queue) override;                                       // 0x10016eaee
     bool RemoveOrReplaceOccupant(INetworkManagerTool* tool, cISC4Occupant* occupant,

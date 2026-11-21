@@ -380,7 +380,6 @@ InputHost g_inputHost;
 void InstallNetworkTool(sc4::cSC4View3DWin& view, cISC4City* city) {
     g_view = &view;
     sc4::SetNetworkToolHost(&g_toolHost);
-    InstallNetworkManagerTools();
     // The tile rules (RUL files) the solver matches drags against, once.
     static bool rulesLoaded = false;
     if (!rulesLoaded) {

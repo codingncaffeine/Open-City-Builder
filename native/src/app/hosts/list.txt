@@ -42,7 +42,6 @@ MySimFilter
 NeighborConnection
 NeighborDeal
 NetworkLotManager
-NetworkManager
 NetworkOccupant
 PreBuiltModelOccupant
 NetworkTool

@@ -9,6 +9,7 @@
 #include "sc4/PropOccupant.h"
 #include "sc4/PropOccupantInterface.h"
 #include "sc4/SCPropertyHelp.h"
+#include "sc4/SubwayConnectionOccupant.h"
 
 namespace sc4 {
 namespace {
@@ -20,6 +21,18 @@ constexpr std::uint32_t kSurfaceNetworkMask = 0x1f4f;
 constexpr std::uint32_t kKeptPropTypeA = 0xab72fbb3, kKeptPropTypeB = 0xcb79919b;
 // The water filter's building properties: either one present includes the building, else the bool 0xcaa45672.
 constexpr std::uint32_t kPropWaterA = 0x88ed3303, kPropWaterB = 0x49512a09, kPropWaterFlag = 0xcaa45672;
+// The subway filter: the transit switch rules (raw bytes; any byte 6, the subway's network, marks a station), the bool that also includes
+// a holder, and the elevated trains (vehicle occupants of the two elevated train groups).
+constexpr std::uint32_t kPropTransitSwitchRules = 0xe90e25a1, kPropSubwayFlag = 0xcaa45671;
+constexpr std::uint8_t kTransitSwitchSubway = 6;
+constexpr std::uint32_t kVehicleOccupantType = 0xc7cc75f1;
+constexpr std::uint32_t kElevatedTrainEngineGroup = 0x4217, kElevatedTrainCarGroup = 0x4208;
+
+bool NamesSubway(const cISCPropertyHolder* holder) {
+    std::vector<std::uint8_t> rules;
+    if (!holder || !cSCPropertyHelp::GetPropertyValue(holder, kPropTransitSwitchRules, rules)) return false;
+    return std::find(rules.begin(), rules.end(), kTransitSwitchSubway) != rules.end();
+}
 }  // namespace
 
 void SetComplexViewFilterHost(IComplexViewFilterHost* host) { g_host = host; }
@@ -102,6 +115,37 @@ bool cSC4WaterOccupantFilter::IsPropertyHolderIncluded(cISCPropertyHolder* holde
     bool flag = false;
     cSCPropertyHelp::GetPropertyValue(holder, kPropWaterFlag, flag);
     return flag;
+}
+
+// 0x0012c78c: a surface network piece (cISC4NetworkOccupant flags 0x1f4f), a subway connection, a subway station, an elevated
+// train (a vehicle occupant in group 0x4217 or 0x4208), or an occupant whose property holder the filter keeps.
+bool cSC4SubwayOccupantFilter::IsOccupantIncluded(cISC4Occupant* occupant) {
+    // The original asks for cISC4NetworkOccupant (0xa821ef94); the port's pieces are the class itself.
+    if (auto* network = dynamic_cast<cSC4NetworkOccupant*>(occupant); network && (network->GetNetworkFlag() & kSurfaceNetworkMask) != 0)
+        return true;
+    void* raw = nullptr;
+    if (occupant->QueryInterface(kGZCLSID_cSC4SubwayConnectionOccupant, &raw) && raw) {
+        static_cast<cIGZUnknown*>(raw)->Release();
+        return true;
+    }
+    if (IsOccupantSubwayStation(occupant)) return true;
+    if (occupant->GetType() == kVehicleOccupantType &&
+        (occupant->IsOccupantGroup(kElevatedTrainEngineGroup) || occupant->IsOccupantGroup(kElevatedTrainCarGroup)))
+        return true;
+    return IsPropertyHolderIncluded(occupant->AsPropertyHolder());
+}
+
+// 0x0012c65a: the transit switch rules name the subway, else the bool 0xcaa45671 (false when absent).
+bool cSC4SubwayOccupantFilter::IsPropertyHolderIncluded(cISCPropertyHolder* holder) {
+    if (NamesSubway(holder)) return true;
+    bool flag = false;
+    if (holder) cSCPropertyHelp::GetPropertyValue(holder, kPropSubwayFlag, flag);
+    return flag;
+}
+
+// 0x0012c6fe
+bool cSC4SubwayOccupantFilter::IsOccupantSubwayStation(cISC4Occupant* occupant) {
+    return occupant && NamesSubway(occupant->AsPropertyHolder());
 }
 
 }  // namespace sc4

@@ -70,7 +70,7 @@ void InstallMySimFilterStub();
 void InstallNeighborConnectionStub();
 void InstallNeighborDealStub();
 void InstallNetworkLotManagerStub();
-void InstallNetworkManagerStub();
+void InstallNetworkManagerHost();   // NativeNetworkManager.cpp
 void InstallNetworkOccupantStub();
 void InstallNetworkLotHosts();   // NativeNetworkLots.cpp
 void InstallPreBuiltModelOccupantStub();
@@ -184,7 +184,7 @@ void InstallStubHosts() {
     InstallNeighborConnectionStub();
     InstallNeighborDealStub();
     InstallNetworkLotManagerStub();
-    InstallNetworkManagerStub();
+    InstallNetworkManagerHost();          // the network manager's real host (before the city's manager is made)
     InstallNetworkOccupantStub();
     InstallNetworkLotHosts();             // the lot manager's and the pieces' real hosts replace the two stubs
     InstallPreBuiltModelOccupantStub();

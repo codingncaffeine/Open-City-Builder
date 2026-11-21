@@ -13,6 +13,11 @@
 // cSC4WaterOccupantFilter (i386 0x0012ca8e, IsPropertyHolderIncluded 0x0012cb26): what the network manager's
 // GetWaterOccupantFilter hands out: surface network pieces, pipe connections and the water buildings.
 //
+// cSC4SubwayOccupantFilter (i386 0x0012c78c, IsPropertyHolderIncluded 0x0012c65a, vtable 0x100a7af58): what the network
+// manager's GetSubwayOccupantFilter hands out: surface network pieces, subway connections, subway stations (a transit switch
+// rule naming the subway), elevated trains and the holders whose transit switch rules name the subway or whose bool 0xcaa45671
+// is set.
+//
 // Serialization (Write / Read) and the GZCOM creators are not ported: the port builds these filters directly.
 #pragma once
 #include <cstdint>
@@ -60,6 +65,15 @@ class cSC4WaterOccupantFilter : public cSC4OccupantFilter {
 public:
     bool IsOccupantIncluded(cISC4Occupant* occupant) override;               // 0x0012ca8e
     bool IsPropertyHolderIncluded(cISCPropertyHolder* holder) override;     // 0x0012cb26
+};
+
+class cSC4SubwayOccupantFilter : public cSC4OccupantFilter {
+public:
+    bool IsOccupantIncluded(cISC4Occupant* occupant) override;               // 0x0012c78c
+    bool IsPropertyHolderIncluded(cISCPropertyHolder* holder) override;     // 0x0012c65a
+    // 0x0012c6fe (static; the network manager's IsOccupantSubwayStation forwards here): the occupant's transit switch rules
+    // (property 0xe90e25a1, raw bytes) name network 6, the subway.
+    static bool IsOccupantSubwayStation(cISC4Occupant* occupant);
 };
 
 }  // namespace sc4

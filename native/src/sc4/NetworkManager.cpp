@@ -51,7 +51,7 @@ struct cRefreshBridgeModels {
 }  // namespace
 
 // cSC4NetworkTool::kNetworkTypeNames @ 0x100a7a8a0: the thirteen type names, the same strings the "Shadow
-// remap by edges" section matches case-insensitively (the binary stores pointers 0x1009f08d6..0x1009f0929).
+// edge remapping" section matches case-insensitively (the binary stores pointers 0x1009f08d6..0x1009f0929).
 const char* const kNetworkTypeNameTable[kNetworkToolCount] = {
     "Road", "Rail", "Highway", "Street", "Pipe", "PowerLine", "Avenue",
     "Subway", "LightRail", "Monorail", "OneWayRoad", "DirtRoad", "GroundHighway",
@@ -134,7 +134,7 @@ std::uint32_t cSC4NetworkManager::GetGZCLSID() const { return kGZCLSID_cSC4Netwo
 // remap tables (Reload and its four ini callbacks)
 // ============================================================================================================
 
-// 0x10016e1ec. Clears the four tables and reads them from the {0x8a5971c5, 0, 0x8a5993b9} ini resource. The
+// 0x10016e1ec. Clears the four tables and reads them from the {0, 0x8a5971c5, 0x8a5993b9} ini resource. The
 // resource open and the file object are behind the host seam (SC4GetResourceAsFile); the ini is deleted at the
 // end, which releases the file (cRZIniFile owns one reference).
 void cSC4NetworkManager::Reload() {
@@ -146,10 +146,10 @@ void cSC4NetworkManager::Reload() {
     cRZIniFile* ini = g_host->OpenNetworkIni();
     if (ini == nullptr) return;
     ini->EnumEntries(cRZString("Texture remapping"), &cSC4NetworkManager::AddTextureRemapEntryCallback, this);
-    ini->EnumEntries(cRZString("Shadow remap"), &cSC4NetworkManager::AddShadowRemapEntryCallback, this);
-    ini->EnumEntries(cRZString("Shadow remap by edges"),
+    ini->EnumEntries(cRZString("Shadow remapping"), &cSC4NetworkManager::AddShadowRemapEntryCallback, this);
+    ini->EnumEntries(cRZString("Shadow edge remapping"),
                      &cSC4NetworkManager::AddShadowRemapByEdgesEntryCallback, this);
-    ini->EnumEntries(cRZString("UK path mapping"), &cSC4NetworkManager::AddPathRemapEntryCallback, this);
+    ini->EnumEntries(cRZString("UK path remapping"), &cSC4NetworkManager::AddPathRemapEntryCallback, this);
     delete ini;
 }
 
@@ -170,7 +170,7 @@ void cSC4NetworkManager::AddTextureMapping(std::uint32_t matchValue, std::uint32
     textureRemaps_.push_back(entry);
 }
 
-// 0x10016edc8: the same record in the "Shadow remap" vector (+0x88). The two functions are separate in the
+// 0x10016edc8: the same record in the "Shadow remapping" vector (+0x88). The two functions are separate in the
 // binary even though the body is identical.
 void cSC4NetworkManager::AddShadowMapping(std::uint32_t matchValue, std::uint32_t matchMask,
                                           std::uint32_t addValue, std::uint32_t transformMask,
@@ -339,9 +339,13 @@ void cSC4NetworkManager::SetNetworkTool(eNetworkType type, INetworkManagerTool* 
     if (previous != nullptr) previous->Release();
 }
 
-void cSC4NetworkManager::AdoptNetworkTool(eNetworkType type, INetworkManagerTool* tool) {
-    const auto index = static_cast<std::size_t>(type);
-    if (index < static_cast<std::size_t>(kNetworkTypeCount) && networkTools_[index] == nullptr) SetNetworkTool(type, tool);
+void cSC4NetworkManager::GetDiagnostics(std::size_t remapSizes[4], bool& ukPathMapping, std::size_t& tracked) const {
+    remapSizes[0] = textureRemaps_.size();
+    remapSizes[1] = shadowTextureRemaps_.size();
+    remapSizes[2] = shadowRemapByEdges_.size();
+    remapSizes[3] = pathRemaps_.size();
+    ukPathMapping = ukPathMapping_;
+    tracked = trackedOccupants_.size();
 }
 
 // 0x10016e6c8. create == false hands out the borrowed tool Init made (the caller AddRefs it);

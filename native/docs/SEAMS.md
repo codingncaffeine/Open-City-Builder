@@ -237,7 +237,7 @@ the caller fills (see `scripts/terrain_shot.mm`).
 | `INeighborsHost` | `src/sc4/NeighborsSimulator.h` | src/sc4/NeighborsSimulator.cpp, src/tools/city_probe_creators.cpp, src/tools/city_probe_hosts.h | implemented | scripts/tests/sc4_neighborssimulator_test.cpp, src/app/NativeRegion.cpp |
 | `INetworkInputToolHost` | `src/sc4/ViewInputControlNetworkTool.h` | src/sc4/ViewInputControlNetworkTool.cpp | implemented | src/app/NativeNetworkTool.cpp |
 | `INetworkLotManagerHost` | `src/sc4/NetworkLotManager.h` | src/app/NativeNetworkLots.h, src/sc4/NetworkLotManager.cpp | implemented | scripts/tests/sc4_networklotmanager_test.cpp, src/app/NativeNetworkLots.cpp |
-| `INetworkManagerHost` | `src/sc4/NetworkManager.h` | src/sc4/NetworkManager.cpp | implemented | scripts/tests/sc4_networkmanager_test.cpp, src/app/hosts/StubNetworkManager.cpp |
+| `INetworkManagerHost` | `src/sc4/NetworkManager.h` | src/sc4/NetworkManager.cpp | implemented | scripts/tests/sc4_networkmanager_test.cpp, src/app/NativeNetworkManager.cpp |
 | `INetworkModelHost` | `src/sc4/NetworkOccupantModel.h` | src/sc4/NetworkOccupantModel.cpp | implemented | src/app/NativeModelMaker.cpp |
 | `INetworkOccupantHost` | `src/sc4/NetworkOccupant.h` | src/app/NativeNetworkLots.h, src/sc4/NetworkOccupant.cpp | implemented | scripts/tests/sc4_networkoccupant_test.cpp, scripts/tests/sc4_networkoccupantwithprebuiltmodel_test.cpp |
 | `INetworkOccupantPathHost` | `src/sc4/NetworkOccupant.h` | src/sc4/NetworkOccupant.cpp | implemented | src/app/NativeNetworkManager.cpp |

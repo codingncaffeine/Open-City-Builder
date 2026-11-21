@@ -44,6 +44,11 @@ namespace native {
 bool NeighborsHasConnection(cIGZUnknown* component, std::uint32_t type, int x, int z);      // NativeSurfaceWaterNeighbors.cpp
 void NeighborsDeleteConnection(cIGZUnknown* component, std::uint32_t type, int x, int z);
 void NeighborsCreateConnection(cIGZUnknown* component, std::uint32_t type, int x, int z);
+// NativeSurfaceWaterOccupants.cpp: the surface water's views of the network pieces and the power poles
+sc4::IWaterNetworkOccupant* SurfaceWaterNetworkOccupantAt(cIGZUnknown* trafficMap, int x, int z, std::uint32_t mask, bool exact);
+sc4::IWaterNetworkOccupant* SurfaceWaterAsNetworkOccupant(cIGZUnknown* object);
+sc4::IWaterCellOccupant* SurfaceWaterAsCellOccupant(cIGZUnknown* object);
+void SurfaceWaterOccupantsInCell(cIGZUnknown* occupantManager, int x, int z, std::uint32_t group, std::vector<sc4::IWaterCellOccupant*>& out);
 namespace {
 using namespace sc4;
 cISC4City* g_city = nullptr;
@@ -139,11 +144,15 @@ struct NativeSurfaceWaterHost final : ISurfaceWaterHost {
     bool NeighborHasConnection(std::uint32_t type, int x, int z) override { return NeighborsHasConnection(Component(CityComponent::NeighborsSimulator), type, x, z); }
     void NeighborDeleteConnection(std::uint32_t type, int x, int z) override { NeighborsDeleteConnection(Component(CityComponent::NeighborsSimulator), type, x, z); }
     void NeighborCreateConnection(std::uint32_t type, int x, int z) override { NeighborsCreateConnection(Component(CityComponent::NeighborsSimulator), type, x, z); }
-    IWaterNetworkOccupant* NetworkOccupantAt(int, int, std::uint32_t, bool) override { SC4_UNWIRED("ISurfaceWaterHost::NetworkOccupantAt (traffic network map)"); return nullptr; }
-    IWaterNetworkOccupant* AsNetworkOccupant(cIGZUnknown*) override { SC4_UNWIRED("ISurfaceWaterHost::AsNetworkOccupant"); return nullptr; }
-    IWaterCellOccupant* AsCellOccupant(cIGZUnknown*) override { SC4_UNWIRED("ISurfaceWaterHost::AsCellOccupant"); return nullptr; }
+    IWaterNetworkOccupant* NetworkOccupantAt(int x, int z, std::uint32_t mask, bool exact) override {
+        return SurfaceWaterNetworkOccupantAt(Component(CityComponent::TrafficNetwork), x, z, mask, exact);
+    }
+    IWaterNetworkOccupant* AsNetworkOccupant(cIGZUnknown* object) override { return SurfaceWaterAsNetworkOccupant(object); }
+    IWaterCellOccupant* AsCellOccupant(cIGZUnknown* object) override { return SurfaceWaterAsCellOccupant(object); }
     const void* LotAtCell(int, int) override { SC4_UNWIRED("ISurfaceWaterHost::LotAtCell (lot manager)"); return nullptr; }
-    void OccupantsInCell(int, int, std::uint32_t, std::vector<IWaterCellOccupant*>&) override { SC4_UNWIRED("ISurfaceWaterHost::OccupantsInCell (occupant manager)"); }
+    void OccupantsInCell(int x, int z, std::uint32_t group, std::vector<IWaterCellOccupant*>& out) override {
+        SurfaceWaterOccupantsInCell(Component(CityComponent::OccupantManager), x, z, group, out);
+    }
 };
 
 // The MySim agent simulator's services on the native application.

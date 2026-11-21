@@ -19,21 +19,21 @@ static int failures = 0;
 
 namespace {
 struct FakeNetwork final : IWaterNetworkOccupant {
-    bool bridge = true, removed = false, bridgeOk = true;
+    bool bridge = true, usable = false, bridgeOk = true;
     float height = 100.0f;
     std::uint8_t mask = 0;
     float where[3] = {0, 0, 0};
     bool HasNetworkFlag(std::uint32_t flag) override { return bridge && flag == 0x40000; }
-    bool IsRemoved() override { return removed; }
+    bool IsUsable() override { return usable; }
     void GetPosition(float xyz[3]) override { for (int i = 0; i < 3; ++i) xyz[i] = where[i]; }
-    std::uint8_t ConnectionMask() override { return mask; }
-    bool BridgeHeight(float& out) override { out = height; return bridgeOk; }
+    std::uint8_t ActiveEdges() override { return mask; }
+    bool PassageCeiling(float& out) override { out = height; return bridgeOk; }
 };
 struct FakeCellOccupant final : IWaterCellOccupant {
     int x = 0, z = 0;
-    bool removed = false;
+    bool preview = false;
     void GetCell(int& ox, int& oz) override { ox = x; oz = z; }
-    bool IsRemoved() override { return removed; }
+    bool IsPreview() override { return preview; }
 };
 struct GridCity final : ISimGridCity {
     std::int32_t CitySizeXInCells() const override { return 4; }
@@ -318,9 +318,9 @@ int main() {
     bodies->SetTractValue(2, 2, 9);
     water->DoMessage(&message);
     CHECK(bodies->GetTractValue(2, 2) == 9);                               // joined: untouched
-    neighbour.removed = true;
+    neighbour.usable = true;
     water->DoMessage(&message);
-    CHECK(bodies->GetTractValue(2, 2) == 1);                               // a removed neighbour does not count
+    CHECK(bodies->GetTractValue(2, 2) == 1);                               // a finished (usable) neighbour does not hold it back
     host.network.clear();
     message.SetData1(0);
     bodies->SetTractValue(2, 2, 9);

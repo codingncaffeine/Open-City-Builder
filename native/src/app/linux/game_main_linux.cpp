@@ -40,6 +40,7 @@
 #include "app/NativeCheats.h"
 #include "app/NativeKeyboard.h"
 #include "gz/CommandServer.h"
+#include "app/NativeNetworkManager.h"
 #include "app/NativeWinControls.h"
 #include "app/NativeNetworkLots.h"
 #include "app/NativeUnderground.h"
@@ -1214,6 +1215,8 @@ int RunScenario(const std::string& path) {
             native::NativeToxicStart(x, z);
         } else if (command == "toxics") {   // toxics: the toxic waste occupants
             native::NativeToxicReport();
+        } else if (command == "netmanager") {   // netmanager: what the network manager's host answers, its remaps, tools and filters
+            native::PrintNetworkManagerHost();
         } else if (command == "walls") {   // walls: the lot retaining walls and their models
             native::NativeWallReport();
         } else if (command == "ports") {   // ports: the airport and seaport developers' ports

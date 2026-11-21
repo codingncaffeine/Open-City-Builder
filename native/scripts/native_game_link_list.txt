@@ -471,7 +471,6 @@ src/app/hosts/StubMySimFilter.cpp
 src/app/hosts/StubNeighborConnection.cpp
 src/app/hosts/StubNeighborDeal.cpp
 src/app/hosts/StubNetworkLotManager.cpp
-src/app/hosts/StubNetworkManager.cpp
 src/app/hosts/StubNetworkOccupant.cpp
 src/app/hosts/StubNetworkTool.cpp
 src/app/hosts/StubOrdinance.cpp
@@ -684,6 +683,7 @@ src/sc4/SurfaceWater.cpp
 src/gz/gzcom_creators/cSC4MySimAgentSimulator.cpp
 src/sc4/MySimAgentSimulator.cpp
 src/app/NativeSurfaceWaterNeighbors.cpp
+src/app/NativeSurfaceWaterOccupants.cpp
 src/app/NativeShadowOverlay.cpp
 src/app/NativeDecalOverlay.cpp
 src/app/NativeDemolition.cpp
@@ -744,6 +744,7 @@ src/sc4/GamePreferencesWinProc.cpp
 src/sc4/AudioPreferencesWinProc.cpp
 src/sc4/VideoPreferencesWinProc.cpp
 src/app/NativeNetworkTool.cpp
+src/app/NativeNetworkManager.cpp
 src/sc4/NetworkToolUI.cpp
 src/sc4/ViewInputControlNetworkTool.cpp
 src/sc4/NetworkWorldCache.cpp

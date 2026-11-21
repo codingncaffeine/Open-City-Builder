@@ -3,6 +3,8 @@
 
 #include <cstring>
 
+#include "sc4/OccupantManager.h"
+#include "sc4/PipeConnectionOccupant.h"
 #include "sc4/PipeOccupant.h"
 
 namespace sc4 {
@@ -43,6 +45,42 @@ void cSC4PipeTool::CreateNetworkOccupant(cSC4NetworkCellInfo* cell, cSC4Undergro
     pipe->SetEdgeTypesFlag(static_cast<std::uint8_t>(networkType_), cell->tileNeighborhoods[networkType_]);   // vslot 0x94
     pipe->SetCostOfDemolition(static_cast<std::int64_t>(placement_.unknownA8[9]));   // vslot 0x100 (i386 +0x36c, high 0)
     out = pipe;
+}
+
+namespace {
+// The shared body of the two queries: every occupant of the cell (spOccupantManager vslot 0xa4, any occupant, unlimited) is
+// asked for `iid`; each answer replaces (and releases) the previous one, so the last match wins. The list's references are
+// dropped as it is walked.
+template <class T>
+bool FindCellOccupant(cISC4OccupantManager* occupants, int x, int z, std::uint32_t iid, T*& out) {
+    out = nullptr;
+    if (occupants == nullptr) return false;
+    const int cell[2] = {x, z};
+    OccupantList list;
+    occupants->GetOccupantsByStandardCityCells(list, cell, cell, static_cast<cISC4OccupantFilter*>(nullptr), 0xffffffffu);
+    bool found = false;
+    for (cISC4Occupant* occupant : list) {
+        void* raw = nullptr;
+        if (occupant->QueryInterface(iid, &raw) && raw) {
+            if (out != nullptr) out->Release();
+            out = static_cast<T*>(raw);
+            found = true;
+        }
+        occupant->Release();
+    }
+    return found;
+}
+}  // namespace
+
+// 0x0012cca4
+bool cSC4PipeTool::FindPipeOccupant(cISC4OccupantManager* occupants, int x, int z, cSC4PipeOccupant*& out) {
+    return FindCellOccupant(occupants, x, z, kGZCLSID_cSC4PipeOccupant, out);
+}
+
+// 0x0012cbb8
+bool cSC4PipeTool::FindPipeConnectionOccupant(cISC4OccupantManager* occupants, int x, int z,
+                                              cSC4PipeConnectionOccupant*& out) {
+    return FindCellOccupant(occupants, x, z, kGZCLSID_cSC4PipeConnectionOccupant, out);
 }
 
 }  // namespace sc4

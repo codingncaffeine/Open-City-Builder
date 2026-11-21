@@ -172,7 +172,7 @@ bool cSTESurfaceWater::IsNavigable(int x, int z, int radius, const void* lot) co
         IWaterNetworkOccupant* network = host_->NetworkOccupantAt(cellX, cellZ, kNetworkLookupMask, true);
         if (network != nullptr && network->HasNetworkFlag(kNetworkOccupantFlagBridge)) {
             float height = 0.0f;
-            if (!network->BridgeHeight(height)) return false;
+            if (!network->PassageCeiling(height)) return false;
             const std::size_t index = static_cast<std::size_t>(terrain_->GetVertIndex(cellX, cellZ));
             return kBridgeClearance <= height - (terrain_->Vertices()[index].altitude + info_[index].depth);
         }
@@ -687,7 +687,7 @@ bool cSTESurfaceWater::DoMessage(cIGZMessage2* base) {
         if (message->GetData3() == kWaterOccupantGroup) {
             auto* object = static_cast<cIGZUnknown*>(message->GetVoid1());
             IWaterCellOccupant* occupant = object ? host_->AsCellOccupant(object) : nullptr;
-            if (occupant && !occupant->IsRemoved()) {
+            if (occupant && !occupant->IsPreview()) {
                 int cellX = 0, cellZ = 0;
                 occupant->GetCell(cellX, cellZ);
                 if (0.0f < GetWaterDepthForCell(cellX, cellZ)) bodiesDirty_ = true;
@@ -702,14 +702,14 @@ bool cSTESurfaceWater::DoMessage(cIGZMessage2* base) {
             built->GetPosition(position);
             int cellX = 0, cellZ = 0;
             host_->PositionToCell(position[0], position[2], cellX, cellZ);
-            const std::uint8_t mask = built->ConnectionMask();
+            const std::uint8_t mask = built->ActiveEdges();
             bool joined = false;
             for (int i = 0; i < 4; ++i) {
                 if (((mask >> i) & 1) == 0) continue;
                 const int nx = kDeltaX[i] + cellX, nz = kDeltaZ[i] + cellZ;
                 if ((nx | nz) < 0 || nx >= host_->CitySizeX() - 1 || nz >= host_->CitySizeZ() - 1) continue;
                 IWaterNetworkOccupant* other = host_->NetworkOccupantAt(nx, nz, kNetworkLookupMask, true);
-                if (other != nullptr && other->HasNetworkFlag(kNetworkOccupantFlagBridge) && !other->IsRemoved()) joined = true;
+                if (other != nullptr && other->HasNetworkFlag(kNetworkOccupantFlagBridge) && !other->IsUsable()) joined = true;
             }
             if (!joined) UpdateBodiesOfWater();
         }
