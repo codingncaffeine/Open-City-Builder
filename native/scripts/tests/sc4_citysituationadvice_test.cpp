@@ -164,17 +164,17 @@ struct FakeAutomaton final : ISituationAutomaton {
     FakeOccupant* occupant = nullptr;
     ISituationOccupant* Occupant() override { return occupant; }
     void Position(float*) override {}
-    void Velocity(float*) override {}
-    void SetPlayerControl(bool) override {}
+    void Remove(bool) override {}
+    void GetOrientation(float*) override {}
     void SetFlag(std::uint32_t, bool) override {}
     bool CheckFlag(std::uint32_t) override { return false; }
-    void AddListener(void*) override {}
-    void RemoveListener(void*) override {}
-    ISituationAutomaton* PursuitTarget() override { return nullptr; }
-    int AutomatonType() override { return 0; }
-    void SendCommand(std::uint32_t) override {}
-    int FirstIndicator() override { return 0; }
-    void OnSituationAttached() override {}
+    void AddListener(cIGZMessageTarget2*) override {}
+    void RemoveListener(cIGZMessageTarget2*) override {}
+    ISituationAutomaton* StateTarget() override { return nullptr; }
+    std::uint32_t GetBehavior() override { return 0; }
+    void StartSFX(std::uint32_t) override {}
+    std::uint32_t SituationIndicatorImageId() override { return 0; }
+    void RegisterInGameDataRegistry() override {}
     bool QueryInterface(std::uint32_t, void**) override { return false; }
     std::uint32_t AddRef() override { return 1; }
     std::uint32_t Release() override { return 1; }

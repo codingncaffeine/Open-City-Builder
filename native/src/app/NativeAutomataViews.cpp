@@ -234,6 +234,10 @@ public:
     bool BeginRoute(bool onlyStart) override { return traffic_ && traffic_->BeginRoute(onlyStart); }                         // 0x4a8
     void ReturnToDefaultSpeed() override { if (traffic_) traffic_->ReturnToDefaultSpeed(); }                                  // 0x538
 
+public:
+    // Another layer's view of the same automaton (the city situation manager's), deleted with this view.
+    std::unique_ptr<cSC4AutomatonExtension> companion;
+
 private:
     cSC4Automaton& a_;
     cSC4TrafficAutomaton* traffic_;
@@ -312,5 +316,16 @@ namespace native {
 sc4::cSC4OccupantGroupTemplate* OccupantGroupTemplateOf(const sc4::IAutomatonGroupTemplate* automatonView) {
     const auto* view = dynamic_cast<const AutomatonGroupView*>(automatonView);
     return view ? view->group_ : nullptr;
+}
+}  // namespace native
+
+namespace native {
+// The second view slot of an automaton (made with its managers' view, deleted with the automaton).
+sc4::cSC4AutomatonExtension* AutomatonCompanion(sc4::cSC4Automaton* automaton) {
+    auto* view = automaton ? static_cast<AutomatonViewImpl*>(AutomatonView(automaton)) : nullptr;
+    return view ? view->companion.get() : nullptr;
+}
+void SetAutomatonCompanion(sc4::cSC4Automaton* automaton, sc4::cSC4AutomatonExtension* companion) {
+    if (auto* view = automaton ? static_cast<AutomatonViewImpl*>(AutomatonView(automaton)) : nullptr) view->companion.reset(companion);
 }
 }  // namespace native

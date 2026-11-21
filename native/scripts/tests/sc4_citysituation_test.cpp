@@ -32,10 +32,12 @@ public:
     std::uint32_t Release() override { return --refs; }
     bool MessageSend(cIGZMessage2* message) override {
         sends.push_back(message->GetType());
+        sendData1.push_back(static_cast<cIGZMessage2Standard*>(message)->GetData1());
         return true;
     }
     bool MessagePost(cIGZMessage2* message, bool) override {
         posts.push_back(message->GetType());
+        postVoid1.push_back(static_cast<cIGZMessage2Standard*>(message)->GetVoid1());
         return true;
     }
     bool AddNotification(cIGZMessageTarget2*, std::uint32_t type) override {
@@ -55,6 +57,8 @@ public:
     bool CreateMessage(std::uint32_t, std::uint32_t, void**) override { return false; }
 
     std::vector<std::uint32_t> added, removed, sends, posts;
+    std::vector<void*> postVoid1;
+    std::vector<std::uint64_t> sendData1;
     std::uint32_t refs = 1;
 };
 
@@ -110,8 +114,8 @@ public:
     bool QueryInterface(std::uint32_t, void**) override { return false; }
     std::uint32_t AddRef() override { return ++refs; }
     std::uint32_t Release() override { return --refs; }
-    void BeginPlayerDrive() override {}
-    void EndPlayerDrive() override {}
+    void Pause() override { ++paused; }
+    void Resume() override { ++resumed; }
     bool HandlesGroup(std::uint32_t group) override { return group == handledGroup; }
     void AlertGroup(float, std::uint32_t, ISituationAutomaton*, bool) override {}
     void AppendInstancesOfGroup(std::uint32_t, std::unordered_set<ISituationAutomaton*>& out) override {
@@ -121,13 +125,40 @@ public:
         ++instancesReleased;
         list.clear();
     }
-    bool FindSpawnPosition(float, float, std::uint32_t, const float[3], float[3], std::uint32_t) override { return false; }
-    ISituationAutomaton* CreateAutomaton(std::uint32_t, const float[3], std::uint32_t) override { return nullptr; }
+    bool FindSpawnPosition(float, float, std::uint32_t, const float from[3], float spawn[3], std::uint32_t) override {
+        if (!spawnAvailable) return false;
+        spawn[0] = from[0] + 10.0f;
+        spawn[1] = from[1];
+        spawn[2] = from[2];
+        return true;
+    }
+    ISituationAutomaton* CreateAutomaton(std::uint32_t group, const float[3], std::uint32_t) override {
+        createdGroups.push_back(group);
+        if (!toCreate) return nullptr;
+        toCreate->AddRef();
+        return toCreate;
+    }
+    bool spawnAvailable = false;
+    ISituationAutomaton* toCreate = nullptr;
+    std::vector<std::uint32_t> createdGroups;
+    int paused = 0, resumed = 0;
 
     std::uint32_t handledGroup = 1;
     std::vector<ISituationAutomaton*> instances;
     int instancesReleased = 0;
     std::uint32_t refs = 1;
+};
+
+class FakeAura final : public ISituationAuraSim {
+public:
+    void AddAura(float x, float z, float radius, float magnitude) override { auras.push_back({x, z, radius, magnitude}); }
+    std::vector<std::vector<float>> auras;
+};
+
+class FakeBudget final : public ISituationBudgetSim {
+public:
+    void AddMoney(long long amount) override { deposits.push_back(amount); }
+    std::vector<long long> deposits;
 };
 
 class FakeNotifier final : public ISituationAutomatonNotifier {
@@ -145,29 +176,30 @@ public:
     std::uint32_t Release() override { return --refs; }   // test double: never destroys itself
     ISituationOccupant* Occupant() override { return occupant; }
     void Position(float xyz[3]) override { xyz[0] = position[0]; xyz[1] = position[1]; xyz[2] = position[2]; }
-    void Velocity(float xyz[3]) override { xyz[0] = xyz[1] = xyz[2] = 0; }
-    void SetPlayerControl(bool) override {}
+    void Remove(bool) override { ++removed; }
+    void GetOrientation(float xyz[3]) override { xyz[0] = 1; xyz[1] = xyz[2] = 0; }
     void SetFlag(std::uint32_t flag, bool on) override {
         if (on) flags |= flag; else flags &= ~flag;
     }
     bool CheckFlag(std::uint32_t flag) override { return (flags & flag) != 0; }
-    void AddListener(void* listener) override { listeners.push_back(listener); }
-    void RemoveListener(void* listener) override {
+    void AddListener(cIGZMessageTarget2* listener) override { listeners.push_back(listener); }
+    void RemoveListener(cIGZMessageTarget2* listener) override {
         listeners.erase(std::remove(listeners.begin(), listeners.end(), listener), listeners.end());
     }
-    ISituationAutomaton* PursuitTarget() override { return pursuitTarget; }
-    int AutomatonType() override { return automatonType; }
-    void SendCommand(std::uint32_t command) override { commands.push_back(command); }
-    int FirstIndicator() override { return firstIndicator; }
-    void OnSituationAttached() override { ++attached; }
+    ISituationAutomaton* StateTarget() override { return pursuitTarget; }
+    std::uint32_t GetBehavior() override { return behavior; }
+    void StartSFX(std::uint32_t sfx) override { commands.push_back(sfx); }
+    std::uint32_t SituationIndicatorImageId() override { return firstIndicator; }
+    void RegisterInGameDataRegistry() override { ++attached; }
 
     float position[3] = {1, 2, 3};
     std::uint32_t flags = 2;   // driveable
-    int automatonType = 0x20;
-    int firstIndicator = 0;
+    std::uint32_t behavior = 0x20;
+    std::uint32_t firstIndicator = 0;
+    int removed = 0;
     ISituationOccupant* occupant = nullptr;
     ISituationAutomaton* pursuitTarget = nullptr;
-    std::vector<void*> listeners;
+    std::vector<cIGZMessageTarget2*> listeners;
     std::vector<std::uint32_t> commands;
     int attached = 0;
     std::uint32_t refs = 1;
@@ -392,13 +424,21 @@ public:
     ISituationZoneManager* ZoneManager() override { return nullptr; }
     ISituationTerrain* Terrain() override { return nullptr; }
     ISituationTrafficNetwork* TrafficNetwork() override { return nullptr; }
-    ISituationAuraSim* AuraSim() override { return nullptr; }
-    ISituationBudgetSim* BudgetSim() override { return nullptr; }
+    ISituationAuraSim* AuraSim() override { return aura; }
+    ISituationBudgetSim* BudgetSim() override { return budget; }
     ISituationLandfillDeveloper* LandfillDeveloper() override { return nullptr; }
-    void EnterPlayerDriveView(ISituationAutomaton*, cIGZMessageTarget2*) override {}
+    void EnterPlayerDriveView(ISituationAutomaton* automaton, cIGZMessageTarget2* target) override { drives.emplace_back(automaton, target); }
+    cISC4CitySituationAdvice* AdvisorSituationByGuid(std::uint32_t guid) override {
+        if (!situationByGuid || guid != situationGuid) return nullptr;
+        situationByGuid->AddRef();
+        return situationByGuid;
+    }
+    std::vector<std::pair<ISituationAutomaton*, cIGZMessageTarget2*>> drives;
+    cISC4CitySituationAdvice* situationByGuid = nullptr;
+    std::uint32_t situationGuid = 0;
+    ISituationAuraSim* aura = nullptr;
+    ISituationBudgetSim* budget = nullptr;
     cIGZWinMgr* WindowManager() override { return nullptr; }
-    void ReleaseWindowParamObject(cIGZWin*, std::uint32_t) override {}
-    cIGZWin* WindowParamWindow(cIGZWin*, std::uint32_t) override { return nullptr; }
     bool DoURL(const void*) override { return false; }
     std::vector<cISC4CitySituationAdvice*> AdvisorSituations() override { return advisorSituations; }
     void RetireAdvisorSituation(cISC4CitySituationAdvice* situation) override { retired.push_back(situation); }
@@ -505,7 +545,7 @@ int main() {
         CHECK(manager->Init());   // idempotent
         // the "sitmgr" node hangs under the registry root and its two raw values under the node
         {
-            const auto node = registry.GetEntryID(static_cast<cIGZUnknown*>(manager));
+            const auto node = registry.GetEntryID(static_cast<cIGZUnknown*>(static_cast<cIGZMessageTarget2*>(manager)));
             CHECK(node != 0 && registry.GetParentNodeEntry(node) == registry.GetRootNodeEntry());
         }
         CHECK(host.messages.added.size() == 10);
@@ -661,9 +701,9 @@ int main() {
         automatonA.flags = 0x10000000;
         CHECK(!manager->CanPlayerDrive(&automatonA));
         automatonA.flags = 2;
-        automatonA.automatonType = 0x34;   // (0x34 | 0x20) == 0x34: a pursuit car
+        automatonA.behavior = 0x34;   // (0x34 | 0x20) == 0x34: behaviors 0x14 / 0x34 cannot be driven
         CHECK(!manager->CanPlayerDrive(&automatonA));
-        automatonA.automatonType = 0x20;
+        automatonA.behavior = 0x20;
         CHECK(manager->CanPlayerDrive(&automatonA));
 
         // HandleSituationTriggered: the advice becomes a track and gets the automaton, which is tracked
@@ -740,8 +780,8 @@ int main() {
         manager->HandleStatusChanged(kSituationRunning);
         CHECK(manager->GetCurrentStatus() == kSituationRunning);
         manager->HandleStatusChanged(kSituationRunning);
-        manager->HandleStatusChanged(kSituationTimeout);
-        CHECK(manager->GetCurrentStatus() == kSituationTimeout);
+        manager->HandleStatusChanged(kSituationFailure);
+        CHECK(manager->GetCurrentStatus() == kSituationFailure);
         manager->Release();
     }
 
@@ -807,10 +847,11 @@ int main() {
         CHECK(manager->DoMessage(shown));
         shown->Release();
 
-        // the cheat message without the right id is not handled
+        // the cheat message without the right id is answered (true) but posts nothing
         cRZMessage2Standard* cheat = MakeMessage(kSituationMsgCheatTyped);
         cheat->SetData1(0x77);
-        CHECK(!manager->DoMessage(cheat));
+        CHECK(manager->DoMessage(cheat));
+        CHECK(host.messages.posts.empty());
         cheat->Release();
 
         // PostMessageToSelf and SendSituationMessage go through the message server
@@ -860,6 +901,123 @@ int main() {
 
         CHECK(manager->Shutdown());
         manager->Release();
+    }
+
+    // --- the mission flow: initiate (0xac1045ef), accept through the window procedure, countdown, checks, result -------
+    // `reach` places the driven automaton next to the target (a success) or far from it (the time limit fails it).
+    for (const bool reach : {true, false}) {
+        FakeHost host;
+        FakeApp app;
+        FakeAura aura;
+        FakeBudget budget;
+        FakeAutomataManager vehicles;
+        FakeAutomaton automaton, targetAutomaton;
+        auto* occupant = new FakeOccupant();
+        auto* targetOccupant = new FakeOccupant();
+        automaton.occupant = occupant;
+        occupant->automaton = &automaton;
+        targetAutomaton.occupant = targetOccupant;
+        targetOccupant->automaton = &targetAutomaton;
+        if (!reach) {
+            automaton.position[0] = 1000.0f;
+            automaton.position[2] = 1000.0f;
+        }
+        vehicles.instances = {&automaton};
+        vehicles.spawnAvailable = true;
+        vehicles.toCreate = &targetAutomaton;
+        host.app = &app;
+        host.aura = &aura;
+        host.budget = &budget;
+        host.managers = {&vehicles};
+        auto* advice = new FakeAdvice();
+        advice->successCondition = 1;
+        advice->successDistance = 32.0f;
+        advice->activeRadius = 0.0f;
+        advice->targetGroups = {0x55};
+        advice->flags = kSituationFlagCreateTarget | kSituationFlagTraining;
+        advice->adviceId = static_cast<int>(0x8c151efdu);
+        advice->successMoney = 500;
+        advice->failureMoney = -100;
+        host.situationByGuid = advice;
+        host.situationGuid = 0x8c151efd;
+        SetCitySituationManagerHost(&host);
+        auto* manager = new cSC4CitySituationManager();
+        manager->AddRef();
+        CHECK(manager->Init());
+
+        // the kit verb / the mission cheat post 0xac1045ef (guid, 1 = for the automaton's occupant, 0 = the advice's groups)
+        cRZMessage2Standard* initiate = MakeMessage(kSituationMsgActivateAdvice);
+        initiate->SetData1(0x8c151efd);
+        initiate->SetData2(1);
+        initiate->SetData3(0);
+        CHECK(manager->DoMessage(initiate));
+        initiate->Release();
+        CHECK(manager->GetActiveSituation() == advice);
+        CHECK(manager->GetActiveAuto() == &automaton);
+        CHECK(manager->GetCurrentStatus() == kSituationNone);
+        CHECK(manager->GetCurrentTarget() == targetOccupant);                 // CreateTarget made the target automaton
+        CHECK(vehicles.createdGroups.size() == 1 && vehicles.createdGroups[0] == 0x55);
+        CHECK(automaton.CheckFlag(0x4000) && automaton.attached == 1);         // SetActiveAutomaton
+        CHECK(automaton.listeners.size() == 1 && automaton.listeners[0] == static_cast<cIGZMessageTarget2*>(manager));
+        CHECK(manager->GetNumTargets() == 1 && manager->GetCurrentTimeLimitSeconds() == 60.0f);
+        // the briefing popup is posted with the automaton
+        CHECK(!host.messages.posts.empty() && host.messages.posts.back() == kSituationMsgShowPopup);
+        CHECK(!host.messages.postVoid1.empty() && host.messages.postVoid1.back() == static_cast<void*>(&automaton));
+
+        // the dialog's accept button (command 3 from sender 0x287259f6, button 6) activates it
+        cGZMessage accept;
+        accept.type = 3;
+        accept.param1 = kSituationButtonSender;
+        accept.param2 = kSituationButtonAccept;
+        CHECK(manager->DoWinProcMessage(nullptr, accept));
+        CHECK(manager->GetCurrentStatus() == kSituationRunning);
+        CHECK(host.drives.size() == 1 && host.drives[0].first == &automaton && host.drives[0].second == manager);
+        CHECK(!host.messages.sends.empty() && host.messages.sends.back() == kSituationMsgSituationActive &&
+              host.messages.sendData1.back() == 1);
+
+        // the first tick starts the 4 s countdown (the automata pause); its end resumes them
+        manager->DoAnimationTick(16.0f);
+        CHECK(manager->CountdownIsInProgress() && vehicles.paused == 1 && vehicles.resumed == 0);
+        manager->DoAnimationTick(4000.0f);
+        CHECK(!manager->CountdownIsInProgress() && vehicles.resumed == 1);
+        if (reach) {
+            // next to the target with a success timeout of 0: success, then the 1 s result delay, then the reward
+            CHECK(manager->GetCurrentStatus() == kSituationSuccess);
+            manager->DoAnimationTick(500.0f);
+            CHECK(budget.deposits.empty());
+            manager->DoAnimationTick(600.0f);
+            CHECK(budget.deposits.size() == 1 && budget.deposits[0] == 500);
+            CHECK(aura.auras.size() == 1);
+            CHECK(manager->GetMissionSuccessCount(0x8c151efd) == 1);
+            CHECK(app.CompletedMissionIds()[0] == 0x8c151efd);                          // a training mission is remembered
+            CHECK(host.retired.size() == 1 && host.retired[0] == advice);
+        } else {
+            // far away: still running; past the 60 s limit the time limit fails it and the failure money is paid
+            CHECK(manager->GetCurrentStatus() == kSituationRunning);
+            for (int i = 0; i < 55; ++i) manager->DoAnimationTick(1000.0f);   // 4 s (the countdown tick) + 55 s
+            CHECK(manager->GetCurrentStatus() == kSituationRunning);
+            manager->DoAnimationTick(1500.0f);
+            CHECK(manager->GetCurrentStatus() == kSituationFailure);
+            manager->DoAnimationTick(1100.0f);
+            CHECK(budget.deposits.size() == 1 && budget.deposits[0] == -100);
+            CHECK(manager->GetMissionSuccessCount(0x8c151efd) == 0 && host.retired.empty());
+        }
+        // the result popup is posted without an automaton
+        CHECK(host.messages.posts.back() == kSituationMsgShowPopup && host.messages.postVoid1.back() == nullptr);
+
+        // completing the situation (the result dialog's close) ends it
+        cRZMessage2Standard* complete = MakeMessage(kSituationMsgSituationComplete);
+        complete->SetIGZUnknown(advice);
+        CHECK(manager->DoMessage(complete));
+        complete->Release();
+        CHECK(manager->GetActiveSituation() == nullptr && manager->GetActiveAuto() == nullptr && manager->GetCurrentTarget() == nullptr);
+        CHECK(automaton.listeners.empty());
+
+        CHECK(manager->Shutdown());
+        manager->Release();
+        advice->Release();
+        occupant->Release();
+        targetOccupant->Release();
     }
 
     SetCitySituationManagerHost(nullptr);

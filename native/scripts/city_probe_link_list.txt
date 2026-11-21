@@ -369,6 +369,7 @@ src/gz/gzcom_creators/cSC4PipeOccupant.cpp
 src/gz/gzcom_creators/cSC4PipeConnectionOccupant.cpp
 src/sc4/Ambulance.cpp
 src/sc4/CitySituationManager.cpp
+src/sc4/CitySituationMissions.cpp
 src/sc4/EmergencyVehicle.cpp
 src/sc4/FireTruck.cpp
 src/sc4/PatrolCar.cpp
