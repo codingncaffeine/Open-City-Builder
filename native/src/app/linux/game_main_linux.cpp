@@ -74,6 +74,7 @@
 #include "gz/DrawFontRenderer.h"
 #include "gz/GZFont.h"
 #include "gz/GZFramework.h"
+#include "gz/Cursor.h"
 #include "gz/FontSys.h"
 #include "gz/RZServices.h"
 #include "gz/WinCtrlMgr.h"
@@ -255,6 +256,70 @@ bool InitFont() {
     gFontHost = new native::FreeTypeFontHost();
     return gFontHost->Ok();
 }
+
+// The cursor platform of the recovered cursor classes (gz/Cursor.h) over SDL: a loaded game cursor becomes a named SDL
+// color cursor (the Mac build's named cursor path: ARGB pixels, the masked ones transparent), the system cursor indices
+// map to SDL's system cursors, a buffer handed in as a hardware cursor becomes a color cursor of its pixels.
+class CursorPlatform final : public gz::ICursorPlatform {
+public:
+    cIGZBuffer* CreateBuffer() override { auto* b = new cGZBuffer(); b->AddRef(); return b; }
+    void SetHardwareCursor(cIGZBuffer* buffer, int hotX, int hotY) override {
+        if (!buffer) return;
+        auto* gz = static_cast<cGZBuffer*>(buffer);
+        const int w = int(gz->Width()), h = int(gz->Height());
+        std::vector<std::uint32_t> pixels(std::size_t(w) * h);
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) pixels[std::size_t(y) * w + x] = gz->GetPixel(x, y);
+        SDL_Cursor* cursor = MakeCursor(pixels.data(), w, h, w * 4, hotX, hotY);
+        if (!cursor) return;
+        if (hardware_) SDL_DestroyCursor(hardware_);
+        hardware_ = cursor;
+        SDL_SetCursor(cursor);
+        gz::gMacHardwareCursorSet = true;
+    }
+    void SetSystemCursor(int index) override {
+        // the Windows-95 style stock cursors in cRZSystemCursorW95's order: arrow, I-beam, wait, cross, up arrow, the four
+        // sizing shapes, size all, no, app starting, help
+        static constexpr SDL_SystemCursor kMap[] = {SDL_SYSTEM_CURSOR_DEFAULT, SDL_SYSTEM_CURSOR_TEXT, SDL_SYSTEM_CURSOR_WAIT,
+            SDL_SYSTEM_CURSOR_CROSSHAIR, SDL_SYSTEM_CURSOR_DEFAULT, SDL_SYSTEM_CURSOR_NWSE_RESIZE, SDL_SYSTEM_CURSOR_NESW_RESIZE,
+            SDL_SYSTEM_CURSOR_EW_RESIZE, SDL_SYSTEM_CURSOR_NS_RESIZE, SDL_SYSTEM_CURSOR_MOVE, SDL_SYSTEM_CURSOR_NOT_ALLOWED,
+            SDL_SYSTEM_CURSOR_PROGRESS, SDL_SYSTEM_CURSOR_DEFAULT};
+        const SDL_SystemCursor which = index >= 0 && index < int(std::size(kMap)) ? kMap[index] : SDL_SYSTEM_CURSOR_DEFAULT;
+        SDL_Cursor*& cursor = system_[which];
+        if (!cursor) cursor = SDL_CreateSystemCursor(which);
+        if (cursor) SDL_SetCursor(cursor);
+    }
+    void SetNamedCursor(const char* name) override {
+        auto it = named_.find(name ? name : "");
+        if (it == named_.end()) return;
+        SDL_SetCursor(it->second);
+        current_ = it->first;
+    }
+    void AddNamedCursor(const char* name, const std::uint32_t* argb, int width, int height, int stride, double hotX, double hotY) override {
+        (void)stride;   // the pixels come packed, one row of `width` after another
+        SDL_Cursor* cursor = MakeCursor(argb, width, height, width * 4, int(hotX), int(hotY));
+        if (!cursor) return;
+        SDL_Cursor*& slot = named_[name ? name : ""];
+        if (slot) SDL_DestroyCursor(slot);
+        slot = cursor;
+    }
+    void ShowCursor() override { SDL_ShowCursor(); }
+    void HideCursor() override { SDL_HideCursor(); }
+    std::size_t NamedCount() const { return named_.size(); }
+    const std::string& Current() const { return current_; }
+private:
+    static SDL_Cursor* MakeCursor(const std::uint32_t* argb, int w, int h, int pitch, int hotX, int hotY) {
+        SDL_Surface* surface = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_ARGB8888, const_cast<std::uint32_t*>(argb), pitch);
+        if (!surface) return nullptr;
+        SDL_Cursor* cursor = SDL_CreateColorCursor(surface, hotX, hotY);
+        SDL_DestroySurface(surface);
+        return cursor;
+    }
+    std::map<std::string, SDL_Cursor*> named_;
+    std::map<SDL_SystemCursor, SDL_Cursor*> system_;
+    SDL_Cursor* hardware_ = nullptr;
+    std::string current_;
+} gCursorPlatform;
 
 // The window font of a cIGZFont (gz::MakeWinFont): the controls draw on the platform's surfaces through it. The text and
 // shadow colors are the font's own (cIGZFont vslots 0x60 / 0x68 of the original's controls).
@@ -671,6 +736,7 @@ bool Boot() {
     if (!InitFont()) std::printf("font: FAILED to initialise\n");
     gz::SetWinFontSource(&gFontSource);
     gz::SetWinFontMaker(&MakeWinFont);
+    gz::SetCursorPlatform(&gCursorPlatform);
     gz::SetWinStyleManager(&gStyleManager);
     native::InstallButtonSounds();   // the window buttons' host: caption fonts (and sounds, once there is audio output)
 
@@ -1467,6 +1533,9 @@ int RunScenario(const std::string& path) {
             std::string code;
             std::getline(words, code);
             native::NativeAdviceLinkProbe(advisor, code.c_str() + (code.empty() ? 0 : 1));
+        } else if (command == "cursors") {   // the game cursors loaded into the cursor platform and the one in force
+            std::printf("cursors: %zu loaded, current %s\n", gCursorPlatform.NamedCount(),
+                        gCursorPlatform.Current().empty() ? "(none)" : gCursorPlatform.Current().c_str());
         } else if (command == "advwin") {   // the advisor window's state
             native::NativeAdvisorWindowReport();
         } else if (command == "command") {   // command HEXID: a framework command run as a shortcut runs it (menus without keys)

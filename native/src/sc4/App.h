@@ -366,6 +366,8 @@ public:
     bool WindowSetup();                                            // @ 0x1000121fa
     bool WindowShutdown();                                         // @ 0x10001226e
     void SetupWinCtrlMgr();                                        // @ 0x10000b128
+    void SetupCursors();                                           // SetupWinCtrlMgr's cursor part (Mac i386 0x0000e1a1..)
+    static constexpr std::uint32_t kRenderPropertyCursorType = 15;   // kCursorType
     // SetupWinCtrlMgr's color table (the control colors the application sets over the manager's own defaults).
     static void ApplyControlColors(gz::cIGZWinCtrlMgr* controls);
     void ShutdownWinCtrlMgr();                                     // @ 0x10000c7ca

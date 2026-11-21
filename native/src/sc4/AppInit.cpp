@@ -13,7 +13,11 @@
 #include "gz/WinFont.h"
 #include "rz/cRZFile.h"
 #include "rz/cRZIniFile.h"
+#include "gz/cIGZPersistResourceKeyList.h"
+#include "gz/cIGZPersistResourceManager.h"
 #include "sc4/DBSegment.h"
+#include "sc4/RenderProperties.h"
+#include "sc4/SLCursor.h"
 #include "gz/cIGZFrameWork.h"
 #include "lua/ISCLua.h"
 #include "render/gd/VideoModes.h"
@@ -390,6 +394,67 @@ void cSC4App::SetupWinCtrlMgr() {
         if (temporary) cRZFile::Remove(path);
     }
     if (startupHooks_.setupWinCtrlResources) startupHooks_.setupWinCtrlResources(controls);
+    SetupCursors();
+}
+
+// The cursors part of SetupWinCtrlMgr. -CustomCursors:off|disabled turns the game's own pointer shapes off (the cursors the
+// system has an equivalent of stay the system's); -cursors:off|disabled|bw|color16|color|color256 sets the render
+// property kCursorType (0..3; "fullColor" is compared after lower-casing, so type 4 cannot be chosen). Every cursor
+// resource (type 0xaa5c3144) whose group is the bit depth of that type is loaded and added to the window manager's
+// cursor manager under its instance.
+void cSC4App::SetupCursors() {
+    auto* properties = dynamic_cast<sc4::cSC4RenderProperties*>(SL::spRenderProperties);
+    cIGZCmdLine* commandLine = framework_ ? framework_->CommandLine() : nullptr;
+    bool custom = true;
+    cRZString value;
+    if (commandLine && commandLine->IsSwitchPresent(cRZString("CustomCursors"), value, true)) {
+        value.MakeLower();
+        const std::string v(value.ToChar());
+        if (v == "off" || v == "disabled") custom = false;
+    }
+    if (commandLine && properties && commandLine->IsSwitchPresent(cRZString("cursors"), value, true)) {
+        value.MakeLower();
+        const std::string v(value.ToChar());
+        int type = -1;
+        if (v == "off" || v == "disabled") type = 0;
+        else if (v == "bw") type = 1;
+        else if (v == "color16") type = 2;
+        else if (v == "color" || v == "color256") type = 3;
+        else if (v == "fullColor") type = 4;
+        if (type >= 0) properties->SetIntValue(kRenderPropertyCursorType, type);
+    }
+    if (!properties) return;
+    const int type = properties->IntValue(kRenderPropertyCursorType);
+    std::uint32_t depth = 0;
+    switch (type) {
+        case 0: depth = 0; break;
+        case 1: depth = 1; break;
+        case 2: depth = 4; break;
+        case 3: depth = 8; break;
+        case 4: depth = 0x20; break;
+        default: depth = static_cast<std::uint32_t>(type) + 0x4a708efbu; break;
+    }
+    cIGZWinMgr* windows = RZ::WM();
+    cIGZCursorManager* cursors = windows ? windows->GetCursorManager() : nullptr;
+    if (!SL::spRM || !cursors) return;
+    cIGZPersistResourceKeyList* keys = nullptr;
+    const std::uint32_t count = SL::spRM->GetAvailableResourceListForType(&keys, 0xaa5c3144);
+    for (std::uint32_t i = 0; keys && i < count; ++i) {
+        const cGZPersistResourceKey key = *keys->GetKey(i);
+        if (!custom) {
+            // the system's own pointers for these: arrow, wait, text and the sizing shapes
+            const std::uint32_t id = key.instance;
+            if (id == 0x43401c71 || id == 1 || id == 3 || (id >= 0xf && id <= 0x12) || id == 0x88024b02 ||
+                id == 0x68024b0e || id == 0xc8024b17 || id == 0xe8024b13)
+                continue;
+        }
+        if (key.group != depth) continue;
+        if (cIGZCursor* cursor = sc4::LoadSLCursor(key)) {
+            cursors->AddCursor(cursor, key.instance);
+            cursor->Release();
+        }
+    }
+    if (keys) keys->Release();
 }
 
 void cSC4App::ApplyControlColors(gz::cIGZWinCtrlMgr* controls) {
