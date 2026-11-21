@@ -12,5 +12,8 @@ namespace native {
 void InstallNetworkTool(sc4::cSC4View3DWin& view, cISC4City* city);
 // cSC4View3DWin's catalog branch: new cSC4ViewInputControlNetworkTool(type), one reference.
 sc4::cSC4ViewInputControl* CreateNetworkTool(int type);
+// Kit verb `terrainheights X0 Z0 X1 Z1` (read-only): the terrain altitude of every vertex in the inclusive rectangle, one
+// line per vertex row.
+void NativeTerrainHeightsReport(int x0, int z0, int x1, int z1);
 
 }  // namespace native

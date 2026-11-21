@@ -1,6 +1,7 @@
 // cSC4NetworkTool — unit test for the recovered slice (state, accessors, init/shutdown, failure strings, bridge
 // queries, network-type flag helpers, padded rect, the terrain highlight of the valid drag and the
 // straight/diagonal splitter). The engine globals the original touches are replaced by INetworkToolHost.
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -54,6 +55,9 @@ struct NetworkToolTestAccess {
         t.SolveMultiTypeIntersections(cells, solved, type);
     }
     static std::vector<tSolvedCell>& SolvedCellList(cSC4NetworkTool& t) { return t.solvedCellList_; }
+    static void ComputeSmoothingSet(cSC4NetworkTool& t, int pad) { t.ComputeInitialSmoothingSet(pad); }
+    static const std::unordered_set<std::uint32_t>& SmoothingSet(const cSC4NetworkTool& t) { return t.unknown128_; }
+    static const std::unordered_set<std::uint32_t>& FixedVertices(const cSC4NetworkTool& t) { return t.unknown150_; }
 };
 }  // namespace sc4
 
@@ -184,6 +188,7 @@ struct FakeHost : INetworkToolHost {
         return terrainAllows;
     }
     int CityWidth() override { return width; }
+    std::int32_t TerrainVertexIndex(std::int32_t x, std::int32_t z) override { return z * 1000 + x; }
     int CityHeight() override { return height; }
     cIGZUnknown* AcquireOccupantManager() override {
         if (occupants == nullptr) occupants = new FakeCounted();
@@ -1105,6 +1110,51 @@ int main() {
             (void)b;
             SetNetworkToolHost(nullptr);
         }
+    }
+
+    // ---- the height solve: LoadNetworkSlopeLimits and ComputeInitialSmoothingSet (i386 0x00152598 / 0x00142c92) ------
+    {
+        cSC4NetworkPlacementParams params{};
+        const float slopeAngle = std::atan(0.5f), smoothAngle = std::atan(0.25f), otherAngle = std::atan(1.0f);
+        std::memcpy(&params.unknown00[0], &slopeAngle, 4);
+        std::memcpy(&params.unknown00[1], &otherAngle, 4);
+        std::memcpy(&params.unknown00[2], &smoothAngle, 4);
+        cSC4NetworkSlopeLimits limits;
+        CHECK(limits.maxSlope == 10.0f && limits.unknown110 == 20.0f);   // the record's constructor defaults
+        LoadNetworkSlopeLimits(params, limits);
+        CHECK(std::fabs(limits.maxSlope - 8.0f) < 1e-4f);                // tan * 16
+        CHECK(std::fabs(limits.maxSlopeDiagonal - 8.0f * 0.70710677f) < 1e-4f);
+        CHECK(std::fabs(limits.maxSmoothness - 4.0f) < 1e-4f);
+        CHECK(std::fabs(limits.maxSmoothnessDiagonal - 4.0f * 0.70710677f) < 1e-4f);
+        CHECK(std::fabs(limits.unknown110 - 16.0f) < 1e-4f);
+    }
+    {
+        Fixture f(0);
+        f.host.typeInfo.penX = 1;
+        f.host.typeInfo.penZ = 1;
+        f.Init();
+        using A = NetworkToolTestAccess;
+        SC4PointU start{5, 5}, end{9, 5};
+        CHECK(f.tool->DrawNetworkLine(start, end, true, 0));
+        f.tool->SetValidStepCount(A::TotalSteps(*f.tool));
+        // The straight branch: one solved piece per step. Only cells with a record join the set, a short step does not.
+        A::SolvedCellList(*f.tool).resize(static_cast<std::size_t>(A::TotalSteps(*f.tool)));
+        for (std::uint32_t x = 5; x <= 9; ++x) f.host.worldCache->CreateCell(x | (5u << 16))->shortStep = (x == 7);
+        f.host.worldCache->CreateCell(10u | (6u << 16));   // inside the padded rectangle
+        f.host.worldCache->CreateCell(13u | (6u << 16));   // outside it
+        A::ComputeSmoothingSet(*f.tool, 1);
+        const auto& set = A::SmoothingSet(*f.tool);
+        CHECK(set.size() == 5);
+        CHECK(set.count(7u | (5u << 16)) == 0 && set.count(10u | (6u << 16)) == 1 && set.count(13u | (6u << 16)) == 0);
+        // The outline of the vertex rectangle x 4..11, z 4..7 (the drag's cells grown by 1, plus one vertex).
+        const auto& fixed = A::FixedVertices(*f.tool);
+        CHECK(fixed.size() == 20);
+        CHECK(fixed.count(4 + 4 * 1000) && fixed.count(11 + 7 * 1000) && fixed.count(4 + 6 * 1000) && fixed.count(11 + 5 * 1000));
+        CHECK(!fixed.count(5 + 5 * 1000) && !fixed.count(10 + 6 * 1000));
+        // Pad 0: the drag's own vertex rows are the outline, so every corner of the drag is fixed.
+        A::ComputeSmoothingSet(*f.tool, 0);
+        CHECK(A::FixedVertices(*f.tool).size() == 12 && A::FixedVertices(*f.tool).count(7 + 5 * 1000));
+        SetNetworkToolHost(nullptr);
     }
 
     // ---- Unregister the host and finish ---------------------------------------------------------------------

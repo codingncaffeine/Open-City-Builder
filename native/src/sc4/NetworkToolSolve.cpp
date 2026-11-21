@@ -12,6 +12,7 @@
 #include "sc4/NetworkTool.h"
 
 #include <cfloat>
+#include <cmath>
 #include <cstdio>
 #include <algorithm>
 #include <cctype>
@@ -27,6 +28,8 @@
 #include "sc4/NetworkWorldCache.h"
 #include "sc4/NetworkPreview.h"
 #include "sc4/TileRules.h"
+#include "sc4/TileNeighborhood.h"
+#include "sc4/GeometryUtilities.h"
 
 namespace sc4 {
 
@@ -1120,14 +1123,651 @@ void cSC4NetworkTool::DestroyHilightedOccupants() {
     }
     ClearOccupantHighlights();
 }
-void cSC4NetworkTool::UpdateTerrainHeights(std::vector<std::uint32_t>&) {}  // i386 vslot 0xec: NOT PORTED YET
+// ============================================================================================================
+// the height solve: SmoothenNetwork, CanTilesBeSupportedOnTerrain, UpdateTerrainHeights
+// ============================================================================================================
+//
+// The first constraint satisfier (+0x228, i386 +0x124) settles the network's own vertex heights: every cell of the
+// smoothing set (the drag and the network cells around it, ComputeInitialSmoothingSet) gets its corner windows
+// (InsertRangeConstraintsForCell, after ApplyPlaneConstraintToRegularCells pulled the regular steps toward the plane
+// between the drag's ends) and the slope / smoothness / equality constraints of its piece; the boundary vertices
+// around the set (+0x150, i386 +0xb8) stay fixed. The second satisfier (+0x328, i386 +0x19c) then finds terrain
+// heights that carry those network heights (CanTilesBeSupportedOnTerrain), and placing writes them into the terrain
+// (UpdateTerrainHeights). The cell records keep i386 offsets in the comments (64-bit = i386 + 8 after +0x0c).
 
-// i386 vslot 0xe8. NOT PORTED YET: the support check of the solved heights; every solve is accepted.
-bool cSC4NetworkTool::CanTilesBeSupportedOnTerrain(std::uint32_t) { return true; }
+namespace {
+// ComputeReferencePlaneForVertexMovement::kVert1Offset / kVert2Offset (i386 0x008453a0 / 0x00845360): per drag
+// direction, the two vertices (x, z offsets from the cell) of the edge the drag leaves a cell by.
+constexpr std::int32_t kVert1Offset[8][2] = {{1, 1}, {0, 1}, {0, 1}, {0, 0}, {0, 0}, {1, 0}, {1, 0}, {1, 1}};
+constexpr std::int32_t kVert2Offset[8][2] = {{1, 0}, {1, 0}, {1, 1}, {1, 1}, {0, 1}, {0, 1}, {0, 0}, {0, 0}};
+// ApplyPlaneConstraintToRegularCells::kXOffsetForVert / kZOffsetForVert (i386 0x00845414 / 0x00845404): the cell
+// corners in vertex-id order (x, z), (x, z+1), (x+1, z+1), (x+1, z).
+constexpr std::int32_t kXOffsetForVert[4] = {0, 0, 1, 1};
+constexpr std::int32_t kZOffsetForVert[4] = {0, 1, 1, 0};
+// GetElevationForReferencePlaneVertex::kXIncrToNeighbor / kZIncrToNeighbor (i386 0x00845340 / 0x00845330): the four
+// cells around a vertex.
+constexpr std::int32_t kXIncrToNeighbor[4] = {0, 0, -1, -1};
+constexpr std::int32_t kZIncrToNeighbor[4] = {0, -1, -1, 0};
+// InsertRangeConstraintsForCell::kEdgesToFixVertex (i386 0x00845400): the sides (bit = side) whose connection pins a
+// lot-connection cell's corner to the terrain.
+constexpr std::uint8_t kRangeEdgesToFixVertex[4] = {0x03, 0x09, 0x0c, 0x06};
+// The offset the vertex ids of a lot-connection cell (network flag 0x200000, the record's +0x5e / i386 +0x56) carry,
+// so their corners solve apart from the terrain vertices they sit on.
+constexpr std::int32_t kLotConnectionVertexOffset = 100000;
+// tHtRange's kErrorTolerance (i386 0x008344f0), which ApplyPlaneConstraintToRegularCells reads through a pointer.
+constexpr float kErrorTolerance = 0.01f;
+// cSC4TrafficAutomaton::kfMinTravelDistance (i386 0x00a70798): the smallest terrain change UpdateTerrainHeights writes.
+constexpr float kMinTerrainChange = 0.001f;
+// kDefaultMaxDensity (i386 0x00a70808): the headroom above the terrain's highest allowed height SmoothenNetwork gives
+// the first satisfier.
+constexpr float kSmoothingHeadroom = 20.0f;
 
-// i386 SmoothenNetwork. NOT PORTED YET: the vertex height solve (ComputeInitialSmoothingSet + the constraint inserters +
-// cSC4VertexHtConstraintSatisfier); the cells keep their terrain heights.
-bool cSC4NetworkTool::SmoothenNetwork(int) { return true; }
+float AsFloat(std::uint32_t word) {
+    float value = 0.0f;
+    std::memcpy(&value, &word, sizeof value);
+    return value;
+}
+// The sides of a packed neighbourhood with any of bits 0-2 set, one bit per side.
+std::uint32_t ConnectedSideMask(std::uint32_t edges) {
+    return (((edges & 0x07070707u) + 0x07070707u) & 0x08080808u) * 0x01020408u >> 27;
+}
+bool VertexOfCell(const cSC4NetworkCellInfo& cell, std::int32_t vertex) {
+    for (std::int32_t id : cell.vertexBaseHeights)
+        if (id == vertex) return true;
+    return false;
+}
+// A cross section of a cell the neighbour is not smoothed with keeps only the vertices it shares with the cell.
+void KeepSharedVertices(const cSC4NetworkCellInfo& cell, std::int32_t& a, std::int32_t& b) {
+    const bool hasA = VertexOfCell(cell, a), hasB = VertexOfCell(cell, b);
+    if (hasA) {
+        if (!hasB) b = a;
+    } else if (hasB) {
+        a = b;
+    } else {
+        a = b = -1;
+    }
+}
+}  // namespace
+
+// i386 0x0067b176
+bool cSC4NetworkTool::IsCellBeingSmoothed(std::uint32_t x, std::uint32_t z) const {
+    return unknown128_.count(Key(x, z)) != 0;
+}
+
+// i386 0x00142c92. The smoothing set (+0x128) and its fixed boundary vertices (+0x150). A straight drag whose solve
+// produced one piece per step takes the drag's bounding rectangle grown by `pad`; anything else grows every solved
+// cell by `pad` row by row (the per-row spans are the static `scans`, in vertex coordinates) and fixes the outline.
+void cSC4NetworkTool::ComputeInitialSmoothingSet(int pad) {
+    unknown128_.clear();
+    unknown150_.clear();
+    INetworkToolHost* host = GetNetworkToolHost();
+    auto fixVertex = [&](std::int32_t x, std::int32_t z) {
+        unknown150_.insert(static_cast<std::uint32_t>(host ? host->TerrainVertexIndex(x, z) : -1));   // terrain vslot 0x24
+    };
+    auto addCell = [&](std::int32_t x, std::int32_t z) {
+        const std::uint32_t key = static_cast<std::uint32_t>(x) + static_cast<std::uint32_t>(z) * 0x10000u;
+        const cSC4NetworkCellInfo* cell = GetCellInfo(key);
+        if (cell && !cell->shortStep) unknown128_.insert(key);                                   // i386 +0x55
+    };
+    if (totalSteps_ == straightSteps_ && static_cast<int>(solvedCellList_.size()) == totalSteps_) {
+        std::int32_t minX = 10000, maxX = -1, minZ = 10000, maxZ = -1;
+        for (int s = 0; s < validSteps_; ++s) {
+            const tDraggedStep& step = steps_[static_cast<std::size_t>(s)];
+            for (std::uint32_t c = step.firstCell; c <= step.lastCell; ++c) {
+                const std::int32_t x = static_cast<std::int32_t>(cells_[c].x), z = static_cast<std::int32_t>(cells_[c].z);
+                minX = std::min(minX, x);
+                maxX = std::max(maxX, x);
+                minZ = std::min(minZ, z);
+                maxZ = std::max(maxZ, z);
+            }
+        }
+        maxX += pad + 1;
+        maxZ += pad + 1;
+        minX = std::max(minX - pad, 0);
+        minZ = std::max(minZ - pad, 0);
+        if (static_cast<std::uint32_t>(maxX) > static_cast<std::uint32_t>(cityWidth_)) maxX = widthPlusOne_ - 1;
+        if (static_cast<std::uint32_t>(maxZ) > static_cast<std::uint32_t>(cityHeight_)) maxZ = heightPlusOne_ - 1;
+        for (std::int32_t z = minZ; z <= maxZ; ++z) {
+            for (std::int32_t x = minX; x <= maxX; ++x) {
+                addCell(x, z);
+                const bool outline = x == minX || x == maxX || z == minZ || z == maxZ;
+                if (outline && x != 0 && x != widthPlusOne_ - 1 && z != 0 && z != heightPlusOne_ - 1) fixVertex(x, z);
+            }
+        }
+        return;
+    }
+    if (solvedCellList_.empty()) return;
+    // ComputeInitialSmoothingSet(long)::scans (i386 0x00bfb500): {first, last} vertex column per vertex row.
+    static std::vector<std::int16_t> scans;
+    scans.assign(static_cast<std::size_t>(std::max(heightPlusOne_, 0)) * 2, 0);
+    for (int row = 0; row < heightPlusOne_; ++row) {
+        scans[row * 2] = 10000;
+        scans[row * 2 + 1] = -1;
+    }
+    std::int32_t firstRow = 10000, lastRow = -1;
+    for (const tSolvedCell& solved : solvedCellList_) {
+        const cSC4NetworkCellInfo* cell = GetCellInfo(solved.cellKey);
+        if (!cell) continue;
+        std::uint32_t rowHi = cell->z + 1 + static_cast<std::uint32_t>(pad);
+        std::int32_t rowLo = static_cast<std::int32_t>(cell->z) - pad;
+        if (rowLo < 0) rowLo = 0;
+        if (static_cast<std::uint32_t>(heightPlusOne_) <= rowHi) rowHi = static_cast<std::uint32_t>(heightPlusOne_) - 1;
+        firstRow = std::min(firstRow, rowLo);
+        lastRow = std::max(lastRow, static_cast<std::int32_t>(rowHi));
+        std::uint32_t colHi = cell->x + 1 + static_cast<std::uint32_t>(pad);
+        std::int32_t colLo = static_cast<std::int32_t>(cell->x) - pad;
+        if (colLo < 0) colLo = 0;
+        if (static_cast<std::uint32_t>(widthPlusOne_) <= colHi) colHi = static_cast<std::uint32_t>(widthPlusOne_) - 1;
+        for (std::int32_t row = rowLo; row <= static_cast<std::int32_t>(rowHi); ++row) {
+            if (colLo < scans[row * 2]) scans[row * 2] = static_cast<std::int16_t>(colLo);
+            if (scans[row * 2 + 1] < static_cast<std::int32_t>(colHi)) scans[row * 2 + 1] = static_cast<std::int16_t>(colHi);
+        }
+    }
+    // The cells inside the spans (the last row and each span's last column are vertex bounds, not cells).
+    for (std::int32_t row = firstRow; row < lastRow; ++row)
+        for (std::int32_t x = scans[row * 2]; x < scans[row * 2 + 1]; ++x) addCell(x, row);
+    // The outline: the first and last rows whole, then each row's ends and the parts its neighbours do not cover.
+    auto fixRow = [&](std::int32_t row) {
+        for (std::int32_t x = scans[row * 2]; x <= scans[row * 2 + 1]; ++x)
+            if (x != 0 && x != widthPlusOne_ - 1) fixVertex(x, row);
+    };
+    if (firstRow != 0) fixRow(firstRow);
+    if (lastRow != heightPlusOne_ - 1) fixRow(lastRow);
+    for (std::int32_t row = firstRow + 1; row <= lastRow - 1; ++row) {
+        const std::int32_t lo = scans[row * 2], hi = scans[row * 2 + 1];
+        if (hi < 0) continue;
+        const std::int32_t neighbors[4] = {scans[(row - 1) * 2], scans[(row - 1) * 2 + 1], scans[(row + 1) * 2], scans[(row + 1) * 2 + 1]};
+        if (scans[(row - 1) * 2 + 1] < 0 || scans[(row + 1) * 2 + 1] < 0) {
+            for (std::uint32_t x = lo != 0 ? static_cast<std::uint32_t>(lo) : 1u;
+                 static_cast<std::int32_t>(x) <= hi && x < static_cast<std::uint32_t>(widthPlusOne_) - 1; ++x)
+                fixVertex(static_cast<std::int32_t>(x), row);
+            continue;
+        }
+        if (lo != 0) fixVertex(lo, row);
+        if (hi != widthPlusOne_ - 1) fixVertex(hi, row);
+        for (int k = 0; k < 4; ++k) {
+            const std::int32_t v = neighbors[k];
+            if (!(lo < v && v < hi)) continue;
+            if ((k & 1) == 0) {
+                for (std::int32_t x = lo + 1; x <= v; ++x) fixVertex(x, row);
+            } else {
+                for (std::int32_t x = v; x != hi; ++x) fixVertex(x, row);
+            }
+        }
+    }
+}
+
+// i386 0x0014363e (vslot 0x138). A free cell's corners get their windows (a fixed boundary vertex keeps its height),
+// a solved or immovable cell's corners are fixed, and a lot-connection cell fixes its offset corners plus the terrain
+// corners of the sides that connect outside the lot.
+void cSC4NetworkTool::InsertRangeConstraintsForCell(std::uint32_t cellKey) {
+    cSC4NetworkCellInfo* cell = GetCellInfo(cellKey);
+    INetworkConstraintSatisfier* satisfier = constraintA_;
+    if (!cell || !satisfier) return;
+    if (!cell->buildable) {                                                                       // i386 +0x56
+        if (!cell->solvedOrImmovable) {                                                           // i386 +0x53
+            for (int i = 0; i < 4; ++i) {
+                const std::int32_t vertex = cell->vertexBaseHeights[i];
+                if (unknown150_.count(static_cast<std::uint32_t>(vertex)) == 0) {
+                    satisfier->AddVertexToSolve(vertex, cell->vertexHeights[i]);
+                    satisfier->InsertRangeConstraint(vertex, cell->range70[i].low, cell->range70[i].high);
+                    satisfier->InsertPreferredRangeConstraint(vertex, cell->preferred90[i].low, cell->preferred90[i].high);
+                    if (cell->hasOccupant) satisfier->InsertPreferredValueConstraint(vertex, cell->vertexHeights[i]);   // i386 +0x51
+                } else {
+                    satisfier->InsertFixedVertex(vertex, cell->vertexHeights[i]);
+                }
+            }
+        } else {
+            for (int i = 0; i < 4; ++i) satisfier->InsertFixedVertex(cell->vertexBaseHeights[i], cell->vertexHeights[i]);
+        }
+        return;
+    }
+    INetworkToolHost* host = GetNetworkToolHost();
+    std::int32_t lot[4] = {0, 0, 0, 0};
+    if (!host || !host->LotBoundingRectAt(cell->x, cell->z, lot)) return;                         // spLotManager vslot 0x14
+    std::uint32_t edges = 0;
+    for (std::uint32_t compact : cell->tileNeighborhoods) edges |= compact;
+    for (int side = 0; side < 4; ++side) {
+        const std::int32_t nx = static_cast<std::int32_t>(cell->x) + kNextX[side];
+        const std::int32_t nz = static_cast<std::int32_t>(cell->z) + kNextZ[side];
+        if (lot[0] <= nx && lot[1] <= nz && nx <= lot[2] && nz <= lot[3]) edges &= ~(0xffu << (side * 8));
+    }
+    const std::uint32_t sides = ConnectedSideMask(edges);
+    for (int i = 0; i < 4; ++i) {
+        const std::int32_t vertex = cell->vertexBaseHeights[i];
+        satisfier->AddVertexToSolve(vertex + kLotConnectionVertexOffset, cell->vertexHeights[i]);
+        satisfier->InsertFixedVertex(vertex + kLotConnectionVertexOffset, cell->vertexHeights[i]);
+        if (sides & kRangeEdgesToFixVertex[i]) {
+            satisfier->AddVertexToSolve(vertex, cell->vertexHeights[i]);
+            satisfier->InsertFixedVertex(vertex, cell->vertexHeights[i]);
+        }
+    }
+}
+
+// i386 0x00142758. A drag end's height comes from the terrain; the vertex is "pinned" when a lot leaves it no
+// adjustment range or an existing network piece outside the smoothing set touches it.
+void cSC4NetworkTool::GetElevationForReferencePlaneVertex(std::int32_t vertex, float& height, bool& pinned) {
+    INetworkToolHost* host = GetNetworkToolHost();
+    const std::uint32_t z = static_cast<std::uint32_t>(vertex) / static_cast<std::uint32_t>(widthPlusOne_);
+    const std::uint32_t x = static_cast<std::uint32_t>(vertex) % static_cast<std::uint32_t>(widthPlusOne_);
+    pinned = false;
+    height = host ? host->TerrainVertexHeight(vertex) : 0.0f;                                     // terrain vslot 0x34
+    float minAltitude = 0.0f, maxAltitude = 0.0f;
+    if (host) host->LotVertexAltitudeAdjustmentRange(static_cast<std::int32_t>(x), static_cast<std::int32_t>(z), minAltitude, maxAltitude);
+    if (maxAltitude == 0.0f) {
+        pinned = true;
+        return;
+    }
+    for (int k = 0; k < 4; ++k) {
+        const std::uint32_t nx = x + static_cast<std::uint32_t>(kXIncrToNeighbor[k]);
+        const std::uint32_t nz = z + static_cast<std::uint32_t>(kZIncrToNeighbor[k]);
+        if (nx >= static_cast<std::uint32_t>(cityWidth_) || nz >= static_cast<std::uint32_t>(cityHeight_)) continue;
+        if (unknown128_.count(nx + nz * 0x10000u)) continue;
+        if (cSC4NetworkOccupant* occupant = GetNetworkOccupant(nx, nz)) {   // occupant manager vslot 0x84 + the type mask
+            occupant->Release();
+            pinned = true;
+            break;
+        }
+    }
+}
+
+// i386 0x00142956. The plane through the edge the first step leaves its cell by and the edge the last step enters
+// its cell by, at the given heights (a height <= 0 is taken from the drag end: a pinned vertex wins, else the mean).
+void cSC4NetworkTool::ComputeReferencePlaneForVertexMovement(float* plane, int firstStep, int lastStep, float startHeight,
+                                                             float endHeight) {
+    const SC4PointU& start = cells_[steps_[static_cast<std::size_t>(firstStep)].firstCell];
+    const SC4PointU& end = cells_[steps_[static_cast<std::size_t>(lastStep)].firstCell];
+    const int direction = straightSteps_ < 1 ? directionB_ : directionA_;
+    const int opposite = (direction + 4) % 8;
+    const std::int32_t s1x = static_cast<std::int32_t>(start.x) + kVert1Offset[direction][0];
+    const std::int32_t s1z = static_cast<std::int32_t>(start.z) + kVert1Offset[direction][1];
+    const std::int32_t s2x = static_cast<std::int32_t>(start.x) + kVert2Offset[direction][0];
+    const std::int32_t s2z = static_cast<std::int32_t>(start.z) + kVert2Offset[direction][1];
+    const std::int32_t e1x = static_cast<std::int32_t>(end.x) + kVert1Offset[opposite][0];
+    const std::int32_t e1z = static_cast<std::int32_t>(end.z) + kVert1Offset[opposite][1];
+    const std::int32_t e2x = static_cast<std::int32_t>(end.x) + kVert2Offset[opposite][0];
+    const std::int32_t e2z = static_cast<std::int32_t>(end.z) + kVert2Offset[opposite][1];
+    auto endHeightAt = [&](std::int32_t ax, std::int32_t az, std::int32_t bx, std::int32_t bz) {
+        float a = 0.0f, b = 0.0f;
+        bool pinned = false;
+        GetElevationForReferencePlaneVertex(widthPlusOne_ * az + ax, a, pinned);
+        if (pinned) return a;
+        GetElevationForReferencePlaneVertex(bz * widthPlusOne_ + bx, b, pinned);
+        return pinned ? b : (a + b) * 0.5f;
+    };
+    if (startHeight <= 0.0f) startHeight = endHeightAt(s1x, s1z, s2x, s2z);
+    if (endHeight <= 0.0f) endHeight = endHeightAt(e1x, e1z, e2x, e2z);
+    if (firstStep == lastStep && straightSteps_ <= firstStep) {
+        plane[0] = 0.0f;
+        plane[1] = 1.0f;
+        plane[2] = 0.0f;
+        plane[3] = -startHeight;
+        return;
+    }
+    const float cs = cellSize_;
+    const float p0[3] = {static_cast<float>(s1x) * cs, startHeight, static_cast<float>(s1z) * cs};
+    const float p1[3] = {static_cast<float>(s2x) * cs, startHeight, static_cast<float>(s2z) * cs};
+    const float p2[3] = {static_cast<float>(e1x) * cs, endHeight, static_cast<float>(e1z) * cs};
+    SC4GeometryUtilities::TriangleToPlaneEquation(p0, p1, p2, plane);
+}
+
+// i386 0x00143c30 (vslot 0x13c). Every regular step's corners move toward the plane between the immovable portions
+// (bridges, tunnels) around it, or between the drag's ends: the window narrows to the plane height +- params +0x20
+// (widened to keep the corner's current height) and the preferred range spans the plane height and the current one.
+void cSC4NetworkTool::ApplyPlaneConstraintToRegularCells(std::vector<tImmovablePortion>& portions) {
+    int planeEnd = -1;
+    bool havePlane = false;
+    float plane[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    float scale = 0.0f;
+    const float deviation = AsFloat(placement_.unknown20);                                       // i386 +0x2f0
+    for (int s = 0; s < validSteps_; ++s) {
+        const tDraggedStep& step = steps_[static_cast<std::size_t>(s)];
+        if (step.direction != 0) continue;
+        if (planeEnd < s || !havePlane) {
+            int first = -1;
+            float startHeight = 0.0f, endHeight = 0.0f;
+            planeEnd = 0x7fffffff;
+            for (const tImmovablePortion& portion : portions) {
+                if (portion.step < s && first < portion.step) {
+                    startHeight = portion.valueB;
+                    first = portion.step;
+                }
+                if (s < portion.x && portion.x < planeEnd) {
+                    endHeight = portion.valueA;
+                    planeEnd = portion.x;
+                }
+            }
+            if (first == -1) {
+                startHeight = 0.0f;
+                first = s;
+            }
+            if (planeEnd == 0x7fffffff) {
+                planeEnd = validSteps_ - 1;
+                endHeight = 0.0f;
+            }
+            ComputeReferencePlaneForVertexMovement(plane, first, planeEnd, startHeight, endHeight);
+            if (plane[1] == 0.0f) return;
+            scale = -1.0f / plane[1];
+            havePlane = true;
+        }
+        for (std::uint32_t c = step.firstCell; c <= step.lastCell; ++c) {
+            cSC4NetworkCellInfo* cell = GetCellInfo(Key(cells_[c].x, cells_[c].z));
+            if (!cell) continue;
+            for (int i = 0; i < 4; ++i) {
+                const float h = (cellSize_ * static_cast<float>(cell->z + kZOffsetForVert[i]) * plane[2] +
+                                 static_cast<float>(cell->x + kXOffsetForVert[i]) * cellSize_ * plane[0] + plane[3]) * scale;
+                float lo = h - deviation, hi = h + deviation;
+                const float current = cell->vertexHeights[i];
+                if (lo <= current) {
+                    if (hi < current) hi = current;
+                } else {
+                    lo = current;
+                }
+                tVertexHeightRange& range = cell->range70[i];
+                if (range.low < lo) range.low = lo;
+                if (hi < range.high) range.high = hi;
+                if (range.high < range.low && range.low - range.high <= kErrorTolerance) range.high = range.low;
+                if (h <= current) cell->preferred90[i] = {h, current};
+                else cell->preferred90[i] = {current, h};
+            }
+        }
+    }
+}
+
+// i386 0x0067af84
+void cSC4NetworkTool::InsertSmoothnessConstraint(int vertexA, int vertexB, int vertexC, float limit) {
+    if (vertexA < 0 || vertexB < 0 || vertexC < 0 || vertexA == vertexB || vertexB == vertexC || vertexA == vertexC) return;
+    if (constraintA_) constraintA_->InsertSmoothnessConstraint(vertexA, vertexB, vertexC, limit);
+}
+
+// i386 0x00143918. For the edge of `side` (when the network of `networkType` crosses it): the cross section of the
+// cell at that edge (`here`), of the neighbour across it (`after`) and of the cell the piece continues to on the other
+// side (`before`). `diagonal` is set for a diagonal edge. A cross section of a cell outside the smoothing set keeps
+// only the vertices it shares with this cell.
+bool cSC4NetworkTool::GetCrossSections(const cSC4NetworkCellInfo& cell, std::uint32_t networkType, int side, tCrossSection& here,
+                                       tCrossSection& before, tCrossSection& after, bool& diagonal) {
+    const std::uint32_t edge = cell.tileNeighborhoods[networkType] >> (side * 8);
+    const std::uint32_t condition = edge & 3;
+    if (condition == 0) return false;
+    const std::uint32_t turn = condition + 6 + static_cast<std::uint32_t>(side) * 2;
+    const std::uint32_t corner = turn & 3;
+    diagonal = (turn & 1) != 0;
+    // Init's table at +0x4bc (i386 +0x290 / +0x2b0): the two corner offsets of each cross section direction.
+    const std::int32_t offsetA = initScratch_[corner], offsetB = initScratch_[8 + corner];
+    const std::int32_t own = cell.buildable ? kLotConnectionVertexOffset : 0;
+    const std::int32_t base = static_cast<std::int32_t>(cell.z) * widthPlusOne_ + static_cast<std::int32_t>(cell.x);
+    here.a = base + offsetA + own;
+    here.b = own + base + offsetB;
+    const std::uint32_t nx = cell.x + static_cast<std::uint32_t>(kNextX[side]);
+    const std::uint32_t nz = cell.z + static_cast<std::uint32_t>(kNextZ[side]);
+    const std::int32_t next = static_cast<std::int32_t>(nz) * widthPlusOne_ + static_cast<std::int32_t>(nx);
+    after.a = next + offsetA;
+    after.b = next + offsetB;
+    if (nx < static_cast<std::uint32_t>(cityWidth_) && nz < static_cast<std::uint32_t>(cityHeight_)) {
+        const cSC4NetworkCellInfo* neighbor = GetCellInfo(nx, nz);
+        if (neighbor && neighbor->buildable) {
+            after.a += kLotConnectionVertexOffset;
+            after.b += kLotConnectionVertexOffset;
+        }
+    }
+    if (!IsCellBeingSmoothed(nx, nz)) KeepSharedVertices(cell, after.a, after.b);
+    int otherSide = side;
+    if (condition == 2) otherSide = side + 2;
+    else if (condition == 3) otherSide = side + 3;
+    else if (condition == 1) otherSide = side + 1;
+    otherSide &= 3;
+    const std::uint32_t ox = cell.x + static_cast<std::uint32_t>(kNextX[otherSide]);
+    const std::uint32_t oz = cell.z + static_cast<std::uint32_t>(kNextZ[otherSide]);
+    const std::int32_t other = static_cast<std::int32_t>(oz) * widthPlusOne_ + static_cast<std::int32_t>(ox);
+    before.a = offsetA + other;
+    before.b = other + offsetB;
+    const bool connected = cSC4TileNeighborhoodCompact(cell.tileNeighborhoods[networkType]).GetEdgeCondition(otherSide) != 0;
+    if (!connected || ox >= static_cast<std::uint32_t>(cityWidth_) || oz >= static_cast<std::uint32_t>(cityHeight_) || !IsCellBeingSmoothed(ox, oz)) {
+        before.a += own;
+        before.b += own;
+        KeepSharedVertices(cell, before.a, before.b);
+    } else {
+        const cSC4NetworkCellInfo* neighbor = GetCellInfo(ox, oz);
+        if (neighbor && neighbor->buildable) {
+            before.a += kLotConnectionVertexOffset;
+            before.b += kLotConnectionVertexOffset;
+        }
+    }
+    return true;
+}
+
+// i386 0x001440c2. A piece with three or four sides (other than a straight crossing of one type), or a two-sided piece
+// of a type with special pieces (+0xf0) whose edges carry a special bit, gets one height for all four corners. The
+// others get, per crossed edge, level cross sections, the slope limit between consecutive sections and the smoothness
+// limit over three of them.
+void cSC4NetworkTool::InsertSlopeAndSmoothnessConstraintsForCell(std::uint32_t cellKey) {
+    const cSC4NetworkCellInfo* cell = GetCellInfo(cellKey);
+    if (!cell || cell->unknown5a || cell->solvedOrImmovable || !constraintA_) return;            // i386 +0x52 / +0x53
+    INetworkConstraintSatisfier* satisfier = constraintA_;
+    const std::int32_t own = cell->buildable ? kLotConnectionVertexOffset : 0;
+    const std::uint32_t flags = cell->networkFlags;
+    const int type = GetFirstNetworkTypeFromFlags(flags);
+    INetworkToolHost* host = GetNetworkToolHost();
+    const INetworkTypeInfo* info = host ? host->NetworkTypeInfo(static_cast<std::uint32_t>(type)) : nullptr;
+    static const cSC4NetworkSlopeLimits kDefaultLimits;
+    const cSC4NetworkSlopeLimits& limits = info ? info->SlopeLimits() : kDefaultLimits;
+    const std::uint32_t compact = cell->compact54;                                               // i386 +0x4c
+    const int sides = ((compact & 0x3u) != 0) + ((compact & 0x300u) != 0) + ((compact & 0x3000000u) != 0) + ((compact & 0x30000u) != 0);
+    const bool simple = static_cast<unsigned>(sides - 1) < 2u ||
+                        ((flags & (flags - 1)) == 0 && (compact == 0x3010301u || compact == 0x1030103u));
+    const bool specialPieces = info && !info->PlacementParams().listD0.empty();                  // +0xf0
+    if ((specialPieces && (compact & 0xf8f8f8f8u) != 0 && sides == 2) || !simple) {
+        for (int i = 0; i < 3; ++i) {
+            const std::int32_t a = own + cell->vertexBaseHeights[i], b = own + cell->vertexBaseHeights[i + 1];
+            if (b != a && a >= 0 && b >= 0) satisfier->InsertEqualityConstraint(static_cast<std::uint32_t>(a), static_cast<std::uint32_t>(b));
+        }
+        return;
+    }
+    for (int side = 0; side < 4; ++side) {
+        tCrossSection here, before, after;
+        bool diagonal = false;
+        if (!GetCrossSections(*cell, static_cast<std::uint32_t>(type), side, here, before, after, diagonal)) continue;
+        const float slope = diagonal ? limits.maxSlopeDiagonal : limits.maxSlope;
+        const float smoothness = diagonal ? limits.maxSmoothnessDiagonal : limits.maxSmoothness;
+        auto level = [&](const tCrossSection& section) {
+            if (section.b != section.a && section.a >= 0 && section.b >= 0)
+                satisfier->InsertEqualityConstraint(static_cast<std::uint32_t>(section.a), static_cast<std::uint32_t>(section.b));
+        };
+        level(here);
+        level(before);
+        level(after);
+        if (before.a >= 0 && here.a >= 0 && here.a != before.a) satisfier->InsertSlopeConstraint(before.a, here.a, slope);
+        if (here.a >= 0 && after.a >= 0 && after.a != here.a) satisfier->InsertSlopeConstraint(here.a, after.a, slope);
+        InsertSmoothnessConstraint(before.a, here.a, after.a, smoothness);
+    }
+}
+
+// i386 0x001443f6: the windows, then the slope / smoothness constraints, then the derived tool's own constraints.
+void cSC4NetworkTool::InsertConstraintsForCellsToBeSmoothed(const std::unordered_set<std::uint32_t>& cells) {
+    for (std::uint32_t key : cells) InsertRangeConstraintsForCell(key);                          // vslot 0x138
+    for (std::uint32_t key : cells) InsertSlopeAndSmoothnessConstraintsForCell(key);
+    for (std::uint32_t key : cells) InsertNetworkSpecificConstraintsForCell(key);                // vslot 0x140
+}
+
+// i386 0x001444ae. NOT PORTED (no input yet): InsertIntersectionCellsIntoSolvedSet / InsertIntersectionConstraints walk
+// the highway intersections (+0x178) through their cIntRule, and Copy{Bridge,Tunnel}ElevationConstraintsIntoCellInfo
+// turn the bridges (+0x190) and tunnels (+0x1a8) into immovable portions; none of the three is identified by
+// PlaceNetwork yet, so the lists are empty and those passes add nothing.
+bool cSC4NetworkTool::SmoothenNetwork(int pad) {
+    if (!constraintA_) return true;
+    const std::size_t solvedCount = solvedCellList_.size();
+    PropagateSolvedCellsForSmoothing();                                                          // vslot 0x134
+    ComputeInitialSmoothingSet(pad);
+    solvedCellList_.resize(solvedCount);
+    std::vector<tImmovablePortion> portions;
+    ApplyPlaneConstraintToRegularCells(portions);                                                // vslot 0x13c
+    INetworkToolHost* host = GetNetworkToolHost();
+    constraintA_->Shutdown();
+    constraintA_->Init(0.0f, (host ? host->TerrainMaxAllowedHeight() : 0.0f) + kSmoothingHeadroom);   // terrain vslot 0x60
+    InsertConstraintsForCellsToBeSmoothed(unknown128_);
+    return constraintA_->Solve();
+}
+
+// i386 0x001454d0 (vslot 0xe8). The terrain under every smoothed cell must carry the network: a free corner's terrain
+// may rise at most params +0x0c above the terrain and sink to params +0x10 below it but not above the road (a piece
+// with a support structure may also hang params +0x3c above it); otherwise it is pulled to the road height. The
+// boundary vertices and the corners of placed immovable pieces keep their terrain height.
+bool cSC4NetworkTool::CanTilesBeSupportedOnTerrain(std::uint32_t networkType) {
+    INetworkConstraintSatisfier* support = constraintB_;
+    if (!support) return true;
+    INetworkToolHost* host = GetNetworkToolHost();
+    support->Shutdown();
+    support->Init(-3.4028235e38f, 3.4028235e38f);
+    const INetworkTypeInfo* info = host ? host->NetworkTypeInfo(networkType) : nullptr;
+    const cSC4NetworkPlacementParams* params = info ? &info->PlacementParams() : nullptr;
+    const float maxRise = params ? AsFloat(params->unknown00[3]) : 0.0f;                         // record +0x5c
+    const float maxCut = params ? params->float10[0] : 0.0f;                                     // record +0x60
+    const float maxSupportDrop = params ? params->float40[2] : 0.0f;                             // record +0x8c
+    for (std::uint32_t key : unknown128_) {
+        const cSC4NetworkCellInfo* cell = GetCellInfo(key);
+        if (!cell || cell->buildable) continue;                                                  // i386 +0x56
+        for (int i = 0; i < 4; ++i) {
+            const std::int32_t vertex = cell->vertexBaseHeights[i];
+            float network = 0.0f;
+            if (!constraintA_ || !constraintA_->GetHeight(vertex, network)) network = cell->vertexHeights[i];
+            const float terrain = host ? host->TerrainVertexHeight(vertex) : 0.0f;
+            if (!support->IsInToSolveSet(vertex)) support->AddVertexToSolve(vertex, terrain);
+            float fixed = terrain;
+            if (unknown150_.count(static_cast<std::uint32_t>(vertex)) == 0 && (!cell->solvedOrImmovable || !cell->hasOccupant)) {
+                float low = terrain - maxCut;
+                float high = network;
+                if (terrain + maxRise <= network) high = terrain + maxRise;
+                std::uint32_t piece = 0;
+                bool hasPiece = false;
+                if (cell->solvedCellIndex < 0) {
+                    if (cell->occupant) {
+                        piece = cell->occupant->PieceId();                                       // vslot 0x5c
+                        hasPiece = true;
+                    }
+                } else {
+                    piece = solvedCellList_[static_cast<std::size_t>(cell->solvedCellIndex)].pieceType;
+                    hasPiece = true;
+                }
+                if (hasPiece && GetSupportStructureInfo(piece)) {
+                    const float hanging = network - maxSupportDrop;
+                    if (low < hanging) low = hanging;
+                    if (high < low) return false;
+                } else if (!cell->solvedOrImmovable) {
+                    if (high < network) return false;
+                    low = network;
+                    high = network;
+                }
+                if (!(high == low)) {
+                    support->InsertRangeConstraint(vertex, low, high);
+                    support->InsertPreferredValueConstraint(vertex, cell->solvedOrImmovable ? terrain : network);
+                    continue;
+                }
+                fixed = high;
+            }
+            support->InsertFixedVertex(vertex, fixed);
+        }
+    }
+    // InsertIntersectionConstraints(support): the highway intersections are not identified yet (see SmoothenNetwork).
+    for (std::uint32_t vertex : unknown150_) {
+        const std::int32_t id = static_cast<std::int32_t>(vertex);
+        if (support->IsInToSolveSet(id)) continue;
+        const float terrain = host ? host->TerrainVertexHeight(id) : 0.0f;
+        support->AddVertexToSolve(id, terrain);
+        support->InsertFixedVertex(id, terrain);
+    }
+    return support->Solve();
+}
+
+// i386 0x00145306 (vslot 0xec). Every terrain vertex the support solve moved by more than 0.001 is written and listed;
+// the touched rectangle (grown by one vertex) is redisplayed inside a long terrain operation. The row of a vertex is
+// its id divided by the vertex row count (+0x4b8), not the row length, as the original computes it.
+void cSC4NetworkTool::UpdateTerrainHeights(std::vector<std::uint32_t>& vertices) {
+    vertices.clear();
+    INetworkConstraintSatisfier* support = constraintB_;
+    INetworkToolHost* host = GetNetworkToolHost();
+    if (!support || !host) return;
+    std::int32_t minX = widthPlusOne_, minZ = heightPlusOne_, maxX = -1, maxZ = -1;
+    support->RewindSolvedVertexList();
+    int vertex = 0;
+    float height = 0.0f;
+    while (support->GetNextSolvedVertexAndItsHeight(vertex, height)) {
+        if (!(std::fabs(height - host->TerrainVertexHeight(vertex)) > kMinTerrainChange)) continue;
+        host->SetTerrainVertexHeight(vertex, height);                                            // terrain vslot 0xc4
+        vertices.push_back(static_cast<std::uint32_t>(vertex));
+        const std::int32_t x = static_cast<std::int32_t>(static_cast<std::uint32_t>(vertex) % static_cast<std::uint32_t>(widthPlusOne_));
+        const std::int32_t z = static_cast<std::int32_t>(static_cast<std::uint32_t>(vertex) / static_cast<std::uint32_t>(heightPlusOne_));
+        minX = std::min(minX, x);
+        maxX = std::max(maxX, x);
+        minZ = std::min(minZ, z);
+        maxZ = std::max(maxZ, z);
+    }
+    if (minZ != 0) --minZ;
+    if (minX != 0) --minX;
+    if (maxX < host->CityWidth()) ++maxX;                                                        // spCity vslot 0x174
+    if (maxZ < host->CityHeight()) ++maxZ;                                                       // spCity vslot 0x178
+    if (minX <= maxX && minZ <= maxZ) {
+        host->BeginLongTerrainOperation();                                                       // terrain vslot 0x15c
+        host->RedisplayTerrain(minX, minZ, maxX, maxZ, 4);                                       // terrain vslot 0x114
+        host->EndLongTerrainOperation();                                                         // terrain vslot 0x160
+    }
+}
+
+// i386 0x0012ab34. The smoothing-set cells whose network height moved re-read it; a placed piece among them (not in
+// the solved list yet) joins the solved list so it is rebuilt at its new heights.
+void cSC4NetworkTool::MarkPositionChangedExistingOccupantsAsNewlySolved() {
+    for (std::uint32_t key : unknown128_) {
+        cSC4NetworkCellInfo* cell = GetCellInfo(key);
+        if (!cell) continue;
+        const std::int32_t own = cell->buildable ? kLotConnectionVertexOffset : 0;
+        bool moved = false;
+        for (int i = 0; i < 4; ++i) {
+            const float height = GetNetworkVertexHeight(own + cell->vertexBaseHeights[i]);      // vslot 0x12c
+            if (!(height == cell->vertexHeights[i])) moved = true;
+            cell->vertexHeights[i] = height;
+        }
+        if (!moved || cell->solvedCellIndex >= 0 || !cell->hasOccupant) continue;
+        cSC4NetworkOccupant* occupant = GetNetworkOccupant(cell->x, cell->z);
+        if (!occupant) continue;
+        tSolvedCell solved;
+        solved.pieceType = occupant->PieceId();                                                  // vslot 0x5c
+        solved.rotationFlip = occupant->GetRotationAndFlip();                                    // vslot 0x68
+        solved.cellKey = key;
+        cell->solvedCellIndex = static_cast<std::int32_t>(solvedCellList_.size());
+        solvedCellList_.push_back(solved);
+        occupant->Release();
+    }
+}
+
+// i386 0x00127d48. The placed pieces on the cells around every terrain vertex that moved (and not in the solved list
+// yet) join the solved list with the network heights the first satisfier solved for their corners.
+void cSC4NetworkTool::MarkTerrainChangedExistingOccupantsAsNewlySolved(const std::vector<std::uint32_t>& vertices) {
+    for (std::uint32_t vertex : vertices) {
+        std::int32_t z1 = static_cast<std::int32_t>(vertex / static_cast<std::uint32_t>(widthPlusOne_));
+        std::int32_t x1 = static_cast<std::int32_t>(vertex % static_cast<std::uint32_t>(widthPlusOne_));
+        const std::int32_t x0 = x1 < 1 ? 0 : x1 - 1;
+        std::int32_t z0 = z1 < 1 ? 0 : z1 - 1;
+        if (static_cast<std::uint32_t>(cityWidth_) <= static_cast<std::uint32_t>(x1)) x1 = cityWidth_ - 1;
+        if (static_cast<std::uint32_t>(cityHeight_) <= static_cast<std::uint32_t>(z1)) z1 = cityHeight_ - 1;
+        for (; z0 <= z1; ++z0) {
+            for (std::int32_t x = x0; x <= x1; ++x) {
+                const std::uint32_t key = static_cast<std::uint32_t>(z0) * 0x10000u + static_cast<std::uint32_t>(x);
+                cSC4NetworkCellInfo* cell = GetCellInfo(key);
+                if (!cell || cell->solvedCellIndex >= 0 || !cell->hasOccupant) continue;
+                cSC4NetworkOccupant* occupant = GetNetworkOccupant(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z0));
+                if (!occupant) continue;
+                tSolvedCell solved;
+                solved.pieceType = occupant->PieceId();
+                solved.rotationFlip = occupant->GetRotationAndFlip();
+                solved.cellKey = key;
+                cell->solvedCellIndex = static_cast<std::int32_t>(solvedCellList_.size());
+                for (int i = 0; i < 4; ++i)
+                    if (constraintA_) constraintA_->GetHeight(cell->vertexBaseHeights[i], cell->vertexHeights[i]);
+                solvedCellList_.push_back(solved);
+                occupant->Release();
+            }
+        }
+    }
+}
 
 // i386 0x00124878 (vslot 0xe4). The preview half (not placing) asks AddCellPreview for every solved cell, the placement
 // half inserts a network occupant per cell, or updates the occupant already there.
@@ -1386,7 +2026,10 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, bool allowDiagonals, bool connect
         } else {
             StartPlacing();                                                          // vslot 0x120
             DestroyHilightedOccupants();                                             // vslot 0xf8
-            // UpdateTerrainHeights / Mark*ExistingOccupantsAsNewlySolved: not ported yet.
+            std::vector<std::uint32_t> movedVertices;
+            UpdateTerrainHeights(movedVertices);                                     // vslot 0xec
+            MarkPositionChangedExistingOccupantsAsNewlySolved();
+            MarkTerrainChangedExistingOccupantsAsNewlySolved(movedVertices);
         }
         if (previewUpdateEnabled_) InsertOccupantsForSolvedCells(solvedCellList_, &placed, false);
     }

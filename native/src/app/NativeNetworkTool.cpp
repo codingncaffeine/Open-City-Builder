@@ -38,6 +38,9 @@
 #include "sc4/cSTETerrain.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/PowerLineTool.h"
+#include "sc4/VertexHtConstraintSatisfier.h"
+#include "sc4/ZoneDeveloper.h"
+#include "sc4/Lot.h"
 
 namespace native {
 namespace {
@@ -115,6 +118,7 @@ public:
             sc4::LoadNetworkPlacementParams(exemplar->AsISCPropertyHolder(), params_);
             exemplar->Release();
         }
+        sc4::LoadNetworkSlopeLimits(params_, slopeLimits_);   // the tail of LoadPlacementParams, run with or without the exemplar
     }
     std::uint32_t ViewInputControlId() const override { return kTypeRecords[type_].vic; }
     std::uint32_t ToolViewId() const override { return kTypeRecords[type_].toolView; }
@@ -127,11 +131,13 @@ public:
     const sc4::cSC4NetworkPlacementParams& PlacementParams() const override { return params_; }
     const sc4::cSC4NetworkSupportStructInfo* FindSupportStructure(std::uint32_t) const override { return nullptr; }
     std::uint32_t PlacementExemplarId() const override { return sc4::kNetworkPlacementExemplarIDs[type_]; }
+    const sc4::cSC4NetworkSlopeLimits& SlopeLimits() const override { return slopeLimits_; }
 
 private:
     std::uint32_t type_;
     std::vector<sc4::cSC4NetworkBridgeTypeInfo> bridges_;
     sc4::cSC4NetworkPlacementParams params_{};
+    sc4::cSC4NetworkSlopeLimits slopeLimits_{};
 };
 
 // cSC4NetworkPreview's terrain and textures.
@@ -176,10 +182,63 @@ void ForCellNetworkOccupants(std::uint32_t x, std::uint32_t z, std::uint32_t typ
     occupants->ReleaseOccupantList(list);
 }
 
+// The tool's two cSC4VertexHtConstraintSatisfier members (+0x228 / +0x328), reached through the tool's satisfier seam.
+class ConstraintSatisfier final : public sc4::INetworkConstraintSatisfier {
+public:
+    void AddVertexToSolve(int vertexId, float height) override { solver_.AddVertexToSolve(vertexId, height); }
+    bool GetHeight(int vertexId, float& out) override { return solver_.GetHeight(vertexId, out); }
+    void InsertRangeConstraint(int vertexId, float low, float high) override { solver_.InsertRangeConstraint(vertexId, low, high); }
+    void InsertPreferredRangeConstraint(int vertexId, float low, float high) override { solver_.InsertPreferredRangeConstraint(vertexId, low, high); }
+    void InsertPreferredValueConstraint(int vertexId, float value) override { solver_.InsertPreferredValueConstraint(vertexId, value); }
+    void InsertFixedVertex(int vertexId, float height) override { solver_.InsertFixedVertex(vertexId, height); }
+    void InsertEqualityConstraint(std::uint32_t a, std::uint32_t b) override {
+        solver_.InsertEqualityConstraint(static_cast<std::int32_t>(a), static_cast<std::int32_t>(b));
+    }
+    bool Init(float low, float high) override { return solver_.Init(low, high); }
+    bool Shutdown() override { return solver_.Shutdown(); }
+    bool Solve() override { return solver_.Solve(); }
+    bool IsInToSolveSet(int vertexId) override { return solver_.IsInToSolveSet(vertexId); }
+    void InsertSlopeConstraint(int a, int b, float maxSlope) override { solver_.InsertSlopeConstraint(a, b, maxSlope); }
+    void InsertSmoothnessConstraint(int a, int b, int c, float limit) override { solver_.InsertSmoothnessConstraint(a, b, c, limit); }
+    void RewindSolvedVertexList() override { solver_.RewindSolvedVertexList(); }
+    bool GetNextSolvedVertexAndItsHeight(int& vertexId, float& height) override {
+        std::int32_t id = 0;
+        const bool more = solver_.GetNextSolvedVertexAndItsHeight(id, height);
+        vertexId = id;
+        return more;
+    }
+
+private:
+    sc4::cSC4VertexHtConstraintSatisfier solver_;
+};
+
+// The satisfier's terrain (SL::spTerrain GetVertex): the grid coordinates of a vertex id for its debug dump.
+class VertexHtConstraintHost final : public sc4::IVertexHtConstraintHost {
+public:
+    void GetVertex(std::int32_t index, std::int32_t& x, std::int32_t& z) override {
+        x = 0;
+        z = 0;
+        if (sc4::cSTETerrain* t = Terrain()) t->GetVertex(index, x, z);
+    }
+};
+
+// The zone developer is the city's lot manager (cISC4LotManager).
+sc4::cSC4ZoneDeveloper* LotManager() {
+    cIGZUnknown* object = CurrentCity() ? CurrentCity()->GetComponent(sc4::CityComponent::ZoneDeveloper) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(0xe4fda3d4, &raw) || !raw) return nullptr;
+    auto* serializable = static_cast<cIGZSerializable*>(raw);
+    sc4::cSC4ZoneDeveloper* out = serializable->GetGZCLSID() == sc4::cSC4ZoneDeveloper::kZoneDeveloperClassId
+                                      ? dynamic_cast<sc4::cSC4ZoneDeveloper*>(serializable) : nullptr;
+    serializable->Release();
+    return out;
+}
+
 class ToolHost final : public sc4::INetworkToolHost {
 public:
     void RegisterShutdownCallback(bool (*)(void*), void*) override {}
-    cIGZUnknown* AcquireTerrain() override { return nullptr; }   // the solver reaches the terrain through this host
+    // SL::spTerrain, borrowed (the tool counts its own reference); the solver reads the terrain through this host.
+    cIGZUnknown* AcquireTerrain() override { return CurrentCity() ? CurrentCity()->GetComponent(sc4::CityComponent::Terrain) : nullptr; }
     float TerrainCellSize() override { return 16.0f; }
     float TerrainVertexHeight(std::int32_t vertex) override { sc4::cSTETerrain* t = Terrain(); return t ? t->GetAltitude(vertex) : 0.0f; }
     bool TerrainAllowsNetwork(std::uint32_t x, std::uint32_t z) override { sc4::cSTETerrain* t = Terrain(); return t && t->CellHasWater(x, z); }
@@ -201,7 +260,30 @@ public:
     cIGZUnknown* CreateNetworkOrFilter(std::uint32_t) override { return nullptr; }
     sc4::INetworkPreview* CreatePreview() override { return new sc4::cSC4NetworkPreview(); }
     sc4::INetworkWorldCache* CreateWorldCache() override { return new sc4::cSC4NetworkWorldCache(); }
-    sc4::INetworkConstraintSatisfier* CreateConstraintSatisfier() override { return nullptr; }
+    sc4::INetworkConstraintSatisfier* CreateConstraintSatisfier() override { return new ConstraintSatisfier(); }
+    // The height solve's terrain and lot calls.
+    std::int32_t TerrainVertexIndex(std::int32_t x, std::int32_t z) override { sc4::cSTETerrain* t = Terrain(); return t ? t->GetVertIndex(x, z) : -1; }
+    float TerrainMaxAllowedHeight() override { return sc4::cSTETerrain::MaxAllowedHeight(); }
+    void SetTerrainVertexHeight(std::int32_t vertex, float height) override { if (sc4::cSTETerrain* t = Terrain()) t->SetAltitude(vertex, height); }
+    void BeginLongTerrainOperation() override { if (sc4::cSTETerrain* t = Terrain()) t->BeginLongTerrainOperation(); }
+    void RedisplayTerrain(std::int32_t minX, std::int32_t minZ, std::int32_t maxX, std::int32_t maxZ, std::uint32_t flags) override {
+        if (sc4::cSTETerrain* t = Terrain()) t->RedisplayTerrain(true, true, sc4::TerrainRect{minX, minZ, maxX, maxZ}, flags);
+    }
+    void EndLongTerrainOperation() override { if (sc4::cSTETerrain* t = Terrain()) t->EndLongTerrainOperation(); }
+    void LotVertexAltitudeAdjustmentRange(std::int32_t x, std::int32_t z, float& minAltitude, float& maxAltitude) override {
+        if (sc4::cSC4ZoneDeveloper* lots = LotManager()) {
+            lots->GetLotVertexAltitudeAdjustmentRange(x, z, minAltitude, maxAltitude);
+            return;
+        }
+        sc4::INetworkToolHost::LotVertexAltitudeAdjustmentRange(x, z, minAltitude, maxAltitude);
+    }
+    bool LotBoundingRectAt(std::uint32_t x, std::uint32_t z, std::int32_t (&rect)[4]) override {
+        sc4::cSC4ZoneDeveloper* lots = LotManager();
+        sc4::cSC4Lot* lot = lots ? lots->GetLot(static_cast<int>(x), static_cast<int>(z), false) : nullptr;
+        if (!lot) return false;
+        lot->GetBoundingRect(rect);
+        return true;
+    }
     const sc4::INetworkTypeInfo* NetworkTypeInfo(std::uint32_t type) override {
         // Never destroyed: the input controls shut down from the window manager's destructor at exit, after function statics.
         static auto* infos = [] {
@@ -435,6 +517,11 @@ void InstallNetworkTool(sc4::cSC4View3DWin& view, cISC4City* city) {
     sc4::SetNetworkPreviewHost(&g_previewHost);
 }
 
+void InstallVertexHtConstraintHost() {
+    static VertexHtConstraintHost host;
+    sc4::SetVertexHtConstraintHost(&host);
+}
+
 sc4::cSC4ViewInputControl* CreateNetworkTool(int type) {
     if (type < 0 || type >= 13) return nullptr;
     auto* tool = new sc4::cSC4ViewInputControlNetworkTool(static_cast<std::uint32_t>(type));
@@ -483,6 +570,32 @@ void NativeLayNetworkLine(std::uint32_t type, int x1, int z1, int x2, int z2) {
     if (neighbors && possible) {
         sc4::cISC4NeighborConnection* made = neighbors->FindConnection(info.unknown8, static_cast<int>(info.x), static_cast<int>(info.z));
         std::printf("netline: connection at %d,%d %s\n", static_cast<int>(info.x), static_cast<int>(info.z), made ? "made" : "MISSING");
+    }
+}
+}  // namespace native
+
+namespace native {
+void NativeTerrainHeightsReport(int x0, int z0, int x1, int z1) {
+    sc4::cSTETerrain* t = Terrain();
+    if (!t) {
+        std::printf("terrainheights: no terrain\n");
+        return;
+    }
+    std::printf("terrainheights %d,%d..%d,%d\n", x0, z0, x1, z1);
+    for (int z = z0; z <= z1; ++z) {
+        std::printf("  z=%3d:", z);
+        for (int x = x0; x <= x1; ++x) std::printf(" %7.2f", t->GetAltitudeAtVertex(x, z));
+        std::printf("\n");
+    }
+    // The network pieces on the cells of the rectangle: their four corner heights (vertex order (x,z) (x,z+1) (x+1,z+1) (x+1,z)).
+    for (int z = z0; z < z1; ++z) {
+        for (int x = x0; x < x1; ++x) {
+            ForCellNetworkOccupants(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z), 0x1fffu, [x, z](sc4::cSC4NetworkOccupant* network) {
+                float h[4] = {};
+                network->GetVertexHeights(h);
+                std::printf("  piece %d,%d %08x corners %.2f %.2f %.2f %.2f\n", x, z, network->PieceId(), h[0], h[1], h[2], h[3]);
+            });
+        }
     }
 }
 }  // namespace native
