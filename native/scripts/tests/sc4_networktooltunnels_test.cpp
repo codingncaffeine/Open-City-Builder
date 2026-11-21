@@ -107,6 +107,7 @@ cSC4NetworkTool* MakeTool(int straight, int count = 50) {
     p.list60 = {0x0ad00000};
     p.list78 = {0};
     p.list90 = {13.8f};
+    p.unknownA8[7] = 20;   // the tunnel cost per cell
     NetworkToolTestAccess::SlopeRise(*tool) = 11.203f;
     return tool;
 }
@@ -140,6 +141,7 @@ int main() {
         bool interior = true;
         for (int s = 11; s < 39; ++s) interior = interior && KindAt(*tool, s) == 3;
         CHECK(interior);
+        CHECK(tool->GetCostOfSolution() == 29 * 20);   // no solved cells: the tunnel's 29 steps at 20 each
 
         // the set to solve loses every cell of the tunnel's steps, portals included
         std::unordered_set<std::uint32_t> set;
