@@ -126,7 +126,7 @@ public:
             sc4::LoadNetworkPlacementParams(exemplar->AsISCPropertyHolder(), params_);
             exemplar->Release();
         }
-        // LoadBridgeTypes(ini, kBridgeSections[type], 0x1000 + type, ...) from the network ini {0, 0x8a5971c5, 0x8a5993b9}
+        // LoadBridgeTypes(ini, kBridgeSections[type], 0x1000 + type, the pen width) from the network ini {0, 0x8a5971c5, 0x8a5993b9}
         // ReloadRules opens; the power line has no section.
         static constexpr const char* kBridgeSections[13] = {
             "RoadBridgeExemplars", "RailBridgeExemplars", "HighwayBridgeExemplars", "StreetBridgeExemplars",
@@ -136,7 +136,7 @@ public:
             cIGZFile* file = nullptr;
             if (sc4::SC4GetResourceAsFile(cGZPersistResourceKey{sc4::kNetworkManagerIniType, sc4::kNetworkManagerIniGroup, sc4::kNetworkManagerIniInstance}, &file, false) && file) {
                 cRZIniFile ini(file);
-                sc4::LoadNetworkBridgeTypes(ini, kBridgeSections[type], bridges_);
+                sc4::LoadNetworkBridgeTypes(ini, kBridgeSections[type], bridges_, 0x1000 + type, kTypeRecords[type].penX);
                 file->Release();
             }
         }
@@ -149,7 +149,15 @@ public:
                 std::printf("network type %u bridge %08x \"%s\": span %u..%u, width %u, ramp %u, pylons %u every %u, %s%s, depth %.1f..%.1f, clearance water %.1f land %.1f%s\n", type, b.id,
                             b.name.c_str(), b.minSpan, b.maxSpan, b.width, b.rampLength, b.pylonLength, b.pylonSpacing, b.isWater ? "water" : "",
                             b.isLand ? " land" : "", b.minWaterDepth, b.maxWaterDepth, b.waterClearance, b.landClearance,
-                            b.suspensionA && b.suspensionB ? ", suspension" : (b.hasCables ? ", cables" : ""));
+                            b.suspensionTopTexture && b.suspensionHangerTexture ? ", suspension" : (b.hasCables ? ", cables" : ""));
+            for (const sc4::cSC4NetworkBridgeTypeInfo& b : bridges_) {
+                if (!std::getenv("SC4_BRIDGE_TYPES")) break;
+                std::string text;
+                for (float s : b.rampSupportHeights) text += " " + std::to_string(s);
+                text += " |";
+                for (float s : b.pylonSupportHeights) text += " " + std::to_string(s);
+                std::printf("network type %u bridge %08x supports ramp/pylon:%s, specializations %zu\n", type, b.id, text.c_str(), b.specializations.size());
+            }
         sc4::LoadNetworkSlopeLimits(params_, slopeLimits_);   // the tail of LoadPlacementParams, run with or without the exemplar
     }
     std::uint32_t ViewInputControlId() const override { return kTypeRecords[type_].vic; }
@@ -285,6 +293,8 @@ public:
         if (t) t->GetCellCornerAltitudes(x, z, out);
         else out[0] = out[1] = out[2] = out[3] = 0.0f;
     }
+    // InsertBridgePiece splits a support column at the water surface (terrain vslot 0x7c).
+    float WaterLevelAt(float x, float z) override { sc4::cSTETerrain* t = Terrain(); return t ? t->GetWaterLevel(x, z) : 0.0f; }
     bool NetworkOccupantInRect(int x0, int z0, int x1, int z1, std::uint32_t typeMask) override {
         sc4::cISC4OccupantManager* occupants = Occupants();
         if (!occupants) return false;
@@ -367,7 +377,8 @@ public:
         if (!SL::spRM || !SL::spRM->GetResource(cGZPersistResourceKey{type, group, instance}, iid, &raw, 0, nullptr) || !raw) return nullptr;
         return static_cast<cIGZUnknown*>(raw);
     }
-    bool LoadString(std::uint32_t, std::uint32_t, cIGZString&) override { return false; }
+    // SC4LoadString: the failure reasons (group 0x2a592fd1) come from the localized string tables.
+    bool LoadString(std::uint32_t group, std::uint32_t instance, cIGZString& out) override { return native::LoadLocalizedString(group, instance, out); }
     // GetNetworkOccupant (i386 0x00126b82): the first occupant of the cell the tool's cSC4NetworkORFilter takes (a network
     // occupant with one of the tool's network flags), one reference.
     sc4::cSC4NetworkOccupant* NetworkOccupantAt(std::uint32_t x, std::uint32_t z, std::uint32_t typeMask) override {
@@ -722,9 +733,19 @@ void NativeBridgeReport(int x0, int z0, int x1, int z1) {
             piece->GetOccupiedCell(cx, cz);
             float position[3] = {0, 0, 0};
             piece->GetPosition(position);
+            // The added parts (support columns, suspension wires, cables) by texture.
+            std::map<std::uint32_t, int> parts;
+            for (const sc4::SC4AddOnPart& part : piece->AddOnParts()) ++parts[part.id];
+            std::string partText;
+            for (const auto& [texture, n] : parts) {
+                char item[32];
+                std::snprintf(item, sizeof item, " %08x x%d", texture, n);
+                partText += item;
+            }
             std::printf("bridges: piece at %u,%u model %08x rotation %u flags %08x position y %.2f model offset y %.2f water %.2f %s\n", cx, cz,
                         piece->PieceId(), piece->GetRotation(), piece->GetNetworkFlag(), position[1], piece->ModelOffset().y,
                         terrain->GetMaxSurfaceLevel(cx, cz), piece->IsUsable() ? "usable" : "not usable");
+            if (!partText.empty()) std::printf("bridges:   parts%s\n", partText.c_str());
         }
         occupants->ReleaseOccupantList(list);
     }

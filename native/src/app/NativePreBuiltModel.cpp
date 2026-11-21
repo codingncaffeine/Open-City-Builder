@@ -235,7 +235,7 @@ public:
     bool WaterSurfaceDisplayed() override { cSTETerrain* t = Terrain(); return t && t->GetWaterSurfaceDisplayState(); }
     // PARTIAL: the pieces' ground shadow decals (the terrain view's land / water overlay managers) are not reached natively;
     // UpdateShadow leaves the piece without one.
-    bool GetShadowOverlays(IShadowOverlay** land, IShadowOverlay** water) override {
+    bool GetShadowOverlays(IShadowDecalOverlay** land, IShadowDecalOverlay** water) override {
         if (land) *land = nullptr;
         if (water) *water = nullptr;
         return false;

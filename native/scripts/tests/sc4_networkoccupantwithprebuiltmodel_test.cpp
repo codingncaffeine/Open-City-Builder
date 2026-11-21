@@ -109,7 +109,7 @@ struct FakeResModel final : s3d::cIS3DResModel {
     void ComputeBounds(cS3DBoundingBox&) override {}
 };
 
-struct FakeOverlay final : IShadowOverlay {
+struct FakeOverlay final : IShadowDecalOverlay {
     int addCalls = 0, removeCalls = 0;
     std::uint32_t nextHandle = 7;
     cGZPersistResourceKey lastKey;
@@ -285,7 +285,7 @@ struct FakeHost final : IPreBuiltModelOccupantHost {
     float TerrainAltitudeAtVertex(int, int) override { return terrainAltitude; }
     float WaterLevel(float, float) override { return waterLevel; }
     bool WaterSurfaceDisplayed() override { return waterSurfaceDisplayed; }
-    bool GetShadowOverlays(IShadowOverlay** l, IShadowOverlay** w) override {
+    bool GetShadowOverlays(IShadowDecalOverlay** l, IShadowDecalOverlay** w) override {
         if (!overlaysAvailable) return false;
         *l = &land;
         *w = &water;

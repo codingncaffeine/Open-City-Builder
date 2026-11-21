@@ -11,6 +11,7 @@
 #include "gz/cIGZMessage2.h"
 #include "rz/cRZString.h"
 #include "sc4/NetworkTool.h"
+#include "sc4/ResourceAsFile.h"
 #include "sc4/NetworkOccupant.h"
 #include "sc4/TileRules.h"
 #include "sc4/SCProperty.h"
@@ -29,6 +30,13 @@ class cIGZPersistResourceManager;
 namespace SL {
 cIGZPersistResourceManager* spRM = nullptr;   // the bridge type loader's resource manager (none here)
 }
+// The bridge specialization script loader: no resources here.
+namespace sc4 {
+bool SC4GetResourceAsFile(const cGZPersistResourceKey&, cIGZFile** out, bool) {
+    *out = nullptr;
+    return false;
+}
+}  // namespace sc4
 
 using namespace sc4;
 

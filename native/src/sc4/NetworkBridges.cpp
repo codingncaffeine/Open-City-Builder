@@ -288,12 +288,132 @@ void cSC4NetworkTool::SelectBridgeElevation(tBridge& bridge) {
     }
 }
 
+// i386 0x0014bdd4. The span runs from the first piece to the last row's piece along the step direction (the next row minus
+// the first); the far edge of the cell on the advancing side counts as the end. Along that axis the catenary
+// (cosh(t) - 1) / (cosh(1) - 1) runs from 0 at the low point to 1 at a tower half a cell inside the span's end: mode 0 has
+// its low point at the start, mode 1 in the middle, mode 2 at the far end. Every corner's wire height is lowered to
+// sag + (1 - sag) x catenary (kDeltaForPos, i386 0x008456c0, gives the corners' offsets in the cell).
+void cSC4NetworkTool::PlotBridgeSuspensionWires(tBridgePiece* pieces, int rows, int width, float sag, int mode) {
+    static constexpr float kDeltaForPos[4][2] = {{0.0f, 0.0f}, {0.0f, 1.0f}, {1.0f, 1.0f}, {1.0f, 0.0f}};
+    const float dx = static_cast<float>(static_cast<int>(pieces[width].x - pieces[0].x));
+    const float dz = static_cast<float>(static_cast<int>(pieces[width].z - pieces[0].z));
+    float firstX = static_cast<float>(pieces[0].x), firstZ = static_cast<float>(pieces[0].z);
+    const tBridgePiece& last = pieces[(rows - 1) * width];
+    float lastX = static_cast<float>(last.x), lastZ = static_cast<float>(last.z);
+    if (dx > 0.0f) lastX += 1.0f;
+    else if (dx < 0.0f) firstX += 1.0f;
+    if (dz > 0.0f) lastZ += 1.0f;
+    else if (dz < 0.0f) firstZ += 1.0f;
+    float low = 0.0f, tower = 0.0f;
+    if (mode == 1) {
+        low = ((firstX + lastX) * dx + (firstZ + lastZ) * dz) * 0.5f;
+        tower = (lastX * dx + lastZ * dz) - 0.5f;
+    } else if (mode == 2) {
+        low = lastX * dx + lastZ * dz;
+        tower = firstX * dx + firstZ * dz + 0.5f;
+    } else if (mode == 0) {
+        low = firstX * dx + firstZ * dz;
+        tower = (lastX * dx + lastZ * dz) - 0.5f;
+    }
+    const float rise = 1.0f - sag;
+    for (int i = 0; i < rows * width; ++i) {
+        tBridgePiece& piece = pieces[i];
+        const float x = static_cast<float>(piece.x), z = static_cast<float>(piece.z);
+        for (int corner = 0; corner != 4; ++corner) {
+            const float t = ((x + kDeltaForPos[corner][0]) * dx + (z + kDeltaForPos[corner][1]) * dz - low) / (tower - low);
+            const double cosh2 = std::exp(static_cast<double>(t)) + std::exp(static_cast<double>(-t));
+            const float height = static_cast<float>((cosh2 - 2.0) / 1.0861612696304874) * rise + sag;   // [0x00a70e90] / [0x00a70e98]
+            if (height < piece.wire[corner]) piece.wire[corner] = height;
+        }
+    }
+}
+
+// i386 0x0014d848. The bridge-local ends become world points (x along the step direction, z to its left, the origin at the
+// corner of the first piece's cell the direction starts from). The cable is cut where it crosses a multiple of 16 in x or z;
+// each stretch goes to the piece whose cell holds its middle (none: dropped). A cable that rises steeply is drawn thicker,
+// by its length over its ground length, up to four times.
+void cSC4NetworkTool::PlotBridgeCable(tBridgePiece* pieces, int rows, int width, const float from[3], const float to[3],
+                                      std::uint32_t texture, float halfWidth) {
+    constexpr float kMinLength = 0.01f;   // cSC4Tank::sfBarrelVelocityScalingFactor (i386 0x00a706d0)
+    if (!(std::fabs(from[0] - to[0]) >= kMinLength) && std::fabs(from[2] - to[2]) < kMinLength) return;
+    const std::uint32_t x0 = pieces[0].x, z0 = pieces[0].z;
+    const int stepX = static_cast<int>(pieces[width].x - x0);
+    const int stepZ = static_cast<int>(pieces[width].z - z0);
+    float originX = static_cast<float>(x0 << 4), originZ = static_cast<float>(z0 << 4);
+    if (stepX < 0 || stepZ > 0) originX += 16.0f;
+    if ((stepX | stepZ) < 0) originZ += 16.0f;
+    const float fz = static_cast<float>(stepZ), fx = static_cast<float>(stepX);
+    const float sz = from[0] * fz + originZ + from[2] * fx;
+    const float sy = from[1];
+    const float sx = (from[0] * fx + originX) - from[2] * fz;
+    const float ez = fz * to[0] + originZ + fx * to[2];
+    const float ey = to[1];
+    const float ex = (fx * to[0] + originX) - fz * to[2];
+    const float ddx = ex - sx, ddy = ey - sy, ddz = ez - sz;
+    std::vector<float> cuts{0.0f, 1.0f};
+    const float maxX = std::max(sx, ex), minX = std::min(sx, ex);
+    const float maxZ = std::max(sz, ez), minZ = std::min(sz, ez);
+    // The first grid line at or above the low end (the original's 1.5 x 2^23 rounding works out to a ceiling).
+    for (float g = static_cast<float>(static_cast<int>(std::ceil(minX * 0.0625f)) << 4); g < maxX; g += 16.0f)
+        cuts.push_back((g - sx) / ddx);
+    for (float g = static_cast<float>(static_cast<int>(std::ceil(minZ * 0.0625f)) << 4); g < maxZ; g += 16.0f)
+        cuts.push_back((g - sz) / ddz);
+    std::sort(cuts.begin(), cuts.end());
+    tBridgeCablePiece stretch;
+    stretch.halfWidth = halfWidth;
+    stretch.texture = texture;
+    const float ground = std::sqrt(ddx * ddx + 0.0f + ddz * ddz);
+    if (kMinLength < ground) {
+        const float length = std::sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
+        stretch.halfWidth = static_cast<double>(length) <= static_cast<double>(ground) * 4.0 ? length / ground * halfWidth
+                                                                                            : halfWidth * 4.0f;
+    }
+    float px = cuts[0] * ddx + sx, py = cuts[0] * ddy + sy, pz = cuts[0] * ddz + sz;
+    for (std::size_t i = 1; i < cuts.size(); ++i) {
+        const float t = cuts[i];
+        const float qx = t * ddx + sx, qy = t * ddy + sy, qz = t * ddz + sz;
+        const int cellX = static_cast<int>(std::floor((px + qx) * 0.5f * 0.0625f));
+        const int cellZ = static_cast<int>(std::floor((pz + qz) * 0.5f * 0.0625f));
+        for (int k = 0; k < rows * width; ++k) {
+            tBridgePiece& piece = pieces[k];
+            if (static_cast<int>(piece.x) == cellX && static_cast<int>(piece.z) == cellZ) {
+                stretch.from[0] = px;
+                stretch.from[1] = py;
+                stretch.from[2] = pz;
+                stretch.to[0] = qx;
+                stretch.to[1] = qy;
+                stretch.to[2] = qz;
+                piece.cables.push_back(stretch);
+                break;
+            }
+        }
+        px = qx;
+        py = qy;
+        pz = qz;
+    }
+}
+
+// i386 0x0014de7a: cable i runs from a + i (b - a) / (count - 1) to c + i (d - c) / (count - 1). With one cable the original
+// divides by zero and its cable lands on no piece; the port draws none.
+void cSC4NetworkTool::PlotBridgeCables(tBridgePiece* pieces, int rows, int width, const float a[3], const float b[3],
+                                       const float c[3], const float d[3], int count, std::uint32_t texture, float halfWidth) {
+    if (count < 2) return;
+    const float n = static_cast<float>(count - 1);
+    const float ab[3] = {(b[0] - a[0]) / n, (b[1] - a[1]) / n, (b[2] - a[2]) / n};
+    const float cd[3] = {(d[0] - c[0]) / n, (d[1] - c[1]) / n, (d[2] - c[2]) / n};
+    for (int i = 0; i < count; ++i) {
+        const float f = static_cast<float>(i);
+        const float to[3] = {f * cd[0] + c[0], f * cd[1] + c[1], f * cd[2] + c[2]};
+        const float from[3] = {f * ab[0] + a[0], f * ab[1] + a[1], f * ab[2] + a[2]};
+        PlotBridgeCable(pieces, rows, width, from, to, texture, halfWidth);
+    }
+}
+
 // i386 0x0014e4a0: the pieces of a bridge without a span-specific layout. Ramp pieces at both ends (mirrored at the far end),
 // pylon groups every `spacing` steps between the inner ramp ends (their count clamped to the type's range, the first moved
 // inwards by the spacing factor), span pieces elsewhere. Every piece gets its model, rotation (the drag direction added), the
 // deck corner heights and the model height.
-// NOT PORTED: the suspension wires (PlotBridgeSuspensionWires, when suspensionA / suspensionB are set) and the cables
-// (PlotBridgeCables, when hasCables): the pieces keep their default wire heights and no cable pieces.
+// A suspension type (both wire textures set, a tower placed) then gets its wire heights, a cable type its cables.
 void cSC4NetworkTool::ConstructParametricBridge(tBridge& bridge) {
     const cSC4NetworkBridgeTypeInfo& bt = typeInfo_->BridgeTypes()[static_cast<std::size_t>(bridge.bridgeType)];
     const std::uint8_t rot0 = static_cast<std::uint8_t>((directionA_ / 2 + 3) % 4);
@@ -429,7 +549,7 @@ void cSC4NetworkTool::ConstructParametricBridge(tBridge& bridge) {
                 piece.corners[(r + 3) & 3] = farHeight;
                 piece.corners[(r + 2) & 3] = farHeight;
             }
-            if ((prevPylon == -1 && nextPylon == -1) || bt.suspensionA == 0 || bt.suspensionB == 0) {
+            if ((prevPylon == -1 && nextPylon == -1) || bt.suspensionTopTexture == 0 || bt.suspensionHangerTexture == 0) {
                 piece.suspension = 0;
             } else {
                 const int r = kRefSpanVert[rot0];
@@ -437,7 +557,7 @@ void cSC4NetworkTool::ConstructParametricBridge(tBridge& bridge) {
                 if (prevPylon == step) flags |= 4;
                 piece.suspension = flags;
                 for (float& w : piece.wire) w = 1.0f;
-                piece.wireValue = bt.suspensionValue;
+                piece.wireValue = bt.suspensionHeight;
                 if (bt.width > 1) {
                     const bool firstColumn = col == 0;
                     const bool side = rot0 == 0 || rot0 == 3;
@@ -446,7 +566,144 @@ void cSC4NetworkTool::ConstructParametricBridge(tBridge& bridge) {
             }
         }
     }
-    // PlotBridgeSuspensionWires / PlotBridgeCables: not ported (see above).
+    const int rows = bridge.endStep - start + 1;
+    const int across = static_cast<int>(bt.width);
+    tBridgePiece* pieces = bridge.pieces.data();
+    if (bt.suspensionTopTexture != 0 && bt.suspensionHangerTexture != 0 && prevPylon != -1) {
+        // The wires: the end span up to the first tower, each span between towers, the end span after the last.
+        PlotBridgeSuspensionWires(pieces, pylonStart - start + 1, across, bt.suspensionEndSag, 0);
+        int at = pylonStart;
+        while (at < prevPylon) {
+            const int next = std::min(at + spacing, prevPylon);
+            PlotBridgeSuspensionWires(pieces + across * (at - start), next - at + 1, across, bt.suspensionSag, 1);
+            at = next;
+        }
+        PlotBridgeSuspensionWires(pieces + across * (prevPylon - start), bridge.endStep - prevPylon + 1, across,
+                                  bt.suspensionEndSag, 2);
+    } else if (bt.hasCables) {
+        // The cable fans in bridge-local coordinates (x = 16 per step from the bridge start plus half a cell, z = half a cell
+        // plus the offset across): from the deck before each tower up to its front (tower A), and from its back (tower B)
+        // down to the deck after it (the deck points mirrored). The last fan always has ten cables.
+        const float e = bridge.elevation;
+        const int count = static_cast<int>(bt.cableCount);
+        const auto deckPoint = [e](const float v[3], float x, float out[3]) {
+            out[0] = x + v[0] + 8.0f;
+            out[1] = v[1] + 0.0f + e;
+            out[2] = v[2] + 0.0f + 8.0f;
+        };
+        const auto towerPoint = [e](const float v[3], float x, float out[3]) {
+            out[0] = v[0] + 8.0f + x;
+            out[1] = e + v[1] + 0.0f;
+            out[2] = v[2] + 8.0f + 0.0f;
+        };
+        float a[3], b[3], c[3], d[3];
+        const int lastTower = prevPylon - start;
+        int tower = pylonStart - start;
+        const float first = static_cast<float>(tower * 16);
+        deckPoint(bt.cableDeck[0], first, a);
+        deckPoint(bt.cableDeck[1], first, b);
+        towerPoint(bt.cableTowerA[0], first, c);
+        towerPoint(bt.cableTowerA[1], first, d);
+        PlotBridgeCables(pieces, rows, across, a, b, c, d, count, bt.cableTexture, bt.cableHalfWidth);
+        while (tower < lastTower) {
+            const int next = std::min(spacing + tower, lastTower);
+            const float here = static_cast<float>(tower << 4), there = static_cast<float>(next << 4);
+            towerPoint(bt.cableTowerB[0], here, a);
+            towerPoint(bt.cableTowerB[1], here, b);
+            deckPoint(bt.cableDeckMirrored[0], here, c);
+            deckPoint(bt.cableDeckMirrored[1], here, d);
+            PlotBridgeCables(pieces, rows, across, a, b, c, d, count, bt.cableTexture, bt.cableHalfWidth);
+            deckPoint(bt.cableDeck[0], there, a);
+            deckPoint(bt.cableDeck[1], there, b);
+            towerPoint(bt.cableTowerA[0], there, c);
+            towerPoint(bt.cableTowerA[1], there, d);
+            PlotBridgeCables(pieces, rows, across, a, b, c, d, count, bt.cableTexture, bt.cableHalfWidth);
+            tower = next;
+        }
+        const float lastX = static_cast<float>(lastTower * 16);
+        towerPoint(bt.cableTowerB[0], lastX, a);
+        towerPoint(bt.cableTowerB[1], lastX, b);
+        deckPoint(bt.cableDeckMirrored[0], lastX, c);
+        deckPoint(bt.cableDeckMirrored[1], lastX, d);
+        PlotBridgeCables(pieces, rows, across, a, b, c, d, 10, bt.cableTexture, bt.cableHalfWidth);
+    }
+}
+
+// i386 0x0014dff6: the pieces of a bridge whose span the specialization script lists, in drag order: each takes the script
+// piece's model, rotation (the drag direction added), support height and model height over the deck; the deck corners come
+// from the step boundary heights. Pieces between a suspension tower or end and the next get suspension flags; at each
+// step that closes such a stretch its wires are plotted (tower to tower: the main sag, an end to a tower or a tower to an
+// end: the end span sag; end to end: none), and a tower opens the next stretch.
+void cSC4NetworkTool::ConstructSpecializedBridge(tBridge& bridge, const cSC4NetworkBridgeSpecialization& spec) {
+    const cSC4NetworkBridgeTypeInfo& bt = typeInfo_->BridgeTypes()[static_cast<std::size_t>(bridge.bridgeType)];
+    const std::uint8_t rot0 = static_cast<std::uint8_t>((directionA_ / 2 + 3) % 4);
+    const int across = static_cast<int>(bt.width);
+    std::size_t next = 0;      // the script piece
+    int open = -1;             // the step (from the bridge start) that opened the current suspension stretch
+    int openAttribute = 0;
+    for (int step = bridge.startStep, index = 0; step <= bridge.endStep; ++step, ++index) {
+        const tDraggedStep& s = steps_[static_cast<std::size_t>(step)];
+        const int dir = rot0 <= 1 ? 1 : -1;
+        const std::uint32_t first = rot0 <= 1 ? s.firstCell : s.lastCell;
+        const std::uint32_t stop = rot0 <= 1 ? s.lastCell + 1 : s.firstCell - 1;
+        int attribute = 0;
+        for (std::uint32_t cell = first; cell != stop; cell += static_cast<std::uint32_t>(dir)) {
+            if (next >= spec.pieces.size() || static_cast<std::size_t>(index + 1) >= spec.heights.size()) return;
+            const cSC4NetworkBridgeSpecialization::Piece& from = spec.pieces[next++];
+            bridge.pieces.emplace_back();
+            tBridgePiece& piece = bridge.pieces.back();
+            piece.supportHeight = from.supportHeight;
+            piece.x = cells_[cell].x;
+            piece.z = cells_[cell].z;
+            piece.kind = 0;
+            piece.model = from.model;
+            piece.rotation = static_cast<std::uint8_t>((rot0 + from.rotation) & 3);
+            piece.modelHeight = bridge.elevation + from.height + bt.deckOffset;
+            piece.suspension = 0;
+            const int r = kRefSpanVert[rot0];
+            const float nearHeight = bridge.elevation + spec.heights[static_cast<std::size_t>(index)];
+            const float farHeight = bridge.elevation + spec.heights[static_cast<std::size_t>(index + 1)];
+            piece.corners[r] = nearHeight;
+            piece.corners[(r + 1) & 3] = nearHeight;
+            piece.corners[(r + 2) & 3] = farHeight;
+            piece.corners[(r + 3) & 3] = farHeight;
+            if (from.attribute == 0 && open < 0) continue;
+            for (float& w : piece.wire) w = 1.0f;
+            piece.wireValue = bt.suspensionHeight;
+            std::uint8_t flags = (rot0 == 1 || rot0 == 3) ? 2 : 1;
+            if (from.attribute == 1) flags |= 4;
+            if (bt.width > 1) {
+                const bool side = rot0 == 0 || rot0 == 3;
+                flags |= (cell == first) == side ? 8 : 0x10;
+            }
+            piece.suspension = flags;
+            if (from.attribute != 0) attribute = from.attribute;
+        }
+        if (attribute == 0) continue;
+        if (open < 0) {
+            open = index;
+            openAttribute = attribute;
+            continue;
+        }
+        tBridgePiece* stretch = bridge.pieces.data() + open * across;
+        const int rows = index - open + 1;
+        if (openAttribute == 1) {
+            if (attribute == 2) {
+                PlotBridgeSuspensionWires(stretch, rows, across, bt.suspensionEndSag, 2);
+                open = -1;
+                continue;
+            }
+            PlotBridgeSuspensionWires(stretch, rows, across, bt.suspensionSag, 1);
+        } else {
+            if (attribute == 2) {
+                open = -1;
+                continue;
+            }
+            PlotBridgeSuspensionWires(stretch, rows, across, bt.suspensionEndSag, 0);
+        }
+        open = index;
+        openAttribute = attribute;
+    }
 }
 
 // i386 0x0014f73a: a straight drag of more than three steps that reaches water gets a bridge for every stretch of water whose
@@ -481,8 +738,10 @@ void cSC4NetworkTool::IdentifyBridgeCells(int& steps, std::uint32_t networkType)
         bridge.referenceAltitude = altitude;
         bridge.landBridge = false;
         SelectBridgeElevation(bridge);
-        // ConstructSpecializedBridge for a span the specialization script lists (none: the parser is not ported).
-        ConstructParametricBridge(bridge);
+        // The specialization script's layout for this exact span, else the parametric one.
+        const auto special = type.specializations.find(end - start + 1);
+        if (special == type.specializations.end()) ConstructParametricBridge(bridge);
+        else ConstructSpecializedBridge(bridge, special->second);
     }
     steps = step;
 }
@@ -512,8 +771,10 @@ bool cSC4NetworkTool::CreateLandBridge(int start, int end, float deck, std::uint
     bridge.elevation = deck;
     bridge.referenceAltitude = deck;
     bridge.landBridge = true;
-    // ConstructSpecializedBridge for a span the specialization script lists (none: the parser is not ported).
-    ConstructParametricBridge(bridge);
+    const cSC4NetworkBridgeTypeInfo& type = typeInfo_->BridgeTypes()[static_cast<std::size_t>(bridgeType)];
+    const auto special = type.specializations.find(end - start + 1);
+    if (special == type.specializations.end()) ConstructParametricBridge(bridge);
+    else ConstructSpecializedBridge(bridge, special->second);
     return true;
 }
 
@@ -645,10 +906,153 @@ void cSC4NetworkTool::InsertBridgePieces(std::list<cSC4NetworkOccupant*>* out) {
     }
 }
 
+namespace {
+
+// AddSuspendedTileStructures (i386 0x0014c0f6, tri1 / tri2 / tri1back / tri2back at 0x00845714 / 08 / 456fc / 456f0): the
+// vertical strip between two wire points (pos 0 / 1 on top, 2 / 3 below them), both faces. Each end hangs `height` above
+// its `base`; the top tile (texture `top`) is at most `tile` high, the rest is filled downwards with hanger tiles of
+// `tile` height (texture `hanger`), the v coordinate scaled to the part of a tile drawn.
+void AddSuspendedTileStructures(cSC4NetworkOccupant* occupant, float (*pos)[3], float (*uv)[2], float tile, float baseA,
+                                float heightA, float baseB, float heightB, std::uint32_t top, std::uint32_t hanger) {
+    static constexpr std::uint32_t kTri1[3] = {0, 1, 2}, kTri2[3] = {2, 1, 3};
+    static constexpr std::uint32_t kTri1Back[3] = {0, 2, 1}, kTri2Back[3] = {2, 3, 1};
+    const auto add = [&](std::uint32_t texture) {
+        occupant->AddPart(pos, uv, kTri1, texture);   // cISC4NetworkOccupant vslot 0x7c
+        occupant->AddPart(pos, uv, kTri2, texture);
+        occupant->AddPart(pos, uv, kTri1Back, texture);
+        occupant->AddPart(pos, uv, kTri2Back, texture);
+    };
+    const auto strip = [&](float a, float b) {
+        uv[2][1] = a / tile;
+        uv[3][1] = b / tile;
+        pos[0][1] = baseA + heightA;
+        pos[1][1] = baseB + heightB;
+        pos[2][1] = pos[0][1] - a;
+        pos[3][1] = pos[1][1] - b;
+    };
+    if (!(tile <= heightA) && !(tile <= heightB)) {
+        strip(heightA, heightB);
+        add(top);
+        return;
+    }
+    float first = std::min(heightA, heightB);
+    if (tile <= first) first = tile;
+    strip(first, first);
+    add(top);
+    heightA -= first;
+    heightB -= first;
+    while (heightA > 0.0f || heightB > 0.0f) {
+        const float a = tile <= heightA ? tile : heightA;
+        const float b = tile <= heightB ? tile : heightB;
+        strip(a, b);
+        add(hanger);
+        heightA -= a;
+        heightB -= b;
+    }
+}
+
+}  // namespace
+
+// i386 0x00316554 (columnTriangleIndices 0x0084ad5c, oppColumnTriangleIndices 0x0084ad50): four side quads between the rings
+// (v = height / 16) and the top cap.
+void cSC4NetworkTool::AddSupportColumnToOccupant(cSC4NetworkOccupant* occupant, const float (*top)[3], const float (*bottom)[3],
+                                                 bool opposite) {
+    static constexpr std::uint32_t kColumn[3] = {0, 1, 2}, kOpposite[3] = {0, 2, 1};
+    const std::uint32_t* indices = opposite ? kOpposite : kColumn;
+    float pos[3][3];
+    float uv[3][2];
+    const auto set = [](float (&v)[3], const float* p) { v[0] = p[0]; v[1] = p[1]; v[2] = p[2]; };
+    for (int k = 0; k != 4; ++k) {
+        const int n = (k + 1) & 3;
+        set(pos[0], top[k]);
+        set(pos[1], bottom[k]);
+        set(pos[2], bottom[n]);
+        uv[0][0] = 0.0f; uv[0][1] = top[k][1] * 0.0625f;
+        uv[1][0] = 0.0f; uv[1][1] = bottom[k][1] * 0.0625f;
+        uv[2][0] = 1.0f; uv[2][1] = bottom[n][1] * 0.0625f;
+        occupant->AddPart(pos, uv, indices, 0x8080000);
+        set(pos[1], bottom[n]);
+        set(pos[2], top[n]);
+        uv[1][0] = 1.0f; uv[1][1] = bottom[n][1] * 0.0625f;
+        uv[2][0] = 1.0f; uv[2][1] = top[n][1] * 0.0625f;
+        occupant->AddPart(pos, uv, indices, 0x8080000);
+    }
+    set(pos[0], top[0]);
+    set(pos[1], top[1]);
+    set(pos[2], top[2]);
+    uv[0][0] = 0.0f; uv[0][1] = 0.0f;
+    uv[1][0] = 0.0f; uv[1][1] = 1.0f;
+    uv[2][0] = 1.0f; uv[2][1] = 1.0f;
+    occupant->AddPart(pos, uv, indices, 0x912220e);
+    set(pos[1], top[2]);
+    set(pos[2], top[3]);
+    uv[1][0] = 1.0f; uv[1][1] = 1.0f;
+    uv[2][0] = 1.0f; uv[2][1] = 0.0f;
+    occupant->AddPart(pos, uv, indices, 0x912220e);
+}
+
+// i386 0x0014ffcc. The suspension flags: bits 0-1 pick which corners are the two deck edges (1: corners 0-1 and 2-3, else
+// 1-2 and 3-0), 0x10 drops the first edge and 8 the second (the inner edges of a wide deck), 4 marks a tower piece. Each edge
+// runs between its two corners' terrain vertices, moved in towards the other edge by the type's inset; its wire heights are
+// the piece's wire fractions times the tower height, above the deck corners plus the type's offset. A tower piece's edge is
+// two strips meeting at the full tower height in the middle of the cell (u to 0.5).
+void cSC4NetworkTool::AddSuspendedBridgeStructures(cSC4NetworkOccupant* occupant, const tBridgePiece& piece,
+                                                   const cSC4NetworkCellInfo* cell, const cSC4NetworkBridgeTypeInfo& type) {
+    if (piece.suspension == 0) return;
+    static constexpr int kEdgesA[4] = {0, 1, 2, 3}, kEdgesB[4] = {1, 2, 3, 0};
+    const int* corner = (piece.suspension & 3) == 1 ? kEdgesA : kEdgesB;
+    const std::uint32_t row = static_cast<std::uint32_t>(widthPlusOne_);
+    const auto vertexX = [&](int c) {
+        return static_cast<float>(static_cast<std::uint32_t>(cell->vertexBaseHeights[c]) % row) * cellSize_;
+    };
+    const auto vertexZ = [&](int c) {
+        return static_cast<float>(static_cast<std::uint32_t>(cell->vertexBaseHeights[c]) / row) * cellSize_;
+    };
+    const auto towards = [](float from, float to) { return from == to ? 0.0f : (to <= from ? -1.0f : 1.0f); };
+    for (int side = 0; side != 2; ++side) {
+        if (side == 0 && (piece.suspension & 0x10)) continue;
+        if (side == 1 && (piece.suspension & 8)) continue;
+        const int base = side * 2;
+        const int a = corner[base], b = corner[base + 1], other = corner[(base + 3) & 3];
+        const float dx = towards(vertexX(a), vertexX(other)) * type.suspensionInset;
+        const float dz = towards(vertexZ(a), vertexZ(other)) * type.suspensionInset;
+        const float ax = vertexX(a) + dx, az = vertexZ(a) + dz;
+        const float bx = vertexX(b) + dx, bz = vertexZ(b) + dz;
+        float tile = type.suspensionTileHeight;
+        if (tile == 0.0f) tile = static_cast<float>(std::max(static_cast<double>(std::fabs(az - bz)), static_cast<double>(std::fabs(ax - bx))));
+        const float baseA = type.suspensionDeckOffset + piece.corners[a];
+        const float baseB = type.suspensionDeckOffset + piece.corners[b];
+        const float heightA = piece.wireValue * piece.wire[a];
+        const float heightB = piece.wireValue * piece.wire[b];
+        float pos[4][3] = {};
+        const auto place = [&](float x0, float z0, float x1, float z1) {
+            pos[0][0] = x0; pos[0][2] = z0;
+            pos[1][0] = x1; pos[1][2] = z1;
+            pos[2][0] = x0; pos[2][2] = z0;
+            pos[3][0] = x1; pos[3][2] = z1;
+        };
+        if (piece.suspension & 4) {
+            float uv[4][2] = {{0.0f, 0.0f}, {0.5f, 0.0f}, {0.0f, 0.0f}, {0.5f, 0.0f}};
+            const float mx = (ax + bx) * 0.5f, mz = (az + bz) * 0.5f;
+            const float baseMid = (baseA + baseB) * 0.5f;
+            place(ax, az, mx, mz);
+            AddSuspendedTileStructures(occupant, pos, uv, tile, baseA, heightA, baseMid, piece.wireValue,
+                                       type.suspensionTopTexture, type.suspensionHangerTexture);
+            place(mx, mz, bx, bz);
+            AddSuspendedTileStructures(occupant, pos, uv, tile, baseMid, piece.wireValue, baseB, heightB,
+                                       type.suspensionTopTexture, type.suspensionHangerTexture);
+        } else {
+            float uv[4][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, 0.0f}, {1.0f, 0.0f}};
+            place(ax, az, bx, bz);
+            AddSuspendedTileStructures(occupant, pos, uv, tile, baseA, heightA, baseB, heightB, type.suspensionTopTexture,
+                                       type.suspensionHangerTexture);
+        }
+    }
+}
+
 // i386 0x00150814: a bridge occupant over the cell, its model placed at the piece's height, the passage under it below the
 // cell's lowest corner by the type's clearance (unless the model exemplar has property 0xabe1b5a3), immovable, inserted.
-// NOT PORTED: the support column down from the piece (supportHeight >= 0: AddSupportColumnToOccupant), the suspension
-// structures (AddSuspendedBridgeStructures) and the cable parts.
+// Then the support column, the suspension wires and the cable stretches become added parts of the occupant.
 void cSC4NetworkTool::InsertBridgePiece(const tBridgePiece& piece, cSC4NetworkCellInfo* cell, const cSC4NetworkBridgeTypeInfo& type,
                                         std::list<cSC4NetworkOccupant*>* out) {
     INetworkToolHost* host = GetNetworkToolHost();
@@ -678,6 +1082,54 @@ void cSC4NetworkTool::InsertBridgePiece(const tBridgePiece& piece, cSC4NetworkCe
             static_cast<cISCResExemplar*>(exemplar)->Release();
         }
         found->Release();
+    }
+    if (piece.supportHeight >= 0.0f) {
+        // The support column: the piece's footprint (pylon or ramp, at its rotation) from the piece height less the support
+        // height down to the cell's lowest terrain vertex, split at the water surface when there is water over the ground.
+        float at[3] = {0, 0, 0};
+        occupant->GetPosition(at);
+        float ground = FLT_MAX;
+        for (int i = 0; i != 4; ++i) ground = std::min(ground, host ? host->TerrainVertexHeight(cell->vertexBaseHeights[i]) : 0.0f);
+        const float topY = at[1] - piece.supportHeight;
+        if (ground <= topY) {
+            const std::vector<float>& footprint = piece.kind == 1 ? type.pylonFootprint : type.rampFootprint;
+            float top[4][3], bottom[4][3];
+            std::size_t index = static_cast<std::size_t>(piece.rotation) * 8;
+            for (int k = 0; k != 4; ++k, index += 2) {
+                const float fx = index < footprint.size() ? footprint[index] : 0.0f;
+                const float fz = index + 1 < footprint.size() ? footprint[index + 1] : 0.0f;
+                top[k][0] = bottom[k][0] = at[0] + fx;
+                top[k][1] = topY;
+                bottom[k][1] = ground;
+                top[k][2] = bottom[k][2] = at[2] + fz;
+            }
+            const float water = host ? host->WaterLevelAt(at[0], at[2]) : 0.0f;
+            const float(*upper)[3] = top;
+            float middle[4][3];
+            if (water > (bottom[0][1] + bottom[1][1] + bottom[2][1] + bottom[3][1]) * 0.25f) {
+                const float line = static_cast<float>(static_cast<double>(water) - 0.01);
+                for (int k = 0; k != 4; ++k) {
+                    middle[k][0] = bottom[k][0];
+                    middle[k][1] = std::min(top[k][1], line);
+                    middle[k][2] = bottom[k][2];
+                }
+                if (water < (top[0][1] + top[1][1] + top[2][1] + top[3][1]) * 0.25f) AddSupportColumnToOccupant(occupant, top, middle, false);
+                upper = middle;
+            }
+            AddSupportColumnToOccupant(occupant, upper, bottom, false);
+        }
+    }
+    if (piece.suspension != 0) AddSuspendedBridgeStructures(occupant, piece, cell, type);
+    // The cable stretches: a quad of the stretch's half width above and below it, both faces (_texcoords_207958 /
+    // _triIndices_207959, i386 0x008457c0 / 0x00845780).
+    for (const tBridgeCablePiece& cable : piece.cables) {
+        static constexpr float kCableUv[4][2] = {{0.0f, 1.0f}, {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}};
+        static constexpr std::uint32_t kCableTris[4][3] = {{0, 1, 2}, {0, 2, 3}, {0, 2, 1}, {0, 3, 2}};
+        const float quad[4][3] = {{cable.from[0], cable.from[1] + cable.halfWidth, cable.from[2]},
+                                  {cable.from[0], cable.from[1] - cable.halfWidth, cable.from[2]},
+                                  {cable.to[0], cable.to[1] - cable.halfWidth, cable.to[2]},
+                                  {cable.to[0], cable.to[1] + cable.halfWidth, cable.to[2]}};
+        for (const auto& tri : kCableTris) occupant->AddPart(quad, kCableUv, tri, cable.texture);
     }
     if (unknown98_) ClearNetworkOccsFromCell(piece.x, piece.z);
     occupant->SetImmovable(true);                                                          // vslot 0x48
