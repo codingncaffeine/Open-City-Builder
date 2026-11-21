@@ -4,6 +4,7 @@
 // of every constraint projection (slope, smoothness through either end and through the middle,
 // preferred value/range clamping), the equality-set merge/application, the solved-vertex walk, the
 // failure paths and the debug dump's terrain queries.
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -353,6 +354,37 @@ void TestEqualityTransitive() {
     }
 }
 
+// Two free vertices with different hints: the equality set survives the range pass (i386 0x0014b102
+// keeps it) and the first solved height is copied to the other (the float flavour, 0x0014b8dc).
+void TestEqualityHoldsWithoutFixedVertex() {
+    cSC4VertexHtConstraintSatisfier solver;
+    CHECK(solver.Init(0.0f, 100.0f));
+    solver.AddVertexToSolve(1, 10.0f);
+    solver.AddVertexToSolve(2, 40.0f);
+    solver.InsertEqualityConstraint(1, 2);
+    CHECK(solver.Solve());
+    float h1 = -1.0f, h2 = -2.0f;
+    CHECK(solver.GetHeight(1, h1));
+    CHECK(solver.GetHeight(2, h2));
+    CHECK(h1 == h2);
+    CHECK(h1 == 10.0f || h1 == 40.0f);
+}
+
+// A slope constraint between two free vertices survives the range pass (i386 0x0014ae02) and bounds the
+// second vertex once the first one is solved.
+void TestSlopeHoldsAfterRangePass() {
+    cSC4VertexHtConstraintSatisfier solver;
+    CHECK(solver.Init(0.0f, 100.0f));
+    solver.AddVertexToSolve(1, 0.0f);
+    solver.AddVertexToSolve(2, 50.0f);
+    solver.InsertSlopeConstraint(1, 2, 5.0f);
+    CHECK(solver.Solve());
+    float h1 = -1.0f, h2 = -1.0f;
+    CHECK(solver.GetHeight(1, h1));
+    CHECK(solver.GetHeight(2, h2));
+    CHECK(std::fabs(h1 - h2) <= 5.0f);
+}
+
 void TestEqualityConflictFails() {
     cSC4VertexHtConstraintSatisfier solver;
     CHECK(solver.Init(0.0f, 100.0f));
@@ -399,11 +431,10 @@ void TestSmoothnessEndFixedThroughMiddle() {
     CHECK(h3 == 8.0f);  // 2*h2 - h1 - limit
 }
 
-// Quirk: the projection through an END that is still a *range* is stored once and consumed, so the
-// final heights need not satisfy the smoothness limit. Here vertex 1's [0,100] window is projected
-// through vertex 2 (10) into vertex 3's window ([0,22]) before either end is solved; the two ends then
-// snap to their hints and the second difference ends up at -20, outside the limit of 2.
-void TestSmoothnessRangeProjectionIsConservative() {
+// The projection through an end that is still a range only narrows the other end ([0,22] here) and
+// stays in place (i386 0x0014af82 never erases), so when the first end is solved the second is pulled
+// to within the limit: one end keeps its hint 0, the other lands on 2*10 - 0 - 2 = 18.
+void TestSmoothnessHoldsAfterRangeProjection() {
     cSC4VertexHtConstraintSatisfier solver;
     CHECK(solver.Init(0.0f, 100.0f));
     solver.AddVertexToSolve(1, 0.0f);
@@ -418,14 +449,13 @@ void TestSmoothnessRangeProjectionIsConservative() {
     CHECK(solver.GetHeight(2, h2));
     CHECK(solver.GetHeight(3, h3));
     CHECK(h2 == 10.0f);
-    CHECK(h1 == 0.0f && h3 == 0.0f);  // both ends kept their hints: the relation is not restored
-    CHECK(h1 - 2.0f * h2 + h3 == -20.0f);
+    CHECK(std::min(h1, h3) == 0.0f && std::max(h1, h3) == 18.0f);
+    CHECK(std::fabs(h1 - 2.0f * h2 + h3) <= 2.0f);
 }
 
-// Quirk: with both smoothness ends fixed and the middle still a window, the fixed-end constraints are
-// consumed while propagating the middle's *range* (they only constrain an unsolved vertex), so the
-// middle ends up at its hinted height.
-void TestSmoothnessFixedEndsLeaveMiddleHinted() {
+// With both smoothness ends fixed (10 and 20) the end-fixed projection survives the middle's range pass
+// and narrows the middle to [14, 16] when the second end is reached; the hint 33 is clamped to 16.
+void TestSmoothnessFixedEndsBoundTheMiddle() {
     cSC4VertexHtConstraintSatisfier solver;
     CHECK(solver.Init(0.0f, 100.0f));
     solver.AddVertexToSolve(1, 0.0f);
@@ -440,7 +470,8 @@ void TestSmoothnessFixedEndsLeaveMiddleHinted() {
     CHECK(solver.GetHeight(2, h2));
     CHECK(solver.GetHeight(3, h3));
     CHECK(h1 == 10.0f && h3 == 20.0f);
-    CHECK(h2 == 33.0f);  // the hint, not the smoothness-projected 15
+    CHECK(h2 == 16.0f);
+    CHECK(std::fabs(h1 - 2.0f * h2 + h3) <= 2.0f);
 }
 
 // A repeated smoothness constraint keeps the smaller second-difference limit.
@@ -499,6 +530,23 @@ void TestSolvedVertexWalk() {
         CHECK(entry.second == static_cast<float>(entry.first) + 0.5f);
     }
     CHECK(seen == (std::set<int>{1, 2, 3}));
+}
+
+// ---------------------------------------------------------------------------------------------
+// IsInToSolveSet: true while the vertex has a live window; Solve consumes the windows.
+// ---------------------------------------------------------------------------------------------
+void TestIsInToSolveSet() {
+    cSC4VertexHtConstraintSatisfier solver;
+    CHECK(solver.Init(0.0f, 100.0f));
+    CHECK(!solver.IsInToSolveSet(7));
+    solver.AddVertexToSolve(7, 3.0f);
+    CHECK(solver.IsInToSolveSet(7));
+    CHECK(!solver.IsInToSolveSet(8));
+    solver.InsertFixedVertex(8, 4.0f);
+    CHECK(solver.IsInToSolveSet(8));
+    CHECK(solver.Solve());
+    CHECK(!solver.IsInToSolveSet(7));
+    CHECK(!solver.IsInToSolveSet(8));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -594,13 +642,16 @@ int main() {
     TestRangeConstraintFold();
     TestInvertedRangeFailsSolve();
     TestEqualityTransitive();
+    TestEqualityHoldsWithoutFixedVertex();
+    TestSlopeHoldsAfterRangePass();
     TestEqualityConflictFails();
     TestEqualityForUnknownVertices();
     TestSmoothnessEndFixedThroughMiddle();
-    TestSmoothnessRangeProjectionIsConservative();
-    TestSmoothnessFixedEndsLeaveMiddleHinted();
+    TestSmoothnessHoldsAfterRangeProjection();
+    TestSmoothnessFixedEndsBoundTheMiddle();
     TestSmoothnessDuplicateKeepsMinimum();
     TestSolvedVertexWalk();
+    TestIsInToSolveSet();
     TestDumpConstraintsQueriesTerrain();
     TestUnknownVertexInserts();
     TestUnconstrainedVertexKeepsHint();

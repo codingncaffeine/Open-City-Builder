@@ -98,7 +98,7 @@ void InstallToxicHost();   // NativeToxic.cpp
 void InstallTractDeveloperStub();
 void InstallTutorialSystemStub();
 void InstallTutorialTaskStub();
-void InstallVertexHtConstraintStub();
+void InstallVertexHtConstraintHost();   // NativeNetworkTool.cpp
 void InstallView3DWinStub();
 void InstallViewInputStub();
 void InstallEffectToolStub();
@@ -215,7 +215,7 @@ void InstallStubHosts() {
     InstallTutorialTaskStub();
     InstallTutorialHosts();               // NativeTutorial.cpp: the tutorial system's, its tasks' and its window's real hosts
     InstallUndergroundHosts();   // NativeUnderground.cpp
-    InstallVertexHtConstraintStub();
+    InstallVertexHtConstraintHost();      // the height solver's terrain (NativeNetworkTool.cpp)
     InstallView3DWinStub();
     InstallViewInputStub();
     InstallEffectToolStub();

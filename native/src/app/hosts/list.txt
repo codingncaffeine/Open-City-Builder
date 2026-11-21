@@ -65,7 +65,6 @@ TutorialSystem
 TutorialTask
 UndergroundNetworkTool
 UndergroundOccupant
-VertexHtConstraint
 View3DWin
 ViewInput
 EffectTool

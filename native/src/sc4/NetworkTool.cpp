@@ -1176,4 +1176,20 @@ void LoadNetworkPlacementParams(const cISCPropertyHolder* exemplar, cSC4NetworkP
     if (!H::GetPropertyValue(exemplar, 0xea86e3b5, p.unknownA8[9])) p.unknownA8[5] = 1;
 }
 
+// The end of LoadPlacementParams (i386 0x00152598), outside the exemplar test: tan of the three angles times 16.0
+// (DOUBLE_00a70e30), the diagonal variants times 0.70710677 (FLOAT_00a708dc).
+void LoadNetworkSlopeLimits(const cSC4NetworkPlacementParams& p, cSC4NetworkSlopeLimits& limits) {
+    float angle = 0.0f;
+    std::memcpy(&angle, &p.unknown00[0], sizeof angle);
+    float value = static_cast<float>(std::tan(static_cast<double>(angle)) * 16.0);
+    limits.maxSlope = value;
+    limits.maxSlopeDiagonal = value * 0.70710677f;
+    std::memcpy(&angle, &p.unknown00[2], sizeof angle);
+    value = static_cast<float>(std::tan(static_cast<double>(angle)) * 16.0);
+    limits.maxSmoothness = value;
+    limits.maxSmoothnessDiagonal = value * 0.70710677f;
+    std::memcpy(&angle, &p.unknown00[1], sizeof angle);
+    limits.unknown110 = static_cast<float>(std::tan(static_cast<double>(angle)) * 16.0);
+}
+
 }  // namespace sc4

@@ -552,7 +552,6 @@ src/app/hosts/StubTutorialSystem.cpp
 src/app/hosts/StubTutorialTask.cpp
 src/app/NativeUnderground.cpp
 src/app/NativeNetworkLots.cpp
-src/app/hosts/StubVertexHtConstraint.cpp
 src/app/NativeView3DWinHost.cpp
 src/app/hosts/StubViewInput.cpp
 src/app/hosts/StubWeather.cpp

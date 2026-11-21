@@ -43,6 +43,7 @@
 #include "rz/cRZKeyboard.h"
 #include "gz/CommandServer.h"
 #include "app/NativeNetworkManager.h"
+#include "app/NativeNetworkTool.h"
 #include "app/NativeWinControls.h"
 #include "app/NativeNetworkLots.h"
 #include "app/NativeUnderground.h"
@@ -1353,6 +1354,10 @@ int RunScenario(const std::string& path) {
             int x1 = 0, z1 = 0, x2 = 0, z2 = 0;
             words >> type >> x1 >> z1 >> x2 >> z2;
             native::NativeLayNetworkLine(type, x1, z1, x2, z2);
+        } else if (command == "terrainheights") {   // terrainheights X0 Z0 X1 Z1: the terrain altitude at every vertex of a rectangle (read-only)
+            int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
+            words >> x0 >> z0 >> x1 >> z1;
+            native::NativeTerrainHeightsReport(x0, z0, x1, z1);
         } else if (command == "powerfunding") {   // powerfunding PERCENT: the power department's funding (as the budget window sets it)
             int percent = 100;
             words >> percent;

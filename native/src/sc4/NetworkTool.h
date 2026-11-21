@@ -468,7 +468,30 @@ public:
     virtual void InsertPreferredValueConstraint(int vertexId, float value) = 0;
     virtual void InsertFixedVertex(int vertexId, float height) = 0;
     virtual void InsertEqualityConstraint(std::uint32_t vertexA, std::uint32_t vertexB) = 0;
+    // The rest of the class as the base tool's height solve (SmoothenNetwork, CanTilesBeSupportedOnTerrain,
+    // UpdateTerrainHeights) drives it. The defaults stand for a satisfier without a solver: nothing is kept and
+    // every solve succeeds with no solved vertex.
+    virtual bool Init(float /*initialHeightLow*/, float /*initialHeightHigh*/) { return false; }   // 0x1001bd156
+    virtual bool Shutdown() { return true; }                                                      // 0x1001bcc74
+    virtual bool Solve() { return true; }                                                         // 0x1001bdebe
+    virtual bool IsInToSolveSet(int /*vertexId*/) { return false; }                               // i386 0x0067b564
+    virtual void InsertSlopeConstraint(int /*vertexA*/, int /*vertexB*/, float /*maxSlope*/) {}   // 0x1001bd80a
+    virtual void InsertSmoothnessConstraint(int /*vertexA*/, int /*vertexB*/, int /*vertexC*/, float /*limit*/) {}   // 0x1001bd8fc
+    virtual void RewindSolvedVertexList() {}                                                      // 0x1001bdeac
+    virtual bool GetNextSolvedVertexAndItsHeight(int& /*vertexId*/, float& /*height*/) { return false; }   // 0x1001bd11c
 };
+
+// The five floats LoadPlacementParams (i386 0x00152598) derives at the end from the placement block and keeps at
+// sNetworkTypeInfo +0x100..+0x110 (i386 record). The record's constructor (0x00156958) sets the defaults below.
+struct cSC4NetworkSlopeLimits {
+    float maxSlope = 10.0f;               // +0x100 tan(params +0x00) * 16: |hA - hB| along a straight edge
+    float maxSlopeDiagonal = 7.0710678f;  // +0x104 the same * 0.70710677 (a diagonal edge)
+    float maxSmoothness = 10.0f;          // +0x108 tan(params +0x08) * 16: |hA - 2 hB + hC| along a straight run
+    float maxSmoothnessDiagonal = 7.0710678f;   // +0x10c the same * 0.70710677
+    float unknown110 = 20.0f;             // +0x110 tan(params +0x04) * 16 (no reader in the height solve)
+};
+// The tail of LoadPlacementParams: the slope and smoothness limits from the placement block's three angles.
+void LoadNetworkSlopeLimits(const cSC4NetworkPlacementParams& params, cSC4NetworkSlopeLimits& limits);
 
 // One cSC4NetworkTypeInfo record (&sNetworkTypeInfo + networkType * 0x180, @ 0x100b23190; the record is
 // filled at start-up by ReloadNetworkTypeInfo 0x100186f9c from the network ini, which is not recovered).
@@ -488,6 +511,8 @@ public:
     // The unordered_map<uint32, cSC4NetworkSupportStructInfo> at +0x58: the value pointer, or null.
     virtual const cSC4NetworkSupportStructInfo* FindSupportStructure(std::uint32_t id) const = 0;
     virtual std::uint32_t PlacementExemplarId() const = 0;           // kNetworkPlacementExemplarIDs[type]
+    // sNetworkTypeInfo +0x100..+0x110 (i386): the limits the height solve gives its slope and smoothness constraints.
+    virtual const cSC4NetworkSlopeLimits& SlopeLimits() const { static const cSC4NetworkSlopeLimits defaults; return defaults; }
 };
 
 // Every engine global / unrecovered neighbour the recovered functions reach. One method per original call, with
@@ -503,6 +528,25 @@ public:
     virtual float TerrainCellSize() = 0;
     // SL::spTerrain i386 vslot 0x34: the terrain height at a vertex id (the cell info's vertex ids, +0xb0).
     virtual float TerrainVertexHeight(std::int32_t /*vertex*/) { return 0.0f; }
+    // The terrain calls of the height solve (i386 vslots of cSTETerrain): 0x24 GetVertIndex(x, z), 0x60
+    // MaxAllowedHeight, 0xc4 SetAltitude(vertex, height), 0x15c / 0x160 Begin / EndLongTerrainOperation and 0x114
+    // RedisplayTerrain(true, true, rect, flags) over an inclusive vertex rectangle.
+    virtual std::int32_t TerrainVertexIndex(std::int32_t /*x*/, std::int32_t /*z*/) { return -1; }
+    virtual float TerrainMaxAllowedHeight() { return 0.0f; }
+    virtual void SetTerrainVertexHeight(std::int32_t /*vertex*/, float /*height*/) {}
+    virtual void BeginLongTerrainOperation() {}
+    virtual void RedisplayTerrain(std::int32_t /*minX*/, std::int32_t /*minZ*/, std::int32_t /*maxX*/, std::int32_t /*maxZ*/,
+                                  std::uint32_t /*flags*/) {}
+    virtual void EndLongTerrainOperation() {}
+    // The lot manager (the tool's +0x4c member, i386 vslot 0x68): GetLotVertexAltitudeAdjustmentRange(x, z, min, max).
+    // Without lots both bounds are FLT_MAX, as the zone developer answers for a vertex no lot touches.
+    virtual void LotVertexAltitudeAdjustmentRange(std::int32_t /*x*/, std::int32_t /*z*/, float& minAltitude, float& maxAltitude) {
+        minAltitude = 3.4028235e38f;
+        maxAltitude = 3.4028235e38f;
+    }
+    // SL::spLotManager vslot 0x14 GetLot(x, z, false) and the lot's bounding cell rectangle {minX, minZ, maxX, maxZ};
+    // false when no lot covers the cell.
+    virtual bool LotBoundingRectAt(std::uint32_t /*x*/, std::uint32_t /*z*/, std::int32_t (&/*rect*/)[4]) { return false; }
     // SL::spTerrain slot +0x110 (i386 vslot 0x88 = cSTETerrain::CellHasWater): IsTerrainOK reads it as "the cell has
     // water" (true = water). The name is the first port's.
     virtual bool TerrainAllowsNetwork(std::uint32_t x, std::uint32_t z) = 0;
@@ -803,7 +847,28 @@ public:
                            std::unordered_set<std::uint32_t>& unsolved, const cSC4TileEvaluator& evaluator, std::uint32_t networkType);
     bool AdjustTileSubsets(std::vector<tSolvedCell>& cells, bool retry);
     bool VerifyTileSubsets(std::vector<tSolvedCell>& cells);
-    bool SmoothenNetwork(int pass);
+    // --- the height solve (i386 0x001444ae SmoothenNetwork and its helpers, 0x00145306 / 0x001454d0) ---
+    // `pad` widens the smoothing set around the drag (PlaceNetwork retries with 0..3, or 1..3 with bridges).
+    bool SmoothenNetwork(int pad);
+    // vslots 0x138 / 0x13c / 0x140 (the derived tools override them).
+    virtual void InsertRangeConstraintsForCell(std::uint32_t cellKey);
+    virtual void ApplyPlaneConstraintToRegularCells(std::vector<tImmovablePortion>& portions);
+    virtual void InsertNetworkSpecificConstraintsForCell(std::uint32_t /*cellKey*/) {}   // i386 0x00142752 (empty)
+    void ComputeInitialSmoothingSet(int pad);
+    void InsertConstraintsForCellsToBeSmoothed(const std::unordered_set<std::uint32_t>& cells);
+    void InsertSlopeAndSmoothnessConstraintsForCell(std::uint32_t cellKey);
+    void InsertSmoothnessConstraint(int vertexA, int vertexB, int vertexC, float limit);
+    // cSC4NetworkTool::tCrossSection: the two vertex ids across an edge (-1 = none).
+    struct tCrossSection {
+        std::int32_t a = -1, b = -1;
+    };
+    bool GetCrossSections(const cSC4NetworkCellInfo& cell, std::uint32_t networkType, int side, tCrossSection& here,
+                          tCrossSection& before, tCrossSection& after, bool& diagonal);
+    bool IsCellBeingSmoothed(std::uint32_t x, std::uint32_t z) const;
+    void ComputeReferencePlaneForVertexMovement(float* plane, int firstStep, int lastStep, float startHeight, float endHeight);
+    void GetElevationForReferencePlaneVertex(std::int32_t vertex, float& height, bool& pinned);
+    void MarkPositionChangedExistingOccupantsAsNewlySolved();
+    void MarkTerrainChangedExistingOccupantsAsNewlySolved(const std::vector<std::uint32_t>& vertices);
     virtual void CreateNetworkOccupant(cSC4NetworkCellInfo* cell, cSC4NetworkOccupant** out, float (*corners)[3], std::uint32_t clsid);
     virtual void AddCellPreview(cSC4NetworkCellInfo& cell, const tSolvedCell& solved);
     virtual void InsertNetworkOccupant(cSC4NetworkCellInfo& cell, const tSolvedCell& solved, std::list<cSC4NetworkOccupant*>* out);

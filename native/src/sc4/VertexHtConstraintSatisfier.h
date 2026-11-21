@@ -36,8 +36,9 @@
 //  * InsertRangeConstraint has a second find() of the same key whose "not found" branch creates the
 //    entry (and copies 16 bytes of uninitialized stack); the first find() returning non-null makes it
 //    unreachable, but the branch is reproduced (with the garbage bytes zeroed, since reading them is UB).
-//  * Equality constraints are applied once and their set is deleted, but the range-flavoured
-//    UpdateEqualityConstraints never clears the kFlagEquality bit (only the float-flavoured one does).
+//  * The range flavours of the Update* passes only narrow windows and keep every constraint (and the
+//    equality flags); the float flavours, run when a vertex gets one height, apply a constraint once
+//    and remove it (the equality set is deleted, the list entry erased).
 //  * A failed equality intersection returns false while leaving the equality set and the partially
 //    narrowed windows in place; Solve's cleanup then removes them.
 //  * InsertSlopeConstraint/InsertSmoothnessConstraint mark only the vertices whose find() succeeded
@@ -170,6 +171,8 @@ public:
     void InsertPreferredRangeConstraint(std::int32_t vertexId, float low, float high);
     // 0x1001bd67c: AddVertexToSolve + InsertRangeConstraint(vertexId, h, h).
     void InsertFixedVertex(std::int32_t vertexId, float height);
+    // i386 0x0067b564 (IsInToSolveSet(int) const): whether the vertex still has a live window.
+    bool IsInToSolveSet(std::int32_t vertexId) const;
 
     // ---- constraints ----------------------------------------------------------------------------
     // 0x1001bd178: joins the two vertices' equality sets (creating/merging as needed).
