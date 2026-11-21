@@ -53,7 +53,10 @@ using namespace sc4;
 // A construction worker as the lot's construction occupant drives it (IConstructionAutomaton over the automaton).
 class LotCrewAutomaton final : public IConstructionAutomaton {
 public:
-    explicit LotCrewAutomaton(cSC4Automaton* automaton) : automaton_(automaton) {}
+    // The view holds a reference on the worker as the original's counted pointer does: a worker the pedestrian manager
+    // drops (a bulldozed lot) stays valid until the construction occupant lets its crew go.
+    explicit LotCrewAutomaton(cSC4Automaton* automaton) : automaton_(automaton) { automaton_->AddRef(); }
+    ~LotCrewAutomaton() { automaton_->Release(); }
     bool QueryInterface(std::uint32_t, void**) override { return false; }
     std::uint32_t AddRef() override { return ++refs_; }
     std::uint32_t Release() override {
