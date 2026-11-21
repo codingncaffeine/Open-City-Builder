@@ -160,9 +160,18 @@ struct FakeServices : IBuildingPlacementServices {
     bool AddOccupant(IPlacedOccupant*, bool) override { ++added; return true; }
     bool RemoveOccupant(IPlacedOccupant*, bool, bool) override { ++removed; return true; }
 };
-struct Source final : IDeclineSource { float value; explicit Source(float v) : value(v) {} float Condition() override { return value; } };
+// A developer as the decline plan sees it: its purpose, active demand and decline list.
+struct Source final : IGrowthDeveloperRef {
+    float value; std::int32_t purpose = 1; std::vector<GrowthTract> decline;
+    explicit Source(float v, std::int32_t p = 1, std::vector<GrowthTract> d = {}) : value(v), purpose(p), decline(std::move(d)) {}
+    void Init(cISCPropertyHolder*) override {}
+    float ActiveDemand() const override { return value; }
+    std::int32_t Purpose() const override { return purpose; }
+    std::vector<GrowthTract> DeclineList() const override { return decline; }
+};
 struct Tract final : ITractDeveloperRef {
-    std::vector<int> results; int calls = 0; int ExecuteOutcome(const TractOutcome&) override { return results[calls++]; }
+    std::vector<int> results; int calls = 0; std::vector<TractOutcome> executed;
+    int ExecuteOutcome(const TractOutcome& outcome) override { executed.push_back(outcome); return results[calls++]; }
     std::vector<std::pair<int, int>> grown; int growResult = 1;
     int Grow(IGrowthDeveloperRef*, int x, int z, std::uint8_t) override { grown.push_back({x, z}); return growResult; }
 };
@@ -589,6 +598,40 @@ int main() {
         sim->SetPlacementServices(nullptr);
     }
     sim->Release();
+
+    // ---- the decline plan (PlanDecline 0x10015060c): developers with demand below -20, agriculture excluded, one tract a day
+    {
+        auto* decline = new cSC4BuildingDevelopmentSimulator();
+        decline->AddRef();
+        Source falling(-30, 1, {{1, 2, 1}, {3, 4, 1}});
+        Source farms(-100, 5, {{9, 9, 1}});                                         // agriculture never declines this way
+        Source growing(10, 2, {{5, 5, 1}});                                         // demand above -20: not planned
+        Source mild(-20, 3, {{6, 6, 1}});                                           // -20 is not below -20
+        decline->SetDeveloperForTest(0x1010, &falling);
+        decline->SetDeveloperForTest(0x4100, &farms);
+        decline->SetDeveloperForTest(0x3110, &growing);
+        decline->SetDeveloperForTest(0x3120, &mild);
+        decline->PlanDecline();
+        const std::list<DeclineEntry>& plan = decline->DeclinePlan();
+        CHECK(plan.size() == 2);
+        if (plan.size() == 2) {
+            CHECK(plan.front().a == 1 && plan.front().b == 2 && plan.front().day == 7 && plan.front().source == &falling);
+            CHECK(plan.back().a == 3 && plan.back().b == 4 && plan.back().day == 8);   // the next tract a day later
+        }
+        Tract tract;
+        tract.results = {12, 12};
+        decline->SetTractDeveloper(&tract);
+        decline->ExecuteDeclinePlan();                                             // day 7: the first tract declines
+        CHECK(tract.calls == 1 && tract.executed.size() == 1 && tract.executed[0].a == 1 && tract.executed[0].b == 2 &&
+              tract.executed[0].source == &falling);
+        CHECK(decline->DeclinePlan().size() == 1);
+        falling.value = -5;                                                         // demand recovered: the rest is dropped
+        decline->PlanDecline();
+        CHECK(decline->DeclinePlan().empty());
+        decline->SetTractDeveloper(nullptr);
+        for (std::uint32_t type : {0x1010u, 0x4100u, 0x3110u, 0x3120u}) decline->SetDeveloperForTest(type, nullptr);
+        decline->Release();
+    }
 
     // ---- the simulation messages (DoMessage 0x10014e84c, DoMonthlySimulation, DoIdle)
     {

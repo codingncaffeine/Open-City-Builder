@@ -132,6 +132,14 @@ public:
         return out;
     }
     float ActiveDemand() const override { return GrowthDeveloperActiveDemand(developer_); }
+    std::int32_t Purpose() const override { return GrowthDeveloperPurpose(developer_); }
+    std::vector<GrowthTract> DeclineList() const override {
+        std::vector<std::array<std::int32_t, 3>> items;
+        GrowthDeveloperDeclineList(developer_, items);
+        std::vector<GrowthTract> out;
+        for (const auto& i : items) out.push_back(GrowthTract{i[0], i[1], i[2]});
+        return out;
+    }
     cIGZUnknown* Object() const override { return GrowthDeveloperObject(developer_); }   // the record's developer reference
     void* Handle() const { return developer_; }
 private:
@@ -141,7 +149,10 @@ private:
 // SL::spTractDeveloper: the city's cSC4TractDeveloper, reached through NativeTractDevelopment.cpp.
 class TractDeveloperRef final : public ITractDeveloperRef {
 public:
-    int ExecuteOutcome(const TractOutcome&) override { SC4_UNWIRED("ITractDeveloperRef::ExecuteOutcome (the decline plan, layer 3)"); return 0; }
+    int ExecuteOutcome(const TractOutcome& outcome) override {   // vslot 0x30 Decline
+        auto* ref = static_cast<GrowthDeveloperRef*>(outcome.source);   // every developer this host made is one
+        return ref ? NativeTractDecline(ref->Handle(), outcome.a, outcome.b, outcome.flag) : 0;
+    }
     int Grow(IGrowthDeveloperRef* developer, int x, int z, std::uint8_t style) override {
         auto* ref = static_cast<GrowthDeveloperRef*>(developer);   // every developer this host made is one
         return ref ? NativeTractGrow(ref->Handle(), x, z, style) : 0;

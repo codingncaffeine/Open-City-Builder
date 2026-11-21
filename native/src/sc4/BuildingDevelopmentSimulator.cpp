@@ -1223,11 +1223,77 @@ void cSC4BuildingDevelopmentSimulator::CreateDeveloper(cISCPropertyHolder* prope
     lastBuildDay_[static_cast<std::int32_t>(developerType)] = g_host ? g_host->SimulatorDay() : 0;
 }
 
+// 0x10015060c (Mac i386 0x000f8f2a): the month's decline plan. Every developer but agriculture (purpose 5) whose active demand is
+// below -20 takes part, weighted by +0x1a8 less its demand. Tracts are drawn one at a time: a weighted developer is picked at
+// random and the next tract of its decline list joins the plan (a developer whose list is used up adds nothing), until no
+// developer that takes part has tracts left. The n-th tract planned may run from n days after today, so the plan declines
+// at most one tract a day.
+void cSC4BuildingDevelopmentSimulator::PlanDecline() {
+    declinePlan_.clear();
+    struct Cursor {
+        std::vector<GrowthTract> list;
+        std::size_t next = 0;
+    };
+    std::map<IGrowthDeveloperRef*, Cursor> cursors;
+    auto declining = [](IGrowthDeveloperRef* developer, std::int32_t& demand) {
+        if (!developer || developer->Purpose() == 5) return false;                 // vslot 0x38
+        demand = static_cast<std::int32_t>(developer->ActiveDemand());              // vslot 0x90 -> 0x60
+        return demand < -0x14;
+    };
+    std::uint32_t total = 0;
+    for (const auto& entry : developers_) {
+        IGrowthDeveloperRef* developer = entry.second;
+        if (!developer || developer->Purpose() == 5) continue;
+        std::int32_t demand = 0;
+        if (declining(developer, demand)) total += developerWeightBonus_ - static_cast<std::uint32_t>(demand);
+        cursors[developer].list = developer->DeclineList();                          // vslot 0x60
+    }
+    const std::uint32_t today = static_cast<std::uint32_t>(g_host ? g_host->SimulatorDay() : 0);
+    std::uint32_t planned = 0;
+    for (;;) {
+        std::int32_t pick = static_cast<std::int32_t>(g_host ? g_host->RandomBelow(total) : 0);
+        for (const auto& entry : developers_) {
+            std::int32_t demand = 0;
+            if (!declining(entry.second, demand)) continue;
+            const std::int32_t weight = static_cast<std::int32_t>(developerWeightBonus_) - demand;
+            if (pick < weight) {
+                Cursor& cursor = cursors[entry.second];
+                if (cursor.next < cursor.list.size()) {
+                    const GrowthTract& tract = cursor.list[cursor.next++];
+                    DeclineEntry plan;
+                    plan.day = planned++;
+                    plan.a = tract.x;
+                    plan.b = tract.z;
+                    plan.source = entry.second;
+                    plan.flag = 0;
+                    declinePlan_.push_back(plan);
+                }
+                break;
+            }
+            pick -= weight;
+        }
+        bool more = false;
+        for (const auto& entry : developers_) {
+            std::int32_t demand = 0;
+            if (!declining(entry.second, demand)) continue;
+            const Cursor& cursor = cursors[entry.second];
+            if (cursor.next < cursor.list.size()) { more = true; break; }
+        }
+        if (!more) break;
+    }
+    if (planned > 0)
+        for (DeclineEntry& plan : declinePlan_) {   // the original adds in float and converts back to an unsigned day
+            float day = static_cast<float>(today) + static_cast<float>(plan.day);
+            if (day <= 0.0f) day = 0.0f;
+            plan.day = static_cast<std::uint32_t>(day);
+        }
+}
+
 void cSC4BuildingDevelopmentSimulator::ExecuteDeclinePlan() {
     const std::uint32_t today = static_cast<std::uint32_t>(g_host ? g_host->SimulatorDay() : 0);
     for (auto it = declinePlan_.begin(); it != declinePlan_.end();) {
         if (today < it->day) { ++it; continue; }                         // not due yet
-        if (static_cast<int>(it->source->Condition()) < -0x13) {
+        if (it->source && static_cast<int>(it->source->ActiveDemand()) < -0x13) {   // vslot 0x90 -> 0x60
             TractOutcome outcome;
             outcome.source = it->source;
             outcome.a = it->a;

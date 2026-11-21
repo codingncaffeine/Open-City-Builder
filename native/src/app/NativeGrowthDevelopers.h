@@ -23,6 +23,10 @@ std::uint32_t GrowthDeveloperSubType(void* developer);               // vslot 0x
 bool GrowthDeveloperListsValid(void* developer);                     // vslot 0x50
 void GrowthDeveloperGrowthList(void* developer, std::vector<std::array<std::int32_t, 3>>& out);   // vslot 0x58 {x, z, style}
 float GrowthDeveloperActiveDemand(void* developer);                  // vslot 0x90 -> demand vslot 0x60
+std::int32_t GrowthDeveloperPurpose(void* developer);                // vslot 0x38
+void GrowthDeveloperDeclineList(void* developer, std::vector<std::array<std::int32_t, 3>>& out);   // vslot 0x60 {x, z, style}
+// cSC4TractDeveloper::Decline for one developer's tract (the decline plan's outcome); the capacity abandoned
+int NativeTractDecline(void* developer, int tractX, int tractZ, std::uint8_t flag);
 // The developer as a COM object (its cISC4GrowthDeveloper view): what the building development simulator's record references.
 cIGZUnknown* GrowthDeveloperObject(void* developer);
 sc4::cSC4GrowthDeveloper* GrowthDeveloperOfType(std::uint32_t type); // the developer of one developer type (or null)

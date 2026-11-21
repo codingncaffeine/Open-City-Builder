@@ -316,6 +316,27 @@ int NativeTractGrow(void* developer, int tractX, int tractZ, std::uint8_t style)
     return result;
 }
 
+static int g_declineOutcomes = 0;          // decline-plan outcomes the tract developer executed
+static int g_declinedCapacity = 0;         // the capacity they abandoned
+
+int NativeTractDecline(void* developer, int tractX, int tractZ, std::uint8_t flag) {
+    cSC4TractDeveloper* tract = TractDeveloper();
+    GrowthView* view = ViewOf(static_cast<cSC4GrowthDeveloper*>(developer));
+    if (!tract || !view) return 0;
+    GrowthProfile profile;
+    profile.developer = view;
+    profile.tractX = tractX;
+    profile.tractZ = tractZ;
+    profile.growthStage = flag;
+    const int abandoned = tract->Decline(profile);   // vslot 0x30
+    ++g_declineOutcomes;
+    g_declinedCapacity += abandoned;
+    if (std::getenv("SC4_SIMDEBUG"))
+        std::fprintf(stderr, "tract developer: Decline developer %x tract (%d,%d) -> capacity %d abandoned\n", view->GetDeveloperType(), tractX,
+                     tractZ, abandoned);
+    return abandoned;
+}
+
 bool NativeLotConfigurationsByFilter(std::vector<sc4::cSC4LotConfiguration*>& out, sc4::cISC4LotConfigurationFilter* filter) {
     sc4::cSC4LotConfigurationManager* manager = LotConfigurations();
     if (!manager) return false;
@@ -330,19 +351,33 @@ void NativeDeclineReport() {
     cSC4ZoneDeveloper* zones = ZoneDeveloper();
     int states[8] = {};
     int abandonedByReason[8] = {};
+    std::map<std::uint32_t, std::pair<int, int>> livable;   // developer type -> livable lots, of them past the 59 days Decline waits
     if (zones)
         for (cSC4Lot* lot : zones->Lots()) {
             if (!lot) continue;
             ++states[lot->GetState() & 7];
             if (lot->GetState() == kLotStateAbandoned) ++abandonedByReason[lot->GetVacateReason() & 7];
+            if (lot->GetState() == kLotStateLivable) {
+                const BuildingProfile* building = NativeBuildingProfile(lot->GetBuildingType(false));
+                if (building && building->purpose) {
+                    auto& count = livable[NativeDeveloperType(building->purpose, lot->GetOccupantWealth())];
+                    ++count.first;
+                    if (lot->GetDaysSinceLastStateChange() > 0x3b) ++count.second;
+                }
+            }
         }
     std::printf("decline: lots unbuilt %d, construction %d, occupied %d, livable %d, abandoned %d (reasons", states[0], states[1], states[2],
                 states[3], states[4]);
     for (int reason = 0; reason < 8; ++reason)
         if (abandonedByReason[reason]) std::printf(" %d:%d", reason, abandonedByReason[reason]);
     std::printf("), reserved %d, demolishable %d\n", states[5], states[6]);
+    std::printf("decline: livable lots by developer (type:lots/past 59 days)");
+    for (const auto& [type, count] : livable) std::printf(" %x:%d/%d", type, count.first, count.second);
+    std::printf("\n");
     std::printf("decline: tract developer abandoned %d, reoccupied %d, constructions %d\n", g_lotDeveloper.abandoned,
                 g_lotDeveloper.reoccupied, g_lotDeveloper.constructions);
+    std::printf("decline: plan outcomes executed %d, capacity declined %d\n", g_declineOutcomes, g_declinedCapacity);
+    std::printf("decline: developers (type:growth/decline lists, demand)%s\n", GrowthDevelopersSummary().c_str());
 }
 
 void InstallTractDeveloperHost() { sc4::SetTractDeveloperHost(&g_host); }

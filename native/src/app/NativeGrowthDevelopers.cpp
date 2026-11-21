@@ -46,6 +46,14 @@ void GrowthDeveloperGrowthList(void* developer, std::vector<std::array<std::int3
     if (!developer) return;
     for (const auto& item : static_cast<sc4::cSC4GrowthDeveloper*>(developer)->GetGrowthList()) out.push_back({item.x, item.z, item.style});
 }
+std::int32_t GrowthDeveloperPurpose(void* developer) {
+    return developer ? static_cast<sc4::cSC4GrowthDeveloper*>(developer)->GetPurpose() : 0;
+}
+void GrowthDeveloperDeclineList(void* developer, std::vector<std::array<std::int32_t, 3>>& out) {
+    out.clear();
+    if (!developer) return;
+    for (const auto& item : static_cast<sc4::cSC4GrowthDeveloper*>(developer)->GetDeclineList()) out.push_back({item.x, item.z, item.style});
+}
 float GrowthDeveloperActiveDemand(void* developer) {
     sc4::IGrowthDemandApi* demand = developer ? static_cast<sc4::cSC4GrowthDeveloper*>(developer)->GetSourceDemand() : nullptr;
     return demand ? demand->GetActiveValue() : 0.0f;

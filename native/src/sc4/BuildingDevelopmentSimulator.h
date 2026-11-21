@@ -3,7 +3,7 @@
 // under construction at once. 113 functions at 0x10014bddc..0x10015392a. This port covers the catalogue
 // (exemplar scan, profiles, families, names, zone capacity map), the developer / wealth type mapping,
 // construction resources, growth marks, cheats and the persisted state; the growth planner
-// (PlanGrowth/Grow/ExecuteGrowthPlan/PlanDecline, tract and lot developers) remains unrecovered.
+// (PlanGrowth/ExecuteGrowthPlan) remains unrecovered (nothing selects the planned mode); Grow, PlanDecline and ExecuteDeclinePlan run.
 // Object layout: +0x80 tract developer map, +0xb8 developers (map type -> growth developer),
 // +0xe0 construction resource counter, +0x178 stage population multiplier, +0x188 day of last successful
 // build per developer type, +0x1b0 stage multiplier table, +0x1c9..0x1cd cheat bools.
@@ -225,30 +225,32 @@ public:
     virtual bool ListsValid() const { return false; }                      // vslot 0x50
     virtual std::vector<GrowthTract> GrowthList() const { return {}; }     // vslot 0x58
     virtual float ActiveDemand() const { return 0.0f; }                    // vslot 0x90 -> demand vslot 0x60
+    // what PlanDecline reads (i386 0x000f8f2a)
+    virtual std::int32_t Purpose() const { return 0; }                     // vslot 0x38
+    virtual std::vector<GrowthTract> DeclineList() const { return {}; }    // vslot 0x60
     // The developer object (a cSC4GrowthDeveloper, class 0x0990c138) the city record references; null = none.
     virtual cIGZUnknown* Object() const { return nullptr; }
 };
-// One pending demolition of the decline plan (a node of the list at this+0x110).
-class IDeclineSource {
-public:
-    virtual ~IDeclineSource() = default;
-    virtual float Condition() = 0;                                          // vslot 0x90 -> vslot 0x60
-};
+// One tract of the decline plan (cSC4BuildingDevelopmentSimulator::Plan, a node of the list at this+0x110): the day it may run
+// from, the tract and the developer whose decline list named it.
 struct DeclineEntry {
     std::uint32_t day = 0;                                                  // +0x10 first day the entry may run
-    std::int32_t a = 0, b = 0;                                              // +0x14, +0x18
-    IDeclineSource* source = nullptr;                                       // +0x20
+    std::int32_t a = 0, b = 0;                                              // +0x14, +0x18 the tract x, z
+    IGrowthDeveloperRef* source = nullptr;                                  // +0x20 the developer (its demand decides)
     std::uint8_t flag = 0;                                                  // +0x28
 };
-struct TractOutcome {                                                       // cISC4TractDeveloper::Outcome argument (its inner list is empty)
-    IDeclineSource* source = nullptr;
+// The GrowthProfile ExecuteDeclinePlan hands to the tract developer's Decline (developer, tract x, z, the plan's flag byte; the
+// outcome list it carries stays empty).
+struct TractOutcome {
+    IGrowthDeveloperRef* source = nullptr;
     std::int32_t a = 0, b = 0;
     std::uint8_t flag = 0;
 };
 class ITractDeveloperRef {                                                  // cISC4TractDeveloper
 public:
     virtual ~ITractDeveloperRef() = default;
-    virtual int ExecuteOutcome(const TractOutcome& outcome) = 0;            // vslot 0x30
+    // vslot 0x30 cSC4TractDeveloper::Decline(GrowthProfile): abandons the tract's buildings of the developer; the capacity abandoned
+    virtual int ExecuteOutcome(const TractOutcome& outcome) = 0;
     // vslot 0x28 Grow(GrowthProfile{developer, x, z, style}, outcomes, declined): > 0 when something was built
     virtual int Grow(IGrowthDeveloperRef* developer, int x, int z, std::uint8_t style) { (void)developer; (void)x; (void)z; (void)style; return 0; }
 };
@@ -332,8 +334,7 @@ public:
     void ReadSimulatorTunableValues();                                      // @ 0x10014d71e
     static void InitDynamicDataFromExemplar(const cGZPersistResourceKey& key, void* context);   // @ 0x10014d666
     void Grow();                                                            // @ 0x10014fb24
-    // Not recovered yet: PlanDecline 0x10015060c (the decline queue).
-    void PlanDecline() {}
+    void PlanDecline();                                                     // @ 0x10015060c (Mac i386 0x000f8f2a)
     int GrowthStage() const { return stage_; }
 
     // type / wealth mapping
@@ -412,6 +413,7 @@ public:
     void DoBuildingChanged(const IBuildingDevelopmentSimHost::ChangedLot& lot, std::int32_t wealth, bool added);   // i386 0x000f99ca
     void AddDeclineEntry(const DeclineEntry& entry) { declinePlan_.push_back(entry); }          // list at +0x110
     void ExecuteDeclinePlan();                                                                  // @ 0x10015001a
+    const std::list<DeclineEntry>& DeclinePlan() const { return declinePlan_; }
 
     // construction resources (the counter object is owned by the city)
     void SetConstructionResources(IConstructionResources* resources) { resources_ = resources; }
