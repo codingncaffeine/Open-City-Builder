@@ -2,9 +2,11 @@
 // type 7 (model instance offset 0x7000000) with no field of its own. Recovered from the Mac i386 build (0x00136bea..0x0013775a,
 // 0x00677ea4..); the Windows record is the same (network-occupants.md).
 //
-// PARTIAL, as for the pipe: the subway statics (StaticInit's diagonal-piece edge distances, the tCustomGeometryInfo piece
-// tables) are not recovered, so a subway loads, saves and answers its interfaces but builds no model; GetAltitude
-// (0x00136d5c), InitPathBottomQuad (0x00136e1c) and GetPathInfo (0x00137320), the train paths, are not ported.
+// The piece tables (sCustomGeometryInfo) are in SubwayOccupantGeometry.cpp; StaticInit fills the two diagonal distance
+// tables, as the pipe's does.
+//
+// PARTIAL: GetAltitude (0x00136d5c), InitPathBottomQuad (0x00136e1c) and GetPathInfo (0x00137320), the train paths, are
+// not ported.
 #pragma once
 #include "sc4/UndergroundOccupant.h"
 
@@ -31,7 +33,10 @@ public:
     std::uint32_t GetNetworkType() const override { return kSubwayNetworkType; }                 // 0x00677ecc
     std::int32_t GetModelInstanceOffset() const override { return kSubwayModelInstanceOffset; }   // 0x00677ed6
 
-    static bool StaticInit();                                            // 0x0013756a (PARTIAL)
+    static bool StaticInit();                                            // 0x0013756a
+    static tCustomGeometryInfo sCustomGeometryInfo;                      // i386 0x00ab83c0
+    static float sDiagonalPieceEdgeDistancePercentages[5];              // i386 0x00bfaa34
+    static float sDiagonalCapEdgeDistancePercentages[5];                // i386 0x00bfaa20
 };
 
 }  // namespace sc4

@@ -2,8 +2,7 @@
 // cSC4UndergroundConnectionOccupant for network type 7 that joins a subway tunnel (cSC4SubwayOccupant, 0xca16374f) to the
 // station above. Recovered from the Mac i386 build (0x002f0282..0x002f0436).
 //
-// PARTIAL: the connection's geometry table (sCustomGeometryInfo) is not recovered, and QueryOccupantInterface (0x002f0436:
-// QI 0xca16374f, then 0x4a10afc2) has no slot in the recovered base.
+// PARTIAL: the connection's geometry table (sCustomGeometryInfo, read only by the unported drawing) is not recovered.
 #pragma once
 #include "sc4/SubwayOccupant.h"
 #include "sc4/UndergroundConnectionOccupant.h"
@@ -24,6 +23,9 @@ public:
     std::uint32_t GetGZIID() const override { return kGZCLSID_cSC4SubwayConnectionOccupant; }
     std::uint32_t GetNetworkOccupantGZIID() const override { return kGZCLSID_cSC4SubwayOccupant; }
     std::uint32_t GetNetworkType() const override { return kSubwayNetworkType; }
+    bool QueryOccupantInterface(cISC4Occupant* occupant, cSC4UndergroundOccupant*& out) override {
+        return QueryPieceInterface(occupant, kGZCLSID_cSC4SubwayOccupant, out);
+    }
 };
 
 }  // namespace sc4

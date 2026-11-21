@@ -4,6 +4,7 @@
 #include "sc4/NetworkOccupant.h"
 #include "sc4/Occupant.h"
 #include "sc4/PipeOccupant.h"
+#include "sc4/SubwayOccupant.h"
 
 namespace sc4 {
 namespace {
@@ -115,8 +116,10 @@ void cSC4UndergroundCustomView::DoOccupantInserted(cISC4Occupant* occupant) {
 }
 
 cISC4CustomView* CreateCustomView(std::uint32_t classId) {
-    if (classId != kGZCLSID_cSC4PipeCustomView) return nullptr;
-    auto* view = new cSC4UndergroundCustomView(kGZCLSID_cSC4PipeOccupant);   // cSC4PipeCustomView 0x00678e44
+    cSC4UndergroundCustomView* view = nullptr;
+    if (classId == kGZCLSID_cSC4PipeCustomView) view = new cSC4UndergroundCustomView(kGZCLSID_cSC4PipeOccupant);   // cSC4PipeCustomView 0x00678e44
+    else if (classId == kGZCLSID_cSC4SubwayCustomView) view = new cSC4UndergroundCustomView(kGZCLSID_cSC4SubwayOccupant);   // cSC4SubwayCustomView 0x00678e0e
+    if (!view) return nullptr;
     view->AddRef();
     return view;
 }

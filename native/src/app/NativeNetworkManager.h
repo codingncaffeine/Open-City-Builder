@@ -18,6 +18,8 @@ void NativePowerPoleReport(int x0, int z0, int x1, int z1);   // NativePowerLine
 // The pipe tool (cSC4PipeTool): one for the program (its destructor traps), shared by the network manager's demolition
 // and the pipe drawing tool. Borrowed.
 sc4::cSC4NetworkTool* NativePipeTool();
+// The subway tool (cSC4SubwayTool): one for the program as well, shared the same way. Borrowed.
+sc4::cSC4NetworkTool* NativeSubwayTool();
 // The network manager's GetAllIntersectionPieces for a piece: the other network pieces, one reference each.
 void NetworkIntersectionPieces(sc4::cSC4NetworkOccupant* occupant, std::vector<sc4::cSC4NetworkOccupant*>& out);
 

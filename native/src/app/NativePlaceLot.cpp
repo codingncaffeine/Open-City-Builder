@@ -36,6 +36,10 @@
 #include "sc4/LotDeveloper.h"
 #include "sc4/NetworkOccupant.h"
 #include "sc4/OccupantManager.h"
+#include "sc4/NetworkManager.h"
+#include "sc4/PipeConnectionOccupant.h"
+#include "sc4/SubwayConnectionOccupant.h"
+#include "app/NativeDemolition.h"
 #include "sc4/OverlayManager.h"
 #include "sc4/FloraOccupant.h"
 #include "sc4/PoliceSimulator.h"
@@ -598,7 +602,33 @@ public:
         out.Copy(text);
     }
     void PlaySound(std::uint32_t group, std::uint32_t id) override { PostSoundSystemEvent(group, id); }
-    void ConnectLotUtilities(cSC4Lot*, const cS3DVector3&) override {}   // PARTIAL: pipe / subway connection occupants
+    // PlaceLot's utility connections (i386 0x002d814a): the lot's building (lot vslot 0xc0, its occupant vslot 0xc) with
+    // property 0x88ed3303 in its property holder gets a pipe connection, a subway station (the network manager's
+    // IsOccupantSubwayStation) a subway connection. Each is made with one reference, placed at the center of the lot's center
+    // cell (spCity vslot 0x184) at the placement height, Init, given the building, inserted into the occupant manager (vslot
+    // 0x50, data 0) and released.
+    void ConnectLotUtilities(cSC4Lot* lot, const SC4Rect<int>& rect, const cS3DVector3& position) override {
+        cIGZUnknown* building = lot ? lot->GetBuilding() : nullptr;
+        void* view = nullptr;
+        if (!building || !building->QueryInterface(sc4::kGZIID_cISC4Occupant, &view) || !view) return;
+        auto* occupant = static_cast<sc4::cISC4Occupant*>(view);
+        cSC4City* city = HostCity();
+        float center[3] = {0.0f, position.y, 0.0f};
+        if (city) city->CellCenterToPosition((rect.x1 - rect.x0 + 2) / 2 - 1 + rect.x0, (rect.z1 - rect.z0 + 2) / 2 - 1 + rect.z0, center[0], center[2]);
+        auto place = [&](sc4::cSC4UndergroundConnectionOccupant* connection) {
+            connection->AddRef();
+            connection->SetPosition(center);
+            connection->Init();
+            connection->SetBuildingOccupant(occupant);
+            if (cISC4OccupantManager* m = Occupants()) m->InsertOccupant(connection, 0);
+            connection->Release();
+        };
+        sc4::cISCPropertyHolder* holder = occupant->AsPropertyHolder();
+        if (holder && holder->GetProperty(0x88ed3303u)) place(new sc4::cSC4PipeConnectionOccupant());
+        sc4::cSC4NetworkManager* networks = CityNetworkManager();
+        if (networks && networks->IsOccupantSubwayStation(occupant)) place(new sc4::cSC4SubwayConnectionOccupant());
+        occupant->Release();
+    }
     void MouseMoved() override {}
     bool BuildingPropertyBool(std::uint32_t type, std::uint32_t property) override {
         return WithBuildingExemplar(type, [&](cISCPropertyHolder* h) {

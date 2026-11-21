@@ -1333,6 +1333,10 @@ int RunScenario(const std::string& path) {
             int x = 0, z = 0;
             words >> x >> z;
             native::NativeUndergroundCellsReport(x, z);
+        } else if (command == "subways") {   // subways [N]: the subway pieces and subway connections of the city (the first N of each)
+            int limit = 12;
+            words >> limit;
+            native::NativeSubwayReport(limit);
         } else if (command == "fires") {   // fires: the fire disaster's state, one line per fire
             native::NativeFireReport();
         } else if (command == "policepower") {   // policepower X0 Z0 X1 Z1 STEP: the police power map the riots read (read-only)
@@ -1556,6 +1560,9 @@ int RunScenario(const std::string& path) {
         } else if (command == "savecity") {   // savecity: what the Save menu item does (cSC4App::RequestSaveCity) without the "saved" message box
             cSC4App* app = native::BootApplication();
             std::printf("savecity: %s\n", app && app->RequestSaveCity(false, false) ? "saved" : "not saved");
+        } else if (command == "regionview") {   // regionview: back to the region without the save question (RequestGoToRegionView(false), after a savecity)
+            cSC4App* app = native::BootApplication();
+            std::printf("regionview: %s\n", app && app->RequestGoToRegionView(false) ? "done" : "refused");
         } else if (command == "regioncity") {   // regioncity: the open city's regional record (what the region view and the neighbors read)
             auto* record = dynamic_cast<cSC4RegionalCity*>(native::NativeCurrentRegionalCity());
             std::vector<cISC4RegionalCity::PointOfInterest> airports, seaports;

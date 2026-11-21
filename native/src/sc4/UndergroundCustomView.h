@@ -22,6 +22,7 @@ class cSC4NetworkOccupant;
 
 constexpr std::uint32_t kGZIID_cISC4CustomView = 0x8a175d6b;
 constexpr std::uint32_t kGZCLSID_cSC4PipeCustomView = 0x6a19bdd8;
+constexpr std::uint32_t kGZCLSID_cSC4SubwayCustomView = 0x4a19bde3;
 constexpr std::uint32_t kMessageUndergroundOccupantInserted = 0x99ef1142;   // the view listens while it is up
 constexpr std::uint32_t kMessageOccupantTranslucencyChanged = 0x99ef1145;  // posted to each piece it changes
 
@@ -70,7 +71,7 @@ private:
     std::uint32_t networkGziid_;               // +0x18
 };
 
-// The data views' custom view by class id (GZCOM CreateInstance(clsid, 0x8a175d6b)): the pipe view, or null for a class
+// The data views' custom view by class id (GZCOM CreateInstance(clsid, 0x8a175d6b)): the pipe or subway view, or null for a class
 // the port does not have. One reference.
 cISC4CustomView* CreateCustomView(std::uint32_t classId);
 
