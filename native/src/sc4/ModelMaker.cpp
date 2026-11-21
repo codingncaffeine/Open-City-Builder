@@ -142,6 +142,8 @@ namespace {
 NetworkModelFactory g_networkModelFactory = nullptr;
 }
 void SetNetworkModelFactory(NetworkModelFactory factory) { g_networkModelFactory = factory; }
+NetworkViewDependence g_networkViewDependence = nullptr;
+void SetNetworkViewDependence(NetworkViewDependence query) { g_networkViewDependence = query; }
 
 // ---- the deferred occupant operation (0x100314e90) --------------------------------------------------------------
 DeferredOccupantOperation::DeferredOccupantOperation(cISC4Occupant* value, OperationType type)
@@ -1107,12 +1109,17 @@ bool cSC4ModelMaker::AddModels(cISC4Occupant* occupant, int zoom, int rotation, 
             result = true;
             break;
         }
-        case kModelOccupantTypeNetwork:
+        case kModelOccupantTypeNetwork: {
             result = LoadNetworkModels(occupant, zoom, rotation);
             ApplyLotStateEffect(occupant, type, 0);
-            zoomMask = static_cast<int>(zoomMask_);
-            rotationMask = static_cast<int>(rotationMask_);
+            // A piece whose models do not depend on the view (cISC4NetworkOccupant vslot 0x80 false) keeps them for every zoom
+            // and rotation; a pre-built model piece is rebuilt when the view changes.
+            if (!g_networkViewDependence || !g_networkViewDependence(occupant)) {
+                zoomMask = static_cast<int>(zoomMask_);
+                rotationMask = static_cast<int>(rotationMask_);
+            }
             break;
+        }
         case kModelOccupantTypeBuilding:
             result = LoadBuildingModels(occupant, zoom, rotation, type);
             if (result) {
@@ -1331,21 +1338,22 @@ bool cSC4ModelMaker::LoadLotBaseTextureModels(cISC4Occupant* occupant, int zoom,
 
 bool cSC4ModelMaker::LoadNetworkModels(cISC4Occupant* occupant, int zoom, int rotation) {
     // The original asks the occupant for cISC4NetworkOccupant (iid 0xa821ef94) and calls its vslot 0x108
-    // GetModelInstances(zoom, rotation, out, 10, count), which hands back the occupant's own model instance; the
-    // port's stand-in for that instance is cSC4NetworkOccupantModel (see sc4/NetworkOccupantModel.h). PARTIAL: the
-    // 0x2890d4de piece (the pre-built model occupant, vslot 0xc0 of its cSC4NetworkOccupant base) is not handled.
-    (void)zoom;
-    (void)rotation;
+    // GetModelInstances(zoom, rotation, out, 10, count): the occupant's own model instance (the port's stand-in is
+    // cSC4NetworkOccupantModel, see sc4/NetworkOccupantModel.h) and, for a pre-built model piece, its model and support
+    // model; every instance goes into the placeable object. PARTIAL: the 0x2890d4de piece (vslot 0x60 of its other
+    // base) is not handled.
     if (!occupant || !g_networkModelFactory) return false;
-    s3d::cIS3DModelInstance* model = g_networkModelFactory(occupant);   // one reference, or null
-    if (!model) return false;
+    s3d::cIS3DModelInstance* models[10] = {};
+    const int count = g_networkModelFactory(occupant, zoom, rotation, models, 10);   // one reference each
+    if (count <= 0) return false;
     cISC43DPlaceableObject* placeable = occupant->GetOrCreatePlaceableObject();
-    if (placeable) {
-        placeable->AddRef();
-        placeable->AddModel(reinterpret_cast<cIS3DModelInstance*>(model));
-        placeable->Release();
+    if (placeable) placeable->AddRef();
+    for (int i = 0; i < count; ++i) {
+        if (!models[i]) continue;
+        if (placeable) placeable->AddModel(reinterpret_cast<cIS3DModelInstance*>(models[i]));
+        models[i]->Release();
     }
-    model->Release();
+    if (placeable) placeable->Release();
     return placeable != nullptr;
 }
 

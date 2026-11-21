@@ -668,7 +668,13 @@ int cSC4PathFinder::FindPath() {
                     if (stepCost(t2, bx, bz, cost)) AddTripNode(bx, bz, entry, std::uint8_t(t2), cost, c, costLimit_[t2], false);
                 }
             }
-            // §4.8.3 wormholes: tunnels and ferries are not modelled natively yet; the subway-station bit is never set.
+            // §4.8.3 wormholes. A tunnel portal (bit 2) leads to the other portal, entered from the same side, at the tunnel's cost
+            // for the travel type. Ferries are not modelled natively yet; the subway-station bit is never set.
+            if (host_->Wormhole(x, z) & 2) {
+                int ox = 0, oz = 0;
+                float cost = 0.0f;
+                if (host_->Tunnel(x, z, t, ox, oz, cost)) AddTripNode(ox, oz, std::uint8_t(s), std::uint8_t(t), cost, c, costLimit_[t], false);
+            }
             // §4.8.4 park-and-ride return
             if ((tripFlags_ & 8) && x == reversalX_ && z == reversalZ_) {
                 const int bx = reversalX_ + kCellStepX[reversalDirection_ & 3], bz = reversalZ_ + kCellStepZ[reversalDirection_ & 3];

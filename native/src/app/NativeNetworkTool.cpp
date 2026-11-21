@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <cstring>
 #include <vector>
 
 #include "app/NativeAudio.h"
@@ -466,6 +467,15 @@ public:
         if (sc4::cSC4NeighborsSimulator* neighbors = native::CityNeighborsSimulator()) neighbors->DeleteConnection(type, x, z);
     }
     // the language manager's GetLanguageUtility(0) -> GetLanguageRoadDrivingSide (non-zero = right-hand traffic)
+    // A tunnel portal's other end (QI 0x8a4bd52b, GetOtherEndOccupant), one reference.
+    sc4::cSC4NetworkOccupant* TunnelOtherEnd(sc4::cSC4NetworkOccupant* portal) override;
+    // InsertTunnelPiece's terrain cut: cSTETerrain SetAltitude(index, height), then the redisplay of the touched vertices
+    // bracketed by the texture-update accumulation.
+    void StartTerrainTextureUpdates() override { if (sc4::cSTETerrain* t = Terrain()) t->StartAccumulatingTextureUpdates(); }
+    void RedisplayTerrain(std::int32_t x0, std::int32_t z0, std::int32_t x1, std::int32_t z1) override {
+        if (sc4::cSTETerrain* t = Terrain()) t->RedisplayTerrain(true, true, sc4::TerrainRect{x0, z0, x1, z1}, 6);
+    }
+    void StopTerrainTextureUpdates() override { if (sc4::cSTETerrain* t = Terrain()) t->StopAccumulatingTextureUpdates(); }
     bool RoadDrivingSideRight() override {
         cIGZLanguageManager* languages = RZ::LM();
         cIGZLanguageUtility* utility = languages ? languages->GetLanguageUtility(0) : nullptr;
@@ -724,4 +734,104 @@ void NativeTerrainHeightsReport(int x0, int z0, int x1, int z1) {
         }
     }
 }
+}  // namespace native
+
+#include "sc4/NetworkTunnelOccupant.h"
+#include "sc4/PathInfo.h"
+
+namespace native {
+
+// Kit verb `tunnelparams TYPE`: the tunnel rules of a network type as its placement exemplar gives them (the trigger and
+// end slopes, the portal exemplars, their rotations and clearances).
+void NativeTunnelParams(std::uint32_t type) {
+    const sc4::INetworkTypeInfo* info = g_toolHost.NetworkTypeInfo(type);
+    if (!info) {
+        std::printf("tunnelparams: no type %u\n", type);
+        return;
+    }
+    const sc4::cSC4NetworkPlacementParams& p = info->PlacementParams();
+    float endSlope = 0.0f;
+    std::memcpy(&endSlope, &p.unknown1c, sizeof endSlope);
+    std::printf("tunnelparams %u: trigger slope %.2f deg (rise per cell %.3f), end slope %.2f deg, %zu portal exemplars:", type,
+                p.maxSlope * 57.29578f, std::tan(p.maxSlope) * 16.0f, endSlope * 57.29578f, p.list60.size());
+    for (std::size_t i = 0; i < p.list60.size(); ++i)
+        std::printf(" %08x(rot %u, clearance %.2f)", p.list60[i], i < p.list78.size() ? p.list78[i] : 0u, i < p.list90.size() ? p.list90[i] : 0.0f);
+    std::printf("\n");
+}
+
+// Kit verb `heights X1 Z1 X2 Z2`: the terrain corner heights of the cells along a straight row or column.
+void NativeTerrainLine(int x1, int z1, int x2, int z2) {
+    sc4::cSTETerrain* terrain = Terrain();
+    if (!terrain) return;
+    const int dx = x2 > x1 ? 1 : (x2 < x1 ? -1 : 0), dz = z2 > z1 ? 1 : (z2 < z1 ? -1 : 0);
+    std::printf("heights %d,%d -> %d,%d:", x1, z1, x2, z2);
+    for (int x = x1, z = z1;; x += dx, z += dz) {
+        float c[4];
+        terrain->GetCellCornerAltitudes(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z), c);
+        std::printf(" %d,%d=%.1f", x, z, (c[0] + c[1] + c[2] + c[3]) * 0.25f);
+        if ((x == x2 && z == z2) || (dx == 0 && dz == 0)) break;
+    }
+    std::printf("\n");
+}
+
+// Kit verb `tunnels`: every tunnel portal occupant of the city: its cell, network flags, portal model, the portal at the
+// other end, and its paths (how many end at the other portal's first path points, as MakeTunnelPaths links them).
+void NativeTunnelReport() {
+    sc4::cISC4OccupantManager* occupants = Occupants();
+    sc4::cSTETerrain* terrain = Terrain();
+    if (!occupants || !terrain) {
+        std::printf("tunnels: no city\n");
+        return;
+    }
+    const int cell0[2] = {0, 0};
+    const int cell1[2] = {static_cast<int>(terrain->CellCountX()) - 1, static_cast<int>(terrain->CellCountZ()) - 1};
+    sc4::OccupantList list;
+    int count = 0;
+    if (occupants->GetOccupantsByStandardCityCells(list, cell0, cell1, 0xc772bf98u, 0xffffffffu)) {
+        for (sc4::cISC4Occupant* occupant : list) {
+            auto* tunnel = dynamic_cast<sc4::cSC4NetworkTunnelOccupant*>(occupant);
+            if (!tunnel) continue;
+            ++count;
+            std::uint32_t x = 0, z = 0;
+            tunnel->GetOccupiedCell(x, z);
+            std::uint32_t ox = 0, oz = 0;
+            sc4::cSC4NetworkOccupant* other = tunnel->GetOtherEndOccupant();
+            if (other) other->GetOccupiedCell(ox, oz);
+            s3d::cIS3DModelInstance* model = tunnel->PreBuiltModel();
+            int paths = 0, linked = 0;
+            sc4::cISC4PathInfo* own = tunnel->GetPathInfo();
+            sc4::cISC4PathInfo* far = other ? other->GetPathInfo() : nullptr;
+            if (own && own->GetPathMap()) {
+                for (const auto& [key, path] : *own->GetPathMap()) {
+                    ++paths;
+                    if (!far || path.points.empty()) continue;
+                    const sc4::tPath* match = far->GetPath(key, nullptr);
+                    if (!match || match->points.empty()) continue;
+                    const cS3DVector3& a = path.points.back();
+                    const cS3DVector3& b = match->points.front();
+                    if (a.x == b.x && a.y == b.y && a.z == b.z) ++linked;
+                }
+            }
+            float corners[4];
+            terrain->GetCellCornerAltitudes(x, z, corners);
+            std::printf("tunnel portal %d,%d flags %08x rot %u model %s, other end %s %u,%u, paths %d (%d lead into the other portal), terrain %.1f %.1f %.1f %.1f\n",
+                        x, z, tunnel->GetNetworkFlag(), tunnel->GetRotation(), model ? "yes" : "none",
+                        other ? "at" : "NONE", ox, oz, paths, linked, corners[0], corners[1], corners[2], corners[3]);
+        }
+        occupants->ReleaseOccupantList(list);
+    }
+    std::printf("tunnels: %d portals\n", count);
+}
+
+}  // namespace native
+
+namespace native {
+namespace {
+sc4::cSC4NetworkOccupant* ToolHost::TunnelOtherEnd(sc4::cSC4NetworkOccupant* portal) {
+    auto* tunnel = portal ? dynamic_cast<sc4::cSC4NetworkTunnelOccupant*>(portal) : nullptr;
+    sc4::cSC4NetworkOccupant* other = tunnel ? tunnel->GetOtherEndOccupant() : nullptr;
+    if (other) other->AddRef();
+    return other;
+}
+}  // namespace
 }  // namespace native

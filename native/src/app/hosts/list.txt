@@ -41,7 +41,6 @@ NeighborConnection
 NeighborDeal
 NetworkLotManager
 NetworkOccupant
-PreBuiltModelOccupant
 NetworkTool
 Ordinance
 Overlay

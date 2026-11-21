@@ -1788,6 +1788,9 @@ bool cSC4TrafficNetworkMap::Read(cIGZIStream& stream) {
         const long rounded = std::lround(value);
         return static_cast<std::uint16_t>(rounded < 0 ? 0 : (rounded > 0xffff ? 0xffff : rounded));
     };
+    // +0x39 (i386 +0x25): a map read from a save makes the tunnel paths in Init and readies its unusable roads in
+    // HandlePostCityInit; the original sets it first thing, whatever the version.
+    tunnelPaths_ = true;
     std::uint16_t version = 0;
     stream.GetUint16(version);
     if (version < 3) return false;

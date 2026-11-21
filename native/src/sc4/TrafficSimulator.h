@@ -489,6 +489,24 @@ public:
     bool WorkOnSimCycle();
     void DoConnectionsChanged(int x1, int z1, int x2, int z2);     // 0x0071A860
     void DoNetworkOccupantChanged(cSC4NetworkOccupant* occupant, bool inserted);   // DoMessage 0x99ef1142 / 0x99ef1143
+    // 0x007140E0 (i386 0x0005dcd6): a tunnel portal's record, keyed by its cell: the other portal's cell, the travel types it
+    // carries and the cost of the passage per travel type (inserted), or the record goes (removed).
+    void DoTunnelChanged(cSC4NetworkOccupant* portal, bool inserted);
+    struct TunnelInfo {                      // traffic-network.md §2.5 (0x2c bytes)
+        std::uint8_t otherX = 0, otherZ = 0;  // +0 / +1 the other portal's cell
+        std::uint16_t travelTypes = 0;        // +2 the travel-type mask (always 0x1fe)
+        std::array<float, 9> cost{};          // +4 the passage cost per travel type
+        std::uint16_t networkType = 0;        // +0x28
+    };
+    // The tunnel record of a portal cell (key x << 8 | z), or null.
+    const TunnelInfo* TunnelAt(int x, int z) const {
+        auto it = tunnels_.find(std::uint16_t((x << 8) | z));
+        return it == tunnels_.end() ? nullptr : &it->second;
+    }
+    std::size_t TunnelCount() const { return tunnels_.size(); }
+    // Row 17 of the record: the count, then per portal its cell key, the other portal's cell, the travel-type mask, the network
+    // type and `costs` passage costs (the record's travel-type count).
+    void WriteTunnelTable(cIGZOStream& stream, int costs) const;
     void DoLotActivated(ITrafficLot* lot);                         // 0x00723AF0 (no transit switches or ferries yet)
     void DoLotDeactivated(ITrafficLot* lot);                       // 0x0071E2F0
     void UpdateIntersectionData();                                 // 0x0071B9A0
@@ -576,6 +594,7 @@ private:
     mutable std::vector<std::vector<std::vector<NetworkInfo>>> grid_;
     std::unordered_map<std::uint32_t, TrafficEdgeDensity> edgeDensities_;
     std::unordered_map<std::uint32_t, TransitSwitch> transitSwitches_;
+    std::unordered_map<std::uint16_t, TunnelInfo> tunnels_;   // +0xd4 hash_map<u16 portal cell, TunnelInfo> (traffic-network.md §2.5)
     std::vector<std::uint32_t> switchIds_;      // empty, or 0x10000 cells packed (x << 8) | z; 0 = no switch
     std::vector<std::uint8_t> switchModes_;
     std::uint32_t nextSwitchId_ = 1;

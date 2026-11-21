@@ -103,6 +103,7 @@ public:
     virtual cISC4PathInfo* LoadPathInfo(const cGZPersistResourceKey& key) = 0;   // spResMan slot 3, iid 0xa9667793 (a reference)
 };
 void SetNetworkOccupantPathHost(INetworkOccupantPathHost* host);
+INetworkOccupantPathHost* NetworkOccupantPathHost();
 
 // cISC4LightingManager as cSC4NetworkOccupant::UpdateLighting calls it (i386 vslots 0x30 and 0x60).
 class INetworkOccupantLighting {
@@ -196,6 +197,9 @@ public:
     void UpdateLighting(INetworkOccupantLighting& lighting);   // i386 0x001344b2 (vslot 0x188)
     bool IsLit() const { return HasNetworkFlag(kNetworkFlagLit); }
     virtual bool CanBeLit() const { return false; }   // the bridge piece answers true
+    // cISC4NetworkOccupant i386 vslot 0x80 (0x100 here): whether the piece's models differ by zoom and rotation (the pre-built
+    // model pieces); a plain tile is drawn the same at every view, so the model maker keeps its models for all of them.
+    virtual bool HasViewDependentModel() const { return false; }
     void SetLit(bool lit);
     bool IsSupportPylonPresent() const { return HasNetworkFlag(kNetworkFlagSupportPylon); }
     bool IsIntersection() const;

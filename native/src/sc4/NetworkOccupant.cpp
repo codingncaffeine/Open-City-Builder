@@ -222,6 +222,7 @@ private:
 }  // namespace
 
 void SetNetworkOccupantPathHost(INetworkOccupantPathHost* host) { g_pathHost = host; }
+INetworkOccupantPathHost* NetworkOccupantPathHost() { return g_pathHost; }
 
 // i386 0x00132da0. Key {0x296678f7, 0x69668828, MapPath(piece id)}, or group 0xa966883f and the connection path id when one is
 // set; that path is made elevation-aware (a clone) and, after the transform to the occupant, offset by the path origin and cut to

@@ -360,6 +360,16 @@ struct tImmovablePortion {
 };
 static_assert(sizeof(tImmovablePortion) == 0x10, "tImmovablePortion stride");
 
+// cSC4NetworkTool::tTunnel (16 bytes, the vector at i386 +0xe4): one tunnel IdentifyTunnelCells found. The two heights
+// are the portal steps' edge means (FindTunnelEnd), the steps index the dragged steps (+0xa0).
+struct tTunnel {
+    float startHeight = 0.0f;      // +0x0 the mean height of the start portal step's edge
+    float endHeight = 0.0f;        // +0x4 the mean height of the end portal step's far edge
+    std::int32_t startStep = 0;    // +0x8
+    std::int32_t endStep = -1;     // +0xc (-1 until FindTunnelEnd finds one)
+};
+static_assert(sizeof(tTunnel) == 0x10, "tTunnel stride");
+
 // The two bounds of one tile corner's allowed height (a std::pair<float, float> in the original).
 struct tVertexHeightRange {
     float low = 0.0f;              // +0x0
@@ -630,6 +640,12 @@ public:
     virtual bool NetworkOccupantInRect(int /*x0*/, int /*z0*/, int /*x1*/, int /*z1*/, std::uint32_t /*typeMask*/) { return false; }
     // ClearCellPreviews: SL::spOccupantManager vslot 0x54 RemoveOccupant(preview, true, 0).
     virtual void RemovePreviewOccupant(cSC4NetworkOccupant* /*occupant*/) {}
+    // InsertTunnelPiece's terrain cut (SL::spTerrain i386 vslots 0xc4 SetAltitude(vertex, height), 0x15c
+    // StartAccumulatingTextureUpdates, 0x114 RedisplayTerrain(true, true, rect, 6), 0x160 StopAccumulatingTextureUpdates).
+    // The rect is inclusive vertex bounds {x0, z0, x1, z1}.
+    virtual void StartTerrainTextureUpdates() {}
+    virtual void RedisplayTerrain(std::int32_t /*x0*/, std::int32_t /*z0*/, std::int32_t /*x1*/, std::int32_t /*z1*/) {}
+    virtual void StopTerrainTextureUpdates() {}
 };
 
 void SetNetworkToolHost(INetworkToolHost* host);
@@ -880,6 +896,21 @@ public:
     // immovable neighbours, whole intersections, a tunnel's other portal) and re-solves the neighbours around them.
     // The pointers are borrowed; the caller keeps its references.
     void DestroyOccupantsAndResolve(const std::vector<cSC4NetworkOccupant*>& occupants);
+    // Tunnels (src/sc4/NetworkToolTunnels.cpp): a straight drag that climbs a step steeper than the trigger slope bores
+    // through the hill when the terrain comes back down within the clearance (IdentifyTunnelCells, FindTunnelEnd); the
+    // portal steps get pre-built portal occupants paired with each other (InsertTunnelPieces / InsertTunnelPiece).
+    void IdentifyTunnelCells(int& steps);                                                    // i386 0x004cc4ee
+    bool FindTunnelEnd(tTunnel& tunnel);                                                     // i386 0x004cba96
+    void RemoveTunnelPiecesFromSetOfCellsToBeSolved(std::unordered_set<std::uint32_t>& set) const;   // i386 0x004cbd32
+    void CopyTunnelElevationConstraintsIntoCellInfo(std::vector<tImmovablePortion>& portions);       // i386 0x001256be
+    void InsertTunnelPieces(std::uint32_t networkType);                                      // i386 0x00128aee
+    cSC4NetworkOccupant* InsertTunnelPiece(std::uint8_t direction, std::uint8_t index, cSC4NetworkCellInfo* cell);   // i386 0x00128530
+    // i386 0x00124496: a pre-built model occupant takes the model of the tuning exemplar `exemplarId` (group 0 = the type's).
+    void SetExemplarForOccupant(cSC4NetworkOccupant* occupant, std::uint32_t exemplarId, const float* offset, std::uint8_t rotation, std::uint32_t group);
+    // The mean terrain height of the edge `direction` (the i386 +0x290 / +0x2b0 vertex offset tables) of a step's first
+    // and last cells, as IdentifyTunnelCells and FindTunnelEnd compute it inline.
+    float StepEdgeMeanHeight(int step, int direction);
+    const std::vector<tTunnel>& Tunnels() const { return tunnels_; }
     // The network manager's RemoveOrReplaceOccupant (slot 8, i386 0x006110b0, network-manager.md §7.4) as this tool
     // calls it: a piece of an intersection is replaced by a plain piece built from its cell.
     bool RemoveOrReplaceOccupant(cSC4NetworkOccupant* occupant, bool& replaced);
@@ -903,8 +934,6 @@ public:
     void InsertBridgePiece(const tBridgePiece& piece, cSC4NetworkCellInfo* cell, const cSC4NetworkBridgeTypeInfo& type,
                            std::list<cSC4NetworkOccupant*>* out);                                         // 0x00150814
     // 0x00124496: a pre-built model piece takes the model of exemplar `exemplarId` (group 0 = the type's default group).
-    void SetExemplarForOccupant(cSC4NetworkOccupant* occupant, std::uint32_t exemplarId, const float* offset,
-                                std::uint8_t rotation, std::uint32_t group);
     const std::vector<tBridge>& Bridges() const { return bridges_; }
     void SetTerrainHilight(int param);                                    // 0x10018cd24
     // i386 0x004cc96a: the drag's cells (+0xb8) and steps (+0xa0); zMajor / xMajor = the splitter's two flags.
@@ -960,7 +989,7 @@ private:
     std::unordered_set<std::uint32_t> unknown150_;          // +0x150
     std::vector<tIntersection> intersections_;               // +0x178
     std::vector<tBridge> bridges_;                          // +0x190
-    std::vector<std::uint32_t> tunnels_;                    // +0x1a8 (i386 +0xe4 std::vector<tTunnel>; no tunnels are made yet)
+    std::vector<tTunnel> tunnels_;                          // +0x1a8 (i386 +0xe4)
     std::vector<tReservedCell> reservedCells_;              // +0x1c0
     std::uint32_t rendererAltitudeScale_ = 0;               // +0x1d8
     std::vector<tNeighborConnection> pendingNeighborConnections_;   // +0x1e0 (i386 +0x100, MarkNeighborConnections)

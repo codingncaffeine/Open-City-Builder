@@ -28,6 +28,7 @@
 #include "sc4/NetworkBridgeOccupant.h"
 #include "sc4/NetworkWorldCache.h"
 #include "sc4/NetworkPreview.h"
+#include "sc4/NetworkTunnelOccupant.h"
 #include "sc4/TileRules.h"
 #include "sc4/TileNeighborhood.h"
 #include "sc4/GeometryUtilities.h"
@@ -509,9 +510,9 @@ void cSC4NetworkTool::BuildSetOfCellsToBeSolved() {
         solvedCells_.insert(key);
     }
     ExpandToSolveSetBasedOnConnectivity(seeds, 4);
-    // RemoveHighwayIntersectionPieces / RemoveTunnelPieces: no such pieces exist until tunnels and highway intersections are
-    // ported.
+    // RemoveHighwayIntersectionPieces: no such pieces exist until highway intersections are ported.
     RemoveBridgePiecesFromSetOfCellsToBeSolved(solvedCells_);
+    RemoveTunnelPiecesFromSetOfCellsToBeSolved(solvedCells_);
 }
 
 // i386: `rings` times, every cell connected to the frontier that is not fixed (and not a short step) joins the set.
@@ -1591,7 +1592,7 @@ void cSC4NetworkTool::InsertConstraintsForCellsToBeSmoothed(const std::unordered
     for (std::uint32_t key : cells) InsertNetworkSpecificConstraintsForCell(key);                // vslot 0x140
 }
 
-// i386 0x001444ae. The bridges' deck heights become immovable portions (CopyBridgeElevationConstraintsIntoCellInfo).
+// i386 0x001444ae. The bridges' deck heights and the tunnel portals' heights become immovable portions.
 // NOT PORTED (no input yet): InsertIntersectionCellsIntoSolvedSet / InsertIntersectionConstraints walk the highway
 // intersections (+0x178) through their cIntRule, which PlaceNetwork does not identify yet.
 bool cSC4NetworkTool::SmoothenNetwork(int pad) {
@@ -1602,6 +1603,7 @@ bool cSC4NetworkTool::SmoothenNetwork(int pad) {
     solvedCellList_.resize(solvedCount);
     std::vector<tImmovablePortion> portions;
     CopyBridgeElevationConstraintsIntoCellInfo(portions);
+    CopyTunnelElevationConstraintsIntoCellInfo(portions);
     ApplyPlaneConstraintToRegularCells(portions);                                                // vslot 0x13c
     INetworkToolHost* host = GetNetworkToolHost();
     constraintA_->Shutdown();
@@ -1845,9 +1847,10 @@ void cSC4NetworkTool::CreateNetworkOccupant(cSC4NetworkCellInfo* cell, cSC4Netwo
         occupant = new cSC4NetworkOccupant();
     } else if (clsid == kGZCLSID_cSC4NetworkBridgeOccupant) {
         occupant = new cSC4NetworkBridgeOccupant();
+    } else if (clsid == kGZCLSID_cSC4NetworkTunnelOccupant) {
+        occupant = new cSC4NetworkTunnelOccupant();
     } else {
-        // cSC4NetworkTunnelOccupant (0x8a4bd52b), cSC4NetworkOccupantWithPreBuiltModel (0x49c1a034): not created by the land
-        // path yet.
+        // cSC4NetworkOccupantWithPreBuiltModel (0x49c1a034): not created by the land path yet.
         std::fprintf(stderr, "network tool: occupant class %08x not ported, using a plain network occupant\n", clsid);
         occupant = new cSC4NetworkOccupant();
     }
@@ -1973,7 +1976,8 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, bool allowDiagonals, bool connect
         validSteps_ = steps;
         IdentifyStartingConditions(steps);                                          // vslot 0x110
         if (steps < validSteps_) { failureReason_ = kFailStart; validSteps_ = 0; }
-        // IdentifyTunnelCells: not ported (no tunnels).
+        IdentifyTunnelCells(steps);                                                 // the count is read, never cut
+        if (steps < validSteps_) { failureReason_ = kFailTunnel; validSteps_ = 0; }
         CheckForReservedTiles(steps, networkType, false);                           // vslot 0x114
         if (steps < validSteps_) { failureReason_ = kFailReserved; validSteps_ = 0; }
         steps = UpdateOccupantHighlights(validSteps_);                              // vslot 0xf4
@@ -2041,6 +2045,7 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, bool allowDiagonals, bool connect
         if (previewUpdateEnabled_) {
             InsertOccupantsForSolvedCells(solvedCellList_, &placed, false);
             InsertBridgePieces(&placed);
+            InsertTunnelPieces(networkType);
         }
     }
     if (!place) {

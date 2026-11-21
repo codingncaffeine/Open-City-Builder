@@ -412,6 +412,10 @@ void SetCityRenderTarget(sc4::cSC4View3DWin& view, gd::cIGZGDriver* driver, gz::
 // host goes in now because the occupant manager's Init (in the city's pass) initialises the vehicles a save restored.
 bool PrepareCityRenderStack(cISC4City* cityInterface) {
     if (!g_target.view || !g_target.driver) return false;
+    // The catalog and the budget window belong to this view before its GUI is added (the end of DoPreCityInit): a
+    // reopened city must not reach the previous view's windows.
+    native::InstallCatalogUi(g_target.view->GetWindowManager());
+    native::SetBudgetViewWindow(g_target.view->AsIGZWin());
     native::InstallAutomataHost();
     native::InstallZoneDeveloperServices();   // the zone developer and the lots are initialized by the city's Init, next
     if (auto* c = dynamic_cast<sc4::cSC4City*>(cityInterface)) native::SetAutomataRenderer(nullptr, c);
@@ -555,8 +559,6 @@ bool FinishCityRenderStack(cISC4City* cityInterface) {
     native::InstallPlaceLotHost(view);
     native::InstallDemolishTool(view);
     native::InstallDispatchTool(view);
-    native::InstallCatalogUi(view.GetWindowManager());
-    native::SetBudgetViewWindow(view.AsIGZWin());
     native::ConfigureCityPanels(view);   // DoPostCityInit's gauges: RCI bars and opinion polls
     // ... and the toolbar readouts the date / funds / population / name messages refresh in the game
     view.UpdateCityName();

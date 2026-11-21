@@ -1358,6 +1358,17 @@ int RunScenario(const std::string& path) {
             int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
             words >> x0 >> z0 >> x1 >> z1;
             native::NativeTerrainHeightsReport(x0, z0, x1, z1);
+        } else if (command == "tunnelparams") {   // tunnelparams TYPE: a network type's tunnel rules (slopes, portal exemplars, clearances)
+            std::uint32_t type = 0;
+            words >> type;
+            native::NativeTunnelParams(type);
+        } else if (command == "heights") {   // heights X1 Z1 X2 Z2: the mean terrain height of each cell along a row or column
+            int x1 = 0, z1 = 0, x2 = 0, z2 = 0;
+            words >> x1 >> z1 >> x2 >> z2;
+            native::NativeTerrainLine(x1, z1, x2, z2);
+        } else if (command == "tunnels") {   // tunnels: every tunnel portal, its model, its other end and its paths
+            native::NativeTunnelReport();
+            native::NativeTrafficTunnelReport();
         } else if (command == "powerfunding") {   // powerfunding PERCENT: the power department's funding (as the budget window sets it)
             int percent = 100;
             words >> percent;

@@ -843,8 +843,8 @@ void cSC4NetworkTool::QueryUserForPotentialIntersections() {}
 
 // i386 0x00124dbe. The per-cell part: each newly solved cell (status) that is not +0x5a costs the most expensive of
 // its network types' per-cell costs (type info +0xdc), and every corner the solve moved costs |terrain - solved| times
-// the terrain-change factor (params, i386 +0x368). The bridge, tunnel and intersection terms read vectors the
-// unported solver steps fill; they stay empty, so they add nothing yet. The rounding is (float)x + 1.5 * 2^23.
+// the terrain-change factor (params, i386 +0x368), plus the tunnels' length times the tunnel cost per cell. The bridge
+// and intersection terms read vectors the unported solver steps fill; they stay empty, so they add nothing yet. The rounding is (float)x + 1.5 * 2^23.
 int cSC4NetworkTool::GetCostOfSolution() {
     INetworkToolHost* host = GetNetworkToolHost();
     std::int32_t cost = 0;
@@ -866,6 +866,8 @@ int cSC4NetworkTool::GetCostOfSolution() {
             heightChange += terrain <= solvedHeight ? solvedHeight - terrain : terrain - solvedHeight;
         }
     }
+    // every tunnel costs its length in steps times the type's tunnel cost per cell (i386 +0x364 = params +0x94)
+    for (const tTunnel& tunnel : tunnels_) cost += (tunnel.endStep - tunnel.startStep) * static_cast<std::int32_t>(placement_.unknownA8[7]);
     float rounded = heightChange * placement_.floatA8[8] + 12582912.0f;
     std::int32_t bits;
     std::memcpy(&bits, &rounded, sizeof bits);
