@@ -82,6 +82,8 @@
 #include "sc4/LightingManager.h"
 #include "sc4/ProgressScreen.h"
 #include "sc4/BuildingSelectWinProc.h"
+#include "sc4/OverlayManager.h"
+#include "app/NativeDecalOverlay.h"
 #include "gz/WinBMP.h"
 #include "rz/cRZKeyboard.h"
 #include "sc4/TractDeveloper.h"
@@ -166,6 +168,8 @@ public:
 private:
     static cSC4Simulator* Sim() { return CityComponentAs<cSC4Simulator>(CityComponent::Simulator, kGZCLSID_cSC4Simulator); }
 };
+
+constexpr std::uint32_t kContourHeightMapInstance = 0x07f94205;   // ToggleContourDisplay's height-map texture
 
 // SL::spRenderProperties: the application's render property set (cSC4App's, published by SL::OnAppInit1); null before it.
 cSC4RenderProperties* AppRenderPropertySet() { return dynamic_cast<cSC4RenderProperties*>(SL::spRenderProperties); }
@@ -581,8 +585,18 @@ struct StubView3DWin final : IView3DWinHost {
         if (zoom < 0 || zoom > 4) return;   // the original indexes the table with the zoom unchecked
         DoSoundSystemEvent(1, kSoundPerZoom[zoom], NewSoundInstanceId());
     }
-    int AddContourCallback() override { return {}; }
-    void RemoveContourCallback(int handle) override {}
+    // SL::TerrainView()->vslot 0x48(0) (the dynamic land overlay manager) -> AddHeightMap(0x7f94205): the contour lines as a
+    // height-map overlay; RemoveOverlay takes it off again. -1 without a city view.
+    int AddContourCallback() override {
+        sc4::cSTEOverlayManager* overlays = native::DecalOverlayManager(0);
+        const int id = overlays ? static_cast<int>(overlays->AddHeightMap(kContourHeightMapInstance)) : -1;
+        static const bool debug = std::getenv("SC4_DEBUG") != nullptr;
+        if (debug) std::printf("contours: height-map overlay %d (enabled %d)\n", id, overlays && id != -1 && overlays->OverlayIsEnabled(static_cast<std::uint32_t>(id)) ? 1 : 0);
+        return id;
+    }
+    void RemoveContourCallback(int handle) override {
+        if (sc4::cSTEOverlayManager* overlays = native::DecalOverlayManager(0)) overlays->RemoveOverlay(static_cast<std::uint32_t>(handle));
+    }
     bool ProjectPointToViewport(cS3DVector3& point) override {
         if (!SL::spViewUtilities) return false;
         float xyz[3] = {point.x, point.y, point.z};
