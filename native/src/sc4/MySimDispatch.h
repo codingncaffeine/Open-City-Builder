@@ -198,14 +198,7 @@ public:
 // Neighbour seams. One method per original virtual call; the original slot / address is in the comment.
 // ------------------------------------------------------------------------------------------------------------------------
 
-// cSC4MySim's primary vtable (0x100aeef70) as the dispatch uses it: DoMessage delivers the 0x2ba06b99 notifications,
-// GetWealth (0x170) picks the walking automata group.
-class IMySimDispatchOwner : public cIGZUnknown {
-public:
-    virtual bool DoMessage(cIGZMessage2* message) = 0;   // 0xc8 @ 0x1007a3364
-    virtual int GetWealth() const = 0;                   // 0x170 @ 0x1007a7f7c
-    virtual bool IsMale() const = 0;                     // 0x178 @ 0x1007a7f74 (walking group: 0x4149 / 0x414a)
-};
+// IMySimDispatchOwner (the dispatch's view of cSC4MySim) is declared in MySim.h; cSC4MySim answers it for iid 0x8bc01ffe.
 
 // cISC4TrafficAutomaton's route view (iid 0x8b99ee7c, the same object as cSC4TrafficAutomaton in src/sc4/TrafficAutomaton).
 class IMySimDispatchRoute : public cIGZUnknown {

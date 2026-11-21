@@ -85,8 +85,9 @@ struct FakeLua final : cISCLua {
     double ToNumber(int index) override { return IsNil(index) ? 0.0 : At(index).number; }
     const char* ToString(int index) override { return IsNil(index) ? "" : At(index).text.c_str(); }
     int Strlen(int index) override { return IsNil(index) ? 0 : static_cast<int>(At(index).text.size()); }
-    void* ToUserData(int index) override { return (!IsNil(index) && At(index).kind == LuaValue::UserData) ? At(index).user : nullptr; }
-    void* ToUserTag(int index) override { return ToUserData(index); }
+    // as the port's Lua 5 binding: a tagged pointer is boxed, ToUserData gives the box and ToUserTag the pointer in it
+    void* ToUserData(int index) override { return (!IsNil(index) && At(index).kind == LuaValue::UserData) ? static_cast<void*>(&At(index).user) : nullptr; }
+    void* ToUserTag(int index) override { return (!IsNil(index) && At(index).kind == LuaValue::UserData) ? At(index).user : nullptr; }
     int GetTop() override { return static_cast<int>(stack.size()); }
     void SetTop(int index) override { stack.resize(static_cast<std::size_t>(index < 0 ? 0 : index)); }
     void Pop(int count) override { stack.resize(stack.size() - static_cast<std::size_t>(count)); }
@@ -938,7 +939,14 @@ int main() {
     {
         void* out = nullptr;
         CHECK(sim->QueryInterface(kGZIID_cISC4MySim, &out));
-        CHECK(out == static_cast<cIGZUnknown*>(static_cast<cRZUnknown*>(sim)));
+        // the primary interface is the view the dispatch keeps as its owner (a dispatch read from a save gets it this way)
+        CHECK(out == static_cast<IMySimDispatchOwner*>(sim));
+        if (out == static_cast<IMySimDispatchOwner*>(sim)) {
+            auto* owner = static_cast<IMySimDispatchOwner*>(out);
+            CHECK(owner->IsMale() == sim->IsMale());
+            CHECK(owner->GetWealth() == sim->GetWealth());
+            owner->Release();
+        }
         out = nullptr;
         CHECK(sim->QueryInterface(kGZIID_cISC4MySimLink, &out));
         CHECK(out == static_cast<cISC4MySim*>(sim));
@@ -1365,6 +1373,23 @@ int main() {
     CHECK(simWinProc->shutdowns == 1);
     CHECK(sim->State() == 0);
     sim->Release();
+
+    // ---- MySimSetTableOccupantSubject: a second call finds the subject stored under the key and reuses it ----
+    {
+        cISCLua* lua = &host.lua;
+        lua->NewTable();
+        MySimSetTableOccupantSubject(lua, "destination_subject", nullptr);
+        lua->PushString("destination_subject");
+        lua->RawGet(-2);
+        void* first = lua->ToUserTag(-1);
+        lua->Pop(1);
+        CHECK(first != nullptr);
+        MySimSetTableOccupantSubject(lua, "destination_subject", nullptr);
+        lua->PushString("destination_subject");
+        lua->RawGet(-2);
+        CHECK(lua->ToUserTag(-1) == first);
+        lua->Pop(2);
+    }
 
     SetAdvisorHost(nullptr);
     SetMySimHost(nullptr);

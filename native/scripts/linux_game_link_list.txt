@@ -514,10 +514,8 @@ src/app/hosts/StubLotRetainingWall.cpp
 src/app/hosts/StubLotRetainingWallModel.cpp
 src/app/hosts/StubMiniMap.cpp
 src/app/hosts/StubModelMaker.cpp
-src/app/hosts/StubMySim.cpp
-src/app/hosts/StubMySimAdvice.cpp
-src/app/hosts/StubMySimDispatch.cpp
-src/app/hosts/StubMySimFilter.cpp
+src/app/NativeMySim.cpp
+src/gz/gzcom_creators/cSC4MySimDispatch.cpp
 src/app/hosts/StubNeighborConnection.cpp
 src/app/hosts/StubNeighborDeal.cpp
 src/app/hosts/StubNetworkLotManager.cpp

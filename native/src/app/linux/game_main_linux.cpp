@@ -1265,6 +1265,12 @@ int RunScenario(const std::string& path) {
             int limit = 8;
             words >> limit;
             native::NativeTrailerReport(limit);
+        } else if (command == "mysims") {   // mysims: every MySim of the city, its state, residence, job and dispatch
+            native::NativeMySimReport();
+        } else if (command == "mysimmovein") {   // mysimmovein NAME [female]: a MySim moves in (the agent simulator's MoveIn + the move-in tool's SetResidence)
+            std::string name, sex;
+            words >> name >> sex;
+            native::NativeMySimMoveIn(name.empty() ? "Mayor" : name.c_str(), sex != "female", 1);
         } else if (command == "decline") {   // decline: the lots by state and what the tract developer abandoned / reoccupied
             native::NativeDeclineReport();
         } else if (command == "lotdev") {   // lotdev: the lot developer's life cycle (initialized, messages by type, night-light deque)

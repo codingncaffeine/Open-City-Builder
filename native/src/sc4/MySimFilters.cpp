@@ -1,5 +1,8 @@
 #include "sc4/MySimFilters.h"
 
+#include "sc4/BuildingOccupant.h"
+#include "sc4/PylonOccupant.h"
+
 namespace sc4 {
 
 namespace {
@@ -10,27 +13,25 @@ void SetMySimFilterHost(IMySimFilterHost* host) { g_host = host; }
 
 bool cMySimBuildingFilter::IsOccupantIncluded(cISC4Occupant* occupant) {
     if (occupant->GetType() != kOccupantTypeBuilding) return false;
-    void* raw = nullptr;
-    if (!occupant->QueryInterface(kIidMySimBuilding, &raw)) return false;
-    auto* building = static_cast<IMySimBuildingFacts*>(raw);   // (the original never releases this reference)
-    std::uint8_t stage = 0;
-    const bool hasLot = g_host->LotStage(building->LotKey(), stage);
-    if (hasLot && stage >= 4) return false;
-    if (*building->Completion() < 1.0f) return false;
-    if (onlyKindOne_ && *building->OccupancyKind() != 1) return false;
-    return true;
+    cISC4BuildingOccupant* building = nullptr;
+    if (!occupant->QueryInterface(kIidMySimBuilding, reinterpret_cast<void**>(&building)) || !building) return false;
+    bool included = true;
+    if (g_host && g_host->BuildingCondition(building) > 3) included = false;
+    else if (building->GetCompletionPercent() < 1.0f) included = false;   // kSC4PercentageOneHundred
+    else if (onlyKindOne_ && building->GetBuildingProfile().purpose != 1) included = false;
+    building->Release();
+    return included;
 }
 
 bool cMySimPylonFilter::IsOccupantIncluded(cISC4Occupant* occupant) {
     if (occupant->GetType() != kOccupantTypePylon) return false;
-    void* raw = nullptr;
-    if (!occupant->QueryInterface(kIidMySimPylon, &raw)) return false;
-    auto* pylon = static_cast<IMySimPylonFacts*>(raw);
+    cISC4PylonOccupant* pylon = nullptr;
+    if (!occupant->QueryInterface(kIidMySimPylon, reinterpret_cast<void**>(&pylon)) || !pylon) return false;
     bool included = false;
-    if (pylon->Kind() != 0 && !pylon->Blocked()) {
-        if (cIGZUnknown* link = pylon->LinkedObject()) {
+    if (pylon->GetUIState() != 0 && !pylon->GetDragState()) {
+        if (cIGZUnknown* owner = pylon->GetPylonOwner()) {
             void* probe = nullptr;
-            included = link->QueryInterface(kIidPylonLink, &probe);
+            included = owner->QueryInterface(kIidPylonLink, &probe);
             if (probe) static_cast<cIGZUnknown*>(probe)->Release();
         }
     }

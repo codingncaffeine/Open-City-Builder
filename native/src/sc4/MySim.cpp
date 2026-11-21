@@ -57,13 +57,15 @@ void MySimSetTableBuilding(cISCLua* lua, const char* key, cISC4BuildingOccupant*
 
 // 0x1007a61d0 SetTableOccupantSubject(cISCLua*, char const*, cISC4Occupant*): replaces the "destination_subject"
 // entry of the table on top of the stack. The entry is read with RawGet, then pushed as a tagged userdata and RawSet.
+// The original's Lua 4 lua_touserdata (0xd8) answered the tagged pointer itself; the port's Lua 5 binding boxes a tagged
+// pointer, so the stored subject is read with ToUserTag (the pointer in the box).
 void MySimSetTableOccupantSubject(cISCLua* lua, const char* key, cISC4Occupant* occupant) {
     if (!lua) return;
     const int top = lua->GetTop();
     lua->PushString(key);                                            // 0x108
     lua->RawGet(-2);                                                 // 0x138
     auto* existing = static_cast<cISC4AdviceSubject*>(
-        static_cast<cIGZUnknown*>(lua->ToUserData(-1)));              // 0xd8
+        static_cast<cIGZUnknown*>(lua->ToUserTag(-1)));               // 0xd8 (see above)
     if (existing) {
         existing->AddRef();
         lua->SetTop(top);                                            // drop the key and the table value
@@ -144,7 +146,8 @@ cSC4MySim::~cSC4MySim() {
 bool cSC4MySim::QueryInterface(std::uint32_t iid, void** out) {
     *out = nullptr;
     if (iid == kGZIID_cISC4MySim) {
-        *out = static_cast<cIGZUnknown*>(static_cast<cRZUnknown*>(this));
+        // the primary interface: the view cSC4MySimDispatch keeps as its owner (DoMessage / GetWealth / IsMale)
+        *out = static_cast<IMySimDispatchOwner*>(this);
     } else if (iid == kGZIID_cISC4MySimLink) {
         *out = static_cast<cISC4MySim*>(this);
     } else {
