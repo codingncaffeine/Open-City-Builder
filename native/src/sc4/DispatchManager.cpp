@@ -24,9 +24,11 @@ constexpr std::uint32_t kDispatchMsgDeactivated = 0xe94671ed;
 constexpr std::uint32_t kDispatchMsgEnd = 0x894671f6;
 
 // Occupant groups that select the dispatch-view tracker type (cISC4Occupant::IsOccupantGroup, slot 0xb0).
-constexpr std::uint32_t kOccupantGroupVehicle = 0x4202;
-constexpr std::uint32_t kOccupantGroupPoliceHelicopter = 0x4303;
-constexpr std::uint32_t kOccupantGroupPedestrian = 0x4301;
+// 0x4202 the fire engine; 0x4303 the fire plane and 0x4301 the police helicopter (the groups cSC4FirePlaneDispatchSource /
+// cSC4PoliceHelicopterDispatchSource::GetDispatchAutomataProperties hand out): the fire units get tracker type 0, the rest 1.
+constexpr std::uint32_t kOccupantGroupFireEngine = 0x4202;
+constexpr std::uint32_t kOccupantGroupFirePlane = 0x4303;
+constexpr std::uint32_t kOccupantGroupPoliceHelicopter = 0x4301;
 
 // Dispatch-view tracker type per dispatch type (table at 0x100a1b2a0).
 constexpr std::uint32_t kTrackerTypeForDispatchType[7] = {1, 0, 1, 1, 1, 0, 1};
@@ -502,10 +504,10 @@ bool cSC4DispatchManager::BeginDispatch(DispatchInfo& info) {
             cISC4Occupant* occupant = automaton->Occupant();
             if (occupant) occupant->AddRef();
             int trackerType = 0;
-            if (occupant && !occupant->IsOccupantGroup(kOccupantGroupVehicle)) {
-                if (!occupant->IsOccupantGroup(kOccupantGroupPoliceHelicopter)) {
+            if (occupant && !occupant->IsOccupantGroup(kOccupantGroupFireEngine)) {
+                if (!occupant->IsOccupantGroup(kOccupantGroupFirePlane)) {
                     trackerType = 1;
-                    occupant->IsOccupantGroup(kOccupantGroupPedestrian);   // original calls it, result unused
+                    occupant->IsOccupantGroup(kOccupantGroupPoliceHelicopter);   // original calls it, result unused
                 }
             }
             info.trackId = vehicleView_->TrackOccupant(occupant, trackerType, automaton->GetCallNumber(), nullptr);

@@ -459,7 +459,7 @@ struct Fixture {
         host.automataManager = &automataManager;
         automataManager.created = &automatonA;
         automatonA.occupant = &automatonOccupant;
-        automatonOccupant.group = 0x4301;   // pedestrian group -> tracker type 1
+        automatonOccupant.group = 0x4301;   // the police helicopter group -> tracker type 1
         source.handledTypes = {0, 1};
         source.stations = {&station};
         source.callMask = 0x1;
