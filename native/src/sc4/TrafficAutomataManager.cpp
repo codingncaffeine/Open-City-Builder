@@ -168,9 +168,11 @@ bool cSC4TrafficAutomataManager::DispatchResponseAutomata(std::uint32_t group, c
 }
 
 bool cSC4TrafficAutomataManager::UpdateResponseList(float deltaMilliseconds) {
-    // 0x10011220c PARTIAL: the retire/retry timing and the per-target loop are ported; the actual spawn/dispatch hooks
-    // call the two PARTIAL entry points (Dispatch / SpawnOccupantAutomaton), which need the traffic simulator trip
-    // object. The lookup itself (cISC4NetworkManager vslot 0xc8) is the host seam.
+    // 0x10011220c (i386 0x000cd8dc): each entry whose timer ran out looks for the roads around its occupant (the traffic network
+    // map's GetSurroundingRoads: within 1 cell for a forced entry, else between pathType and pathType + 2 cells) and sends one
+    // automaton per remaining count from a random one of them: a forced entry spawns on the road (SpawnOccupantAutomaton), the
+    // others drive from the road to the occupant (Dispatch). An entry that finds no road or still has count left waits 1000 ms
+    // and is dropped on its sixth such try; a finished entry is dropped.
     ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
     ITrafficNetworkManagerApi* network = host ? host->TrafficNetworkManager() : nullptr;
     for (auto it = responses_.begin(); it != responses_.end();) {
@@ -181,21 +183,19 @@ bool cSC4TrafficAutomataManager::UpdateResponseList(float deltaMilliseconds) {
             ++it;
             continue;
         }
-        int networkA = static_cast<int>(entry.pathType) + 2;
-        int networkB = static_cast<int>(entry.pathType);
+        int maxCells = static_cast<int>(entry.pathType) + 2;
+        int minCells = static_cast<int>(entry.pathType);
         if (entry.forced) {
-            networkA = 1;
-            networkB = 0;
+            maxCells = 1;
+            minCells = 0;
         }
         std::vector<ITrafficNetworkMapOccupant*> targets;
         const bool found = network && entry.occupant &&
-                           network->GetResponseOccupants(entry.occupant.get(), networkA, networkB, 0xc49, targets);
+                           network->GetResponseOccupants(entry.occupant.get(), maxCells, minCells, 0xc49, targets);
         bool retire = false;
-        if (!found) {
-            ++entry.retries;
-            retire = entry.retries >= 6;   // 0x10011247e: ++retries; keep while the new count is below 6
-        } else {
-            for (std::uint32_t i = 0; i < entry.count; ++i) {
+        if (found) {
+            const std::uint32_t tries = entry.count;   // one try per count the entry held when the pass began
+            for (std::uint32_t i = 0; i < tries; ++i) {
                 if (targets.empty()) break;
                 const std::uint32_t pick = Random().RandomUint32Uniform(static_cast<std::uint32_t>(targets.size()));
                 ITrafficNetworkMapOccupant* target = targets[pick];
@@ -216,8 +216,16 @@ bool cSC4TrafficAutomataManager::UpdateResponseList(float deltaMilliseconds) {
                 target->Release();
                 targets.erase(targets.begin() + pick);
             }
+            static const bool trace = std::getenv("SC4_DISPATCHDEBUG") != nullptr;
+            if (trace)
+                std::fprintf(stderr, "response: group 0x%x forced %d: %zu roads left, %u of %u sent\n", entry.group, entry.forced ? 1 : 0, targets.size(),
+                             tries - entry.count, tries);
             for (ITrafficNetworkMapOccupant* target : targets) target->Release();
             retire = entry.count == 0;
+        }
+        if (!found || !retire) {   // 0x10011247e (i386 0x000cdb61): ++retries; keep while the new count is below 6
+            ++entry.retries;
+            retire = entry.retries >= 6;
         }
         if (retire) {
             it = responses_.erase(it);

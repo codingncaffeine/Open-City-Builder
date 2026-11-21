@@ -117,6 +117,7 @@ public:
     std::uint32_t Release() override { return b_->Release(); }
     IAutomataOccupant* AsOccupant() const override { return CityOccupantView(b_->AsOccupant()); }
     const float& GetCompletionPercent() override { return b_->GetCompletionPercent(); }
+    std::uint32_t GetProfilePurpose() override { return b_->GetBuildingProfile().purpose; }
 private:
     cISC4BuildingOccupant* b_;
 };

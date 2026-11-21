@@ -65,7 +65,7 @@ struct FakeOccupant final : IAutomataOccupant {
 struct FakeBuilding final : IAutomataBuildingOccupant {
     int refs = 1;
     FakeOccupant* occupant = nullptr;
-    float completion = 100.0f;
+    float completion = 1.0f;   // kSC4PercentageOneHundred (a fraction)
     bool QueryInterface(std::uint32_t, void**) override { return false; }
     std::uint32_t AddRef() override { return static_cast<std::uint32_t>(++refs); }
     std::uint32_t Release() override { return static_cast<std::uint32_t>(--refs); }
@@ -1021,6 +1021,10 @@ int main() {
         building.occupant = &automaton.occupant;
         message->SetVoid1(&building);
         manager->DestroyAutomata();
+        building.completion = 0.99f;   // completion is a fraction: a building at 99% is not new yet
+        CHECK(manager->DoMessage(message));
+        CHECK(manager->TrackedBuildings().at(0x2000) == 0);
+        building.completion = 1.0f;
         CHECK(manager->DoMessage(message));
         CHECK(manager->TrackedBuildings().at(0x2000) == 1);   // the building's source group count went up
         message->SetType(kMsgOccupantInserted);

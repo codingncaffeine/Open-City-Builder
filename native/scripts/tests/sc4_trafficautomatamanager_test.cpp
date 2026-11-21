@@ -21,6 +21,7 @@
 #include "sc4/SCProperty.h"
 #include "sc4/SCPropertyHelp.h"
 #include "sc4/TrafficAutomataManager.h"
+#include "sc4/VehicleManager.h"
 
 using namespace sc4;
 
@@ -68,12 +69,14 @@ struct FakeOccupant final : IAutomataOccupant {
 struct FakeBuilding final : IAutomataBuildingOccupant {
     int refs = 1;
     FakeOccupant* occupant = nullptr;
-    float completion = 100.0f;
+    float completion = 1.0f;   // kSC4PercentageOneHundred (a fraction)
     bool QueryInterface(std::uint32_t, void**) override { return false; }
     std::uint32_t AddRef() override { return static_cast<std::uint32_t>(++refs); }
     std::uint32_t Release() override { return static_cast<std::uint32_t>(--refs); }
+    std::uint32_t purpose = 0;
     IAutomataOccupant* AsOccupant() const override { return occupant; }
     const float& GetCompletionPercent() override { return completion; }
+    std::uint32_t GetProfilePurpose() override { return purpose; }
 };
 
 // ---- automaton -------------------------------------------------------------------------------------------------------------
@@ -566,14 +569,18 @@ struct FakeTrafficNetwork final : ITrafficNetworkManagerApi {
     std::vector<std::pair<int, int>> swept;   // the cells the population pass asked for
     TrafficTileInfo* GetFirstTileInfoAtCell(int x, int z) override { swept.push_back({x, z}); return GetTileInfoAtCell(x, z); }
     void GetVisibleCellRect(int out[4]) override { std::memcpy(out, rect, sizeof rect); }
-    bool GetResponseOccupants(cISC4Occupant*, int, int, std::uint32_t,
+    int responseMaxCells = -1, responseMinCells = -1;
+    std::uint32_t responseMask = 0;
+    bool GetResponseOccupants(cISC4Occupant*, int maxCells, int minCells, std::uint32_t mask,
                               std::vector<ITrafficNetworkMapOccupant*>& out) override {
         ++responseCalls;
+        responseMaxCells = maxCells;
+        responseMinCells = minCells;
+        responseMask = mask;
         out = responseOccupants;
         for (ITrafficNetworkMapOccupant* occupant : out) occupant->AddRef();
         return responseFound;
     }
-    bool ResponseAllowed(ITrafficNetworkMapOccupant*) override { return true; }
     float& OccupantPathDensity(ITrafficNetworkMapOccupant*, std::uint32_t layer, std::uint32_t pathType) override {
         return pathDensity[{layer, pathType}];
     }
@@ -584,7 +591,16 @@ struct FakeTrafficNetwork final : ITrafficNetworkManagerApi {
 };
 
 // ---- host ------------------------------------------------------------------------------------------------------------------
-struct FakeTrafficHost final : ITrafficAutomataManagerHost {
+// A vehicle-manager host is a traffic host with the vehicle seams (all neutral here), so it serves both managers.
+struct FakeTrafficHost final : IVehicleManagerHost {
+    bool HasRenderProperties() const override { return false; }
+    float AutomataDensityFactor() override { return 1.0f; }
+    int AutomataMinZoom() override { return 1; }
+    int TimeOfDay() override { return 0; }
+    void ShowVehicleHeadlights(IAutomataAutomaton*, bool, bool) override {}
+    IAutomataAutomaton* CreateVehicleAutomaton() override { return nullptr; }
+    void NotifyKindManagersTuningChanged() override {}
+    void HandleFundsChangedSweep() override {}
     FakeMessageServer messages;
     cIGZMessageServer2* server = &messages;
     std::vector<std::uint32_t> registeredMessages, removedMessages, ticksAdded, ticksRemoved;
@@ -1258,6 +1274,15 @@ int main() {
         CHECK(manager->DispatchResponseCount() == 1);   // five failures keep the entry
         manager->UpdateResponseList(1001.0f);
         CHECK(manager->DispatchResponseCount() == 0);   // the sixth retires it
+        CHECK(host.trafficNetwork.responseMaxCells == 8);   // a driving response looks for roads path type .. path type + 2 cells away
+        CHECK(host.trafficNetwork.responseMinCells == 6);
+        CHECK(host.trafficNetwork.responseMask == 0xc49);
+        CHECK(manager->DispatchResponseAutomata(0x4200, cityOccupant, 1, true, 5, 0));
+        manager->UpdateResponseList(1.0f);
+        CHECK(host.trafficNetwork.responseMaxCells == 1);   // a forced response spawns on a road next to the occupant
+        CHECK(host.trafficNetwork.responseMinCells == 0);
+        for (int i = 0; i < 5; ++i) manager->UpdateResponseList(1001.0f);
+        CHECK(manager->DispatchResponseCount() == 0);
         host.trafficNetwork.responseFound = true;
         host.trafficNetwork.responseOccupants.clear();
         CHECK(manager->DispatchResponseAutomata(0x4200, cityOccupant, 4, false, 6, 0));
@@ -1265,6 +1290,13 @@ int main() {
         CHECK(manager->DispatchResponseCount() == 1);
         CHECK(manager->Responses().front().timeLeft == 1000.0f);
         CHECK(manager->Responses().front().count == 4);
+        CHECK(manager->Responses().front().retries == 1);   // roads found but automata left to send: a retry too (i386 0x000cdb61)
+        for (int i = 0; i < 4; ++i) manager->UpdateResponseList(1001.0f);
+        CHECK(manager->DispatchResponseCount() == 1);
+        manager->UpdateResponseList(1001.0f);
+        CHECK(manager->DispatchResponseCount() == 0);   // the sixth unfinished pass retires it
+        CHECK(manager->DispatchResponseAutomata(0x4200, cityOccupant, 4, false, 6, 0));
+        manager->UpdateResponseList(1.0f);
         CHECK(manager->DispatchResponseAutomata(0x4200, cityOccupant, 0, false, 6, 0));
         manager->UpdateResponseList(1.0f);
         CHECK(manager->DispatchResponseCount() == 1);   // the zero-count entry retired
@@ -1378,6 +1410,73 @@ int main() {
         // the fake automata keep a refcount that never deletes; the test owns them
         for (FakeTrafficAutomaton* candidate : {matching, inRect, special, outside, follower, newLeader}) delete candidate;
         CHECK(cSC4AutomataManager::StaticInstanceCount() == 0);
+    }
+
+    // ---------------------------------------------------------------- cSC4VehicleManager::HandleNewBuilding (0x1000da9a0)
+    {
+        host.exemplars.clear();   // the previous block deleted its exemplar
+        host.exemplarKeys.clear();
+        auto* manager = new cSC4VehicleManager(&host);
+        manager->AddRef();
+        CHECK(manager->Init());
+        manager->SetMaxCount(100);
+        auto* cityOccupant = new FakeCityOccupant();
+        FakeOccupant occupant;
+        auto* holder = new cSCPropertyHolder();
+        holder->AddRef();
+        occupant.holder = holder;
+        host.cityOccupants[&occupant] = cityOccupant;
+        FakeBuilding building;
+        building.occupant = &occupant;
+        building.purpose = 1;
+        // the building names its response groups (0xe9aee3da) and their counts (0xe9aee3db, 1 past its end): forced responses
+        AddUintArray(*holder, kResponseGroupsProperty, {0x4301, 0x4302});
+        {
+            const std::uint8_t counts[1] = {3};
+            cRZVariant variant;
+            variant.RefUint8(counts, 1);
+            holder->AddProperty(kResponseCountsProperty, &variant, false);
+        }
+        tuning.f21a00 = 1.0f;
+        CHECK(manager->HandleNewBuilding(&building));
+        CHECK(manager->DispatchResponseCount() == 2);   // no new-residence automaton when the building has its own list
+        if (manager->DispatchResponseCount() == 2) {
+            const tResponseAutomataInfo& first = manager->Responses()[0];
+            const tResponseAutomataInfo& second = manager->Responses()[1];
+            CHECK(first.group == 0x4301 && first.count == 3 && first.forced && first.pathType == 5 && first.flags == (2u | 0x02000000u));
+            CHECK(first.occupant.get() == cityOccupant);
+            CHECK(second.group == 0x4302 && second.count == 1 && second.forced);
+        }
+        manager->HandleRemoveOccupant(&occupant);   // drops the entries of the occupant
+        CHECK(manager->DispatchResponseCount() == 0);
+        // the automaton limit stops the list
+        manager->SetMaxCount(0);
+        CHECK(manager->HandleNewBuilding(&building));
+        CHECK(manager->DispatchResponseCount() == 0);
+        manager->SetMaxCount(100);
+        // a residence without a list: one group 0x4206 automaton driving in from 8..10 cells, with the tuning probability
+        holder->RemoveProperty(kResponseGroupsProperty, false);
+        CHECK(manager->HandleNewBuilding(&building));
+        CHECK(manager->DispatchResponseCount() == 1);
+        if (manager->DispatchResponseCount() == 1) {
+            const tResponseAutomataInfo& entry = manager->Responses()[0];
+            CHECK(entry.group == kNewResidenceResponseGroup && entry.count == 1 && !entry.forced && entry.pathType == 8);
+        }
+        manager->HandleRemoveOccupant(&occupant);   // drops the entries of the occupant
+        CHECK(manager->DispatchResponseCount() == 0);
+        tuning.f21a00 = -1.0f;   // probability below every draw
+        CHECK(manager->HandleNewBuilding(&building));
+        CHECK(manager->DispatchResponseCount() == 0);
+        tuning.f21a00 = 1.0f;
+        building.purpose = 3;    // not residential
+        CHECK(manager->HandleNewBuilding(&building));
+        CHECK(manager->DispatchResponseCount() == 0);
+        tuning.f21a00 = 0.0f;
+        manager->Shutdown();
+        manager->Release();
+        host.cityOccupants.erase(&occupant);
+        holder->Release();
+        delete cityOccupant;
     }
 
     host.tuningHolder->Release();   // the test's own reference taken at the start

@@ -1464,6 +1464,10 @@ int RunScenario(const std::string& path) {
             int limit = 0;
             words >> limit;
             native::NativeRouteParityReport(limit);
+        } else if (command == "freightprobe") {   // freightprobe X0 Z0 X1 Z1: freight destinations and one freight search from a lot (read-only)
+            int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
+            words >> x0 >> z0 >> x1 >> z1;
+            native::NativeFreightReport(x0, z0, x1, z1);
         } else if (command == "fires") {   // fires: the fire disaster's state, one line per fire
             native::NativeFireReport();
         } else if (command == "policepower") {   // policepower X0 Z0 X1 Z1 STEP: the police power map the riots read (read-only)
