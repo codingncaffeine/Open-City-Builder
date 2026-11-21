@@ -161,6 +161,11 @@ void cSC4VertexHtConstraintSatisfier::InsertFixedVertex(std::int32_t vertexId, f
     InsertRangeConstraint(vertexId, height, height);
 }
 
+// i386 0x0067b564: a find in the to-solve map (the network tool's support pass asks before adding a vertex).
+bool cSC4VertexHtConstraintSatisfier::IsInToSolveSet(std::int32_t vertexId) const {
+    return toSolve_.find(vertexId) != toSolve_.end();
+}
+
 // 0x1001bd09a: the first equality set (in list order) whose tree contains the vertex.
 std::set<int>* cSC4VertexHtConstraintSatisfier::FindEqualitySet(std::int32_t vertexId) const {
     for (std::set<int>* set : equalitySets_) {
@@ -398,23 +403,21 @@ bool cSC4VertexHtConstraintSatisfier::UpdateEqualityConstraints(std::int32_t ver
     return true;
 }
 
-// 0x1001beb14: the range flavour intersects every other member's window with the solved range and
-// does NOT clear the equality flag (quirk; only the float flavour does). An empty set returns early
-// without being removed.
+// 0x1001beb14 (i386 0x0014b102): the range flavour intersects every other member's window with the
+// vertex's range and keeps the set and the equality flags: like every range flavour it narrows windows
+// without consuming the constraint, which the float flavour applies (and removes) once a member is
+// solved.
 bool cSC4VertexHtConstraintSatisfier::UpdateEqualityConstraints(std::int32_t vertexId,
                                                                 const tHtRange& range,
                                                                 std::set<int>& nextVertices) {
     std::set<int>* set = FindEqualitySet(vertexId);
     if (set == nullptr) return true;
-    if (set->empty()) return true;  // 0x1001beb??: early return, the set is not removed
     for (int member : *set) {
         if (member == vertexId) continue;
         bool changed = false;
         if (!IntersectVertexRange(member, range, changed)) return false;
         if (changed) nextVertices.insert(member);
     }
-    equalitySets_.remove(set);
-    delete set;
     return true;
 }
 
@@ -463,12 +466,12 @@ bool cSC4VertexHtConstraintSatisfier::UpdateSlopeConstraints(std::int32_t vertex
             ++it;
             continue;
         }
-        // 0x1001bec??: [range.low - slope, range.high + slope].
+        // i386 0x0014ae02: [range.low - slope, range.high + slope]; the constraint stays for the solved pass.
         tHtRange shifted{range.low - it->maxSlope, range.high + it->maxSlope};
         bool changed = false;
         if (!IntersectVertexRange(other, shifted, changed)) return false;
         if (changed) nextVertices.insert(other);
-        it = slopeConstraints_.erase(it);
+        ++it;
     }
     return true;
 }
@@ -526,11 +529,8 @@ bool cSC4VertexHtConstraintSatisfier::UpdateSmoothnessConstraints(std::int32_t v
                                           -it->maxSecondDifference - range.high,
                                           it->maxSecondDifference - range.low};
             if (!AddEndFixedSmoothnessConstraint(c)) return false;
-        } else {
-            ++it;
-            continue;
         }
-        it = smoothnessConstraints_.erase(it);
+        ++it;   // the range flavour keeps the constraint for the solved height's pass
     }
     return true;
 }
@@ -584,7 +584,7 @@ bool cSC4VertexHtConstraintSatisfier::UpdateMidFixedSmoothnessConstraints(
         bool changed = false;
         if (!IntersectVertexRange(other, shifted, changed)) return false;
         if (changed) nextVertices.insert(other);
-        it = midFixedSmoothnessConstraints_.erase(it);
+        ++it;   // kept (range flavour)
     }
     return true;
 }
@@ -620,9 +620,9 @@ bool cSC4VertexHtConstraintSatisfier::UpdateEndFixedSmoothnessConstraints(
     std::int32_t vertexId, const tHtRange& range, std::set<int>& nextVertices) {
     for (auto it = endFixedSmoothnessConstraints_.begin(); it != endFixedSmoothnessConstraints_.end();) {
         if (it->vertexEnd == vertexId) {
-            // 0x1001be917 (range): [(range.low - high) * -0.5, (range.high - low) * -0.5].
-            const tHtRange middle_range{(range.low - it->high) * -0.5f,
-                                        (range.high - it->low) * -0.5f};
+            // i386 0x0014b18c: [(high - range.low) * -0.5, (low - range.high) * -0.5] (FLOAT_00a707c4 = -0.5).
+            const tHtRange middle_range{(it->high - range.low) * -0.5f,
+                                        (it->low - range.high) * -0.5f};
             bool changed = false;
             if (!IntersectVertexRange(it->vertexMid, middle_range, changed)) return false;
             if (changed) nextVertices.insert(it->vertexMid);
@@ -633,11 +633,8 @@ bool cSC4VertexHtConstraintSatisfier::UpdateEndFixedSmoothnessConstraints(
             bool changed = false;
             if (!IntersectVertexRange(it->vertexEnd, end_range, changed)) return false;
             if (changed) nextVertices.insert(it->vertexEnd);
-        } else {
-            ++it;
-            continue;
         }
-        it = endFixedSmoothnessConstraints_.erase(it);
+        ++it;   // kept (range flavour)
     }
     return true;
 }
