@@ -557,7 +557,6 @@ bool FinishCityRenderStack(cISC4City* cityInterface) {
     native::InstallDispatchTool(view);
     native::InstallCatalogUi(view.GetWindowManager());
     native::SetBudgetViewWindow(view.AsIGZWin());
-    view.AddGUI();   // DoPreCityInit's city UI (kept after the tools: the panels it builds look them up)
     native::ConfigureCityPanels(view);   // DoPostCityInit's gauges: RCI bars and opinion polls
     // ... and the toolbar readouts the date / funds / population / name messages refresh in the game
     view.UpdateCityName();

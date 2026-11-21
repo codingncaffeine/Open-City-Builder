@@ -3501,6 +3501,9 @@ void cSC4View3DWin::DoPreCityInit() {
     if (modelMaker_ && host_) host_->InitModelMaker(modelMaker_);
     if (host_) host_->OnView3DInit();
     UpdateProgressMessage();
+    // ReadTunableValues and SC4SendProgressMessage(2, "") come here in the original (not ported yet)
+    AddGUI();
+    UpdateProgressMessage();
 }
 // DoPostCityInit (0x1007867d8): the view keeps SL::spSimulator at +0x238 (the speed buttons and the hidden pause use it); the rest of
 // the body (the camera's city size, the clock, the panels) is the host's. The progress screen moves on at its start and is

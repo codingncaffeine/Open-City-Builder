@@ -6,6 +6,7 @@
 
 #include "app/NativeAudio.h"
 #include "app/NativeGraphics.h"
+#include "app/NativeWinMgr.h"
 #include "gz/Buffer.h"
 #include "sc4/WinCalloutBox.h"
 #include "sc4/WinCatalogView.h"
@@ -52,7 +53,8 @@ void InstallCatalogUi(cIGZWinMgr* manager) {
 }
 
 sc4::cISC4WinCalloutBox* CreateCalloutBox() {
-    auto* box = new sc4::cSC4WinCalloutBox(g_manager);
+    // The view's DoPreCityInit makes its cursor-text box before the catalog is installed: the active window manager then.
+    auto* box = new sc4::cSC4WinCalloutBox(g_manager ? g_manager : static_cast<cIGZWinMgr*>(ActiveWinMgr()));
     box->AddRef();
     return box;
 }
