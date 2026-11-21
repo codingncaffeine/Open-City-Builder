@@ -169,8 +169,8 @@ WeatherHost g_weatherHost;
 
 void InstallNativeWeather() { sc4::SetWeatherHost(&g_weatherHost); }
 
-// cSC4WeatherSimulator::DoPostCityInit (the city-started message 0x26d31ec1, which the native city does not post): a month and the
-// weeks of a full moisture / temperature pass, before the terrain picks its first surface cover from them.
+// After the load: the weather simulator has run its catch-up (DoPostCityInit, a month and the weeks of a full moisture /
+// temperature pass) on the city's "init done" message 0x26d31ec1, which cSC4App posts and pumps; this only reports it.
 void WeatherPostCityInit() {
     sc4::cSC4City* city = HostCity();
     cIGZUnknown* object = city ? city->GetComponent(CityComponent::WeatherSimulator) : nullptr;
@@ -179,7 +179,6 @@ void WeatherPostCityInit() {
     auto* serializable = static_cast<cIGZSerializable*>(raw);
     if (serializable->GetGZCLSID() == sc4::kGZCLSID_cSC4WeatherSimulator) {
         auto* weather = static_cast<sc4::cSC4WeatherSimulator*>(serializable);
-        weather->DoPostCityInit();
         if (std::getenv("SC4_DEBUG")) {
             std::vector<std::vector<std::uint8_t>>* map = nullptr;
             weather->GetMoistureValueMapPtr(map);

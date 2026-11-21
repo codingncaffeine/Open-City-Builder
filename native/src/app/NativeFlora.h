@@ -10,6 +10,6 @@ namespace native {
 void InstallNativeFlora();                   // the IFloraSimulatorHost + IFloraHost the city's flora uses
 sc4::cSC4FloraSimulator* CityFloraSimulator();   // the city's cSC4FloraSimulator with its species loaded, or null
 sc4::cSC4ViewInputControl* CreateFloraTool(std::uint32_t floraType);   // the mayor-mode tree tool (no reference: the view takes it)
-void WeatherPostCityInit();   // NativeWeather.cpp: the weather simulator's post-city-init pass (moisture, temperature)
+void WeatherPostCityInit();   // NativeWeather.cpp: reports the weather simulator's post-city-init pass (moisture, temperature)
 
 }  // namespace native

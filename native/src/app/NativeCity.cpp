@@ -337,8 +337,7 @@ bool LoadCityFile(cSC4App& app, const std::string& path, cRZAutoRefCount<cISC4Re
     ForgetLotSerializables();
     ListenForSavedView();
     const bool loaded = app.LoadCity(cRZString(path.c_str()), holder);
-    // The city-started message 0x26d31ec1 is not posted natively: the weather simulator's catch-up (DoPostCityInit) runs here,
-    // after cSC4City::Init has initialised the components (the city view attached during the load, before them).
+    // the weather simulator's catch-up ran on the city's "init done" message (0x26d31ec1) during the load: report it
     if (loaded) WeatherPostCityInit();
     // SC4_ROUNDTRIP=1 (dev switch, sandboxed tests only): the first city opened is saved over its own file at once and the
     // saved file is opened again, so one headless run shows whether every class reads back what it wrote.
