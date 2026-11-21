@@ -60,6 +60,8 @@ struct View3DWinTestAccess {
     static std::list<CursorTextInfo>& CursorText(cSC4View3DWin& v) { return v.cursorText_; }
     static cIGZBuffer*& CursorTextIcon(cSC4View3DWin& v) { return v.cursorTextIcon_; }
     static cIGZBuffer*& CostIndicatorBuffer(cSC4View3DWin& v) { return v.costIndicatorBuffer_; }
+    static std::int32_t& CostState(cSC4View3DWin& v) { return v.costState_; }
+    static std::uint32_t& CostColorState(cSC4View3DWin& v) { return v.costColorState_; }
     static gz::cIGZWinBMP*& CostIndicatorText(cSC4View3DWin& v) { return v.costIndicatorText_; }
     static std::uint32_t& MayorSubPanelState(cSC4View3DWin& v) { return v.mayorSubPanelState_; }
     static std::uint32_t& MayorSubPanel(cSC4View3DWin& v) { return v.mayorSubPanel_; }
@@ -789,8 +791,6 @@ struct FakeHost final : IView3DWinHost {
     int clockShutdowns = 0, validationShutdowns = 0, progressShutdowns = 0;
     std::vector<std::uint32_t> gameMessages;
     int lightingHighlights = 0, lightingRestores = 0;
-    int costUpdates = 0;
-    float lastCostDt = -1.0f;
     bool popupSafe = false, popupEnabled = false;
     std::uint32_t frameCounter = 0x1234;
     int hoverUpdates = 0;
@@ -1080,7 +1080,6 @@ struct FakeHost final : IView3DWinHost {
     void ShutdownModelMaker(cIGZUnknown*) override { ++modelMakerShutdowns; }
     void ShutdownCameraObject(cIGZUnknown*) override { ++cameraShutdowns; }
     void ShutdownSimulationClock(cIGZUnknown*) override { ++clockShutdowns; }
-    void UpdateCostIndicator(float dt) override { ++costUpdates; lastCostDt = dt; }
     bool PopupModalDialogsSafe() override { return popupSafe; }
     bool PopupModalDialogsEnabled() override { return popupEnabled; }
     std::uint32_t SimulationFrameCounter() override { return frameCounter; }
@@ -1880,11 +1879,9 @@ int main() {
         View3DWinTestAccess::PaintEnabled(*view) = true;
         View3DWinTestAccess::FrameTimeThreshold(*view) = 0.0f;      // run the frame block every time
         View3DWinTestAccess::Scrolling(*view) = false;
-        host.costUpdates = 0;
         host.frameMarkers = 0;
         renderer.draws = 0;
         CHECK(view->GZPaint());
-        CHECK(host.costUpdates == 1 && host.lastCostDt >= 0.0f && host.lastCostDt <= 0.5f);
         CHECK(host.frameMarkers == 1 && host.lastFrameMarker == host.frameCounter);
         CHECK(renderer.draws == 1 && renderer.drawContextMarker == host.frameCounter);
         // The frame only resumes the simulation once the hidden timeout has passed (2 s by default, so
@@ -2034,7 +2031,6 @@ int main() {
         View3DWinTestAccess::MouseDownX(*view) = 400;
         View3DWinTestAccess::MouseDownY(*view) = 300;
         View3DWinTestAccess::DraggedPastDeadZone(*view) = false;
-        host.costUpdates = 0;
         View3DWinTestAccess::Scrolling(*view) = false;
         View3DWinTestAccess::Stopping(*view) = false;
         camera->SetZoom(0.0f);
@@ -2042,7 +2038,6 @@ int main() {
         CHECK(!View3DWinTestAccess::DraggedPastDeadZone(*view));
         CHECK(View3DWinTestAccess::EdgeScrollX(*view) == 0 && View3DWinTestAccess::EdgeScrollY(*view) == 0);
         CHECK(View3DWinTestAccess::CursorTextX(*view) == 400 && View3DWinTestAccess::CursorTextY(*view) == 300);
-        CHECK(host.costUpdates == 1);
         CHECK(view->GZOnMouseMove(799, 300, 0));               // right edge -> east
         CHECK(View3DWinTestAccess::Scrolling(*view));
         CHECK(std::fabs(View3DWinTestAccess::ScrollAngle(*view) - 0.0f) < 1e-6f);
@@ -2155,11 +2150,9 @@ int main() {
         // with a zero delta.
         box.window_->HideWindow();
         box.positions = 0;
-        host.costUpdates = 0;
         view->UpdateCursorTextPositions(12, 34);
         CHECK(box.positions == 0);
         CHECK(View3DWinTestAccess::CursorTextX(*view) == 12 && View3DWinTestAccess::CursorTextY(*view) == 34);
-        CHECK(host.costUpdates == 1 && host.lastCostDt == 0.0f);
         box.window_->ShowWindow();
         view->UpdateCursorTextPositions(56, 78);
         CHECK(box.positions == 1 && box.point.x == 56 && box.point.y == 78);
@@ -2665,6 +2658,40 @@ int main() {
         CHECK(!host.createdBuffers.empty() && View3DWinTestAccess::CostIndicatorBuffer(*view) == host.createdBuffers.back() && host.createdBuffers.back()->refs == 1);
         CHECK(host.bmpWindow->GetWinBMPFlag(6));
         CHECK(host.bmpWindow->imageArea.right == 0x80 && host.bmpWindow->imageArea.bottom == 0x20);
+        // the cost indicator: up and left of the cursor, yellow and see-through while affordable, red and solid when not; a paid
+        // cost rises 200 pixels over 1.5 s from where it was paid and is hidden when the time is up
+        {
+            cIGZWin* costWindow = host.bmpWindow->AsIGZWin();
+            const bool hadCity = host.cityExists;
+            const std::int64_t hadFunds = host.funds;
+            host.cityExists = true;
+            host.funds = 1000;
+            costWindow->HideWindow();
+            view->UpdateCursorTextPositions(500, 400);
+            view->SetCostIndicator(400);
+            CHECK(costWindow->IsVisible());
+            CHECK(View3DWinTestAccess::CostState(*view) == 1 && View3DWinTestAccess::CostColorState(*view) == 0);
+            const cRZRect& at = costWindow->GetArea();
+            CHECK(at.left == 500 - 15 - 0x80 && at.top == 400 - 15 && at.right == 500 - 15 && at.bottom == 400 - 15 + 0x20);
+            view->SetCostIndicator(400, 5000);                               // more than the treasury holds
+            CHECK(View3DWinTestAccess::CostColorState(*view) == 1);
+            host.funds = -5;
+            view->SetCostIndicator(0);                                       // nothing required: affordable even in debt
+            CHECK(View3DWinTestAccess::CostColorState(*view) == 0);
+            view->ClearCostIndicator(true);
+            CHECK(View3DWinTestAccess::CostState(*view) == 2 && View3DWinTestAccess::CostColorState(*view) == 2);
+            view->UpdateCursorTextPositions(10, 10);                         // the paid cost stays where it was paid
+            CHECK(costWindow->GetArea().left == 500 - 15 - 0x80 && costWindow->GetArea().top == 400 - 15);
+            view->UpdateCostIndicator(0.75f);                                // half way: 100 pixels up
+            CHECK(costWindow->GetArea().top == 300 - 15 && costWindow->IsVisible());
+            view->UpdateCostIndicator(0.75f);
+            CHECK(View3DWinTestAccess::CostState(*view) == 0 && !costWindow->IsVisible());
+            view->SetCostIndicator(7);
+            view->ClearCostIndicator(false);
+            CHECK(View3DWinTestAccess::CostState(*view) == 0 && !costWindow->IsVisible());
+            host.cityExists = hadCity;
+            host.funds = hadFunds;
+        }
         // 8. the advisor popup queue, the compass window and the compass win proc.
         CHECK(host.advisorQueue != nullptr && host.advisorQueue->inits == 1);
         CHECK(View3DWinTestAccess::AdvisorPopups(*view) == host.advisorQueue);

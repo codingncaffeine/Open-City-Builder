@@ -130,6 +130,7 @@ namespace s3d { class cIS3DModelInstance; }
 
 class cIGZPersistDBSegment;
 class cIGZVariant;
+class cIGZFont;
 
 namespace sc4 {
 
@@ -273,6 +274,11 @@ constexpr std::uint32_t kCursorTextIconInstance = 0x14416160;
 constexpr std::uint32_t kCostIndicatorBufferW = 0x80;         // the cost indicator's backing buffer
 constexpr std::uint32_t kCostIndicatorBufferH = 0x20;
 constexpr std::uint32_t kCostIndicatorColorType = 1;
+// RenderCostIndicator: the indicator font and its fallback, and the nine passes (0x00abcce0: x, y, colour 0 = the state's, 1 = black).
+constexpr std::uint32_t kCostIndicatorFontId = 0xe2b14587, kCostIndicatorFallbackFontId = 0x68963c4c;
+constexpr float kCostIndicatorFadeMs = 1500.0f;   // a paid cost's rise and fade
+struct CostIndicatorPass { int dx, dy, color; };
+constexpr CostIndicatorPass kCostIndicatorPasses[9] = {{1, 1, 1}, {1, 2, 1}, {1, 3, 1}, {2, 1, 1}, {2, 3, 1}, {3, 1, 1}, {3, 2, 1}, {3, 3, 1}, {2, 2, 0}};
 // The alert border's three images (UpdateAlertBorder): a disaster going on / a city situation / the simulator paused.
 // The progress screen's title strings (DoPreCityInit): "loading" (followed by the city's name) and "new city".
 constexpr std::uint32_t kProgressTitleGroup = 0x6a231eaa, kProgressLoadingInstance = 0xaa765647, kProgressNewCityInstance = 0xaa76563a;
@@ -725,7 +731,6 @@ public:
     // --- SL::spViewUtilities->ProjectPointToViewportCoordinates2D @ 0x100173a1a; false without the global
     virtual bool ProjectPointToViewport(cS3DVector3& point) = 0;
     // --- per frame / per message
-    virtual void UpdateCostIndicator(float dt) = 0;                   // @ 0x10078178a (PARTIAL: the cost-indicator windows)
     virtual bool PopupModalDialogsSafe() = 0;                         // SC4GetPopupModalDialogsSafe
     virtual bool PopupModalDialogsEnabled() = 0;                      // SC4GetPopupModalDialogsEnabled
     virtual std::uint32_t SimulationFrameCounter() = 0;               // (+0x170) vslot 0x48
@@ -754,6 +759,7 @@ public:
     virtual bool SimulationDate(int& day, int& month, int& year, int& startYear) { (void)day; (void)month; (void)year; (void)startYear; return false; }
     virtual void FormatDate(int day, int month, int year, cIGZString& out) { (void)day; (void)month; (void)year; (void)out; }
     virtual std::uint32_t MakeNativeColor(std::uint8_t r, std::uint8_t g, std::uint8_t b) = 0;   // RZ::GS() vslot 0x118
+    virtual cIGZFont* WindowFont(std::uint32_t id) { (void)id; return nullptr; }   // RZ::WCM() vslot 0x28 (borrowed)
     virtual bool BudgetDialogOpen(cIGZUnknown* dialog) = 0;               // cSC4BudgetUIWinProc vslot 0x50 (0x10078883e)
     virtual void RefreshBudgetDialog(cIGZUnknown* dialog) = 0;            // cSC4BudgetUIWinProc vslot 0x48 (0x100788846)
     // --- the four window procedures RemoveGUI shuts down through their own Shutdown (the fifth, the panel UI
@@ -920,7 +926,14 @@ public:
     void SendViewInputControlChangeMessage(cSC4ViewInputControl* previous, cSC4ViewInputControl* next);   // @ 0x100782556
     void UpdateCursorTextPositions(int x, int y);                  // @ 0x100783a60
     void CursorTextChanged();                                      // @ 0x10079155e
-    void UpdateCostIndicator(float dt);                            // @ 0x10078178a (PARTIAL: the cost-indicator windows)
+    void UpdateCostIndicator(float dt);                            // @ 0x10078178a
+    // The cost indicator: the money string beside the cursor, yellow while affordable (alpha 0x96), red when it is not (alpha
+    // 0xff); a paid cost turns white and floats 200 pixels up while it fades out over 1.5 s.
+    void SetCostIndicator(std::uint32_t cost) override;            // Mac i386 0x00825b96: (cost, cost)
+    void SetCostIndicator(std::uint32_t cost, std::uint32_t required) override;   // Mac i386 0x0051ff7a
+    void ClearCostIndicator(bool paid) override;                   // Mac i386 0x0051fef2
+    void RenderCostIndicator();                                    // Mac i386 0x0051fbee
+    void SetCostIndicatorAlpha(std::uint8_t alpha);                // Mac i386 0x0051c988
     void CreateProgressScreen(bool flag);                          // @ 0x100780910
     void UpdateProgressMessage();                                  // @ 0x100788d98
     void DeleteProgressScreen();                                   // Mac i386 0x0051c8f2
@@ -1060,16 +1073,16 @@ protected:
     // The cost-indicator state (+0x5a0..+0x5ac) and its two windows (+0x5c0 the backing buffer, +0x5c8 the
     // cGZWinBMP that shows it).
     std::uint32_t costValue_ = 0;                       // +0x5a0 (the amount SetCostIndicator was given)
-    std::int32_t costState_ = 0;                        // +0x5a4 (1 = the indicator is active)
-    std::uint32_t costColorState_ = 0;                  // +0x5a8 (0 = cannot afford, 1 = affordable, 2 = free)
-    float costTimer_ = 0.0f;                            // +0x5ac (UpdateCostIndicator's countdown, seconds)
+    std::int32_t costState_ = 0;                        // +0x5a4 (0 = off, 1 = shown, 2 = fading after a payment)
+    std::uint32_t costColorState_ = 0;                  // +0x5a8 (0 = affordable, 1 = cannot afford, 2 = paid, fading)
+    float costTimer_ = 0.0f;                            // +0x5ac (the paid cost's countdown, milliseconds)
     cIGZBuffer* costIndicatorBuffer_ = nullptr;         // +0x5c0 (0x80 x 0x20, SL::spGS vslot 0x20)
     gz::cIGZWinBMP* costIndicatorText_ = nullptr;       // +0x5c8 (the cGZWinBMP that shows it)
     // The cursor-text block (+0x5b0..+0x5f0). The +0x5d0 window is a cSC4WinCalloutBox (its interface is the
     // one CursorTextChanged calls); the icon is the +0x5f0 image.
     int cursorTextX_ = 0;                               // +0x5b0
     int cursorTextY_ = 0;                               // +0x5b4
-    int costTextX_ = 0;                                 // +0x5b8 (the cost indicator's own x)
+    int costTextX_ = 0;                                 // +0x5b8 (where the paid cost starts floating up: the cursor x then)
     int costTextY_ = 0;                                 // +0x5bc (its y)
     cISC4WinCalloutBox* cursorTextBox_ = nullptr;       // +0x5d0 (referenced; AddGUI creates it)
     std::list<CursorTextInfo> cursorText_;              // +0x5d8

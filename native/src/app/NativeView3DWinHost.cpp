@@ -592,7 +592,6 @@ struct StubView3DWin final : IView3DWinHost {
         point.z = xyz[2];
         return true;
     }
-    void UpdateCostIndicator(float dt) override {}
     bool PopupModalDialogsSafe() override { return ActiveWinMgr() && ActiveWinMgr()->modalDialogs; }
     bool PopupModalDialogsEnabled() override { return ActiveWinMgr() && ActiveWinMgr()->modalDialogs; }
     std::uint32_t SimulationFrameCounter() override { return {}; }
@@ -641,6 +640,8 @@ struct StubView3DWin final : IView3DWinHost {
         out.AssignFromCString(text);
     }
     std::uint32_t MakeNativeColor(std::uint8_t r, std::uint8_t g, std::uint8_t b) override { return 0xff000000u | (std::uint32_t(r) << 16) | (std::uint32_t(g) << 8) | b; }
+    // RZ::WCM() vslot 0x28: the window control manager's font of that style (borrowed)
+    cIGZFont* WindowFont(std::uint32_t id) override { return g_progressServices.Font(id); }
     bool BudgetDialogOpen(cIGZUnknown* dialog) override { return native::BudgetUiOpen(dialog); }
     void RefreshBudgetDialog(cIGZUnknown* dialog) override { native::BudgetUiRefresh(dialog); }
     void ShutdownNewsTickerWinProc(cIGZUnknown* proc) override { native::ShutdownNewsTickerWindow(proc); }
@@ -993,6 +994,10 @@ void NativeCityViewReport() {
     std::printf(" tract styles");
     for (std::uint32_t style : tract.GetActiveStyles()) std::printf(" %x", style);
     std::printf(" all-at-once %d years %d\n", tract.IsUsingAllStylesAtOnce() ? 1 : 0, tract.GetYearsBetweenStyleChanges());
+    // the cost indicator's window and fonts (it shows only while a tool prices something under the cursor)
+    std::printf("cityview: cost indicator font %08x %s fallback %08x %s\n", sc4::kCostIndicatorFontId,
+                g_progressServices.Font(sc4::kCostIndicatorFontId) ? "present" : "missing", sc4::kCostIndicatorFallbackFontId,
+                g_progressServices.Font(sc4::kCostIndicatorFallbackFontId) ? "present" : "missing");
 }
 
 

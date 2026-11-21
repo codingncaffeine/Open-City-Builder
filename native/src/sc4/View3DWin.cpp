@@ -14,6 +14,7 @@
 #include "gz/WinBtn.h"
 #include "gz/WinGen.h"
 #include "gz/WinUtils.h"
+#include "gz/Font.h"
 #include "sc4/WinAuraAlert.h"
 #include "sc4/SC4UI.h"
 #include "sc4/SLBuffer.h"
@@ -1233,10 +1234,110 @@ void cSC4View3DWin::UpdateCursorTextPositions(int x, int y) {               // 0
     UpdateCostIndicator(0.0f);              // the cost indicator follows the cursor too
 }
 
-void cSC4View3DWin::UpdateCostIndicator(float dt) {                         // 0x10078178a (PARTIAL)
-    // The cost-indicator windows (+0x5c0 bitmap / +0x5c8 text) are not recovered, so the whole body is
-    // still the host's; see notes/ledger_pending/cSC4View3DWin.txt.
-    if (host_) host_->UpdateCostIndicator(dt);
+// UpdateCostIndicator (0x10078178a): the indicator sits up and to the left of the cursor (its bottom-right corner 15 pixels from
+// it); a paid cost instead rises from where it was paid, 200 pixels over its 1.5 s, fading with the time left, and is hidden
+// when the time is up.
+void cSC4View3DWin::UpdateCostIndicator(float dt) {
+    if (!costIndicatorText_ || !costIndicatorBuffer_) return;
+    int x = cursorTextX_;
+    int y = cursorTextY_;
+    if (costState_ == 2) {
+        costTimer_ = static_cast<float>(static_cast<double>(costTimer_) + static_cast<double>(dt) * -1000.0);
+        if (costTimer_ <= 0.0f) {
+            costState_ = 0;
+            if (cIGZWin* window = costIndicatorText_->AsIGZWin()) window->HideWindow();
+            return;
+        }
+        x = costTextX_;
+        y = static_cast<int>(static_cast<float>(costTextY_) + ((kCostIndicatorFadeMs - costTimer_) * 200.0f) / -kCostIndicatorFadeMs);
+        SetCostIndicatorAlpha(static_cast<std::uint8_t>(static_cast<int>((costTimer_ * 255.0f) / kCostIndicatorFadeMs)));
+    }
+    const int width = static_cast<int>(costIndicatorBuffer_->Width());
+    const int height = static_cast<int>(costIndicatorBuffer_->Height());
+    const cRZRect area{x - 0xf - width, y - 0xf, x - 0xf, y - 0xf + height};
+    if (cIGZWin* window = costIndicatorText_->AsIGZWin()) window->SetArea(area);
+    costIndicatorText_->SetImageArea(cRZRect{0, 0, area.right - area.left, area.bottom - area.top});
+}
+
+// SetCostIndicator(cost) (0x100825b96 in the i386 build): the cost is also the amount that must be in the treasury.
+void cSC4View3DWin::SetCostIndicator(std::uint32_t cost) { SetCostIndicator(cost, cost); }
+
+// SetCostIndicator(cost, required): red when the treasury (SL::spCity's budget simulator, 0 without a city) holds less than
+// `required`, yellow otherwise; it is drawn again only when the cost or the colour changed.
+void cSC4View3DWin::SetCostIndicator(std::uint32_t cost, std::uint32_t required) {
+    const std::int64_t funds = host_ && host_->CityExists() ? host_->CityFunds() : 0;
+    const bool affordable = required == 0 || funds > 0xffffffffll || (funds >= 0 && required <= static_cast<std::uint32_t>(funds));
+    const std::uint32_t color = affordable ? 0u : 1u;
+    costTimer_ = 0.0f;
+    if (costState_ == 1 && color == costColorState_ && cost == costValue_) return;
+    costState_ = 1;
+    costColorState_ = color;
+    costValue_ = cost;
+    RenderCostIndicator();
+    SetCostIndicatorAlpha(color != 1 ? 0x96 : 0xff);
+    if (costIndicatorText_)
+        if (cIGZWin* window = costIndicatorText_->AsIGZWin()) window->ShowWindow();
+}
+
+// ClearCostIndicator: a paid cost turns white and starts its 1.5 s rise from the cursor; otherwise the indicator goes away.
+void cSC4View3DWin::ClearCostIndicator(bool paid) {
+    costState_ = 1;
+    if (paid) {
+        costColorState_ = 2;
+        costState_ = 2;
+        costTextX_ = cursorTextX_;
+        costTextY_ = cursorTextY_;
+        costTimer_ = kCostIndicatorFadeMs;
+        RenderCostIndicator();
+        return;
+    }
+    costTimer_ = 0.0f;
+    costState_ = 0;
+    if (costIndicatorText_)   // the original calls through the window unchecked
+        if (cIGZWin* window = costIndicatorText_->AsIGZWin()) window->HideWindow();
+}
+
+// RenderCostIndicator: the money string right-aligned in the buffer, in the indicator font (0xe2b14587, else 0x68963c4c),
+// drawn eight times in black one pixel around its place and once on it in the colour of the state.
+void cSC4View3DWin::RenderCostIndicator() {
+    if (costState_ == 0 || !costIndicatorBuffer_ || !costIndicatorText_ || !host_) return;
+    cIGZFont* font = host_->WindowFont(kCostIndicatorFontId);
+    cRZString text;
+    host_->MakeMoneyString(static_cast<std::int64_t>(costValue_), text);
+    if (!font) font = host_->WindowFont(kCostIndicatorFallbackFontId);
+    if (!font) return;
+    cRZRect area{0, 0, 0, 0};
+    font->CalculateTextArea(text.ToChar(), text.Strlen(), area, false, true);
+    const int width = area.right - area.left;
+    const auto fill = static_cast<cIGZBuffer::eLockFlags>(0x8001);
+    if (costIndicatorBuffer_->Lock(fill)) {
+        costIndicatorBuffer_->Fill(0, nullptr);
+        costIndicatorBuffer_->Unlock(fill);
+    }
+    if (!font->LockSurfaceForFontUse(costIndicatorBuffer_)) return;
+    std::uint32_t colors[2] = {0, host_->MakeNativeColor(0, 0, 0)};
+    if (costColorState_ == 0) colors[0] = host_->MakeNativeColor(0xff, 0xff, 0x28);
+    else if (costColorState_ == 1) colors[0] = host_->MakeNativeColor(0xff, 0x28, 0x28);
+    else if (costColorState_ == 2) colors[0] = host_->MakeNativeColor(0xff, 0xff, 0xff);
+    for (const CostIndicatorPass& pass : kCostIndicatorPasses) {
+        const int left = (0x7c - width) + pass.dx;
+        area.right += left - area.left;
+        area.bottom += pass.dy - area.top;
+        area.left = left;
+        area.top = pass.dy;
+        font->DrawTextParagraph(costIndicatorBuffer_, area, text.ToChar(), text.Strlen(), 2, colors[pass.color], kFontDefaultColor, nullptr, nullptr);
+    }
+    font->UnlockSurfaceForFontUse(costIndicatorBuffer_);
+}
+
+// SetCostIndicatorAlpha: the buffer's shade colour (cIGZBufferShade): white with the alpha.
+void cSC4View3DWin::SetCostIndicatorAlpha(std::uint8_t alpha) {
+    if (!costIndicatorBuffer_) return;
+    void* raw = nullptr;
+    if (!costIndicatorBuffer_->QueryInterface(kGZIID_cIGZBufferShade, &raw) || !raw) return;
+    auto* shade = static_cast<cIGZBufferShade*>(raw);
+    shade->SetShadeColor(0xff, 0xff, 0xff, alpha);
+    shade->Release();
 }
 
 void cSC4View3DWin::CursorTextChanged() {                                   // 0x10079155e
