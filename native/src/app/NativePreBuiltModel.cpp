@@ -23,6 +23,8 @@
 #include "sc4/DrawContext.h"
 #include "sc4/LightingManager.h"
 #include "sc4/OverlayManager.h"
+#include "sc4/PolygonClipper.h"
+#include "render/gd/IGZGDriver.h"
 #include "sc4/NetworkOccupantModel.h"
 #include "sc4/NetworkOccupantWithPreBuiltModel.h"
 #include "sc4/Render3D.h"
@@ -185,9 +187,60 @@ public:
         }
     }
 
-    // i386 0x004ca294: the triangles below `lo` are cut away (a bridge pylon standing in water or on the ground; only the
-    // bridge pieces, network flag 0x40000, take this path). NOT PORTED: the pylon clip; the model is drawn whole.
-    void Clip(const cS3DVector3&, const cS3DVector3&, bool) override {}
+    // i386 0x004ca294: when the model reaches out of the box (in y only for `yOnly`), each mesh's triangles go through
+    // cSC4PolygonClipper: the mesh takes its clipped vertices, indices and the draw records that kept triangles. Only the bridge
+    // pieces (network flag 0x40000) call it, with the y range from the water surface or the lowest ground corner up: the part
+    // of a pylon under it is cut away. Then the bounds are cut to the box.
+    void Clip(const cS3DVector3& lo, const cS3DVector3& hi, bool yOnly) override {
+        if (yOnly) {
+            if (!(bounds_.min[1] < lo.y) && !(hi.y < bounds_.max[1])) return;
+        } else if (!(bounds_.min[0] < lo.x) && !(bounds_.min[2] < lo.z) && !(hi.x < bounds_.max[0]) && !(hi.z < bounds_.max[2])) {
+            return;
+        }
+        for (std::size_t m = 0; m < groups_.size(); ++m) {
+            SC4Mesh mesh;
+            std::memcpy(&mesh, Meshes()[m].data(), sizeof mesh);
+            std::vector<SC4MeshDrawRecord> records;
+            if (mesh.draws) records.assign(mesh.draws->begin, mesh.draws->end);
+            std::vector<std::uint16_t> source;
+            if (mesh.indexGroup && *mesh.indexGroup) {
+                std::uint32_t total = 0;   // the index count is the end of the furthest draw range
+                for (const SC4MeshDrawRecord& d : records) total = std::max(total, d.start + d.count);
+                source.assign(*mesh.indexGroup, *mesh.indexGroup + total);
+            }
+            std::vector<std::uint8_t> clippedVertices;
+            std::vector<std::uint16_t> clippedIndices;
+            std::uint16_t count = 0;
+            if (groups_[m].format == gd::vf::V3F_C4UB_T2F) {   // the only record the native model resource makes (24 bytes)
+                cSC4PolygonClipper clipper;
+                clipper.SetBounds(lo, hi, yOnly);
+                clipper.SetVerts(vertices_[m].data(), static_cast<int>(kVertexStride));
+                if (!records.empty())
+                    records.resize(static_cast<std::size_t>(
+                        clipper.AddPrimitives(records.data(), source.empty() ? nullptr : source.data(), static_cast<int>(records.size()))));
+                count = clipper.MoveTo(clippedVertices, clippedIndices);
+            } else {
+                records.clear();   // any other vertex format leaves the mesh empty, as the original's
+            }
+            vertices_[m] = std::move(clippedVertices);
+            groups_[m].count = count;
+            groups_[m].data = vertices_[m].data();
+            indices_[m] = std::move(clippedIndices);
+            indexPointers_[m] = indices_[m].data();
+            draws_[m] = std::move(records);
+            drawLists_[m].begin = draws_[m].data();
+            drawLists_[m].end = draws_[m].data() + draws_[m].size();
+            mesh.vertices = &groups_[m];
+            mesh.indexGroup = &indexPointers_[m];
+            mesh.draws = &drawLists_[m];
+            std::memcpy(Meshes()[m].data(), &mesh, sizeof mesh);
+        }
+        const float los[3] = {lo.x, lo.y, lo.z}, his[3] = {hi.x, hi.y, hi.z};
+        for (int k = 0; k < 3; ++k) {
+            if (bounds_.min[k] < los[k]) bounds_.min[k] = los[k];
+            if (his[k] < bounds_.max[k]) bounds_.max[k] = his[k];
+        }
+    }
 
     void GetBounds(cS3DBoundingBox& out) override { out = bounds_; }
 
