@@ -224,7 +224,7 @@ struct cSC4NetworkBridgeTypeInfo {
 // cSC4NetworkSupportStructInfo (ReadSupportStructureInfo i386 0x0015495c), keyed by property 0xe974eaa1 in the network type
 // info's hash map (LoadSupports reads every exemplar of group 0x8974f80f).
 struct cSC4NetworkSupportStructInfo {
-    std::vector<std::uint32_t> models;   // +0x00 0xe974eaa2
+    std::vector<std::uint32_t> edges;    // +0x00 0xe974eaa2: corner pairs (0-3, 4 = the middle) of the edges that take supports
     std::vector<float> footprint;        // +0x0c 0xe974eaa3: 4 corners, then the three quarter turns
 };
 
@@ -1026,6 +1026,28 @@ public:
     // 0x00316554: the four sides (texture 0x8080000) and the top (0x912220e) of a column between two corner rings.
     static void AddSupportColumnToOccupant(cSC4NetworkOccupant* occupant, const float (*top)[3], const float (*bottom)[3],
                                            bool opposite);
+    // cSC4NetworkTool::tSupportInstance (i386, on AddSupportStructures' stack): the piece's support record and the edge being
+    // worked on: its two quad corners (0-3, 4 = the middle of the cell), the terrain height under each and whether the piece
+    // stands above the terrain there.
+    struct tSupportInstance {
+        const cSC4NetworkSupportStructInfo* info = nullptr;   // +0x00
+        std::uint32_t vertexA = 0, vertexB = 0;               // +0x04 / +0x08
+        float terrainA = 0.0f, terrainB = 0.0f;               // +0x0c / +0x10
+        bool raisedA = false, raisedB = false;                // +0x14 / +0x15
+    };
+    // 0x00316a68: for every edge of the support record (corner pairs, mapped through the piece's rotation and mirror) where
+    // the piece stands above the terrain, a side lip when the edge is open (no connection across it, or not a cell side) and,
+    // at level 1, a retaining wall down to the terrain; at level 2 a pylon under the piece instead of walls.
+    void AddSupportStructures(cSC4NetworkOccupant* occupant, cSC4NetworkCellInfo& cell, const cSC4NetworkSupportStructInfo* info,
+                              int level);
+    // 0x0031684e: a column with the record's footprint (at the piece's rotation, mirrored with the piece) from 1.3 below the
+    // piece's surface down to the lowest terrain corner of the cell.
+    void AddSupportPylon(cSC4NetworkOccupant* occupant, tSupportInstance& instance, cSC4NetworkCellInfo& cell);
+    // 0x00316260: a two-sided strip (texture 0xbb0200) from 1.5 above to 3 below the edge.
+    static void AddNetworkSideLip(cSC4NetworkOccupant* occupant, const float* a, const float* b);
+    // 0x003163d6: a two-sided wall (texture 0xbb0000) from `inset` below the edge down to the terrain under its corners.
+    static void AddRetainingWall(cSC4NetworkOccupant* occupant, const tSupportInstance& instance, const float* a, const float* b,
+                                 float inset);
     // 0x0014ffcc: the wire and hanger tiles of a suspended piece along its two deck edges.
     void AddSuspendedBridgeStructures(cSC4NetworkOccupant* occupant, const tBridgePiece& piece, const cSC4NetworkCellInfo* cell,
                                       const cSC4NetworkBridgeTypeInfo& type);

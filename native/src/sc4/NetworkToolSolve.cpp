@@ -2288,8 +2288,9 @@ bool cSC4NetworkTool::ComputePreBuiltSupportModel(cSC4NetworkCellInfo& cell, con
 // support model ComputePreBuiltSupportModel picks; any other piece is a plain occupant drawn as the piece's quad with the
 // triangles SetQuadTrianglesToDraw picks. Then the old occupants of the cell leave, the new one is inserted (its handle at
 // +0x54), translucent until it is usable.
-// NOT PORTED YET: the support structures of a raised piece whose support record exists (AddSupportStructures 0x00316a68:
-// side lips, retaining walls and pylons; GetSupportStructureInfo answers for roads, streets, rails, light rail, monorail).
+// A piece with a support record (GetSupportStructureInfo by piece id, from the records of the types LoadSupports loads) that stands
+// above the terrain at a corner gets its support structures: level 1 (side lips and retaining walls) up to the type's
+// wall height (placement +0x38), level 2 (side lips and a pylon) above it.
 void cSC4NetworkTool::InsertNetworkOccupant(cSC4NetworkCellInfo& cell, const tSolvedCell& solved, std::list<cSC4NetworkOccupant*>* out) {
     INetworkToolHost* host = GetNetworkToolHost();
     std::uint32_t group = 0;
@@ -2305,6 +2306,7 @@ void cSC4NetworkTool::InsertNetworkOccupant(cSC4NetworkCellInfo& cell, const tSo
             }
         }
     }
+    const cSC4NetworkSupportStructInfo* support = GetSupportStructureInfo(solved.pieceType);
     float corners[4][3];
     cSC4NetworkOccupant* occupant = nullptr;
     if (!prebuiltPiece) {
@@ -2324,6 +2326,18 @@ void cSC4NetworkTool::InsertNetworkOccupant(cSC4NetworkCellInfo& cell, const tSo
                 prebuilt->AddSupportModel(modelId, rotation, cS3DVector3(supportOffset[0], supportOffset[1], supportOffset[2]));
         }
         SetExemplarForOccupant(occupant, solved.pieceType, offset, solved.rotationFlip, group);
+    }
+    if (support) {
+        int level = 0;
+        for (int i = 0; i != 4; ++i) {
+            const float above = cell.vertexHeights[i] - (host ? host->TerrainVertexHeight(cell.vertexBaseHeights[i]) : 0.0f);
+            if (above > 0.01f) level = std::max(level, placement_.float40[1] <= above ? 2 : 1);
+        }
+        if (level != 0) {
+            AddSupportStructures(occupant, cell, support, level);
+            occupant->SetNetworkFlag(0x40000000);
+            occupant->SetNetworkFlag(0x8000000);
+        }
     }
     if (!prebuiltPiece) SetQuadTrianglesToDraw(occupant, cell.tileNeighborhoods[networkType_]);   // vslot 0x148
     occupant->ClearNetworkFlag(0x400000);

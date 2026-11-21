@@ -19,6 +19,7 @@
 #include "sc4/NetworkOccupant.h"
 #include "sc4/NetworkOccupantWithPreBuiltModel.h"
 #include "sc4/SCProperty.h"
+#include "sc4/TileNeighborhood.h"
 
 namespace sc4 {
 
@@ -989,6 +990,129 @@ void cSC4NetworkTool::AddSupportColumnToOccupant(cSC4NetworkOccupant* occupant, 
     uv[1][0] = 1.0f; uv[1][1] = 1.0f;
     uv[2][0] = 1.0f; uv[2][1] = 0.0f;
     occupant->AddPart(pos, uv, indices, 0x912220e);
+}
+
+namespace {
+
+// The two triangles of a strip between four corners (0-1 along the top, 2-3 below them) and the same two turned the other
+// way, so the strip shows from both sides (kSideLipTriIndices 0x0084ace0, kWallTriIndices 0x0084ad20).
+constexpr std::uint32_t kStripTriangles[4][3] = {{0, 2, 1}, {1, 2, 3}, {0, 1, 2}, {1, 3, 2}};
+
+// AddSupportStructures' kQuadVertMap (0x0084ade0) and kFlippedQuadVertMap (0x0084ad80): a support record's corner (0-3, 4 =
+// the middle) in the piece's own frame -> the cell corner it lands on, by rotation.
+constexpr std::uint32_t kQuadVertMap[4][5] = {{0, 1, 2, 3, 4}, {3, 0, 1, 2, 4}, {2, 3, 0, 1, 4}, {1, 2, 3, 0, 4}};
+constexpr std::uint32_t kFlippedQuadVertMap[4][5] = {{3, 2, 1, 0, 4}, {0, 3, 2, 1, 4}, {1, 0, 3, 2, 4}, {2, 1, 0, 3, 4}};
+
+// cSC4Tank::sfBarrelVelocityScalingFactor (0x00a706d0), the constant the original shares for "above the terrain".
+constexpr float kRaisedThreshold = 0.01f;
+
+}  // namespace
+
+// i386 0x00316260.
+void cSC4NetworkTool::AddNetworkSideLip(cSC4NetworkOccupant* occupant, const float* a, const float* b) {
+    float pos[4][3] = {{a[0], a[1] + 1.5f, a[2]}, {b[0], b[1] + 1.5f, b[2]}, {a[0], a[1] - 3.0f, a[2]}, {b[0], b[1] - 3.0f, b[2]}};
+    float uv[4][2] = {{0.0f, 0.0f}, {0.0f, 0.0f}, {0.0f, 1.0f}, {0.0f, 1.0f}};
+    const int along = a[0] != b[0] ? 0 : 2;   // u runs along x unless the edge runs along z
+    for (int i = 0; i != 4; ++i) uv[i][0] = pos[i][along] * 0.0625f;
+    for (const auto& triangle : kStripTriangles) occupant->AddPart(pos, uv, triangle, 0xbb0200);
+}
+
+// i386 0x003163d6.
+void cSC4NetworkTool::AddRetainingWall(cSC4NetworkOccupant* occupant, const tSupportInstance& instance, const float* a,
+                                       const float* b, float inset) {
+    float pos[4][3] = {{a[0], a[1] - inset, a[2]}, {b[0], b[1] - inset, b[2]}, {a[0], instance.terrainA, a[2]},
+                       {b[0], instance.terrainB, b[2]}};
+    float uv[4][2];
+    const int along = a[0] != b[0] ? 0 : 2;
+    for (int i = 0; i != 4; ++i) {
+        uv[i][0] = pos[i][along] * 0.0625f;
+        uv[i][1] = pos[i][1] * 0.0625f;
+    }
+    for (const auto& triangle : kStripTriangles) occupant->AddPart(pos, uv, triangle, 0xbb0000);
+}
+
+// i386 0x0031684e.
+void cSC4NetworkTool::AddSupportPylon(cSC4NetworkOccupant* occupant, tSupportInstance& instance, cSC4NetworkCellInfo& cell) {
+    INetworkToolHost* host = GetNetworkToolHost();
+    const bool flipped = occupant->GetFlip() != 0;
+    const float centerX = (static_cast<float>(cell.x) + 0.5f) * cellSize_;
+    const float centerZ = (static_cast<float>(cell.z) + 0.5f) * cellSize_;
+    float ground = FLT_MAX;
+    for (int i = 0; i != 4; ++i) ground = std::min(ground, host ? host->TerrainVertexHeight(cell.vertexBaseHeights[i]) : 0.0f);
+    const std::vector<float>& footprint = instance.info->footprint;
+    std::size_t index = static_cast<std::size_t>(occupant->GetRotation()) * 8;
+    float top[4][3], bottom[4][3];
+    for (int k = 0; k != 4; ++k, index += 2) {
+        const float fx = index < footprint.size() ? footprint[index] : 0.0f;
+        const float fz = index + 1 < footprint.size() ? footprint[index + 1] : 0.0f;
+        top[k][0] = bottom[k][0] = flipped ? centerX - fx : centerX + fx;
+        top[k][2] = bottom[k][2] = centerZ + fz;
+        top[k][1] = occupant->GetAltitude(top[k][0], top[k][2]) - 1.3f;              // vslot 0xe0
+        bottom[k][1] = ground;
+    }
+    AddSupportColumnToOccupant(occupant, top, bottom, flipped);
+}
+
+// i386 0x00316a68.
+void cSC4NetworkTool::AddSupportStructures(cSC4NetworkOccupant* occupant, cSC4NetworkCellInfo& cell,
+                                           const cSC4NetworkSupportStructInfo* info, int level) {
+    INetworkToolHost* host = GetNetworkToolHost();
+    const std::uint32_t rotation = occupant->GetRotation() & 3u;                        // vslot 0x60
+    const bool flipped = occupant->GetFlip() != 0;                                       // vslot 0x64
+    const auto terrain = [&](std::uint32_t v) {
+        return host ? host->TerrainVertexHeight(cell.vertexBaseHeights[v]) : 0.0f;       // world cache vslot 0x34
+    };
+    const std::uint32_t row = static_cast<std::uint32_t>(widthPlusOne_);
+    // A corner's ground height and how far the piece stands above it there (the middle averages the four corners).
+    const auto heights = [&](std::uint32_t v, float& ground) {
+        if (v == 4) {
+            ground = (terrain(0) + terrain(1) + terrain(2) + terrain(3)) * 0.25f;
+            return (cell.vertexHeights[0] + cell.vertexHeights[1] + cell.vertexHeights[2] + cell.vertexHeights[3]) * 0.25f - ground;
+        }
+        ground = terrain(v);
+        return cell.vertexHeights[v] - ground;
+    };
+    const auto corner = [&](std::uint32_t v, float* out) {
+        if (v == 4) {
+            const auto id0 = static_cast<std::uint32_t>(cell.vertexBaseHeights[0]), id2 = static_cast<std::uint32_t>(cell.vertexBaseHeights[2]);
+            out[0] = (static_cast<float>(id0 % row) * cellSize_ + static_cast<float>(id2 % row) * cellSize_) * 0.5f;
+            out[2] = (cellSize_ * static_cast<float>(id0 / row) + cellSize_ * static_cast<float>(id2 / row)) * 0.5f;
+            out[1] = (cell.vertexHeights[0] + cell.vertexHeights[1] + cell.vertexHeights[2] + cell.vertexHeights[3]) * 0.25f;
+        } else {
+            const auto id = static_cast<std::uint32_t>(cell.vertexBaseHeights[v]);
+            out[0] = static_cast<float>(id % row) * cellSize_;
+            out[2] = static_cast<float>(id / row) * cellSize_;
+            out[1] = cell.vertexHeights[v];
+        }
+    };
+    tSupportInstance instance;
+    instance.info = info;
+    const std::vector<std::uint32_t>& edges = info->edges;
+    for (std::size_t k = 0; k + 1 < edges.size(); k += 2) {
+        // A mirrored piece walks its edges the other way round.
+        const std::uint32_t first = edges[flipped ? k + 1 : k], second = edges[flipped ? k : k + 1];
+        if (first > 4 || second > 4) continue;
+        instance.vertexA = flipped ? kFlippedQuadVertMap[rotation][first] : kQuadVertMap[rotation][first];
+        instance.vertexB = flipped ? kFlippedQuadVertMap[rotation][second] : kQuadVertMap[rotation][second];
+        instance.raisedA = heights(instance.vertexA, instance.terrainA) > kRaisedThreshold;
+        instance.raisedB = heights(instance.vertexB, instance.terrainB) > kRaisedThreshold;
+        if (!instance.raisedA && !instance.raisedB) continue;
+        float a[3], b[3];
+        corner(instance.vertexA, a);
+        corner(instance.vertexB, b);
+        // An edge along a cell side gets a lip only when nothing connects across that side; any other edge always does.
+        bool open = true;
+        const std::uint32_t va = instance.vertexA, vb = instance.vertexB;
+        if (va != 4 && vb != 4 && (va == ((vb + 1) & 3) || vb == ((va + 1) & 3))) {
+            const std::uint32_t start = va == ((vb + 1) & 3) ? vb : va;
+            const int type = GetFirstNetworkTypeFromFlags(cell.networkFlags);
+            const std::uint32_t compact = type >= 0 && type < 13 ? cell.tileNeighborhoods[type] : 0;
+            open = !cSC4TileNeighborhoodCompact::HasConnectionOnEdge(compact, static_cast<int>((0u - start) & 3u));
+        }
+        if (open) AddNetworkSideLip(occupant, a, b);
+        if (level == 1) AddRetainingWall(occupant, instance, a, b, open ? 3.0f : 0.01f);
+    }
+    if (level == 2) AddSupportPylon(occupant, instance, cell);
 }
 
 // i386 0x0014ffcc. The suspension flags: bits 0-1 pick which corners are the two deck edges (1: corners 0-1 and 2-3, else
