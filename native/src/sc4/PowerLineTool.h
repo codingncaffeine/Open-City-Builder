@@ -194,7 +194,6 @@ public:
     virtual int Get0To3Direction(int x1, int z1, int x2, int z2) = 0;
 
     // Calls on the cSC4NetworkTool base object that the base port does not define.
-    virtual void ClearBaseCellPreviews() = 0;                                  // base vslot [16] 0x10018803e
     virtual void DrawNetworkLine(SC4PointU& a, SC4PointU& b, bool preview, std::uint32_t networkType) = 0;  // [18]
     virtual bool AttemptNeighborConnections(bool first, std::uint32_t networkType) = 0;  // 0x10018bdc6
     virtual void PlaceNeighborConnections() = 0;                               // 0x10018c640

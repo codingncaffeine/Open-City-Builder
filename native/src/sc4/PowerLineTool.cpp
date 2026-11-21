@@ -1068,7 +1068,7 @@ void cSC4PowerLineTool::ClearCellPreviews() {
         }
     }
     connectionList_.clear();
-    if (host != nullptr) host->ClearBaseCellPreviews();
+    cSC4NetworkTool::ClearCellPreviews();   // the base tool's cell preview (the blue / red drag highlight)
 }
 
 }  // namespace sc4

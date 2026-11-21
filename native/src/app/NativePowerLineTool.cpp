@@ -10,6 +10,7 @@
 #include "app/NativeCityView.h"
 #include "app/NativeDemolition.h"
 #include "app/NativeEffects.h"
+#include "app/NativeUi.h"
 #include "app/NativeLighting.h"
 #include "app/NativePower.h"
 #include "app/NativeZoneDeveloperHost.h"
@@ -211,9 +212,8 @@ public:
         file->Release();
         return ini;
     }
-    bool LoadString(std::uint32_t, std::uint32_t, cIGZString&) override { return false; }
+    bool LoadString(std::uint32_t group, std::uint32_t instance, cIGZString& out) override { return LoadLocalizedString(group, instance, out); }
     int Get0To3Direction(int x1, int z1, int x2, int z2) override { return native::Get0To3Direction(x1, z1, x2, z2); }
-    void ClearBaseCellPreviews() override {}
     void DrawNetworkLine(SC4PointU&, SC4PointU&, bool, std::uint32_t) override {}
     bool AttemptNeighborConnections(bool, std::uint32_t) override { return false; }
     void PlaceNeighborConnections() override {}

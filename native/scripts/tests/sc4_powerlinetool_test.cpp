@@ -450,7 +450,6 @@ struct FakeHost : INetworkToolHost, IPowerLineToolHost {
         if (dz == 0) return 0;
         return dx == dz ? 1 : 3;
     }
-    void ClearBaseCellPreviews() override { ++baseClears; }
     void DrawNetworkLine(SC4PointU& a, SC4PointU& b, bool preview, std::uint32_t networkType) override {
         drawnLines.push_back({a, b});
         (void)preview;
@@ -544,7 +543,7 @@ struct FakeHost : INetworkToolHost, IPowerLineToolHost {
     std::vector<int> connectLines;
     std::vector<const std::vector<tLineInfo>*> connectLineVectors;
     std::vector<std::pair<SC4PointU, SC4PointU>> drawnLines;
-    int cellQueries = 0, rayCalls = 0, directionCalls = 0, baseClears = 0, attemptCalls = 0;
+    int cellQueries = 0, rayCalls = 0, directionCalls = 0, attemptCalls = 0;
     int placeNeighborsCalls = 0, iniOpens = 0;
     bool attemptResult = false;
 };
@@ -1073,6 +1072,7 @@ int main() {
         c->AddRef();  // the list's reference
         d->AddRef();
         list.push_back(tIntersectionInfo{c, d, true, true, {}});
+        const int clearsBefore = f.host.preview ? f.host.preview->clears : -1;
         f.tool->ClearCellPreviews();
         CHECK(PowerLineToolTestAccess::CreatedPoles(*f.tool).empty());
         CHECK(PowerLineToolTestAccess::PreviewPoles(*f.tool).empty());
@@ -1082,7 +1082,7 @@ int main() {
         CHECK(f.host.removed.size() == 1 && f.host.removed[0] == a);  // manager remove for created poles
         CHECK(b->previewCalls >= 1);                                  // the second list is marked as preview
         CHECK(f.host.draws.size() == 2);                              // both ends of the connection
-        CHECK(f.host.baseClears == 1);
+        CHECK(f.host.preview && f.host.preview->clears == clearsBefore + 1);   // the base tool's preview is cleared
     }
 
     // ---- destructor keeps the original's leak of the pole references ----------------------------------------
