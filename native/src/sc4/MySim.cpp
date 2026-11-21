@@ -1185,8 +1185,11 @@ bool cSC4MySim::FindNewResidence() {
         std::vector<cISC4BuildingOccupant*> candidates;
         host->ResidenceCandidates(candidates);                            // cMySimBuildingFilter(true)
         const std::size_t count = candidates.size();
+        // The original steps RandomUint32Uniform(count) - 1 nodes into the list (a draw of 0 runs onto the list end and
+        // wraps to the first node), even for an empty list.
+        const std::uint32_t draw = random_.RandomUint32Uniform(static_cast<std::uint32_t>(count));
         if (count != 0) {
-            std::size_t index = random_.RandomUint32Uniform(static_cast<std::uint32_t>(count));
+            std::size_t index = draw == 0 ? 0 : draw - 1;
             for (std::size_t n = 0; n < count; ++n) {
                 cISC4BuildingOccupant* building = candidates[index];
                 bool keepLooking = true;

@@ -260,13 +260,9 @@ public:
     bool LoadString(std::uint32_t group, std::uint32_t instance, cIGZString& out) override { return LoadLocalizedString(group, instance, out); }
     // --- city ---
     void ResidenceCandidates(std::vector<cISC4BuildingOccupant*>& out) override {
-        cISC4OccupantManager* manager = Occupants();
-        out.clear();
-        if (!manager) return;
-        int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
-        manager->GetOccupantManagerCellBounds(x0, z0, x1, z1);
-        const int a[2] = {x0, z0}, b[2] = {x1, z1};
-        FilteredBuildings(a, b, true, out);
+        // FindNewResidence (i386 0x0054a5f8): occupant manager 0x9c (occupant-manager cells) with no corners, i.e. the
+        // whole city, through cMySimBuildingFilter(true).
+        FilteredBuildings(nullptr, nullptr, true, out);
     }
     bool IsResidenceCandidate(cISC4BuildingOccupant* building) override {
         cMySimBuildingFilter filter(true);
@@ -990,6 +986,12 @@ void NativeMySimReport() {
                         trip->GetTravelType(), trip->RouteSize(), rider ? "yes" : "no", isAutomaton ? "" : " (not an automaton)",
                         where[0], where[1], where[2], rider && rider->IsOccupantGroup(0x4149) ? 1 : 0,
                         rider && rider->IsOccupantGroup(0x414a) ? 1 : 0, rider && rider->IsOccupantGroup(0x420b) ? 1 : 0);
+            const MySimLocation& here = trip->GetCurrentLocation();
+            const MySimLocation& goal = trip->GetCurrentDestination();
+            std::printf("mysims: slot %d trip time %d at cell %d,%d (home %d work %d) leave %d destination %d,%d (home %d work %d)\n", i,
+                        trip->Time(), here.cellX, here.cellZ, here == trip->GetCurrentDefaultDestination() ? 1 : 0,
+                        here == trip->GetCurrentCommuteDestination() ? 1 : 0, here.data28, goal.cellX, goal.cellZ,
+                        goal == trip->GetCurrentDefaultDestination() ? 1 : 0, goal == trip->GetCurrentCommuteDestination() ? 1 : 0);
         }
     }
     cSC424HourClock* clock = Clock24();
@@ -1025,6 +1027,9 @@ void NativeMySimMoveIn(const char* name, bool male, unsigned zodiac) {
     }
     if (!chosen) { std::printf("mysimmovein: \"%s\" found no residence among %zu candidates\n", name, candidates.size()); return; }
     target->SetResidence(chosen);
+    // The move-in runs from the MySim panel, whose sim list refresh (cSC4MySimWinProc::GetCurrentSims) ends with
+    // TrackLocation(nullptr): every sim shows its residence and location, which starts the dispatch tracking.
+    agent->TrackLocation(nullptr);
     std::printf("mysimmovein: \"%s\" moved into %s (%zu candidates), state %d\n", name, chosen->GetExemplarName().Data(),
                 candidates.size(), target->State());
 }

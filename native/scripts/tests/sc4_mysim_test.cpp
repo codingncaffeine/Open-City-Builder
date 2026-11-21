@@ -1468,6 +1468,35 @@ int main() {
         fresh->Release();
     }
 
+    // ---- FindNewResidence starts RandomUint32Uniform(count) - 1 nodes into the candidates (i386 0x0054a6d9) ----
+    {
+        std::vector<FakeBuilding*> pool;
+        for (int i = 0; i < 7; ++i) {
+            auto* building = new FakeBuilding();
+            building->AddRef();
+            building->profile.purpose = 1;
+            pool.push_back(building);
+        }
+        bool sawFirstNode = false, sawOffset = false;
+        for (int round = 0; round < 12; ++round) {
+            for (FakeBuilding* b : pool) { b->AddRef(); host.candidates.push_back(b); }
+            cRZRandom predict = sim->Random();
+            const std::uint32_t draw = predict.RandomUint32Uniform(static_cast<std::uint32_t>(pool.size()));
+            cISC4BuildingOccupant* before = sim->GetResidence();
+            // every candidate is free; the walk skips the current residence, so start after it if the start is it
+            std::size_t index = draw == 0 ? 0 : draw - 1;
+            if (pool[index] == before) index = (index + 1) % pool.size();
+            sim->FindNewResidence();
+            CHECK(sim->GetResidence() == pool[index]);
+            if (draw == 0) sawFirstNode = true; else sawOffset = true;
+            for (FakeBuilding* b : host.candidates) b->Release();
+            host.candidates.clear();
+        }
+        CHECK(sawOffset);
+        (void)sawFirstNode;
+        for (FakeBuilding* b : pool) b->Release();
+    }
+
     // ---- Shutdown ----
     CHECK(host.registryAdds == 2);
     CHECK(sim->Shutdown());
