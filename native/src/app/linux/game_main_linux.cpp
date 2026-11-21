@@ -1349,6 +1349,10 @@ int RunScenario(const std::string& path) {
             int x0 = -1, z0 = -1, x1 = -1, z1 = -1;
             words >> x0 >> z0 >> x1 >> z1;
             native::NativeBridgeReport(x0, z0, x1, z1);
+        } else if (command == "oneway") {   // oneway X0 Z0 X1 Z1: the network pieces of a cell rectangle with their one-way directions (read-only)
+            int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
+            words >> x0 >> z0 >> x1 >> z1;
+            native::NativeOneWayReport(x0, z0, x1, z1);
         } else if (command == "netline") {   // netline TYPE X1 Z1 X2 Z2: a network tool lays a line as the drag's release does (neighbor connections too)
             std::uint32_t type = 0;
             int x1 = 0, z1 = 0, x2 = 0, z2 = 0;

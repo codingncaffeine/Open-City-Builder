@@ -95,6 +95,8 @@ int cSC4NetworkOccupantModel::Draw(SC4DrawContext* context, bool highlight) {
                 if (occupant_.HasNetworkFlag(kNetworkFlagQuadDrawA)) context->DrawPrimsIndexed(0, 3, indices);
                 if (occupant_.HasNetworkFlag(kNetworkFlagQuadDrawB)) context->DrawPrimsIndexed(0, 3, indices + 3);
             }
+            // The one-way arrow over the piece (vslot 0x114 GetOneWayDirections, vslot 0x170 DrawOneWayArrow).
+            if (const std::uint8_t directions = occupant_.GetOneWayDirections()) DrawOneWayArrow(context, *state, directions, zoom);
         }
     }
     const std::vector<SC4AddOnPart>& parts = occupant_.AddOnParts();
@@ -109,6 +111,53 @@ int cSC4NetworkOccupantModel::Draw(SC4DrawContext* context, bool highlight) {
         }
     }
     return 1;
+}
+
+namespace {
+// DrawOneWayArrow(...)::kArrowOrientation (i386 0x00844fe0, read from the binary): per set of edges (bit i = edge i of
+// the one-way type), the texture rotation/flip of the arrow for a positive and a negative direction sum; 0xff = no arrow.
+constexpr std::uint8_t kArrowOrientation[16][2] = {
+    {0xff, 0xff}, {0xff, 0xff}, {0xff, 0xff}, {0x83, 0x02}, {0xff, 0xff}, {0x01, 0x03}, {0x03, 0x82}, {0xff, 0xff},
+    {0xff, 0xff}, {0x01, 0x80}, {0x02, 0x00}, {0xff, 0xff}, {0x81, 0x00}, {0xff, 0xff}, {0xff, 0xff}, {0xff, 0xff}};
+}  // namespace
+
+// Only a plain straight or curved one-way piece (two edges, each of connection kind 1..3, in one of the six simple
+// configurations) gets an arrow: texture 0xbe35eb0 on a straight, 0xbe35ec0 on a curve (whose edges 1 and 2 read their
+// direction pair swapped). The direction bits vote (1 = +1, 2 = -1) for the arrow's orientation. The arrow borrows the
+// quad's corners with other texture coordinates and puts the piece's own coordinates back afterwards.
+void cSC4NetworkOccupantModel::DrawOneWayArrow(SC4DrawContext* context, const cSC4PackedRenderState& state, std::uint8_t directions, int zoom) {
+    const std::uint32_t edges = occupant_.GetEdgeTypesFlag(10);   // vslot 0x98
+    if ((edges & 0xfcfcfcfcu) != 0) return;
+    const std::uint32_t edgeSet = ((((edges & 0x03030303u) + 0x03030303u) & 0x04040404u) * 0x01020408u) >> 26;
+    std::uint8_t orientation = kArrowOrientation[edgeSet][0];
+    if (orientation == 0xff) return;
+    switch (edges) {
+        case 0x301: case 0x20002: case 0x30100: case 0x1000003: case 0x2000200: case 0x3010000: break;
+        default: return;
+    }
+    std::uint32_t bits = directions;
+    std::uint32_t textureId = 0xbe35eb0;
+    if (((1u << edgeSet) & 0x1248u) != 0) {   // the curves (edges 0+1, 1+2, 0+3, 2+3)
+        bits = (bits & ~0x3cu) + (bits & 0x14u) * 2 + ((bits & 0x28u) >> 1);
+        textureId = 0xbe35ec0;
+    }
+    int sum = 0;
+    for (int shift = 0; shift != 8; shift += 2) {
+        const std::uint32_t d = ((bits & 0xffu) >> shift) & 3u;
+        if (d == 1) ++sum;
+        else if (d == 2) --sum;
+    }
+    if (sum < 0) orientation = kArrowOrientation[edgeSet][1];
+    const std::uint32_t texture = GetTexture(textureId, 0, zoom);   // vslot 0x180
+    if (!texture) return;
+    context->SetRenderState(PackedStates().blend);                 // sPackedRenderState
+    context->SetTexture(static_cast<int>(texture), 0);
+    occupant_.SetTextureCoordinates(orientation);
+    const std::uint16_t* indices = occupant_.HasNetworkFlag(0x1000000) ? kFlippedTriangleIndices : kTriangleIndices;
+    if (occupant_.HasNetworkFlag(kNetworkFlagQuadDrawA)) context->DrawPrimsIndexed(0, 3, indices);
+    if (occupant_.HasNetworkFlag(kNetworkFlagQuadDrawB)) context->DrawPrimsIndexed(0, 3, indices + 3);
+    context->SetRenderState(state);
+    occupant_.SetTextureCoordinates(occupant_.GetRotationAndFlip());
 }
 
 }  // namespace sc4

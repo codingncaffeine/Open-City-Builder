@@ -542,6 +542,146 @@ void cSC4NetworkTool::ExpandToSolveSetBasedOnConnectivity(std::vector<std::uint3
     }
 }
 
+// ============================================================================================================
+// one-way roads
+// ============================================================================================================
+
+namespace {
+// (anonymous namespace)::ResolveOneWayConflictsWorkUnit (12 bytes in the i386 build): a cell whose one-way bits
+// changed and the edge the change came in through (-1 for the seeds).
+struct ResolveOneWayConflictsWorkUnit {
+    std::uint32_t x = 0;
+    std::uint32_t z = 0;
+    std::int32_t incomingEdge = -1;
+};
+
+// The two one-way bits of an edge (the cell info's i386 +0x50 byte; 1 and 2 are the two directions along the axis).
+constexpr std::uint32_t OneWayBitsOnEdge(std::uint8_t bits, std::uint32_t edge) { return (static_cast<std::uint32_t>(bits) >> (edge * 2)) & 3u; }
+}  // namespace
+
+// i386 0x004cde90 (PlaceNetwork calls it for type 10 only, after BuildSetOfCellsToBeSolved): the one-way directions the
+// drag assigned are carried along the existing one-way road at both ends of the drag, so a new piece that joins a one-way
+// road against its direction turns the road it joins around. The walk starts at the cells of the first and the last
+// dragged step; a cell with one or two edges of the type passes the direction it got in through one edge out through its
+// other (flipped on a turn between the edge pairs 0/1 and 2/3), into the neighbour across that edge (the other portal for
+// a tunnel portal), which joins the solve set. A cell with more edges (an intersection) stops the walk. Then every cell of
+// the solve set drops the one-way bits of edges that contradict another edge with the same connection direction, on its
+// own side and on the neighbour's, until no new cell is touched.
+void cSC4NetworkTool::ResolveOneWayConflicts(std::uint32_t networkType) {
+    if (!worldCache_ || steps_.empty()) return;
+    std::vector<ResolveOneWayConflictsWorkUnit> work, next;
+    // The seeds: the cells of step 0 and of the last step (i386 +0x70, the total step count).
+    for (std::size_t s = 0;;) {
+        const tDraggedStep& step = steps_[s];
+        for (std::uint32_t c = step.firstCell; c <= step.lastCell; ++c) work.push_back({cells_[c].x, cells_[c].z, -1});
+        const std::size_t last = static_cast<std::size_t>(totalSteps_) - 1;
+        if (s == last || last >= steps_.size()) break;
+        s = last;
+    }
+    INetworkToolHost* host = GetNetworkToolHost();
+    const auto inCity = [this](std::uint32_t x, std::uint32_t z) {
+        return x < static_cast<std::uint32_t>(cityWidth_) && z < static_cast<std::uint32_t>(cityHeight_);   // i386 +0x280 / +0x284
+    };
+    while (!work.empty()) {
+        for (const ResolveOneWayConflictsWorkUnit& unit : work) {
+            const std::uint32_t key = Key(unit.x, unit.z);
+            cSC4NetworkCellInfo* cell = worldCache_->GetCell(key);   // cSC4NetworkWorldCache::GetCell (the world cache at i386 +0x1c)
+            if (!cell) continue;
+            cell->status = 1;
+            if (!cell->pieceFromSolvedList) {                          // i386 +0x57: in the solve set (+0x84)
+                cell->pieceFromSolvedList = true;
+                solvedCells_.insert(key);
+            }
+            // Only a cell with one or two edges of the type carries the direction through.
+            const std::uint32_t edges = cell->tileNeighborhoods[networkType];
+            const std::uint32_t edgeCount = (((edges & 0x07070707u) + 0x07070707u) & 0x08080808u) * 0x01010101u >> 27;
+            if (edgeCount - 1u >= 2u) continue;
+            // A tunnel portal's edge into the hill leads to the other portal: the edge that points toward it.
+            std::int32_t tunnelEdge = -1;
+            std::uint32_t otherX = 0, otherZ = 0;
+            if (cell->occupant && cell->occupant->HasNetworkFlag(0x80000)) {   // vslot 0x20: a tunnel portal
+                if (cSC4NetworkOccupant* other = host ? host->TunnelOtherEnd(cell->occupant) : nullptr) {   // QI 0x8a4bd52b, GetOtherEndOccupant
+                    other->GetOccupiedCell(otherX, otherZ);                                                  // vslot 0xec
+                    const std::int32_t ox = static_cast<std::int32_t>(otherX), oz = static_cast<std::int32_t>(otherZ);
+                    const std::int32_t ux = static_cast<std::int32_t>(unit.x), uz = static_cast<std::int32_t>(unit.z);
+                    if (ox < ux) tunnelEdge = 0;
+                    else if (oz < uz) tunnelEdge = 1;
+                    else if (ux < ox) tunnelEdge = 2;
+                    else if (uz < oz) tunnelEdge = 3;
+                    other->Release();
+                }
+            }
+            // The edge the direction comes from (kept: the incoming edge, or the first edge whose neighbour was already
+            // solved) and the edge it goes out through (the last other edge toward a neighbour that may change).
+            std::int32_t fromEdge = unit.incomingEdge, toEdge = -1;
+            cSC4NetworkCellInfo* toCell = nullptr;
+            for (std::uint32_t e = 0; e < 4; ++e) {
+                if (OneWayBitsOnEdge(cell->unknown58, e) == 0) continue;
+                std::uint32_t nx = unit.x + static_cast<std::uint32_t>(kNextX[e]), nz = unit.z + static_cast<std::uint32_t>(kNextZ[e]);
+                if (static_cast<std::int32_t>(e) == tunnelEdge) {
+                    nx = otherX;
+                    nz = otherZ;
+                }
+                if (!inCity(nx, nz)) continue;
+                cSC4NetworkCellInfo* n = GetCellInfo(Key(nx, nz));
+                if (!n || n->unknown5a != 0) continue;                // i386 +0x52
+                if (n->status == 0 || (fromEdge >= 0 && static_cast<std::int32_t>(e) != fromEdge)) {
+                    toEdge = static_cast<std::int32_t>(e);
+                    toCell = n;
+                } else {
+                    fromEdge = static_cast<std::int32_t>(e);
+                }
+            }
+            if (fromEdge < 0 || toEdge < 0) continue;
+            std::uint32_t direction = OneWayBitsOnEdge(cell->unknown58, static_cast<std::uint32_t>(fromEdge));
+            if (toEdge == (fromEdge ^ 1)) direction ^= 3;
+            if (direction == OneWayBitsOnEdge(cell->unknown58, static_cast<std::uint32_t>(toEdge))) continue;
+            SetOneWayBits(*cell, toEdge, static_cast<std::uint8_t>(direction));
+            if (!toCell) continue;
+            const std::int32_t back = (toEdge + 2) & 3;
+            SetOneWayBits(*toCell, back, static_cast<std::uint8_t>(direction));
+            next.push_back({toCell->x, toCell->z, back});
+        }
+        work.swap(next);
+        next.clear();
+    }
+    // The conflicts: per cell of the solve set, two edges with the same connection direction (the edge's byte plus the
+    // edge index, mod 4) must agree (flipped unless the two differ in bit 1); a contradicting edge loses its bits on both
+    // sides. A neighbour not yet in the solve set brings the cell back for another round.
+    std::unordered_set<std::uint32_t> current(solvedCells_), added;
+    while (!current.empty()) {
+        for (std::uint32_t key : current) {
+            cSC4NetworkCellInfo* cell = GetCellInfo(key);
+            if (!cell) continue;
+            std::uint32_t seen[4] = {0, 0, 0, 0};
+            for (std::uint32_t e = 0; e < 4; ++e) {
+                const std::uint32_t slot = ((cell->tileNeighborhoods[networkType] >> (e * 8)) + e) & 3u;
+                std::uint32_t direction = OneWayBitsOnEdge(cell->unknown58, e);
+                if (direction == 0) continue;
+                if (((slot ^ e) & 2u) == 0) direction ^= 3u;
+                if (seen[slot] != 0 && direction != seen[slot]) {
+                    cell->unknown58 = static_cast<std::uint8_t>(cell->unknown58 & ~(3u << (slot * 2)));
+                    const std::uint32_t nx = (key & 0xffffu) + static_cast<std::uint32_t>(kNextX[slot]);
+                    const std::uint32_t nz = (key >> 16) + static_cast<std::uint32_t>(kNextZ[slot]);
+                    if (inCity(nx, nz)) {
+                        if (cSC4NetworkCellInfo* n = GetCellInfo(nx, nz)) {
+                            n->unknown58 = static_cast<std::uint8_t>(n->unknown58 & ~(3u << (((slot + 2) & 3u) * 2)));
+                            if (!n->pieceFromSolvedList) {
+                                n->pieceFromSolvedList = true;
+                                added.insert(key);   // the original inserts the cell being walked, not the neighbour
+                            }
+                        }
+                    }
+                }
+                seen[slot] = direction;
+            }
+        }
+        solvedCells_.insert(added.begin(), added.end());
+        current.swap(added);
+        added.clear();
+    }
+}
+
 // i386: the neighbour-city connections (+0x100) open their edge on the cell; a connection onto a straight edge turns
 // every connection bit into the next kind.
 void cSC4NetworkTool::MarkNeighborConnections() {
@@ -2027,7 +2167,7 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, bool allowDiagonals, bool connect
             DoAdditionalDraws();
             // IdentifyHighwayIntersections: not ported (no highway crossings); the valid count stays.
             BuildSetOfCellsToBeSolved();
-            // ResolveOneWayConflicts (type 10): not ported.
+            if (networkType == kNetworkOneWayRoad) ResolveOneWayConflicts(networkType);
             MarkNeighborConnections();
             const int solvedSteps = SolveNetwork(networkType, false);
             if (solvedSteps < validSteps_) {

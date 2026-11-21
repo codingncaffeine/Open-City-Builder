@@ -72,6 +72,8 @@ struct NetworkToolTestAccess {
     static void ComputeSmoothingSet(cSC4NetworkTool& t, int pad) { t.ComputeInitialSmoothingSet(pad); }
     static const std::unordered_set<std::uint32_t>& SmoothingSet(const cSC4NetworkTool& t) { return t.unknown128_; }
     static const std::unordered_set<std::uint32_t>& FixedVertices(const cSC4NetworkTool& t) { return t.unknown150_; }
+    static void ResolveOneWay(cSC4NetworkTool& t, std::uint32_t type) { t.ResolveOneWayConflicts(type); }
+    static std::unordered_set<std::uint32_t>& SolveSet(cSC4NetworkTool& t) { return t.solvedCells_; }
 };
 }  // namespace sc4
 
@@ -1333,6 +1335,104 @@ int main() {
         A::ComputeSmoothingSet(*f.tool, 0);
         CHECK(A::FixedVertices(*f.tool).size() == 12 && A::FixedVertices(*f.tool).count(7 + 5 * 1000));
         SetNetworkToolHost(nullptr);
+    }
+
+    // ---- one-way roads: ResolveOneWayConflicts -------------------------------------------------------------
+    {
+        // An existing eastbound one-way road on x 0..9, z 5 (direction 2 on its x edges); a new drag from its end cell
+        // (9,5) to (15,5) carries direction 1. The walk from the drag's first step turns the whole old road around and
+        // takes its cells into the solve set; the old road's cell beyond an intersection (x 3 has three edges) stops it.
+        Fixture f(kNetworkOneWayRoad);
+        f.Init();
+        using A = NetworkToolTestAccess;
+        auto key = [](std::uint32_t x, std::uint32_t z) { return x | (z << 16); };
+        auto cellAt = [&](std::uint32_t x, std::uint32_t z) { return f.host.worldCache->CreateCell(key(x, z)); };
+        // A connection on edge e: byte e of the packed neighbourhood (kind 2 = a straight x connection here).
+        auto edge = [](int e, std::uint32_t kind) { return kind << (e * 8); };
+        for (std::uint32_t x = 0; x <= 15; ++x) {
+            cSC4NetworkCellInfo* c = cellAt(x, 5);
+            c->x = x;
+            c->z = 5;
+            const bool drag = x >= 9;
+            std::uint32_t edges = 0;
+            if (x > 0) edges |= edge(0, 2);
+            if (x < 15) edges |= edge(2, 2);
+            if (x == 3) edges |= edge(1, 2);                 // a side street joins x 3 from z 4
+            c->tileNeighborhoods[kNetworkOneWayRoad] = edges;
+            std::uint8_t bits = 0;
+            const std::uint8_t dir = (x < 9) ? 2 : 1;
+            if (x > 0) bits |= static_cast<std::uint8_t>(dir << 0);
+            if (x < 15) bits |= static_cast<std::uint8_t>(dir << 4);
+            if (x == 9) bits = static_cast<std::uint8_t>((2u << 0) | (1u << 4));   // the old end piece's west edge, the drag's east edge
+            c->unknown58 = bits;
+            c->status = drag ? 1 : 0;
+            c->pieceFromSolvedList = drag;
+            if (drag) A::SolveSet(*f.tool).insert(key(x, 5));
+        }
+        auto& steps = A::Steps(*f.tool);
+        auto& cells = A::Cells(*f.tool);
+        steps.clear();
+        cells.clear();
+        for (std::uint32_t x = 9; x <= 15; ++x) {
+            cells.push_back(SC4PointU{x, 5});
+            tDraggedStep step;
+            step.firstCell = step.lastCell = x - 9;
+            steps.push_back(step);
+        }
+        A::SetTotalSteps(*f.tool, 7);
+        A::ResolveOneWay(*f.tool, kNetworkOneWayRoad);
+        for (std::uint32_t x = 4; x <= 9; ++x) {
+            const cSC4NetworkCellInfo* c = f.host.worldCache->GetCell(key(x, 5));
+            CHECK((c->unknown58 & 3u) == 1 && ((c->unknown58 >> 4) & 3u) == 1);   // west and east edges now direction 1
+            CHECK(c->pieceFromSolvedList && A::SolveSet(*f.tool).count(key(x, 5)) == 1 && c->status == 1);
+        }
+        // x 3 (three edges): its east edge took the direction from x 4, its west edge and x 0..2 keep theirs
+        const cSC4NetworkCellInfo* junction = f.host.worldCache->GetCell(key(3, 5));
+        CHECK(((junction->unknown58 >> 4) & 3u) == 1 && (junction->unknown58 & 3u) == 2);
+        for (std::uint32_t x = 0; x <= 2; ++x) {
+            const cSC4NetworkCellInfo* c = f.host.worldCache->GetCell(key(x, 5));
+            CHECK(((c->unknown58 >> 4) & 3u) == 2 && !c->pieceFromSolvedList);
+        }
+        // the drag's own cells keep direction 1
+        for (std::uint32_t x = 10; x <= 15; ++x) CHECK((f.host.worldCache->GetCell(key(x, 5))->unknown58 & 3u) == 1);
+    }
+    {
+        // The conflict pass: edges 0 and 2 of (20,8) share connection slot 2 ((byte + edge) & 3); direction 1 on edge 0
+        // reads 1, on edge 2 it reads 2 (flipped: the edge and the slot agree in bit 1), so edge 2 loses its bits and
+        // the neighbour (21,8) loses its edge 0 bits. A cell without a contradiction keeps its bits.
+        Fixture f(kNetworkOneWayRoad);
+        f.Init();
+        using A = NetworkToolTestAccess;
+        auto key = [](std::uint32_t x, std::uint32_t z) { return x | (z << 16); };
+        cSC4NetworkCellInfo* c = f.host.worldCache->CreateCell(key(20, 8));
+        c->x = 20;
+        c->z = 8;
+        c->tileNeighborhoods[kNetworkOneWayRoad] = 0x00040002u;
+        c->unknown58 = 0x11;                            // direction 1 on edges 0 and 2
+        c->pieceFromSolvedList = true;
+        cSC4NetworkCellInfo* n = f.host.worldCache->CreateCell(key(21, 8));
+        n->x = 21;
+        n->z = 8;
+        n->unknown58 = 0x13;                            // edge 0 direction 3, edge 2 direction 1
+        cSC4NetworkCellInfo* calm = f.host.worldCache->CreateCell(key(25, 8));
+        calm->x = 25;
+        calm->z = 8;
+        calm->tileNeighborhoods[kNetworkOneWayRoad] = 0x00020002u;   // slots 2 and 0: no shared slot
+        calm->unknown58 = 0x11;
+        calm->pieceFromSolvedList = true;
+        A::SolveSet(*f.tool) = {key(20, 8), key(25, 8)};
+        auto& steps = A::Steps(*f.tool);
+        auto& cells = A::Cells(*f.tool);
+        steps.assign(1, tDraggedStep{});
+        cells.assign(1, SC4PointU{30, 20});             // a seed cell without one-way bits
+        f.host.worldCache->CreateCell(key(30, 20))->x = 30;
+        A::SetTotalSteps(*f.tool, 1);
+        A::ResolveOneWay(*f.tool, kNetworkOneWayRoad);
+        CHECK(c->unknown58 == 0x01);
+        CHECK(n->unknown58 == 0x10 && n->pieceFromSolvedList);
+        CHECK(calm->unknown58 == 0x11);
+        // the original queues the walked cell (not the neighbour) for another round: the set still holds (20,8)
+        CHECK(A::SolveSet(*f.tool).count(key(20, 8)) == 1 && A::SolveSet(*f.tool).count(key(21, 8)) == 0);
     }
 
     // ---- bridges: a straight drag over a valley gets a land bridge ------------------------------------------

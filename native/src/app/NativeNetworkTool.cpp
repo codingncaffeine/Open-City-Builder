@@ -857,3 +857,36 @@ sc4::cSC4NetworkOccupant* ToolHost::TunnelOtherEnd(sc4::cSC4NetworkOccupant* por
 }
 }  // namespace
 }  // namespace native
+
+namespace native {
+// Kit verb `oneway X0 Z0 X1 Z1` (read-only): every network piece on the cells of the rectangle with its piece id,
+// rotation/flip, its edge configuration for the one-way road type (10) and its one-way directions (the 0x4835c6aa
+// property: two bits per edge, edge 0 = -x, 1 = -z, 2 = +x, 3 = +z), then a map of the rectangle ('.' no piece,
+// 'o' a piece without directions, else the hex digit of the edges that carry a direction).
+void NativeOneWayReport(int x0, int z0, int x1, int z1) {
+    if (x1 < x0) std::swap(x0, x1);
+    if (z1 < z0) std::swap(z0, z1);
+    std::printf("oneway: cells x %d..%d z %d..%d\n", x0, x1, z0, z1);
+    std::vector<std::string> rows;
+    for (int z = z0; z <= z1; ++z) {
+        std::string row;
+        for (int x = x0; x <= x1; ++x) {
+            char mark = '.';
+            ForCellNetworkOccupants(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z), 0x1fffu, [&](sc4::cSC4NetworkOccupant* network) {
+                const std::uint8_t directions = network->GetOneWayDirections();
+                std::printf("oneway: piece %d,%d %08x rotation/flip %02x types %04x edges10 %08x directions %02x [%u %u %u %u]\n", x, z,
+                            network->PieceId(), network->GetRotationAndFlip(), network->GetNetworkFlag() & 0x1fffu,
+                            network->GetEdgeTypesFlag(10), directions, directions & 3u, (directions >> 2) & 3u, (directions >> 4) & 3u,
+                            (directions >> 6) & 3u);
+                int set = 0;
+                for (int e = 0; e < 4; ++e)
+                    if ((directions >> (e * 2)) & 3u) set |= 1 << e;
+                mark = set ? "0123456789abcdef"[set] : 'o';
+            });
+            row += mark;
+        }
+        rows.push_back(row);
+    }
+    for (std::size_t i = 0; i < rows.size(); ++i) std::printf("oneway: z %3d %s\n", z0 + static_cast<int>(i), rows[i].c_str());
+}
+}  // namespace native
