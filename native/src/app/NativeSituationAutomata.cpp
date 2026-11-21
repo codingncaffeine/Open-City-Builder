@@ -216,7 +216,7 @@ public:
         if (!m) return false;
         const cS3DVector3 origin{from[0], from[1], from[2]};
         cS3DVector3 where{from[0], from[1], from[2]};
-        if (!m->GetRandomCreationPoint(group, origin, minDistance, maxDistance, origin, where, flags)) return false;
+        if (!m->GetRandomCreationPoint(group, origin, minDistance, maxDistance, where, flags, nullptr)) return false;
         spawnPosition[0] = where.x;
         spawnPosition[1] = where.y;
         spawnPosition[2] = where.z;
