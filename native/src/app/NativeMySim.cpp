@@ -22,6 +22,7 @@
 #include "platform/Unwired.h"
 #include "rz/cRZMessage2Standard.h"
 #include "rz/cRZVariant.h"
+#include "sc4/AdviceSubject.h"
 #include "sc4/AdvisorSystem.h"
 #include "sc4/BuildingOccupant.h"
 #include "sc4/DBSegment.h"
@@ -442,7 +443,15 @@ public:
         *out = static_cast<IMySimDispatch*>(object);
         return ok;
     }
-    cISC4AdviceSubject* CreateLuaSubject(cISC4Occupant*, bool) override { SC4_UNWIRED("IMySimHost::CreateLuaSubject (the MySim's Lua building subject)"); return nullptr; }
+    // GZCOM CreateInstance(0x6a26d049 cSC4AdviceSubject, 0x6a26d050): a new subject with one reference; the caller sets its object.
+    cISC4AdviceSubject* CreateLuaSubject(cISC4Occupant*, bool) override {
+        auto* subject = new cSC4AdviceSubject();
+        cISC4AdviceSubject* out = nullptr;
+        subject->AddRef();
+        if (!subject->QueryInterface(kGZIID_cISC4AdviceSubject, reinterpret_cast<void**>(&out))) out = nullptr;
+        subject->Release();
+        return out;
+    }
 
     static void RegisterAgentValues(cSC4MySimAgentSimulator& agent, sc4::cISC4GameDataRegistry* registry) {
         nsISC4GameDataRegistry::AddValue<cSC4MySimAgentSimulator>(reinterpret_cast<void*>(&GetSimCommand), "get_sim", &GetSimCommand, &agent, 0, &agent, registry);
