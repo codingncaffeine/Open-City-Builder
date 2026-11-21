@@ -186,6 +186,12 @@ void SetNetworkModelFactory(NetworkModelFactory factory);
 // and rotation (the pre-built model pieces), which the model maker then rebuilds when the view changes. Unset: false.
 using NetworkViewDependence = bool (*)(cISC4Occupant* occupant);
 void SetNetworkViewDependence(NetworkViewDependence query);
+// cISC4Occupant i386 vslot 0xa8 GetModelInstances(zoom, rotation, out, capacity, count) of the pipe and subway connection
+// occupants (types 0x2a183167 / 0x8a13918a), as LoadUndergroundConnectionModels calls it: the connection is its own model
+// instance. One reference each; returns how many were written. Unset: none.
+using UndergroundConnectionModelFactory = int (*)(cISC4Occupant* occupant, int zoom, int rotation, s3d::cIS3DModelInstance** out,
+                                                  int capacity);
+void SetUndergroundConnectionModelFactory(UndergroundConnectionModelFactory factory);
 
 // ---- seam: cSC4ModelBackgroundLoader (unrecovered owner of the background load tasks) -----------------------
 class IModelBackgroundLoader : public cIGZUnknown {

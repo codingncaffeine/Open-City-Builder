@@ -15,7 +15,9 @@
 
 #include "app/NativeCity.h"
 #include "app/NativeCityView.h"
+#include "app/NativeLighting.h"
 #include "app/NativeModelMaker.h"
+#include "sc4/Render3D.h"
 #include "gz/cGZPersistResourceKey.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "sc4/ComplexViewOccupantFilter.h"
@@ -24,8 +26,10 @@
 #include "sc4/ZoneDeveloper.h"
 #include "sc4/UndergroundCustomView.h"
 #include "sc4/OccupantManager.h"
+#include "sc4/PathInfo.h"
 #include "sc4/PipeOccupant.h"
 #include "sc4/SubwayConnectionOccupant.h"
+#include "sc4/TrafficSimulator.h"
 #include "sc4/SubwayOccupant.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/UndergroundConnectionOccupant.h"
@@ -36,6 +40,8 @@
 #include "sc4/cSTETerrain.h"
 #include "s3d/MeshAndMaterial.h"
 #include "sc4/DrawContext.h"
+#include "sc4/LightingManager.h"
+#include "sc4/ViewUtilities.h"
 #include "s3d/ModelInstance.h"
 
 namespace native {
@@ -259,8 +265,42 @@ private:
 
 // The connection pieces' globals: the city's cell geometry, the terrain, the cell queries the underground tool makes, the
 // network manager's tool of the connection's network, the occupant manager and the renderer.
-class UndergroundConnectionHost final : public IUndergroundConnectionHost {
+class UndergroundConnectionHost final : public IUndergroundConnectionHost, public IUndergroundConnectionViewHost {
 public:
+    // the drawing: the same services the underground pieces use
+    void PrepareRenderer() override { occupantHost_.PrepareRenderer(); }
+    IUndergroundTextureBinding* CreateTextureBinding(std::uint32_t group, std::uint32_t instance) override {
+        return occupantHost_.CreateTextureBinding(group, instance);
+    }
+    s3d::cIS3DModelInstance* CreateModel(std::uint32_t instance) override {
+        return instance ? occupantHost_.CreateCustomModel(instance) : nullptr;
+    }
+    IUndergroundModelMeshes* ModelMeshes(s3d::cIS3DModelInstance* instance) override { return occupantHost_.ModelMeshes(instance); }
+    void GetZoomAndRotation(int& zoom, int& rotation) override {
+        zoom = rotation = 0;
+        cSC43DRender* render = CityRenderer();
+        if (SC4ViewUtilities* view = render ? render->GetViewUtilities() : nullptr) view->GetZoomAndRotation(zoom, rotation);
+    }
+    void GetCameraViewAngles(float& yaw, float& pitch, float& screenPitch) override {
+        yaw = pitch = screenPitch = 0.0f;
+        cSC43DRender* render = CityRenderer();
+        if (SC4ViewUtilities* view = render ? render->GetViewUtilities() : nullptr) view->GetCameraViewAngles(yaw, pitch, screenPitch);
+    }
+    cS3DVector3 LightColor(const cS3DVector3& normal) override {
+        cSC4LightingManager* lighting = LightingManager();
+        return lighting ? lighting->GetColor(normal) : cS3DVector3{1.0f, 1.0f, 1.0f};
+    }
+    cISC4Occupant* FindBuildingOccupant(int cellX, int cellZ) override {
+        std::list<cISC4Occupant*> occupants;
+        CellOccupants(cellX, cellZ, occupants);
+        cISC4Occupant* found = nullptr;
+        for (cISC4Occupant* occupant : occupants) {
+            if (occupant->GetType() == 0x278128a0u) found = occupant;
+            occupant->Release();
+        }
+        return found;   // borrowed: the occupant manager keeps it
+    }
+
     void PositionToCell(float x, float z, int& cellX, int& cellZ) override {   // spCity vslot 0x17c
         if (cSC4City* city = HostCity()) city->PositionToCell(x, z, cellX, cellZ);
         else cellX = static_cast<int>(x * 0.0625f), cellZ = static_cast<int>(z * 0.0625f);
@@ -386,6 +426,7 @@ void InstallUndergroundHosts() {
     SetUndergroundOccupantHost(&occupant);
     static UndergroundConnectionHost connection;
     SetUndergroundConnectionHost(&connection);
+    SetUndergroundConnectionViewHost(&connection);
     static ViewFilterHost filter;
     static CustomViewHost customView;
     SetComplexViewFilterHost(&filter);
@@ -396,7 +437,7 @@ void InstallUndergroundHosts() {
 
 namespace native {
 
-void NativeSubwayReport(int limit) {
+void NativeSubwayReport(int limit, bool paths) {
     cSTETerrain* terrain = Terrain();
     if (!terrain) {
         std::printf("subways: no city\n");
@@ -421,6 +462,33 @@ void NativeSubwayReport(int limit) {
                                     subway->PieceId(), subway->GetRotationAndFlip(),
                                     subway->GetEdgeTypesFlag(static_cast<std::uint8_t>(kSubwayNetworkType)), subway->GetNetworkFlag(),
                                     position[1], model ? "yes" : "no", subway->PieceGeometry().size(), subway->CustomModel() ? ", custom" : "");
+                        if (paths) {
+                            // the train paths as the traffic simulator reads them (path type 4)
+                            cISC4PathInfo* info = subway->GetPathInfo();
+                            int trainPaths = 0;
+                            float low = 0.0f, high = 0.0f;
+                            bool any = false;
+                            if (info && info->GetPathMap())
+                                for (const auto& [key, path] : *info->GetPathMap()) {
+                                    if (((key >> 24) & 0xf) != 4) continue;
+                                    for (const cS3DVector3& p : path.points) {
+                                        low = !any || p.y < low ? p.y : low;
+                                        high = !any || p.y > high ? p.y : high;
+                                        any = true;
+                                    }
+                                    ++trainPaths;
+                                }
+                            std::printf("subway paths: cell %d,%d path info %s, %d train paths, heights %.2f..%.2f, connections %u, floor y %.2f %.2f %.2f %.2f\n", x, z,
+                                        info ? "yes" : "no", trainPaths, low, high, unsigned(subway->PathConnectionExists(4, 0xff, 0xff)),
+                                        subway->PathBottomVertex(0).y, subway->PathBottomVertex(1).y, subway->PathBottomVertex(2).y,
+                                        subway->PathBottomVertex(3).y);
+                            // the traffic simulator's subway travel (type 6) connections of the cell and its walkers' switches
+                            cIGZUnknown* object = HostCity() ? HostCity()->GetComponent(CityComponent::TrafficSimulator) : nullptr;
+                            if (auto* simulator = object ? dynamic_cast<cSC4TrafficSimulator*>(object) : nullptr)
+                                std::printf("subway traffic: cell %d,%d subway mask %04x walk mask %04x walk switches %04x\n", x, z,
+                                            simulator->CellConnections(x, z).masks[6], simulator->CellConnections(x, z).masks[0],
+                                            simulator->CellConnections(x, z).switches[0]);
+                        }
                     }
                     subway->Release();
                 } else if (occupant->QueryInterface(kGZCLSID_cSC4SubwayConnectionOccupant, &raw) && raw) {

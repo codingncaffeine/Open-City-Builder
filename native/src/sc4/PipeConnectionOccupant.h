@@ -2,7 +2,8 @@
 // cSC4UndergroundConnectionOccupant for network type 4 that joins a pipe (cSC4PipeOccupant, 0x49c05b9f) to the building
 // above. Recovered from SimCity 4 Deluxe Edition 1.2.1 (0x1003dde60..0x1003de14a).
 //
-// PARTIAL: the pipe connection's geometry table (sCustomGeometryInfo) is not recovered.
+// Its geometry table (sCustomGeometryInfo): a half pipe facing the camera from the building down to the trench, with the
+// models 0x6a089741 (top) and 0x6a089740 (bottom).
 #pragma once
 #include "sc4/PipeOccupant.h"
 #include "sc4/UndergroundConnectionOccupant.h"
@@ -26,6 +27,8 @@ public:
     bool QueryOccupantInterface(cISC4Occupant* occupant, cSC4UndergroundOccupant*& out) override {
         return QueryPieceInterface(occupant, kGZCLSID_cSC4PipeOccupant, out);
     }
+
+    static const tUndergroundConnectionGeometryInfo sCustomGeometryInfo;   // i386 0x00ab9ba0
 };
 
 }  // namespace sc4

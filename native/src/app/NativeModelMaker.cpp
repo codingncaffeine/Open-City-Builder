@@ -40,6 +40,7 @@
 #include "sc4/ViewUtilities.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
+#include "sc4/UndergroundConnectionOccupant.h"
 
 namespace native {
 bool NativeAddRetainingWallModels(sc4::cISC4Occupant* occupant, bool create, bool addToRenderer);   // app/NativeLotWalls.cpp
@@ -842,6 +843,14 @@ void InstallModelMakerHosts(sc4::cSC43DRender& render) {
         model->AddRef();
         out[0] = model;
         return 1;
+    });
+    // The pipe and subway connections are their own model instance (cSC4UndergroundConnectionOccupant::GetModelInstances).
+    sc4::SetUndergroundConnectionModelFactory([](sc4::cISC4Occupant* occupant, int zoom, int rotation, s3d::cIS3DModelInstance** out, int capacity) -> int {
+        auto* connection = dynamic_cast<sc4::cSC4UndergroundConnectionOccupant*>(occupant);
+        if (!connection) return 0;
+        int count = 0;
+        connection->GetModelInstances(zoom, rotation, out, capacity, count);
+        return count;
     });
     sc4::SetNetworkViewDependence([](sc4::cISC4Occupant* occupant) {
         auto* network = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);

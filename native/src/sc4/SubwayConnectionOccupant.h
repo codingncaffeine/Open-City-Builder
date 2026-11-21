@@ -2,7 +2,8 @@
 // cSC4UndergroundConnectionOccupant for network type 7 that joins a subway tunnel (cSC4SubwayOccupant, 0xca16374f) to the
 // station above. Recovered from the Mac i386 build (0x002f0282..0x002f0436).
 //
-// PARTIAL: the connection's geometry table (sCustomGeometryInfo, read only by the unported drawing) is not recovered.
+// Its geometry table (sCustomGeometryInfo): a square shaft from the station down to the tube, quad by quad, and the model
+// 0x0ad80000 at the station's height.
 #pragma once
 #include "sc4/SubwayOccupant.h"
 #include "sc4/UndergroundConnectionOccupant.h"
@@ -26,6 +27,8 @@ public:
     bool QueryOccupantInterface(cISC4Occupant* occupant, cSC4UndergroundOccupant*& out) override {
         return QueryPieceInterface(occupant, kGZCLSID_cSC4SubwayOccupant, out);
     }
+
+    static const tUndergroundConnectionGeometryInfo sCustomGeometryInfo;   // i386 0x00ab9d20
 };
 
 }  // namespace sc4
