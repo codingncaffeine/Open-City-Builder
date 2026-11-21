@@ -17,7 +17,6 @@ BudgetUIWinProc
 BuildingDevelopmentSim
 Feature
 CameraControl
-CitySituationAdvice
 DemandSimulator
 Disaster
 Effects

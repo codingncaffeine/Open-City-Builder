@@ -358,6 +358,34 @@ int main() {
     CHECK(!t->Init(7) && host.released == 1);
     t->Release();
 
+    // A situation that is a view of an outer advice object shares its reference count (the original is one object).
+    struct CountingOuter final : cIGZUnknown {
+        int refs = 1;
+        bool QueryInterface(std::uint32_t, void**) override { return false; }
+        std::uint32_t AddRef() override { return static_cast<std::uint32_t>(++refs); }
+        std::uint32_t Release() override { return static_cast<std::uint32_t>(--refs); }
+    } outer;
+    struct OuterBase final : ISituationAdviceBase {
+        cIGZUnknown* owner = nullptr;
+        bool Init(int) override { return true; }
+        void Shutdown() override {}
+        int AdviceId() override { return 0; }
+        int AdvisorId() override { return 0; }
+        void SetFlags(int, bool) override {}
+        int Mood() override { return 0; }
+        std::uint32_t Trigger() override { return 0; }
+        bool QueryBaseInterface(std::uint32_t, void**) override { return false; }
+        cIGZUnknown* Outer() override { return owner; }
+    } outerBase;
+    outerBase.owner = &outer;
+    {
+        cSC4CitySituationAdvice viewOfOuter(&outerBase);
+        CHECK(viewOfOuter.AddRef() == 2 && outer.refs == 2);
+        void* view = nullptr;
+        CHECK(viewOfOuter.QueryInterface(kGZIID_cISC4CitySituationAdvice, &view) && outer.refs == 3);
+        CHECK(viewOfOuter.Release() == 2 && viewOfOuter.Release() == 1 && outer.refs == 1);   // never deletes the member view
+    }
+
     SetCitySituationAdviceHost(nullptr);
     std::printf(failures ? "citysituationadvice: %d FAILURES\n" : "citysituationadvice: ok\n", failures);
     return failures ? 1 : 0;

@@ -34,7 +34,7 @@ void InstallBudgetUIWinProcStub();
 void InstallBuildingDevelopmentSimStub();
 void InstallFeatureStub();
 void InstallCameraControlStub();
-void InstallCitySituationAdviceStub();
+void InstallCitySituationAdvice();   // NativeCitySituationAdvice.cpp
 void InstallCivicBuildingHost();
 void InstallDemandSimulatorStub();
 void InstallDisasterStub();
@@ -148,7 +148,7 @@ void InstallStubHosts() {
     InstallBuildingDevelopmentSimStub();
     InstallFeatureStub();
     InstallCameraControlStub();
-    InstallCitySituationAdviceStub();
+    InstallCitySituationAdvice();
     InstallCivicBuildingHost();           // NativeCivic.cpp: the civic building simulator's services
     InstallDemandSimulatorStub();
     InstallDisasterStub();

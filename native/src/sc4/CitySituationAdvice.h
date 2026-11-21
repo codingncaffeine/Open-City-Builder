@@ -114,6 +114,9 @@ public:
     virtual int Priority() { return 0; }               // vslot 0x38 (GetPriority; the situation track sort key)
     virtual std::uint32_t Trigger() = 0;               // cSC4Advice::GetTrigger
     virtual bool QueryBaseInterface(std::uint32_t iid, void** out) = 0;
+    // The object both views belong to (the original is one object: the situation derives from cSC4Advice, so the two views
+    // share one reference count). Null when the situation stands alone; then it counts its own references.
+    virtual cIGZUnknown* Outer() { return nullptr; }
 };
 
 class ICitySituationAdviceHost {
@@ -203,7 +206,7 @@ public:
     std::uint32_t GetGZCLSID() const { return kGZCLSID_cSC4CitySituationAdvice; }   // @ 0x1006a9fe0 (thunks 0x1006a9fec, 0x1006a9ff8)
 
     bool QueryInterface(std::uint32_t iid, void** out) override;        // @ 0x1006a9c56 (thunks 0x1006a9c78/c9e/cc4)
-    std::uint32_t AddRef() override { return ++refCount_; }             // @ 0x1006a9cea (thunks 0x1006a9cf8/d02/d10)
+    std::uint32_t AddRef() override;                                    // @ 0x1006a9cea (thunks 0x1006a9cf8/d02/d10)
     std::uint32_t Release() override;                                   // @ 0x1006a9d1e (thunks 0x1006a9d2c/d36/d44)
 
     void* AsAdvice() override { return base_; }                         // @ 0x1006a9d52
