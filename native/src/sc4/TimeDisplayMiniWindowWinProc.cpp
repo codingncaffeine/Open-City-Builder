@@ -133,7 +133,8 @@ void cSC4TimeDisplayMiniWindowWinProc::Attach(gz::cIGZWinGen* dialog) {
     if (dialog_) dialog_->Release();
     dialog_ = dialog;
     if (label_) { label_->Release(); label_ = nullptr; }
-    if (dialog_) dialog_->AsIGZWin()->GetChildAs(kLabelId, gz::kGZIID_cIGZWinText, reinterpret_cast<void**>(&label_));
+    // win vslot 0x94 (i386) = GetChildAsRecursive: the label sits inside the dialog's frame, not directly under it
+    if (dialog_) dialog_->AsIGZWin()->GetChildAsRecursive(kLabelId, gz::kGZIID_cIGZWinText, reinterpret_cast<void**>(&label_));
 }
 
 // Opens the clock under the application window, or raises it when it is already there.
