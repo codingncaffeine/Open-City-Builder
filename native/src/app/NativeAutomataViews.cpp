@@ -213,6 +213,7 @@ public:
         if (traffic_ && target) traffic_->SetPath(target, key, static_cast<const std::vector<cS3DVector3>*>(path), keep);
     }
     void HandleNetworkOccupantRemoved() override { if (traffic_) traffic_->HandleNetworkOccupantRemoved(); }   // 0x470
+    void RestoreLoadedPath() override { if (traffic_) traffic_->RestoreLoadedPath(); }
     std::uint32_t GetPathKey() const override { return traffic_ ? traffic_->GetPathKey() : 0xffff; }           // 0x478
     ITrafficNetworkMapOccupant* GetNetworkOccupant() const override { return traffic_ ? traffic_->GetNetworkOccupant() : nullptr; }   // 0x480
     bool IsTrain() const override { return traffic_ && traffic_->IsTrain(); }                                   // 0x4a0

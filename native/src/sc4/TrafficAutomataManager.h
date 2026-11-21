@@ -110,6 +110,9 @@ public:
     virtual std::deque<RouteData>* RouteDeque() = 0;                              // +0x368 (i386 +0x23c)
     virtual bool BeginRoute(bool onlyStart) = 0;                                  // 0x4a8 (i386 0x254)
     virtual void ReturnToDefaultSpeed() = 0;                                      // 0x538 (i386 0x29c)
+    // The loaded automaton's path info and path, looked up again from its saved occupant and key (the field writes of
+    // HandlePostCityInit at 0x100114e88; cSC4TrafficAutomaton::RestoreLoadedPath)
+    virtual void RestoreLoadedPath() {}
     // cSC4Train's slot (i386 0x328): how many cars a train should pull; nothing for any other automaton
     virtual void SetDesiredNumCars(std::uint8_t count) { (void)count; }
 };
@@ -183,6 +186,9 @@ public:
     // The crime layer: any path of a type on the occupant (cISC4PathInfo 0x24 GetRandomPathWildcard(type, 0xff, 0xff, random, &key))
     // and a point on it (0x5c GetRandomPathPoint).
     virtual bool RandomPathPoint(ITrafficNetworkMapOccupant*, std::uint32_t, cRZRandomSuper*, std::uint32_t&, cS3DVector3&) { return false; }
+    // cISC4PathInfo 0x24 GetRandomPathWildcard(type, 0xff, 0xff, random, &key) alone (SpawnOccupantAutomaton): a random path key of a
+    // type on the occupant.
+    virtual bool RandomPathKey(ITrafficNetworkMapOccupant*, std::uint32_t, cRZRandomSuper*, std::uint32_t&) { return false; }
     // spCrimeSim (the crime layer's incidents): cell, crime type and whether its figures were made (vslots 0x2c / 0x30).
     struct CrimeIncidentCell { int x = 0, z = 0; std::uint32_t typeId = 0; bool visualsCreated = false; };
     virtual bool CrimeIncidents(std::vector<CrimeIncidentCell>&) { return false; }
@@ -241,7 +247,7 @@ public:
     bool Shutdown() override;                                                          // 0x20  @ 0x100111e24
     bool RemoveAutomaton(IAutomataAutomaton* automaton, bool force) override;          // 0x40  @ 0x1001159c4
     bool GetRandomCreationPoint(std::uint32_t group, const cS3DVector3& origin, float minDistance, float maxDistance,
-                                const cS3DVector3& center, cS3DVector3& direction, std::uint32_t flags) override;   // 0x80
+                                cS3DVector3& out, std::uint32_t flags, const cS3DVector3* velocity) override;   // 0x80
     IAutomataAutomaton* Dispatch(std::uint32_t group, const tAutomataLocation& from, const tAutomataLocation& to,
                                  std::uint32_t flags, std::uint8_t type, const cGZPersistResourceKey& key,
                                  std::uint8_t argument) override;                      // 0x88 @ 0x100112842
@@ -264,7 +270,7 @@ public:
                                           std::uint8_t pathType, std::uint32_t flags);   // 0x260 @ 0x100112114
     virtual ITrafficAutomataAutomaton* SpawnOccupantAutomaton(ITrafficNetworkMapOccupant* occupant, int param2,
                                                               std::uint32_t group, std::uint32_t flags, bool param5,
-                                                              int pathType);            // 0x268 @ 0x100114fea (PARTIAL)
+                                                              int pathType);            // 0x268 @ 0x100114fea
     virtual void GetEdgeDensity(ITrafficNetworkMapOccupant* occupant, TrafficTileInfo* tile, PopulateLayer layer,
                                 float clockMultiplier, float (*weights)[4]);            // 0x270 @ 0x100115196
     virtual int GetPathTypeForLayer(PopulateLayer layer) const;                        // 0x278 @ 0x100114f92
@@ -283,7 +289,7 @@ public:
                                      float elapsedSeconds, double density, std::uint8_t entry, std::uint8_t exit,
                                      float weight);                                   // 0x2a8 @ i386 0x000cfa2a
     virtual void SpawnAutomaton(ITrafficNetworkMapOccupant* occupant, TrafficTileInfo* tile, PopulateLayer layer,
-                                std::uint8_t entry, std::uint8_t exit, float elapsedMilliseconds);   // 0x2b0 (PARTIAL)
+                                std::uint8_t entry, std::uint8_t exit, float elapsedMilliseconds);   // 0x2b0 @ i386 0x000d0b70
     virtual void RecallAutomatonFromNetwork(TrafficTileInfo* tile, std::uint32_t pathType);   // 0x2b8 @ 0x100114c6e
     virtual bool IsOffscreenEntryEdge(TrafficTileInfo* tile, int cellX, int cellZ, std::uint8_t entry);   // 0x2c0
     virtual bool PopulateCrimeLayer(float clockMultiplier);                            // 0x2c8 @ 0x1001154ba (PARTIAL)

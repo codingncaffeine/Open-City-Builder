@@ -287,6 +287,9 @@ public:
     // ---- non-virtual helpers / lifecycle (no vtable slot) ----
     void SetPopulateLayer(std::uint32_t layer);                            // @ 0x100114798
     void ClearLookaheadDeque();                                            // @ 0x100116632
+    // The traffic automata manager's HandlePostCityInit (0x100114e88) writes these fields of every loaded automaton itself:
+    // the path info of the network occupant read from the save and the path of the saved key (the saved path index is kept).
+    void RestoreLoadedPath();
     cSC4Automaton* FindLeaderInTile(ITrafficAutomatonOccupant* occupant, std::uint32_t key, std::uint32_t maskA,
                                     std::uint32_t maskB);                  // @ 0x100115ce8
     std::uint8_t ChooseExitEdge(ITrafficAutomatonOccupant* occupant, TrafficTileInfo* tile, std::uint8_t entry,

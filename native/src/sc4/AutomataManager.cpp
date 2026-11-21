@@ -732,10 +732,14 @@ IAutomataAutomaton* cSC4AutomataManager::CreateAutomatonInternal(std::uint32_t g
 }
 
 
+// i386 0x000c6004: a random point between the two distances (the maximum clamped to the city width) around `origin`, in a random
+// direction (flat unless flag 0x40000, which also keeps the height instead of the terrain's). `velocity` is not read.
 bool cSC4AutomataManager::GetRandomCreationPoint(std::uint32_t group, const cS3DVector3& origin, float minDistance,
-                                                 float maxDistance, const cS3DVector3& center, cS3DVector3& direction,
-                                                 std::uint32_t flags) {
-    (void)origin;   // the second location argument is not read by the original
+                                                 float maxDistance, cS3DVector3& out, std::uint32_t flags,
+                                                 const cS3DVector3* velocity) {
+    (void)velocity;
+    cS3DVector3& direction = out;   // the original builds the unit direction in the out vector, then moves it to the point
+    const cS3DVector3& center = origin;
     if (!CanCreateGroup(group)) return false;
     if (!g_host) return false;
     const int cellCount = g_host->CityCellCount();

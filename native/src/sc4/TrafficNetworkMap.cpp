@@ -1471,14 +1471,16 @@ float cSC4TrafficNetworkMap::GetRoadAltitude(float x, float z) const {
     return host_->TerrainHeightAt(x, z);
 }
 
-// 0x10029e40e
+// 0x10029e40e (i386 0x001ea9dc): the usable network occupants of `networkFlags` in the box `maxCells` cells around the rect,
+// leaving out (for a positive `minCells`) every occupant whose cell rect overlaps the rect grown by `minCells`: the roads
+// between the two distances.
 bool cSC4TrafficNetworkMap::GetSurroundingRoads(std::vector<ITrafficNetworkMapOccupant*>& out,
-                                                const SC4RectInt32& rect, int margin, int flag,
+                                                const SC4RectInt32& rect, int maxCells, int minCells,
                                                 std::uint32_t networkFlags) {
-    const float boxMin[3] = {static_cast<float>((rect.x0 - margin) * 16), -3.4028235e+38f,
-                             static_cast<float>((rect.z0 - margin) * 16)};
-    const float boxMax[3] = {static_cast<float>((margin + 1 + rect.x1) * 16), 3.4028235e+38f,
-                             static_cast<float>((margin + 1 + rect.z1) * 16)};
+    const float boxMin[3] = {static_cast<float>((rect.x0 - maxCells) * 16), -3.4028235e+38f,
+                             static_cast<float>((rect.z0 - maxCells) * 16)};
+    const float boxMax[3] = {static_cast<float>((maxCells + 1 + rect.x1) * 16), 3.4028235e+38f,
+                             static_cast<float>((maxCells + 1 + rect.z1) * 16)};
     out.clear();
     std::vector<cISC4Occupant*> candidates = host_->NetworkOccupantsInBox(boxMin, boxMax);
     for (cISC4Occupant* candidate : candidates) {
@@ -1486,11 +1488,11 @@ bool cSC4TrafficNetworkMap::GetSurroundingRoads(std::vector<ITrafficNetworkMapOc
         ITrafficNetworkMapOccupant* occupant = host_->AsMapOccupant(candidate);   // the original: QI 0xa821ef94 (see the host)
         if (!occupant) continue;
         bool outskirts = true;
-        if (flag >= 1) {
+        if (minCells > 0) {
             SC4CellRect cells{};
             candidate->GetBoundingCityCells(cells);
-            if (cells.x0 > rect.x0 - margin && cells.z0 > rect.z0 - margin &&
-                cells.x0 < rect.x1 + margin && cells.z0 < rect.z1 + margin) {
+            if (rect.x0 - minCells < cells.x1 && rect.z0 - minCells < cells.z1 && cells.x0 < rect.x1 + minCells &&
+                cells.z0 < rect.z1 + minCells) {
                 outskirts = false;
             }
         }
@@ -1507,7 +1509,7 @@ bool cSC4TrafficNetworkMap::GetSurroundingRoads(std::vector<ITrafficNetworkMapOc
 
 // 0x10029e684
 bool cSC4TrafficNetworkMap::GetSurroundingRoads(std::vector<ITrafficNetworkMapOccupant*>& out,
-                                                cISC4Occupant* occupant, int margin, int flag,
+                                                cISC4Occupant* occupant, int maxCells, int minCells,
                                                 std::uint32_t networkFlags) {
     if (!occupant) return false;
     std::int32_t cells[4] = {0, 0, 0, 0};
@@ -1522,7 +1524,7 @@ bool cSC4TrafficNetworkMap::GetSurroundingRoads(std::vector<ITrafficNetworkMapOc
         cells[2] = rect.x1;
         cells[3] = rect.z1;
     }
-    return GetSurroundingRoads(out, SC4RectInt32{cells[0], cells[1], cells[2], cells[3]}, margin, flag,
+    return GetSurroundingRoads(out, SC4RectInt32{cells[0], cells[1], cells[2], cells[3]}, maxCells, minCells,
                                networkFlags);
 }
 

@@ -65,6 +65,7 @@ void NativePolicePowerReport(int x0, int z0, int x1, int z1, int step);   // kit
 void NativeRiotReport();                          // kit command `riots`
 void NativeQueryReport(std::uint32_t skipUi, int limit);   // the query tool's buildings (querylist kit command; app/NativeQuery.cpp)
 void NativeTrailerReport(int limit);  // the trailer vehicles on screen and the cars they pull (app/NativeAutomataGenerator.cpp)
+void NativeCarReport(int samples);  // the vehicle manager's traffic automata: paths, states, samples over time (app/NativeTrafficReport.cpp)
 void NativeMySimReport();                  // kit command `mysims`: the MySims of the city and their state (app/NativeMySim.cpp)
 void NativeMySimMoveIn(const char* name, bool male, unsigned zodiac);   // kit command `mysimmovein NAME`: a MySim moves in through the original's add code
 void NativePlayerDriveCommand(const std::string& line);   // kit command `udi` (app/NativePlayerDrive.cpp)

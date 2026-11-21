@@ -145,6 +145,23 @@ bool cSC4TrafficAutomaton::Shutdown() {
 // 0x100116632: release each node's occupant (the counted first field) and clear the deque.
 void cSC4TrafficAutomaton::ClearLookaheadDeque() { lookahead_.clear(); }
 
+// 0x100114e88 (the per-automaton body of the manager's HandlePostCityInit): a loaded automaton has its network occupant, path
+// key and path index from the save but neither the path info nor the path pointer; both are looked up again (a key the piece
+// no longer has leaves the path null). The path index is left as read.
+void cSC4TrafficAutomaton::RestoreLoadedPath() {
+    if (!networkOccupant_) return;
+    cISC4PathInfo* info = networkOccupant_->GetPathInfoObject();
+    if (info != pathInfo_) {
+        if (info) info->AddRef();
+        cISC4PathInfo* replaced = pathInfo_;
+        pathInfo_ = info;
+        if (replaced) replaced->Release();
+    }
+    if (!pathInfo_) return;
+    const tPath* found = pathInfo_->GetPath(pathKey_, nullptr);
+    path_ = found ? &found->points : nullptr;
+}
+
 // 0x100114798: temporarily drop the network occupant, switch the populate layer (which SetPath re-resolves through the
 // manager) and put the occupant back. The old occupant is kept alive across the two SetPath calls.
 void cSC4TrafficAutomaton::SetPopulateLayer(std::uint32_t layer) {
@@ -1015,7 +1032,7 @@ bool cSC4TrafficAutomaton::ChooseNewDestination() {
         Remove(false);
         return false;
     }
-    cS3DVector3 startPoint = path_ ? path_->back() : position_;
+    cS3DVector3 startPoint = path_ ? path_->back() : GetPathPos();   // i386 0x000d08b0: vslot 0x498 without a path
     bool any = false;
     for (std::deque<tLookaheadNode>::iterator it = lookahead_.begin(); it != lookahead_.end(); ++it) {
         std::uint32_t key = 0;
@@ -1382,8 +1399,8 @@ bool cSC4TrafficAutomaton::SetRouteInfo(const std::deque<RouteData>& route, bool
 }
 
 // 0x100119db2: start a trip on `occupant` with a path key. Uses the path for the key when one exists; with `best` it
-// falls back to GetBestPath around the automaton's position. A path with fewer than two points is refused. SetPath
-// attaches it, and the map's lane tick for the key is reset to 0.
+// falls back to GetBestPath around the path position (GetPathPos, i386 vslot 0x24c). A path with fewer than two points is
+// refused. SetPath attaches it, and the map's lane tick for the key is reset to 0.
 bool cSC4TrafficAutomaton::StartTrip(ITrafficAutomatonOccupant* occupant, std::uint32_t key, bool best) {
     if (!occupant) return false;
     cISC4PathInfo* pathInfo = occupant->GetPathInfoObject();
@@ -1396,7 +1413,7 @@ bool cSC4TrafficAutomaton::StartTrip(ITrafficAutomatonOccupant* occupant, std::u
     if (direct) points = &direct->points;
     if (best && !points) {
         const tPath* found = pathInfo->GetBestPath(type, static_cast<std::uint8_t>(key >> 8),
-                                                   static_cast<std::uint8_t>(key), position_, &foundKey, nullptr);
+                                                   static_cast<std::uint8_t>(key), GetPathPos(), &foundKey, nullptr);
         if (found) points = &found->points;
     }
     if (!points) return false;

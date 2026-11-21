@@ -58,7 +58,7 @@
 //  * Write always writes version 6 (the version is a *stream* version, not the class version).
 //  * TranslateDispatchLocation(type 0) with a null occupant returns false; type 0 only uses the occupant's cell rectangle
 //    for building occupants (type 0x278128a0), anything else goes through GetPosition -> world-to-cell.
-//  * GetRandomCreationPoint always resets +4 of the output direction to the terrain height unless flag 0x40000 is passed.
+//  * GetRandomCreationPoint always resets +4 of the output point to the terrain height unless flag 0x40000 is passed.
 //  * The four camera-follow globals are class statics, not members: only one automaton can be followed in a process.
 //
 // Seams: everything the manager reached through SL::spCity / SL::spView3D / SL::spViewUtilities / SL::spRenderer /
@@ -589,8 +589,8 @@ public:
                                                 const cGZPersistResourceKey& key, cIGZMessageTarget2* listener,
                                                 std::uint8_t argument, const cS3DVector3* velocity) = 0;   // 0x78 @0x100100698
     virtual bool GetRandomCreationPoint(std::uint32_t group, const cS3DVector3& origin, float minDistance,
-                                        float maxDistance, const cS3DVector3& center, cS3DVector3& direction,
-                                        std::uint32_t flags) = 0;                           // 0x80 @0x100100ba0
+                                        float maxDistance, cS3DVector3& out, std::uint32_t flags,
+                                        const cS3DVector3* velocity) = 0;                     // 0x80 @0x100100ba0
     virtual IAutomataAutomaton* Dispatch(std::uint32_t group, const tAutomataLocation& from, const tAutomataLocation& to,
                                          std::uint32_t flags, std::uint8_t type, const cGZPersistResourceKey& key,
                                          std::uint8_t argument) = 0;                        // 0x88 @0x100100d86 (stub)
@@ -701,7 +701,7 @@ public:
                                                      const cGZPersistResourceKey& key, cIGZMessageTarget2* listener,
                                                      std::uint8_t argument);   // @ 0x100104da8
     bool GetRandomCreationPoint(std::uint32_t group, const cS3DVector3& origin, float minDistance, float maxDistance,
-                                const cS3DVector3& center, cS3DVector3& direction, std::uint32_t flags) override;   // @ 0x100100ba0
+                                cS3DVector3& out, std::uint32_t flags, const cS3DVector3* velocity) override;   // @ 0x100100ba0
     IAutomataAutomaton* Dispatch(std::uint32_t, const tAutomataLocation&, const tAutomataLocation&, std::uint32_t,
                                  std::uint8_t, const cGZPersistResourceKey&, std::uint8_t) override {
         return nullptr;   // @ 0x100100d86 (stub in the shipping binary)

@@ -218,7 +218,11 @@ struct FakeTrafficHost final : ITrafficAutomatonHost {
     void StartAudioEvent(std::uint32_t) override { ++audioStarts; }
     void StopAudioEvent(std::uint32_t) override { ++audioStops; }
     ITrafficParticleSystem* CreateParticleSystem() override { ++particleRequests; return &particles; }
-    ITrafficAutomatonOccupant* ReadNetworkOccupant(cIGZIStream&) override { return nullptr; }
+    ITrafficAutomatonOccupant* readOccupant = nullptr;   // what the saved occupant reference resolves to (one reference handed out)
+    ITrafficAutomatonOccupant* ReadNetworkOccupant(cIGZIStream&) override {
+        if (readOccupant) readOccupant->AddRef();
+        return readOccupant;
+    }
     const TrafficAutomatonTuning* Tuning() override { return &tuning; }
 };
 
@@ -911,6 +915,22 @@ int main() {
         CHECK(loaded->PathIndex() == 0);
         CHECK(loaded->IsSavedFlagSet());
         CHECK(loaded->Release() == 0);
+        // the manager's post-city-init lookup: a loaded automaton has its occupant and key but no path until RestoreLoadedPath
+        world.host.readOccupant = &occupant;
+        PortMemoryIStream again(os.bytes().data(), os.bytes().size());
+        cSC4TrafficAutomaton* restored = MakeAutomaton(world);
+        CHECK(restored->Read(again));
+        CHECK(restored->GetNetworkOccupant() == &occupant);
+        CHECK(restored->CurrentPath() == nullptr);
+        CHECK(restored->CurrentPathInfo() == nullptr);
+        restored->RestoreLoadedPath();
+        CHECK(restored->CurrentPathInfo() == info);
+        CHECK(restored->CurrentPath() != nullptr && restored->CurrentPath()->size() == 2);
+        CHECK(restored->CurrentPath() && restored->CurrentPath()->back().x == 40.0f);
+        CHECK(restored->PathIndex() == 0);
+        world.host.readOccupant = nullptr;
+        restored->SetPath(nullptr, 0, nullptr, true);
+        CHECK(restored->Release() == 0);
         // a version other than 2 is refused
         PortMemoryOStream newer;
         newer.SetUint16(3);

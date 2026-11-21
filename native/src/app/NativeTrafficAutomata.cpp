@@ -201,6 +201,10 @@ public:
         cISC4PathInfo* info = Info(o);
         return info && info->GetRandomPathWildcard(type, 0xff, 0xff, random, &key, nullptr) && info->GetRandomPathPoint(key, out);
     }
+    bool RandomPathKey(ITrafficNetworkMapOccupant* o, std::uint32_t type, cRZRandomSuper* random, std::uint32_t& key) override {
+        cISC4PathInfo* info = Info(o);
+        return info && info->GetRandomPathWildcard(type, 0xff, 0xff, random, &key, nullptr);
+    }
     bool CrimeIncidents(std::vector<CrimeIncidentCell>& out) override { return NativeCrimeIncidents(out); }
     void SetCrimeVisualsCreated(std::uint32_t index, bool created) override { NativeSetCrimeVisualsCreated(index, created); }
     void SetVisibleCells(int x0, int z0, int x1, int z1) { visible_[0] = x0; visible_[1] = z0; visible_[2] = x1; visible_[3] = z1; }
