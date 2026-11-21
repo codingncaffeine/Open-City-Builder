@@ -1,1 +1,1 @@
-"gz_winfolders:$T/gz_winfolders_test.cpp $S/gz/WinFolders.cpp $S/gz/Win.cpp $S/gz/Buffer.cpp $S/gz/WinText.cpp $S/gz/WinCtrlFactory.cpp $S/gz/RZDraw.cpp $S/rz/cRZString.cpp $S/rz/cRZVariant.cpp -I$T"
+"gz_winfolders:$T/gz_winfolders_test.cpp $S/gz/WinFolders.cpp $S/gz/Win.cpp $S/gz/Buffer.cpp $S/gz/WinText.cpp $S/gz/WinCtrlFactory.cpp $S/gz/RZDraw.cpp $S/rz/cRZString.cpp $S/rz/cRZVariant.cpp $S/gz/WinFolderRow.cpp $S/rz/cRZSysServPtr.cpp $S/gz/GZCOMDirector.cpp $S/rz/cRZCOMDllDirector.cpp -I$T"

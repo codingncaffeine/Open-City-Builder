@@ -22,9 +22,8 @@ EVIDENCE decompiled in Ghidra (work/gz/cGZWinFolders.txt plus the disassembly of
 0x10051393c FoldersSetOutlineBitmap
 0x100513b46 FoldersDestruct
 0x100513b9c FoldersDeletingDestruct
-PARTIAL:
-0x100513326 FoldersRecalcTabs (layout logic complete and tested, but it builds the tab rows through IWinFoldersHost::CreateFolderRow, i.e. the unrecovered cGZWinFolderRow: todo CLASS-cGZWinFolderRow; the default host returns no row, so the recovered control cannot lay out real tabs yet)
+0x100513326 FoldersRecalcTabs
+0x100512078 cGZWinFolderRow (21 functions to 0x100513b46) recovered in src/gz/WinFolderRow.cpp|h from the Mac i386 decompile (0x00399f70..0x0039b076, destructor 0x0074d058); test scripts/tests/gz_winfolderrow_test.cpp (tab measuring, stretch, selection, paint, click forwarding, references, cGZWinFolders building real rows)
 SKIPPED:
-0x100512078 cGZWinFolderRow (AddRef, Release, QueryInterface, Init, Shutdown, SetOutlineBmp, GZOnMouseDownL, GZPaint, DrawTab, SelectTab x2, CanThisTabBeAdded, AddTab, StretchToFit, SetFont, GetSelectedTabName, GetSelectedTabID, ClearSelection, GetSelection and its destructors, 0x100512078..0x100513b46): the tab-row neighbour class is not recovered (todo CLASS-cGZWinFolderRow); WinFolders.h declares its cIGZWinFolderRow interface and the control creates rows through the IWinFoldersHost seam
 0x10051299a libc++ list glue inside the span (push_back 0x10051299a, remove 0x100512f7c, clear 0x100513cc8 / 0x100513d18, splice 0x100513d8a): compiler-generated std::list code, replaced by std::list<tFolderTab> / std::list<WinFolderRow> operations
 0x100512c98 non-virtual thunks to cGZWinFolders's methods (AddRef 0x100512c98, Release 0x100512cb0, QueryInterface 0x100512cdc, Init 0x100512dca, Shutdown 0x100512e32, GZOnMouseDownL 0x100513034, GZPaint 0x1005130c2, destructors 0x100513c0a / 0x100513c5a): compiler-generated this-adjusting thunks of the recovered class layout, not hand-written

@@ -76,6 +76,7 @@ EVIDENCE test scripts/tests/gz_legacycontrol_test.cpp - three vtables and the sh
 0x10053d90d SetControlFontByName
 0x10053d1f3 SetControlResourceKeyParam
 0x10053e4a0 SetControlImageParam
+0x100547684 LegacyControlInterpretPropertiesGZWinFolders
 
 PARTIAL:
 0x10053bc8e LegacyControlInterpretPropertiesGZWinCommon the seven comment strings (properties 0x108..0x10f) are packed into the unrecovered cRZStringArray variant (vtbl 0x100b0ecb8); flags, id, area/pos/size, fill colour, caption, captionres + native resolution and transparent are written
@@ -91,7 +92,6 @@ PARTIAL:
 0x1005432b8 LegacyControlInterpretPropertiesSC3WinGen needs the cIGZWinGen setters, WCM font lookup and LoadBuffer
 0x100543942 LegacyControlInterpretPropertiesGZWinFileBrowser needs the cIGZWinFileBrowser setters and the resource manager (7.2 KB)
 0x100544dd8 LegacyControlInterpretPropertiesGZWinTreeView needs the cIGZWinTreeView setters, WCM fonts and load-buffer resources
-0x100547684 LegacyControlInterpretPropertiesGZWinFolders needs the cIGZWinFolders setters and the WCM font lookup
 0x1005479ca LegacyControlInterpretPropertiesGZWinGrid needs the cIGZWinGrid setters and the WCM font/colour lookups
 0x10053d08f LoadScriptLocalizedString only the seam path is written: the original first asks cIGZUIScriptService (slot 0x48/0x28) and then the resource manager (type 0x89b7dc8); both are unrecovered
 0x10053e2a1 LoadScriptImageBuffer only the seam path is written: the original first asks cIGZUIScriptService (slot 0x48/0x18) and then the resource manager (type 0x6f1568e)

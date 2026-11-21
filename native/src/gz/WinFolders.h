@@ -38,9 +38,8 @@
 // window width, Shutdown drops the row list before the base deletes the child windows (the original leaves it
 // dangling, which a Shutdown + Init cycle would walk), and Init returns true even when RecalcTabs fails.
 //
-// The tab rows themselves (cGZWinFolderRow, 0x198 bytes, 21 functions 0x100512260..0x100513b46) are not recovered, so
-// the control reaches them through IWinFoldersHost (see docs/SEAMS.md): the host creates a row and the control only
-// uses the cIGZWinFolderRow interface below.
+// The tab rows (cGZWinFolderRow, gz/WinFolderRow.h) are created through IWinFoldersHost (see docs/SEAMS.md), whose
+// default makes the real row; the control only uses the cIGZWinFolderRow interface below.
 #pragma once
 #include <cstdint>
 #include <list>
@@ -59,18 +58,18 @@ constexpr std::uint32_t kFoldersOutlineBitmapId = 0xe8963edf; // RZ::WCM() vslot
 // param1 = this id, param2 = GetID() of the control, param3 = 0.
 constexpr std::uint32_t kFoldersCmdFolderSelected = 0xe87111be;
 
-// One entry of the folder list (tFolderTab, 0x40 bytes in the original): the name, two words at +0x28 / +0x30 that
-// AddFolder leaves uninitialised and nothing in this class reads, and the caller's id at +0x38.
+// One tab (tFolderTab, 0x40 bytes in the original): the name, the tab's area inside its row and the caller's id. The
+// control's AddFolder copies the area without setting it (nothing in the control reads it); cGZWinFolderRow::AddTab
+// fills it with the tab's place in the row.
 struct tFolderTab {
     cRZString name;                  // +0x00 (0x28 bytes)
-    void* uninitialised28 = nullptr; // +0x28
-    void* uninitialised30 = nullptr; // +0x30
+    cRZRect area;                    // +0x28 (left, top, right, bottom)
     std::uint32_t id = 0;            // +0x38
 };
 
 // ---- seam: the tab row ----------------------------------------------------------------------------------------
-// cIGZWinFolderRow (vtable 0x100ac07e0): the interface of one row of tabs. cGZWinFolderRow is not recovered
-// (0x100512260..0x100513b46); the control only calls the slots below.
+// cIGZWinFolderRow (vtable 0x100ac07e0): the interface of one row of tabs (cGZWinFolderRow, gz/WinFolderRow.h);
+// the control only calls the slots below.
 class cIGZWinFolderRow : public cIGZUnknown {
 public:
     virtual bool CanThisTabBeAdded(const cIGZString* name) = 0;            // [3]  0x18
@@ -108,9 +107,9 @@ public:
     virtual cIGZBuffer* DefaultOutlineBitmap() = 0;
     // new cGZWinFolderRow (0x198 bytes) + the cGZWin constructor + SetFont (vslot 0x30) + cGZWinFolderRow::
     // SetOutlineBmp (@0x100512260); returns one reference (the original allocates it with a zero count, AddRefs it,
-    // child-adds it and Release()s it again, leaving the child list as the owner). Null while cGZWinFolderRow is
-    // missing.
-    virtual WinFolderRow CreateFolderRow(cIGZFont* font, cIGZBuffer* outline) = 0;
+    // child-adds it and Release()s it again, leaving the child list as the owner). `mgr` is the control's window
+    // manager (the original's cGZWin constructor registers with the global one).
+    virtual WinFolderRow CreateFolderRow(cIGZWinMgr* mgr, cIGZFont* font, cIGZBuffer* outline) = 0;
 };
 IWinFoldersHost* WinFoldersHost();
 void SetWinFoldersHost(IWinFoldersHost* host);

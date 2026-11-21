@@ -7,14 +7,15 @@
 
 #include "gz/Buffer.h"
 #include "gz/WinCtrlFactory.h"
+#include "gz/WinFolderRow.h"
 #include "gz/WinFont.h"
 
 namespace gz {
 
 namespace {
 
-// The engine side of the seam: RZ::FO() / RZ::WCM() through the recovered font and control-manager seams. The row
-// factory has nothing to hand out until cGZWinFolderRow exists (see the header and docs/SEAMS.md).
+// The engine side of the seam: RZ::FO() / RZ::WCM() through the recovered font and control-manager seams, and the
+// real cGZWinFolderRow.
 class DefaultWinFoldersHost final : public IWinFoldersHost {
 public:
     cIGZFont* DefaultFont() override {
@@ -30,10 +31,12 @@ public:
         IWinCtrlFactory* factory = WinCtrlFactory();
         return factory ? factory->Image(kFoldersOutlineBitmapId) : nullptr;
     }
-    WinFolderRow CreateFolderRow(cIGZFont*, cIGZBuffer*) override {
-        // cGZWinFolderRow is not recovered (21 functions, 0x100512260..0x100513b46; see todo CLASS-cGZWinFolderRow),
-        // so there is no row to create yet.
-        return {};
+    WinFolderRow CreateFolderRow(cIGZWinMgr* mgr, cIGZFont* font, cIGZBuffer* outline) override {
+        auto* row = new cGZWinFolderRow(mgr);
+        row->AddRef();             // the one reference the seam hands over
+        row->SetFont(font);        // vslot 0x30
+        row->SetOutlineBmp(outline);
+        return {static_cast<cIGZWinFolderRow*>(row), static_cast<cIGZWin*>(row)};
     }
 };
 
@@ -207,7 +210,7 @@ void cGZWinFolders::SetOutlineBmp(cIGZBuffer* bitmap) {   // @ 0x10051393c
 // ---- layout -------------------------------------------------------------------------------------------------------
 
 bool cGZWinFolders::CreateRow() {   // the row construction inlined at 0x1005134db and 0x100513697
-    WinFolderRow row = WinFoldersHost()->CreateFolderRow(font_, outlineBmp_);
+    WinFolderRow row = WinFoldersHost()->CreateFolderRow(GetWindowManager(), font_, outlineBmp_);
     if (!row.row || !row.window) return false;
     row.window->SetArea(0, 0, GetW(), bitmapHeight_);   // cGZWin vslot 0x1b0
     // ChildAdd takes the reference the factory handed over and makes the row a child window. The original ignores
@@ -263,7 +266,7 @@ bool cGZWinFolders::RecalcTabs() {   // @ 0x100513326
         if (ceiled > 0.0f && ceiled < 2147483648.0f) rowTotal = static_cast<int>(ceiled);
     }
     for (int i = 0; i < rowTotal; ++i)
-        if (!CreateRow()) return false;   // guarded: the row factory can fail while cGZWinFolderRow is missing
+        if (!CreateRow()) return false;   // guarded: a row the window manager refuses
 
     // Hand the tabs to the rows in add order, starting at the first row (the one GZPaint puts at the bottom).
     if (!tabs_.empty()) {

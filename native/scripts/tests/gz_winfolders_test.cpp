@@ -44,7 +44,7 @@ struct Host final : IWinFoldersHost {
     std::vector<FakeRow*> rows;
     cIGZFont* DefaultFont() override { return font; }
     cIGZBuffer* DefaultOutlineBitmap() override { return outline; }
-    WinFolderRow CreateFolderRow(cIGZFont* font, cIGZBuffer* outline) override;
+    WinFolderRow CreateFolderRow(cIGZWinMgr* mgr, cIGZFont* font, cIGZBuffer* outline) override;
 };
 
 // One row of tabs: a cGZWin child plus the cIGZWinFolderRow interface (the real cGZWinFolderRow has the same shape).
@@ -120,7 +120,8 @@ struct FakeRow final : cGZWin, cIGZWinFolderRow {
     int paintY = -1;
 };
 
-WinFolderRow Host::CreateFolderRow(cIGZFont* font, cIGZBuffer* outlineBmp) {
+WinFolderRow Host::CreateFolderRow(cIGZWinMgr* winMgr, cIGZFont* font, cIGZBuffer* outlineBmp) {
+    CHECK(winMgr == mgr);   // the control hands over its own window manager
     (void)outlineBmp;   // the real factory hands it to cGZWinFolderRow::SetOutlineBmp
     ++requested;
     if (!rowsAvailable) return {};

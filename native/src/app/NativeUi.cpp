@@ -29,6 +29,7 @@
 #include "gz/WinBMP.h"
 #include "gz/WinBtn.h"
 #include "gz/WinFlatRect.h"
+#include "gz/WinFolders.h"
 #include "gz/WinGen.h"
 #include "gz/WinStyle.h"
 #include "gz/WinCtrlFactory.h"
@@ -340,6 +341,8 @@ bool InitUiScripts(WinMgr* mgr) {
     // cSC4WinText (clsid 0xaa7cecfd): the game's text window, a cGZWinText that wraps and ellipsizes its caption itself
     gz::RegisterDirectorMaker("cSC4WinText", +[]() -> cIGZUnknown* { return MakeWin<sc4::cSC4WinText>(); });
     gz::RegisterDirectorMaker("cGZWinFlatRect", +[]() -> cIGZUnknown* { return MakeWin<gz::cGZWinFlatRect>(); });
+    // The folder tab strip (clsid 0x78e8055): the script view's tabs.
+    gz::RegisterDirectorMaker("cGZWinFolders", +[]() -> cIGZUnknown* { return MakeWin<gz::cGZWinFolders>(); });
     gz::RegisterDirectorMaker("cSC4WinMapView", +[]() -> cIGZUnknown* { return MakeWin<sc4::cSC4WinMapView>(); });   // clsid 0x28c5a41f
     gz::RegisterDirectorMaker("cSC4WinMiniMap", +[]() -> cIGZUnknown* { return MakeWin<sc4::cSC4WinMiniMap>(); });   // the city view's corner minimap
     // The city toolbar's gauges (clsids 0xc7a0e17e RCI bar, 0xaa5c2f86 trend bar, mayor rating bar): without makers the script

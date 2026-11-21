@@ -14,6 +14,7 @@
 #include "gz/Win.h"
 #include "gz/WinBMP.h"
 #include "gz/WinFlatRect.h"
+#include "gz/WinFolders.h"
 #include "gz/WinGen.h"
 #include "gz/WinScrollbar.h"
 #include "gz/WinBtn.h"
@@ -1785,6 +1786,45 @@ void cGZLegacyControl::InterpretPropertiesGZWinSpinner(cIGZWin* window, tScriptP
     spinner->Release();
 }
 
+// The folder tab strip (Mac i386 0x003bfc2a). Init: the font (a style id through RZ::WCM()'s system fonts, or a font
+// name that is only recorded on the window) and the tab outline image; later passes: the folder names, one per
+// `listelement` string, replacing the old list (ids 0).
+void cGZLegacyControl::InterpretPropertiesGZWinFolders(cIGZWin* window, tScriptPropertyArray& parameters, bool init) {
+    gz::cIGZWinFolders* folders = nullptr;
+    if (!window || !window->QueryInterface(gz::kGZIID_cIGZWinFolders, reinterpret_cast<void**>(&folders))) return;
+    if (init) {
+        std::uint32_t styleId = 0;
+        cRZString name;
+        if (GetPropertyUint32(parameters, 0xf000, styleId)) {
+            gz::IWinFontSource* fonts = gz::WinFontSource();
+            gz::IWinFont* font = fonts ? fonts->Font(styleId) : nullptr;   // WCM vslot 0x14 i386
+            folders->SetFont(font ? font->AsFont() : nullptr);
+            SetGZWinFont(window, styleId, 0);
+        } else if (GetPropertyString(parameters, 0xf000, name)) {
+            SetGZWinFont(window, name, 0);
+        }
+        cRZString imageText;
+        if (GetPropertyString(parameters, 0xf016, imageText)) {
+            unsigned group = 0, instance = 0;
+            std::sscanf(imageText.ToChar(), "{%x,%x}", &group, &instance);
+            cIGZBuffer* image = LoadBuffer(group, instance);
+            if (image) folders->SetOutlineBmp(image);
+            SetGZWinImage(window, group, instance, 0);
+            if (image) image->Release();
+        }
+    } else {
+        folders->DeleteAllFolders();
+        cRZString folder;
+        for (const tScriptProperty& property : parameters) {
+            if (property.id != 0x502 || !property.value) continue;
+            if (property.value->GetType() != (cIGZVariant::kTypeRZChar | cIGZVariant::kTypeArrayFlag)) continue;
+            property.value->GetValString(folder);
+            folders->AddFolder(folder, 0);
+        }
+    }
+    folders->Release();
+}
+
 // ---------------------------------------------------------------------------------------------------------
 // PARTIAL per-class interpreters (addresses in LegacyControl.h). Their bodies apply the control-specific view
 // interface setters; the decompiler drops the QueryInterface result base in every one of them (the `local_*`
@@ -1806,6 +1846,5 @@ GZLEGACYCTRL_PARTIAL_INTERPRETER(GZWinOptGrp)
 GZLEGACYCTRL_PARTIAL_INTERPRETER(GZWinTextTicker)
 GZLEGACYCTRL_PARTIAL_INTERPRETER(GZWinFileBrowser)
 GZLEGACYCTRL_PARTIAL_INTERPRETER(GZWinTreeView)
-GZLEGACYCTRL_PARTIAL_INTERPRETER(GZWinFolders)
 
 #undef GZLEGACYCTRL_PARTIAL_INTERPRETER

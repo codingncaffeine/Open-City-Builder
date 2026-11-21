@@ -15,6 +15,7 @@
 
 #include "fake_winmgr.h"
 #include "gz/LegacyControl.h"
+#include "gz/WinFolders.h"
 #include "gz/Win.h"
 #include "gz/WinFlatRect.h"
 #include "gz/WinGen.h"
@@ -1192,6 +1193,42 @@ int main() {
     CHECK_EQ(outlineWindow->outline.releases, 2);
     outlineWindow->Init();   // Shutdown (which drops the window's parameters) only runs on an initialized window
     outlineWindow->Release();
+
+    // The folder strip interpreter: the init pass records the font name and the outline image, the later pass replaces
+    // the folders with the `listelement` strings (other properties and non-string values are skipped).
+    {
+        auto* folders = new gz::cGZWinFolders(&mgr);
+        folders->AddRef();
+        folders->AddFolder(cRZString("old"), 5);
+        Params initParams;
+        initParams.Text(0xf000u, "main9");
+        initParams.Text(0xf016u, "{11223344,55667788}");
+        initParams.Text(0x502u, "ignored at init");
+        cGZLegacyControl::InterpretPropertiesGZWinFolders(folders, initParams.list, true);
+        std::uint32_t count = 0;
+        folders->GetCount(count);
+        CHECK_EQ(count, 1u);                          // the init pass leaves the folders alone
+        cIGZVariant* folderParam = nullptr;
+        CHECK(folders->GetParam(0xfaa3be85u, &folderParam));
+        if (folderParam) folderParam->Release();
+        folderParam = nullptr;
+        CHECK(folders->GetParam(0xdaa3b860u, &folderParam));
+        if (folderParam) { CHECK_EQ(folderParam->GetCount(), 8u); folderParam->Release(); }
+        Params listParams;
+        listParams.Text(0x502u, "Globals");
+        listParams.Uint(0x502u, 3u);                  // not a string: skipped
+        listParams.Text(0x503u, "other");
+        listParams.Text(0x502u, "Locals");
+        cGZLegacyControl::InterpretPropertiesGZWinFolders(folders, listParams.list, false);
+        folders->GetCount(count);
+        CHECK_EQ(count, 2u);
+        cRZString folderName;
+        CHECK(folders->GetFolderByIndex(0, folderName) && std::string(folderName.ToChar()) == "Globals");
+        CHECK(folders->GetFolderByIndex(1, folderName) && std::string(folderName.ToChar()) == "Locals");
+        cGZLegacyControl::InterpretPropertiesGZWinFolders(nullptr, listParams.list, false);   // no window: nothing
+        folders->Init();   // Shutdown (which drops the window's parameters) only runs on an initialized window
+        folders->Release();
+    }
 
     // The slider interpreter: min/max, direction, image resource and the post-init initial value.
     auto* sliderWindow = new SliderWindow(&mgr);

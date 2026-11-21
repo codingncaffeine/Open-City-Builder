@@ -21,6 +21,8 @@ src/gz/DrawContextAsBuffer.cpp
 src/gz/MessageQueue.cpp
 src/gz/WinGen.cpp
 src/gz/WinFlatRect.cpp
+src/gz/WinFolders.cpp
+src/gz/WinFolderRow.cpp
 src/gz/WinMgrBase.cpp
 src/gz/cGZMessageServer2.cpp
 src/gz/RZDraw.cpp
