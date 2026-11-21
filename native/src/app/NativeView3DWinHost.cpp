@@ -81,6 +81,8 @@
 #include "sc4/CameraControl.h"
 #include "sc4/LightingManager.h"
 #include "sc4/ProgressScreen.h"
+#include "sc4/BuildingSelectWinProc.h"
+#include "sc4/TractDeveloper.h"
 #include "sc4/Region.h"
 #include "dbpf/DBPFReader.h"
 #include "gz/GZCOMDirector.h"
@@ -252,6 +254,59 @@ ProgressScreenServices g_progressServices;
 
 cSC4ProgressScreen* AsProgressScreen(cIGZUnknown* screen) { return static_cast<cSC4ProgressScreen*>(static_cast<cIGZMessageTarget2*>(screen)); }
 
+// cSC4BuildingSelectWinProc's environment: SL::spTractDeveloper's style settings and the tutorial's UI command filter.
+class TractStyles final : public ITractStyles {
+public:
+    std::vector<std::uint32_t> GetActiveStyles() override { auto* t = Tract(); return t ? t->GetActiveStyles() : std::vector<std::uint32_t>{}; }
+    void SetActiveStyles(const std::vector<std::uint32_t>& styles) override { if (auto* t = Tract()) t->SetActiveStyles(styles); }
+    bool IsUsingAllStylesAtOnce() override { auto* t = Tract(); return t && t->IsUsingAllStylesAtOnce(); }
+    void UseAllStylesAtOnce(bool all) override { if (auto* t = Tract()) t->UseAllStylesAtOnce(all); }
+    int GetYearsBetweenStyleChanges() override { auto* t = Tract(); return t ? t->GetYearsBetweenStyleChanges() : 0; }
+    void SetYearsBetweenStyleChanges(int years) override { if (auto* t = Tract()) t->SetYearsBetweenStyleChanges(years); }
+private:
+    static cISC4TractDeveloper* Tract() {   // borrowed: the city holds the developer
+        void* raw = nullptr;
+        if (!SL::spTractDeveloper || !SL::spTractDeveloper->QueryInterface(kGZIID_cISC4TractDeveloper, &raw) || !raw) return nullptr;
+        auto* tract = static_cast<cISC4TractDeveloper*>(raw);
+        tract->Release();
+        return tract;
+    }
+};
+class TutorialCommandFilter final : public ITutorialFilter {
+public:
+    bool Allows(const cGZMessage& message) override { cGZMessage copy = message; return native::NativeTutorialFilterUiCommand(copy); }
+};
+
+// The view's handle on its style selector (+0x490): the recovered cSC4BuildingSelectWinProc, which installs itself as the
+// window's proc in Init and takes it off again in Shutdown.
+class BuildingSelectWindow final : public IBuildingSelectWindow {
+public:
+    explicit BuildingSelectWindow(cIGZWin* window) : proc_(new cSC4BuildingSelectWinProc(window)) { proc_->AddRef(); }
+    ~BuildingSelectWindow() { proc_->Release(); }
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid != gz::kGZIID_cIGZWinProc && iid != 1) return false;
+        *out = static_cast<gz::cIGZWinProc*>(this);
+        AddRef();
+        return true;
+    }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override {
+        if (--refs_ == 0) { delete this; return 0; }
+        return refs_;
+    }
+    bool DoWinProcMessage(cIGZWin* window, cGZMessage& message) override { return proc_->DoWinProcMessage(window, message); }
+    bool Init() override { return proc_->Init(); }
+    void ShowWindow() override { proc_->ShowWindow(); }
+    void HideWindow() override { proc_->HideWindow(); }
+    bool IsVisible() override { return proc_->IsVisible(); }
+    void Shutdown() { proc_->Shutdown(); }
+    cSC4BuildingSelectWinProc* Proc() const { return proc_; }
+
+private:
+    std::uint32_t refs_ = 0;
+    cSC4BuildingSelectWinProc* proc_;
+};
+
 struct StubView3DWin final : IView3DWinHost {
     View3DNotifications notifications_;
     cIGZMessageServer2* MessageServer2() override { return SL::spMS2; }   // SL::spMS2: erosion, view filter / level and tool changes
@@ -384,7 +439,15 @@ struct StubView3DWin final : IView3DWinHost {
     IMySimWindow* CreateMySimWinProc(gz::cIGZWinGen* panel) override { return native::CreateMySimWindow(panel); }
     IBudgetUIWindow* CreateBudgetUIWinProc() override { return native::CreateBudgetUiWindow(); }
     IGraphsViewWindow* CreateGraphsViewWinProc(cIGZWin* window) override { return native::CreateGraphsViewWindow(window); }
-    IBuildingSelectWindow* CreateBuildingSelectWinProc(cIGZWin* window) override { return {}; }
+    // new cSC4BuildingSelectWinProc(window) (+ AddRef): the tract developer's building style selector.
+    IBuildingSelectWindow* CreateBuildingSelectWinProc(cIGZWin* window) override {
+        static TractStyles styles;
+        static TutorialCommandFilter tutorial;
+        sc4::SetBuildingSelectEnvironment(&styles, &tutorial);
+        auto* proc = new BuildingSelectWindow(window);
+        proc->AddRef();
+        return proc;
+    }
     IAdvisorPopupQueue* CreateAdvisorPopupTracker() override { return CreateAdvisorPopupQueue(); }
     // new cSC4CompassWinProc; gen->SetWinProc(proc): the window holds the only reference. The original builds the GUI on the city's
     // init-begins message, so the proc is listening when the city-ready message (0x26d31ec1) shows the face of the camera's rotation;
@@ -570,7 +633,7 @@ struct StubView3DWin final : IView3DWinHost {
     void ShutdownMySimWinProc(cIGZUnknown* proc) override {}
     void ShutdownBudgetUIWinProc(cIGZUnknown* proc) override {}
     void ShutdownGraphsViewWinProc(cIGZUnknown* proc) override {}
-    void ShutdownBuildingSelectWinProc(cIGZUnknown* proc) override {}
+    void ShutdownBuildingSelectWinProc(cIGZUnknown* proc) override { static_cast<BuildingSelectWindow*>(static_cast<IBuildingSelectWindow*>(proc))->Shutdown(); }
 
 private:
     bool rewardsUnlocked_ = false;   // the view's +0x456
@@ -897,6 +960,26 @@ void NativeCityViewReport() {
     cSC4RenderProperties* properties = AppRenderPropertySet();
     std::printf(" disaster %d situation %d paused %d borders-on %d\n", host.DisasterAlertActive() ? 1 : 0, host.SituationAlertActive() ? 1 : 0,
                 host.SimulatorPaused() ? 1 : 0, properties && properties->BoolValue(kPropDisplayAlertBorders) ? 1 : 0);
+    // the building style selector: the script window and the proc on it, and the tract developer's settings it shows
+    cIGZWin* styles = viewWin->GetChildWindowFromIDRecursive(sc4::kBuildingSelectScriptId);
+    std::printf("cityview: style selector %s", styles ? "present" : "missing");
+    if (styles) {
+        void* genRaw = nullptr;
+        gz::cIGZWinProc* proc = nullptr;
+        if (styles->QueryInterface(gz::kGZIID_cIGZWinGen, &genRaw) && genRaw) {
+            auto* gen = static_cast<gz::cIGZWinGen*>(genRaw);
+            proc = gen->GetWinProc();
+            gen->Release();
+        }
+        const bool recovered = proc && dynamic_cast<cSC4BuildingSelectWinProc*>(proc) != nullptr;
+        std::printf(" visible %d proc %s collapsed %d expanded %d", styles->IsVisible() ? 1 : 0, recovered ? "cSC4BuildingSelectWinProc" : (proc ? "other" : "none"),
+                    styles->GetChildWindowFromID(0x8bca20c3) ? 1 : 0, styles->GetChildWindowFromID(0x2bc619af) ? 1 : 0);
+    }
+    TractStyles tract;
+    std::printf(" tract styles");
+    for (std::uint32_t style : tract.GetActiveStyles()) std::printf(" %x", style);
+    std::printf(" all-at-once %d years %d\n", tract.IsUsingAllStylesAtOnce() ? 1 : 0, tract.GetYearsBetweenStyleChanges());
 }
+
 
 }  // namespace native
