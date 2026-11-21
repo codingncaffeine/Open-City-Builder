@@ -33,6 +33,7 @@
 #include "sc4/AdvisorConcrete.h"
 #include "sc4/AdviceDetokenizer.h"
 #include "sc4/AdvisorUIAdvisorWinProc.h"
+#include "sc4/CommonIIDs.h"
 #include "sc4/CitySituationManager.h"
 #include "sc4/AdvisorSystem.h"
 #include "sc4/BudgetSimulator.h"
@@ -668,14 +669,21 @@ private:
     std::uint32_t refs_ = 0;
 };
 
+// The city's situation manager: the city component is a COM wrapper whose plain-object view is the manager.
+cSC4CitySituationManager* CitySituations() {
+    cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(CityComponent::CitySituationManager) : nullptr;
+    if (!object) return nullptr;
+    if (auto* manager = dynamic_cast<cSC4CitySituationManager*>(object)) return manager;
+    void* raw = nullptr;
+    if (!object->QueryInterface(kGZIID_PlainObject, &raw) || !raw) return nullptr;
+    return static_cast<cSC4CitySituationManager*>(raw);
+}
+
 // The advice detokenizer reaches the city's situation manager.
 class AdviceDetokenizerHostImpl final : public IAdviceDetokenizerHost {
 public:
-    cSC4CitySituationManager* SituationManager() override {
-        cSC4City* city = HostCity();
-        cIGZUnknown* object = city ? city->GetComponent(CityComponent::CitySituationManager) : nullptr;
-        return object ? dynamic_cast<cSC4CitySituationManager*>(object) : nullptr;
-    }
+    cSC4CitySituationManager* SituationManager() override { return CitySituations(); }
     cISC4AdvisorSystem* System(void* context) override {
         return static_cast<cISC4AdvisorSystem*>(static_cast<cSC4AdvisorSystem*>(context));
     }
@@ -1014,9 +1022,7 @@ void NativePrintAdvisors() {
 // Is `occupant` the running mission's current target (city vslot 0xc4 GetCitySituationManager, its vslot 0x24)? The same
 // object answers the same cIGZUnknown.
 bool NativeIsSituationTarget(cIGZUnknown* occupant) {
-    cSC4City* city = HostCity();
-    cIGZUnknown* object = city ? city->GetComponent(CityComponent::CitySituationManager) : nullptr;
-    auto* situations = object ? dynamic_cast<cSC4CitySituationManager*>(object) : nullptr;
+    cSC4CitySituationManager* situations = CitySituations();
     ISituationOccupant* target = situations ? situations->GetCurrentTarget() : nullptr;
     if (!target || !occupant) return false;
     void *a = nullptr, *b = nullptr;

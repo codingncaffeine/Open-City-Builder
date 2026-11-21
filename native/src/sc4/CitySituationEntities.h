@@ -8,6 +8,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "gz/cIGZMessage2.h"
 #include "gz/cIGZString.h"
 #include "gz/cIGZUnknown.h"
 #include "rz/cRZString.h"
@@ -17,10 +18,6 @@ namespace sc4 {
 class ISituationAutomaton;
 class cISC4CitySituationAdvice;
 
-// iids used by QueryInterface on occupants
-constexpr std::uint32_t kGZIID_cISC4Automaton = 0xa9b40f05;
-constexpr std::uint32_t kGZIID_cISC4NetworkOccupant = 0xa821ef94;
-
 // Occupant property that excludes an automaton occupant from the situation system (HandleInsertOccupant).
 constexpr std::uint32_t kPropertyNoSituationAutomaton = 0x029244db;
 
@@ -28,6 +25,8 @@ class ISituationPropertyHolder {
 public:
     virtual ~ISituationPropertyHolder() = default;
     virtual bool HasProperty(std::uint32_t propertyId) = 0;   // vslot 0x18
+    // cSCPropertyHelp::GetPropertyValue(holder, id, u32&): false when the property is missing (the popup's dashboard id).
+    virtual bool GetPropertyU32(std::uint32_t propertyId, std::uint32_t& value) { (void)propertyId; (void)value; return false; }
 };
 
 // cISC4Occupant
@@ -52,40 +51,47 @@ public:
     virtual cIGZString* DisplayName() { return nullptr; }
 };
 
-// cISC4Automaton
+// cISC4Automaton (the slots checked against the cSC4Automaton vtable; 64-bit offsets, the i386 slot is half)
 class ISituationAutomaton : public cIGZUnknown {
 public:
-    virtual ISituationOccupant* Occupant() = 0;                    // 0x30
-    virtual void Position(float xyz[3]) = 0;                       // 0x38
-    virtual void Velocity(float xyz[3]) = 0;                       // 0x78 [inferred] (heading vector, CheckEscapeCitySuccess)
-    virtual void SetPlayerControl(bool on) = 0;                    // 0x68 [inferred] (false releases the player drive)
-    virtual void SetFlag(std::uint32_t flag, bool on) = 0;         // 0xf0
-    virtual bool CheckFlag(std::uint32_t flag) = 0;                // 0xf8
-    virtual void AddListener(void* listenerView) = 0;              // 0x138 (the manager's message-target view)
-    virtual void RemoveListener(void* listenerView) = 0;           // 0x140
-    virtual ISituationAutomaton* PursuitTarget() = 0;              // 0x1c0 -> object whose +0x38 is the chased automaton
-    virtual int AutomatonType() = 0;                               // 0x1d8 (0x34 = pursuit car; (type | 0x20) == 0x34 excluded from driving)
-    virtual void SendCommand(std::uint32_t commandId) = 0;         // 0x1e8 (sound / animation hook)
-    virtual int FirstIndicator() = 0;                              // 0x218 -> first node with a non-zero value at +0xf0 (0 = none)
-    virtual void OnSituationAttached() = 0;                        // 0x220
+    virtual ISituationOccupant* Occupant() = 0;                    // 0x30 AsOccupant
+    virtual void Position(float xyz[3]) = 0;                       // 0x38 GetPosition
+    virtual void Remove(bool fade) = 0;                            // 0x68 Remove (HandleSituationCancelled drops a created target)
+    virtual void GetOrientation(float xyz[3]) = 0;                 // 0x78 GetOrientation (CheckEscapeCitySuccess's heading)
+    virtual void SetFlag(std::uint32_t flag, bool on) = 0;         // 0xf0 SetAutomataFlag
+    virtual bool CheckFlag(std::uint32_t flag) = 0;                // 0xf8 CheckAutomataFlag
+    virtual void AddListener(cIGZMessageTarget2* target) = 0;      // 0x138 AddCallback (the manager's message-target view)
+    virtual void RemoveListener(cIGZMessageTarget2* target) = 0;   // 0x140 RemoveCallback
+    virtual ISituationAutomaton* StateTarget() = 0;                // 0x1c0 GetState(): the current state's target automaton (+0x38)
+    virtual std::uint32_t GetBehavior() = 0;                       // 0x1d8 ((behavior | 0x20) == 0x34 is not driveable)
+    virtual void StartSFX(std::uint32_t sfx) = 0;                  // 0x1e8
+    // 0x218 GetAutomataGroup: the group's situation indicator image ("csi_image", +0xf0), else the template chain's
+    // (cSC4OccupantGroupTemplate::GetSituationIndicatorImageId); 0 = none.
+    virtual std::uint32_t SituationIndicatorImageId() = 0;
+    virtual void RegisterInGameDataRegistry() = 0;                 // 0x220
+    // 0x218 GetAutomataGroup: the player-drive parameters of the group (its own block, else the template chain's): the
+    // maximum speed (+0x8). False when the group has none.
+    virtual bool PlayerDriveMaxSpeed(float& speed) { (void)speed; return false; }
 };
 
 // cISC4AutomataManager (vehicle, aircraft, pedestrian and watercraft managers, in that order)
 class ISituationAutomataManager : public cIGZUnknown {
 public:
-    virtual void BeginPlayerDrive() = 0;                           // 0x48 [inferred] (called when the countdown starts)
-    virtual void EndPlayerDrive() = 0;                             // 0x50 [inferred] (called when the countdown ends)
-    virtual bool HandlesGroup(std::uint32_t group) = 0;            // 0xf0
-    // Alert nearby automata of `group` to chase `target` within `radius` (0xb0).
+    virtual void Pause() = 0;                                      // 0x48 (the countdown before a drive)
+    virtual void Resume() = 0;                                     // 0x50 (the countdown finished)
+    virtual bool HandlesGroup(std::uint32_t group) = 0;            // 0xf0 CanCreateGroup
+    // Alert nearby automata of `group` to chase `target` within `radius` (0xb0 ChaseAutomaton(group, radius, target, all)).
     virtual void AlertGroup(float radius, std::uint32_t group, ISituationAutomaton* target, bool flag) = 0;
     // 0x100: adds the automata of `group` to `out` (the original appends to a shared unordered_set, so an automaton
     // that belongs to two managers is only kept once). `out` counts as owned by the managers until 0x108 releases it.
     virtual void AppendInstancesOfGroup(std::uint32_t group, std::unordered_set<ISituationAutomaton*>& out) = 0;
     virtual void ReleaseInstances(std::unordered_set<ISituationAutomaton*>& list) = 0;   // 0x108
-    // 0x80: finds a free spawn position for a new automaton of `group` near `from`; fills `spawnPosition`.
+    // 0x80 GetRandomCreationPoint: finds a free spawn position for a new automaton of `group` between `minDistance` and
+    // `maxDistance` of `from`; fills `spawnPosition`.
     virtual bool FindSpawnPosition(float minDistance, float maxDistance, std::uint32_t group, const float from[3], float spawnPosition[3],
                                    std::uint32_t flags) = 0;
-    // 0x78: creates an automaton of `group` at `spawnPosition`; returns a counted reference (or null).
+    // 0x78: creates an automaton of `group` at `spawnPosition` (no resource key, no listener, argument 0xff); returns a
+    // counted reference (or null).
     virtual ISituationAutomaton* CreateAutomaton(std::uint32_t group, const float spawnPosition[3], std::uint32_t flags) = 0;
 };
 

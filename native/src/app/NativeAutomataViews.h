@@ -16,6 +16,7 @@ class IAutomataBuildingOccupant;
 class IAutomataGroupTemplate;
 class IAutomatonGroupTemplate;
 class cSC4Automaton;
+class cSC4AutomatonExtension;
 class cSC4OccupantGroupTemplate;
 class cISC4Occupant;
 }  // namespace sc4
@@ -40,5 +41,8 @@ sc4::IAutomataGroupTemplate* GroupTemplateView(sc4::cSC4OccupantGroupTemplate* g
 sc4::IAutomatonGroupTemplate* AutomatonGroupTemplateView(const sc4::IAutomataGroupTemplate* managerView);
 // The script group template behind the automaton's view of it (null for a view AutomatonGroupTemplateView did not make).
 sc4::cSC4OccupantGroupTemplate* OccupantGroupTemplateOf(const sc4::IAutomatonGroupTemplate* automatonView);
+// A second view of an automaton another layer attaches (owned by the automaton's view, deleted with the automaton).
+sc4::cSC4AutomatonExtension* AutomatonCompanion(sc4::cSC4Automaton* automaton);
+void SetAutomatonCompanion(sc4::cSC4Automaton* automaton, sc4::cSC4AutomatonExtension* companion);
 
 }  // namespace native

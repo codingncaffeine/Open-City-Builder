@@ -1298,8 +1298,10 @@ int RunScenario(const std::string& path) {
             native::NativeRunAppLua(code.c_str());
         } else if (command == "advisors") {   // advisors: every advisor and its active advices
             native::NativePrintAdvisors();
-        } else if (command == "situations") {   // situations: the city situation manager (tracks, active mission, status, timers)
-            native::NativeSituationsReport();
+        } else if (command == "situations") {   // situations [initiate GUID | accept [PNG]]: the city situation manager (tracks, active mission, status, timers); initiate posts the situation message the mission cheat posts; accept arms the next dialog's accept through its window procedure
+            std::string rest;
+            std::getline(words, rest);
+            native::NativeSituationsCommand(rest);
         } else if (command == "ticker") {   // ticker: the news ticker's queue, flipper ring and scroll
             native::NativeTickerReport();
         } else if (command == "terrainflags") {   // terrainflags: hidden-terrain cell flags against the city file's (SC4_TERRAINHIDEDEBUG=1)
@@ -1910,6 +1912,13 @@ int main(int argc, char** argv) {
             static int lastOrdinal = -1, dialogFrame = 0;
             if (gMgr->modalCount != lastOrdinal) { lastOrdinal = gMgr->modalCount; dialogFrame = 0; std::printf("modal: dialog %d begins\n", lastOrdinal); }
             ++dialogFrame;
+            // `situations accept [PNG]`: on the 20th frame of a situation dialog its picture is written and the dialog is
+            // accepted through the situation manager's window procedure (no input is sent).
+            std::string situationShot;
+            if (dialogFrame == 20 && native::NativeSituationsAcceptDue(situationShot)) {
+                if (!situationShot.empty()) WritePng(situationShot);
+                native::NativeSituationsAccept();
+            }
             if (const char* input = std::getenv("SC4_MODALINPUT")) {
                 std::stringstream list(input);
                 std::string entry;

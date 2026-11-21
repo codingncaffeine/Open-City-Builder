@@ -107,7 +107,7 @@ void cSC4CitySituationManager::GetCurrentTargetName(cRZString& out) const {
 // success aura. False without an active situation.
 bool cSC4CitySituationManager::GetSituationAura(float& radius, float& magnitude) const {
     if (!activeSituation_) return false;
-    if (status_ == kSituationTimeout) {
+    if (status_ == kSituationFailure) {
         activeSituation_->GetFailureAura(radius, magnitude);
     } else {
         activeSituation_->GetSuccessAura(radius, magnitude);
@@ -119,7 +119,7 @@ bool cSC4CitySituationManager::GetSituationAura(float& radius, float& magnitude)
 bool cSC4CitySituationManager::GetSituationMoney(std::int64_t& money) const {
     if (!activeSituation_) return false;
     long long amount = 0;   // the situation API takes long long& (int64_t is long on Linux)
-    if (status_ == kSituationTimeout) {
+    if (status_ == kSituationFailure) {
         activeSituation_->GetFailureMoney(amount);
     } else {
         activeSituation_->GetSuccessMoney(amount);
@@ -188,7 +188,7 @@ void cSC4CitySituationManager::HandleStatusChanged(std::uint32_t status) {
         factor = activeSituation_->GetDelayAfterDisabled();
         if (factor <= 1.0f) factor = 1.0f;
     }
-    statusSpeedFactor_ = factor;
+    resultDelay_ = factor;
 }
 
 // ---------------------------------------------------------------------------------------------- state clears
@@ -303,17 +303,18 @@ void cSC4CitySituationManager::InitScriptFuncRef(const char* name, int tableInde
     ref = lua_->Ref(true);
 }
 
-// @ 0x1006dcfa2: calls registry function `functionRef` with the value of registry reference `argumentRef` (either may be
-// -2 = none). MySim missions prepare the sim's script first (mysim flag 0x20).
-void cSC4CitySituationManager::CallScriptFunction(int functionRef, int argumentRef) {
-    if (argumentRef == -2 || !lua_) return;
+// @ 0x1006dcfa2: calls the registry function `functionRef` with the situation's script table (registry reference
+// `tableRef`) as its argument; a function reference of -2 means none. MySim missions prepare the sim's script first
+// (mysim flag 0x20).
+void cSC4CitySituationManager::CallScriptFunction(int tableRef, int functionRef) {
+    if (functionRef == -2 || !lua_) return;
     if (activeSituation_ && activeSituation_->CheckSituationFlag(kSituationFlagMySimMission) && mySim_) {
         mySim_->PrepareScript();
     }
     const int savedTop = lua_->GetTop();
-    lua_->GetRef(argumentRef);
+    lua_->GetRef(functionRef);
     if (lua_->IsFunction(-1)) {
-        lua_->GetRef(functionRef);
+        lua_->GetRef(tableRef);
         lua_->CallProtected(1, 0);
     }
     lua_->SetTop(savedTop);
@@ -356,14 +357,14 @@ bool cSC4CitySituationManager::FindAutomatonForSituation(cISC4CitySituationAdvic
 }
 
 // @ 0x1006db35c: driveable means: not flag 2, not flag 1, not flag 0x8000000, not flag 0x10000000, and the automaton type
-// is not a pursuit car ((type | 0x20) != 0x34).
+// is not in behavior 0x14 or 0x34 ((behavior | 0x20) != 0x34).
 bool cSC4CitySituationManager::CanPlayerDrive(ISituationAutomaton* automaton) const {
     if (!automaton) return false;
     if (!automaton->CheckFlag(2)) return false;
     if (automaton->CheckFlag(1)) return false;
     if (automaton->CheckFlag(0x8000000)) return false;
     if (automaton->CheckFlag(0x10000000)) return false;
-    return (static_cast<std::uint32_t>(automaton->AutomatonType()) | 0x20u) != 0x34u;
+    return (automaton->GetBehavior() | 0x20u) != 0x34u;
 }
 
 // @ 0x1006db912: puts the automaton's occupant into `group` and tracks the automaton.
@@ -413,12 +414,6 @@ namespace sc4 {
 // passes (nsISC4GameDataRegistry::GenericValueExchnageFuncUint32 at 0x1006e6628): reading hands the value out, writing
 // stores the variant's u32.
 namespace {
-
-// The manager's messages are always cRZMessage2Standard objects; the original reaches the payload accessors through
-// the object's own vtable, so the port downcasts (the caller guarantees the type, as the original does).
-cIGZMessage2Standard& StandardMessage(cIGZMessage2* message) {
-    return *static_cast<cIGZMessage2Standard*>(message);
-}
 
 bool ExchangeUint32(void* context, cIGZVariant& value, bool write, cISC4GameDataRegistry* registry) {
     (void)registry;
@@ -475,7 +470,7 @@ bool cSC4CitySituationManager::Init() {
         lua_ = host->Lua();
         if (sc4::cISC4GameDataRegistry* registry = host->GameDataRegistry()) {
             // nsISC4GameDataRegistry::AddNode with a null parent hangs the node under the root; the values hang under it.
-            const auto node = registry->AddChildEntry(static_cast<cIGZUnknown*>(this), "sitmgr", registry->GetRootNodeEntry(), 0, nullptr);
+            const auto node = registry->AddChildEntry(static_cast<cIGZUnknown*>(static_cast<cIGZMessageTarget2*>(this)), "sitmgr", registry->GetRootNodeEntry(), 0, nullptr);
             registry->AddChildEntry(&numTargets_, "num_targets", &ExchangeUint32, node, 2, nullptr);
             registry->AddChildEntry(&currentTargetIndex_, "cur_target_index", &ExchangeUint32, node, 2, nullptr);
         }
@@ -500,10 +495,10 @@ bool cSC4CitySituationManager::Init() {
 // @ 0x1006d85c6: releases every service reference, frees the coverage cells, drops the automata managers, unsubscribes
 // from the message server and the automaton notifier, clears the tracking lists, removes the game-data node and
 // unregisters the cheat code.
-//
-// Recovered-partial: the original also calls vslot 0x160 (DeactivateSituation) here, which is not recovered.
+// The active situation is deactivated first (vslot 0x160).
 bool cSC4CitySituationManager::Shutdown() {
     if (!initialized_) return true;
+    DeactivateSituation();
     mySim_ = nullptr;
     occupantManager_ = nullptr;
     lua_ = nullptr;
@@ -525,7 +520,7 @@ bool cSC4CitySituationManager::Shutdown() {
     ClearTrackedAutomata();
     ClearSituationTrackList();
     if (sc4::cISC4GameDataRegistry* registry = g_host ? g_host->GameDataRegistry() : nullptr) {
-        registry->RemoveChildEntry(static_cast<cIGZUnknown*>(this));
+        registry->RemoveChildEntry(static_cast<cIGZUnknown*>(static_cast<cIGZMessageTarget2*>(this)));
     }
     ISituationApp* app = g_host ? g_host->App() : nullptr;
     ISituationCheatCodes* cheats = g_host ? g_host->CheatCodes() : nullptr;
@@ -553,9 +548,9 @@ void cSC4CitySituationManager::TrackAutomaton(ISituationAutomaton* automaton, st
         automaton->Release();
         return;
     }
-    const int indicator = automaton->FirstIndicator();
+    const std::uint32_t indicator = automaton->SituationIndicatorImageId();
     if (indicator == 0) return;
-    trackId = dispatchView_->TrackOccupant(automaton->Occupant(), 4, indicator, 0);
+    trackId = dispatchView_->TrackOccupant(automaton->Occupant(), 4, static_cast<int>(indicator), 0);
     if (trackedAutomata_.count(automaton) != 0) return;
     trackedAutomata_.insert(automaton);
     automaton->AddListener(this);
@@ -706,89 +701,6 @@ void cSC4CitySituationManager::HandleSituationUntriggered(cISC4CitySituationAdvi
         track.automaton = found;
         ++tracked;
         found->Release();
-    }
-}
-
-// ---------------------------------------------------------------------------------------------- message routing
-
-// @ 0x1006d8bd0: routes the notifications the manager subscribed to. The original's switch is a signed compare tree;
-// the ids are listed in SituationMessage (sc4/CitySituationManager.h). Answers true for a handled message.
-//
-// Recovered-partial: the routes whose handlers are not recovered answer false (they are the target selection core
-// 0x9d92fc3/0xbb324bd, the situation start 0xac1045ef/0x6bb350e4, the popup 0x8a09fa66/0x2c16bde7/0xebb67ef7 and the
-// per-tick update 0x86ad10ee).
-bool cSC4CitySituationManager::DoMessage(cIGZMessage2* message) {
-    if (!message) return false;
-    switch (message->GetType()) {
-        case kSituationMsgAdviceTriggered:
-        case kSituationMsgAdviceUntriggered: {
-            cIGZUnknown* unknown = StandardMessage(message).GetIGZUnknown();
-            if (!unknown) return true;
-            cISC4CitySituationAdvice* situation = nullptr;
-            if (!unknown->QueryInterface(kGZIID_cISC4CitySituationAdvice, reinterpret_cast<void**>(&situation)) || !situation) {
-                return true;
-            }
-            if (message->GetType() == kSituationMsgAdviceTriggered) {
-                HandleSituationTriggered(situation);
-            } else {
-                HandleSituationUntriggered(situation);
-            }
-            situation->Release();
-            return true;
-        }
-        case kSituationMsgAdviceShown:
-            return true;                     // one-shot notification, nothing to do
-        case kSituationMsgMissionActorSet: {
-            // Only service missions (flag 0x8) keep a mission actor.
-            if (!activeSituation_ || !activeSituation_->CheckSituationFlag(kSituationFlagServiceMission)) return true;
-            cIGZUnknown* unknown = StandardMessage(message).GetIGZUnknown();
-            if (!unknown) return true;
-            if (missionActor_.get() == unknown) return true;
-            unknown->AddRef();
-            missionActor_ = static_cast<ISituationMissionActor*>(unknown);
-            return true;
-        }
-        case kSituationMsgOccupantInserted:
-            if (g_host) HandleInsertOccupant(g_host->OccupantOfMessage(StandardMessage(message).GetVoid1()));
-            return true;
-        case kSituationMsgAdviceEnabled: {
-            // Re-trigger every city-situation advice (only after a load from an old save and with an advisor system).
-            if (!tutorialsLoaded_ || !g_host) return true;
-            for (cISC4CitySituationAdvice* situation : g_host->AdvisorSituations()) HandleSituationTriggered(situation);
-            return true;
-        }
-        case kSituationMsgAutomatonStatus: {
-            // Status 2 = the active automaton got stuck: it fails unless the situation is already in a final state.
-            ISituationAutomaton* automaton = g_host ? g_host->AutomatonOfMessage(StandardMessage(message).GetVoid1()) : nullptr;
-            const std::uint32_t code = static_cast<std::uint32_t>(StandardMessage(message).GetData2());
-            if (code == 2 && activeAutomaton_ && activeAutomaton_.get() == automaton) {
-                const std::uint32_t status = (activeSituation_ && status_ != kSituationRunning) ? kSituationTimeout : status_;
-                HandleStatusChanged(status);
-            }
-            return true;
-        }
-        case kSituationMsgCheatTyped: {
-            // "cISC4CitySituationManager <hex advice id>" activates that situation.
-            if (static_cast<std::uint32_t>(StandardMessage(message).GetData1()) != kCheatTriggerMission) return false;
-            auto* text = static_cast<cIGZString*>(StandardMessage(message).GetVoid2());
-            if (!text) return true;
-            cRZCmdLine commandLine(text->ToChar());
-            if (commandLine.argc() < 2) return true;
-            const std::uint32_t adviceId = static_cast<std::uint32_t>(std::strtoul(commandLine[1].ToChar(), nullptr, 16));
-            if (adviceId == 0) return true;
-            cIGZMessageServer2* server = g_host ? g_host->MessageServer() : nullptr;
-            if (!server) return true;
-            cRZMessage2Standard* activation = new cRZMessage2Standard();
-            activation->AddRef();
-            activation->SetType(kSituationMsgActivateAdvice);
-            activation->SetData1(adviceId);
-            activation->SetData2(1);
-            server->MessagePost(activation, false);
-            activation->Release();
-            return true;
-        }
-        default:
-            return false;
     }
 }
 

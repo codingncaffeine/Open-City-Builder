@@ -444,6 +444,7 @@ src/app/hosts/StubCameraControl.cpp
 src/app/hosts/StubCatalogView.cpp
 src/app/NativeCitySituationAdvice.cpp
 src/app/NativeCitySituations.cpp
+src/app/NativeSituationAutomata.cpp
 src/app/NativeCivic.cpp
 src/app/NativeControllerManagerHost.cpp
 src/app/hosts/StubDemandSimulator.cpp
@@ -569,6 +570,7 @@ src/tools/city_probe_creators4.cpp
 src/tools/city_probe_creators5.cpp
 src/sc4/SpecialVehicles.cpp
 src/sc4/CitySituationManager.cpp
+src/sc4/CitySituationMissions.cpp
 src/sc4/WatercraftManager.cpp
 src/sc4/Watercraft.cpp
 src/gz/gzcom_creators/cSC4PipeOccupant.cpp

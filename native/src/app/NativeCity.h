@@ -32,6 +32,9 @@ void NativeAdviceLinkProbe(int advisorId, const char* code);   // kit command `a
 void NativeRunAppLua(const char* code);
 void NativePrintAdvisors();
 void NativeSituationsReport();   // NativeCitySituations.cpp: the city situation manager (kit verb `situations`)
+void NativeSituationsCommand(const std::string& line);   // `situations [initiate GUID | accept [PNG]]`
+bool NativeSituationsAcceptDue(std::string& shot);         // the modal pump: an armed accept and an open situation dialog
+void NativeSituationsAccept();                             // ... accepts it through the manager's window procedure
 void NativeTickerReport();       // app/NativeWinHtml.cpp: the news ticker (kit command `ticker`)
 
 // The window changes LoadCity asks for once the file is read (the application window's DestroyCurrentScreen / CreateCityScreen).

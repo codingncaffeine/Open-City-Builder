@@ -1136,8 +1136,11 @@ void cSC4Automaton::SendCallbackMessage(std::uint32_t event, std::uint32_t data)
     message->SetVoid1(this);
     message->SetData2(event);
     message->SetData3(data);
-    for (const cRZAutoRefCount<cIGZMessageTarget2>& callback : callbacks_) {
-        if (callback.get()) callback.get()->DoMessage(message);
+    // The next node is taken before the call (as the original does): a callback may remove itself from the list.
+    for (auto it = callbacks_.begin(); it != callbacks_.end();) {
+        cIGZMessageTarget2* callback = it->get();
+        ++it;
+        if (callback) callback->DoMessage(message);
     }
     message->Release();
 }
