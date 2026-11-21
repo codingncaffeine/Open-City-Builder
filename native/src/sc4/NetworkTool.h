@@ -841,6 +841,8 @@ public:
     cSC4NetworkCellInfo* ComputeAndStoreCellInfo(std::uint32_t key);
     cSC4NetworkCellInfo* CreatePlaceholderCellInfo(std::uint32_t x, std::uint32_t z, std::uint32_t networkType);
     void AssignEdgeMajorTypes(std::uint32_t networkType);
+    // i386 0x004cc34e: a wide network (pen width > 1) groups the cells of each step across their shared edges.
+    void AddGroupingInfo(std::uint32_t networkType);
     void DoAdditionalDraws();
     bool AssignSimpleEdgeSubtypes(cSC4NetworkCellInfo& cell, std::uint32_t type, std::unordered_set<std::uint32_t>& set, bool assign);
     bool AssignComplexEdgeSubtypes(cSC4NetworkCellInfo& cell, std::uint32_t type, std::unordered_set<std::uint32_t>& set, bool assign);

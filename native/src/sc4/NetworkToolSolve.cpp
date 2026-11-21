@@ -689,6 +689,34 @@ constexpr std::uint32_t kNetworkTypeToNeighborConnectionType[kNetworkTypeCount] 
 // other is what PlaceNeighborConnections creates). A diagonal drag (fewer straight steps than steps) records one corner
 // connection. Refused: an existing connection on the edge, a cell holding a network that does not fit the edge, or a
 // higher-priority network the override rules do not let this one replace.
+// i386 0x004cc34e. For a network drawn with a pen wider than one cell (sNetworkTypeInfo +0x1c, the highways), the cells
+// a step covers belong together: every cell but the step's last gets condition 4 (grouped) on the edge toward the next
+// cell of the step (edge 3 for a horizontal step, else 2), every cell but the first on the edge back (edge 1, else 0),
+// in that type's neighbourhood; then the cell's all-types neighbourhood is recomputed.
+void cSC4NetworkTool::AddGroupingInfo(std::uint32_t networkType) {
+    INetworkToolHost* host = GetNetworkToolHost();
+    const INetworkTypeInfo* info = host && networkType < kNetworkTypeCount ? host->NetworkTypeInfo(networkType) : nullptr;
+    if (!info || info->PenWidthX() < 2) return;
+    const int forwardEdge = stepIsHorizontal_ ? 3 : 2;
+    const int backEdge = stepIsHorizontal_ ? 1 : 0;
+    const int stepCount = std::min(straightSteps_, validSteps_);
+    for (int i = 0; i < stepCount; ++i) {
+        const tDraggedStep& step = steps_[static_cast<std::size_t>(i)];
+        for (std::uint32_t c = step.firstCell; c <= step.lastCell; ++c) {
+            const SC4PointU& point = cells_[c];
+            cSC4NetworkCellInfo* cell = GetCellInfo(point.x + (point.z << 16));
+            if (!cell) continue;
+            cSC4TileNeighborhoodCompact compact(cell->tileNeighborhoods[networkType]);
+            if (c < step.lastCell)
+                compact.SetEdgeCondition(forwardEdge, static_cast<std::uint8_t>((compact.GetEdgeCondition(forwardEdge) & 0xf8u) | 4u));
+            if (step.firstCell < c)
+                compact.SetEdgeCondition(backEdge, static_cast<std::uint8_t>((compact.GetEdgeCondition(backEdge) & 0xf8u) | 4u));
+            cell->tileNeighborhoods[networkType] = compact.Packed();
+            cell->RecomputeEdgesFromAllTypes();
+        }
+    }
+}
+
 bool cSC4NetworkTool::AttemptNeighborConnections(bool allowDiagonals, std::uint32_t networkType) {
     INetworkToolHost* host = GetNetworkToolHost();
     if (!host || anchors_.size() < 2 || networkType >= kNetworkTypeCount) return false;
@@ -1995,7 +2023,7 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, bool allowDiagonals, bool connect
             unknown10_.clear();                                                     // +0x08 potential intersections
             CreateCellInfosForCurrentPlacementTiles(networkType);
             AssignEdgeMajorTypes(networkType);
-            // AddGroupingInfo (pen width > 1, the highways): not ported.
+            AddGroupingInfo(networkType);
             DoAdditionalDraws();
             // IdentifyHighwayIntersections: not ported (no highway crossings); the valid count stays.
             BuildSetOfCellsToBeSolved();
