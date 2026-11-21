@@ -417,7 +417,6 @@ bool PrepareCityRenderStack(cISC4City* cityInterface) {
     // The catalog and the budget window belong to this view before its GUI is added (the end of DoPreCityInit): a
     // reopened city must not reach the previous view's windows.
     native::InstallCatalogUi(g_target.view->GetWindowManager());
-    native::SetBudgetViewWindow(g_target.view->AsIGZWin());
     native::InstallAutomataHost();
     native::InstallZoneDeveloperServices();   // the zone developer and the lots are initialized by the city's Init, next
     if (auto* c = dynamic_cast<sc4::cSC4City*>(cityInterface)) native::SetAutomataRenderer(nullptr, c);
