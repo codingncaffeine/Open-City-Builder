@@ -3,168 +3,214 @@
 Every recovered class reaches the engine through a `Set*Host` seam. `native` means a hand-written adapter in `src/app`, `stub` means only the
 generated neutral host (`src/app/hosts`) installs it (the class runs without its neighbours), `none` means nothing installs it.
 
-- native: 35   stub only: 88   none: 38
+- native: 169   stub only: 15   none: 23
 
 | seam | declared in | status | installed by |
 |---|---|---|---|
-| SetModelInstanceHost | src/s3d/ModelInstance.h | native | src/app/NativeModelMaker.cpp |
-| SetSpriteInstanceHost | src/s3d/ModelInstanceAnimatedSprite.h | none |  |
-| SetWinFoldersHost | src/gz/WinFolders.h | none |  |
-| SetFileSystemHost | src/gz/FileSystem.h | none |  |
-| SetHost | src/gz/WinMgrBase.h | native | src/app/game_main.mm |
-| SetGraphicSystemHost | src/gz/GraphicSystemW32.h | none |  |
-| SetWinHtmlHost | src/gz/WinHTML.h | none |  |
-| SetLuaScriptServerHost | src/gz/LuaScriptServer.h | none |  |
-| SetWinButtonHost | src/gz/WinBtn.h | native | src/app/NativeAudio.cpp |
-| SetHardwareRenderHost | src/gz/DrawContextRenderToHardware.h | native | src/app/NativeGraphics.cpp |
-| SetWinGridHost | src/gz/WinGrid.h | none |  |
-| SetWinTextTickerHost | src/gz/WinTextTicker.h | none |  |
-| SetIMEProxyHost | src/gz/WinIMEProxy.h | none |  |
-| SetDrawSystemHost | src/gz/DrawSystem.h | none |  |
-| SetGraphHost | src/gz/Graph.h | none |  |
-| SetLogServiceHost | src/gz/LogService.h | none |  |
+| SetHost | src/audio/FreshHost.h | native | src/app/NativeAudioDirector.cpp, src/app/game_main.mm, src/app/linux/game_main_linux.cpp |
 | SetBufferHost | src/gz/Buffer.h | native | src/app/NativeGraphics.cpp |
-| SetPersistHost | src/gz/PersistStreams.h | none |  |
 | SetDrawContextHost | src/gz/DrawContext.h | native | src/app/NativeGraphics.cpp |
-| SetScriptTerpHost | src/gz/ScriptTerp.h | native | src/app/NativeUi.cpp |
-| SetScriptControlHost | src/gz/LegacyControl.h | native | src/app/NativeUi.cpp |
+| SetHardwareRenderHost | src/gz/DrawContextRenderToHardware.h | native | src/app/NativeGraphics.cpp |
+| SetDrawSystemHost | src/gz/DrawSystem.h | none |  |
+| SetFileSystemHost | src/gz/FileSystem.h | native | src/app/NativeBoot.cpp |
 | SetCityHost | src/gz/GZCOM.h | none | src/gz/GZCOMCreators7.cpp, src/gz/gzcom_creators/cSC4City.cpp |
+| SetSurfaceWaterHost | src/gz/GZCOM.h | native | src/app/NativeTerrainHost.cpp |
+| SetMySimAgentHost | src/gz/GZCOM.h | native | src/app/NativeTerrainHost.cpp |
+| SetGraphHost | src/gz/Graph.h | native | src/app/NativeGraphsView.cpp |
+| SetGraphicSystemHost | src/gz/GraphicSystemW32.h | none |  |
+| SetScriptControlHost | src/gz/LegacyControl.h | native | src/app/NativeUi.cpp |
+| SetLogServiceHost | src/gz/LogService.h | none |  |
+| SetLuaScriptServerHost | src/gz/LuaScriptServer.h | none |  |
+| SetPersistHost | src/gz/PersistStreams.h | none |  |
+| SetScriptTerpHost | src/gz/ScriptTerp.h | native | src/app/NativeUi.cpp |
+| SetWinButtonHost | src/gz/WinBtn.h | native | src/app/NativeAudio.cpp |
+| SetWinFoldersHost | src/gz/WinFolders.h | none |  |
 | SetWinGenHost | src/gz/WinGen.h | none |  |
-| SetWinTextEditHost | src/gz/WinTextEdit.h | none |  |
+| SetWinHtmlHost | src/gz/WinHTML.h | native | src/app/NativeWinHtml.cpp |
+| SetIMEProxyHost | src/gz/WinIMEProxy.h | none |  |
+| SetWinTextEditHost | src/gz/WinTextEdit.h | native | src/app/linux/game_main_linux.cpp |
+| SetWinTextTickerHost | src/gz/WinTextTicker.h | none |  |
+| SetWinGridHost | src/gz/WinGrid.h | none |  |
 | SetDX7Host | src/render/DirectDraw7.h | none |  |
 | SetCookieHTTPHost | src/rz/CookieManager.h | none |  |
 | SetRadioStationHost | src/rz/Radio.h | none |  |
 | SetRadioHost | src/rz/Radio.h | none |  |
-| SetAemsEngineHost | src/sc4audio/AudioAEMSEventSystem.h | none |  |
-| SetAmbienceManagerHost | src/sc4audio/AudioAmbienceManager.h | none |  |
-| SetAmbienceLayerHost | src/sc4audio/AmbienceLayer.h | none |  |
-| SetAudioEventHandlerHost | src/sc4audio/AudioEventHandler.h | none |  |
-| SetSLStringHost | src/sc4/SLString.h | none |  |
-| SetAdviceSubjectHost | src/sc4/AdviceSubject.h | stub | src/app/hosts/StubAdviceSubject.cpp |
-| SetHelicopterHost | src/sc4/Helicopter.h | stub | src/app/hosts/StubHelicopter.cpp |
-| SetMySimWinProcHost | src/sc4/MySimWinProc.h | native | src/app/NativeCityUi.cpp |
-| SetMySimHost | src/sc4/MySim.h | stub | src/app/hosts/StubMySim.cpp |
-| SetEffectsManagerHost | src/sc4/EffectsManager.h | stub | src/app/hosts/StubEffectsManager.cpp |
-| SetTutorialSystemHost | src/sc4/TutorialSystem.h | stub | src/app/hosts/StubTutorialSystem.cpp |
-| SetPlaceableHost | src/sc4/PlaceableObject.h | native | src/app/NativeModelMaker.cpp |
-| SetEffectsHost | src/sc4/EffectComponents.h | stub | src/app/hosts/StubEffects.cpp |
-| SetNetworkModelHost | src/sc4/NetworkOccupantModel.h | native | src/app/NativeModelMaker.cpp |
-| SetFloraHost | src/sc4/FloraOccupant.h | stub | src/app/hosts/StubFlora.cpp |
-| SetPropHost | src/sc4/PropOccupant.h | stub | src/app/hosts/StubProp.cpp |
-| SetQueryHost | src/sc4/ViewInputControlQuery.h | stub | src/app/hosts/StubQuery.cpp |
-| SetDetokenizerHost | src/sc4/StringDetokenizer.h | none |  |
-| SetLotRetainingWallHost | src/sc4/LotRetainingWallOccupant.h | stub | src/app/hosts/StubLotRetainingWall.cpp |
-| SetLandfillDeveloperHost | src/sc4/LandfillDeveloper.h | stub | src/app/hosts/StubLandfillDeveloper.cpp |
-| SetRegionScreenHost | src/sc4/WinRegionScreen.h | native | src/app/NativeRegionScreen.cpp |
-| SetPowerLineToolHost | src/sc4/PowerLineTool.h | stub | src/app/hosts/StubPowerLineTool.cpp |
-| SetOrdinanceHost | src/sc4/Ordinance.h | stub | src/app/hosts/StubOrdinance.cpp |
-| SetCitySituationAdviceHost | src/sc4/CitySituationAdvice.h | stub | src/app/hosts/StubCitySituationAdvice.cpp |
-| SetSeaportHost | src/sc4/SeaportDeveloper.h | none |  |
-| SetView3DWinHost | src/sc4/View3DWin.h | native | src/app/NativeView3DWinHost.cpp |
-| SetDemandSimulatorHost | src/sc4/DemandSimulator.h | stub | src/app/hosts/StubDemandSimulator.cpp |
-| SetNetworkLotManagerHost | src/sc4/NetworkLotManager.h | stub | src/app/hosts/StubNetworkLotManager.cpp |
-| SetPreBuiltModelOccupantHost | src/sc4/NetworkOccupantWithPreBuiltModel.h | stub | src/app/hosts/StubPreBuiltModelOccupant.cpp |
-| SetLotBaseTextureHost | src/sc4/LotBaseTextureOccupant.h | native | src/app/NativeModelMaker.cpp |
-| SetUndergroundNetworkToolHost | src/sc4/UndergroundNetworkTool.h | stub | src/app/hosts/StubUndergroundNetworkTool.cpp |
-| SetSoundBankHost | src/sc4/AudioAEMSSoundBank.h | stub | src/app/hosts/StubSoundBank.cpp |
-| SetResourceCatalogHost | src/sc4/ResourceCatalogView.h | none |  |
-| SetPropertyViewHost | src/sc4/PropertyView.h | stub | src/app/hosts/StubPropertyView.cpp |
-| SetPedestrianHost | src/sc4/PedestrianManager.h | none |  |
-| SetNeighborsHost | src/sc4/NeighborsSimulator.h | none |  |
-| SetNetworkManagerHost | src/sc4/NetworkManager.h | stub | src/app/hosts/StubNetworkManager.cpp |
-| SetLocalGridHost | src/sc4/LocalGridHelper.h | stub | src/app/hosts/StubLocalGrid.cpp |
-| SetLotConfigurationManagerHost | src/sc4/LotConfigurationManager.h | stub | src/app/hosts/StubLotConfigurationManager.cpp |
-| SetResizableOutlineHost | src/sc4/WinResizableOutline.h | stub | src/app/hosts/StubResizableOutline.cpp |
-| SetTutorialTaskHost | src/sc4/TutorialTask.h | stub | src/app/hosts/StubTutorialTask.cpp |
-| SetCityDetailHost | src/sc4/CityDetailManager.h | none |  |
-| SetWinTertiaryMenuFrameHost | src/sc4/WinTertiaryMenuFrame.h | native | src/app/NativeCatalogUi.cpp |
-| SetConstructionOccupantHost | src/sc4/ConstructionOccupant.h | none |  |
-| SetAuraHost | src/sc4/AuraSimulator.h | stub | src/app/hosts/StubAura.cpp |
-| SetAutomataAttractorHost | src/sc4/AutomataAttractor.h | stub | src/app/hosts/StubAutomataAttractor.cpp |
-| SetGraphsViewHost | src/sc4/GraphsViewWinProc.h | stub | src/app/hosts/StubGraphsView.cpp |
-| SetControllerManagerHost | src/sc4/AutomataControllerManager.h | stub | src/app/hosts/StubControllerManager.cpp |
-| SetZoneToolHost | src/sc4/ViewInputControlZone.h | native | src/app/NativeZoneTool.cpp |
-| SetAdvisorConcreteHost | src/sc4/AdvisorConcrete.h | stub | src/app/hosts/StubAdvisorConcrete.cpp |
-| SetRender3DHost | src/sc4/Render3D.h | native | src/app/NativeRender3DHost.cpp |
-| SetPylonOccupantHost | src/sc4/PylonOccupant.h | stub | src/app/hosts/StubPylonOccupant.cpp |
-| SetCivicBuildingHost | src/sc4/CivicBuildingSimulator.h | stub | src/app/hosts/StubCivicBuilding.cpp |
-| SetWinAdviceListHost | src/sc4/WinAdviceList.h | stub | src/app/hosts/StubWinAdviceList.cpp |
-| SetDisasterHost | src/sc4/Disaster.h | stub | src/app/hosts/StubDisaster.cpp |
-| SetAircraftHost | src/sc4/Aircraft.h | stub | src/app/hosts/StubAircraft.cpp |
-| SetEffectToolHost | src/sc4/ViewInputControlEffect.h | stub | src/app/hosts/StubEffectTool.cpp |
-| SetViewInputHost | src/sc4/ViewInputControl.h | native | src/app/NativeCityView.cpp |
-| SetVehicleHost | src/sc4/Vehicle.h | none |  |
-| SetPropControllerHost | src/sc4/PropOccupantAutomataController.h | stub | src/app/hosts/StubPropController.cpp |
-| SetPropVisualEffectHost | src/sc4/PropOccupantVisualEffect.h | stub | src/app/hosts/StubPropVisualEffect.cpp |
-| SetWinBMPViewHost | src/sc4/WinBMPView.h | stub | src/app/hosts/StubWinBMPView.cpp |
-| SetLoadHeightFieldHost | src/sc4/WinLoadHeightField.h | stub | src/app/hosts/StubLoadHeightField.cpp |
-| SetSLBufferHost | src/sc4/SLBuffer.h | native | src/app/game_main.mm |
-| SetGrowthDeveloperHost | src/sc4/GrowthDeveloper.h | stub | src/app/hosts/StubGrowthDeveloper.cpp |
-| SetSplashScreenHost | src/sc4/WinSplashScreen.h | native | src/app/game_main.mm |
-| SetLotHost | src/sc4/Lot.h | stub | src/app/hosts/StubLot.cpp |
-| SetDispatchHost | src/sc4/DispatchManager.h | none | src/tools/city_probe_bindings.cpp |
-| SetNeighborConnectionHost | src/sc4/NeighborConnection.h | stub | src/app/hosts/StubNeighborConnection.cpp |
-| SetLotRetainingWallModelHost | src/sc4/LotRetainingWallModel.h | stub | src/app/hosts/StubLotRetainingWallModel.cpp |
-| SetPropDeveloperHost | src/sc4/PropDeveloper.h | stub | src/app/hosts/StubPropDeveloper.cpp |
-| SetTextDecalHost | src/sc4/TextDecalOccupant.h | stub | src/app/hosts/StubTextDecal.cpp |
-| SetCityScrollHost | src/sc4/ViewInputControlCityScroll.h | native | src/app/NativeCityView.cpp |
-| SetAdvisorSystemHost | src/sc4/AdvisorSystem.h | stub | src/app/hosts/StubAdvisorSystem.cpp |
-| SetAdviceHost | src/sc4/Advice.h | stub | src/app/hosts/StubAdvice.cpp |
-| SetOrdinanceSimHost | src/sc4/OrdinanceTypes.h | stub | src/app/hosts/StubOrdinanceSim.cpp |
-| SetPlacementHost | src/sc4/cSC4ZoneManager.h | native | src/app/NativeZoneTool.cpp |
-| SetPlaceLotHost | src/sc4/ViewInputControlPlaceLot.h | stub | src/app/hosts/StubPlaceLot.cpp |
-| SetAutomataControllerHost | src/sc4/AutomataController.h | stub | src/app/hosts/StubAutomataController.cpp |
-| SetWinLotConfigurationEditorHost | src/sc4/WinLotConfigurationEditor.h | stub | src/app/hosts/StubWinLotConfigurationEditor.cpp |
-| SetFloraSimulatorHost | src/sc4/FloraSimulator.h | stub | src/app/hosts/StubFloraSimulator.cpp |
-| SetTerrainHost | src/sc4/cSTETerrain.h | native | src/app/NativeTerrainHost.cpp |
-| SetZoneDeveloperHost | src/sc4/ZoneDeveloper.h | stub | src/app/hosts/StubZoneDeveloper.cpp |
-| SetVertexHtConstraintHost | src/sc4/VertexHtConstraintSatisfier.h | stub | src/app/hosts/StubVertexHtConstraint.cpp |
-| SetRewardAdviceHost | src/sc4/RewardAdvice.h | stub | src/app/hosts/StubRewardAdvice.cpp |
-| SetBuildingDevelopmentSimHost | src/sc4/BuildingDevelopmentSimulator.h | stub | src/app/hosts/StubBuildingDevelopmentSim.cpp |
-| SetSimulatorHost | src/sc4/Simulator.h | stub | src/app/hosts/StubSimulator.cpp |
-| SetCameraControlHost | src/sc4/CameraControl.h | native | src/app/NativeCityView.cpp |
-| SetRegionCloudsHost | src/sc4/WinRegionClouds.h | native | src/app/NativeRegionExtras.cpp |
-| SetAutomataManagerHost | src/sc4/AutomataManager.h | stub | src/app/hosts/StubAutomataManager.cpp |
-| SetAdvisorPopupTrackerHost | src/sc4/AdvisorPopupTracker.h | stub | src/app/hosts/StubAdvisorPopupTracker.cpp |
-| SetSignToolHost | src/sc4/ViewInputControlSignTool.h | stub | src/app/hosts/StubSignTool.cpp |
-| SetSignpostHost | src/sc4/SignpostOccupant.h | stub | src/app/hosts/StubSignpost.cpp |
-| SetOverlayHost | src/sc4/OverlayManager.h | stub | src/app/hosts/StubOverlay.cpp |
-| SetUndergroundOccupantHost | src/sc4/UndergroundOccupant.h | stub | src/app/hosts/StubUndergroundOccupant.cpp |
-| SetBudgetUIWinProcHost | src/sc4/BudgetUIWinProc.h | native | src/app/NativeBudgetUi.cpp |
-| SetAmbienceStateHost | src/sc4/AmbienceStateFilters.h | stub | src/app/hosts/StubAmbienceState.cpp |
+| SetModelInstanceHost | src/s3d/ModelInstance.h | native | src/app/NativeModelMaker.cpp |
+| SetSpriteInstanceHost | src/s3d/ModelInstanceAnimatedSprite.h | native | src/app/NativeSprites.cpp |
+| SetAdviceHost | src/sc4/Advice.h | native | src/app/NativeAdvisors.cpp |
+| SetAdviceSubjectHost | src/sc4/AdviceSubject.h | native | src/app/NativeAdvisors.cpp |
+| SetAdvisorHost | src/sc4/Advisor.h | native | src/app/NativeAdvisors.cpp |
+| SetAdvisorPopupTrackerHost | src/sc4/AdvisorPopupTracker.h | native | src/app/NativeView3DWinHost.cpp |
+| SetAdvisorSystemHost | src/sc4/AdvisorSystem.h | native | src/app/NativeAdvisors.cpp |
+| SetAirportDeveloperHost | src/sc4/AirportDeveloper.h | native | src/app/NativePorts.cpp |
+| SetAmbienceStateHost | src/sc4/AmbienceStateFilters.h | native | src/app/NativeAudioAmbience.cpp |
+| SetSoundBankHost | src/sc4/AudioAEMSSoundBank.h | native | src/app/NativeAudioDirector.cpp |
+| SetAuraHost | src/sc4/AuraSimulator.h | native | src/app/NativeAura.cpp |
+| SetAutomataAttractorHost | src/sc4/AutomataAttractor.h | native | src/app/NativeAutomataGroups.cpp |
+| SetAutomataControllerHost | src/sc4/AutomataController.h | native | src/app/NativeAutomataControllerHost.cpp |
+| SetAutomataScriptHost | src/sc4/AutomataScriptSystem.h | native | src/app/NativeAutomataScripts.cpp |
+| SetBudgetHost | src/sc4/Budget.h | native | src/app/NativeBudgetSim.cpp |
 | SetBudgetDialogHost | src/sc4/BudgetDialogs.h | stub | src/app/hosts/StubBudgetDialog.cpp |
-| SetLotConfigurationHost | src/sc4/LotConfiguration.h | stub | src/app/hosts/StubLotConfiguration.cpp |
-| SetMySimDispatchHost | src/sc4/MySimDispatch.h | stub | src/app/hosts/StubMySimDispatch.cpp |
-| SetNetworkToolHost | src/sc4/NetworkTool.h | stub | src/app/hosts/StubNetworkTool.cpp |
-| SetMeshBuilderHost | src/sc4/DrawContext.h | none |  |
-| SetCitySituationManagerHost | src/sc4/CitySituationManager.h | none |  |
-| SetRegionViewHost | src/sc4/WinRegionView.h | native | src/app/NativeRegionScreen.cpp |
-| SetNetworkOccupantHost | src/sc4/NetworkOccupant.h | stub | src/app/hosts/StubNetworkOccupant.cpp |
-| SetWinAnimationRecorderHost | src/sc4/WinAnimationRecorder.h | stub | src/app/hosts/StubWinAnimationRecorder.cpp |
-| SetNeighborDealHost | src/sc4/NeighborDeal.h | stub | src/app/hosts/StubNeighborDeal.cpp |
-| SetAutomataScriptHost | src/sc4/AutomataScriptSystem.h | none |  |
-| SetEstablishCityHost | src/sc4/EstablishCityWinProc.h | stub | src/app/hosts/StubEstablishCity.cpp |
-| SetAdvisorHost | src/sc4/Advisor.h | stub | src/app/hosts/StubAdvisor.cpp |
-| SetMySimFilterHost | src/sc4/MySimFilters.h | stub | src/app/hosts/StubMySimFilter.cpp |
-| SetPipeBurstHost | src/sc4/PipeBurstInstance.h | stub | src/app/hosts/StubPipeBurst.cpp |
-| SetPropManagerHost | src/sc4/PropManager.h | stub | src/app/hosts/StubPropManager.cpp |
-| SetNationHost | src/sc4/Nation.h | native | src/app/NativeRegion.cpp |
-| SetRegionalCityHost | src/sc4/RegionalCity.h | native | src/app/NativeRegion.cpp |
+| SetBudgetUIWinProcHost | src/sc4/BudgetUIWinProc.h | native | src/app/NativeBudgetUi.cpp |
+| SetFeatureHost | src/sc4/BusinessFeature.h | native | src/app/NativeAppServices.cpp |
+| SetCameraControlHost | src/sc4/CameraControl.h | native | src/app/NativeCityView.cpp |
 | SetCellTextureModelHost | src/sc4/CellTextureModel.h | native | src/app/NativeModelMaker.cpp |
-| SetAutomatonHost | src/sc4/Automaton.h | stub | src/app/hosts/StubAutomaton.cpp |
-| SetRegionHost | src/sc4/Region.h | native | src/app/NativeRegion.cpp |
-| SetAirportDeveloperHost | src/sc4/AirportDeveloper.h | none |  |
-| SetPortDeveloperHost | src/sc4/PortDeveloper.h | stub | src/app/hosts/StubPortDeveloper.cpp |
-| SetWinMapViewHost | src/sc4/WinMapView.h | stub | src/app/hosts/StubWinMapView.cpp |
-| SetWeatherHost | src/sc4/WeatherSimulator.h | stub | src/app/hosts/StubWeather.cpp |
-| SetRegionScrollHost | src/sc4/WinRegionScroll.h | native | src/app/NativeRegionExtras.cpp |
-| SetBudgetHost | src/sc4/Budget.h | stub | src/app/hosts/StubBudget.cpp |
-| SetFeatureHost | src/sc4/BusinessFeature.h | stub | src/app/hosts/StubFeature.cpp |
-| SetMySimAdviceHost | src/sc4/MySimAdvice.h | stub | src/app/hosts/StubMySimAdvice.cpp |
-| SetMiniMapHost | src/sc4/WinMiniMap.h | stub | src/app/hosts/StubMiniMap.cpp |
-| SetToxicHost | src/sc4/ToxicOccupant.h | stub | src/app/hosts/StubToxic.cpp |
-| SetModelMakerHost | src/sc4/ModelMaker.h | native | src/app/NativeModelMaker.cpp |
+| SetCityDetailHost | src/sc4/CityDetailManager.h | none |  |
+| SetCitySituationAdviceHost | src/sc4/CitySituationAdvice.h | stub | src/app/hosts/StubCitySituationAdvice.cpp |
+| SetCitySituationManagerHost | src/sc4/CitySituationManager.h | none |  |
+| SetCivicBuildingHost | src/sc4/CivicBuildingSimulator.h | native | src/app/NativeCivic.cpp |
+| SetConstructionOccupantHost | src/sc4/ConstructionOccupant.h | native | src/app/NativeConstruction.cpp |
+| SetDemandSimulatorHost | src/sc4/DemandSimulator.h | native | src/app/NativeDemandHost.cpp |
+| SetDisasterHost | src/sc4/Disaster.h | native | src/app/NativeDisasters.cpp |
+| SetMeshBuilderHost | src/sc4/DrawContext.h | none |  |
+| SetEffectsHost | src/sc4/EffectComponents.h | native | src/app/NativeEffects.cpp |
+| SetEstablishCityHost | src/sc4/EstablishCityWinProc.h | native | src/app/NativeEstablishCity.cpp |
+| SetFloraHost | src/sc4/FloraOccupant.h | native | src/app/NativeFlora.cpp |
+| SetGraphsViewHost | src/sc4/GraphsViewWinProc.h | native | src/app/NativeGraphsView.cpp |
+| SetLandfillDeveloperHost | src/sc4/LandfillDeveloper.h | native | src/app/NativeLandfill.cpp |
 | SetLightingManagerHost | src/sc4/LightingManager.h | native | src/app/NativeLighting.cpp |
+| SetLocalGridHost | src/sc4/LocalGridHelper.h | native | src/app/NativeLocalGrid.cpp |
+| SetLotHost | src/sc4/Lot.h | native | src/app/NativeZoneDeveloperHost.cpp |
+| SetLotBaseTextureHost | src/sc4/LotBaseTextureOccupant.h | native | src/app/NativeModelMaker.cpp |
+| SetLotConfigurationHost | src/sc4/LotConfiguration.h | native | src/app/NativeLotConfigHost.cpp |
+| SetLotConfigurationManagerHost | src/sc4/LotConfigurationManager.h | native | src/app/NativeLotConfigHost.cpp |
+| SetMySimHost | src/sc4/MySim.h | stub | src/app/hosts/StubMySim.cpp |
+| SetMySimAdviceHost | src/sc4/MySimAdvice.h | stub | src/app/hosts/StubMySimAdvice.cpp |
+| SetMySimDispatchHost | src/sc4/MySimDispatch.h | stub | src/app/hosts/StubMySimDispatch.cpp |
+| SetMySimFilterHost | src/sc4/MySimFilters.h | stub | src/app/hosts/StubMySimFilter.cpp |
+| SetMySimWinProcHost | src/sc4/MySimWinProc.h | native | src/app/NativeCityUi.cpp |
+| SetNationHost | src/sc4/Nation.h | native | src/app/NativeRegion.cpp |
+| SetNeighborConnectionHost | src/sc4/NeighborConnection.h | native | src/app/NativeRegion.cpp |
+| SetNeighborsHost | src/sc4/NeighborsSimulator.h | native | src/app/NativeRegion.cpp |
+| SetNetworkModelHost | src/sc4/NetworkOccupantModel.h | native | src/app/NativeModelMaker.cpp |
+| SetPreBuiltModelOccupantHost | src/sc4/NetworkOccupantWithPreBuiltModel.h | stub | src/app/hosts/StubPreBuiltModelOccupant.cpp |
+| SetOccupantGroupHost | src/sc4/OccupantGroupTemplate.h | native | src/app/NativeAutomataGroups.cpp |
+| SetOrdinanceHost | src/sc4/Ordinance.h | native | src/app/NativeOrdinance.cpp |
+| SetOrdinanceSimHost | src/sc4/OrdinanceTypes.h | native | src/app/NativeOrdinance.cpp |
+| SetOverlayHost | src/sc4/OverlayManager.h | stub | src/app/hosts/StubOverlay.cpp |
+| SetPlaceableHost | src/sc4/PlaceableObject.h | native | src/app/NativeModelMaker.cpp |
+| SetPortDeveloperHost | src/sc4/PortDeveloper.h | native | src/app/NativePorts.cpp |
+| SetPropControllerHost | src/sc4/PropOccupantAutomataController.h | stub | src/app/hosts/StubPropController.cpp |
+| SetPropertyViewHost | src/sc4/PropertyView.h | stub | src/app/hosts/StubPropertyView.cpp |
+| SetPylonOccupantHost | src/sc4/PylonOccupant.h | native | src/app/NativeDispatchTool.cpp |
+| SetRegionHost | src/sc4/Region.h | native | src/app/NativeRegion.cpp |
+| SetRegionalCityHost | src/sc4/RegionalCity.h | native | src/app/NativeRegion.cpp |
+| SetRender3DHost | src/sc4/Render3D.h | native | src/app/NativeRender3DHost.cpp |
+| SetResourceCatalogHost | src/sc4/ResourceCatalogView.h | none |  |
+| SetSLBufferHost | src/sc4/SLBuffer.h | native | src/app/game_main.mm, src/app/linux/game_main_linux.cpp |
+| SetSLStringHost | src/sc4/SLString.h | native | src/app/NativeUi.cpp |
+| SetSeaportHost | src/sc4/SeaportDeveloper.h | native | src/app/NativePorts.cpp |
+| SetSignpostHost | src/sc4/SignpostOccupant.h | native | src/app/NativeSignLabel.cpp |
+| SetSimulatorHost | src/sc4/Simulator.h | native | src/app/NativeSimulatorHost.cpp |
+| SetGetawayVanHost | src/sc4/SpecialVehicles.h | native | src/app/NativeDispatch.cpp |
+| SetDetokenizerHost | src/sc4/StringDetokenizer.h | native | src/app/NativeView3DWinHost.cpp |
+| SetToxicHost | src/sc4/ToxicOccupant.h | native | src/app/NativeToxic.cpp |
+| SetDefaultTrafficNetworkMapHost | src/sc4/TrafficNetworkMap.h | native | src/app/NativeTrafficNetworkMap.cpp |
+| SetUndergroundNetworkToolHost | src/sc4/UndergroundNetworkTool.h | native | src/app/NativeUnderground.cpp |
+| SetVehicleHost | src/sc4/Vehicle.h | none |  |
+| SetVertexHtConstraintHost | src/sc4/VertexHtConstraintSatisfier.h | stub | src/app/hosts/StubVertexHtConstraint.cpp |
+| SetViewInputHost | src/sc4/ViewInputControl.h | native | src/app/NativeCityView.cpp |
+| SetCityScrollHost | src/sc4/ViewInputControlCityScroll.h | native | src/app/NativeCityView.cpp |
+| SetEffectToolHost | src/sc4/ViewInputControlEffect.h | native | src/app/NativeDisasterTools.cpp |
+| SetQueryHost | src/sc4/ViewInputControlQuery.h | native | src/app/NativeQuery.cpp |
+| SetSignToolHost | src/sc4/ViewInputControlSignTool.h | native | src/app/NativeSignLabel.cpp |
+| SetZoneToolHost | src/sc4/ViewInputControlZone.h | native | src/app/NativeZoneTool.cpp |
+| SetWeatherHost | src/sc4/WeatherSimulator.h | native | src/app/NativeWeather.cpp |
+| SetWinAdviceListHost | src/sc4/WinAdviceList.h | native | src/app/NativeWinHtml.cpp |
+| SetWinAnimationRecorderHost | src/sc4/WinAnimationRecorder.h | stub | src/app/hosts/StubWinAnimationRecorder.cpp |
+| SetWinBMPViewHost | src/sc4/WinBMPView.h | native | src/app/NativeSnapshot.cpp |
 | SetCatalogViewHost | src/sc4/WinCatalogView.h | native | src/app/NativeCatalogUi.cpp |
-| SetTractDeveloperHost | src/sc4/TractDeveloper.h | stub | src/app/hosts/StubTractDeveloper.cpp |
-| SetOccupantGroupHost | src/sc4/OccupantGroupTemplate.h | stub | src/app/hosts/StubOccupantGroup.cpp |
+| SetLoadHeightFieldHost | src/sc4/WinLoadHeightField.h | stub | src/app/hosts/StubLoadHeightField.cpp |
+| SetWinLotConfigurationEditorHost | src/sc4/WinLotConfigurationEditor.h | stub | src/app/hosts/StubWinLotConfigurationEditor.cpp |
+| SetMiniMapHost | src/sc4/WinMiniMap.h | native | src/app/NativeMiniMap.cpp |
+| SetWinRCIHost | src/sc4/WinRCI.h | native | src/app/NativeCityPanel.cpp |
+| SetRegionCloudsHost | src/sc4/WinRegionClouds.h | native | src/app/NativeRegionExtras.cpp |
+| SetRegionScreenHost | src/sc4/WinRegionScreen.h | native | src/app/NativeRegionScreen.cpp |
+| SetRegionScrollHost | src/sc4/WinRegionScroll.h | native | src/app/NativeRegionExtras.cpp |
+| SetResizableOutlineHost | src/sc4/WinResizableOutline.h | stub | src/app/hosts/StubResizableOutline.cpp |
+| SetSplashScreenHost | src/sc4/WinSplashScreen.h | native | src/app/game_main.mm, src/app/linux/game_main_linux.cpp |
+| SetWinTertiaryMenuFrameHost | src/sc4/WinTertiaryMenuFrame.h | native | src/app/NativeCatalogUi.cpp |
+| SetTrendBarHost | src/sc4/WinTrendBar.h | native | src/app/NativeCityPanel.cpp |
+| SetPlacementHost | src/sc4/cSC4ZoneManager.h | native | src/app/NativeZoneTool.cpp |
+| SetTerrainHost | src/sc4/cSTETerrain.h | native | src/app/NativeTerrainHost.cpp |
+| SetNetworkToolUIHost | src/sc4/NetworkToolUI.h | native | src/app/NativeNetworkTool.cpp |
+| SetNetworkInputToolHost | src/sc4/ViewInputControlNetworkTool.h | native | src/app/NativeNetworkTool.cpp |
+| SetNetworkPreviewHost | src/sc4/NetworkPreview.h | native | src/app/NativeNetworkTool.cpp |
+| SetFloraToolHost | src/sc4/ViewInputControlFlora.h | native | src/app/NativeFlora.cpp |
+| SetModelParticlesHost | src/sc4/ModelBasedParticlesEffect.h | native | src/app/NativeEffects.cpp |
+| SetNetworkToolHost | src/sc4/NetworkTool.h | native | src/app/NativeNetworkTool.cpp |
+| SetDecalEffectHost | src/sc4/DecalEffect.h | native | src/app/NativeDecalOverlay.cpp |
+| SetEffectsManagerHost | src/sc4/EffectsManager.h | native | src/app/NativeEffects.cpp |
+| SetPlaceLotHost | src/sc4/ViewInputControlPlaceLot.h | native | src/app/NativePlaceLot.cpp |
+| SetTerrainScrubberHost | src/sc4/ViewInputControlTerrainScrubber.h | native | src/app/NativeTerrainTool.cpp |
+| SetDemolishToolHost | src/sc4/ViewInputControlDemolish.h | native | src/app/NativeDemolishTool.cpp |
+| SetNetworkOccupantHost | src/sc4/NetworkOccupant.h | native | src/app/NativeNetworkLots.cpp |
+| SetNetworkOccupantPathHost | src/sc4/NetworkOccupant.h | native | src/app/NativeNetworkManager.cpp |
+| SetGrowthDeveloperHost | src/sc4/GrowthDeveloper.h | native | src/app/NativeGrowthDevelopers.cpp |
+| SetPropManagerHost | src/sc4/PropManager.h | native | src/app/NativeProps.cpp |
+| SetControllerManagerHost | src/sc4/AutomataControllerManager.h | native | src/app/NativeControllerManagerHost.cpp |
+| SetAutomataManagerHost | src/sc4/AutomataManager.h | native | src/app/NativeAutomataManagerHost.cpp |
+| SetPedestrianHost | src/sc4/PedestrianManager.h | none |  |
+| SetDispatchHost | src/sc4/DispatchManager.h | native | src/app/NativeDispatch.cpp |
+| SetDispatchToolHost | src/sc4/ViewInputControlDispatch.h | native | src/app/NativeDispatchTool.cpp |
+| SetPropHost | src/sc4/PropOccupant.h | native | src/app/NativeProps.cpp |
+| SetModelMakerHost | src/sc4/ModelMaker.h | native | src/app/NativeModelMaker.cpp |
+| SetTextDecalHost | src/sc4/TextDecalOccupant.h | native | src/app/NativeSignLabel.cpp |
+| SetRewardAdviceHost | src/sc4/RewardAdvice.h | native | src/app/NativeAdvisors.cpp |
+| SetAdvisorConcreteHost | src/sc4/AdvisorConcrete.h | native | src/app/NativeAdvisors.cpp |
+| SetAdvisorUIImageHost | src/sc4/AdvisorUIImageWinProc.h | native | src/app/NativeView3DWinHost.cpp |
+| SetAdvisorUIAdvisorHost | src/sc4/AdvisorUIAdvisorWinProc.h | native | src/app/NativeAdvisors.cpp |
+| SetAdviceDetokenizerHost | src/sc4/AdviceDetokenizer.h | native | src/app/NativeAdvisors.cpp |
+| SetWinMapViewHost | src/sc4/WinMapView.h | native | src/app/NativeWinMapView.cpp |
+| SetRegionViewHost | src/sc4/WinRegionView.h | native | src/app/NativeRegionScreen.cpp |
+| SetFireInstanceHost | src/sc4/DisasterInstanceFire.h | native | src/app/NativeDisasters.cpp |
+| SetSimFireCrewHost | src/sc4/SimFireCrew.h | native | src/app/NativeFireCrew.cpp |
+| SetRiotInstanceHost | src/sc4/DisasterInstanceRiot.h | native | src/app/NativeRiot.cpp |
+| SetRiotPoliceHost | src/sc4/RiotPolice.h | native | src/app/NativeRiotPolice.cpp |
+| SetRegEffectsHost | src/sc4/ModelRegEffects.h | native | src/app/NativeModelRegEffects.cpp |
+| SetAutomatonHost | src/sc4/Automaton.h | native | src/app/NativeAutomata.cpp |
+| SetDisasterToolHost | src/sc4/ViewInputControlDisaster.h | native | src/app/NativeDisasterTools.cpp |
+| SetEarthquakeHost | src/sc4/DisasterInstanceEarthquake.h | native | src/app/NativeDisasters.cpp |
+| SetAttractorHost | src/sc4/AttractorEffect.h | native | src/app/NativeEffectComponents.cpp |
+| SetSequenceHost | src/sc4/AttractorEffect.h | native | src/app/NativeEffectComponents.cpp |
+| SetScrubberHost | src/sc4/ScrubberEffect.h | native | src/app/NativeEffectComponents.cpp |
+| SetVolcanoHost | src/sc4/DisasterInstanceVolcano.h | native | src/app/NativeDisasters.cpp |
+| SetPropDeveloperHost | src/sc4/PropDeveloper.h | native | src/app/NativePropDeveloper.cpp |
+| SetPipeBurstHost | src/sc4/PipeBurstInstance.h | native | src/app/NativeDisasters.cpp |
+| SetUndergroundCustomViewHost | src/sc4/UndergroundCustomView.h | native | src/app/NativeUnderground.cpp |
+| SetLotRetainingWallModelHost | src/sc4/LotRetainingWallModel.h | native | src/app/NativeLotWalls.cpp |
+| SetLotRetainingWallHost | src/sc4/LotRetainingWallOccupant.h | native | src/app/NativeLotWalls.cpp |
+| SetFoundationModelHost | src/sc4/FoundationModel.h | native | src/app/NativeLotWalls.cpp |
+| SetUndergroundOccupantHost | src/sc4/UndergroundOccupant.h | native | src/app/NativeUnderground.cpp |
+| SetNetworkLotManagerHost | src/sc4/NetworkLotManager.h | native | src/app/NativeNetworkLots.cpp |
+| SetCheatCodeEntryDialogHost | src/sc4/CheatCodeEntryDialog.h | native | src/app/NativeCheats.cpp |
+| SetTutorialSystemHost | src/sc4/TutorialSystem.h | native | src/app/NativeTutorial.cpp |
+| SetTutorialUIHost | src/sc4/TutorialUIWinProc.h | native | src/app/NativeTutorial.cpp |
+| SetTutorialTaskHost | src/sc4/TutorialTask.h | native | src/app/NativeTutorial.cpp |
+| SetSnapshotHost | src/sc4/WinSnapshot.h | native | src/app/NativeSnapshot.cpp |
+| SetTipOfTheDayHost | src/sc4/TipOfTheDayWinProc.h | native | src/app/NativeTips.cpp |
+| SetSubBudgetWindowHost | src/sc4/SubBudgetWindow.h | native | src/app/NativeBudgetUi.cpp |
+| SetLabelToolHost | src/sc4/ViewInputControlLabelTool.h | native | src/app/NativeSignLabel.cpp |
+| SetSignLabelDemolishHost | src/sc4/ViewInputControlSignLabelDemolish.h | native | src/app/NativeSignLabel.cpp |
+| SetObliterateCityHost | src/sc4/ObliterateCity.h | native | src/app/NativeObliterate.cpp |
+| SetFloraSimulatorHost | src/sc4/FloraSimulator.h | native | src/app/NativeFlora.cpp |
+| SetNeighborDealHost | src/sc4/NeighborDeal.h | native | src/app/NativeRegion.cpp |
+| SetComplexViewFilterHost | src/sc4/ComplexViewOccupantFilter.h | native | src/app/NativeUnderground.cpp |
+| SetNetworkManagerHost | src/sc4/NetworkManager.h | native | src/app/NativeNetworkManager.cpp |
+| SetBuildingDevelopmentSimHost | src/sc4/BuildingDevelopmentSimulator.h | native | src/app/NativeBuildingDevelopment.cpp |
+| SetTerrainChangedHost | src/sc4/BuildingDevelopmentSimulator.h | native | src/app/NativeTerrainChangedLots.cpp |
+| SetSuitabilityHost | src/sc4/BuildingDevelopmentSimulator.h | none |  |
+| SetTractDeveloperHost | src/sc4/TractDeveloper.h | native | src/app/NativeTractDevelopment.cpp |
+| SetAircraftHost | src/sc4/Aircraft.h | native | src/app/NativeAircraft.cpp |
+| SetAircraftManagerHost | src/sc4/AircraftManager.h | native | src/app/NativeAircraft.cpp |
+| SetHelicopterHost | src/sc4/Helicopter.h | native | src/app/NativeAircraft.cpp |
+| SetPowerLineToolHost | src/sc4/PowerLineTool.h | native | src/app/NativePowerLineTool.cpp |
+| SetPowerPoleOccupantHost | src/sc4/PowerPoleOccupant.h | native | src/app/NativePowerLineTool.cpp |
+| SetAircraftDispatchSourceHost | src/sc4/AircraftDispatchSource.h | native | src/app/NativeDispatch.cpp |
+| SetView3DWinHost | src/sc4/View3DWin.h | native | src/app/NativeView3DWinHost.cpp |
+| SetZoneDeveloperHost | src/sc4/ZoneDeveloper.h | native | src/app/NativeZoneDeveloperHost.cpp |
+| SetAmbienceLayerHost | src/sc4audio/AmbienceLayer.h | native | src/app/NativeAudioAmbience.cpp |
+| SetAemsEngineHost | src/sc4audio/AudioAEMSEventSystem.h | none |  |
+| SetAmbienceManagerHost | src/sc4audio/AudioAmbienceManager.h | native | src/app/NativeAudioAmbience.cpp |
+| SetAudioEventHandlerHost | src/sc4audio/AudioEventHandler.h | native | src/app/NativeAudioDirector.cpp |
+| SetHitIniHost | src/sc4audio/AudioCOMDirector.h | native | src/app/NativeAudioDirector.cpp |
