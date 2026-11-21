@@ -673,6 +673,131 @@ int NetworkNameToID(const std::string& name) {
 
 }  // namespace
 
+// kNetworkTypeToNeighborConnectionType (i386 0x00844d20): the neighbour connection type of each network type (0: the street
+// and the one-way road make no connection of their own).
+constexpr std::uint32_t kNetworkTypeToNeighborConnectionType[kNetworkTypeCount] = {2, 1, 3, 0, 5, 4, 8, 6, 7, 11, 0, 10, 12};
+
+// i386 0x00125a22. The drag's last anchor segment is drawn again; when its end steps out of the city (the cell next to the
+// end, in the drag direction, is outside it) and the pen's cells there all face the same neighbour city, every cell of the
+// last step gets a connection record (in both vectors: the pending one opens the cells' edges in the next solve, the
+// other is what PlaceNeighborConnections creates). A diagonal drag (fewer straight steps than steps) records one corner
+// connection. Refused: an existing connection on the edge, a cell holding a network that does not fit the edge, or a
+// higher-priority network the override rules do not let this one replace.
+bool cSC4NetworkTool::AttemptNeighborConnections(bool allowDiagonals, std::uint32_t networkType) {
+    INetworkToolHost* host = GetNetworkToolHost();
+    if (!host || anchors_.size() < 2 || networkType >= kNetworkTypeCount) return false;
+    const INetworkTypeInfo* info = host->NetworkTypeInfo(networkType);   // sNetworkTypeInfo[networkType] +0x1c / +0x20
+    const int penX = info ? info->PenWidthX() : 1, penZ = info ? info->PenWidthZ() : 1;
+    SC4PointU start = anchors_[anchors_.size() - 2];
+    SC4PointU end = anchors_[anchors_.size() - 1];
+    DrawNetworkLine(start, end, allowDiagonals, networkType);                     // vslot 0x48 (i386)
+    if (start.x == end.x && start.z == end.z) return false;
+    if (steps_.empty() || cells_.empty()) return false;
+    int dir = directionA_ >> 1;
+    int nextX = 0, nextZ = 0;
+    std::uint32_t edgeBits = 0;
+    bool sameCity = true;
+    const tDraggedStep& last = steps_.back();
+    auto across = [&](int x, int z) { return host->NeighborCityAcross(x, z); };
+    if (straightSteps_ < totalSteps_) {                                            // the drag ends on a diagonal
+        if (penZ != 1) return false;
+        if (last.lastCell - last.firstCell + 1 < 2) dir = (dir + directionB_ - directionA_) & 3;
+        // the decompile names the anchor count here; the end cell's x is what the z half and the straight branch use
+        nextX = static_cast<int>(end.x) + kNextX[dir];
+        nextZ = static_cast<int>(end.z) + kNextZ[dir];
+        if (static_cast<std::uint32_t>(nextX) < static_cast<std::uint32_t>(cityWidth_) &&
+            static_cast<std::uint32_t>(nextZ) < static_cast<std::uint32_t>(cityHeight_)) return false;
+        edgeBits = (directionB_ - dir * 2 < 5 ? 3u : 1u) << (dir * 8);
+        if (penX >= 2)
+            sameCity = across(static_cast<int>(cells_[last.firstCell].x), nextZ) == across(static_cast<int>(cells_[last.lastCell].x), nextZ);
+    } else {
+        nextX = static_cast<int>(end.x) + kNextX[dir];
+        nextZ = static_cast<int>(end.z) + kNextZ[dir];
+        if (static_cast<std::uint32_t>(nextX) < static_cast<std::uint32_t>(cityWidth_) &&
+            static_cast<std::uint32_t>(nextZ) < static_cast<std::uint32_t>(cityHeight_)) return false;
+        edgeBits = 2u << (dir * 8);
+        if (penX >= 2) {
+            if ((dir & 1) == 0)
+                sameCity = across(nextX, static_cast<int>(cells_[last.firstCell].z)) == across(nextX, static_cast<int>(cells_[last.lastCell].z));
+            else
+                sameCity = across(static_cast<int>(cells_[last.firstCell].x), nextZ) == across(static_cast<int>(cells_[last.lastCell].x), nextZ);
+        }
+    }
+    if (!sameCity) return false;
+    if ((edgeBits & 0x1010101u) != 0 && penZ >= 2) return false;
+    const std::uint32_t connectionType = kNetworkTypeToNeighborConnectionType[networkType_ < kNetworkTypeCount ? networkType_ : 0];
+    if (!host->HasNeighborsSimulator() || connectionType == 0) return false;
+    bool flag = false;
+    if (connectionType == 3 || connectionType == 0xc || connectionType == 8) {     // the two-sided networks: the driving side
+        flag = nextX == cityWidth_ || nextZ == -1;
+        if (!host->RoadDrivingSideRight()) flag = !flag;
+    }
+    const bool atXEdge = nextX == -1 || nextX == cityWidth_;
+    const bool atZEdge = nextZ == -1 || nextZ == cityHeight_;
+    for (std::uint32_t index = last.firstCell;; ++index) {
+        if (last.lastCell < index) {                                                // every cell checked: record the connections
+            auto record = [&](std::uint32_t key, int x, int z, bool side) {
+                tNeighborConnection connection;
+                connection.unknown0 = key;
+                connection.unknown4 = edgeBits;
+                connection.info.x = static_cast<std::uint32_t>(x);
+                connection.info.z = static_cast<std::uint32_t>(z);
+                connection.info.unknown8 = connectionType;
+                connection.info.unknownC = side ? 1 : 0;
+                pendingNeighborConnections_.push_back(connection);
+                neighborConnections_.push_back(connection);
+            };
+            if ((edgeBits & 0x1010101u) == 0) {
+                for (std::uint32_t c = last.firstCell; c <= last.lastCell; ++c) {
+                    int x = nextX, z = nextZ;
+                    if (atXEdge) z = static_cast<int>(cells_[c].z);
+                    else if (atZEdge) x = static_cast<int>(cells_[c].x);
+                    record(cells_[c].z * 0x10000u + cells_[c].x, x, z, c == last.firstCell ? flag : !flag);
+                }
+            } else {
+                if (penZ != 1) return false;
+                const int cx = nextX < 0 ? 0 : nextX == cityWidth_ ? nextX - 1 : nextX;
+                const int cz = nextZ < 0 ? 0 : nextZ == cityHeight_ ? nextZ - 1 : nextZ;
+                record(static_cast<std::uint32_t>(cx) + static_cast<std::uint32_t>(cz) * 0x10000u, nextX, nextZ, false);
+            }
+            return true;
+        }
+        const SC4PointU& cell = cells_[index];
+        if (cSC4NetworkCellInfo* cellInfo = GetCellInfo(cell.x, cell.z)) {
+            if ((kFlagForNetworkType[networkType_] & cellInfo->networkFlags) == 0) return false;
+            auto edge = [&](std::uint32_t packed) { return (packed >> ((dir & 3) << 3)) & 0xffu; };
+            if (edge(cellInfo->compact54) != 0) {
+                for (std::uint32_t t = 0; t < kNetworkTypeCount; ++t) {
+                    const std::uint32_t condition = edge(cellInfo->tileNeighborhoods[t]);
+                    if (condition == 0) continue;
+                    if (condition != ((edgeBits >> (dir * 8)) & 0xffu)) return false;
+                    if (networkType_ != t && kNetworkMultitypePriority[networkType_] < kNetworkMultitypePriority[t] &&
+                        (g_overrideMatrix[networkType_] & (1u << t)) == 0) return false;
+                }
+            }
+        }
+        if (atXEdge) {
+            if (host->NeighborConnectionAt(connectionType, nextX, static_cast<int>(cell.z))) return false;
+        } else if (atZEdge) {
+            if (host->NeighborConnectionAt(connectionType, static_cast<int>(cell.x), nextZ)) return false;
+        }
+    }
+}
+
+// i386 0x00123e36: each recorded connection replaces the connections of the other network types this drag may replace
+// (the placement mask) on its cell, then is created in the neighbours simulator.
+void cSC4NetworkTool::PlaceNeighborConnections() {
+    INetworkToolHost* host = GetNetworkToolHost();
+    if (!host || !host->HasNeighborsSimulator()) return;
+    for (const tNeighborConnection& connection : neighborConnections_) {
+        const int x = static_cast<int>(connection.info.x), z = static_cast<int>(connection.info.z);
+        for (std::uint32_t t = 0; t < kNetworkTypeCount; ++t)
+            if (networkType_ != t && (placementFlagMask_ & kFlagForNetworkType[t]) != 0 && kNetworkTypeToNeighborConnectionType[t] != 0)
+                host->DeleteNeighborConnection(kNetworkTypeToNeighborConnectionType[t], x, z);
+        host->CreateNeighborConnection(connection.info.unknown8, x, z, connection.info.unknownC != 0);
+    }
+}
+
 // i386 0x00125220 (0x100186d56). PORTED: the multitype rules {0x0a5bcf4b, 0xaa5bcf57, 0x10000001}
 // (ReadAllMultiTypeIntersectionSolutions + SC4NetworkLoadOverrideMatrix). Not yet: the network type info ini
 // (0x8a5971c5/0x8a5993b9, the host holds those records), the tile-conflict overrides (0x10000002) and the highway
@@ -1246,11 +1371,13 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, bool allowDiagonals, bool connect
         }
         if (!connectNeighbor || validSteps_ != totalSteps_) break;
         if (connected) {
-            // PlaceNeighborConnections (place): not ported.
+            if (place) PlaceNeighborConnections();
             break;
         }
-        // AttemptNeighborConnections: not ported, so the drag never retries with a neighbour connection.
-        break;
+        // the whole drag solved: when it ends at the city edge, solve it again with the neighbour connections' edges open
+        if (anchors_.size() < 2 || !AttemptNeighborConnections(allowDiagonals, networkType)) break;
+        // MarkHighwayIntersectionPieces(false) here walks the highway intersections, which are not identified yet (none)
+        connected = true;
     }
     std::list<cSC4NetworkOccupant*> placed;
     if (validSteps_ > 0) {

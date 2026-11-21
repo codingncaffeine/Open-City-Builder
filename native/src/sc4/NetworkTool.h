@@ -460,6 +460,15 @@ public:
     // SL::spRM vslot 0xc with {0x6534284a, the type's exemplar group, piece} (iid 0xa52160f5): a pre-built model piece.
     virtual bool HasPrebuiltModelExemplar(std::uint32_t /*type*/, std::uint32_t /*piece*/) { return false; }
     virtual int CurrentViewLevel() { return 1; }                      // SL::spView3D vslot 0x58
+    // SL::spNeighborsSim for the neighbour-city connections of a drag (AttemptNeighborConnections /
+    // PlaceNeighborConnections); x / z are the connection cells just outside the city (-1 or the city size).
+    virtual bool HasNeighborsSimulator() { return false; }
+    virtual const void* NeighborCityAcross(int /*x*/, int /*z*/) { return nullptr; }            // vslot 0x30 FindCityOnOtherSideOfConnection
+    virtual bool NeighborConnectionAt(std::uint32_t /*type*/, int /*x*/, int /*z*/) { return false; }   // vslot 0x2c FindConnection != null
+    virtual void CreateNeighborConnection(std::uint32_t /*type*/, int /*x*/, int /*z*/, bool /*flag*/) {}  // vslot 0x18
+    virtual void DeleteNeighborConnection(std::uint32_t /*type*/, int /*x*/, int /*z*/) {}             // vslot 0x1c
+    // cIGZLanguageManager GetLanguageUtility(0) -> GetLanguageRoadDrivingSide: true = right-hand traffic.
+    virtual bool RoadDrivingSideRight() { return true; }
     // SL::NetworkManager() vslot 0x34: the texture instance of a piece at the current zoom (the rotation may change).
     virtual std::uint32_t PieceTexture(std::uint32_t piece, int& /*rotation*/) { return piece; }
     // cSC4NetworkRoutines::ComputeDemolitionRegionForPlacementCells + spDemolition vslot 0x18 (DemolishRegion with
@@ -675,6 +684,10 @@ public:
     void BuildSetOfCellsToBeSolved();
     void ExpandToSolveSetBasedOnConnectivity(std::vector<std::uint32_t>& frontier, int rings);
     void MarkNeighborConnections();
+    // i386 0x00125a22 / 0x00123e36: a drag that ends at the city edge becomes neighbour-city connections (recorded on the
+    // last step's edge cells), and placing the drag creates them in the neighbours simulator.
+    bool AttemptNeighborConnections(bool allowDiagonals, std::uint32_t networkType);
+    void PlaceNeighborConnections();
     void BuildPaddedNetworkSet(const std::unordered_set<std::uint32_t>& set, std::unordered_set<std::uint32_t>& out, std::uint32_t pad);
     int SolveNetwork(std::uint32_t networkType, bool retry);
     // i386 0x00147178: the cells two network types share. The lower-priority type gives way (overridden or trimmed

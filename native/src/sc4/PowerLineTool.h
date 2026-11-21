@@ -195,8 +195,9 @@ public:
 
     // Calls on the cSC4NetworkTool base object that the base port does not define.
     virtual void DrawNetworkLine(SC4PointU& a, SC4PointU& b, bool preview, std::uint32_t networkType) = 0;  // [18]
-    virtual bool AttemptNeighborConnections(bool first, std::uint32_t networkType) = 0;  // 0x10018bdc6
-    virtual void PlaceNeighborConnections() = 0;                               // 0x10018c640
+    // the base tool's AttemptNeighborConnections / PlaceNeighborConnections (i386 0x00125a22 / 0x00123e36) on `tool`
+    virtual bool AttemptNeighborConnections(cSC4NetworkTool& tool, bool first, std::uint32_t networkType) = 0;
+    virtual void PlaceNeighborConnections(cSC4NetworkTool& tool) = 0;
 
     // cSC4PowerPoleOccupant.
     virtual IPowerPoleOccupant* CreatePoleOccupant() = 0;                      // new(0x1a0) + ctor 0x100320cf6

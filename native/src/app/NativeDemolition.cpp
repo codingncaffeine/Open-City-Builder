@@ -469,6 +469,7 @@ sc4::cSC4Demolition* NativeDemolitionService() { return Service(); }
 IDemolitionHost* NativeDemolitionHost() { return &g_host; }
 cISC4Occupant* DemolitionOccupant(IDemolishable* occupant) { return occupant ? Raw(occupant) : nullptr; }
 cSC4NetworkManager* CityNetworkManager() { return Networks(); }
+cSC4NeighborsSimulator* CityNeighborsSimulator() { return Neighbors(); }
 
 bool DemolishRegion(bool commit, const DemolitionRegion& region, int privilege, std::uint32_t flags, bool dezone, std::int64_t* cost,
                     cISC4Occupant* clicked, int viewX, int viewY, IDemolishFilter* filter) {

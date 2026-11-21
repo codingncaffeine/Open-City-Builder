@@ -33,6 +33,8 @@
 #include "sc4/ViewInputControlNetworkTool.h"
 #include "sc4/ViewUtilities.h"
 #include "sc4/cSC4City.h"
+#include "gz/RZServices.h"
+#include "sc4/NeighborsSimulator.h"
 #include "sc4/cSTETerrain.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/PowerLineTool.h"
@@ -306,6 +308,28 @@ public:
         return piece + ((piece & 0xf) == 0 ? static_cast<std::uint32_t>(zoom) : 0u);   // as cSC4NetworkOccupantModel::GetTexture
     }
     int CurrentViewLevel() override { return g_view ? static_cast<int>(g_view->GetCurrentViewLevel()) : 1; }
+    // SL::spNeighborsSim: the neighbour-city connections a drag to the city edge makes
+    bool HasNeighborsSimulator() override { return native::CityNeighborsSimulator() != nullptr; }
+    const void* NeighborCityAcross(int x, int z) override {
+        sc4::cSC4NeighborsSimulator* neighbors = native::CityNeighborsSimulator();
+        return neighbors ? static_cast<const void*>(neighbors->FindCityOnOtherSideOfConnection(x, z)) : nullptr;
+    }
+    bool NeighborConnectionAt(std::uint32_t type, int x, int z) override {
+        sc4::cSC4NeighborsSimulator* neighbors = native::CityNeighborsSimulator();
+        return neighbors && neighbors->FindConnection(type, x, z) != nullptr;
+    }
+    void CreateNeighborConnection(std::uint32_t type, int x, int z, bool flag) override {
+        if (sc4::cSC4NeighborsSimulator* neighbors = native::CityNeighborsSimulator()) neighbors->CreateConnection(type, x, z, flag);
+    }
+    void DeleteNeighborConnection(std::uint32_t type, int x, int z) override {
+        if (sc4::cSC4NeighborsSimulator* neighbors = native::CityNeighborsSimulator()) neighbors->DeleteConnection(type, x, z);
+    }
+    // the language manager's GetLanguageUtility(0) -> GetLanguageRoadDrivingSide (non-zero = right-hand traffic)
+    bool RoadDrivingSideRight() override {
+        cIGZLanguageManager* languages = RZ::LM();
+        cIGZLanguageUtility* utility = languages ? languages->GetLanguageUtility(0) : nullptr;
+        return utility == nullptr || static_cast<std::uint8_t>(utility->GetLanguageRoadDrivingSide()) != 0;
+    }
 
 };
 
@@ -347,7 +371,11 @@ public:
         out[2] = origin[2] + direction[2] * t;
         return true;
     }
-    bool ConfirmNeighborConnection(const sc4::NeighborConnectionInfo&) override { return false; }
+    // cSC4NetworkToolUI::DoPlacement: SL::spNeighborsSim vslot 0x14 RequestCreateConnection(type, x, z, flag) asks the player
+    bool ConfirmNeighborConnection(const sc4::NeighborConnectionInfo& info) override {
+        sc4::cSC4NeighborsSimulator* neighbors = native::CityNeighborsSimulator();
+        return neighbors && neighbors->RequestCreateConnection(info.unknown8, static_cast<int>(info.x), static_cast<int>(info.z), info.unknownC != 0);
+    }
     void RefreshCursor() override {}
 };
 
@@ -414,4 +442,47 @@ sc4::cSC4ViewInputControl* CreateNetworkTool(int type) {
     return tool;
 }
 
+}  // namespace native
+
+namespace native {
+sc4::cSC4NetworkTool* NativeManagerNetworkTool(std::uint32_t type);   // NativeNetworkManager.cpp
+
+// Kit verb `netline TYPE X1 Z1 X2 Z2`: the network manager's tool of TYPE lays a line as the drag's release does
+// (cSC4NetworkToolUI::DoPlacement): a dry run with neighbour connections on, the possible connection, then the placement
+// with the connection. The player's confirmation dialog is skipped (kits have no input); the neighbour connections of the
+// city are counted before and after.
+void NativeLayNetworkLine(std::uint32_t type, int x1, int z1, int x2, int z2) {
+    sc4::cSC4NetworkTool* tool = NativeManagerNetworkTool(type);
+    sc4::cSC4NeighborsSimulator* neighbors = CityNeighborsSimulator();
+    if (!tool) {
+        std::printf("netline: the network manager has no tool of type %u\n", type);
+        return;
+    }
+    auto count = [&] {
+        sc4::ConnectionList list;
+        if (neighbors) neighbors->GetAllConnections(list);
+        return static_cast<int>(list.size());
+    };
+    const int before = count();
+    const std::vector<sc4::SC4PointU> anchors = {sc4::SC4PointU{static_cast<std::uint32_t>(x1), static_cast<std::uint32_t>(z1)},
+                                                 sc4::SC4PointU{static_cast<std::uint32_t>(x2), static_cast<std::uint32_t>(z2)}};
+    tool->Reset();
+    tool->SetAnchorPoints(anchors);
+    tool->PlaceAllSegments(false, true, true, type);
+    sc4::NeighborConnectionInfo info;
+    const bool possible = tool->GetPossibleNeighborConnection(info) && !tool->GetFailureState();
+    tool->Reset();
+    tool->SetAnchorPoints(anchors);
+    tool->PlaceAllSegments(true, true, possible, type);
+    const bool failed = tool->GetFailureState();
+    tool->ClearCellPreviews();
+    tool->Reset();
+    std::printf("netline %u %d,%d -> %d,%d: neighbor connection %s", type, x1, z1, x2, z2, possible ? "possible" : "none");
+    if (possible) std::printf(" (type %u at %d,%d side %u)", info.unknown8, static_cast<int>(info.x), static_cast<int>(info.z), info.unknownC);
+    std::printf(", failure %d, city connections %d -> %d\n", failed ? 1 : 0, before, count());
+    if (neighbors && possible) {
+        sc4::cISC4NeighborConnection* made = neighbors->FindConnection(info.unknown8, static_cast<int>(info.x), static_cast<int>(info.z));
+        std::printf("netline: connection at %d,%d %s\n", static_cast<int>(info.x), static_cast<int>(info.z), made ? "made" : "MISSING");
+    }
+}
 }  // namespace native

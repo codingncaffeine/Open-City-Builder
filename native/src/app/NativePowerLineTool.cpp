@@ -215,8 +215,10 @@ public:
     bool LoadString(std::uint32_t group, std::uint32_t instance, cIGZString& out) override { return LoadLocalizedString(group, instance, out); }
     int Get0To3Direction(int x1, int z1, int x2, int z2) override { return native::Get0To3Direction(x1, z1, x2, z2); }
     void DrawNetworkLine(SC4PointU&, SC4PointU&, bool, std::uint32_t) override {}
-    bool AttemptNeighborConnections(bool, std::uint32_t) override { return false; }
-    void PlaceNeighborConnections() override {}
+    bool AttemptNeighborConnections(sc4::cSC4NetworkTool& tool, bool first, std::uint32_t networkType) override {
+        return tool.AttemptNeighborConnections(first, networkType);
+    }
+    void PlaceNeighborConnections(sc4::cSC4NetworkTool& tool) override { tool.PlaceNeighborConnections(); }
     IPowerPoleOccupant* CreatePoleOccupant() override { return new cSC4PowerPoleOccupant(); }
     void ConnectPoles(IPowerPoleOccupant* from, IPowerPoleOccupant* to, const std::vector<tLineInfo>* lines) override {
         if (cSC4PowerPoleOccupant* pole = AsPole(from)) pole->AddConnection(AsPole(to), const_cast<std::vector<tLineInfo>*>(lines));

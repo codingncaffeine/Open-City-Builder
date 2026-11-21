@@ -940,8 +940,8 @@ bool cSC4PowerLineTool::DoNetworkSpecificPlacement(bool first, bool checkNeighbo
     if (poleInfos_.empty()) validSteps_ = 0;
     IPowerLineToolHost* host = GetPowerLineToolHost();
     if (checkNeighbors && totalSteps_ <= validSteps_ && anchors_.size() > 1 && failureReason_ == 0 &&
-        host != nullptr && host->AttemptNeighborConnections(first, networkType_) && unknown98_ != 0) {
-        host->PlaceNeighborConnections();
+        host != nullptr && host->AttemptNeighborConnections(*this, first, networkType_) && unknown98_ != 0) {
+        host->PlaceNeighborConnections(*this);
     }
     if (unknown98_ == 0) SetTerrainHilight(0);
     ReleasePoleInfos();

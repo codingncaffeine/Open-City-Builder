@@ -455,13 +455,13 @@ struct FakeHost : INetworkToolHost, IPowerLineToolHost {
         (void)preview;
         (void)networkType;
     }
-    bool AttemptNeighborConnections(bool first, std::uint32_t networkType) override {
+    bool AttemptNeighborConnections(cSC4NetworkTool&, bool first, std::uint32_t networkType) override {
         (void)first;
         (void)networkType;
         ++attemptCalls;
         return attemptResult;
     }
-    void PlaceNeighborConnections() override { ++placeNeighborsCalls; }
+    void PlaceNeighborConnections(cSC4NetworkTool&) override { ++placeNeighborsCalls; }
     IPowerPoleOccupant* CreatePoleOccupant() override {
         auto* pole = new FakePole();
         ownedPoles.push_back(pole);

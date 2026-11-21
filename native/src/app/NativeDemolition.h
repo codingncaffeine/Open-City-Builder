@@ -5,7 +5,7 @@
 
 #include <cstdint>
 
-namespace sc4 { class cISC4Occupant; class cSC4Lot; class cSC4NetworkManager; class IDemolitionHost; class IDemolishFilter; class IDemolishable; struct DemolitionRegion; }
+namespace sc4 { class cISC4Occupant; class cSC4Lot; class cSC4NetworkManager; class cSC4NeighborsSimulator; class IDemolitionHost; class IDemolishFilter; class IDemolishable; struct DemolitionRegion; }
 
 namespace native {
 
@@ -20,6 +20,8 @@ bool NativeHasDemolition();   // SL::spDemolition is up
 // The city occupant behind an occupant a caller's filter is asked about.
 sc4::cISC4Occupant* DemolitionOccupant(sc4::IDemolishable* occupant);
 sc4::cSC4NetworkManager* CityNetworkManager();   // the city's network manager, or null
+sc4::cSC4NeighborsSimulator* CityNeighborsSimulator();   // the city's neighbours simulator, or null
+void NativeLayNetworkLine(std::uint32_t type, int x1, int z1, int x2, int z2);   // kit verb `netline` (NativeNetworkTool.cpp)
 bool DemolishLots(bool commit, sc4::cSC4Lot* const* lots, int count, int privilege, std::uint32_t flags, bool dezone,
                   std::int64_t* cost);
 
