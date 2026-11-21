@@ -405,6 +405,8 @@ void SetCityRenderTarget(sc4::cSC4View3DWin& view, gd::cIGZGDriver* driver, gz::
     g_cityRender = nullptr;
     native::DetachTerrainView();   // the previous city's, if its screen did not shut its renderer down
     native::SetCityView3DWin(&view);
+    // AddGUI (DoPreCityInit, before the city starts) builds the budget panel inside this view: the previous city's view is gone
+    native::SetBudgetViewWindow(view.AsIGZWin());
 }
 
 // cSC4View3DWin::DoPreCityInit (i386 0x00528030): the camera, its control (looking at the middle of a 1 km city) and the 3D render
