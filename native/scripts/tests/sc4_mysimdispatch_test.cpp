@@ -407,8 +407,10 @@ struct FakeHost final : IMySimDispatchHost {
     }
     cIGZUnknown* Clock() override { return &clock; }
     IMySimDispatchVehicleView* DispatchVehicleView() override { return &view; }
+    bool noManagers = false;
     IMySimDispatchAutomataManager* AutomataManager(std::uint32_t group) override {
         managerGroups.push_back(group);
+        if (noManagers) return nullptr;
         if (group == 0x4149u || group == 0x414au || group == 0x4107u) return &pedestrianManager;
         return &vehicleManager;
     }
@@ -438,8 +440,16 @@ struct FakeHost final : IMySimDispatchHost {
         tiles.push_back({rect[2], rect[3]});
         return true;
     }
-    void OccupantsInCellRect(const int[4], std::deque<cISC4Occupant*>&) override {}
-    void ClearOccupantList(std::deque<cISC4Occupant*>& list) override { list.clear(); }
+    std::vector<cISC4Occupant*> cellOccupants;           // what every occupant-manager cell query returns
+    std::vector<std::array<int, 4>> rectsSeen;
+    void OccupantsInCellRect(const int rect[4], std::deque<cISC4Occupant*>& out) override {
+        rectsSeen.push_back({rect[0], rect[1], rect[2], rect[3]});
+        for (cISC4Occupant* occupant : cellOccupants) { occupant->AddRef(); out.push_back(occupant); }
+    }
+    void ClearOccupantList(std::deque<cISC4Occupant*>& list) override {
+        for (cISC4Occupant* occupant : list) occupant->Release();
+        list.clear();
+    }
     IMySimDispatchAutomaton* AutomatonOf(cISC4Occupant* occupant) override {
         auto* fake = dynamic_cast<FakeOccupant*>(occupant);
         if (!fake || !fake->automaton) return nullptr;
@@ -759,15 +769,246 @@ int main() {
         CHECK(dispatch.CheckFlags(0x200));
         CHECK(dispatch.AutomataOccupant() == &automatonOccupant);
 
-        // the transcribed switchTravel ends in the "no trip" state; the next update falls back to the default
-        // destination and drops the automaton
+        // switchTravel keeps the trip going: the sim stays in the travelling state on its car
         dispatch.updateState();
+        CHECK(dispatch.GetState() == 2);
+        CHECK(dispatch.AutomataOccupant() == &automatonOccupant);
+        if (automaton) CHECK(automaton->removeCalls == 0);
+
+        // the car reaches the end of its route at the job: the walking leg is the arrival (state 3, location notice)
+        automatonOccupant.position[0] = 12 * 16 + 8;
+        automatonOccupant.position[2] = 12 * 16 + 8;
+        if (automaton) automaton->route = {RouteData{12, 12, 1}};
+        fixture.owner.messages.clear();
+        cRZMessage2Standard* reached = MakeMessage(kMySimDispatchMsgAutomaton, 0, kDispatchEventRouteReached);
+        dispatch.DoMessage(reached);
+        reached->Release();
         CHECK(dispatch.GetState() == 3);
-        CHECK(dispatch.AutomataOccupant() == nullptr);
-        if (automaton) CHECK(automaton->removeCalls == 1);
+        CHECK(dispatch.GetCurrentLocation() == destination);
+        CHECK(dispatch.GetTravelType() == 0xfe);
+        CHECK(!dispatch.CheckFlags(0x8460));
+        CHECK(dispatch.CheckFlags(0x2));
+        bool locationEvent = false, farEvent = false;
+        for (const auto& message : fixture.owner.messages) {
+            if (message.data1 == kDispatchNotifyLocation) locationEvent = true;
+            if (message.data1 == kDispatchNotifyFarFromDestination) farEvent = true;
+        }
+        CHECK(locationEvent);
+        CHECK(!farEvent);
         current.occupant = nullptr;
         destination.occupant = nullptr;
         job.refs = 0;
+    }
+
+    // ---- a trip to the commute location: it becomes the commute destination and keeps the work dwell time ----
+    {
+        Fixture fixture;
+        cSC4MySimDispatch& dispatch = *fixture.dispatch;
+        FakeOccupant& residence = newOccupant();
+        residence.isBuilding = true;
+        FakeOccupant& job = newOccupant();
+        job.isBuilding = true;
+        MySimLocation home = MakeLocation(&residence, 10, 10);
+        MySimLocation work = MakeLocation(&job, 12, 12);
+        fixture.host.occupantRects[&residence] = {10, 10, 10, 10};
+        fixture.host.occupantRects[&job] = {12, 12, 12, 12};
+        dispatch.Init();
+        dispatch.SetCurrentCommuteDestination(home, false);
+        dispatch.TeleportToCommuteLocation();
+        dispatch.SetDefaultDestination(home);
+        work.commuteLocation = true;
+        work.data24 = 540;   // the MySim's CheckCommute at 8:00: (17 - 8) * 60 minutes
+        dispatch.AddDestinationLocation(work, 4);
+        dispatch.updateState();
+        CHECK(dispatch.GetState() == 2);
+        CHECK(dispatch.GetCurrentDestination().data28 == 540);
+        fixture.host.findPathRoute = {RouteData{10, 10, 1}, RouteData{11, 11, 1}, RouteData{12, 12, 1}};
+        dispatch.updateState();
+        CHECK(dispatch.CheckFlags(0x1000));
+        CHECK(dispatch.GetCurrentDestination().data28 == 540);
+        CHECK(dispatch.GetCurrentCommuteDestination() == work);
+        CHECK(dispatch.GetCurrentCommuteDestination().data24 == 540);
+        home.occupant = nullptr;
+        work.occupant = nullptr;
+    }
+
+    // ---- switchTravel: the walking leg ends too far from the destination ----
+    {
+        Fixture fixture;
+        cSC4MySimDispatch& dispatch = *fixture.dispatch;
+        FakeOccupant& residence = newOccupant();
+        residence.isBuilding = true;
+        FakeOccupant& job = newOccupant();
+        job.isBuilding = true;
+        MySimLocation current = MakeLocation(&residence, 10, 10);
+        MySimLocation destination = MakeLocation(&job, 140, 140);
+        fixture.host.occupantRects[&residence] = {10, 10, 10, 10};
+        fixture.host.occupantRects[&job] = {140, 140, 140, 140};
+        fixture.host.cityX = fixture.host.cityZ = 256;
+        fixture.host.lotCellRectSets = true;
+        dispatch.Init();
+        dispatch.SetCurrentCommuteDestination(current, false);
+        dispatch.TeleportToCommuteLocation();
+        dispatch.SetDefaultDestination(destination);
+        dispatch.GoTo(destination);
+        dispatch.updateState();
+        fixture.host.findPathRoute = {RouteData{10, 10, 1}, RouteData{11, 10, 1}, RouteData{12, 10, 1}};
+        dispatch.updateState();
+        FakeOccupant& automatonOccupant = newOccupant();
+        automatonOccupant.group = 0x420b;
+        fixture.host.vehicleManager.automatonOccupant = &automatonOccupant;
+        dispatch.updateState();
+        FakeAutomaton* automaton = fixture.host.vehicleManager.created.empty() ? nullptr
+                                                                              : fixture.host.vehicleManager.created[0];
+        CHECK(automaton != nullptr);
+        automatonOccupant.position[0] = 12 * 16 + 8;
+        automatonOccupant.position[2] = 10 * 16 + 8;
+        if (automaton) automaton->route = {RouteData{12, 10, 1}};
+        fixture.owner.messages.clear();
+        cRZMessage2Standard* reached = MakeMessage(kMySimDispatchMsgAutomaton, 0, kDispatchEventRouteReached);
+        dispatch.DoMessage(reached);
+        reached->Release();
+        // about 180 cells away (the original compares the distance in cells with the squared proximity minimum, 100): no arrival, the sim idles where the walk ended
+        CHECK(dispatch.GetState() == 2);
+        CHECK(dispatch.GetTravelType() == 0xfe);
+        CHECK(dispatch.CheckFlags(0x1));
+        CHECK(dispatch.CheckFlags(0x2400));
+        CHECK(!dispatch.CheckFlags(0x40));
+        CHECK(dispatch.GetCurrentLocation().cellX == 12);
+        CHECK(dispatch.GetCurrentLocation().data28 == dispatch.Time() + 5);
+        bool farEvent = false, locationEvent = false;
+        for (const auto& message : fixture.owner.messages) {
+            if (message.data1 == kDispatchNotifyFarFromDestination) farEvent = true;
+            if (message.data1 == kDispatchNotifyLocation) locationEvent = true;
+        }
+        CHECK(farEvent);
+        CHECK(!locationEvent);
+        current.occupant = nullptr;
+        destination.occupant = nullptr;
+    }
+
+    // ---- switchTravel: car leg to a bus leg (get off, find the stop, board the bus) ----
+    {
+        Fixture fixture;
+        cSC4MySimDispatch& dispatch = *fixture.dispatch;
+        FakeOccupant& residence = newOccupant();
+        residence.isBuilding = true;
+        FakeOccupant& job = newOccupant();
+        job.isBuilding = true;
+        MySimLocation current = MakeLocation(&residence, 10, 10);
+        MySimLocation destination = MakeLocation(&job, 14, 14);
+        fixture.host.occupantRects[&residence] = {10, 10, 10, 10};
+        fixture.host.occupantRects[&job] = {14, 14, 14, 14};
+        fixture.host.lotCellRectSets = true;
+        dispatch.Init();
+        dispatch.SetCurrentCommuteDestination(current, false);
+        dispatch.TeleportToCommuteLocation();
+        dispatch.SetDefaultDestination(destination);
+        dispatch.GoTo(destination);
+        dispatch.updateState();
+        fixture.host.findPathRoute = {RouteData{10, 10, 1}, RouteData{11, 10, 1}, RouteData{11, 11, 2},
+                                      RouteData{12, 12, 2}, RouteData{14, 14, 2}};
+        dispatch.updateState();
+        FakeOccupant& carOccupant = newOccupant();
+        carOccupant.group = 0x420b;
+        fixture.host.vehicleManager.automatonOccupant = &carOccupant;
+        dispatch.updateState();
+        CHECK(dispatch.GetTravelType() == 1);
+        FakeAutomaton* car = fixture.host.vehicleManager.created.empty() ? nullptr : fixture.host.vehicleManager.created[0];
+        CHECK(car != nullptr);
+
+        // the car leg ends at 11,10: the next leg is a bus leg, so the sim gets off and waits at the switch
+        carOccupant.position[0] = 11 * 16 + 8;
+        carOccupant.position[2] = 10 * 16 + 8;
+        if (car) car->route = {RouteData{11, 10, 1}};
+        cRZMessage2Standard* reached = MakeMessage(kMySimDispatchMsgAutomaton, 0, kDispatchEventRouteReached);
+        dispatch.DoMessage(reached);
+        reached->Release();
+        CHECK(dispatch.GetState() == 2);
+        CHECK(dispatch.CheckFlags(0x10));
+        CHECK(!dispatch.CheckFlags(0x20));
+        CHECK(dispatch.CheckFlags(0x400));
+        CHECK(dispatch.AutomataOccupant() == nullptr);
+        if (car) CHECK(car->removeCalls == 1);
+
+        // next update: the stop (group 0x1301 for a bus leg) is found around the switch, then the bus of group 0x4200
+        // standing on the stop's cell is boarded for the bus leg
+        FakeOccupant& stop = newOccupant();
+        stop.group = 0x1301;
+        stop.position[0] = 11 * 16 + 4;
+        stop.position[2] = 11 * 16 + 4;
+        FakeOccupant& busOccupant = newOccupant();
+        busOccupant.group = 0x4200;
+        FakeAutomaton bus;
+        bus.refs = 1;
+        bus.occupant = &busOccupant;
+        busOccupant.automaton = &bus;
+        fixture.host.cellOccupants = {&residence, &stop, &busOccupant};
+        fixture.owner.messages.clear();
+        dispatch.updateState();
+        CHECK(fixture.host.rectsSeen.size() == 2);
+        if (fixture.host.rectsSeen.size() == 2) {
+            const std::array<int, 4> around{10, 9, 12, 12};   // the switch cell and the next route cell, one cell wider
+            CHECK(fixture.host.rectsSeen[0] == around);
+            const std::array<int, 4> cell{11, 11, 11, 11};    // the stop's own cell
+            CHECK(fixture.host.rectsSeen[1] == cell);
+        }
+        bool stopEvent = false;
+        for (const auto& message : fixture.owner.messages) {
+            if (message.data1 == kDispatchNotifyTransitStop && message.data2 == 0x1301) stopEvent = true;
+        }
+        CHECK(stopEvent);
+        CHECK(stop.groupQueries.size() >= 1 && stop.groupQueries[0] == 0x1301);
+        CHECK(bus.callback != nullptr);
+        CHECK(bus.priority == 0xff);
+        CHECK(bus.route.size() == 4);   // the bus leg 11,11 .. 14,14 plus the start corner
+        CHECK(dispatch.GetTravelType() == 2);
+        CHECK(dispatch.AutomataOccupant() == &busOccupant);
+        CHECK(dispatch.CheckFlags(0x200));
+        CHECK(!dispatch.CheckFlags(0x436));
+        CHECK(dispatch.GetState() == 2);
+        CHECK(fixture.host.vehicleManager.created.size() == 1);   // no new automaton: the bus was boarded
+        fixture.host.cellOccupants.clear();
+        current.occupant = nullptr;
+        destination.occupant = nullptr;
+    }
+
+    // ---- switchTravel: the next leg cannot be dispatched and there is no further switch (trip fails) ----
+    {
+        Fixture fixture;
+        cSC4MySimDispatch& dispatch = *fixture.dispatch;
+        FakeOccupant& residence = newOccupant();
+        residence.isBuilding = true;
+        FakeOccupant& job = newOccupant();
+        job.isBuilding = true;
+        MySimLocation current = MakeLocation(&residence, 10, 10);
+        MySimLocation destination = MakeLocation(&job, 12, 12);
+        fixture.host.occupantRects[&residence] = {10, 10, 10, 10};
+        fixture.host.occupantRects[&job] = {12, 12, 12, 12};
+        fixture.host.lotCellRectSets = true;
+        dispatch.Init();
+        dispatch.SetCurrentCommuteDestination(current, false);
+        dispatch.TeleportToCommuteLocation();
+        dispatch.SetDefaultDestination(destination);
+        dispatch.GoTo(destination);
+        dispatch.updateState();
+        // no automata manager answers, so the car leg cannot be dispatched; the next leg is the walking one
+        fixture.host.findPathRoute = {RouteData{10, 10, 1}, RouteData{11, 10, 1}};
+        fixture.host.noManagers = true;
+        dispatch.updateState();
+        CHECK(dispatch.CheckFlags(0x400));
+        fixture.owner.messages.clear();
+        dispatch.updateState();
+        CHECK(dispatch.GetState() == -1);
+        CHECK(dispatch.GetTravelType() == 0xff);
+        CHECK(fixture.host.vehicleManager.created.empty());
+        bool pylonEvent = false;
+        for (const auto& message : fixture.owner.messages) {
+            if (message.data1 == kDispatchNotifyPylon) pylonEvent = true;
+        }
+        CHECK(pylonEvent);
+        current.occupant = nullptr;
+        destination.occupant = nullptr;
     }
 
     // ---- messages: follow camera, five-minute tick, deferred Init ----
