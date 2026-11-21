@@ -2,6 +2,7 @@
 // city comes up (the camera, the camera control and the 3D renderer) and the window attaches them.
 #pragma once
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace gd { class cIGZGDriver; }
@@ -66,6 +67,7 @@ void NativeQueryReport(std::uint32_t skipUi, int limit);   // the query tool's b
 void NativeTrailerReport(int limit);  // the trailer vehicles on screen and the cars they pull (app/NativeAutomataGenerator.cpp)
 void NativeMySimReport();                  // kit command `mysims`: the MySims of the city and their state (app/NativeMySim.cpp)
 void NativeMySimMoveIn(const char* name, bool male, unsigned zodiac);   // kit command `mysimmovein NAME`: a MySim moves in through the original's add code
+void NativePlayerDriveCommand(const std::string& line);   // kit command `udi` (app/NativePlayerDrive.cpp)
 void NativeAircraftReport();          // the aircraft manager's airports, runway markers and aircraft (app/NativeAircraft.cpp)
 void NativeTrainReport(int limit);    // track cells, trains and buses, the first engines with their cars (app/NativeTrafficAutomata.cpp)
 // The city view's render stack, built as the original's view does: SetCityRenderTarget when the city screen is made,

@@ -1261,6 +1261,9 @@ int RunScenario(const std::string& path) {
             native::NativeDispatchReport();
         } else if (command == "generators") {   // generators: the automata the generators made, where they are on screen
             native::NativeGeneratorReport();
+        } else if (command == "udi") {   // udi [start GROUP X Z [R] | take X Z [GROUP] | steer ACCEL TURN | stop | groups]: U-Drive-It through the tool's own entry points; bare: status
+            std::string rest; std::getline(words >> std::ws, rest);
+            native::NativePlayerDriveCommand(rest);
         } else if (command == "trailers") {   // trailers [N]: the trailer vehicles (first N on screen) and their cars
             int limit = 8;
             words >> limit;

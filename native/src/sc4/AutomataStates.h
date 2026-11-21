@@ -137,6 +137,11 @@ public:
     cS3DVector3 driveDir60;                // +0x60 (unit driving direction)
     std::int32_t damage70 = 0;             // +0x70 (accumulated damage; the params' +0x5c is the crash threshold)
     std::uint8_t onRoad254 = 0;            // +0x254 (1 = off the network, reported through callback event 10)
+    // The U-Drive-It tool's bytes in the record (cSC4ViewInputControlPlayerDrive; i386 offsets).
+    std::uint8_t keyEffectOn205[13] = {};  // +0x205: one on / off byte per drive command (HandleKeyEffects)
+    std::uint8_t toggle229 = 0;            // +0x229: flipped by drive command 9
+    std::int32_t mouseX214 = 0;            // +0x214 / +0x218: the mouse position while driving (OnMouseMove)
+    std::int32_t mouseY218 = 0;
     tAutomataStatePlayerDrive() { for (float& v : history) v = -1.0f; }
 };
 class tAutomataStateBumped : public tAutomataState {        // @ Write 0x10010e70a, Read 0x10010e76a

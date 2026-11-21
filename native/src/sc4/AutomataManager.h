@@ -471,7 +471,7 @@ struct AutomataTuningGlobals {
     float f21a68 = 0.0f, f21a6c = 0.0f;        // 0x4bae8fe1 / 0x4bae8fe2
     std::uint8_t f21a70 = 0;                   // 0xebfb4a0a (uint8)
     float f21a74 = 0.0f;                       // 0xcc101142
-    std::uint32_t f21a78 = 0;                  // 0x6c200139 (uint32: the speed the player drive unlocks with)
+    std::uint32_t f21a78 = 0;                  // 0x6c200139 (uint32: the vehicle count limit while the player drives)
     float f21a7c = 0.0f;                       // 0x8c3e8185 (1 / count)
     float f21974 = 0.0f, f21978 = 0.0f;        // 0xec0700c0 / 0x6c0700c4
     bool f21aa8 = false;                       // 0x4998c91c "clock multipliers enabled"
@@ -527,7 +527,7 @@ public:
     virtual void SetPlayerDriveControl(IAutomataPlayerDriveControl* control) = 0;     // stores it (the original writes the global)
     virtual IAutomataPlayerDriveControl* CreatePlayerDriveControl() = 0;              // operator new(0x148) + ctor (counted)
     virtual void AddViewInputControl(IAutomataPlayerDriveControl* control, int layer) = 0;   // SL::spView3D vslot 0xc8
-    virtual void SetVehicleManagerSpeed(float speed) = 0;                             // SL::spVehicleManager vslot 0xb8
+    virtual void SetVehicleManagerSpeed(float speed) = 0;                             // SL::spVehicleManager vslot 0xb8 = SetMaxCount (the value is a count)
     virtual void SetGhostModels(bool enabled) = 0;                                    // cSC4Automaton::sbGhostModelsEnabled
     virtual bool CurrentInputControlIsPlayerDrive() = 0;                              // SL::spView3D 0xc0 -> 0x28 == 0x2b709676
     virtual IAutomataCameraControl* CameraControl() = 0;                              // SL::spRenderer vslot 0x80

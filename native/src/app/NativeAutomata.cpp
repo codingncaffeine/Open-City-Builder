@@ -24,6 +24,7 @@
 #include "sc4/cSTETerrain.h"
 
 namespace native {
+bool NativeCurrentInputControlIsPlayerDrive();   // app/NativePlayerDrive.cpp
 sc4::cSC4AutomataController* NativeFindAttraction(sc4::cISC4Occupant* occupant, cS3DVector3* direction, float* distance, float* strength);   // app/NativeAutomataControllerHost.cpp
 sc4::IAutomatonGroupTemplate* NativeFindAutomatonGroup(std::uint32_t id);                                                                  // app/NativeAutomataManagerHost.cpp
 s3d::cS3DModelInstanceAnimatedSprite* NativeCreateSpriteInstance(const cGZPersistResourceKey& key);   // app/NativeSprites.cpp
@@ -220,7 +221,7 @@ public:
     void StartSoundLoop(std::uint32_t soundId, std::uint32_t handle) override { PostSoundSystemEvent(0xea451903, soundId, handle); }
     void MoveSoundLoop(std::uint32_t handle, std::uint32_t x, std::uint32_t y, std::uint32_t z) override { PostSoundSystemEvent(0xca45190f, handle, x, y, z); }
     std::uint32_t ViewZoom() override { return SL::spViewUtilities ? static_cast<std::uint32_t>(SL::spViewUtilities->Zoom()) : 0; }
-    bool IsDrivingMode() override { return false; }   // no U-Drive-It yet: the vehicle manager never enters driving mode
+    bool IsDrivingMode() override { return NativeCurrentInputControlIsPlayerDrive(); }   // SL::spVehicleManager IsDrivingMode: the U-Drive-It tool is the view's
     void PostAudioEvent(std::uint32_t) override {}
     std::uint32_t RandomBelow(std::uint32_t range) override { return range ? static_cast<std::uint32_t>(rng_() % range) : 0; }
     std::int32_t RandomInt(std::int32_t lo, std::int32_t hi) override { return hi > lo ? lo + static_cast<std::int32_t>(rng_() % static_cast<std::uint32_t>(hi - lo)) : lo; }

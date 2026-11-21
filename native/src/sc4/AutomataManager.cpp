@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -1132,7 +1133,8 @@ void cSC4AutomataManager::UpdateCameraFollow(float deltaMilliseconds) {
     if (zoom < 0) zoom = 0;
     if (zoom > 4) zoom = 4;
     const float nose = kAutomataCameraNoseFraction[zoom];
-    const int noseX = static_cast<int>(static_cast<float>(viewportWidth) * nose + 12582912.0f) - 0x4b400000;
+    // The original rounds through the float bits: (bits of (v + 1.5 * 2^23)) - 0x4b400000 is v rounded to the nearest integer.
+    const int noseX = std::bit_cast<std::int32_t>(static_cast<float>(viewportWidth) * nose + 12582912.0f) - 0x4b400000;
     view->ProjectPointFromViewCoordinatesToViewportCoordinates(viewPosition);
     view->ProjectPointFromViewCoordinatesToViewportCoordinates(viewGround);
 
@@ -1143,7 +1145,7 @@ void cSC4AutomataManager::UpdateCameraFollow(float deltaMilliseconds) {
         viewPosition[0] += static_cast<float>(noseX);
         sCamFollowLastRotation |= 2;
     }
-    const int noseY = static_cast<int>(static_cast<float>(viewportHeight) * nose + 12582912.0f) - 0x4b400000;
+    const int noseY = std::bit_cast<std::int32_t>(static_cast<float>(viewportHeight) * nose + 12582912.0f) - 0x4b400000;
     if (up) {
         viewPosition[1] -= static_cast<float>(noseY);
         sCamFollowLastRotation |= 1;
@@ -1368,10 +1370,10 @@ void cSC4AutomataManager::EnterPlayerDriveView(IAutomataAutomaton* automaton, cI
 
 void cSC4AutomataManager::ExitPlayerDriveView() {
     if (g_host) {
-        // The original passes the address of sTuningParams here, i.e. its first four bytes read as a float (quirk kept).
-        float speed = 0.0f;
-        std::memcpy(&speed, &sTuning.params.f000, sizeof speed);
-        g_host->SetVehicleManagerSpeed(speed);
+        // The vehicle manager's count limit goes back to the tuning's first word (0x4998c89f, the normal vehicle count).
+        std::uint32_t count = 0;
+        std::memcpy(&count, &sTuning.params.f000, sizeof count);
+        g_host->SetVehicleManagerSpeed(static_cast<float>(count));
         g_host->SetPlayerDriveControl(nullptr);
     }
     IAutomataPlayerDriveControl* control = spPlayerDriveView;

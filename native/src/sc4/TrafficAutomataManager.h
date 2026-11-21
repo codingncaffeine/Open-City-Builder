@@ -212,6 +212,16 @@ public:
     virtual IAutomataOccupant* AsAutomataOccupant(cISC4Occupant* occupant) = 0;
     // The traffic network occupant view of a base network occupant (the same object, wider interface).
     virtual ITrafficNetworkOccupant* AsTrafficNetworkOccupant(IAutomataNetworkOccupant* occupant) = 0;
+    // GetRandomCreationPoint's network path: SL::spLotManager vslot 0x14 (the lot at a cell) -> vslot 0x38 (its cell rect); false
+    // without a lot.
+    virtual bool LotCellRectAt(int cellX, int cellZ, SC4RectInt32& rect) { (void)cellX; (void)cellZ; (void)rect; return false; }
+    // The traffic network map's GetSurroundingRoads(out, rect, maxCells, minCells, networkFlags) (vslot 0x68): the network
+    // occupants of the flags between the two cell distances of the rect, one reference each.
+    virtual bool SurroundingRoads(std::vector<ITrafficNetworkMapOccupant*>& out, const SC4RectInt32& rect, int maxCells, int minCells,
+                                  std::uint32_t networkFlags) {
+        (void)out; (void)rect; (void)maxCells; (void)minCells; (void)networkFlags;
+        return false;
+    }
 };
 
 // The two occupant types IsTrafficAutomaton accepts (0x100112d36).

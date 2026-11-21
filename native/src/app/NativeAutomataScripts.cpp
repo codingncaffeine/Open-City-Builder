@@ -4,7 +4,7 @@
 // controller templates and no group classes: every automaton was created as a plain vehicle.
 // The seven "automata" registry commands reach the city's controller manager (SL::spCity vslot 0x178) and the automata manager
 // that takes the group (cSC4AutomataManager::StaticCreateAutomaton); a scripted automaton then registers its own node.
-//   PARTIAL: the player-drive key map is not read; the watercraft manager is not asked for a group.
+//   PARTIAL: the watercraft manager is not asked for a group.
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -28,6 +28,8 @@
 
 namespace native {
 sc4::cSC4AutomataManager* NativeAutomataManagerAt(int index);   // NativeAutomataManagerHost.cpp
+bool NativeDriveKeyMapAvailable();                                            // NativePlayerDrive.cpp
+void NativeDriveKeyCodes(int command, std::uint32_t keys[8], std::uint32_t& count);
 sc4::cSC4AutomataManager* NativeAutomataManagerForGroup(std::uint32_t group);
 namespace {
 using namespace sc4;
@@ -140,8 +142,8 @@ public:
         sc4::cSC4AutomataManager* manager = NativeAutomataManagerAt(index);
         return manager ? manager->GetSourceBuildingCount(group) : 0;
     }
-    bool DriveKeyMapAvailable() override { return false; }
-    void GetDriveKeyCodes(int, std::uint32_t[8], std::uint32_t& count) override { count = 0; }
+    bool DriveKeyMapAvailable() override { return NativeDriveKeyMapAvailable(); }
+    void GetDriveKeyCodes(int command, std::uint32_t keys[8], std::uint32_t& count) override { NativeDriveKeyCodes(command, keys, count); }
     void Report(const std::string& text) override {
         if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "automata scripts: %s\n", text.c_str());
     }

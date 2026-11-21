@@ -27,6 +27,7 @@
 namespace sc4 { IVehicleHost* NewStubIVehicleHost(); }   // app/hosts/IfaceIVehicleHost.cpp
 
 namespace native {
+const sc4::tAutomataPlayerDriveParams* NativePlayerDriveParams(sc4::cSC4Automaton* automaton);   // app/NativePlayerDrive.cpp
 // app/NativeCrime.cpp: the crime simulator's incident list as the crime layer reads it.
 bool NativeCrimeIncidents(std::vector<sc4::ITrafficNetworkManagerApi::CrimeIncidentCell>& out);
 void NativeSetCrimeVisualsCreated(std::uint32_t index, bool created);
@@ -275,9 +276,21 @@ public:
         if (manager && automaton) manager->RecalculateLeaders(TrafficAutomatonView(AutomatonView(automaton)));
     }
     bool IsOccupantGroup(cISC4Occupant* occupant, std::uint32_t group) override { return occupant && occupant->IsOccupantGroup(group); }
-    bool FindPlayerDriveParams(cSC4Automaton* a, const tAutomataPlayerDriveParams** out) override { return stub()->FindPlayerDriveParams(a, out); }
+    // The automata group chain (GetAutomataGroup, then the parents) up to the first group with player-drive parameters.
+    bool FindPlayerDriveParams(cSC4Automaton* a, const tAutomataPlayerDriveParams** out) override {
+        *out = nullptr;
+        if (!a || !a->GetAutomataGroup()) return false;
+        *out = NativePlayerDriveParams(a);
+        return true;
+    }
     int CellAutomatonCount(int travelType, int cellX, int cellZ) override { return stub()->CellAutomatonCount(travelType, cellX, cellZ); }
-    void OccupantsInCell(int cellX, int cellZ, std::vector<ITrafficAutomatonOccupant*>& out) override { stub()->OccupantsInCell(cellX, cellZ, out); }
+    // The traffic network map's tile list of a cell (slot 0x70) through the +0x88 next links: each tile's network occupant
+    // (the map keeps the references).
+    void OccupantsInCell(int cellX, int cellZ, std::vector<ITrafficAutomatonOccupant*>& out) override {
+        auto* map = Component<cSC4TrafficNetworkMap>(CityComponent::TrafficNetwork);
+        for (TrafficTileInfo* tile = map ? map->SafeGetTileInfoAtCell(cellX, cellZ) : nullptr; tile; tile = tile->next)
+            if (tile->occupant) out.push_back(static_cast<ITrafficAutomatonOccupant*>(tile->occupant));
+    }
     bool CanDriveOnCell(int cellX, int cellZ, float x, float z) override { return stub()->CanDriveOnCell(cellX, cellZ, x, z); }
     bool IsInsideCity(float x, float z) override {
         cSC4City* c = HostCity();

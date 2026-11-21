@@ -324,16 +324,63 @@ bool cSC4TrafficAutomataManager::Dispatch(IAutomataAutomaton* automaton, const t
     return placed;
 }
 
+// i386 0x000ced18: with flag 0x2000 or 0x20000 the base's random point; otherwise a random network occupant of the group's
+// network kinds (0x80 for 0x4208 / 0x4217, 0x100 for the el train, 0x200 for the monorail, 2 for the other trains, 0xc49 for
+// the road vehicles) between `minDistance` and the clamped `maxDistance` of the origin's lot (or cell): the out point is that
+// occupant's cell centre at the occupant's altitude. The distances are cells (world units / 16). The point is written to `direction`
+// (the original's out argument).
 bool cSC4TrafficAutomataManager::GetRandomCreationPoint(std::uint32_t group, const cS3DVector3& origin,
                                                         float minDistance, float maxDistance,
                                                         const cS3DVector3& center, cS3DVector3& direction,
                                                         std::uint32_t flags) {
-    // 0x100112566 PARTIAL: the flags & 0x22000 path is the base implementation; the network-occupant path needs
-    // cISC4NetworkManager vslot 0xd0 (exemplars in a cell rect) and the lot manager (SL::spLotManager vslot 0x28).
     if ((flags & 0x22000u) != 0)
         return cSC4AutomataManager::GetRandomCreationPoint(group, origin, minDistance, maxDistance, center, direction,
                                                             flags);
-    return false;
+    if (!CanCreateGroup(group)) return false;
+    std::uint32_t networkFlags = 0xc49;
+    if (group == 0x4208 || group == 0x4217) {
+        networkFlags = 0x80;
+    } else if (group - 0x422cu < 2u) {
+        networkFlags = 0x100;
+    } else if (group - 0x422eu < 2u) {
+        networkFlags = 0x200;
+    } else if (group == 0x4005 || group == 0x4201 || group == 0x4203 || group == 0x4215 || group == 0x4216 || group == 0x4230 ||
+               group == 0x4233) {
+        networkFlags = 2;
+    }
+    ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
+    if (!host) return false;
+    int cellX = 0, cellZ = 0;
+    (void)center;
+    host->WorldToCell(origin.x, origin.z, cellX, cellZ);
+    SC4RectInt32 rect;
+    if (!host->LotCellRectAt(cellX, cellZ, rect)) {
+        rect.x0 = rect.x1 = cellX;
+        rect.z0 = rect.z1 = cellZ;
+    }
+    const float span = static_cast<float>(host->CityCellCount()) * host->CellSize();
+    float limit = minDistance;
+    if (minDistance <= maxDistance) limit = maxDistance <= span ? maxDistance : span;
+    std::vector<ITrafficNetworkMapOccupant*> roads;
+    if (!host->SurroundingRoads(roads, rect, static_cast<int>(limit * 0.0625f), static_cast<int>(minDistance * 0.0625f), networkFlags))
+        return false;
+    bool found = false;
+    if (!roads.empty()) {
+        ITrafficNetworkMapOccupant* road = roads[Random().RandomUint32Uniform(static_cast<std::uint32_t>(roads.size()))];
+        if (road) {
+            found = true;
+            std::uint32_t roadX = 0, roadZ = 0;
+            road->GetOccupiedCell(roadX, roadZ);
+            float x = 0.0f, z = 0.0f;
+            host->CellToWorld(static_cast<int>(roadX), static_cast<int>(roadZ), x, z);
+            direction.x = x + host->CellSize() * 0.5f;   // cSC4City::CellCenterToPosition
+            direction.z = z + host->CellSize() * 0.5f;
+            direction.y = road->GetAltitude(direction.x, direction.z);
+        }
+    }
+    for (ITrafficNetworkMapOccupant* road : roads)
+        if (road) road->Release();
+    return found;
 }
 
 // ---- per-kind queries --------------------------------------------------------------------------------------------------
