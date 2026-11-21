@@ -38,6 +38,8 @@
 #include "app/NativeCitySystems.h"
 #include "app/NativeSnapshot.h"
 #include "app/NativeCheats.h"
+#include "app/NativeKeyboard.h"
+#include "gz/CommandServer.h"
 #include "app/NativeWinControls.h"
 #include "app/NativeNetworkLots.h"
 #include "app/NativeUnderground.h"
@@ -1477,6 +1479,16 @@ int RunScenario(const std::string& path) {
             std::uint32_t id = 0;
             const bool done = cheats && cheats->DoDefaultCheatCodeProcessing(cRZString(text.c_str()), id);
             std::printf("cheat %s: %s (id %08x)\n", text.c_str(), done ? "accepted" : "not accepted", id);
+        } else if (command == "cmdtext") {   // cmdtext TEXT: a command line run as text through the command server (the debug console's path), with its output
+            std::string text; std::getline(words >> std::ws, text);
+            cIGZCommandServer* server = native::GameCommandServer();
+            cIGZCommandParameterSet* output = nullptr;
+            if (server) server->CreateCommandParameterSet(&output);
+            const std::uint32_t status = server ? server->ExecuteCommand(text.c_str(), std::uint32_t(text.size()), output) : 2;
+            cRZString shown;
+            if (server && output) server->ConvertCommandOutputToString(output, shown);
+            std::printf("cmdtext %s -> status %u output \"%s\"\n", text.c_str(), status, shown.ToChar());
+            if (output) output->Release();
         } else if (command == "quit") {
             return 0;
         } else {

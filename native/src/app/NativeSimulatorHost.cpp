@@ -8,10 +8,11 @@
 
 #include "app/NativeCheats.h"
 #include "app/NativeBoot.h"
+#include "app/NativeKeyboard.h"
+#include "gz/CommandServer.h"
 #include "gz/GZFramework.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "gz/cIGZSystemService.h"
-#include "platform/Unwired.h"
 #include "sc4/Exemplar.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/Simulator.h"
@@ -41,14 +42,18 @@ struct NativeSimulatorHost final : ISimulatorHost {
         g_ticked.erase(it);
         service->Release();
     }
-    // The cheat code manager and the command server are not recovered: the simulator's "FPS" / "SimDate" cheats and the
-    // GetSimulationDate command are not reachable.
+    // Cheats go through the game's cheat code manager; commands through the framework command server (SL::spCommandServer:
+    // cSC4Simulator::Init registers GetSimulationDate with slot 6 and no help text, Shutdown removes it with slot 9).
     void RegisterCheat(std::uint32_t id, const char* text) override { native::RegisterGameCheat(id, text); }
     void UnregisterCheat(std::uint32_t id) override { native::UnregisterGameCheat(id); }
     void AddCheatNotification(cIGZMessageTarget2* target, std::uint32_t id) override { native::AddGameCheatListener(target, id); }
     void RemoveCheatNotification(cIGZMessageTarget2* target, std::uint32_t id) override { native::RemoveGameCheatListener(target, id); }
-    void RegisterCommand(std::uint32_t, const char*) override { SC4_UNWIRED("ISimulatorHost::RegisterCommand (command server)"); }
-    void UnregisterCommand(std::uint32_t) override {}
+    void RegisterCommand(std::uint32_t id, const char* name) override {
+        if (cIGZCommandServer* server = native::GameCommandServer()) server->RegisterCommand(id, name, nullptr);
+    }
+    void UnregisterCommand(std::uint32_t id) override {
+        if (cIGZCommandServer* server = native::GameCommandServer()) server->UnregisterCommand(id);
+    }
     bool DebugFunctionalityEnabled() override { return false; }   // the retail build's SL::spSC4 vslot 0xa8
     bool IsDrivingMode() override { return false; }               // no U-Drive-It: the vehicle manager never enters driving mode natively
     cISCPropertyHolder* TuningExemplar() override {
