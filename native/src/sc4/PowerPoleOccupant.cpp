@@ -653,6 +653,8 @@ void cSC4PowerPoleOccupant::DrawConnection(cSC4PowerPoleOccupant* pole, bool byC
 }
 
 // 0x100320544: every connected pole forgets this one, and this one drops its connections (the entries stay).
+std::int64_t cSC4PowerPoleOccupant::GetCostOfDemolition() const { return snCostOfDemolition; }
+
 void cSC4PowerPoleOccupant::BreakAllConnectionsAtDestination(bool quiet) {
     for (std::size_t i = 0; i < connections_.size(); ++i) {
         if (cSC4PowerPoleOccupant* other = connections_[i].pole) other->RemoveConnection(this, false);

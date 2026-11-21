@@ -124,6 +124,7 @@ public:
     std::uint32_t Style() const { return style_; }
     bool IsPreview() const { return preview_; }                 // 0x100324332
     bool HasModel() const { return model_ != nullptr; }
+    std::int64_t GetCostOfDemolition() const;                   // i386 0x006d910a: snCostOfDemolition (tuning 0x0a2eced8)
 
     // --- connections ---
     void AddConnection(cSC4PowerPoleOccupant* pole, std::vector<tLineInfo>* lines);     // 0x10031f4aa

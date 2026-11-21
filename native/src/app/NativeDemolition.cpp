@@ -17,6 +17,7 @@
 #include "app/NativeEffects.h"
 #include "app/NativeZoneDeveloperHost.h"
 #include "gz/cGZPersistResourceManager.h"
+#include "sc4/PowerPoleOccupant.h"
 #include "sc4/BuildingOccupant.h"
 #include "sc4/CommonIIDs.h"
 #include "sc4/Demolition.h"
@@ -382,11 +383,31 @@ public:
         return true;
     }
     bool FloraCost(IDemolishable*, std::int64_t& cost) override { cost = 0; return true; }   // flora slot 22: always 0
-    // PARTIAL: power poles (cISC4PowerPoleOccupant) are not demolishable natively yet.
-    bool PoleCost(IDemolishable*, std::int64_t&) override { return false; }
-    std::vector<IDemolishable*> PoleConnections(IDemolishable*) override { return {}; }
-    void PoleDetach(IDemolishable*) override {}
-    bool IsPlainOccupant(IDemolishable*) override { return false; }
+    // Power poles through cISC4PowerPoleOccupant (QI 0xa8c86142): vslot 10 GetCostOfDemolition, 4 GetNumberOfConnections, 7
+    // GetConnectionOccupant, 6 BreakAllConnectionsAtDestination (i386 vtable of cSC4PowerPoleOccupant).
+    bool PoleCost(IDemolishable* pole, std::int64_t& cost) override {
+        auto* occupant = dynamic_cast<cSC4PowerPoleOccupant*>(Raw(pole));
+        if (!occupant) return false;
+        cost = occupant->GetCostOfDemolition();
+        return true;
+    }
+    std::vector<IDemolishable*> PoleConnections(IDemolishable* pole) override {
+        std::vector<IDemolishable*> out;
+        auto* occupant = dynamic_cast<cSC4PowerPoleOccupant*>(Raw(pole));
+        if (!occupant) return out;
+        for (int i = 0; i < occupant->GetNumberOfConnections(); ++i)
+            if (auto* other = dynamic_cast<cSC4PowerPoleOccupant*>(occupant->GetConnectionOccupant(i)))
+                out.push_back(g_arena.Of(static_cast<cISC4Occupant*>(other)));
+        return out;
+    }
+    void PoleDetach(IDemolishable* pole) override {
+        if (auto* occupant = dynamic_cast<cSC4PowerPoleOccupant*>(Raw(pole))) occupant->BreakAllConnectionsAtDestination(true);
+    }
+    // a connected pole left without connections goes with the demolished one
+    bool IsPlainOccupant(IDemolishable* occupant) override {
+        auto* other = dynamic_cast<cSC4PowerPoleOccupant*>(Raw(occupant));
+        return other && other->GetNumberOfConnections() == 0;
+    }
     IDemolitionEffect* CreateEffect(std::uint32_t effectSet, std::uint32_t index) override;
     void ReleaseEffect(IDemolitionEffect* effect) override;
     // The group effect (demolish_group_small / medium / large: its rumble) at the region's centre.
