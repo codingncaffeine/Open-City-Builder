@@ -131,7 +131,39 @@ public:
     std::uint32_t typeNext = 0xffffffffu;                    // +0xf0 (Tab)
 };
 
-using IntersectionRuleMap = std::unordered_map<std::uint32_t, cIntRule>;
+// The iteration order of the original's __gnu_cxx::hash_map<unsigned long, ...> (the SGI hashtable of its libstdc++): the
+// hash of a key is the key, a key lives in bucket key % bucket count, a new key goes to the front of its bucket, and before
+// every insertion the table grows to the first prime of the SGI prime list not below the new element count when that is
+// more buckets than it has, moving each old bucket's nodes from its front to the front of their new buckets. clear() keeps
+// the bucket count. A default-constructed map starts at 193 buckets (the prime for the hint 100). The original walks
+// sIntersectionRules in this order where the first matching rule wins (IdentifyHighwayIntersections,
+// QueryUserForPotentialIntersections).
+class cHashMapOrder {
+public:
+    explicit cHashMapOrder(std::size_t hint = 100);
+    void Insert(std::uint32_t key);   // hash_map::operator[] / insert of the key
+    void Clear();                     // hash_map::clear
+    std::vector<std::uint32_t> Keys() const;   // begin() .. end()
+    std::size_t BucketCount() const { return buckets_.size(); }
+    std::size_t Size() const { return size_; }
+
+private:
+    std::vector<std::vector<std::uint32_t>> buckets_;   // each bucket front first
+    std::size_t size_ = 0;
+};
+
+// cSC4NetworkTool::sIntersectionRules: the rules by id, with the original's iteration order beside them.
+struct IntersectionRuleMap : std::unordered_map<std::uint32_t, cIntRule> {
+    cHashMapOrder order;
+    cIntRule& operator[](std::uint32_t id) {
+        order.Insert(id);
+        return std::unordered_map<std::uint32_t, cIntRule>::operator[](id);
+    }
+    void clear() {
+        order.Clear();
+        std::unordered_map<std::uint32_t, cIntRule>::clear();
+    }
+};
 
 // ReadHighwayIntersectionRules (0x001520da): every "HighwayIntersectionInfo_<id>" section of the ini becomes a rule (keys
 // in file order), every "Ordering..." section links the rules into their rotation and type rings. The map is cleared first.

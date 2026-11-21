@@ -40,6 +40,8 @@
 #include "gz/RZServices.h"
 #include "sc4/NeighborsSimulator.h"
 #include "sc4/cSTETerrain.h"
+#include "sc4/LocalGridHelper.h"
+#include "sc4/SC4UI.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/PowerLineTool.h"
 #include "sc4/NetworkBridgeOccupant.h"
@@ -281,6 +283,45 @@ public:
     cIGZUnknown* AcquireTerrain() override { return CurrentCity() ? CurrentCity()->GetComponent(sc4::CityComponent::Terrain) : nullptr; }
     float TerrainCellSize() override { return 16.0f; }
     float TerrainVertexHeight(std::int32_t vertex) override { sc4::cSTETerrain* t = Terrain(); return t ? t->GetAltitude(vertex) : 0.0f; }
+    // QueryUserForPotentialIntersections: a new tool of the type (GetNetworkTool(type, true)), the budget, the terrain, the
+    // preview effect (the effects manager through the local grid helper, placed as the intersection tool places it), the
+    // generic confirmation dialog and the confirmation sound.
+    sc4::cSC4NetworkTool* AcquireNetworkTool(std::uint32_t type) override {
+        auto* tool = new sc4::cSC4NetworkTool(type);
+        tool->AddRef();
+        return tool;
+    }
+    std::int64_t TotalFunds() override { sc4::cSC4BudgetSimulator* b = Budget(); return b ? b->GetTotalFunds() : 0; }
+    void WithdrawFunds(std::int64_t amount) override { if (sc4::cSC4BudgetSimulator* b = Budget()) b->WithdrawFunds(amount); }
+    float TerrainAltitude(float x, float z) override { sc4::cSTETerrain* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
+    cIGZUnknown* StartEffect(const std::string& name, const float (&position)[3], std::uint8_t rotation, bool flip) override {
+        sc4::ILocalGridHost* grid = sc4::LocalGridHost();
+        sc4::ILocalGridEffect* effect = grid && grid->Effects() ? grid->Effects()->Create(name.c_str()) : nullptr;
+        if (!effect) return nullptr;
+        cS3DTransform transform;
+        transform.translation[0] = position[0];
+        transform.translation[1] = position[1];
+        transform.translation[2] = position[2];
+        transform.flags |= 1;
+        transform.changeCounter = static_cast<std::uint8_t>(transform.changeCounter + 1);
+        // cS3DMatrix3::MakeIdentity + RotateY(rotation * -pi/2); a flipped piece negates the first row
+        const float angle = static_cast<float>(rotation) * -1.5707964f, c = std::cos(angle), s = std::sin(angle);
+        float m[3][3] = {{c, 0, s}, {0, 1, 0}, {-s, 0, c}};
+        if (flip) for (float& v : m[0]) v = -v;
+        std::memcpy(transform.rotation, m, sizeof m);
+        transform.flags |= 4;
+        transform.changeCounter = static_cast<std::uint8_t>(transform.changeCounter + 1);
+        effect->SetEffectTransform(transform);
+        effect->Start(0);
+        return effect;
+    }
+    void StopEffect(cIGZUnknown* effect) override {
+        auto* grid = static_cast<sc4::ILocalGridEffect*>(effect);
+        grid->Stop(0);
+        grid->Release();
+    }
+    bool ConfirmationDialog(const cIGZString& text) override { return nSC4UI::GenericConfirmationDialog(cRZString(""), text, nullptr, nullptr); }
+    void PlayUISound(std::uint32_t sound) override { PlayGameSound(sound); }
     bool TerrainAllowsNetwork(std::uint32_t x, std::uint32_t z) override { sc4::cSTETerrain* t = Terrain(); return t && t->CellHasWater(x, z); }
     // The bridge solve: terrain vslot 0x48 / 0x44 and occupant manager vslot 0xa4 with the tool's cSC4NetworkORFilter.
     float CellMaxSurfaceLevel(std::uint32_t x, std::uint32_t z) override { sc4::cSTETerrain* t = Terrain(); return t ? t->GetMaxSurfaceLevel(x, z) : 0.0f; }
@@ -669,6 +710,11 @@ void NativeLayNetworkLine(std::uint32_t type, int x1, int z1, int x2, int z2) {
                     bridge.startStep, bridge.endStep, bridge.elevation, bridge.referenceAltitude, bridge.pieces.size());
     }
     tool->ClearCellPreviews();
+    // DoPlacement asks about the crossings the placement left (the dialogs take their default answer in a kit).
+    tool->QueryUserForPotentialIntersections();
+    for (const sc4::tIntersection& intersection : tool->Intersections())
+        std::printf("netline: intersection rule %08x at %d,%d steps %d (%d..%d)\n", intersection.ruleId, intersection.x, intersection.z,
+                    intersection.step, intersection.stepA, intersection.stepB);
     tool->Reset();
     std::printf("netline %u %d,%d -> %d,%d: neighbor connection %s", type, x1, z1, x2, z2, possible ? "possible" : "none");
     if (possible) std::printf(" (type %u at %d,%d side %u)", info.unknown8, static_cast<int>(info.x), static_cast<int>(info.z), info.unknownC);

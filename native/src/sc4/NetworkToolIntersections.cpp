@@ -11,11 +11,14 @@
 // and its cost, +0x398 the type record, +0x39c the network type, +0x3a4 the occupant filter.
 #include "sc4/NetworkTool.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <list>
 
 #include "sc4/NetworkOccupant.h"
 #include "sc4/NetworkOccupantWithPreBuiltModel.h"
 #include "sc4/NetworkWorldCache.h"
+#include "rz/cRZString.h"
 
 namespace sc4 {
 
@@ -218,6 +221,65 @@ void cSC4NetworkTool::MarkHighwayIntersectionPieces(bool mark) {
     }
 }
 
+// i386 0x004ce810. Walks the cells of the first `steps` dragged steps; on a cell that already holds a network occupant every
+// auto-placed rule (+0xe1) naming one of the cell's network types, inside the city there and whose Test matches, in the
+// original's sIntersectionRules order, marks that the step crosses; the first such rule of a run of crossing steps is
+// recorded (rule, cell, step) and its cells marked. When a step no longer crosses, the recorded intersection is kept with
+// the step offsets of its rule and the crossing cell joins the potential intersections with the drag's network type; a run
+// still open at the end of the drag is kept the same way with the type 4. Returns `steps` (the original never cuts it).
+int cSC4NetworkTool::IdentifyHighwayIntersections(int steps, std::uint32_t networkType) {
+    intersections_.clear();
+    tIntersection record;
+    bool open = false;
+    const std::vector<std::uint32_t> order = Rules().order.Keys();
+    const auto keep = [&](std::uint32_t potentialType) {
+        const nSC4Networks::cIntRule* rule = GetIntersectionRule(record.ruleId);
+        record.stepA = record.step + (rule ? rule->stepOffsetA : 0);
+        record.stepB = record.step + (rule ? rule->stepOffsetB : 0);
+        if (std::getenv("SC4_NETDEBUG"))
+            std::fprintf(stderr, "network solve: intersection rule %08x at %d,%d step %d (%d..%d), potential type %u\n", record.ruleId, record.x,
+                         record.z, record.step, record.stepA, record.stepB, potentialType);
+        intersections_.push_back(record);
+        tPotentialIntersection potential;
+        potential.x = static_cast<std::uint32_t>(record.x);
+        potential.z = static_cast<std::uint32_t>(record.z);
+        potential.networkFlags = potentialType;
+        unknown10_.push_back(potential);
+    };
+    for (int step = 0; step < steps && step < static_cast<int>(steps_.size()); ++step) {
+        bool crosses = false;
+        for (std::uint32_t c = steps_[static_cast<std::size_t>(step)].firstCell; c <= steps_[static_cast<std::size_t>(step)].lastCell && c < cells_.size(); ++c) {
+            const std::uint32_t x = cells_[c].x, z = cells_[c].z;
+            cSC4NetworkCellInfo* cell = GetCellInfo(Key(x, z));
+            if (!cell || !cell->occupant) continue;
+            for (std::uint32_t id : order) {
+                const nSC4Networks::cIntRule* rule = GetIntersectionRule(id);
+                if (!rule || !rule->autoPlace || !(cell->networkFlags & rule->typeMask)) continue;
+                if (!rule->IsWithinBounds(static_cast<int>(x), static_cast<int>(z), static_cast<std::uint32_t>(cityWidth_),
+                                          static_cast<std::uint32_t>(cityHeight_)))
+                    continue;
+                if (rule->Test(static_cast<int>(x), static_cast<int>(z), *this) != nSC4Networks::cIntRule::kMatch) continue;
+                if (!open) {
+                    record = tIntersection{};
+                    record.ruleId = rule->id;
+                    record.x = static_cast<int>(x);
+                    record.z = static_cast<int>(z);
+                    record.step = step;
+                    MarkIntersection(record, true);
+                    open = true;
+                }
+                crosses = true;
+            }
+        }
+        if (!crosses && open) {
+            keep(networkType);
+            open = false;
+        }
+    }
+    if (open) keep(4);
+    return steps;
+}
+
 // The occupied cells of the recorded intersections leave the set to solve; the record keeps them.
 void cSC4NetworkTool::RemoveHighwayIntersectionPiecesFromSetOfCellsToBeSolved(std::unordered_set<std::uint32_t>& cells) {
     for (tIntersection& intersection : intersections_) {
@@ -322,6 +384,60 @@ void cSC4NetworkTool::InsertIntersectionConstraints(INetworkConstraintSatisfier&
                     break;
             }
         }
+    }
+}
+
+}  // namespace sc4
+
+namespace sc4 {
+
+// i386 0x0012b18c (vslot 0x188), after a paid placement. For every potential intersection the drag left (+0x08) the first
+// rule, in the original's sIntersectionRules order, that has a convert query (+0x78) and whose Test matches at the cell on
+// the network manager's highway tool decides: when the tool can lay it as a preview and the city can pay its cost, the
+// rule's preview effect shows over its first model and the player is asked the query string (group 0x2a592fd1); a yes lays
+// the intersection for real, withdraws the cost and plays the confirmation sound.
+void cSC4NetworkTool::QueryUserForPotentialIntersections() {
+    if (worldCache_) worldCache_->Clear();
+    INetworkToolHost* host = GetNetworkToolHost();
+    if (!host) return;
+    const std::vector<tPotentialIntersection> potentials = unknown10_;
+    for (const tPotentialIntersection& potential : potentials) {
+        cSC4NetworkTool* tool = host->AcquireNetworkTool(kNetworkHighway);
+        if (!tool) continue;
+        tool->Init();
+        const int x = static_cast<int>(potential.x), z = static_cast<int>(potential.z);
+        for (std::uint32_t id : Rules().order.Keys()) {
+            const nSC4Networks::cIntRule* rule = GetIntersectionRule(id);
+            if (!rule || rule->convertQueryId == 0) continue;
+            if (rule->Test(x, z, *tool) != nSC4Networks::cIntRule::kMatch) continue;
+            if (std::getenv("SC4_NETDEBUG")) std::fprintf(stderr, "network query: potential %d,%d asks rule %08x\n", x, z, rule->id);
+            if (tool->InsertIsolatedHighwayIntersection(x, z, rule->id, false)) {
+                const std::uint32_t cost = static_cast<std::uint32_t>(tool->GetCostOfSolution());   // vslot 0x50
+                const std::int64_t funds = host->TotalFunds();
+                if (funds >= 0 && (funds > 0xffffffffll || cost <= static_cast<std::uint32_t>(funds))) {
+                    cIGZUnknown* effect = nullptr;
+                    if (!rule->previewEffect.empty() && !rule->pieces.empty()) {
+                        const nSC4Networks::cIntPiece& piece = rule->pieces.front();
+                        // The altitude is asked at the cell indices as world coordinates, as the original passes them.
+                        const float position[3] = {(static_cast<float>(x) + 0.5f) * 16.0f + piece.x,
+                                                   host->TerrainAltitude(static_cast<float>(x), static_cast<float>(z)),
+                                                   (0.5f + static_cast<float>(z)) * 16.0f + piece.z};
+                        effect = host->StartEffect(rule->previewEffect, position, piece.rotation, piece.flip != 0);
+                    }
+                    cRZString text;
+                    if (!host->LoadString(0x2a592fd1, rule->convertQueryId, text)) text = cRZString("## Intersection query string missing ##");
+                    if (host->ConfirmationDialog(text)) {
+                        tool->InsertIsolatedHighwayIntersection(x, z, rule->id, true);
+                        host->WithdrawFunds(static_cast<std::int64_t>(cost));
+                        host->PlayUISound(0xea5ec59f);
+                    }
+                    if (effect) host->StopEffect(effect);
+                }
+            }
+            break;
+        }
+        tool->Shutdown();
+        tool->Release();
     }
 }
 

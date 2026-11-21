@@ -70,6 +70,7 @@ namespace sc4 {
 class cISC4NetworkToolUI;
 class cSC4NetworkOccupant;
 class cSC4NetworkOccupantWithPreBuiltModel;
+class cSC4NetworkTool;
 class cSC4NetworkConstructionCrew;
 class cSC4TileEvaluator;
 
@@ -639,6 +640,20 @@ public:
     virtual void SendOccupantDemolished(cSC4NetworkOccupant* /*occupant*/) {}
     virtual bool RemoveNetworkOccupant(cSC4NetworkOccupant* /*occupant*/) { return false; }
     virtual void GetIntersectionPieces(cSC4NetworkOccupant* /*occupant*/, std::vector<cSC4NetworkOccupant*>& /*out*/) {}
+    // QueryUserForPotentialIntersections (i386 0x0012b18c): SL::NetworkManager() vslot 0x14 GetNetworkTool(type, true) with one
+    // reference (the caller Inits it, vslot 0xc, and shuts it down, 0x10, before it releases it); the city budget's total funds
+    // (spCity vslot 0xd0, budget vslot 0x18) and its withdrawal (vslot 0x20 (amount, 0)); the terrain's GetAltitude(x, z)
+    // (the tool's +0x44, vslot 0x30); the named visual effect (spEffectsManager vslot 0x18, one reference) placed (vslot 0x1c)
+    // and started (vslot 0xc, 0) at `position` turned by `rotation` quarter turns (mirrored when `flip`), then stopped (vslot
+    // 0x10, 0) and released; nSC4UI::GenericConfirmationDialog(empty title, text, null, null); spSS vslot 0x28 (1, sound, 0, 0, 0).
+    virtual cSC4NetworkTool* AcquireNetworkTool(std::uint32_t /*type*/) { return nullptr; }
+    virtual std::int64_t TotalFunds() { return 0; }
+    virtual void WithdrawFunds(std::int64_t /*amount*/) {}
+    virtual float TerrainAltitude(float /*x*/, float /*z*/) { return 0.0f; }
+    virtual cIGZUnknown* StartEffect(const std::string& /*name*/, const float (&/*position*/)[3], std::uint8_t /*rotation*/, bool /*flip*/) { return nullptr; }
+    virtual void StopEffect(cIGZUnknown* /*effect*/) {}
+    virtual bool ConfirmationDialog(const cIGZString& /*text*/) { return false; }
+    virtual void PlayUISound(std::uint32_t /*sound*/) {}
     virtual cSC4NetworkOccupant* TunnelOtherEnd(cSC4NetworkOccupant* /*portal*/) { return nullptr; }
     // The bridge solve's terrain and occupant queries (i386 the tool's terrain +0x44 and occupant manager +0x48):
     // terrain vslot 0x48 GetMaxSurfaceLevel (the highest corner of land or water), vslot 0x44 GetCellCornerAltitudes (the land
@@ -957,6 +972,7 @@ public:
                                         std::uint32_t pathId);                                       // 0x00127f2e
     void MarkIntersection(const tIntersection& intersection, bool mark);                              // 0x004ce724
     void MarkHighwayIntersectionPieces(bool mark);                                                    // 0x004ce7ae
+    int IdentifyHighwayIntersections(int steps, std::uint32_t networkType);                           // 0x004ce810
     void RemoveHighwayIntersectionPiecesFromSetOfCellsToBeSolved(std::unordered_set<std::uint32_t>& cells);   // 0x004ce63c
     void InsertIntersectionCellsIntoSolvedSet();                                                      // 0x00143f6a
     void InsertIntersectionConstraints(INetworkConstraintSatisfier& satisfier);                       // 0x00144e56

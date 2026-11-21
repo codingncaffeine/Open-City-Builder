@@ -2395,12 +2395,16 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, cSC4NetworkConstructionCrew* crew
             AssignEdgeMajorTypes(networkType);
             AddGroupingInfo(networkType);
             DoAdditionalDraws();
-            // IdentifyHighwayIntersections: not ported (no highway crossings); the valid count stays.
-            BuildSetOfCellsToBeSolved();
-            if (networkType == kNetworkOneWayRoad) ResolveOneWayConflicts(networkType);
-            MarkNeighborConnections();
-            const int solvedSteps = SolveNetwork(networkType, false);
-            if (solvedSteps < validSteps_) {
+            const int crossingSteps = IdentifyHighwayIntersections(validSteps_, networkType);
+            const int solvedSteps = crossingSteps < validSteps_ ? crossingSteps : [&] {
+                BuildSetOfCellsToBeSolved();
+                if (networkType == kNetworkOneWayRoad) ResolveOneWayConflicts(networkType);
+                MarkNeighborConnections();
+                return SolveNetwork(networkType, false);
+            }();
+            if (crossingSteps < validSteps_) {
+                failureReason_ = static_cast<int>(0xf0000005);
+            } else if (solvedSteps < validSteps_) {
                 if (std::getenv("SC4_NETDEBUG")) std::fprintf(stderr, "network solve: %d of %d steps solved\n", solvedSteps, validSteps_);
                 failureReason_ = kFailSolve;
             } else {
@@ -2425,7 +2429,7 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, cSC4NetworkConstructionCrew* crew
         }
         // the whole drag solved: when it ends at the city edge, solve it again with the neighbour connections' edges open
         if (anchors_.size() < 2 || !AttemptNeighborConnections(allowDiagonals, networkType)) break;
-        // MarkHighwayIntersectionPieces(false) here walks the highway intersections, which are not identified yet (none)
+        MarkHighwayIntersectionPieces(false);
         connected = true;
     }
     std::list<cSC4NetworkOccupant*> placed;
@@ -2444,6 +2448,7 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, cSC4NetworkConstructionCrew* crew
             InsertOccupantsForSolvedCells(solvedCellList_, &placed, false);
             InsertBridgePieces(&placed);
             InsertTunnelPieces(networkType);
+            InsertHighwayIntersectionPieces(&placed);
         }
     }
     if (!place) {

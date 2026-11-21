@@ -839,9 +839,6 @@ void cSC4NetworkTool::ClearCellPreviews() {
 // Not modelled yet (unknown460_): nothing is ever highlighted.
 void cSC4NetworkTool::ClearOccupantHighlights() {}
 
-// i386 0x0012b18c. Not ported yet: the multi-type intersection query (it only asks when the solve found some).
-void cSC4NetworkTool::QueryUserForPotentialIntersections() {}
-
 // i386 0x00124dbe. The per-cell part: each newly solved cell (status) that is not +0x5a costs the most expensive of
 // its network types' per-cell costs (type info +0xdc), and every corner the solve moved costs |terrain - solved| times
 // the terrain-change factor (params, i386 +0x368), plus the tunnels' length times the tunnel cost per cell. The bridge
