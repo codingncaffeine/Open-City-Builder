@@ -491,3 +491,48 @@ void NativeSubwayRouteReport(int x0, int z0, int x1, int z1, std::uint32_t allow
 }
 
 }  // namespace native
+
+namespace native {
+
+// Kit command `modesplit [LABEL]`: the commute mode split of the traffic simulator's current trips (CommuteModeSplit). Read-only.
+void NativeModeSplitReport(const char* label) {
+    auto* simulator = Component<cSC4TrafficSimulator>(CityComponent::TrafficSimulator);
+    if (!simulator) {
+        std::printf("modesplit %s: no traffic simulator\n", label);
+        return;
+    }
+    const cSC4TrafficSimulator::ModeSplit s = simulator->CommuteModeSplit();
+    const auto pct = [&](std::uint64_t v) { return s.routed ? 100.0 * double(v) / double(s.routed) : 0.0; };
+    std::printf("modesplit %s: commuters %llu routed %llu unrouted %llu freight %llu | car %llu (%.1f%%) walk %llu (%.1f%%) walk-only %llu (%.1f%%) "
+                "bus %llu (%.1f%%) train %llu (%.1f%%) subway %llu (%.1f%%) el %llu (%.1f%%) mono %llu (%.1f%%) any-transit %llu (%.1f%%)\n",
+                label, (unsigned long long)s.commuters, (unsigned long long)s.routed, (unsigned long long)s.unrouted, (unsigned long long)s.freight,
+                (unsigned long long)s.byType[1], pct(s.byType[1]), (unsigned long long)s.byType[0], pct(s.byType[0]), (unsigned long long)s.walkOnly,
+                pct(s.walkOnly), (unsigned long long)s.byType[2], pct(s.byType[2]), (unsigned long long)s.byType[3], pct(s.byType[3]),
+                (unsigned long long)s.byType[6], pct(s.byType[6]), (unsigned long long)s.byType[7], pct(s.byType[7]), (unsigned long long)s.byType[8],
+                pct(s.byType[8]), (unsigned long long)s.transit, pct(s.transit));
+    static const char* kStrategy[3] = {"transit-pref", "car-pref", "neutral"};
+    for (int i = 0; i < 3; ++i)
+        std::printf("modesplit %s: strategy %s routed %llu any-transit %llu car %llu\n", label, kStrategy[i], (unsigned long long)s.byStrategy[i][0],
+                    (unsigned long long)s.byStrategy[i][1], (unsigned long long)s.byStrategy[i][2]);
+}
+
+}  // namespace native
+
+namespace native {
+
+// Kit command `routeparity [N]`: the first N routed commuter trips searched again toward their own destinations
+// (cSC4TrafficSimulator::RouteParity); right after loading a city these are the routes the original computed. Changes nothing.
+void NativeRouteParityReport(int limit) {
+    auto* simulator = Component<cSC4TrafficSimulator>(CityComponent::TrafficSimulator);
+    if (!simulator) {
+        std::printf("routeparity: no traffic simulator\n");
+        return;
+    }
+    const cSC4TrafficSimulator::RouteParityResult r = simulator->RouteParity(limit > 0 ? std::uint32_t(limit) : 0xffffffffu);
+    std::printf("routeparity: compared %u not found %u same travel types %u same route %u; walk-only stored %u ours %u; mean |length diff| %.4f, mean signed diff (same types) %.4f\n",
+                r.compared, r.notFound, r.sameTypes, r.sameRoute, r.savedWalkOnly, r.oursWalkOnly, r.compared ? r.lengthDiff / r.compared : 0.0,
+                r.sameTypes ? r.signedDiffSame / r.sameTypes : 0.0);
+    for (const std::string& line : r.mismatches) std::printf("routeparity: mismatch %s\n", line.c_str());
+}
+
+}  // namespace native

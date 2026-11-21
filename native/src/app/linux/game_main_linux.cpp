@@ -1446,6 +1446,14 @@ int RunScenario(const std::string& path) {
             words >> x0 >> z0 >> x1 >> z1 >> allowed >> start;
             native::NativeSubwayRouteReport(x0, z0, x1, z1, static_cast<std::uint32_t>(std::strtoul(allowed.c_str(), nullptr, 16)),
                                             static_cast<std::uint32_t>(std::strtoul(start.c_str(), nullptr, 16)));
+        } else if (command == "modesplit") {   // modesplit [LABEL]: the commute mode split of the traffic simulator's trips (read-only)
+            std::string label;
+            words >> label;
+            native::NativeModeSplitReport(label.c_str());
+        } else if (command == "routeparity") {   // routeparity [N]: stored commuter routes searched again toward their destinations (read-only)
+            int limit = 0;
+            words >> limit;
+            native::NativeRouteParityReport(limit);
         } else if (command == "fires") {   // fires: the fire disaster's state, one line per fire
             native::NativeFireReport();
         } else if (command == "policepower") {   // policepower X0 Z0 X1 Z1 STEP: the police power map the riots read (read-only)

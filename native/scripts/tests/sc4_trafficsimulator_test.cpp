@@ -198,6 +198,21 @@ struct Host : ITrafficHost {
         return it == demandTotals.end() ? 0 : it->second;
     }
     SC4RectInt32 TrafficSourceStartRect(void*) override { return sourceRect; }
+    // AllLots: owned views of the lots in `listed` (the city's lot list)
+    struct LotView : ITrafficLot {
+        FakeLot* lot;
+        explicit LotView(FakeLot* l) : lot(l) {}
+        sc4::cISCPropertyHolder* Properties() override { return lot->Properties(); }
+        void OccupiedRect(SC4RectInt32& out) override { lot->OccupiedRect(out); }
+        void* TrafficSource() override { return lot->TrafficSource(); }
+        std::list<cSC4TripData>* TripList(void* s) override { return lot->TripList(s); }
+        void RefreshTrafficSource(void* s) override { lot->RefreshTrafficSource(s); }
+    };
+    std::vector<FakeLot*> listed;
+    void AllLots(std::vector<std::unique_ptr<ITrafficLot>>& out) override {
+        out.clear();
+        for (FakeLot* l : listed) out.push_back(std::make_unique<LotView>(l));
+    }
 };
 
 }  // namespace
@@ -1178,6 +1193,37 @@ int main() {
         back.Shutdown();
         host.cellsX = host.cellsZ = 0;
     }
+
+    // ==== CommuteModeSplit: commuter trips with a route, by the travel types they used ====
+    {
+        cSC4TrafficSimulator split(&host, &random);
+        FakeLot home, other;
+        const auto trip = [](std::uint8_t type, std::uint8_t strategy, std::uint8_t kind, std::uint32_t count, std::uint32_t types, bool routed = true,
+                             std::uint8_t flags = 9) {
+            cSC4TripData t;
+            t.type = type; t.index = strategy; t.kind = kind; t.count = count; t.extra = types; t.flags = flags;
+            if (routed) t.route = {0, 1, 1};
+            return t;
+        };
+        home.trips = {trip(0, 0, 3, 10, 0x1),             // walked
+                      trip(0, 0, 3, 5, 0x41),             // walked to the subway
+                      trip(1, 1, 3, 7, 0x2),              // drove
+                      trip(2, 2, 1, 4, 0x5),              // re-route pending, kept its walk + bus route
+                      trip(0, 0, 0, 3, 0x2, false),       // still to search
+                      trip(0, 0, 5, 2, 0x0, false),       // no route found
+                      trip(0, 0, 3, 1, 0x12fc3c, true, 2)};   // a reachability probe: not commuters
+        other.trips = {trip(3, 2, 3, 9, 0x10),            // freight
+                       trip(1, 2, 3, 6, 0x8 | 0x1)};      // walked to the train
+        host.listed = {&home, &other};
+        const cSC4TrafficSimulator::ModeSplit s = split.CommuteModeSplit();
+        CHECK(s.commuters == 10 + 5 + 7 + 4 + 3 + 2 + 6);
+        CHECK(s.routed == 10 + 5 + 7 + 4 + 6 && s.unrouted == 5 && s.freight == 9);
+        CHECK(s.byType[0] == 10 + 5 + 4 + 6 && s.byType[1] == 7 && s.byType[2] == 4 && s.byType[3] == 6 && s.byType[6] == 5);
+        CHECK(s.walkOnly == 10 && s.transit == 5 + 4 + 6);
+        CHECK(s.byStrategy[0][0] == 15 && s.byStrategy[0][1] == 5 && s.byStrategy[1][2] == 7 && s.byStrategy[2][0] == 10 && s.byStrategy[2][1] == 10);
+        host.listed.clear();
+    }
+
 
     if (failures) return 1;
     std::printf("sc4_trafficsimulator: all passed\n");

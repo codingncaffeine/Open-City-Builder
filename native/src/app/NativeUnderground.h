@@ -15,5 +15,9 @@ void NativeSubwayReport(int limit, bool paths = false);
 // subwayroute X0 Z0 X1 Z1 ALLOWED START: one traffic path search between two cells with the given travel types
 // (app/NativeTrafficAutomata.cpp)
 void NativeSubwayRouteReport(int x0, int z0, int x1, int z1, std::uint32_t allowed, std::uint32_t start);
+// modesplit [LABEL]: the commute mode split of the traffic simulator's current trips (app/NativeTrafficAutomata.cpp)
+void NativeModeSplitReport(const char* label);
+// routeparity [N]: stored commuter routes searched again toward their destinations (app/NativeTrafficAutomata.cpp)
+void NativeRouteParityReport(int limit);
 
 }  // namespace native

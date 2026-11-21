@@ -990,9 +990,22 @@ void cSC4TrafficSimulator::DoPostCityInit() {
         WorkOnRefreshCommuteMap();
     }
     if (Debug()) {
-        double road = 0;
-        if (volume_[1]) for (auto& column : volume_[1]->GetGridData()) for (float v : column) road += v;
-        std::fprintf(stderr, "traffic: volume at load: road %.0f\n", road);
+        double sums[6] = {};
+        for (int n = 0; n < 6; ++n)
+            if (volume_[std::size_t(n)])
+                for (auto& column : volume_[std::size_t(n)]->GetGridData()) for (float v : column) sums[n] += v;
+        std::fprintf(stderr, "traffic: volume at load: walk %.0f road %.0f rail %.0f subway %.0f el %.0f mono %.0f\n", sums[0], sums[1], sums[2], sums[3], sums[4], sums[5]);
+        std::fprintf(stderr, "traffic: tunables: generates traffic");
+        for (int t = 0; t < 9; ++t) std::fprintf(stderr, " %d", int(tunables_.travelTypeEnabled[std::size_t(t)]));
+        std::fprintf(stderr, "; start costs neutral/transit/car");
+        for (const auto* a : {&tunables_.values_ee0, &tunables_.values_f04, &tunables_.values_f28}) {
+            std::fprintf(stderr, " [");
+            for (float v : *a) std::fprintf(stderr, " %.2f", v);
+            std::fprintf(stderr, " ]");
+        }
+        std::fprintf(stderr, "; strategies");
+        for (std::uint8_t v : travelStrategies_) std::fprintf(stderr, " %u", unsigned(v));
+        std::fprintf(stderr, "\n");
     }
     ResumeLoadedCycle();
     // strategy buckets from the lots, in list order
@@ -1725,6 +1738,103 @@ void cSC4TrafficSimulator::DumpTrips(const char* path) {
                          lot->ZoneType(), t.type, t.index, t.flags, t.kind, t.count, t.sourceX, t.sourceZ, t.distance, t.extra, t.route.size(), t.routeReversed.size());
     }
     std::fclose(f);
+}
+
+cSC4TrafficSimulator::ModeSplit cSC4TrafficSimulator::CommuteModeSplit() const {
+    ModeSplit out;
+    if (!host_) return out;
+    std::vector<std::unique_ptr<ITrafficLot>> lots;
+    host_->AllLots(lots);
+    for (auto& lot : lots) {
+        std::list<cSC4TripData>* trips = lot->TripList(lot->TrafficSource());
+        if (!trips) continue;
+        for (const cSC4TripData& t : *trips) {
+            if (t.flags & 2) continue;   // reachability probes carry no commuters
+            if (t.type == 3) {
+                out.freight += t.count;
+                continue;
+            }
+            out.commuters += t.count;
+            if (t.kind == 4 || t.kind == 5 || t.route.empty()) {   // a trip waiting for a search (0, 1) still holds its last route
+                out.unrouted += t.count;
+                continue;
+            }
+            out.routed += t.count;
+            for (int k = 0; k < 9; ++k)
+                if ((t.extra >> k) & 1) out.byType[std::size_t(k)] += t.count;
+            const bool transit = (t.extra & 0x1cc) != 0;   // bus, passenger train, subway, el-train, monorail
+            if ((t.extra & 0x1ff) == 1) out.walkOnly += t.count;
+            if (transit) out.transit += t.count;
+            if (t.index < 3) {
+                out.byStrategy[t.index][0] += t.count;
+                if (transit) out.byStrategy[t.index][1] += t.count;
+                if (t.extra & 2) out.byStrategy[t.index][2] += t.count;
+            }
+        }
+    }
+    return out;
+}
+
+cSC4TrafficSimulator::RouteParityResult cSC4TrafficSimulator::RouteParity(std::uint32_t limit) {
+    RouteParityResult out;
+    if (!host_ || !graph_) return out;
+    std::vector<std::unique_ptr<ITrafficLot>> lots;
+    host_->AllLots(lots);
+    cSC4PathFinder finder(graph_);
+    finder.AddRef();
+    finder.Init();
+    for (auto& lot : lots) {
+        std::list<cSC4TripData>* trips = lot->TripList(lot->TrafficSource());
+        if (!trips) continue;
+        for (const cSC4TripData& trip : *trips) {
+            if (out.compared >= limit) break;
+            if (trip.type > 2 || (trip.flags & 2) || trip.kind != 3 || trip.route.empty()) continue;
+            std::vector<RouteRecord> records;
+            if (!ReadRoute(trip.route, records) || records.empty()) continue;
+            std::uint32_t savedTypes = 0;
+            for (const RouteRecord& r : records) savedTypes |= 1u << (r.type & 0x1f);
+            // SetupTrip's commuter configuration, aimed at the trip's own destination (filter 3) so job capacities play no part
+            SC4RectInt32 start, end{trip.sourceX, trip.sourceZ, trip.sourceX, trip.sourceZ};
+            lot->OccupiedRect(start);
+            if (unsigned(trip.sourceX) < unsigned(cellsX_) && unsigned(trip.sourceZ) < unsigned(cellsZ_))
+                if (ITrafficLot* dest = host_->LotAt(trip.sourceX, trip.sourceZ, 0)) dest->OccupiedRect(end);
+            finder.SetTripDestinationFilter(3);
+            finder.SetStartRect(start);
+            finder.SetEndRect(end);
+            finder.ClearAllFlags();
+            finder.ClearAllTravelTypeFlags();
+            finder.SetStartingCostArray(nullptr);
+            finder.SetMaxTripLength(tunables_.tripScale);
+            finder.SetTrafficDensity(trip.count);
+            finder.SetTravelTypeFlag(0x1cf, false);
+            if (trip.flags & 4) {
+                finder.SetTravelTypeFlag(std::uint16_t(1u << (trip.index & 0xf)), true);
+            } else {
+                finder.SetTravelTypeFlag(0x3, true);
+                finder.SetStartingCostArray(trip.index == 0 ? tunables_.values_f04.data() : trip.index == 1 ? tunables_.values_f28.data() : tunables_.values_ee0.data());
+            }
+            ++out.compared;
+            if (savedTypes == 1) ++out.savedWalkOnly;
+            if (finder.FindPath() != 1) {
+                ++out.notFound;
+                continue;
+            }
+            std::vector<std::uint8_t> route;
+            std::uint32_t types = 0;
+            finder.GetCompressedRoute(route, types);
+            if (types == 1) ++out.oursWalkOnly;
+            if (types == savedTypes) ++out.sameTypes;
+            else if (out.mismatches.size() < 40) {
+                char line[256];
+                std::snprintf(line, sizeof line, "lot %d,%d..%d,%d strategy %u flags %u count %u dest %d,%d: stored types %x length %.3f route %zu, ours types %x length %.3f route %zu", start.x0, start.z0, start.x1, start.z1, trip.index, trip.flags, trip.count, trip.sourceX, trip.sourceZ, savedTypes, trip.distance, trip.route.size(), types, finder.GetTripLength(), route.size());
+                out.mismatches.emplace_back(line);
+            }
+            if (route == trip.route) ++out.sameRoute;
+            out.lengthDiff += std::fabs(double(finder.GetTripLength()) - double(trip.distance));
+            if (types == savedTypes) out.signedDiffSame += double(finder.GetTripLength()) - double(trip.distance);
+        }
+    }
+    return out;
 }
 
 void cSC4TrafficSimulator::ReduceTransitSwitches() {
