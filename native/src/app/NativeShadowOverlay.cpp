@@ -10,6 +10,7 @@
 #include "sc4/DrawContext.h"
 #include "sc4/PackedRenderState.h"
 #include "sc4/Render3D.h"
+#include "app/NativeDecalOverlay.h"
 #include "app/NativeModelMaker.h"
 #include "app/NativeTerrainView.h"
 #include "sc4/CellTextureModel.h"
@@ -173,7 +174,6 @@ public:
         static bool packed = false;
         if (!packed) { state.PackRenderState(true, true, true, true, true, 1, false, 1, 4, 5, 4, 0.5f, -1, -1); packed = true; }   // renderStates_[kOverlayDrawModeShadow] (InitDrawStates)
         const int maxX = static_cast<int>(g_terrain->CellCountX()), maxZ = static_cast<int>(g_terrain->CellCountZ());
-        auto& slots = g_manager->Overlays();
         // only the cells in view: the terrain view's view-frustum row tables (rows are z, colStart[z]..colEnd[z] the x range). The
         // original draws the shadows inside the terrain draw and reads its draw-frustum tables (SDSFindOverlaysToDraw through
         // GetTerrainCullingInfo); this pass runs every frame after the dynamic view, and with the backing store the terrain is only
@@ -190,16 +190,28 @@ public:
         // one draw per (texture, faded strength): DrawShadows sets the alpha reference per overlay to strength * falloff * threshold
         std::map<std::pair<int, std::uint8_t>, std::vector<Vertex>> byTexture;
         std::size_t live = 0;
-        for (std::uint32_t i = 0; i < slots.size(); ++i) {
+        // The model shadows (this manager), then the shadow decals of the terrain view's dynamic land and water managers (0 and 1,
+        // where the pre-built network pieces' UpdateShadow puts them). Those take DrawRect's inclusive cell rectangle, and the water
+        // one lies on the water surface without the land pass's falloff (DrawShadows with drawWaterPass_).
+        const float sea = g_terrain->GetSeaLevel();
+        const struct { cSTEOverlayManager* manager; bool decals, water; } layers[3] = {
+            {g_manager, false, false}, {DecalOverlayManager(0), true, false}, {DecalOverlayManager(1), true, true}};
+        static const bool pieceShadows = std::getenv("SC4_NOPIECESHADOWS") == nullptr;   // dev: leave the shadow decals out
+        for (const auto& layer : layers) {
+          if (!layer.manager) continue;
+          if (layer.decals && !pieceShadows) continue;
+          auto& slots = layer.manager->Overlays();
+          const int grow = layer.decals ? 1 : 0;
+          for (std::uint32_t i = 0; i < slots.size(); ++i) {
             const cOverlay& overlay = slots[i];
             if (overlay.freeLink == -1 && (overlay.flags & kOverlayFlagShadow)) ++live;
             if (overlay.freeLink != -1 || (overlay.flags & 9u) != 9u || !overlay.texture) continue;
             const int x0 = std::max(0, overlay.rect.left), z0 = std::max(rowBegin, overlay.rect.top);
-            const int x1 = std::min(maxX, overlay.rect.right), z1 = std::min(rowEnd, overlay.rect.bottom);
+            const int x1 = std::min(maxX, overlay.rect.right + grow), z1 = std::min(rowEnd, overlay.rect.bottom + grow);
             if (x1 <= x0 || z1 <= z0) continue;
             // DrawShadows: the strength falls off with the location of the rectangle's centre (land pass), and a faint shadow is skipped
             const cS3DVector2 centre{8.0f * static_cast<float>(overlay.rect.left + overlay.rect.right), 8.0f * static_cast<float>(overlay.rect.top + overlay.rect.bottom)};
-            const float strengthHere = std::clamp(strength * service->ShadowFalloff(centre), 0.0f, 1.0f);
+            const float strengthHere = std::clamp(layer.water ? strength : strength * service->ShadowFalloff(centre), 0.0f, 1.0f);
             if (strengthHere < 0.05f) continue;
             const std::uint8_t overlayAlpha = static_cast<std::uint8_t>(strengthHere * 255.0f);
             std::vector<Vertex>& triangles = byTexture[{dbg ? 0 : overlay.texture->GlTextureId(), overlayAlpha}];
@@ -212,7 +224,7 @@ public:
                 v = (wx * m.m[0][1] + wy * m.m[1][1] + wz * m.m[2][1] + m.m[3][1]) * inverseW;
             };
             auto vertex = [&](int x, int z) {
-                const float wx = x * 16.0f, wz = z * 16.0f, wy = g_terrain->GetAltitudeAtVertex(x, z);
+                const float wx = x * 16.0f, wz = z * 16.0f, wy = layer.water ? std::max(g_terrain->GetAltitudeAtVertex(x, z), sea) : g_terrain->GetAltitudeAtVertex(x, z);
                 Vertex out{wx, wy, wz, {red ? std::uint8_t(255) : rgb[0], red ? std::uint8_t(0) : rgb[1], red ? std::uint8_t(0) : rgb[2], red ? std::uint8_t(255) : overlayAlpha}, 0, 0, 0, 0};
                 project(overlay.texMatrix, wx, wy, wz, out.u, out.v);
                 project(overlay.shadowMatrix, wx, wy, wz, out.u1, out.v1);
@@ -223,6 +235,7 @@ public:
                     const Vertex a = vertex(x, z), b = vertex(x + 1, z), c = vertex(x, z + 1), d = vertex(x + 1, z + 1);
                     triangles.insert(triangles.end(), {a, b, c, b, d, c});
                 }
+          }
         }
         if (byTexture.empty()) return;
         context.ResetModelViewTransform();

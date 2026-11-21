@@ -26,6 +26,8 @@
 #include "sc4/FloraOccupant.h"
 #include "sc4/Demolition.h"
 #include "app/NativeDemolition.h"
+#include "app/NativeDecalOverlay.h"
+#include "sc4/OverlayManager.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "app/NativeUi.h"
 #include "gz/WinBtn.h"
@@ -1267,13 +1269,24 @@ void NativePreBuiltPieceReport(int x0, int z0, int x1, int z1) {
             std::uint32_t x = 0, z = 0;
             piece->GetOccupiedCell(x, z);
             const cS3DVector3& offset = piece->SupportOffset();
-            std::printf("prebuiltpiece %u,%u id %08x rot %02x flags %08x model %s support %08x rotation %.3f offset %.2f %.2f %.2f shadow %08x/%02x\n", x, z,
+            std::printf("prebuiltpiece %u,%u id %08x rot %02x flags %08x model %s support %08x rotation %.3f offset %.2f %.2f %.2f shadow %08x/%02x decal land %d water %d\n", x, z,
                         piece->PieceId(), piece->GetRotationAndFlip(), piece->GetNetworkFlag(), piece->PreBuiltModel() ? "yes" : "none",
-                        piece->SupportModelId(), piece->SupportRotation(), offset.x, offset.y, offset.z, shadow, turn);
+                        piece->SupportModelId(), piece->SupportRotation(), offset.x, offset.y, offset.z, shadow, turn, piece->ShadowLand(), piece->ShadowWater());
         }
         occupants->ReleaseOccupantList(list);
     }
     std::printf("prebuiltpieces: %d pre-built pieces, %d with a support model, %d with a shadow texture (zoom %d)\n", count, supported, shadowed, zoom);
+    // the shadow overlays of the terrain view's dynamic land and water managers (the pieces' shadow decals)
+    for (int index = 0; index < 2; ++index) {
+        sc4::cSTEOverlayManager* manager = DecalOverlayManager(index);
+        int live = 0;
+        if (manager)
+            for (std::uint32_t i = 0; i < manager->Overlays().size(); ++i) {
+                const sc4::cOverlay& overlay = manager->Overlays()[i];
+                live += overlay.freeLink == -1 && (overlay.flags & sc4::kOverlayFlagShadow) ? 1 : 0;
+            }
+        std::printf("prebuiltpieces: %s overlay manager %s, %d shadow overlays\n", index ? "water" : "land", manager ? "present" : "missing", live);
+    }
 }
 
 }  // namespace native

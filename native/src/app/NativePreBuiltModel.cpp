@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "app/NativeCityView.h"
+#include "app/NativeDecalOverlay.h"
 #include "app/NativeDemolition.h"
 #include "app/NativeLighting.h"
 #include "app/NativeModelMaker.h"
@@ -21,6 +22,7 @@
 #include "gz/cGZPersistResourceKey.h"
 #include "sc4/DrawContext.h"
 #include "sc4/LightingManager.h"
+#include "sc4/OverlayManager.h"
 #include "sc4/NetworkOccupantModel.h"
 #include "sc4/NetworkOccupantWithPreBuiltModel.h"
 #include "sc4/Render3D.h"
@@ -199,6 +201,23 @@ private:
     cS3DBoundingBox bounds_{{0, 0, 0}, {0, 0, 0}};
 };
 
+// The terrain view's overlay manager `index` (SL::TerrainView vslot 0x48: 0 the dynamic land one, 1 the dynamic water one) as the
+// pieces' UpdateShadow uses it: AddShadowDecal and RemoveOverlay.
+class ShadowDecalLayer final : public IShadowDecalOverlay {
+public:
+    explicit ShadowDecalLayer(int index) : index_(index) {}
+    std::uint32_t AddShadowDecal(const cGZPersistResourceKey& key, const cS3DVector2& position, float height, float rotation, bool flip) override {
+        cSTEOverlayManager* manager = DecalOverlayManager(index_);
+        return manager ? manager->AddShadowDecal(key, position, height, rotation, flip) : 0xffffffffu;
+    }
+    void RemoveOverlay(std::uint32_t id) override {
+        if (cSTEOverlayManager* manager = DecalOverlayManager(index_)) manager->RemoveOverlay(id);
+    }
+private:
+    int index_;
+};
+ShadowDecalLayer g_landShadows(0), g_waterShadows(1);
+
 class PreBuiltModelHost final : public IPreBuiltModelOccupantHost {
 public:
     // cSC4NetworkOccupant::Draw: the tile's own quad (cSC4NetworkOccupantModel draws it in the port).
@@ -233,12 +252,12 @@ public:
     float TerrainAltitudeAtVertex(int x, int z) override { cSTETerrain* t = Terrain(); return t ? t->GetAltitudeAtVertex(x, z) : 0.0f; }
     float WaterLevel(float x, float z) override { cSTETerrain* t = Terrain(); return t ? t->GetWaterLevel(x, z) : 0.0f; }
     bool WaterSurfaceDisplayed() override { cSTETerrain* t = Terrain(); return t && t->GetWaterSurfaceDisplayState(); }
-    // PARTIAL: the pieces' ground shadow decals (the terrain view's land / water overlay managers) are not reached natively;
-    // UpdateShadow leaves the piece without one.
+    // spCity vslot 0x150 -> terrain vslot 0x108 -> the terrain view's overlay managers 0 (land) and 1 (water); none without a city view.
     bool GetShadowOverlays(IShadowDecalOverlay** land, IShadowDecalOverlay** water) override {
-        if (land) *land = nullptr;
-        if (water) *water = nullptr;
-        return false;
+        const bool present = DecalOverlayManager(0) && DecalOverlayManager(1);
+        if (land) *land = present ? &g_landShadows : nullptr;
+        if (water) *water = present ? &g_waterShadows : nullptr;
+        return present;
     }
     std::uint32_t MapShadowTexture(std::uint32_t instance, std::uint8_t& rotation, std::uint32_t flags, std::uint32_t raised) override {
         return NativeMapShadowTexture(instance, rotation, flags, raised);
