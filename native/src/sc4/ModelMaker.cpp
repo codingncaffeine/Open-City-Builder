@@ -140,8 +140,10 @@ IModelMakerUtility* ModelMakerUtility() { return g_utility; }
 void SetModelMakerUtility(IModelMakerUtility* utility) { g_utility = utility; }
 namespace {
 NetworkModelFactory g_networkModelFactory = nullptr;
+UndergroundConnectionModelFactory g_connectionModelFactory = nullptr;
 }
 void SetNetworkModelFactory(NetworkModelFactory factory) { g_networkModelFactory = factory; }
+void SetUndergroundConnectionModelFactory(UndergroundConnectionModelFactory factory) { g_connectionModelFactory = factory; }
 NetworkViewDependence g_networkViewDependence = nullptr;
 void SetNetworkViewDependence(NetworkViewDependence query) { g_networkViewDependence = query; }
 
@@ -1357,13 +1359,24 @@ bool cSC4ModelMaker::LoadNetworkModels(cISC4Occupant* occupant, int zoom, int ro
     return placeable != nullptr;
 }
 
+// i386 0x00245296: the pipe and subway connections (types 0x2a183167 / 0x8a13918a) hand out their model instances
+// (GetModelInstances, up to 10), which go into the occupant's placeable object; true when there was one.
 bool cSC4ModelMaker::LoadUndergroundConnectionModels(cISC4Occupant* occupant, int zoom, int rotation) {
-    // PARTIAL: the original calls cISC4UndergroundOccupant vslot 0x150 GetModelInstances(zoom, rotation, out, 10,
-    // count) for types 0x2a183167 / 0x8a13918a; that interface is not recovered, so the list stays empty.
     if (!occupant) return false;
-    (void)zoom;
-    (void)rotation;
-    return false;
+    s3d::cIS3DModelInstance* models[10] = {};
+    int count = 0;
+    const std::uint32_t type = occupant->GetType();
+    if ((type == kModelOccupantTypeUnderground || type == kModelOccupantTypeMiscA) && g_connectionModelFactory)
+        count = g_connectionModelFactory(occupant, zoom, rotation, models, 10);
+    cISC43DPlaceableObject* placeable = occupant->GetPlaceableObject();
+    if (placeable) placeable->AddRef();
+    for (int i = 0; i < count; ++i) {
+        if (!models[i]) continue;
+        if (placeable) placeable->AddModel(reinterpret_cast<cIS3DModelInstance*>(models[i]));
+        models[i]->Release();
+    }
+    if (placeable) placeable->Release();
+    return count > 0;
 }
 
 bool cSC4ModelMaker::ApplyStateEffectToModels(cISC4Occupant* occupant, std::uint32_t type,

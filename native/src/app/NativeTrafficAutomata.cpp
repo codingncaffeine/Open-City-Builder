@@ -439,4 +439,42 @@ void NativeTrainReport(int limit) {
 // A new path finder over the city's traffic simulator (the caller owns the reference); null without a simulator.
 sc4::cISC4PathFinder* NativeCreatePathFinder() { return g_simulatorApi.CreatePathFinder(); }
 
+// Kit command `subwayroute X0 Z0 X1 Z1 ALLOWED START` (hex travel-type masks): one search of the traffic simulator's path finder
+// (cISC4TrafficSimulator::CreatePathFinder, as the route query uses it) from a cell to a cell, the travel types allowed and the
+// ones a trip may start with; prints the trip's cost and the travel types of its legs (6 = subway). It changes nothing.
+void NativeSubwayRouteReport(int x0, int z0, int x1, int z1, std::uint32_t allowed, std::uint32_t start) {
+    auto* simulator = Component<cSC4TrafficSimulator>(CityComponent::TrafficSimulator);
+    cISC4PathFinder* finder = simulator ? simulator->CreatePathFinder() : nullptr;
+    if (!finder) {
+        std::printf("subway route: no traffic simulator\n");
+        return;
+    }
+    finder->SetTripDestinationFilter(3);
+    finder->SetStartRect(SC4RectInt32{x0, z0, x0, z0});
+    finder->SetEndRect(SC4RectInt32{x1, z1, x1, z1});
+    finder->ClearAllFlags();
+    finder->ClearAllTravelTypeFlags();
+    finder->SetTravelTypeFlag(static_cast<std::uint16_t>(allowed), false);
+    finder->SetTravelTypeFlag(static_cast<std::uint16_t>(start), true);
+    finder->SetMaxTripLength(simulator->GetTripScale());   // as SetupTrip does
+    const int found = finder->FindPath();
+    std::vector<std::uint8_t> route;
+    std::uint32_t types = 0;
+    if (found == 1) finder->GetCompressedRoute(route, types);
+    std::printf("subway route: %d,%d -> %d,%d allowed %x start %x: %s, cost %.2f, travel types %x (subway %s), legs:", x0, z0, x1, z1,
+                allowed, start, found == 1 ? "found" : "none", found == 1 ? finder->GetTripLength() : 0.0f, types,
+                (types & 0x40) ? "yes" : "no");
+    // the compressed route: {type, x, z}, then runs of {type | 0x40, steps, packed directions}
+    if (route.size() >= 3) {
+        std::printf(" start type %u at %u,%u", route[0], route[1], route[2]);
+        for (std::size_t i = 3; i + 1 < route.size();) {
+            const std::uint8_t type = route[i] & 0x3f, steps = route[i + 1];
+            std::printf("; %u x%u", type, steps);
+            i += 2 + (steps + 3) / 4;
+        }
+    }
+    std::printf("\n");
+    finder->Release();
+}
+
 }  // namespace native

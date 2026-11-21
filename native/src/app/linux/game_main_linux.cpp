@@ -1416,10 +1416,17 @@ int RunScenario(const std::string& path) {
             int x = 0, z = 0;
             words >> x >> z;
             native::NativeUndergroundCellsReport(x, z);
-        } else if (command == "subways") {   // subways [N]: the subway pieces and subway connections of the city (the first N of each)
+        } else if (command == "subways") {   // subways [N] [paths]: the subway pieces and connections (the first N of each), with "paths" their train paths
             int limit = 12;
-            words >> limit;
-            native::NativeSubwayReport(limit);
+            std::string option;
+            words >> limit >> option;
+            native::NativeSubwayReport(limit, option == "paths");
+        } else if (command == "subwayroute") {   // subwayroute X0 Z0 X1 Z1 ALLOWED START: a traffic path search between two cells (hex type masks)
+            int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
+            std::string allowed = "41", start = "1";
+            words >> x0 >> z0 >> x1 >> z1 >> allowed >> start;
+            native::NativeSubwayRouteReport(x0, z0, x1, z1, static_cast<std::uint32_t>(std::strtoul(allowed.c_str(), nullptr, 16)),
+                                            static_cast<std::uint32_t>(std::strtoul(start.c_str(), nullptr, 16)));
         } else if (command == "fires") {   // fires: the fire disaster's state, one line per fire
             native::NativeFireReport();
         } else if (command == "policepower") {   // policepower X0 Z0 X1 Z1 STEP: the police power map the riots read (read-only)

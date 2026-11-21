@@ -2,7 +2,7 @@
 // view (cSC4SubwayCustomView, class 0x4a19bde3), and cSC4SubwayConnectionOccupant on the underground connection base: Init
 // (i386 0x0022f916: the cell, the trench floor quad, the cell's piece or a piece laid to a neighbor, never for a loaded
 // connection), DoMessage (0x0023197a: pieces inserted on / removed from its cell, its building removed), SetBuildingOccupant
-// and the record.
+// and the record. The train paths of the tube pieces (GetPathInfo with the floor heights) and the connection's drawn geometry.
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -13,10 +13,12 @@
 #include "rz/PortMemoryStreams.h"
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/BuildingOccupant.h"
+#include "sc4/PathInfo.h"
 #include "sc4/PipeOccupant.h"
 #include "sc4/SubwayConnectionOccupant.h"
 #include "sc4/SubwayOccupant.h"
 #include "sc4/UndergroundCustomView.h"
+#include "sc4/ViewUtilities.h"
 
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
@@ -278,6 +280,216 @@ void TestMessages() {
     SetUndergroundConnectionHost(nullptr);
 }
 
+// ---- the train paths (cSC4SubwayOccupant::GetAltitude / InitPathBottomQuad / GetPathInfo, i386 0x00136d5c..0x00137320)
+
+// The path file the subway asks for: one train path (type 4) across the cell, high above the tube, and one road path.
+struct FakePathHost final : INetworkOccupantPathHost {
+    std::vector<cGZPersistResourceKey> asked;
+    bool lastUseElevation = true;
+    std::uint32_t MapPath(std::uint32_t id) override { return id + 0x10000; }   // the subway must not map its id
+    cISC4PathInfo* LoadPathInfo(const cGZPersistResourceKey& key) override {
+        asked.push_back(key);
+        auto* info = new cSC4PathInfo();
+        info->AddRef();
+        info->SetUseElevationFlag(true);
+        if (tPath* train = info->NewPath(MakePathKey(4, 0, 2))) {
+            train->points = {{-8.0f, 999.0f, 0.0f}, {0.0f, 999.0f, 0.0f}, {8.0f, 999.0f, 0.0f}};
+            train->length = 1.0f;
+        }
+        if (tPath* road = info->NewPath(MakePathKey(1, 0, 2))) road->points = {{-8.0f, 999.0f, 4.0f}, {8.0f, 999.0f, 4.0f}};
+        resource_ = info;
+        info->AddRef();   // the test keeps the resource to look at it
+        return info;
+    }
+    ~FakePathHost() { if (resource_) resource_->Release(); }
+    cSC4PathInfo* resource_ = nullptr;
+};
+
+// A tube piece on a sloped floor (corner heights 40, 42, 50, 46 for the corners at (x0, z0), (x0, z0+16), (x0+16, z0+16),
+// (x0+16, z0)): the train paths come from {0x296678f7, 0xa966883f, piece id | 0x6000000} with no id mapping, the resource is
+// made flat, and every point sits half a unit under the floor quad (split on its 0-2 diagonal), the lengths summed again.
+void TestTrainPaths() {
+    FakePathHost host;
+    SetNetworkOccupantPathHost(&host);
+    auto* piece = new cSC4SubwayOccupant();
+    piece->AddRef();
+    const float x0 = 160.0f, z0 = 320.0f;
+    const float corners[4][3] = {{x0, 40.0f, z0}, {x0, 42.0f, z0 + 16.0f}, {x0 + 16.0f, 50.0f, z0 + 16.0f}, {x0 + 16.0f, 46.0f, z0}};
+    piece->Init(corners);
+    piece->SetQuadDraw(0x200, 0);   // a straight piece: the floor quad is the trench floor
+    cISC4PathInfo* info = piece->GetPathInfo();
+    CHECK(info != nullptr);
+    CHECK(host.asked.size() == 1);
+    if (!host.asked.empty()) {
+        CHECK(host.asked[0].type == 0x296678f7 && host.asked[0].group == 0xa966883f);
+        CHECK(host.asked[0].instance == (0x200u | 0x6000000u));
+    }
+    CHECK(host.resource_ && !host.resource_->UseElevation());
+    // GetAltitude on both triangles of the quad
+    CHECK_NEAR(piece->GetAltitude(x0 + 8.0f, z0 + 4.0f), 43.5f);   // x run longer: corners 0, 3, 2
+    CHECK_NEAR(piece->GetAltitude(x0 + 4.0f, z0 + 8.0f), 42.5f);   // z run longer: corners 0, 1, 2
+    CHECK_NEAR(piece->PathBottomVertex(2).y, 50.0f);
+    int trainPaths = 0;
+    if (info && info->GetPathMap()) {
+        for (const auto& [key, path] : *info->GetPathMap()) {
+            float length = 0.0f;
+            for (std::size_t i = 0; i < path.points.size(); ++i) {
+                const cS3DVector3& p = path.points[i];
+                CHECK_NEAR(p.y, piece->GetAltitude(p.x, p.z));
+                CHECK(p.y < 60.0f);
+                if (i) {
+                    const cS3DVector3& q = path.points[i - 1];
+                    length += std::sqrt((p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y) + (p.z - q.z) * (p.z - q.z));
+                }
+            }
+            CHECK_NEAR(path.length, length);
+            if (((key >> 24) & 0xf) == 4) {
+                ++trainPaths;
+                CHECK(path.length > 16.0f);   // the slope makes it longer than the flat 16
+            }
+        }
+    }
+    CHECK(trainPaths == 1);
+    CHECK(piece->GetPathInfo() == info);   // cached
+    CHECK(host.asked.size() == 1);
+    piece->Shutdown();
+    piece->Release();
+    SetNetworkOccupantPathHost(nullptr);
+}
+
+// ---- the connection's drawing (cSC4UndergroundConnectionOccupant 0x00230aa4..0x00232394)
+
+struct FakeBinding final : IUndergroundTextureBinding {
+    explicit FakeBinding(std::uint32_t id) : id_(id) {}
+    const std::uint32_t* TextureIds() override { return &id_; }
+    void Release() override { delete this; }
+    std::uint32_t id_;
+};
+
+struct FakeViewHost final : IUndergroundConnectionViewHost {
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> textures;   // group, instance
+    std::vector<std::uint32_t> models;
+    int rotation = 0;
+    void PrepareRenderer() override {}
+    IUndergroundTextureBinding* CreateTextureBinding(std::uint32_t group, std::uint32_t instance) override {
+        textures.push_back({group, instance});
+        return new FakeBinding(instance);
+    }
+    s3d::cIS3DModelInstance* CreateModel(std::uint32_t instance) override {
+        models.push_back(instance);
+        return nullptr;
+    }
+    IUndergroundModelMeshes* ModelMeshes(s3d::cIS3DModelInstance*) override { return nullptr; }
+    void GetZoomAndRotation(int& zoom, int& r) override { zoom = 4; r = rotation; }
+    void GetCameraViewAngles(float& yaw, float& pitch, float& screenPitch) override { yaw = pitch = screenPitch = 0.0f; }
+    cS3DVector3 LightColor(const cS3DVector3&) override { return {1.0f, 1.0f, 1.0f}; }
+    cISC4Occupant* FindBuildingOccupant(int, int) override { return nullptr; }
+};
+
+bool HasTexture(const FakeViewHost& host, std::uint32_t group, std::uint32_t instance) {
+    for (const auto& t : host.textures) if (t.first == group && t.second == instance) return true;
+    return false;
+}
+
+// A station connection on a cell without a tube piece: the shaft is the 15 wide square from the connection's height (50) down
+// to the trench floor (35) and 3 more, at its position; four walls from the terrain (100..103) to the floor, the floor quad; the
+// textures and the model of the subway connection's table. A tube piece under it takes the walls and floor away and sets the
+// shaft's bottom at its model height. The highlight quad, the model instance and a view rotation.
+void TestConnectionDrawing() {
+    FakeHost host;
+    FakeViewHost view;
+    SetUndergroundConnectionHost(&host);
+    SetUndergroundConnectionViewHost(&view);
+    cSC4SubwayConnectionOccupant* connection = MakeConnection(5, 5);   // position 88, 50, 88
+    CHECK(connection->Init());
+    CHECK(connection->ModelDirty());
+    connection->CreateGeometry();
+    const auto& shaft = connection->Piece();
+    CHECK(shaft.size() == 10);
+    if (shaft.size() == 10) {
+        CHECK_NEAR(shaft[0].x, 80.5f);
+        CHECK_NEAR(shaft[0].z, 80.5f);
+        CHECK_NEAR(shaft[0].y, 50.0f);        // top: the connection's height
+        CHECK_NEAR(shaft[1].y, 32.0f);        // bottom: 15 under it and the table's 3
+        CHECK_NEAR(shaft[4].x, 95.5f);
+        CHECK_NEAR(shaft[4].z, 95.5f);
+        CHECK_NEAR(shaft[5].u, 2.0f);         // one u per vertex pair
+        CHECK_NEAR(shaft[0].v, 0.0f);
+        CHECK_NEAR(shaft[1].v, 18.0f / 15.0f);
+        CHECK(shaft[3].color[0] == 0xff && shaft[3].color[3] == 0xff);
+    }
+    CHECK_NEAR(connection->TrenchFloorY(), 35.0f);
+    CHECK(connection->WallQuadCount() == 4);
+    const auto& wall = connection->Walls(0);   // corners 1 -> 0
+    CHECK(wall.size() == 4);
+    if (wall.size() == 4) {
+        CHECK_NEAR(wall[0].x, 80.0f);
+        CHECK_NEAR(wall[0].z, 96.0f);
+        CHECK_NEAR(wall[0].y, 101.0f);
+        CHECK_NEAR(wall[1].y, 86.0f);
+        CHECK_NEAR(wall[1].v, 15.0f / 16.0f);
+        CHECK_NEAR(wall[2].z, 80.0f);
+        CHECK_NEAR(wall[2].y, 85.0f);
+        CHECK_NEAR(wall[2].v, 15.0f / 16.0f);   // the near corner's depth
+        CHECK_NEAR(wall[3].y, 100.0f);
+        CHECK_NEAR(wall[3].u, 1.0f);
+    }
+    CHECK(connection->Trench().size() == 4);
+    CHECK(HasTexture(view, kTextureBindingGroupZoom, 0x6a4e6066));
+    CHECK(HasTexture(view, kTextureBindingGroupPiece, 0xe95a8d8d));
+    CHECK(HasTexture(view, kTextureBindingGroupPiece, 0x095a8d70));
+    CHECK(connection->PieceTexture() && connection->PieceTexture()->TextureIds()[0] == 0x6a4e6066);
+    CHECK(!view.models.empty() && view.models[0] == 0x0ad80000);
+    CHECK_NEAR(connection->ViewMatrix().m[0][3], 88.0f);
+    CHECK_NEAR(connection->ViewMatrix().m[1][3], 50.0f);
+
+    connection->SetHighlight(1, false);
+    const auto& quad = connection->Highlight();
+    CHECK(quad.size() == 4);
+    if (quad.size() == 4) {
+        CHECK_NEAR(quad[0].y, 101.0f);   // corner 1 first
+        CHECK_NEAR(quad[1].y, 100.0f);
+        CHECK(quad[0].color[0] == 0x7f && quad[0].color[1] == 0x87 && quad[0].color[2] == 0xe8 && quad[0].color[3] == 0x64);
+    }
+    connection->SetHighlight(0, false);
+    CHECK(connection->Highlight().empty());
+
+    s3d::cIS3DModelInstance* models[2] = {};
+    int count = 0;
+    connection->GetModelInstances(4, 0, models, 2, count);
+    CHECK(count == 1 && models[0] == static_cast<s3d::cIS3DModelInstance*>(static_cast<s3d::cS3DModelInstanceBasic*>(connection)));
+    if (models[0]) models[0]->Release();
+
+    // a view rotation rebuilds: the models turn with it
+    std::int32_t before[2] = {4, 0}, after[2] = {4, 1};
+    auto* message = new cRZMessage2Standard();
+    message->AddRef();
+    message->SetType(0xa6b79602);
+    message->SetVoid1(before);
+    message->SetVoid2(after);
+    view.rotation = 1;
+    connection->DoMessage(message);
+    message->Release();
+    CHECK_NEAR(connection->ViewMatrix().m[0][0], std::cos(SC4ViewUtilities::GetObjectYRotationAngle(1)));
+
+    // a tube piece under it: no walls or floor, the shaft down to the piece's model height
+    cSC4SubwayOccupant* here = MakeSubway(5, 5);
+    cRZMessage2Standard* inserted = Message(kMessageUndergroundInserted, here);
+    connection->DoMessage(inserted);
+    inserted->Release();
+    connection->CreateGeometry();
+    CHECK(connection->WallQuadCount() == 4 && connection->Walls(0).empty());
+    CHECK(connection->Trench().empty());
+    CHECK_NEAR(connection->TrenchFloorY(), here->ModelY());
+    if (connection->Piece().size() == 10) CHECK_NEAR(connection->Piece()[1].y, here->ModelY() - 3.0f);
+
+    connection->Shutdown();
+    connection->Release();
+    here->Release();
+    SetUndergroundConnectionViewHost(nullptr);
+    SetUndergroundConnectionHost(nullptr);
+}
+
 }  // namespace
 
 int main() {
@@ -286,6 +498,8 @@ int main() {
     TestInitJoinsNeighbor();
     TestInitOwnPieceAndLoaded();
     TestMessages();
+    TestTrainPaths();
+    TestConnectionDrawing();
     std::printf(failures ? "FAILED\n" : "sc4_subwayconnection ok\n");
     return failures ? 1 : 0;
 }

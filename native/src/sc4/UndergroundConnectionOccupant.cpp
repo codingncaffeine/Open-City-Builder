@@ -1,8 +1,12 @@
 #include "sc4/UndergroundConnectionOccupant.h"
 
+#include <cmath>
+
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/BuildingOccupant.h"
 #include "sc4/DBSegment.h"
+#include "sc4/GeometryUtilities.h"
+#include "sc4/ViewUtilities.h"
 
 namespace sc4 {
 
@@ -55,9 +59,50 @@ constexpr int kNeighborOffsets[8][2] = {{-1, 0}, {0, -1}, {1, 0}, {0, 1}, {-1, -
 
 cIGZMessageServer2* MessageServer() { return DBSegmentMessageServer(); }   // SL::spMS2
 
+IUndergroundConnectionViewHost* g_viewHost = nullptr;
+bool sbPieceConnectionsInited = false;                  // 0x00ab98a0
+std::int32_t sCurZoom = 0;                               // 0x00c20e54
+cSC4PackedRenderState mTrenchPackedRenderState;         // 0x00c20e30
+cSC4PackedRenderState mPiecePackedRenderState;          // 0x00c20e28
+cSC4PackedRenderState mHighlightPackedRenderState;      // 0x00c20e20
+
+// sWateredStateRGBs (0x00c09940): the shaft's self-lit shade, dry and watered (Init sets the watered one).
+const cS3DVector3 kWateredStateRGBs[2] = {{0.8f, 0.23f, 0.23f}, {1.0f, 1.0f, 1.0f}};
+constexpr std::uint32_t kBuildingOccupantType = 0x278128a0;
+constexpr std::uint32_t kMessageViewZoomRotation = 0xa6b79602;   // void1 the old {zoom, rotation}, void2 the new
+constexpr std::uint8_t kHighlightColor[4] = {0x7f, 0x87, 0xe8, 0x64};   // the word 0x64e8877f
+// The walls CreateWalls adds (corner pairs, all four sides of the cell).
+constexpr std::uint32_t kWallCorners[4][2] = {{1, 0}, {0, 3}, {3, 2}, {2, 1}};
+
+// cS3DMatrix4 from a cS3DMatrix3::RotateY of the identity (rows), the translation column cleared.
+cS3DMatrix4 RotationY(float radians) {
+    cS3DMatrix4 m;
+    const float c = std::cos(radians), s = std::sin(radians);
+    m.m[0][0] = c;
+    m.m[0][2] = s;
+    m.m[2][0] = -s;
+    m.m[2][2] = c;
+    return m;
+}
+
+void SetTranslation(cS3DMatrix4& m, float x, float y, float z) {   // cS3DMatrix4::SetColumn(3, {x, y, z, 1})
+    m.m[0][3] = x;
+    m.m[1][3] = y;
+    m.m[2][3] = z;
+    m.m[3][3] = 1.0f;
+}
+
+template <class T>
+void ReleaseBinding(T*& binding) {
+    if (binding) binding->Release();
+    binding = nullptr;
+}
+
 }  // namespace
 
 void SetUndergroundConnectionHost(IUndergroundConnectionHost* host) { g_host = host; }
+void SetUndergroundConnectionViewHost(IUndergroundConnectionViewHost* host) { g_viewHost = host; }
+const cSC4PackedRenderState& cSC4UndergroundConnectionOccupant::TrenchPackedRenderState() { return mTrenchPackedRenderState; }
 
 cSC4UndergroundConnectionOccupant::cSC4UndergroundConnectionOccupant() { SetProperties(3); }
 
@@ -76,10 +121,12 @@ bool cSC4UndergroundConnectionOccupant::QueryInterface(std::uint32_t iid, void**
     return s3d::cS3DModelInstanceBasic::QueryInterface(iid, out);
 }
 
-// 0x0022f87a: the occupant and the four view messages (the packed render states belong to the unported drawing).
+// 0x0022f87a: the statics, the occupant, the packed render states and the four view messages.
 bool cSC4UndergroundConnectionOccupant::Init() {
+    if (!sbPieceConnectionsInited) StaticInit();
     if (!IsInitialized()) {
         cSC4Occupant::Init();
+        SetupPackedRenderState();
         if (cIGZMessageServer2* server = MessageServer(); server && !subscribed_) {
             for (std::uint32_t message : kUndergroundConnectionViewMessages)
                 server->AddNotification(static_cast<cIGZMessageTarget2*>(this), message);
@@ -95,7 +142,7 @@ bool cSC4UndergroundConnectionOccupant::Init() {
 // ones first) holding a piece or a connection of the same network gets a piece laid from this cell to it by the network
 // manager's tool (a new connection only), and the cell's piece is looked up again. A piece found is told to rebuild; the
 // bounds follow and the view messages are subscribed.
-bool cSC4UndergroundConnectionOccupant::Init(std::uint32_t gziid, tCustomGeometryInfo* info) {
+bool cSC4UndergroundConnectionOccupant::Init(std::uint32_t gziid, const tUndergroundConnectionGeometryInfo* info) {
     if (IsInitialized()) return true;
     cSC4Occupant::Init();
     gziid_ = gziid;
@@ -155,12 +202,17 @@ bool cSC4UndergroundConnectionOccupant::Init(std::uint32_t gziid, tCustomGeometr
     return true;
 }
 
-// 0x0022ff94 (the texture bindings it also releases belong to the unported drawing).
+// 0x0022ff94
 bool cSC4UndergroundConnectionOccupant::Shutdown() {
+    ReleaseBinding(floorTexture_);
+    ReleaseBinding(wallTexture_);
+    ReleaseBinding(pieceTexture_);
     for (auto& wall : walls_) wall.clear();
     trench_.clear();
     highlight_.clear();
     piece_.clear();
+    ReleaseAndClear(topModel_);
+    ReleaseAndClear(bottomModel_);
     ReleaseAndClear(network_);
     ReleaseAndClear(building_);
     if (subscribed_) {
@@ -251,9 +303,8 @@ void cSC4UndergroundConnectionOccupant::PostOccupantMessage(std::uint32_t messag
 // 0x0023197a. An underground piece removed from this connection's cell is let go (the model is dirty again and the trench
 // floor drops back to the position's depth). The building removed takes the connection with it: out of the occupant
 // manager, its piece rebuilt, shut down. A piece of this network inserted on this cell becomes its piece; the connection's
-// own insertion has its piece rebuild its walls.
-// PARTIAL: the view message 0xa6b79602 (a change between its two data words) rebuilds the drawn geometry (CreateGeometry,
-// not recovered).
+// own insertion has its piece rebuild its walls. A view rotation (message 0xa6b79602 whose old and new rotation differ) rebuilds
+// the drawn geometry.
 bool cSC4UndergroundConnectionOccupant::DoMessage(cIGZMessage2* message) {
     if (!message) return true;
     auto* standard = static_cast<cIGZMessage2Standard*>(message);
@@ -296,6 +347,10 @@ bool cSC4UndergroundConnectionOccupant::DoMessage(cIGZMessage2* message) {
             ModelStateChanged();
         }
         piece->Release();
+    } else if (type == kMessageViewZoomRotation) {
+        const auto* before = static_cast<const std::int32_t*>(standard->GetVoid1());
+        const auto* after = static_cast<const std::int32_t*>(standard->GetVoid2());
+        if (before && after && before[1] != after[1]) CreateGeometry();   // the original reads both without a check
     }
     return true;
 }
@@ -369,6 +424,291 @@ bool cSC4UndergroundConnectionOccupant::Read(cIGZIStream& stream) {
         loaded_ = true;
     }
     return !stream.GetError();
+}
+
+// ------------------------------------------------------------------------------------------------------------- drawing
+
+// 0x0022f0f2 (the resource manager reference it takes is the view host's).
+bool cSC4UndergroundConnectionOccupant::StaticInit() {
+    sbPieceConnectionsInited = true;
+    return true;
+}
+
+// 0x0022f6e8: the same three packed states as the underground pieces'.
+void cSC4UndergroundConnectionOccupant::SetupPackedRenderState() {
+    if (!g_viewHost) return;   // the original tests SL::spRenderer
+    g_viewHost->PrepareRenderer();
+    mTrenchPackedRenderState.PackRenderState(true, true, true, false, false, 1, false, 3, -1, -1, -1, -1.0f, 1, -1);
+    mPiecePackedRenderState.PackRenderState(true, true, true, false, true, 1, false, 3, 4, 5, -1, -1.0f, 1, -1);
+    mHighlightPackedRenderState.PackRenderState(true, true, true, false, true, 0, false, 3, 4, 5, -1, -1.0f, 1, -1);
+}
+
+// 0x0022fefc: the zoom is kept; the per-zoom texture table it then re-binds (sTexResIdToInfoMap, 0x00c20e40) has no writer in the
+// original, so there is nothing to re-bind.
+void cSC4UndergroundConnectionOccupant::ChangeZoomLevel(SC4DrawContext* context) {
+    if (context) sCurZoom = context->Zoom();
+}
+
+void cSC4UndergroundConnectionOccupant::GetModelInstances(int, int, s3d::cIS3DModelInstance** out, int capacity, int& count) {
+    count = 0;
+    if (!out || capacity < 1) return;
+    count = 1;
+    out[0] = static_cast<s3d::cS3DModelInstanceBasic*>(this);
+    out[0]->AddRef();
+}
+
+// 0x002315e4. The shaft's transform: turned to face the camera when the table asks for it, at the connection's position and
+// height; the models' transform: turned with the view rotation. Then the shaft, the walls and the trench floor.
+void cSC4UndergroundConnectionOccupant::CreateGeometry() {
+    pieceMatrix_ = cS3DMatrix4{};
+    if (geometryInfo_ && geometryInfo_->faceCamera && g_viewHost) {
+        float yaw = 0.0f, pitch = 0.0f, screenPitch = 0.0f;
+        g_viewHost->GetCameraViewAngles(yaw, pitch, screenPitch);
+        pieceMatrix_ = RotationY(-yaw);
+    }
+    SetTranslation(pieceMatrix_, position_[0], modelY_, position_[2]);
+    int zoom = 0, rotation = 0;
+    if (g_viewHost) g_viewHost->GetZoomAndRotation(zoom, rotation);
+    viewMatrix_ = RotationY(SC4ViewUtilities::GetObjectYRotationAngle(rotation));
+    SetTranslation(viewMatrix_, position_[0], modelY_, position_[2]);
+    CreatePieceModel();
+    CreateWalls();
+    CreateFloor();
+}
+
+// 0x00230c2e. The shaft: the table's vertices with the top ones at the connection's height (the building's, when there is
+// one) and the bottom ones down to the trench floor (the network piece's model height, else the trench depth below) and the
+// table's offset further; u runs across the shaft (or one per vertex pair for a quad strip), v down it, both in units of the
+// shaft's larger width measured from the origin. Then the two models and the wall and floor textures.
+void cSC4UndergroundConnectionOccupant::CreatePieceModel() {
+    piece_.clear();
+    ReleaseBinding(pieceTexture_);
+    ReleaseAndClear(topModel_);
+    ReleaseAndClear(bottomModel_);
+    const tUndergroundConnectionGeometryInfo* info = geometryInfo_;
+    if (!info) return;
+    if (g_viewHost) pieceTexture_ = g_viewHost->CreateTextureBinding(kTextureBindingGroupZoom, info->pieceTexture);
+    for (std::uint32_t i = 0; i < info->vertexCount; ++i) piece_.push_back(info->vertices[i]);
+    cISC4Occupant* building = building_;
+    if (!building && g_viewHost) building = g_viewHost->FindBuildingOccupant(cellX_, cellZ_);
+    if (building) {
+        float position[3] = {};
+        building->GetPosition(position);
+        modelY_ = position[1];
+    }
+    cIGZUnknown* owner = static_cast<cISC4Occupant*>(static_cast<cSC4Occupant*>(this));
+    if (g_viewHost) {
+        topModel_ = g_viewHost->CreateModel(info->topModel);
+        if (topModel_) topModel_->SetOwner(owner);
+        bottomModel_ = g_viewHost->CreateModel(info->bottomModel);
+        if (bottomModel_) bottomModel_->SetOwner(owner);
+    }
+    for (std::uint32_t i = 0; i < info->indexCount; ++i) piece_[info->topIndices[i]].y = 0.0f;
+    if (auto* piece = dynamic_cast<cSC4UndergroundOccupant*>(network_)) {
+        std::uint32_t pieceId = 0;
+        int networkTypeId = 0;
+        float heights[4] = {};
+        piece->GetQueryData(pieceId, networkTypeId, heights, trenchFloorY_);
+    } else {
+        trenchFloorY_ = modelY_ - kTrenchFloorDepth;
+    }
+    for (std::uint32_t i = 0; i < info->indexCount; ++i)
+        piece_[info->bottomIndices[i]].y = (trenchFloorY_ - modelY_) - info->bottomOffset;
+    float minX = 0.0f, maxX = 0.0f, minZ = 0.0f, maxZ = 0.0f;   // the original starts the extent at the origin
+    for (const UndergroundVertex& v : piece_) {
+        minX = v.x < minX ? v.x : minX;
+        maxX = v.x > maxX ? v.x : maxX;
+        minZ = v.z < minZ ? v.z : minZ;
+        maxZ = v.z > maxZ ? v.z : maxZ;
+    }
+    const float widthX = maxX - minX, widthZ = maxZ - minZ;
+    const float extent = std::fabs(widthZ <= widthX ? widthX : widthZ);
+    SetTranslation(pieceMatrix_, position_[0], modelY_, position_[2]);
+    const float half = extent * 0.5f;
+    const float (*m)[4] = pieceMatrix_.m;
+    for (std::size_t i = 0; i < piece_.size(); ++i) {
+        UndergroundVertex& v = piece_[i];
+        const float x = v.x, y = v.y, z = v.z;
+        v.u = info->quadStrip ? static_cast<float>(static_cast<int>(i) / 2) : (half + x) / extent;
+        v.v = std::fabs(y) / extent;
+        v.x = x * m[0][0] + y * m[0][1] + z * m[0][2] + m[0][3];
+        v.y = x * m[1][0] + y * m[1][1] + z * m[1][2] + m[1][3];
+        v.z = x * m[2][0] + y * m[2][1] + z * m[2][2] + m[2][3];
+        v.color[0] = v.color[1] = v.color[2] = v.color[3] = 0xff;
+    }
+    ReleaseBinding(floorTexture_);
+    ReleaseBinding(wallTexture_);
+    if (g_viewHost) {
+        floorTexture_ = g_viewHost->CreateTextureBinding(kTextureBindingGroupPiece, info->floorTexture);
+        wallTexture_ = g_viewHost->CreateTextureBinding(kTextureBindingGroupPiece, info->wallTexture);
+    }
+    ModelStateChanged();
+}
+
+// 0x00231386: one wall quad from corner a to corner b, from the terrain down to the trench floor. Quirk kept: the far corner's
+// lower v uses the near corner's depth.
+void cSC4UndergroundConnectionOccupant::AddWallQuad(std::uint32_t a, std::uint32_t b, std::vector<UndergroundVertex>& out) {
+    const float depth = (cornerHeights_[a] - floor_[a].y) * 0.0625f;
+    auto vertex = [](const UndergroundVertex& corner, float y, float u, float v) {
+        UndergroundVertex out;
+        out.x = corner.x;
+        out.y = y;
+        out.z = corner.z;
+        out.color[0] = out.color[1] = out.color[2] = 0xff;
+        out.color[3] = corner.color[3];
+        out.u = u;
+        out.v = v;
+        return out;
+    };
+    out.push_back(vertex(floor_[a], cornerHeights_[a], 0.0f, 0.0f));
+    out.push_back(vertex(floor_[a], floor_[a].y, 0.0f, depth));
+    out.push_back(vertex(floor_[b], floor_[b].y, 1.0f, depth));
+    out.push_back(vertex(floor_[b], cornerHeights_[b], 1.0f, 0.0f));
+}
+
+// 0x00231506: the four walls of the cell, only when no network piece is under it (the piece has its own).
+void cSC4UndergroundConnectionOccupant::CreateWalls() {
+    for (auto& wall : walls_) wall.clear();
+    if (network_) return;
+    wallCount_ = 0;
+    for (const auto& corners : kWallCorners) {
+        AddWallQuad(corners[0], corners[1], walls_[wallCount_]);
+        ++wallCount_;
+    }
+    ModelStateChanged();
+}
+
+// 0x00230b96: the trench floor quad, only when no network piece is under the cell.
+void cSC4UndergroundConnectionOccupant::CreateFloor() {
+    trench_.clear();
+    if (network_) return;
+    for (const UndergroundVertex& corner : floor_) {
+        UndergroundVertex v = corner;
+        v.color[0] = v.color[1] = v.color[2] = 0xff;
+        trench_.push_back(v);
+    }
+    ModelStateChanged();
+}
+
+// 0x00230aa4: the highlight quad over the cell at the terrain's height, corners 1, 0, 2, 3.
+void cSC4UndergroundConnectionOccupant::CreateHighlight() {
+    highlight_.clear();
+    for (std::uint32_t corner : {1u, 0u, 2u, 3u}) {
+        UndergroundVertex v;
+        v.x = floor_[corner].x;
+        v.y = cornerHeights_[corner];
+        v.z = floor_[corner].z;
+        for (int c = 0; c < 4; ++c) v.color[c] = kHighlightColor[c];
+        v.u = floor_[corner].u;
+        v.v = floor_[corner].v;
+        highlight_.push_back(v);
+    }
+    ModelStateChanged();
+}
+
+// 0x00230b60
+void cSC4UndergroundConnectionOccupant::SetHighlight(int highlight, bool) {
+    if (highlight == 0) highlight_.clear();
+    else CreateHighlight();
+    ModelStateChanged();
+}
+
+// 0x00231ba6. A changed connection rebuilds first. The highlight pass draws the highlight quad. Render pass 0 draws the trench
+// floor and the walls; pass 1 the shaft (one strip, or quad by quad each shaded by the light on its face) under the watered
+// shade, then the top model at the connection's height and the bottom model at the trench floor, turned with the view. A
+// pass other than 0 clears the change.
+int cSC4UndergroundConnectionOccupant::Draw(SC4DrawContext* context, bool highlight) {
+    if (!context) return 1;
+    if (modelDirty_) CreateGeometry();
+    if (highlight) {
+        if (!highlight_.empty()) {
+            context->ResetModelViewTransform();
+            context->SetRenderState(mHighlightPackedRenderState);
+            context->DrawPrims(1, 0x0a, static_cast<int>(highlight_.size()), highlight_.data());
+        }
+        return 1;
+    }
+    if (context->RenderPass() == 0) {
+        if (floorTexture_ && !trench_.empty()) {
+            const std::uint32_t texture = floorTexture_->TextureIds()[0];
+            context->ResetModelViewTransform();
+            context->SetRenderState(mTrenchPackedRenderState);
+            context->SetTexture(static_cast<int>(texture), 0);
+            context->SetTexWrapModes(2, 2, 0);
+            context->SetTexFiltering(1, 1, 0);
+            context->DrawPrims(6, 0x0a, static_cast<int>(trench_.size()), trench_.data());
+        }
+        if (wallTexture_ && wallCount_ != 0) {
+            const std::uint32_t texture = wallTexture_->TextureIds()[0];
+            context->ResetModelViewTransform();
+            context->SetRenderState(mTrenchPackedRenderState);
+            context->SetTexture(static_cast<int>(texture), 0);
+            context->SetTexWrapModes(2, 2, 0);
+            context->SetTexFiltering(1, 1, 0);
+            for (std::uint32_t i = 0; i < wallCount_ && i < 4; ++i)
+                if (!walls_[i].empty()) context->DrawPrims(6, 0x0a, static_cast<int>(walls_[i].size()), walls_[i].data());
+        }
+        return 2;
+    }
+    if (context->RenderPass() == 1) {
+        context->SetSelfLitShade(kWateredStateRGBs[value174_ == 0 ? 0 : 1]);
+        if (pieceTexture_ && !piece_.empty()) {
+            const std::uint32_t texture = pieceTexture_->TextureIds()[0];
+            context->ResetModelViewTransform();
+            context->SetRenderState(mTrenchPackedRenderState);
+            context->SetTexture(static_cast<int>(texture), 0);
+            context->SetTexWrapModes(3, 3, 0);
+            context->SetTexFiltering(1, 1, 0);
+            if (geometryInfo_ && geometryInfo_->quadStrip) {
+                for (std::size_t i = 0; i + 2 < piece_.size(); i += 2) {
+                    const float p0[3] = {piece_[i].x, piece_[i].y, piece_[i].z};
+                    const float p1[3] = {piece_[i + 1].x, piece_[i + 1].y, piece_[i + 1].z};
+                    const float p2[3] = {piece_[i + 2].x, piece_[i + 2].y, piece_[i + 2].z};
+                    float n[3] = {};
+                    SC4GeometryUtilities::GetNormalToTriangle(p0, p1, p2, n);
+                    cS3DVector3 normal{n[0], n[1], n[2]};
+                    const float length = std::sqrt(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
+                    if (length > 0.0f) {   // cS3DVector3::Normalize
+                        normal.x /= length;
+                        normal.y /= length;
+                        normal.z /= length;
+                    }
+                    if (g_viewHost) context->SetShade(g_viewHost->LightColor(normal));
+                    context->DrawPrims(1, 0x0a, 4, &piece_[i]);
+                }
+                context->ResetShade();
+            } else {
+                context->DrawPrims(1, 0x0a, static_cast<int>(piece_.size()), piece_.data());
+            }
+        }
+        auto drawModel = [&](s3d::cIS3DModelInstance* model, float y) {
+            if (!model) return;
+            SetTranslation(viewMatrix_, position_[0], y, position_[2]);
+            context->SetModelTransform(viewMatrix_);
+            const s3d::SC4DrawAttributes attributes = model->GetDrawAttributes();
+            IUndergroundModelMeshes* meshes = g_viewHost ? g_viewHost->ModelMeshes(model) : nullptr;
+            if (!meshes) return;
+            const int count = meshes->Count();
+            for (int i = 0; i < count; ++i) {
+                s3d::cS3DMaterial* material = meshes->Material(i);
+                const SC4Mesh* mesh = meshes->Mesh(i);
+                if (!material || !mesh) continue;
+                material->flags = static_cast<std::uint16_t>(material->flags | 0x10);
+                material->b9 = 4;
+                material->b10 = 5;
+                context->SetModelShade(model, nullptr);
+                context->SetRenderState(*material, &attributes);
+                context->RenderMesh(*mesh);
+                context->ResetShade();
+            }
+            meshes->Release();
+        };
+        drawModel(topModel_, modelY_);
+        drawModel(bottomModel_, trenchFloorY_);
+        context->ResetShade();
+    }
+    modelDirty_ = false;
+    return 1;
 }
 
 }  // namespace sc4

@@ -189,7 +189,9 @@ public:
     void GetVertexHeights(float* heights) const;
     float GetVertexHeight(int corner) const { return corners_[corner].y; }
     void SetVertexHeights(const float* heights);
-    float GetAltitude(float x, float z) const;
+    // cISC4NetworkOccupant i386 vslot 0xe0 (0x1c0 here): the height of the piece at a point; the subway piece answers from its
+    // tube floor, the pre-built model piece from its model.
+    virtual float GetAltitude(float x, float z) const;
     void GetNormal(float x, float z, float out[3]) const;
     void GetOccupiedCell(std::uint32_t& x, std::uint32_t& z) const;
     virtual void SetTranslucency(bool on, std::uint8_t alpha);
