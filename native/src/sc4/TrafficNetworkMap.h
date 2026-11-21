@@ -343,6 +343,13 @@ public:
         return intersections_;   // 0x1002a0510
     }
     std::size_t TileCount() const;   // test helper: live TileInfo nodes
+    // What the map holds, as the persistence record carries it (debug report and round-trip checks).
+    struct Counts {
+        std::size_t tiles = 0, tilesWithPiece = 0, laneTicks = 0, frequencies = 0, intersections = 0, intersectionAutomata = 0,
+                    unusableCells = 0, unusableRoads = 0, trainJunctions = 0, trainJunctionKeys = 0;
+        bool operator==(const Counts&) const = default;
+    };
+    Counts GetCounts() const;
 
     // ---- volume / congestion accumulation (0x10029ae0 .. 0x10029e5f0) ----
     void UpdateRoadNeighborInfo(ITrafficNetworkMapOccupant* occupant, TrafficTileInfo* tile);   // 0x100299ae0
@@ -410,8 +417,8 @@ public:
     bool HandleTuningParametersChanged();                                      // 0x10029b7ae
 
     // ---- persistence (0x10029e972 / 0x10029eeaa) ----
-    bool Write(cIGZOStream& stream) const override;   // partial
-    bool Read(cIGZIStream& stream) override;          // partial
+    bool Write(cIGZOStream& stream) const override;
+    bool Read(cIGZIStream& stream) override;
 
     // ---- accessors ----
     int CellsX() const { return cellsX_; }

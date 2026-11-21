@@ -1687,116 +1687,179 @@ bool cSC4TrafficNetworkMap::DoMessage2(std::uint32_t messageId, std::uint32_t da
 // persistence
 // ---------------------------------------------------------------------------------------------------
 
-// 0x10029e972 — the version-7 record. PARTIAL: Write is complete, but Read (0x10029eeaa, 4.5 KB) is not
-// hand-written yet, so no round trip is verified.
+cSC4TrafficNetworkMap::Counts cSC4TrafficNetworkMap::GetCounts() const {
+    Counts counts;
+    for (TrafficTileInfo* head : grid_) {
+        for (TrafficTileInfo* tile = head; tile != nullptr; tile = tile->next) {
+            ++counts.tiles;
+            counts.tilesWithPiece += tile->occupant != nullptr;
+            for (const std::vector<TrafficLaneTick>& entries : tile->laneTicks) counts.laneTicks += entries.size();
+            counts.frequencies += tile->frequencies.size();
+        }
+    }
+    counts.intersections = intersections_.size();
+    for (const auto& entry : intersections_) counts.intersectionAutomata += entry.second.automata.size();
+    counts.unusableCells = unusableRoads_.size();
+    for (const auto& entry : unusableRoads_) counts.unusableRoads += entry.second.size();
+    counts.trainJunctions = trainJunctions_.size();
+    for (const auto& entry : trainJunctions_) {
+        for (const std::vector<std::uint32_t>& keys : entry.second.keys) counts.trainJunctionKeys += keys.size();
+    }
+    return counts;
+}
+
+namespace {
+
+// The debug report of what a save wrote or a load read (SC4_DEBUG), so a record can be compared across a save and reload.
+void ReportCounts(const char* what, std::uint16_t version, const cSC4TrafficNetworkMap::Counts& c, bool ok) {
+    if (!std::getenv("SC4_DEBUG")) return;
+    std::fprintf(stderr,
+                 "traffic map: %s version %u%s: %zu tiles (%zu with a network piece), %zu lane ticks, %zu frequencies, "
+                 "%zu intersections (%zu automata), %zu unusable cells (%zu roads), %zu train junctions (%zu keys)\n",
+                 what, version, ok ? "" : " FAILED", c.tiles, c.tilesWithPiece, c.laneTicks, c.frequencies, c.intersections,
+                 c.intersectionAutomata, c.unusableCells, c.unusableRoads, c.trainJunctions, c.trainJunctionKeys);
+}
+
+// SC4WriteGZSerializable(stream, networkOccupant): the reference to the piece (null writes the null reference). The
+// original passes its cISC4NetworkOccupant, whose serializable face is the occupant object's; the port's map occupant
+// reaches that object through AsOccupant.
+void WriteOccupantReference(cIGZOStream& stream, ITrafficNetworkMapOccupant* occupant) {
+    SC4WriteGZSerializable(stream, occupant ? static_cast<const cIGZUnknown*>(occupant->AsOccupant()) : nullptr);
+}
+
+}  // namespace
+
+// 0x10029e972 (i386 0x001eb14a) — the version-7 record. Every reference is a serializer reference (SC4WriteGZSerializable):
+// the tile's network piece, the intersection, unusable-road and train-junction occupants. One deviation: the original
+// also writes a reference per traffic automaton listed on a tile and on an intersection; the port writes those lists empty
+// (count 0, which the original's Read takes) because its read side cannot hand a loaded car back to the map (see Read).
 bool cSC4TrafficNetworkMap::Write(cIGZOStream& stream) const {
     stream.SetUint16(7);
     const std::uint32_t cellCount = static_cast<std::uint32_t>(cellsX_) * static_cast<std::uint32_t>(cellsZ_);
     stream.SetUint32(cellCount);
-    if (cellCount == 0) {
-        stream.SetUint32(0);
-    } else {
-        std::uint32_t tileCount = 0;
-        for (TrafficTileInfo* head : grid_) {
-            for (TrafficTileInfo* tile = head; tile != nullptr; tile = tile->next) ++tileCount;
-        }
-        stream.SetUint32(tileCount);
-        for (std::uint32_t cell = 0; cell < cellCount; ++cell) {
-            for (TrafficTileInfo* tile = grid_[cell]; tile != nullptr; tile = tile->next) {
-                stream.SetUint32(cell);
-                // SC4WriteGZSerializable(stream, tile->occupant): a reference (null when the tile has no piece), as Read takes it
-                SC4WriteGZSerializable(stream, tile->occupant ? static_cast<const cIGZUnknown*>(tile->occupant->AsOccupant()) : nullptr);
-                stream.SetUint32(static_cast<std::uint32_t>(tile->laneTicks.size()));
-                for (std::uint32_t type = 0; type < tile->laneTicks.size(); ++type) {
-                    stream.SetUint32(type);
-                    const std::vector<TrafficLaneTick>& entries = tile->laneTicks[type];
-                    stream.SetUint32(static_cast<std::uint32_t>(entries.size()));
-                    for (const TrafficLaneTick& entry : entries) {
-                        stream.SetUint32(entry.key);
-                        stream.SetFloat32(static_cast<float>(entry.laneTick));
-                    }
-                }
-                // PARTIAL: the original writes a reference per automaton on the tile; the port writes none (the cars re-enter the
-                // tiles as they drive), so the count says none.
-                stream.SetUint32(0);
-                stream.SetUint8(0);
-                stream.SetUint32(tile->roadMask);
-                stream.SetUint32(tile->occupancyMask);
-                stream.SetUint32(tile->buildingMask);
-                for (std::uint32_t i = 0; i < 4; ++i) {
-                    stream.SetFloat32(static_cast<float>(tile->edgeOccupancy[i]));
-                    for (std::uint32_t j = 0; j < 4; ++j) stream.SetUint16(tile->distribution[i][j]);
-                }
-                stream.SetUint16(0);
-                stream.SetUint32(static_cast<std::uint32_t>(tile->frequencies.size()));
-                for (const TrafficFrequency& entry : tile->frequencies) {
+    std::uint32_t tileCount = 0;
+    for (std::uint32_t cell = 0; cell < cellCount && cell < grid_.size(); ++cell) {
+        for (TrafficTileInfo* tile = grid_[cell]; tile != nullptr; tile = tile->next) ++tileCount;
+    }
+    stream.SetUint32(tileCount);
+    for (std::uint32_t cell = 0; cell < cellCount && cell < grid_.size(); ++cell) {
+        for (TrafficTileInfo* tile = grid_[cell]; tile != nullptr; tile = tile->next) {
+            stream.SetUint32(cell);
+            WriteOccupantReference(stream, tile->occupant);
+            stream.SetUint32(static_cast<std::uint32_t>(tile->laneTicks.size()));
+            for (std::uint32_t lane = 0; lane < tile->laneTicks.size(); ++lane) {
+                stream.SetUint32(lane);
+                const std::vector<TrafficLaneTick>& entries = tile->laneTicks[lane];
+                stream.SetUint32(static_cast<std::uint32_t>(entries.size()));
+                for (const TrafficLaneTick& entry : entries) {
                     stream.SetUint32(entry.key);
-                    stream.SetFloat32(static_cast<float>(entry.automataCount));
-                    stream.SetUint16(static_cast<std::uint16_t>(entry.autosPerSecond));
+                    stream.SetFloat32(static_cast<float>(entry.laneTick));
                 }
+            }
+            stream.SetUint32(0);   // the automata on the tile (see above)
+            stream << false;
+            stream.SetUint32(tile->roadMask);
+            stream.SetUint32(tile->occupancyMask);
+            stream.SetUint32(tile->buildingMask);
+            for (std::uint32_t i = 0; i < 4; ++i) {
+                stream.SetFloat32(static_cast<float>(tile->edgeOccupancy[i]));
+                for (std::uint32_t j = 0; j < 4; ++j) stream.SetUint16(tile->distribution[i][j]);
+            }
+            stream.SetUint16(0);
+            stream.SetUint32(static_cast<std::uint32_t>(tile->frequencies.size()));
+            for (const TrafficFrequency& entry : tile->frequencies) {
+                stream.SetSint32(static_cast<std::int32_t>(entry.key));
+                stream.SetFloat32(static_cast<float>(entry.automataCount));
+                stream.SetUint16(static_cast<std::uint16_t>(entry.autosPerSecond));
             }
         }
     }
+    // the intersections: occupant, the +0x50 flag (i386 node +0x58), the automata, then the four approaches
     stream.SetUint32(static_cast<std::uint32_t>(intersections_.size()));
     for (const auto& entry : intersections_) {
-        stream.SetUint32(0);   // occupant reference placeholder (SC4WriteGZSerializable in the original)
-        stream.SetUint8(entry.second.dirty != 0);
-        stream.SetUint32(static_cast<std::uint32_t>(entry.second.automata.size()));
+        WriteOccupantReference(stream, entry.first);
+        stream << (entry.second.flag50 != 0);
+        stream.SetUint32(0);   // the automata on the intersection (see above)
         for (const TrafficIntersectionInfo& approach : entry.second.approaches) {
             stream.SetUint32(static_cast<std::uint32_t>(approach.type));
-            stream.SetUint8(approach.green);
+            stream << (approach.green != 0);
             stream.SetFloat32(approach.stateDuration);
             stream.SetFloat32(approach.otherDuration);
             stream.SetFloat32(approach.timeLeft);
         }
     }
+    // the unusable roads: cell key, then the occupants of the cell
     stream.SetUint32(static_cast<std::uint32_t>(unusableRoads_.size()));
     for (const auto& entry : unusableRoads_) {
         stream.SetUint32(entry.first);
-        stream.SetUint32(0);   // the occupant references of the cell are written by SC4WriteGZSerializable in the original
+        stream.SetUint32(static_cast<std::uint32_t>(entry.second.size()));
+        for (ITrafficNetworkMapOccupant* occupant : entry.second) WriteOccupantReference(stream, occupant);
     }
     stream.SetSint32(visible_.x0);
     stream.SetSint32(visible_.z0);
     stream.SetSint32(visible_.x1);
     stream.SetSint32(visible_.z1);
     stream.SetFloat32(stoplightPhaseA_);
-    stream.SetUint8(stoplightGroupA_ ? 1 : 0);
+    stream << (stoplightGroupA_ != 0);
     stream.SetFloat32(stoplightPhaseB_);
-    stream.SetUint8(stoplightGroupB_ ? 1 : 0);
+    stream << (stoplightGroupB_ != 0);
+    // the train junctions: occupant, then four key lists with their cursor
     stream.SetUint32(static_cast<std::uint32_t>(trainJunctions_.size()));
     for (const auto& entry : trainJunctions_) {
-        stream.SetUint32(0);   // occupant reference placeholder
+        WriteOccupantReference(stream, entry.first);
         for (std::uint32_t type = 0; type < 4; ++type) {
             stream.SetUint32(static_cast<std::uint32_t>(entry.second.keys[type].size()));
             for (std::uint32_t key : entry.second.keys[type]) stream.SetUint32(key);
             stream.SetUint16(entry.second.cursor[type]);
         }
     }
-    return !stream.GetError();
+    const bool ok = !stream.GetError();
+    ReportCounts("wrote", 7, GetCounts(), ok);
+    return ok;
 }
 
-// 0x10029eeaa. The stream is read completely. Every occupant and automaton reference of the file is read (and released): the port keeps
-// the traffic data keyed by its own occupant interface, which the native city does not hand out yet (see the host), so the per-occupant maps
-// (intersections, unusable roads, train junctions) are consumed but not rebuilt here; the tile data and the stoplight state are kept.
+// 0x10029eeaa (i386 0x001ec0d6). The tiles, intersections, unusable roads, train junctions, view rectangle and stoplight state
+// are rebuilt as the original does; every occupant reference goes through the host's AsMapOccupant (the port's network
+// occupants do not answer 0xa821ef94). One deviation: the traffic automata listed on tiles and intersections are read and
+// released, not kept, because the port's loaded cars have no map view yet (the original pushes them onto the lists).
 bool cSC4TrafficNetworkMap::Read(cIGZIStream& stream) {
     const auto skipReference = [&stream]() {
         void* raw = nullptr;
         SC4ReadGZSerializable(stream, kGZIID_cIGZSerializable, &raw, false);
         if (raw) static_cast<cIGZUnknown*>(raw)->Release();
     };
+    // SC4ReadGZSerializable(stream, 0xa821ef94, ...): one reference to the network piece, or null
+    const auto readOccupant = [this, &stream]() -> ITrafficNetworkMapOccupant* {
+        void* raw = nullptr;
+        SC4ReadGZSerializable(stream, kGZIID_cIGZSerializable, &raw, false);
+        if (!raw) return nullptr;
+        auto* object = static_cast<cIGZUnknown*>(raw);
+        ITrafficNetworkMapOccupant* result = nullptr;
+        void* occupant = nullptr;
+        if (host_ && object->QueryInterface(0x26bb767e, &occupant) && occupant) {   // cISC4Occupant
+            result = host_->AsMapOccupant(static_cast<cISC4Occupant*>(occupant));
+            static_cast<cISC4Occupant*>(occupant)->Release();
+        }
+        object->Release();
+        return result;
+    };
     const auto clampToUint16 = [](float value) {
         const long rounded = std::lround(value);
         return static_cast<std::uint16_t>(rounded < 0 ? 0 : (rounded > 0xffff ? 0xffff : rounded));
+    };
+    const auto fail = [this](std::uint16_t version) {
+        ReportCounts("read", version, GetCounts(), false);
+        return false;
     };
     // +0x39 (i386 +0x25): a map read from a save makes the tunnel paths in Init and readies its unusable roads in
     // HandlePostCityInit; the original sets it first thing, whatever the version.
     tunnelPaths_ = true;
     std::uint16_t version = 0;
     stream.GetUint16(version);
-    if (version < 3) return false;
+    if (version < 3) return fail(version);
     std::uint32_t gridSize = 0;
     stream.GetUint32(gridSize);
-    if (gridSize > kMaxStreamedGrid) return false;
+    if (gridSize > kMaxStreamedGrid) return fail(version);
     grid_.assign(gridSize, nullptr);
     std::uint32_t tileCount = 0;
     stream.GetUint32(tileCount);
@@ -1809,28 +1872,16 @@ bool cSC4TrafficNetworkMap::Read(cIGZIStream& stream) {
             while (*link) link = &(*link)->next;
             *link = tile;
         }
-        {   // the network occupant of the tile (the original reads it as 0xa821ef94; the port converts it through the host)
-            void* raw = nullptr;
-            SC4ReadGZSerializable(stream, kGZIID_cIGZSerializable, &raw, false);
-            if (raw) {
-                auto* object = static_cast<cIGZUnknown*>(raw);
-                void* occupant = nullptr;
-                if (host_ && object->QueryInterface(0x26bb767e, &occupant) && occupant) {   // cISC4Occupant
-                    tile->occupant = host_->AsMapOccupant(static_cast<cISC4Occupant*>(occupant));   // one reference, the tile's
-                    static_cast<cISC4Occupant*>(occupant)->Release();
-                }
-                object->Release();
-            }
-        }
+        tile->occupant = readOccupant();   // the tile's reference
         std::uint32_t lanes = 0;
         stream.GetUint32(lanes);
-        if (lanes > kMaxStreamedList) return false;
+        if (lanes > kMaxStreamedList) return fail(version);
         tile->laneTicks.resize(lanes);
         for (std::uint32_t lane = 0; lane < lanes; ++lane) {
             std::uint32_t unused = 0, entries = 0;
             stream.GetUint32(unused);
             stream.GetUint32(entries);
-            if (entries > kMaxStreamedList) return false;
+            if (entries > kMaxStreamedList) return fail(version);
             for (std::uint32_t e = 0; e < entries; ++e) {
                 TrafficLaneTick tick;
                 float laneTick = 0.0f;
@@ -1842,8 +1893,8 @@ bool cSC4TrafficNetworkMap::Read(cIGZIStream& stream) {
         }
         std::uint32_t automata = 0;
         stream.GetUint32(automata);
-        if (automata > kMaxStreamedList) return false;
-        for (std::uint32_t a = 0; a < automata; ++a) skipReference();   // the traffic automata on the tile
+        if (automata > kMaxStreamedList) return fail(version);
+        for (std::uint32_t a = 0; a < automata; ++a) skipReference();   // the traffic automata on the tile (see above)
         bool unused = false;
         stream >> unused;
         stream.GetUint32(tile->roadMask);
@@ -1873,56 +1924,82 @@ bool cSC4TrafficNetworkMap::Read(cIGZIStream& stream) {
         if (version > 4) {
             std::uint32_t frequencies = 0;
             stream.GetUint32(frequencies);
-            if (frequencies > kMaxStreamedList) return false;
+            if (frequencies > kMaxStreamedList) return fail(version);
             tile->frequencies.reserve(frequencies);
             for (std::uint32_t f = 0; f < frequencies; ++f) {
                 TrafficFrequency entry;
                 float count = 0.0f;
                 std::uint16_t perSecond = 0;
-                stream.GetUint32(entry.key);
+                std::int32_t key = 0;
+                stream.GetSint32(key);
                 stream.GetFloat32(count);
                 stream.GetUint16(perSecond);
+                entry.key = static_cast<std::uint32_t>(key);
                 entry.automataCount = static_cast<std::uint32_t>(count);
                 entry.autosPerSecond = perSecond;
                 tile->frequencies.push_back(entry);
             }
         }
     }
-    // the intersections: occupant, (version 7) dirty flag and automata, then the four approaches
+    // the intersections: occupant, (version 7) the +0x50 flag and the automata, then the four approaches. A repeated
+    // occupant reads into the entry already there (insert_unique); the near-switch byte and the dirty flag start clear.
     std::uint32_t count = 0;
     stream.GetUint32(count);
     for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) {
-        skipReference();
-        if (version >= 7) {
-            bool dirty = false;
-            stream >> dirty;
+        ITrafficNetworkMapOccupant* occupant = readOccupant();
+        TrafficIntersectionArray scratch;
+        TrafficIntersectionArray* array = &scratch;   // an occupant the port cannot map is read and dropped
+        if (occupant) {
+            auto inserted = intersections_.emplace(occupant, TrafficIntersectionArray{});
+            if (!inserted.second) occupant->Release();   // the entry keeps the reference it already holds
+            array = &inserted.first->second;
+        }
+        if (version > 6) {
+            bool flag = false;
+            stream >> flag;
+            array->flag50 = flag ? 1 : 0;
+        }
+        array->dirty = 0;
+        if (version > 6) {
             std::uint32_t automata = 0;
             stream.GetUint32(automata);
-            if (automata > kMaxStreamedList) return false;
-            for (std::uint32_t a = 0; a < automata; ++a) skipReference();
+            if (automata > kMaxStreamedList) return fail(version);
+            for (std::uint32_t a = 0; a < automata; ++a) skipReference();   // the automata on the intersection (see above)
         }
-        for (int approach = 0; approach < 4; ++approach) {
+        for (TrafficIntersectionInfo& approach : array->approaches) {
             std::uint32_t type = 0;
             bool green = false;
-            float stateDuration = 0, otherDuration = 0, timeLeft = 0;
             stream.GetUint32(type);
             stream >> green;
-            stream.GetFloat32(stateDuration);
-            stream.GetFloat32(otherDuration);
-            stream.GetFloat32(timeLeft);
+            stream.GetFloat32(approach.stateDuration);
+            stream.GetFloat32(approach.otherDuration);
+            stream.GetFloat32(approach.timeLeft);
+            approach.type = static_cast<int>(type);
+            approach.green = green ? 1 : 0;
+            approach.nearSwitch = 0;
         }
     }
-    // the unusable roads: version 1 is a plain list of occupants, later versions a list of cells with their occupants
+    // the unusable roads: version 1 is a plain list of occupants (each handed to HandleInsertNetworkOccupant, vtable 0xd4),
+    // later versions a list of cells with their occupants
     stream.GetUint32(count);
     if (version < 2) {
-        for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) skipReference();
+        for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) {
+            if (ITrafficNetworkMapOccupant* occupant = readOccupant()) {
+                HandleInsertNetworkOccupant(occupant);
+                occupant->Release();
+            }
+        }
     } else {
         for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) {
             std::uint32_t key = 0, occupants = 0;
             stream.GetUint32(key);
             stream.GetUint32(occupants);
-            if (occupants > kMaxStreamedList) return false;
-            for (std::uint32_t o = 0; o < occupants; ++o) skipReference();
+            if (occupants > kMaxStreamedList) return fail(version);
+            std::vector<ITrafficNetworkMapOccupant*>& list = unusableRoads_[key];
+            for (std::uint32_t o = 0; o < occupants; ++o) {
+                ITrafficNetworkMapOccupant* occupant = readOccupant();
+                if (occupant) list.push_back(occupant);   // the list keeps the reference
+            }
         }
     }
     stream.GetSint32(visible_.x0);
@@ -1942,18 +2019,30 @@ bool cSC4TrafficNetworkMap::Read(cIGZIStream& stream) {
     if (version > 5) {   // the train junctions: occupant, then four key lists with their cursor
         stream.GetUint32(count);
         for (std::uint32_t i = 0; i < count && !stream.GetError(); ++i) {
-            skipReference();
+            ITrafficNetworkMapOccupant* occupant = readOccupant();
+            TrafficTrainJunctionArray array;
             for (int type = 0; type < 4; ++type) {
                 std::uint32_t keys = 0;
                 stream.GetUint32(keys);
-                if (keys > kMaxStreamedList) return false;
-                for (std::uint32_t k = 0; k < keys; ++k) { std::uint32_t key = 0; stream.GetUint32(key); }
-                std::uint16_t cursor = 0;
-                stream.GetUint16(cursor);
+                if (keys > kMaxStreamedList) {
+                    if (occupant) occupant->Release();
+                    return fail(version);
+                }
+                array.keys[type].reserve(keys);
+                for (std::uint32_t k = 0; k < keys; ++k) {
+                    std::uint32_t key = 0;
+                    stream.GetUint32(key);
+                    array.keys[type].push_back(key);
+                }
+                stream.GetUint16(array.cursor[type]);
             }
+            if (!occupant) continue;
+            if (!trainJunctions_.emplace(occupant, std::move(array)).second) occupant->Release();   // insert_unique keeps the first
         }
     }
-    return !stream.GetError();
+    const bool ok = !stream.GetError();
+    ReportCounts("read", version, GetCounts(), ok);
+    return ok;
 }
 
 }  // namespace sc4
