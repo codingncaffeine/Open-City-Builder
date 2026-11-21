@@ -69,6 +69,7 @@ namespace sc4 {
 
 class cISC4NetworkToolUI;
 class cSC4NetworkOccupant;
+class cSC4NetworkOccupantWithPreBuiltModel;
 class cSC4NetworkConstructionCrew;
 class cSC4TileEvaluator;
 
@@ -906,6 +907,15 @@ public:
     virtual void InsertNetworkOccupant(cSC4NetworkCellInfo& cell, const tSolvedCell& solved, std::list<cSC4NetworkOccupant*>* out);
     virtual float GetNetworkVertexHeight(std::int32_t vertex);
     virtual void SetQuadTrianglesToDraw(cSC4NetworkOccupant* occupant, std::uint32_t compact);
+    // i386 0x0012306c / 0x001230f2: the cell above or below (left or right of) (x, z) carries a network type outside
+    // `networkFlags` (the multi-type neighbors a two-wide piece takes its support from).
+    bool AdjacentVerticallyToMultitype(std::uint32_t x, std::uint32_t z, std::uint32_t networkFlags);
+    bool AdjacentHorizontallyToMultitype(std::uint32_t x, std::uint32_t z, std::uint32_t networkFlags);
+    // The support model InsertNetworkOccupant (i386 0x0012b6d8) gives a pre-built model piece: true with the model id,
+    // its rotation and its offset from the piece position when the piece takes one.
+    bool ComputePreBuiltSupportModel(cSC4NetworkCellInfo& cell, const tSolvedCell& solved, cSC4NetworkOccupant* occupant,
+                                     cSC4NetworkOccupantWithPreBuiltModel* prebuilt, const float (*corners)[3],
+                                     std::uint32_t& modelId, float& rotation, float (&offset)[3]);
     void ClearNetworkOccsFromCell(std::uint32_t x, std::uint32_t z);
     static void MarkOccupantsUsable(std::list<cSC4NetworkOccupant*>& occupants, bool release);
     // vslot 0x190 (Mac i386 0x00128fae, network-tools.md §10): removes the pieces (and what they pull in: grouped edges,
