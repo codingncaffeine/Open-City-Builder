@@ -396,7 +396,8 @@ struct cSC4NetworkCellInfo {
     // returns it as its out value (0x10018fe2e) and IsSimpleDiagonalNetwork classifies its edges (0x10018b0a0).
     std::uint32_t tileNeighborhoods[13] = {};
     std::uint32_t compact54 = 0;             // +0x54 another cSC4TileNeighborhoodCompact
-    std::uint8_t unknown58 = 0;              // +0x58
+    std::uint8_t unknown58 = 0;              // +0x58 the one-way directions: two bits per edge (AssignEdgeMajorTypes,
+                                             // ResolveOneWayConflicts; the occupant's 0x4835c6aa property)
     bool hasOccupant = false;                // +0x59
     std::uint8_t unknown5a = 0;              // +0x5a
     // +0x5b: set when the cell belongs to a step whose direction is not 0 (CreateCellInfosForCurrentPlacementTiles).
@@ -850,6 +851,7 @@ public:
     void AssignEdgeSubtypes(std::unordered_set<std::uint32_t>& set, std::unordered_set<std::uint32_t>& removed, bool reset);
     void BuildSetOfCellsToBeSolved();
     void ExpandToSolveSetBasedOnConnectivity(std::vector<std::uint32_t>& frontier, int rings);
+    void ResolveOneWayConflicts(std::uint32_t networkType);   // i386 0x004cde90 (type 10)
     void MarkNeighborConnections();
     // i386 0x00125a22 / 0x00123e36: a drag that ends at the city edge becomes neighbour-city connections (recorded on the
     // last step's edge cells), and placing the drag creates them in the neighbours simulator.
