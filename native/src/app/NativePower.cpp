@@ -22,6 +22,7 @@
 #include "sc4/NetworkOccupant.h"
 #include "sc4/Occupant.h"
 #include "sc4/OccupantManager.h"
+#include "sc4/PowerPoleOccupant.h"
 #include "sc4/Ordinance.h"
 #include "sc4/PowerLineOccupant.h"
 #include "sc4/PowerPoleOccupant.h"
@@ -142,6 +143,14 @@ public:
     float DepartmentFundingFraction() override {
         cSC4DepartmentBudget* department = Department();
         return department ? department->GetFundingPercentage() : 1.0f;
+    }
+    // ApplyPoleFunding's pole slots: cISC4PowerPoleOccupant GetDistressed / SetDistressed (i386 0x2c / 0x30)
+    bool PoleEnabled(cISC4Occupant* pole) override {
+        auto* occupant = dynamic_cast<sc4::cSC4PowerPoleOccupant*>(pole);
+        return occupant && occupant->GetDistressed();
+    }
+    void SetPoleEnabled(cISC4Occupant* pole, bool distressed) override {
+        if (auto* occupant = dynamic_cast<sc4::cSC4PowerPoleOccupant*>(pole)) occupant->SetDistressed(distressed);
     }
     const sc4::cISCPropertyHolder* SimulatorExemplar() override { return NativeSimulatorExemplar(0xc911e35b); }
     void SetGenerationCost(std::int64_t cost) override {
@@ -363,6 +372,13 @@ sc4::cSC4PowerSimulator* NativePowerSimulator() {
     auto* simulator = static_cast<cSC4PowerSimulator*>(static_cast<cISC4PowerSimulator*>(raw));
     simulator->Release();
     return simulator->IsInitialized() ? simulator : nullptr;
+}
+
+// Kit command `powerfunding PERCENT`: the power department's funding, as the budget window's slider sets it.
+void NativeSetPowerFunding(int percent) {
+    cSC4DepartmentBudget* department = g_power.Department();
+    if (department) department->SetFundingPercentage(static_cast<float>(percent) * 0.01f, 0);
+    std::printf("powerfunding %d -> %s %.2f\n", percent, department ? "department" : "no department", department ? department->GetFundingPercentage() : 0.0f);
 }
 
 bool NativeCellPowered(int x, int z) {

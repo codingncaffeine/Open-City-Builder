@@ -246,7 +246,7 @@ void cSC4PowerPoleOccupant::InitFromExemplar(cIGZUnknown* exemplar, std::uint32_
     attributes.flags &= ~0xffffu;
     attributes.shade[3] = 1.0f;
     SetDrawAttributes(attributes);
-    // A distressed pole restarts its spark effect here (SetDistressed(true)); the effect is not recovered.
+    if (distressed_) SetDistressed(true);   // a distressed pole restarts its sparks
 }
 
 void cSC4PowerPoleOccupant::SetExemplar(cIGZUnknown* exemplar) {
@@ -292,6 +292,7 @@ bool cSC4PowerPoleOccupant::Shutdown() {
     if (effect_) {
         cIGZUnknown* held = effect_;
         effect_ = nullptr;
+        if (g_poleHost && g_poleHost->VisualEffectStarted(held)) g_poleHost->StopVisualEffect(held, 1);
         held->Release();
     }
     cSC4Occupant::Shutdown();
@@ -654,6 +655,24 @@ void cSC4PowerPoleOccupant::DrawConnection(cSC4PowerPoleOccupant* pole, bool byC
 
 // 0x100320544: every connected pole forgets this one, and this one drops its connections (the entries stay).
 std::int64_t cSC4PowerPoleOccupant::GetCostOfDemolition() const { return snCostOfDemolition; }
+
+// i386 0x00255134: a pole the power funding leaves unmaintained sparks ("powerpolezap" at the pole's position); a maintained
+// one stops its sparks and drops the effect.
+void cSC4PowerPoleOccupant::SetDistressed(bool distressed) {
+    distressed_ = distressed;
+    if (distressed) {
+        if (!effect_ && g_poleHost) {
+            effect_ = g_poleHost->CreateVisualEffect("powerpolezap");
+            if (effect_) g_poleHost->StartVisualEffect(effect_, position_);
+        }
+    } else {
+        if (effect_ && g_poleHost && g_poleHost->VisualEffectStarted(effect_)) g_poleHost->StopVisualEffect(effect_, 0);
+        if (effect_) {
+            effect_->Release();
+            effect_ = nullptr;
+        }
+    }
+}
 
 void cSC4PowerPoleOccupant::BreakAllConnectionsAtDestination(bool quiet) {
     for (std::size_t i = 0; i < connections_.size(); ++i) {

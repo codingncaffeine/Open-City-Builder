@@ -9,6 +9,7 @@
 
 #include "app/NativeCityView.h"
 #include "app/NativeDemolition.h"
+#include "app/NativeEffects.h"
 #include "app/NativeLighting.h"
 #include "app/NativePower.h"
 #include "app/NativeZoneDeveloperHost.h"
@@ -25,6 +26,7 @@
 #include "sc4/ResourceAsFile.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/ViewUtilities.h"
+#include "sc4/VisualEffect.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
 
@@ -273,6 +275,21 @@ public:
         if (occupants && occupant) occupants->RemoveOccupant(occupant, true, 0);
     }
     const cISCPropertyHolder* TuningPropertyHolder() override { return PowerLineTuning(); }
+    cIGZUnknown* CreateVisualEffect(const char* name) override { return native::CreateNamedEffect(name); }
+    // the source transform carries the pole's position (translation flag set, change counter bumped), then Start(0)
+    void StartVisualEffect(cIGZUnknown* effect, const float* xyz) override {
+        auto* visual = static_cast<cSC4VisualEffect*>(effect);
+        cS3DTransform source;
+        source.translation[0] = xyz[0];
+        source.translation[1] = xyz[1];
+        source.translation[2] = xyz[2];
+        source.flags = 1;
+        source.changeCounter = 1;
+        visual->SetSourceTransform(source);
+        visual->Start(0);
+    }
+    bool VisualEffectStarted(cIGZUnknown* effect) override { return static_cast<cSC4VisualEffect*>(effect)->IsStarted(); }
+    void StopVisualEffect(cIGZUnknown* effect, int transition) override { static_cast<cSC4VisualEffect*>(effect)->Stop(transition); }
 
 private:
     static void Utilities(int& zoom, int& rotation) {
@@ -321,7 +338,7 @@ void NativePowerPoleReport(int x0, int z0, int x1, int z1) {
     }
     const int a[2] = {x0, z0}, b[2] = {x1, z1};
     OccupantList list;
-    int poles = 0, wires = 0;
+    int poles = 0, wires = 0, distressed = 0;
     if (occupants->GetOccupantsByStandardCityCells(list, a, b, static_cast<sc4::cISC4OccupantFilter*>(nullptr), 0xffffffffu)) {
         for (cISC4Occupant* occupant : list) {
             if (auto* pole = dynamic_cast<cSC4PowerPoleOccupant*>(occupant)) {
@@ -337,10 +354,12 @@ void NativePowerPoleReport(int x0, int z0, int x1, int z1) {
                 }
                 cGZPersistResourceKey key{0, 0, 0};
                 if (cISCResExemplar* exemplar = pole->GetDefaultExemplar()) exemplar->GetKey(key);
-                std::printf("pole %d,%d at %.1f,%.1f,%.1f: mask 0x%x exemplar %08x connections %d (draws %d, curves %d, wire occupants %d) model %s preview %d\n",
+                std::printf("pole %d,%d at %.1f,%.1f,%.1f: mask 0x%x exemplar %08x connections %d (draws %d, curves %d, wire occupants %d) model %s preview %d distressed %d zap %d\n",
                             x, z, p[0], p[1], p[2], pole->Style(), key.instance, pole->GetNumberOfConnections(), drawn, curves, lines,
-                            pole->HasModel() ? "yes" : "no", pole->IsPreview() ? 1 : 0);
+                            pole->HasModel() ? "yes" : "no", pole->IsPreview() ? 1 : 0, pole->GetDistressed() ? 1 : 0,
+                            pole->HasDistressEffect() ? 1 : 0);
                 ++poles;
+                if (pole->GetDistressed()) ++distressed;
             } else if (auto* line = dynamic_cast<cSC4PowerLineOccupant*>(occupant)) {
                 std::uint32_t x = 0, z = 0;
                 line->GetCell(x, z);
@@ -350,7 +369,7 @@ void NativePowerPoleReport(int x0, int z0, int x1, int z1) {
         }
     }
     occupants->ReleaseOccupantList(list);
-    std::printf("poles: %d poles, %d wire occupants in %d,%d..%d,%d\n", poles, wires, x0, z0, x1, z1);
+    std::printf("poles: %d poles (%d distressed), %d wire occupants in %d,%d..%d,%d\n", poles, distressed, wires, x0, z0, x1, z1);
     std::vector<float> widths;
     int textures[4] = {};
     cSC4PowerPoleOccupant::DrawStatics(widths, textures);

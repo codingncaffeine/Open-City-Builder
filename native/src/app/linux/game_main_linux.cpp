@@ -99,6 +99,7 @@
 #include "app/NativeAudio.h"
 #include "app/NativeAudioDirector.h"
 #include "app/NativeDemolition.h"
+#include "app/NativePower.h"
 #include "sc4/Demolition.h"
 
 namespace linuxapp {   // StubClock.cpp: the game's stub SDL clock and timer
@@ -1294,6 +1295,10 @@ int RunScenario(const std::string& path) {
             int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
             words >> x0 >> z0 >> x1 >> z1;
             native::NativePowerPoleReport(x0, z0, x1, z1);
+        } else if (command == "powerfunding") {   // powerfunding PERCENT: the power department's funding (as the budget window sets it)
+            int percent = 100;
+            words >> percent;
+            native::NativeSetPowerFunding(percent);
         } else if (command == "demolish") {   // demolish X0 Z0 X1 Z1: the bulldozer's commit on a cell rectangle (the player's privilege, effects on)
             sc4::DemolitionRegion region;
             words >> region.bounds.x0 >> region.bounds.z0 >> region.bounds.x1 >> region.bounds.z1;

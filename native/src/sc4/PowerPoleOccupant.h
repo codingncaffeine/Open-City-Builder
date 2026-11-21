@@ -64,6 +64,12 @@ public:
     virtual void RemoveOccupant(cISC4Occupant* occupant) = 0;
     // SL::spRM +0x0c GetPropertyExemplar({0x6534284a, 0xe7e2c2db, 0xc911e35b}, 0xa52160f5): the power-line tuning, or null.
     virtual const cISCPropertyHolder* TuningPropertyHolder() = 0;
+    // SL::spEffectsManager vslot 0x18 (i386): a named visual effect (cISC4VisualEffect), one reference, or null; then its
+    // vslots 0x20 SetSourceTransform + 0x0c Start(0), 0x14 IsStarted, 0x10 Stop.
+    virtual cIGZUnknown* CreateVisualEffect(const char* name) { (void)name; return nullptr; }
+    virtual void StartVisualEffect(cIGZUnknown* effect, const float* xyz) { (void)effect; (void)xyz; }
+    virtual bool VisualEffectStarted(cIGZUnknown* effect) { (void)effect; return false; }
+    virtual void StopVisualEffect(cIGZUnknown* effect, int transition) { (void)effect; (void)transition; }
 };
 IPowerPoleOccupantHost* PowerPoleOccupantHost();
 void SetPowerPoleOccupantHost(IPowerPoleOccupantHost* host);
@@ -125,6 +131,9 @@ public:
     bool IsPreview() const { return preview_; }                 // 0x100324332
     bool HasModel() const { return model_ != nullptr; }
     std::int64_t GetCostOfDemolition() const;                   // i386 0x006d910a: snCostOfDemolition (tuning 0x0a2eced8)
+    bool GetDistressed() const { return distressed_; }          // i386 0x00254aa6
+    bool HasDistressEffect() const { return effect_ != nullptr; }
+    void SetDistressed(bool distressed);                        // i386 0x00255134: the "powerpolezap" sparks
 
     // --- connections ---
     void AddConnection(cSC4PowerPoleOccupant* pole, std::vector<tLineInfo>* lines);     // 0x10031f4aa
@@ -175,7 +184,7 @@ private:
     bool field18c_ = false;                         // +0x18c
     bool subscribed_ = false;                       // +0x18d
     bool distressed_ = false;                       // +0x18e
-    cIGZUnknown* effect_ = nullptr;                 // +0x190 the "powerpolezap" effect (released by Shutdown)
+    cIGZUnknown* effect_ = nullptr;                 // +0x190 the "powerpolezap" effect (stopped and released by Shutdown)
     bool preview_ = false;                          // +0x198
 };
 
