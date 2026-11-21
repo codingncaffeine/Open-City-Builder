@@ -26,6 +26,8 @@
 #include "sc4/FloraOccupant.h"
 #include "sc4/Demolition.h"
 #include "app/NativeDemolition.h"
+#include "app/NativeDecalOverlay.h"
+#include "sc4/OverlayManager.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "app/NativeUi.h"
 #include "gz/WinBtn.h"
@@ -1267,13 +1269,73 @@ void NativePreBuiltPieceReport(int x0, int z0, int x1, int z1) {
             std::uint32_t x = 0, z = 0;
             piece->GetOccupiedCell(x, z);
             const cS3DVector3& offset = piece->SupportOffset();
-            std::printf("prebuiltpiece %u,%u id %08x rot %02x flags %08x model %s support %08x rotation %.3f offset %.2f %.2f %.2f shadow %08x/%02x\n", x, z,
+            std::printf("prebuiltpiece %u,%u id %08x rot %02x flags %08x model %s support %08x rotation %.3f offset %.2f %.2f %.2f shadow %08x/%02x decal land %d water %d\n", x, z,
                         piece->PieceId(), piece->GetRotationAndFlip(), piece->GetNetworkFlag(), piece->PreBuiltModel() ? "yes" : "none",
-                        piece->SupportModelId(), piece->SupportRotation(), offset.x, offset.y, offset.z, shadow, turn);
+                        piece->SupportModelId(), piece->SupportRotation(), offset.x, offset.y, offset.z, shadow, turn, piece->ShadowLand(), piece->ShadowWater());
         }
         occupants->ReleaseOccupantList(list);
     }
     std::printf("prebuiltpieces: %d pre-built pieces, %d with a support model, %d with a shadow texture (zoom %d)\n", count, supported, shadowed, zoom);
+    // the shadow overlays of the terrain view's dynamic land and water managers (the pieces' shadow decals)
+    for (int index = 0; index < 2; ++index) {
+        sc4::cSTEOverlayManager* manager = DecalOverlayManager(index);
+        int live = 0;
+        if (manager)
+            for (std::uint32_t i = 0; i < manager->Overlays().size(); ++i) {
+                const sc4::cOverlay& overlay = manager->Overlays()[i];
+                live += overlay.freeLink == -1 && (overlay.flags & sc4::kOverlayFlagShadow) ? 1 : 0;
+            }
+        std::printf("prebuiltpieces: %s overlay manager %s, %d shadow overlays\n", index ? "water" : "land", manager ? "present" : "missing", live);
+    }
+}
+
+}  // namespace native
+
+namespace native {
+
+// supports X0 Z0 X1 Z1: every network piece of the rectangle that carries support structures (network flag 0x40000000), with
+// its added parts by texture (0xbb0200 side lips, 0xbb0000 retaining walls, 0x8080000 / 0x912220e pylon sides and top).
+void NativeSupportStructureReport(int x0, int z0, int x1, int z1) {
+    sc4::cISC4OccupantManager* occupants = Occupants();
+    if (!occupants) {
+        std::printf("supports: no city\n");
+        return;
+    }
+    const int cell0[2] = {x0, z0}, cell1[2] = {x1, z1};
+    sc4::OccupantList list;
+    int pieces = 0, supported = 0, lips = 0, walls = 0, pylons = 0;
+    if (occupants->GetOccupantsByStandardCityCells(list, cell0, cell1, 0xc772bf98u, 0xffffffffu)) {
+        for (sc4::cISC4Occupant* occupant : list) {
+            auto* piece = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);
+            if (!piece) continue;
+            ++pieces;
+            if (!(piece->GetNetworkFlag() & 0x40000000u)) continue;
+            ++supported;
+            int lip = 0, wall = 0, side = 0, top = 0;
+            float low = 1e30f, high = -1e30f;
+            for (const sc4::SC4AddOnPart& part : piece->AddOnParts()) {
+                if (part.id == 0xbb0200u) ++lip;
+                else if (part.id == 0xbb0000u) ++wall;
+                else if (part.id == 0x8080000u) ++side;
+                else if (part.id == 0x912220eu) ++top;
+                else continue;
+                for (const auto& c : part.corner) {
+                    low = std::min(low, c.y);
+                    high = std::max(high, c.y);
+                }
+            }
+            lips += lip / 4;
+            walls += wall / 4;
+            if (side) ++pylons;
+            std::uint32_t x = 0, z = 0;
+            piece->GetOccupiedCell(x, z);
+            std::printf("support %u,%u id %08x rot %02x flags %08x lip triangles %d wall triangles %d pylon sides %d top %d, y %.2f..%.2f\n", x, z,
+                        piece->PieceId(), piece->GetRotationAndFlip(), piece->GetNetworkFlag(), lip, wall, side, top, low, high);
+        }
+        occupants->ReleaseOccupantList(list);
+    }
+    std::printf("supports: %d network pieces, %d with support structures: %d side lips, %d retaining walls, %d pylons\n", pieces, supported,
+                lips, walls, pylons);
 }
 
 }  // namespace native

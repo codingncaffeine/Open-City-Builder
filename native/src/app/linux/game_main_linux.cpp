@@ -1393,6 +1393,10 @@ int RunScenario(const std::string& path) {
             int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
             words >> x0 >> z0 >> x1 >> z1;
             native::NativePreBuiltPieceReport(x0, z0, x1, z1);
+        } else if (command == "supports") {   // supports X0 Z0 X1 Z1: the network pieces with support structures (lips, walls, pylons) (read-only)
+            int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
+            words >> x0 >> z0 >> x1 >> z1;
+            native::NativeSupportStructureReport(x0, z0, x1, z1);
         } else if (command == "terrainheights") {   // terrainheights X0 Z0 X1 Z1: the terrain altitude at every vertex of a rectangle (read-only)
             int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
             words >> x0 >> z0 >> x1 >> z1;

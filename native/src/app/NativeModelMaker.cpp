@@ -32,6 +32,7 @@
 #include "sc4/LotBaseTextureOccupant.h"
 #include "sc4/ModelMaker.h"
 #include "sc4/ModelMakerUtility.h"
+#include "sc4/OverlayManager.h"
 #include "sc4/NetworkOccupantModel.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/PlaceableObject.h"
@@ -725,7 +726,11 @@ public:
     std::uint32_t MapShadowTexture(std::uint32_t instance, std::uint8_t& rotation, std::uint32_t flags, std::uint32_t raised) override {
         return CityMapShadowTexture(instance, rotation, flags, raised);
     }
-    std::uint32_t AddShadowDecal(int, const cGZPersistResourceKey&, float, float, float, float, bool) override { return 0; }
+    // the terrain view's land (0) or water (1) overlay manager
+    std::uint32_t AddShadowDecal(int overlay, const cGZPersistResourceKey& key, float x, float z, float height, float rotation, bool flip) override {
+        sc4::cSTEOverlayManager* manager = DecalOverlayManager(overlay);
+        return manager ? manager->AddShadowDecal(key, cS3DVector2{x, z}, height, rotation, flip) : 0xffffffffu;
+    }
 
 private:
     std::map<std::pair<std::uint32_t, std::uint32_t>, int> hidingChanges_;   // the trace's counts by (old, new) flags

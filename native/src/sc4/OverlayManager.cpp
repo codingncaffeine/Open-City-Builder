@@ -447,15 +447,16 @@ std::uint32_t cSTEOverlayManager::AddShadowDecal(const cGZPersistResourceKey& ke
         for (int r = 0; r < 4; ++r) stored.texMatrix.m[r][1] = stored.texMatrix.m[r][3] - stored.texMatrix.m[r][1];
     }
 
-    // The shadow projection matrix (a fixed swizzle of the decal transform, built from the literals at
-    // 0x1007298xx): row0 {0.5, 0.5, 0.5, 0}, row1 {0, 0.5, 0, 0}, row2 {0, 0, 1, 0}, row3 {0.25, 0.25, 0, 1}.
-    cS3DMatrix4 shadowMatrix{};
-    shadowMatrix.m[0][0] = 0.5f; shadowMatrix.m[0][1] = 0.5f; shadowMatrix.m[0][2] = 0.5f;
-    shadowMatrix.m[1][1] = 0.5f;
-    shadowMatrix.m[2][2] = 1.0f;
-    shadowMatrix.m[3][0] = 0.25f; shadowMatrix.m[3][1] = 0.25f;
-    shadowMatrix.m[3][3] = 1.0f;
-    stored.shadowMatrix = shadowMatrix * stored.texMatrix;
+    // The mask transform: the decal's texture coordinates squeezed into the middle of the shadow mask, [0, 1] -> [0.25, 0.75]
+    // (i386 0x004da0a3: an identity with m00 = m11 = 0.5 and m30 = m31 = 0.25, applied after the texture transform:
+    // operator*(texMatrix, scale)).
+    cS3DMatrix4 scale{};
+    scale.m[0][0] = 0.5f;
+    scale.m[1][1] = 0.5f;
+    scale.m[2][2] = 1.0f;
+    scale.m[3][0] = 0.25f; scale.m[3][1] = 0.25f;
+    scale.m[3][3] = 1.0f;
+    stored.shadowMatrix = stored.texMatrix * scale;
 
     AddOverlay(overlaySlot);
     const std::uint32_t decalSlot = decals_.AddSlot(decal);

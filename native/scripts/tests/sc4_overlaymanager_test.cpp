@@ -699,10 +699,21 @@ static void TestRingAndShadowDecals(FakeHost& host) {
     const std::uint32_t shadowSlot = static_cast<std::uint32_t>(manager.Decals()[0].overlay);
     CHECK((manager.Overlays()[shadowSlot].flags & kOverlayFlagShadow) != 0);
     CHECK((manager.Overlays()[shadowSlot].flags & 9u) == 9u);
-    // The shadow matrix is the swizzle times the texture transform, so it differs from it.
-    CHECK(!Near(manager.Overlays()[shadowSlot].shadowMatrix.m[0][0], manager.Overlays()[shadowSlot].texMatrix.m[0][0]) ||
-          !Near(manager.Overlays()[shadowSlot].shadowMatrix.m[3][0],
-                manager.Overlays()[shadowSlot].texMatrix.m[3][0]));
+    // The shadow matrix is the texture transform followed by the squeeze into the mask's middle: at every world point the mask
+    // coordinates are the texture coordinates times 0.5 plus 0.25.
+    {
+        const cS3DMatrix4& tex = manager.Overlays()[shadowSlot].texMatrix;
+        const cS3DMatrix4& mask = manager.Overlays()[shadowSlot].shadowMatrix;
+        const float points[3][3] = {{64.0f, 0.0f, 64.0f}, {56.0f, 3.0f, 70.0f}, {72.0f, -2.0f, 57.0f}};
+        bool squeezed = true;
+        for (const auto& p : points)
+            for (int c = 0; c < 2; ++c) {
+                const float t = p[0] * tex.m[0][c] + p[1] * tex.m[1][c] + p[2] * tex.m[2][c] + tex.m[3][c];
+                const float s = p[0] * mask.m[0][c] + p[1] * mask.m[1][c] + p[2] * mask.m[2][c] + mask.m[3][c];
+                squeezed = squeezed && Near(s, t * 0.5f + 0.25f);
+            }
+        CHECK(squeezed);
+    }
 
     // A mirrored shadow decal reflects V: m[r][1] = m[r][3] - m[r][1].
     host.factory.sizeW = 64;
@@ -927,7 +938,7 @@ static void TestDrawPass(FakeHost& host) {
         CHECK(accurate.Has("comb01030100/0"));
         CHECK(accurate.Has("texstate1/1"));
         CHECK(accurate.Has("wrap2/2/1") && accurate.Has("wrap3/3/0"));   // the mask stage gets 2/2, the model texture 3/3
-        CHECK(accurate.Has("xform1/0.031,-3.500"));                   // inverseView * shadowMatrix
+        CHECK(accurate.Has("xform1/0.031,-1.500"));                   // inverseView * shadowMatrix (texture v * 0.5 + 0.25)
         CHECK(accurate.Has("afunc6/1.000"));                          // scale * falloff * intensity
         bool fadedAlpha = false;                                      // the colour's alpha carries scale * falloff (0.5)
         for (const std::string& entry : accurate.log) fadedAlpha |= entry.rfind("color", 0) == 0 && entry.size() > 5 && entry.substr(entry.find('/')) == "/0.50";

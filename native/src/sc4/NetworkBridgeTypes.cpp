@@ -631,7 +631,7 @@ void LoadNetworkSupportStructures(std::uint32_t group, std::map<std::uint32_t, c
         std::uint32_t id = 0;
         cSC4NetworkSupportStructInfo info;
         cSCPropertyHelp::GetPropertyValue(holder, 0xe974eaa1, id);
-        cSCPropertyHelp::GetPropertyValue(holder, 0xe974eaa2, info.models);
+        cSCPropertyHelp::GetPropertyValue(holder, 0xe974eaa2, info.edges);
         cSCPropertyHelp::GetPropertyValue(holder, 0xe974eaa3, info.footprint);
         AppendQuarterTurns(info.footprint);
         out[id] = info;
