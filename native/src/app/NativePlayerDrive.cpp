@@ -364,7 +364,7 @@ void NativePlayerDriveCommand(const std::string& line) {
         }
         const cS3DVector3 origin{x, 0.0f, z};
         cS3DVector3 where{x, 0.0f, z};
-        const bool placed = manager->GetRandomCreationPoint(group, origin, 0.0f, radius, origin, where, kPlayerDriveFlags);
+        const bool placed = manager->GetRandomCreationPoint(group, origin, 0.0f, radius, where, kPlayerDriveFlags, nullptr);
         IAutomataAutomaton* made = manager->CreateAutomaton(group, where, kPlayerDriveFlags, cGZPersistResourceKey{}, nullptr, 0xff, nullptr);
         std::printf("udi start: group 0x%x near (%.0f, %.0f): point %s (%.1f, %.1f, %.1f), automaton %p\n", group, x, z, placed ? "found" : "none",
                     where.x, where.y, where.z, static_cast<void*>(made ? AutomatonOf(made) : nullptr));

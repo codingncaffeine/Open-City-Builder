@@ -423,6 +423,7 @@ src/app/NativeRiotPolice.cpp
 src/app/NativeDisasterTools.cpp
 src/app/NativePlayerDrive.cpp
 src/app/NativePlayerDriveView.cpp
+src/app/NativeTrafficReport.cpp
 src/sc4/ViewInputControlPlayerDrive.cpp
 src/sc4/ViewInputControlDisaster.cpp
 src/sc4/DisasterInstanceEarthquake.cpp

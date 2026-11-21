@@ -1,5 +1,6 @@
 // cSC4TrafficNetworkMap: tile storage, the per-cell volume/congestion accumulation, intersections,
 // train junctions, surrounding-road and geometry queries, view tracking and shutdown.
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -504,6 +505,26 @@ int main() {
     for (ITrafficNetworkMapOccupant* road : roads) road->Release();
     host.box.clear();
     CHECK(map.GetSurroundingRoads(roads, &near.base, 1, 1, 0x10000000u) == false);
+    {
+        // the minimum distance (not the maximum) grows the rect that is left out, and an occupant is left out when its cells
+        // overlap that rect: within 4 cells of (2,3) but not within 2, (3,3) is out and (0,3) / (4,3) / (6,3) are in
+        FakeOccupant west, close, edge;
+        InitStreet(west, 0, 3);
+        InitStreet(close, 3, 3);
+        InitStreet(edge, 4, 3);
+        host.box = {&near.base, &west.base, &close.base, &edge.base, &far.base};
+        CHECK(map.GetSurroundingRoads(roads, SC4RectInt32{2, 3, 2, 3}, 4, 2, 0x10000000u));
+        CHECK(roads.size() == 3);
+        CHECK(std::find(roads.begin(), roads.end(), &west) != roads.end());
+        CHECK(std::find(roads.begin(), roads.end(), &edge) != roads.end());
+        CHECK(std::find(roads.begin(), roads.end(), &far) != roads.end());
+        for (ITrafficNetworkMapOccupant* road : roads) road->Release();
+        // no minimum distance: every road in the box
+        CHECK(map.GetSurroundingRoads(roads, SC4RectInt32{2, 3, 2, 3}, 4, 0, 0x10000000u));
+        CHECK(roads.size() == 5);
+        for (ITrafficNetworkMapOccupant* road : roads) road->Release();
+        host.box.clear();
+    }
 
     // ---- view tracking ----
     host.viewPosition[0] = 2 * 16.0f;

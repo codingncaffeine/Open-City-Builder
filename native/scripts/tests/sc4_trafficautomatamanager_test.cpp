@@ -194,6 +194,8 @@ struct FakeTrafficAutomaton final : ITrafficAutomataAutomaton {
         pathKey = key;
     }
     void HandleNetworkOccupantRemoved() override { ++occupantRemovals; }
+    int restoredPaths = 0;
+    void RestoreLoadedPath() override { ++restoredPaths; }
     std::uint32_t GetPathKey() const override { return pathKey; }
     ITrafficNetworkMapOccupant* GetNetworkOccupant() const override { return networkOccupant; }
     bool IsTrain() const override { return train; }
@@ -469,6 +471,7 @@ struct FakeCityOccupant final : cISC4Occupant {
 
 struct FakeTrafficOccupant final : ITrafficNetworkOccupant {
     int refs = 1;
+    ITrafficNetworkMapPathInfo* pathInfo = nullptr;   // only tested against null by the manager
     FakeCityOccupant city;
     std::uint32_t networkFlags = kTrafficOccupantType;
     bool pathConnection = false;
@@ -487,7 +490,7 @@ struct FakeTrafficOccupant final : ITrafficNetworkOccupant {
         if (edge < 0 || edge >= 8) return false;
         return connections[edge] && (networkType & networkFlags) != 0;
     }
-    ITrafficNetworkMapPathInfo* GetPathInfo() override { return nullptr; }
+    ITrafficNetworkMapPathInfo* GetPathInfo() override { return pathInfo; }
     void ReleasePathInfo() override {}
     bool PathConnectionExists(std::uint32_t, std::uint8_t, std::uint8_t) const override { return pathConnection; }
     bool IsIntersection() const override { return false; }
@@ -541,6 +544,21 @@ struct FakeTrafficNetwork final : ITrafficNetworkManagerApi {
     int responseCalls = 0;
     std::map<std::pair<std::uint32_t, std::uint32_t>, float> pathDensity;
     std::map<std::tuple<std::uint32_t, std::uint32_t, std::uint32_t>, std::uint16_t> edgeCounts;
+    std::uint32_t randomKey = 0, randomKeyType = 0;
+    bool anyPath = false;   // every key has a path starting at pathStart
+    int lanes = 0;
+    int LaneCount(ITrafficNetworkMapOccupant*, std::uint32_t, std::uint8_t, std::uint8_t) override { return lanes; }
+    cS3DVector3 pathStart{0, 0, 0};
+    bool RandomPathKey(ITrafficNetworkMapOccupant*, std::uint32_t type, cRZRandomSuper*, std::uint32_t& key) override {
+        randomKeyType = type;
+        key = randomKey;
+        return randomKey != 0;
+    }
+    bool PathStart(ITrafficNetworkMapOccupant*, std::uint32_t key, cS3DVector3& out) override {
+        if (!anyPath && (key != randomKey || key == 0)) return false;
+        out = pathStart;
+        return true;
+    }
     TrafficTileInfo* GetTileInfoAtCell(int x, int z) override {
         auto it = tiles.find({x, z});
         return it == tiles.end() ? nullptr : it->second;
@@ -1159,6 +1177,79 @@ int main() {
         CHECK(created->shutdowns >= 1);   // no path finder: the failed route removes the new automaton
         delete created;
 
+        // ---- SpawnOccupantAutomaton (0x100114fea): a random path key of the piece, the automaton at its first point on layer 7,
+        // its trip on that key and the lifespan; nothing without the piece's path info; removed when the trip cannot start
+        {
+            static char pathInfoStandIn;
+            AddUintArray(exemplar->holder, 0x09c80416, {0x7ab50e44, 0x1, 0x2});   // the exemplar's model key: a model to choose
+            manager->ScanExemplars();
+            FakeTrafficOccupant piece;
+            piece.city.rect = SC4CellRect{0, 0, 0, 0};
+            host.trafficNetwork.randomKey = 0x01000302;
+            host.trafficNetwork.pathStart = cS3DVector3{40.0f, 3.0f, 56.0f};
+            FakeTrafficAutomaton* spawned = new FakeTrafficAutomaton();
+            spawned->occupant.type = kTrafficOccupantType;
+            host.classCreated = spawned;
+            host.trafficAutomata[spawned] = spawned;
+            CHECK(manager->SpawnOccupantAutomaton(&piece, 9, 0x4200, 0, false, 1) == nullptr);   // no path info
+            CHECK(spawned->startTrips == 0);
+            piece.pathInfo = reinterpret_cast<ITrafficNetworkMapPathInfo*>(&pathInfoStandIn);
+            CHECK(manager->SpawnOccupantAutomaton(&piece, 9, 0x4200, 0, false, 1) == spawned);
+            CHECK(host.trafficNetwork.randomKeyType == 1);
+            CHECK(spawned->startTrips == 1 && spawned->tripKey == 0x01000302 && spawned->tripOccupant == &piece);
+            CHECK(spawned->populateLayer == 7);
+            CHECK(spawned->cellLifespan == 9);
+            CHECK(spawned->position[0] == 40.0f && spawned->position[2] == 56.0f);
+            manager->RemoveAutomaton(spawned, true);
+            spawned->startTripResult = false;
+            spawned->removedForce = false;
+            CHECK(manager->SpawnOccupantAutomaton(&piece, 9, 0x4200, 0, false, 0) == nullptr);   // the trip fails: removed
+            CHECK(host.trafficNetwork.randomKeyType == manager->DefaultPathType());              // path type 0: the default
+            CHECK(spawned->removedForce || spawned->shutdowns >= 1);
+            host.classCreated = nullptr;
+            host.trafficAutomata.erase(spawned);
+            host.trafficNetwork.randomKey = 0;
+            delete spawned;
+
+            // ---- SpawnAutomaton (i386 0x000d0b70): a layer-7 car gets a cell lifespan from the tuning's range (i386 +0xc/+0x10),
+            // and nothing is made within twice the radius of the automaton the camera follows
+            AddUintArray(exemplar->holder, kPropertyOccupantGroups, {0x4200, 0x1402, manager->DefaultGroup()});
+            manager->ScanExemplars();
+            tuning.f2188c = 3;
+            tuning.f21890 = 5;
+            host.trafficNetwork.anyPath = true;
+            host.trafficNetwork.lanes = 1;
+            piece.pathConnection = true;
+            FakeTrafficAutomaton* car = new FakeTrafficAutomaton();
+            car->occupant.type = kTrafficOccupantType;
+            host.classCreated = car;
+            host.trafficAutomata[car] = car;
+            manager->SpawnAutomaton(&piece, nullptr, PopulateLayer::kLayer7, 0, 2, 1.0f);
+            CHECK(car->startTrips == 1 && car->tripKey == 0x01000002u);
+            CHECK(car->cellLifespan >= 3 && car->cellLifespan <= 5);
+            manager->RemoveAutomaton(car, true);
+            FakeTrafficAutomaton followed;
+            followed.position[0] = 41.0f;
+            followed.position[1] = 3.0f;
+            followed.position[2] = 56.0f;   // 1 from the path start, radius 4
+            manager->SetCameraFollow(&followed);
+            car->startTrips = 0;
+            manager->SpawnAutomaton(&piece, nullptr, PopulateLayer::kLayer7, 0, 2, 1.0f);
+            CHECK(car->startTrips == 0);
+            followed.position[0] = 400.0f;   // far away: the control
+            manager->SpawnAutomaton(&piece, nullptr, PopulateLayer::kLayer7, 0, 2, 1.0f);
+            CHECK(car->startTrips == 1);
+            manager->RemoveAutomaton(car, true);
+            manager->SetCameraFollow(nullptr);
+            host.classCreated = nullptr;
+            host.trafficAutomata.erase(car);
+            host.trafficNetwork.anyPath = false;
+            host.trafficNetwork.lanes = 0;
+            tuning.f2188c = 0;
+            tuning.f21890 = 0;
+            delete car;
+        }
+
         // ---- UpdateResponseList (0x10011220c): retire after six failed lookups, refresh on success
         host.trafficNetwork.responseFound = false;
         cityOccupant->AddRef();
@@ -1191,6 +1282,36 @@ int main() {
         CHECK(reader->DefaultPathType() == 0);   // the original drops the field (0x1001161f7)
         CHECK(reader->DefaultNetworkType() == 0);
         CHECK(reader->Responses().empty());
+        {
+            // HandlePostCityInit (0x100114e88) of a loaded city: every automaton gets its path back, a collision-detecting one its
+            // leader too; a manager that was not loaded leaves them alone
+            FakeTrafficAutomaton* loaded = new FakeTrafficAutomaton();
+            FakeTrafficAutomaton* blind = new FakeTrafficAutomaton();
+            FakeTrafficAutomaton* ahead = new FakeTrafficAutomaton();
+            loaded->findLeaderResult = ahead;
+            blind->detectCollisions = false;
+            blind->findLeaderResult = ahead;
+            host.trafficAutomata[loaded] = loaded;
+            host.trafficAutomata[blind] = blind;
+            reader->AddAutomaton(loaded);
+            reader->AddAutomaton(blind);
+            manager->AddAutomaton(ahead);
+            host.trafficAutomata[ahead] = ahead;
+            manager->HandlePostCityInit();   // the control: not loaded
+            CHECK(ahead->restoredPaths == 0);
+            reader->HandlePostCityInit();
+            CHECK(loaded->restoredPaths == 1 && blind->restoredPaths == 1);
+            CHECK(loaded->leader == ahead);
+            CHECK(blind->leader == nullptr);
+            loaded->SetLeader(nullptr);
+            reader->RemoveAutomaton(loaded, true);
+            reader->RemoveAutomaton(blind, true);
+            manager->RemoveAutomaton(ahead, true);
+            for (FakeTrafficAutomaton* a : {loaded, blind, ahead}) host.trafficAutomata.erase(a);
+            delete loaded;
+            delete blind;
+            delete ahead;
+        }
         std::uint16_t badVersion = 1;
         PortMemoryOStream badOutput;
         badOutput.SetUint16(badVersion);

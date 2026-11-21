@@ -402,10 +402,10 @@ public:
     bool ConstrainPointToNetworkTile(cS3DVector3& point, std::uint32_t flags) const;   // 0x10029cf42
     bool ConstrainVectorToNetworkTile(const cS3DVector3& from, cS3DVector3& point, std::uint32_t flags) const;   // 0x10029d174
     float GetRoadAltitude(float x, float z) const;   // 0x10029d538
-    bool GetSurroundingRoads(std::vector<ITrafficNetworkMapOccupant*>& out, const SC4RectInt32& rect, int margin,
-                             int flag, std::uint32_t networkFlags);   // 0x10029e40e
-    bool GetSurroundingRoads(std::vector<ITrafficNetworkMapOccupant*>& out, cISC4Occupant* occupant, int margin,
-                             int flag, std::uint32_t networkFlags);   // 0x10029e684
+    bool GetSurroundingRoads(std::vector<ITrafficNetworkMapOccupant*>& out, const SC4RectInt32& rect, int maxCells,
+                             int minCells, std::uint32_t networkFlags);   // 0x10029e40e
+    bool GetSurroundingRoads(std::vector<ITrafficNetworkMapOccupant*>& out, cISC4Occupant* occupant, int maxCells,
+                             int minCells, std::uint32_t networkFlags);   // 0x10029e684
 
     // ---- ticks and messages (0x100299322 .. 0x100299f86) ----
     bool DoMessage(::cGZMessage& message) override;                          // 0x100299312 (message target)

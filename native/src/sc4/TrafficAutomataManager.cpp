@@ -327,15 +327,13 @@ bool cSC4TrafficAutomataManager::Dispatch(IAutomataAutomaton* automaton, const t
 // i386 0x000ced18: with flag 0x2000 or 0x20000 the base's random point; otherwise a random network occupant of the group's
 // network kinds (0x80 for 0x4208 / 0x4217, 0x100 for the el train, 0x200 for the monorail, 2 for the other trains, 0xc49 for
 // the road vehicles) between `minDistance` and the clamped `maxDistance` of the origin's lot (or cell): the out point is that
-// occupant's cell centre at the occupant's altitude. The distances are cells (world units / 16). The point is written to `direction`
-// (the original's out argument).
+// occupant's cell centre at the occupant's altitude. The distances are world units, handed to the map as cells (/ 16).
+// `velocity` is not read.
 bool cSC4TrafficAutomataManager::GetRandomCreationPoint(std::uint32_t group, const cS3DVector3& origin,
-                                                        float minDistance, float maxDistance,
-                                                        const cS3DVector3& center, cS3DVector3& direction,
-                                                        std::uint32_t flags) {
+                                                        float minDistance, float maxDistance, cS3DVector3& out,
+                                                        std::uint32_t flags, const cS3DVector3* velocity) {
     if ((flags & 0x22000u) != 0)
-        return cSC4AutomataManager::GetRandomCreationPoint(group, origin, minDistance, maxDistance, center, direction,
-                                                            flags);
+        return cSC4AutomataManager::GetRandomCreationPoint(group, origin, minDistance, maxDistance, out, flags, velocity);
     if (!CanCreateGroup(group)) return false;
     std::uint32_t networkFlags = 0xc49;
     if (group == 0x4208 || group == 0x4217) {
@@ -351,7 +349,6 @@ bool cSC4TrafficAutomataManager::GetRandomCreationPoint(std::uint32_t group, con
     ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
     if (!host) return false;
     int cellX = 0, cellZ = 0;
-    (void)center;
     host->WorldToCell(origin.x, origin.z, cellX, cellZ);
     SC4RectInt32 rect;
     if (!host->LotCellRectAt(cellX, cellZ, rect)) {
@@ -373,9 +370,9 @@ bool cSC4TrafficAutomataManager::GetRandomCreationPoint(std::uint32_t group, con
             road->GetOccupiedCell(roadX, roadZ);
             float x = 0.0f, z = 0.0f;
             host->CellToWorld(static_cast<int>(roadX), static_cast<int>(roadZ), x, z);
-            direction.x = x + host->CellSize() * 0.5f;   // cSC4City::CellCenterToPosition
-            direction.z = z + host->CellSize() * 0.5f;
-            direction.y = road->GetAltitude(direction.x, direction.z);
+            out.x = x + host->CellSize() * 0.5f;   // cSC4City::CellCenterToPosition
+            out.z = z + host->CellSize() * 0.5f;
+            out.y = road->GetAltitude(out.x, out.z);
         }
     }
     for (ITrafficNetworkMapOccupant* road : roads)
@@ -875,10 +872,10 @@ void cSC4TrafficAutomataManager::PopulateNetworkOccupant(ITrafficNetworkMapOccup
 // wildcard path; a random lane of the edge gives the path key. Gated (MaybeSpawnAutomaton) adds the elapsed time to the edge's
 // accumulator and spawns only once it reaches the spawn interval (1 / density) and the lane is empty. The automaton starts at
 // the path's first point, faded in, on a trip along it.
-// The train layers (4, 5, 6, 9, 10) spawn nothing while any train is on a tile within two cells of the occupant, and a train
-// that is made is told how many cars to pull: one per `f21a50` of the edge's density, within its kind's range.
-//   PARTIAL: the camera-follow distance test of SpawnAutomaton and the cell lifespan of layers 7/8 are not ported; the
-//   accumulator is never reset (as in the original's code).
+// The train layers (4, 5, 6, 9, 10) spawn nothing while any train is on a tile within two cells of the occupant (both entry
+// points), and a train that MaybeSpawnAutomaton makes is told how many cars to pull: one per `f21a50` of the edge's density,
+// within its kind's range. SpawnAutomaton makes nothing near the automaton the camera follows. Layers 7 and 8 get a random
+// cell lifespan. The accumulator is never reset (as in the original's code).
 bool cSC4TrafficAutomataManager::SpawnOnEdge(ITrafficNetworkMapOccupant* occupant, PopulateLayer layer, std::uint8_t entry,
                                              std::uint8_t exit, bool gated, float elapsedSeconds, double density, float weight) {
     ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
@@ -935,22 +932,32 @@ bool cSC4TrafficAutomataManager::SpawnOnEdge(ITrafficNetworkMapOccupant* occupan
             }
             return false;
         }
-        const auto layerId = static_cast<std::uint32_t>(layer);
-        if (layerId == 6 || layerId == 4 || layerId == 5 || layerId == 9 || layerId == 10) {
-            SC4CellRect rect{};
-            occupant->AsOccupant()->GetBoundingCityCells(rect);
-            for (int x = static_cast<int>(rect.x0) - 2; x <= static_cast<int>(rect.x1) + 2; ++x)
-                for (int z = static_cast<int>(rect.z0) - 2; z <= static_cast<int>(rect.z1) + 2; ++z)
-                    for (TrafficTileInfo* near = network->GetFirstTileInfoAtCell(x, z); near; near = near->next)
-                        for (ITrafficNetworkMapAutomaton* there : near->automata)
-                            if (there && there->IsTrain()) {
-                                TrainTraceReason(layer, 8);
-                                return false;
-                            }
-        }
+    }
+    const auto layerId = static_cast<std::uint32_t>(layer);
+    if (layerId == 6 || layerId == 4 || layerId == 5 || layerId == 9 || layerId == 10) {
+        SC4CellRect rect{};
+        occupant->AsOccupant()->GetBoundingCityCells(rect);
+        for (int x = static_cast<int>(rect.x0) - 2; x <= static_cast<int>(rect.x1) + 2; ++x)
+            for (int z = static_cast<int>(rect.z0) - 2; z <= static_cast<int>(rect.z1) + 2; ++z)
+                for (TrafficTileInfo* near = network->GetFirstTileInfoAtCell(x, z); near; near = near->next)
+                    for (ITrafficNetworkMapAutomaton* there : near->automata)
+                        if (there && there->IsTrain()) {
+                            TrainTraceReason(layer, 8);
+                            return false;
+                        }
     }
     cS3DVector3 start{};
     network->PathStart(occupant, key, start);
+    if (!gated) {
+        // SpawnAutomaton (i386 0x000d0b70) makes nothing within twice the radius of the automaton the camera follows
+        if (IAutomataAutomaton* followed = CameraFollowTarget()) {
+            float p[3] = {0.0f, 0.0f, 0.0f};
+            followed->GetPosition(p);
+            const float dx = p[0] - start.x, dy = p[1] - start.y, dz = p[2] - start.z;
+            const float radius = followed->GetRadius();
+            if (std::sqrt(dx * dx + dy * dy + dz * dz) < radius + radius) return false;
+        }
+    }
     cGZPersistResourceKey model;
     ChooseRandomModel(group, occupant, layer, model);
     if (model.instance == 0) {
@@ -972,6 +979,10 @@ bool cSC4TrafficAutomataManager::SpawnOnEdge(ITrafficNetworkMapOccupant* occupan
     TrainTraceReason(layer, 0);
     automaton->SetOpacity(0.0f, 0.0f);
     automaton->SetOpacity(1.0f, AutomataTuning().f219b4);
+    if (layerId - 7u < 2u) {   // layers 7 and 8: a random cell lifespan from the tuning's range
+        const AutomataTuningGlobals& tuning = AutomataTuning();
+        traffic->SetCellLifespan(static_cast<std::uint8_t>(Random().RandomSint32RangeUniform(tuning.f2188c, tuning.f21890)));
+    }
     if (gated && IsTrainSpawnGroup(group)) {
         const AutomataTuningGlobals& tuning = AutomataTuning();
         const int wanted = FloorIdiomImpl(weight / static_cast<float>(tuning.f21a50));
@@ -1005,14 +1016,36 @@ ITrafficAutomataAutomaton* cSC4TrafficAutomataManager::SpawnOccupantAutomaton(IT
                                                                               int param2, std::uint32_t group,
                                                                               std::uint32_t flags, bool param5,
                                                                               int pathType) {
-    // 0x100114fea PARTIAL: needs ITrafficNetworkMapPathInfo slot 0x48 (a random path for the occupant) and the
-    // automaton StartTrip slot; the exemplar lookup / creation calls are ready.
-    (void)occupant;
-    (void)param2;
-    (void)group;
-    (void)flags;
-    (void)param5;
-    (void)pathType;
+    // 0x100114fea (i386 0x000cf83a): a response automaton on a random path of the occupant. `param2` becomes its cell lifespan,
+    // `param5` picks populate layer 7 for the model choice (else 0) and a zero `pathType` means the default path type. The path
+    // key comes from the piece's GetRandomPathWildcard(type, any entry, any exit) and the automaton starts at the first point of
+    // that path; only groups 0x4001 / 0x4002 keep the chosen model, every other group is made with its own default. A traffic
+    // automaton goes to layer 7 and starts its trip on the key; one that cannot is removed.
+    ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
+    ITrafficNetworkManagerApi* network = host ? host->TrafficNetworkManager() : nullptr;
+    if (!occupant || !network || !occupant->GetPathInfo()) return nullptr;
+    if (pathType == 0) pathType = static_cast<int>(defaultPathType_);
+    std::uint32_t key = 0;
+    network->RandomPathKey(occupant, static_cast<std::uint32_t>(pathType), &Random(), key);
+    cS3DVector3 start{};
+    network->PathStart(occupant, key, start);
+    cGZPersistResourceKey model;
+    ChooseRandomModel(group, occupant, static_cast<PopulateLayer>(param5 ? 7 : 0), model);
+    if (model.instance == 0) return nullptr;
+    if (group - 0x4001u > 1u) model = cGZPersistResourceKey{};
+    IAutomataAutomaton* automaton = CreateAutomaton(group, start, flags, model, nullptr, 0, nullptr);
+    if (!automaton) return nullptr;
+    if (IsTrafficAutomaton(automaton)) {
+        ITrafficAutomataAutomaton* traffic = host->AsTrafficAutomaton(automaton);
+        if (traffic) {
+            traffic->SetPopulateLayer(7);
+            if (traffic->StartTrip(occupant, key, false)) {
+                traffic->SetCellLifespan(static_cast<std::uint8_t>(param2));
+                return traffic;
+            }
+        }
+    }
+    RemoveAutomaton(automaton, true);
     return nullptr;
 }
 
@@ -1209,10 +1242,18 @@ void cSC4TrafficAutomataManager::ScanExemplars() {
 }
 
 void cSC4TrafficAutomataManager::HandlePostCityInit() {
-    // 0x100114e88 PARTIAL: the base work runs; the per-automaton cached occupant / path info / leader refresh needs the
-    // cSC4TrafficAutomaton fields +0x310/+0x318/+0x328/+0xf0, which the recovered traffic automaton keeps private (no
-    // setters on its public surface).
+    // 0x100114e88: the base work, then for a city that was loaded every automaton gets its path info and path back from the
+    // saved network occupant and key, and a collision-detecting one its leader (FindLeader).
     cSC4AutomataManager::HandlePostCityInit();
+    if (!PostCityInitPending()) return;
+    ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
+    if (!host) return;
+    for (IAutomataAutomaton* automaton : Automata()) {
+        ITrafficAutomataAutomaton* traffic = automaton ? host->AsTrafficAutomaton(automaton) : nullptr;
+        if (!traffic) continue;
+        traffic->RestoreLoadedPath();
+        if (traffic->GetDetectCollisions()) traffic->SetLeader(traffic->FindLeader());
+    }
 }
 
 // ---- persistence -------------------------------------------------------------------------------------------------------

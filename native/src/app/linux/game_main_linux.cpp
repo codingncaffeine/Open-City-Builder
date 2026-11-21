@@ -1268,6 +1268,10 @@ int RunScenario(const std::string& path) {
             int limit = 8;
             words >> limit;
             native::NativeTrailerReport(limit);
+        } else if (command == "cars") {   // cars [N]: the traffic automata (how many follow a path, states, layers) and N followed samples
+            int samples = 6;
+            words >> samples;
+            native::NativeCarReport(samples);
         } else if (command == "mysims") {   // mysims: every MySim of the city, its state, residence, job and dispatch
             native::NativeMySimReport();
         } else if (command == "mysimmovein") {   // mysimmovein NAME [female]: a MySim moves in (the agent simulator's MoveIn + the move-in tool's SetResidence)

@@ -888,11 +888,17 @@ int main() {
     manager->DestroyAutomata();
 
     // GetRandomCreationPoint: needs a creatable group and the terrain height
+    // (the out point lies within the maximum distance around the origin, on the terrain unless flag 0x40000; the original
+    // draws the distance as min + (random * max - min), so the minimum cancels out)
+    for (int i = 0; i < 20; ++i) {
+        cS3DVector3 point{0, 0, 0};
+        CHECK(manager->GetRandomCreationPoint(0x1402, cS3DVector3{500, 9, 700}, 2.0f, 10.0f, point, 0, nullptr));
+        const float flat = std::sqrt((point.x - 500.0f) * (point.x - 500.0f) + (point.z - 700.0f) * (point.z - 700.0f));
+        CHECK(flat <= 10.001f);
+        CHECK(point.y == host.terrainHeight);   // the height is written over the point's y
+    }
     cS3DVector3 direction{0, 0, 0};
-    CHECK(manager->GetRandomCreationPoint(0x1402, cS3DVector3{0, 0, 0}, 2.0f, 10.0f, cS3DVector3{5, 0, 5}, direction,
-                                          0));
-    CHECK(direction.y == host.terrainHeight);   // the height is written over the direction's y (quirk)
-    CHECK(!manager->GetRandomCreationPoint(0x9999, cS3DVector3{0, 0, 0}, 0, 0, cS3DVector3{0, 0, 0}, direction, 0));
+    CHECK(!manager->GetRandomCreationPoint(0x9999, cS3DVector3{0, 0, 0}, 0, 0, direction, 0, nullptr));
 
     // GetAutomataManagerForGroup
     host.kinds[2].handled = 0x1406;
