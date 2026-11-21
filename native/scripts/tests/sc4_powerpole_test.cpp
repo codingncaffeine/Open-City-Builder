@@ -1,6 +1,7 @@
 // cSC4PowerPoleOccupant: the connections between poles (which end draws the wire, its four curves and the buoys over
 // water, the wire occupants it keeps), hiding / removing a connection, the wire cells, the highlight state and the
 // foundation geometry SetPosition builds. The engine is a fake IPowerPoleOccupantHost.
+#include "rz/PortMemoryStreams.h"
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -157,6 +158,22 @@ int main() {
     b->AddConnection(a, nullptr);
     a->BreakAllConnectionsAtDestination(true);
     CHECK(b->GetNumberOfConnections() == 0);
+
+    // ---- the record's last byte is the distressed flag (+0x10e), not the preview flag (+0x114) ---------------------------
+    a->SetDistressed(true);   // the fake host makes no effect
+    CHECK(a->GetDistressed() && !a->IsPreview());
+    {
+        PortMemoryOStream out;
+        CHECK(a->Write(out));
+        auto* c = new cSC4PowerPoleOccupant();
+        c->AddRef();
+        PortMemoryIStream in(out.bytes().data(), out.bytes().size());
+        CHECK(c->Read(in));
+        CHECK(c->GetDistressed() && !c->IsPreview());
+        c->Release();
+    }
+    a->SetDistressed(false);
+    CHECK(!a->GetDistressed());
 
     wire->Release();
     a->Release();

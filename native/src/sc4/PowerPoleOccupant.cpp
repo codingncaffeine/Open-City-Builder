@@ -865,7 +865,7 @@ bool cSC4PowerPoleOccupant::Write(cIGZOStream& stream) const {
         stream.SetUint8(static_cast<std::uint8_t>(attributes.flags & 0xff));
         stream.SetUint8(static_cast<std::uint8_t>((attributes.flags >> 8) & 0xff));
         stream.SetFloat32(attributes.shade[3]);
-        stream.SetUint8(preview_ ? 1 : 0);
+        stream.SetUint8(distressed_ ? 1 : 0);
     }
     return !stream.GetError();
 }
@@ -926,7 +926,7 @@ bool cSC4PowerPoleOccupant::Read(cIGZIStream& stream) {
         stream.GetFloat32(attributes.shade[3]);
         SetDrawAttributes(attributes);
         stream.GetUint8(flag);
-        preview_ = flag != 0;
+        distressed_ = flag != 0;   // +0x10e (i386): the record's last byte is the distressed flag, not the preview flag
         if (model_ != nullptr) {
             s3d::cIS3DModelInstance* model = model_;
             model_ = nullptr;
