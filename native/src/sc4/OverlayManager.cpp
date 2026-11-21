@@ -464,13 +464,12 @@ std::uint32_t cSTEOverlayManager::AddShadowDecal(const cGZPersistResourceKey& ke
 }
 
 std::uint32_t cSTEOverlayManager::AddHeightMap(std::uint32_t instance) {   // 0x1007295c8
-    // The matrix is all zeros except m[5] (2 / cells x), m[9] and m[15] (1): the height-map UV projection.
+    // An identity matrix (cS3DMatrix4(S3DIdentityTag)) with column 0 cleared (SetColumn(0, 0)) and m[5] = 2 / cells x: u is 0,
+    // v follows the altitude (i386 0x004d7d40).
     cS3DMatrix4 matrix{};
     for (int r = 0; r < 4; ++r)
-        for (int c = 0; c < 4; ++c) matrix.m[r][c] = 0.0f;
+        for (int c = 0; c < 4; ++c) matrix.m[r][c] = (r == c && c != 0) ? 1.0f : 0.0f;
     matrix.m[1][1] = 2.0f / static_cast<float>(cellCountX_);
-    matrix.m[2][1] = 1.0f;
-    matrix.m[3][3] = 1.0f;
     const cRZRect rect{0, 0, cellCountX_, cellCountZ_};
     return AddOverlay(instance, rect, matrix, 0x12u);   // bitset<8>{0,1,0,0,1,0,0,0}
 }

@@ -723,8 +723,10 @@ static void TestRingAndShadowDecals(FakeHost& host) {
     const cOverlay& height = manager.Overlays()[heightId];
     CHECK(RectEq(height.rect, 0, 0, 8, 8));
     CHECK(Near(height.texMatrix.m[1][1], 0.25f));                   // 2 / cells x
-    CHECK(Near(height.texMatrix.m[2][1], 1.0f) && Near(height.texMatrix.m[3][3], 1.0f));
-    CHECK(Near(height.texMatrix.m[0][0], 0.0f));
+    // identity with column 0 cleared: v follows the altitude only, never the z axis (that drew stripes, not contour lines)
+    CHECK(Near(height.texMatrix.m[2][2], 1.0f) && Near(height.texMatrix.m[3][3], 1.0f));
+    CHECK(Near(height.texMatrix.m[2][1], 0.0f) && Near(height.texMatrix.m[0][1], 0.0f) && Near(height.texMatrix.m[3][1], 0.0f));
+    for (int r = 0; r < 4; ++r) CHECK(Near(height.texMatrix.m[r][0], 0.0f));
     CHECK((height.flags & 0x12u) == 0x12u);          // the bitset 0x12, not the 0x20 height-map bit
     CHECK((height.flags & kOverlayFlagHeightMap) == 0);
     manager.SetHeightMapParams(heightId, 2.0f, 1.0f);
