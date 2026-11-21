@@ -2079,7 +2079,7 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, bool allowDiagonals, bool connect
     if (!place) {
         // The preview occupants (+0x25c) are kept so ClearCellPreviews can take them out again.
         for (cSC4NetworkOccupant* occupant : placed) previewOccupants_.push_back(occupant);
-        // SetTerrainHilight (previewUpdateEnabled_): not ported.
+        if (previewUpdateEnabled_) SetTerrainHilight(0);                         // the invalid rest of the drag in red
     } else {
         // The construction crew (cSC4NetworkConstructionCrew::AddNetworkSegment) is not ported: the pieces are usable at once.
         MarkOccupantsUsable(placed, true);
