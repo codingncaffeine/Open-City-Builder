@@ -98,6 +98,7 @@
 #include "sc4/CommonIIDs.h"
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <list>
 #include <map>
 #include <set>
@@ -121,6 +122,7 @@
 #include "sc4/ViewInputControl.h"
 
 class cIGZCommandParameterSet;
+class cIGZCmdLine;
 class SC4ViewUtilities;   // global scope (src/sc4/ViewUtilities.h)
 class cRZCmdLine;
 class cISC4Occupant;
@@ -133,6 +135,7 @@ class cIGZVariant;
 class cIGZFont;
 
 namespace sc4 {
+class cISCPropertyHolder;
 
 class cSC4View3DWin;
 class cISC4CatalogItem;
@@ -613,6 +616,13 @@ public:
                                         std::uint32_t iid, void** out) = 0;
     // cSLBuffer(key, colorType, false) + its inner buffer (0x100043c72): one reference on the image, or null.
     virtual cIGZBuffer* LoadImageBuffer(std::uint32_t type, std::uint32_t group, std::uint32_t instance) = 0;
+    // ReadTunableValues: SL::spRM GetResource(key, iid 0xa52160f5) -> the exemplar's properties for `read` (false when
+    // absent), the application's ini path (SL::spSC4 vslot 0x74) and the framework's command line (vslot 0x54).
+    virtual bool ReadExemplarProperties(const cGZPersistResourceKey& key, const std::function<void(const cISCPropertyHolder*)>& read) {
+        (void)key; (void)read; return false;
+    }
+    virtual void AppIniFilePath(cIGZString& out) { (void)out; }
+    virtual cIGZCmdLine* CommandLine() { return nullptr; }
     // GZCOM()->CreateInstance(exemplar 0x22ecfc47, iid cIGZWin / 0x22ba0121) @ 0x100789464: the toolbar button.
     virtual cIGZWin* CreateToolbarButton() = 0;
     // GZCOM()->CreateInstance(exemplar 0xca5d3294, iid 0xca5d3290) @ 0x10078a63d: the compass / alert border.
@@ -940,6 +950,7 @@ public:
     void SetCostIndicatorAlpha(std::uint8_t alpha);                // Mac i386 0x0051c988
     void CreateProgressScreen(bool flag);                          // @ 0x100780910
     void UpdateProgressMessage();                                  // @ 0x100788d98
+    void ReadTunableValues();                                      // i386 0x005201fe
     void DeleteProgressScreen();                                   // Mac i386 0x0051c8f2
     // DoLoad's flag: the city's view record (0xa9c8647c, 0xe9c8647e, 1, version below 5) was read, so the progress screen titles
     // the load with the city's name (a new city keeps the "new city" title).

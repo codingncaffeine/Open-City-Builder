@@ -410,6 +410,16 @@ struct StubView3DWin final : IView3DWinHost {
         return ok;
     }
     cIGZBuffer* LoadImageBuffer(std::uint32_t, std::uint32_t group, std::uint32_t instance) override { return native::LoadBitmapResource(group, instance); }
+    bool ReadExemplarProperties(const cGZPersistResourceKey& key, const std::function<void(const sc4::cISCPropertyHolder*)>& read) override {
+        void* raw = nullptr;
+        if (!SL::spRM || !SL::spRM->GetResource(key, 0xa52160f5, &raw, 0, nullptr) || !raw) return false;
+        auto* exemplar = static_cast<cISCResExemplar*>(raw);
+        read(exemplar->AsISCPropertyHolder());
+        exemplar->Release();
+        return true;
+    }
+    void AppIniFilePath(cIGZString& out) override { if (cSC4App* app = native::BootApplication()) app->GetAppIniFilePath(out); }
+    cIGZCmdLine* CommandLine() override { cIGZFrameWork* framework = RZGetFramework(); return framework ? framework->CommandLine() : nullptr; }
     // GZCOM()->CreateInstance(0x22ecfc47, cIGZWin): the button that brings the hidden UI back (AddGUI skins it, gives it id 0x43 and
     // hides it until MinimizeUI). It was null natively, so a hidden UI could not be shown again.
     cIGZWin* CreateToolbarButton() override {

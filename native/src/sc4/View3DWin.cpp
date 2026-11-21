@@ -21,6 +21,9 @@
 #include "sc4/WinCatalogView.h"
 #include "sc4/WinTertiaryMenuFrame.h"
 #include "rz/cRZCmdLine.h"
+#include "rz/cRZIniFile.h"
+#include "rz/RZStringUtils.h"
+#include "sc4/SCPropertyHelp.h"
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/SCResParser.h"
 #include "s3d/ModelInstance.h"
@@ -2718,6 +2721,44 @@ bool cSC4View3DWin::SetRenderProperties(const cIGZString& name, const cIGZString
     return true;
 }
 
+// The scroll tunables of exemplar {0x6534284a, 0x690f693f, 0xe90f6c84} (the stop factor, whether the stop scales with the
+// speed, the edge and keyboard scroll speeds), then every [Render Properties] entry of the application's ini and every
+// -RenderProp:name,value (or "name value") switch, each switch erased from a copy of the command line once applied.
+void cSC4View3DWin::ReadTunableValues() {
+    if (!host_) return;
+    host_->ReadExemplarProperties(cGZPersistResourceKey{0x6534284a, 0x690f693f, 0xe90f6c84}, [this](const cISCPropertyHolder* holder) {
+        cSCPropertyHelp::GetPropertyValue(holder, 0x4975dd20, scrollStopFactor_);
+        cSCPropertyHelp::GetPropertyValue(holder, 0x4975dd25, scrollStopScaled_);
+        cSCPropertyHelp::GetPropertyValue(holder, 0x49e5522f, edgeScrollSpeed_);
+        cSCPropertyHelp::GetPropertyValue(holder, 0xa9e581fb, keyboardScrollSpeed_);
+    });
+    cRZString path;
+    host_->AppIniFilePath(path);
+    cRZIniFile ini(path);
+    ini.EnumEntries(cRZString("Render Properties"), SetRenderPropertiesStatic, this);
+    cIGZCmdLine* original = host_->CommandLine();
+    if (!original) return;
+    cRZCmdLine commandLine(*original);
+    const cRZString name("RenderProp");
+    cRZString value;
+    while (commandLine.IsSwitchPresent(name, value, true)) {
+        cRZString parts[2];
+        unsigned count = 2;
+        bool ok = RZParseDelimitedText(value.ToChar(), value.Strlen(), ',', parts, count) && count == 2;
+        if (!ok) {
+            count = 2;
+            ok = RZParseDelimitedText(value.ToChar(), value.Strlen(), ' ', parts, count) && count == 2;
+        }
+        if (ok) SetRenderProperties(parts[0], parts[1]);
+        for (int i = 0; i < commandLine.argc(); ++i) {
+            if (commandLine[i].FindChars(name.ToChar(), 0, false) == 1) {   // "-RenderProp...": the name right after the dash
+                commandLine.EraseArgument(i);
+                break;
+            }
+        }
+    }
+}
+
 void cSC4View3DWin::SetRenderPropertiesStatic(const cRZString& name, const cRZString& value, void* context) {
     // cRZIniFile::EnumEntries callback with the view as its context (0x100792b3a).
     if (auto* view = static_cast<cSC4View3DWin*>(context)) view->SetRenderProperties(name, value);
@@ -3501,7 +3542,20 @@ void cSC4View3DWin::DoPreCityInit() {
     if (modelMaker_ && host_) host_->InitModelMaker(modelMaker_);
     if (host_) host_->OnView3DInit();
     UpdateProgressMessage();
-    // ReadTunableValues and SC4SendProgressMessage(2, "") come here in the original (not ported yet)
+    ReadTunableValues();
+    // SC4SendProgressMessage(2, ""): message 0x4a44667f with the caption string and the line, sent on SL::spMS2
+    if (cIGZMessageServer2* server = host_ ? host_->MessageServer2() : nullptr) {
+        auto* message = new cRZMessage2Standard();
+        message->AddRef();
+        auto* text = new cRZString("");
+        text->AddRef();
+        message->SetType(0x4a44667fu);
+        message->SetString(text);
+        message->SetData1(2);
+        server->MessageSend(message);
+        message->Release();
+        text->Release();
+    }
     AddGUI();
     UpdateProgressMessage();
 }
