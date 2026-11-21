@@ -1,6 +1,7 @@
 // InsertNetworkOccupant's pre-built model pieces: a solved piece whose exemplar exists becomes a pre-built model occupant
 // (no quad triangles) with the support model of the type's placement block at the offset and rotation the piece's edge
-// pattern selects; a piece without one stays a plain quad occupant. Also the two multi-type adjacency checks.
+// pattern selects; a piece without one stays a plain quad occupant. Also the two multi-type adjacency checks and the bridge
+// term of GetCostOfSolution.
 #include <cmath>
 #include <cstdio>
 #include <list>
@@ -40,6 +41,8 @@ struct NetworkToolTestAccess {
     static bool Horizontally(cSC4NetworkTool& t, std::uint32_t x, std::uint32_t z, std::uint32_t flags) {
         return t.AdjacentHorizontallyToMultitype(x, z, flags);
     }
+    static std::vector<tBridge>& Bridges(cSC4NetworkTool& t) { return t.bridges_; }
+    static cSC4NetworkPlacementParams& Placement(cSC4NetworkTool& t) { return t.placement_; }
 };
 }  // namespace sc4
 
@@ -218,6 +221,26 @@ int main() {
         auto* prebuilt = dynamic_cast<cSC4NetworkOccupantWithPreBuiltModel*>(occupant);
         CHECK(prebuilt && prebuilt->SupportModelId() == 0);
         if (occupant) occupant->Release();
+    }
+
+    // ---- GetCostOfSolution: a bridge costs its type's fixed cost plus its steps times (its cost per step + the network's bridge
+    //      cost per cell) ----
+    {
+        cSC4NetworkBridgeTypeInfo type;
+        type.unknown150[0] = 1000;
+        type.unknown150[1] = 50;
+        host.types[kNetworkHighway].bridges = {cSC4NetworkBridgeTypeInfo{}, type};
+        NetworkToolTestAccess::Placement(*tool).unknownA8[6] = 10;
+        NetworkToolTestAccess::Placement(*tool).floatA8[8] = 0.0f;
+        CHECK(tool->GetCostOfSolution() == 0);
+        tBridge bridge;
+        bridge.networkType = kNetworkHighway;
+        bridge.startStep = 3;
+        bridge.endStep = 7;
+        bridge.bridgeType = 1;
+        NetworkToolTestAccess::Bridges(*tool).push_back(bridge);
+        CHECK(tool->GetCostOfSolution() == 1000 + 4 * (50 + 10));
+        NetworkToolTestAccess::Bridges(*tool).clear();
     }
 
     tool->Release();
