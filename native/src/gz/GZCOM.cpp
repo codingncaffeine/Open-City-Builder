@@ -342,7 +342,7 @@ __attribute__((weak)) void* GZCOM_CreatecSC4PipeOccupant() { SC4_UNWIRED("GZCOM_
 // original allocates 0x0 bytes; the class is not recovered yet
 __attribute__((weak)) void* GZCOM_CreatecSC4SubwayOccupant() { SC4_UNWIRED("GZCOM_CreatecSC4SubwayOccupant"); return nullptr; }
 // original allocates 0x0 bytes; the class is not recovered yet
-void* GZCOM_CreatecSC4NetworkTunnelOccupant() { SC4_UNWIRED("GZCOM_CreatecSC4NetworkTunnelOccupant"); return nullptr; }
+__attribute__((weak)) void* GZCOM_CreatecSC4NetworkTunnelOccupant() { SC4_UNWIRED("GZCOM_CreatecSC4NetworkTunnelOccupant"); return nullptr; }
 // original allocates 0x40 bytes; the class is not recovered yet
 void* GZCOM_CreatecSC4PipeCustomView() { SC4_UNWIRED("GZCOM_CreatecSC4PipeCustomView"); return nullptr; }
 // original allocates 0x40 bytes; the class is not recovered yet
@@ -350,7 +350,7 @@ void* GZCOM_CreatecSC4SubwayCustomView() { SC4_UNWIRED("GZCOM_CreatecSC4SubwayCu
 // weak fallback: gzcom_creators/cSC4NetworkOccupantWithPreBuiltModel.cpp provides the real constructor-backed creator when linked
 __attribute__((weak)) void* GZCOM_CreatecSC4NetworkOccupantWithPreBuiltModel() { SC4_UNWIRED("GZCOM_CreatecSC4NetworkOccupantWithPreBuiltModel"); return nullptr; }
 // original allocates 0x0 bytes; the class is not recovered yet
-void* GZCOM_CreatecSC4NetworkBridgeOccupant() { SC4_UNWIRED("GZCOM_CreatecSC4NetworkBridgeOccupant"); return nullptr; }
+__attribute__((weak)) void* GZCOM_CreatecSC4NetworkBridgeOccupant() { SC4_UNWIRED("GZCOM_CreatecSC4NetworkBridgeOccupant"); return nullptr; }
 // weak fallback: gzcom_creators/cSC4Simulator.cpp provides the real constructor-backed creator when linked
 __attribute__((weak)) void* GZCOM_CreatecSC4Simulator() { SC4_UNWIRED("GZCOM_CreatecSC4Simulator"); return nullptr; }
 // weak fallback: GZCOMCreators*.cpp provide the real constructor-backed creator when linked

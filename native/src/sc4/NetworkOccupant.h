@@ -195,7 +195,7 @@ public:
     void MarkLightingUpdateNeeded() { SetNetworkFlag(kNetworkFlagLightingDirty); }
     void UpdateLighting(INetworkOccupantLighting& lighting);   // i386 0x001344b2 (vslot 0x188)
     bool IsLit() const { return HasNetworkFlag(kNetworkFlagLit); }
-    bool CanBeLit() const { return false; }
+    virtual bool CanBeLit() const { return false; }   // the bridge piece answers true
     void SetLit(bool lit);
     bool IsSupportPylonPresent() const { return HasNetworkFlag(kNetworkFlagSupportPylon); }
     bool IsIntersection() const;
