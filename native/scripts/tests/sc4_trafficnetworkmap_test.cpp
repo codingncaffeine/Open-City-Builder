@@ -4,9 +4,16 @@
 #include <cstdio>
 #include <cstring>
 #include <set>
+#include <memory>
+#include <string>
+#include <unistd.h>
 #include <vector>
 
+#include "gz/cIGZIStream.h"
+#include "gz/cIGZOStream.h"
 #include "rz/cRZMessage2Standard.h"
+#include "rz/cRZString.h"
+#include "sc4/DBSegment.h"
 #include "sc4/TrafficNetworkMap.h"
 
 static int failures = 0;
@@ -16,11 +23,28 @@ using namespace sc4;
 namespace {
 
 struct FakeOccupant;
+struct FakeBase;
+
+// The serializable face of a fake network piece (class 0x7e570001): the class record carries the piece's tag, which the
+// test host maps back to the piece when a map reads its references.
+constexpr std::uint32_t kFakePieceClass = 0x7e570001u;
+struct SerialFace : cIGZSerializable {
+    FakeBase* base = nullptr;
+    bool QueryInterface(std::uint32_t iid, void** out) override;
+    std::uint32_t AddRef() override;
+    std::uint32_t Release() override;
+    bool Write(cIGZOStream& stream) const override;
+    bool Read(cIGZIStream& stream) override;
+    std::uint32_t GetGZCLSID() const override { return kFakePieceClass; }
+};
 
 // cISC4Occupant implementation used by the seams that hand occupants back.
 struct FakeBase : cISC4Occupant {
     FakeOccupant* owner = nullptr;
     int refs = 1;
+    std::uint32_t tag = 0;
+    SerialFace serial;
+    FakeBase() { serial.base = this; }
     SC4CellRect cells{0, 0, 0, 0};
     float position[3] = {0, 0, 0};
     bool QueryInterface(std::uint32_t iid, void** out) override;
@@ -196,9 +220,17 @@ struct Host : ITrafficNetworkMapHost {
     void SubscribeMessage(std::uint32_t) override { ++subscribed; }
     void UnsubscribeMessage(std::uint32_t) override { ++unsubscribed; }
     void MakeTunnelPaths(ITrafficNetworkMapPathInfo*, ITrafficNetworkMapOccupant*, ITrafficNetworkMapOccupant*) override {}
+    // every cISC4Occupant of this test is a FakeBase; a piece read back from a file is found by its tag
+    std::vector<FakeOccupant*> pieces;
+    ITrafficNetworkMapOccupant* AsMapOccupant(cISC4Occupant* occupant) override;
 };
 
 bool FakeBase::QueryInterface(std::uint32_t iid, void** out) {
+    if (iid == kGZIID_cIGZSerializable) {
+        *out = static_cast<cIGZSerializable*>(&serial);
+        AddRef();
+        return true;
+    }
     if (iid == 0x26bb767eu) {   // cISC4Occupant: the occupant itself
         *out = static_cast<cISC4Occupant*>(this);
         AddRef();
@@ -209,6 +241,37 @@ bool FakeBase::QueryInterface(std::uint32_t iid, void** out) {
     owner->AddRef();
     return true;
 }
+
+bool SerialFace::QueryInterface(std::uint32_t iid, void** out) {
+    if (iid == kGZIID_cIGZSerializable) {
+        *out = static_cast<cIGZSerializable*>(this);
+        AddRef();
+        return true;
+    }
+    return base->QueryInterface(iid, out);
+}
+std::uint32_t SerialFace::AddRef() { return base->AddRef(); }
+std::uint32_t SerialFace::Release() { return base->Release(); }
+bool SerialFace::Write(cIGZOStream& stream) const { return stream.SetUint32(base->tag); }
+bool SerialFace::Read(cIGZIStream& stream) { return stream.GetUint32(base->tag); }
+
+ITrafficNetworkMapOccupant* Host::AsMapOccupant(cISC4Occupant* occupant) {
+    auto* base = static_cast<FakeBase*>(occupant);
+    FakeOccupant* found = base->owner;
+    if (!found && base->tag < pieces.size()) found = pieces[base->tag];
+    if (found) found->AddRef();
+    return found;
+}
+
+// Makes the fake pieces a file names: each new object of the fake class is a bare FakeBase that reads its tag.
+struct PieceFactory final : ISerializableFactory {
+    std::vector<std::unique_ptr<FakeBase>> made;
+    cIGZSerializable* CreateSerializable(std::uint32_t classId) override {
+        if (classId != kFakePieceClass) return nullptr;
+        made.push_back(std::make_unique<FakeBase>());
+        return &made.back()->serial;
+    }
+};
 
 void InitStreet(FakeOccupant& occupant, std::uint32_t x, std::uint32_t z) {
     occupant.types = 1u << 0;   // street
@@ -499,6 +562,184 @@ int main() {
         CHECK(unusable == map.UnusableRoads().end() || unusable->second.empty());
         CHECK(map.HandleRemoveNetworkOccupant(&fresh));   // the fake leaves the map before it goes out of scope
         CHECK(map.FindNetworkOccupant(6, 1) == nullptr);
+    }
+
+    // ---- persistence: a populated map is written to a city file, read back into a new map and written again ----
+    {
+        PieceFactory factory;
+        sc4::SetSerializableFactory(&factory);
+        FakeOccupant pieceA, pieceB, pieceC, pieceD;   // a stoplight junction, a plain street, a train junction, an unusable road
+        FakeOccupant* pieces[] = {&pieceA, &pieceB, &pieceC, &pieceD};
+        host.pieces.assign(std::begin(pieces), std::end(pieces));
+        for (std::uint32_t i = 0; i < 4; ++i) pieces[i]->base.tag = i;
+        InitStreet(pieceA, 1, 1);
+        InitStreet(pieceB, 2, 1);
+        InitStreet(pieceC, 4, 2);
+        InitStreet(pieceD, 6, 3);
+        pieceA.pathInfo.intersections[kPathTypeCar] = true;
+        pieceC.types = 0;
+        pieceC.pathInfo.junctionKeys = {11u, 22u, 33u};
+        host.props.clear();
+        cSC4TrafficNetworkMap saved(&host, &tuning);
+        CHECK(saved.Init());
+        CHECK(saved.HandleNetworkOccupantUsable(&pieceA, false));
+        CHECK(saved.HandleNetworkOccupantUsable(&pieceB, false));
+        CHECK(saved.HandleNetworkOccupantUsable(&pieceC, false));
+        CHECK(saved.HandleInsertNetworkOccupant(&pieceD));
+        TrafficTileInfo* tileA = saved.GetTileInfoAtCell(1, 1);
+        TrafficTileInfo* tileB = saved.GetTileInfoAtCell(2, 1);
+        CHECK(tileA && tileB);
+        if (tileA && tileB) {
+            tileA->laneTicks.resize(2);
+            tileA->laneTicks[1].push_back(TrafficLaneTick{0x01000102u, 37u, 0u, 0u});
+            tileA->frequencies.push_back(TrafficFrequency{0x01000001u, 5u, 3u});
+            tileB->frequencies.push_back(TrafficFrequency{0x03000002u, 2u, 9u});
+            tileB->roadMask = 0x5u;
+            tileB->occupancyMask = 0xau;
+            tileB->buildingMask = 0x3u;
+            tileB->edgeOccupancy[2] = 17;
+            tileB->distribution[1][3] = 4242;
+        }
+        CHECK(saved.GetIntersectionMap().size() == 1 && saved.TrainJunctions().size() == 1);
+        auto& junction = const_cast<TrafficIntersectionArray&>(saved.GetIntersectionMap().at(&pieceA));
+        junction.flag50 = 1;
+        junction.dirty = 1;
+        junction.approaches[3].type = 2;
+        junction.approaches[3].green = 1;
+        junction.approaches[3].nearSwitch = 1;
+        junction.approaches[3].stateDuration = 4.5f;
+        junction.approaches[3].otherDuration = 6.25f;
+        junction.approaches[3].timeLeft = 1.75f;
+        saved.StoplightGroupB() = false;
+        const cSC4TrafficNetworkMap::Counts counts = saved.GetCounts();
+        CHECK(counts.tiles == 3 && counts.laneTicks == 1 && counts.frequencies == 2 && counts.intersections == 1 &&
+              counts.unusableCells == 1 && counts.unusableRoads == 1 && counts.trainJunctions == 1 && counts.trainJunctionKeys == 12);
+
+        // The record as the original's Read takes it (i386 0x001ec0d6): every reference is a 64-bit id plus a class id
+        // (a null one is the id alone), tiles = cell, piece, lanes, automata (none), flag, three masks, four edges of a float
+        // and four u16, a u16, frequencies of 10 bytes; intersections = piece, flag, automata, four approaches of 17 bytes;
+        // unusable roads = key, count, pieces; view rectangle, two stoplight phases with their group; train junctions =
+        // piece, four key lists with their cursor.
+        const std::size_t ref = 12;
+        std::size_t expected = 2 + 4 + 4;
+        for (int z = 0; z < saved.CellsZ(); ++z)
+            for (int x = 0; x < saved.CellsX(); ++x)
+                for (TrafficTileInfo* tile = saved.GetTileInfoAtCell(x, z); tile; tile = tile->next) {
+                    expected += 4 + ref + 4;
+                    for (const auto& lane : tile->laneTicks) expected += 8 + 8 * lane.size();
+                    expected += 4 + 1 + 12 + 4 * (4 + 8) + 2 + 4 + 10 * tile->frequencies.size();
+                }
+        expected += 4 + (ref + 1 + 4 + 4 * 17);
+        expected += 4 + (4 + 4 + ref);
+        expected += 16 + 5 + 5;
+        expected += 4 + ref;
+        for (const auto& keys : saved.TrainJunctions().at(&pieceC).keys) expected += 4 + 4 * keys.size() + 2;
+
+        const auto open = [](const std::string& path, bool write) -> sc4::cSC4DBSegment* {
+            auto* seg = new sc4::cSC4DBSegment();
+            seg->AddRef();
+            seg->Init();
+            cRZString p(path.c_str());
+            seg->SetPath(p);
+            if (!(write ? seg->Open(false, true) : seg->Open(true, false))) { seg->Release(); return nullptr; }
+            return seg;
+        };
+        const auto save = [&open](const cSC4TrafficNetworkMap& map, const std::string& path, const cGZPersistResourceKey& key) {
+            sc4::cSC4DBSegment* seg = open(path, true);
+            if (!seg) return false;
+            sc4::cISC4DBSegmentOStream* os = nullptr;
+            bool ok = seg->OpenOStream(key, &os, true) && map.Write(*os);
+            if (os) {
+                ok = seg->CloseOStream(os) && ok;
+                os->Release();
+            }
+            seg->Close();
+            seg->Release();
+            return ok;
+        };
+        const auto bytesOf = [](sc4::cSC4DBSegment* seg, const cGZPersistResourceKey& key) {
+            std::vector<std::uint8_t> out;
+            sc4::cISC4DBSegmentIStream* is = nullptr;
+            if (!seg->OpenIStream(key, &is)) return out;
+            out.resize(is->GetRecord()->GetSize());
+            for (std::uint8_t& b : out) is->GetUint8(b);
+            seg->CloseIStream(is);
+            is->Release();
+            return out;
+        };
+        const cGZPersistResourceKey key{0x6a0f82b2u, 0x60606060u, 1u};
+        const char* tmp = std::getenv("TMPDIR");
+        const std::string dir = tmp && *tmp ? tmp : "/tmp";
+        const std::string path = dir + "/sc4_trafficmap_" + std::to_string(getpid()) + ".sc4";
+        const std::string again = dir + "/sc4_trafficmap_again_" + std::to_string(getpid()) + ".sc4";
+        CHECK(save(saved, path, key));
+
+        cSC4TrafficNetworkMap back(&host, &tuning);
+        std::vector<std::uint8_t> first, second;
+        if (sc4::cSC4DBSegment* seg = open(path, false)) {
+            CHECK(seg->LoadClassObjects(0x48));
+            first = bytesOf(seg, key);
+            sc4::cISC4DBSegmentIStream* is = nullptr;
+            CHECK(seg->OpenIStream(key, &is));
+            if (is) {
+                CHECK(back.Read(*is));
+                CHECK(!is->GetError() && is->GetRecord()->GetPosition() == is->GetRecord()->GetSize());
+                CHECK(back.Init());   // the city inits the map after the read; the read grid is kept
+                seg->CloseIStream(is);
+                is->Release();
+            }
+            seg->Close();
+            seg->Release();
+        } else {
+            CHECK(!"the saved city file opens");
+        }
+        CHECK(first.size() == expected);
+        CHECK(back.GetCounts() == counts);
+        TrafficTileInfo* readA = back.GetTileInfoAtCell(1, 1);
+        TrafficTileInfo* readB = back.GetTileInfoAtCell(2, 1);
+        CHECK(readA && readA->occupant == &pieceA && readB && readB->occupant == &pieceB);
+        CHECK(back.GetTileInfoAtCell(4, 2) && back.GetTileInfoAtCell(4, 2)->occupant == &pieceC);
+        if (readA && readB) {
+            CHECK(readA->laneTicks.size() == 2 && readA->laneTicks[1].size() == 1 && readA->laneTicks[1][0].key == 0x01000102u &&
+                  readA->laneTicks[1][0].laneTick == 37u);
+            CHECK(readA->frequencies.size() == 1 && readA->frequencies[0].key == 0x01000001u &&
+                  readA->frequencies[0].automataCount == 5u && readA->frequencies[0].autosPerSecond == 3u);
+            CHECK(readB->roadMask == 0x5u && readB->occupancyMask == 0xau && readB->buildingMask == 0x3u);
+            CHECK(readB->edgeOccupancy[2] == 17 && readB->distribution[1][3] == 4242);
+        }
+        const auto intersection = back.GetIntersectionMap().find(&pieceA);
+        CHECK(intersection != back.GetIntersectionMap().end());
+        if (intersection != back.GetIntersectionMap().end()) {
+            const TrafficIntersectionArray& array = intersection->second;
+            CHECK(array.flag50 == 1 && array.dirty == 0);   // the flag comes back, the dirty mark starts clear
+            CHECK(array.approaches[3].type == 2 && array.approaches[3].green == 1 && array.approaches[3].nearSwitch == 0);
+            CHECK(array.approaches[3].stateDuration == 4.5f && array.approaches[3].otherDuration == 6.25f &&
+                  array.approaches[3].timeLeft == 1.75f);
+            CHECK(array.approaches[0].type == junction.approaches[0].type &&
+                  array.approaches[0].timeLeft == junction.approaches[0].timeLeft);
+        }
+        const auto train = back.TrainJunctions().find(&pieceC);
+        CHECK(train != back.TrainJunctions().end() && train->second.keys[0] == pieceC.pathInfo.junctionKeys);
+        const auto unusable = back.UnusableRoads().find((6u << 16) | 3u);
+        CHECK(unusable != back.UnusableRoads().end() && unusable->second.size() == 1 && unusable->second[0] == &pieceD);
+        CHECK(back.GetVisibleCellRect().x0 == saved.GetVisibleCellRect().x0 &&
+              back.GetVisibleCellRect().z1 == saved.GetVisibleCellRect().z1);
+        CHECK(back.StoplightPhaseA() == saved.StoplightPhaseA() && back.StoplightGroupB() == false);
+
+        // written again, the record is the same bytes (the references name the same objects)
+        CHECK(save(back, again, key));
+        if (sc4::cSC4DBSegment* seg = open(again, false)) {
+            second = bytesOf(seg, key);
+            seg->Close();
+            seg->Release();
+        }
+        CHECK(!first.empty() && second == first);
+        unlink(path.c_str());
+        unlink(again.c_str());
+        sc4::SetSerializableFactory(nullptr);
+        back.Shutdown();
+        saved.Shutdown();
+        host.pieces.clear();
     }
 
     // ---- shutdown ----
