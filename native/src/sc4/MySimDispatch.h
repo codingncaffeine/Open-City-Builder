@@ -45,8 +45,8 @@
 //
 // Flag bits (+0x58), from the code that sets/tests them:
 //   0x1   player drive (U-Drive-It) pending/active        0x2   player drive view running
-//   0x4   "this destination is a cell, not an occupant"   0x10  at a transit stop/building
-//   0x20  commute trip (checked by switchTravel)          0x40  stuck (setStuck)
+//   0x4   "this destination is a cell, not an occupant"   0x10  waiting at a transit stop
+//   0x20  the current leg ended (route reached)           0x40  stuck (setStuck)
 //   0x80  a default destination is set (SetDefaultDestination / MySim DoMessage)
 //   0x100 tracking through the dispatch view             0x200 path leg dispatched, follow the route
 //   0x400 switching travel type                          0x800 switching travel type (enter branch)
@@ -129,6 +129,10 @@ constexpr std::uint32_t kMySimDispatchMsgReadPending = 0x26d31ec1;      // Read 
 constexpr std::uint32_t kMySimDispatchMsgExitPlayerDrive = 0x0bb324bd;  // data2 == 1 -> ExitUDriveIt
 constexpr std::uint32_t kMySimDispatchMsgAutomaton = 0x09d92fc3;        // automaton event: data2 = tAutomataEvent
 constexpr std::uint32_t kMySimDispatchMsgNotify = kMessageMySimDispatchNotify;   // 0x2ba06b99 sent to the owner
+// switchTravel notifications that have no MySim.h name: the sim found the stop of its transit leg (data2 = the stop
+// occupant group), and the walking leg ended farther than the proximity minimum from the destination.
+constexpr std::uint32_t kDispatchNotifyTransitStop = 0xeba0732e;
+constexpr std::uint32_t kDispatchNotifyFarFromDestination = 0x2bac398f;
 
 // The automaton event ids DoMessage tests (cISC4Automaton::tAutomataEvent, Automaton.h): 1 animation done,
 // 2 removing, 5 route reached, 9 dispatched-returned.

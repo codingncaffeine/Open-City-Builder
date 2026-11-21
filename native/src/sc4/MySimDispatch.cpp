@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <utility>
 
 #include "gz/cIGZSerializable.h"
@@ -295,6 +297,11 @@ bool cSC4MySimDispatch::setFlags(std::uint32_t flags, bool on) {
 // 0x1006aea60 notifyMySim: build a cRZMessage2Standard of type 0x2ba06b99 and call the owner's DoMessage directly.
 void cSC4MySimDispatch::notifyMySim(std::uint32_t event, int data2, int data3, int data4) {
     if (!owner_) return;
+    static const bool debug = std::getenv("SC4_DEBUG") != nullptr;
+    if (debug) {
+        std::fprintf(stderr, "mysimdispatch: notify %08x %d %d (state %d travel %d time %d at %d,%d)\n", event, data2, data3,
+                     state_, travelType_, time_, currentLocation_.cellX, currentLocation_.cellZ);
+    }
     auto* message = new cRZMessage2Standard();
     message->AddRef();
     message->SetType(kMySimDispatchMsgNotify);
@@ -1007,7 +1014,9 @@ std::uint32_t cSC4MySimDispatch::updateState() {
             pathFinder_->SetTravelTypeFlag(0x100, travelType_ == 8);
         }
         pathFinder_->SetTripDestinationFilter(3);   // 0x48
-        if (currentDestination_.commuteLocation) currentDestination_ = commuteDestination_;
+        // a trip to the commute location makes it the commute destination (i386 0x004827ec: commute = destination), so
+        // the destination keeps its dwell time
+        if (currentDestination_.commuteLocation) commuteDestination_ = currentDestination_;
         int startRect[4], endRect[4];
         getLocationCellRect(currentLocation_, startRect);
         getLocationCellRect(currentDestination_, endRect);
@@ -1090,76 +1099,332 @@ std::uint32_t cSC4MySimDispatch::updateState() {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// switchTravel (0x1006b0b16) — PARTIAL. The original is 4.5 KB that interleaves the flag dispatch with the transit-stop
-// occupant-manager search, the automaton state hand-off for a resumed trip and the U-Drive-It branch. The flag dispatch
-// and the walk / new-leg / stuck branches are transcribed below; the transit search, the automaton hand-off and the
-// U-Drive-It branch are not (see notes/ledger_pending/cSC4MySimDispatch.txt).
+// switchTravel (0x1006b0b16, i386 0x00480c7c): runs when the sim reached the end of a path leg (flag 0x400). It starts
+// from the current state and travel type and picks one of four branches by the flag word:
+//  * player drive (0x1): the U-Drive-It hand-off (re-dispatch on foot, or arrive when the drive ended);
+//  * stuck (0x40): the trip ends (state -1);
+//  * at a transit stop (0x10): find the stop occupant near the route cell, wait there, then board the transit automaton
+//    that stops on the cell (or walk on when the wait ran out);
+//  * a cell-only destination (0x4): wait until the dwell time ran out, then dispatch the next leg;
+//  * a leg ended (0x20): the walking leg reached the destination (arrival: state 3), the leg continues with the same
+//    travel type, or the sim gets off at a transit switch;
+//  * otherwise: dispatch the next leg (or jump to the next switch).
+// The flags are applied at the end in the original's order: setStuck, 0x2401, clear mask, set mask.
 // ---------------------------------------------------------------------------------------------------------------
-void cSC4MySimDispatch::switchTravel() {
-    const std::uint32_t originalFlags = flags_;
-    std::uint32_t travelType = static_cast<std::uint32_t>(travelType_);
-    std::uint32_t setFlagsMask = 0;
-    std::uint32_t clearFlagsMask = 0;
-    int newState = kMySimTripNone;
+namespace {
+// The transit-stop occupant group (and the automaton group riding it) for the travel type of the next leg
+// (i386 0x00481358 switch); travel types without an entry leave the automaton group unchanged and search group 0.
+std::uint32_t TransitStopGroupFor(std::uint8_t travelType, std::uint32_t& automataGroup) {
+    const unsigned index = static_cast<unsigned>(travelType) - 2u;
+    if (index >= 7u || ((kTransitMask >> index) & 1u) == 0) return 0;
+    automataGroup = kTransitGroupTable[index];
+    return kTransitStopTable[index];
+}
+}  // namespace
 
-    if ((originalFlags & 0x41) == 0x40) {
-        // stuck while not player-driving: nothing to switch
-    } else if ((originalFlags & kMySimDispatchFlagPlayerDrive) == 0) {
-        if (travelType == 0xfe && (originalFlags & kMySimDispatchFlagCellOnly) == 0 &&
-            !(currentLocation_ == defaultDestination_) && !(currentLocation_ == commuteDestination_)) {
-            currentLocation_.data28 = time_ + minTimeIdling_;
-            setFlagsMask = 1;
-        } else if ((originalFlags & kMySimDispatchFlagAtBuilding) == 0) {
-            if ((originalFlags & kMySimDispatchFlagCellOnly) != 0) {
-                if (currentLocation_.data28 < time_) {
+void cSC4MySimDispatch::switchTravel() {
+    IMySimDispatchHost* host = Host();
+    const std::uint32_t flags = flags_;
+    std::uint32_t travelType = static_cast<std::uint32_t>(travelType_);
+    int newState = state_;
+    std::uint32_t setMask = 0;      // flags set at the end
+    std::uint32_t clearMask = 0;    // flags cleared at the end
+    std::uint32_t stuckMask = 0;    // 0x40 -> setStuck, 0x1 -> setFlags(0x2401)
+
+    auto routeAt = [this](int index) -> RouteData {
+        return index >= 0 && index < static_cast<int>(route_.size()) ? route_[std::size_t(index)] : RouteData{};
+    };
+    // The route cell of the next switch becomes the current location (after jumpToNextSwitch).
+    auto moveToSwitchCell = [this, &routeAt](std::uint32_t& outTravelType) {
+        const RouteData data = routeAt(pathSegmentStart_ - 1);
+        outTravelType = data.travelType;
+        currentLocation_.cellX = data.x;
+        currentLocation_.cellZ = data.z;
+        currentLocation_.x = static_cast<float>(data.x << 4);
+        currentLocation_.z = static_cast<float>(data.z << 4);
+    };
+
+    if ((flags & kMySimDispatchFlagPlayerDrive) != 0) {
+        // --- U-Drive-It (i386 0x00480cb5) ---
+        IMySimDispatchAutomaton* automaton = acquireAutomaton();
+        const int automatonState = automaton ? automaton->GetStateId() : -1;
+        bool teleported = (flags & kMySimDispatchFlagTeleported) != 0;
+        int animOffset = -1;
+        if (teleported) {
+            notifyMySim(kDispatchNotifyIdleOffset, 0, 0, 0);
+            cGZPersistResourceKey key;
+            getModelKey(defaultModelType_, key, animOffset);   // GetModelOffset(defaultModelType_)
+        }
+        if (!automaton || defaultModelType_ != kModelWalk || automatonState != 7 ||
+            (travelType_ != 0 && travelType_ != kTravelTypeWalk)) {
+            cLocation location = currentLocation_;
+            const RouteData data = routeAt(pathSegmentStart_);
+            if (data.travelType != 0xfe) {
+                location.cellX = data.x;
+                location.x = static_cast<float>(data.x << 4);
+                location.z = static_cast<float>(data.z << 4);
+                location.cellZ = data.z;
+            }
+            if (!snapToNearestRoadTile(currentLocation_) && !snapToNearestRoadTile(location)) {
+                notifyMySim(kDispatchNotifyPylon, 0, 0, 0);
+                newState = kMySimTripNone;
+                teleported = false;
+            } else {
+                currentLocation_ = location;
+                std::deque<RouteData> path;
+                path.push_back(RouteData{data.x, data.z, 0});
+                notifyMySim(kDispatchNotifyIdleOffset, 0, 0, 0);
+                const std::uint8_t result = basicDispatch(path, nullptr, true);
+                if (result == 0xff) {
+                    notifyMySim(kDispatchNotifyPylon, 0, 0, 0);
+                    newState = kMySimTripNone;
+                    travelType = 0xff;
+                } else if (travelType_ != kTravelTypeWalk) {
+                    travelType = result;
+                }
+            }
+        }
+        if (!teleported) {
+            clearMask = 0x2002;
+        } else {
+            if (automaton) automaton->Release();
+            automaton = acquireAutomaton();
+            if (currentLocation_.data28 < time_ || !automaton) {
+                setFlags(kMySimDispatchFlagPlayerDrive, false);
+                const int limit = destinationProximityMin_ * destinationProximityMin_;
+                const bool near = distance_between_locations(currentDestination_, currentLocation_) < limit;
+                bool arrive = false;
+                if (travelType_ != kTravelTypeWalk || (flags_ & kMySimDispatchFlagCommute) == 0) {
                     const std::uint8_t result = basicDispatchOnNewPathLeg(nullptr, false);
                     travelType = result;
-                    setFlagsMask = result == 0xff ? 0x40 : 0x200;
-                    clearFlagsMask = result == 0xff ? 0 : 0x436;
-                }
-            } else if ((originalFlags & kMySimDispatchFlagCommute) == 0) {
-                const std::uint8_t result = basicDispatchOnNewPathLeg(nullptr, false);
-                if (result == 0xff) {
-                    if (!jumpToNextSwitch()) {
+                    if (result != 0xff) {
+                        clearMask = 0x2437;
+                        setMask = 0x200;
+                    } else if (jumpToNextSwitch()) {
+                        moveToSwitchCell(travelType);
+                        clearMask = 0x2002;
+                        setMask = 0x220;
+                    } else if (!near) {
                         notifyMySim(kDispatchNotifyPylon, 0, 0, 0);
-                        travelType = 0xff;
-                    } else if (pathSegmentStart_ > 0 && pathSegmentStart_ - 1 < static_cast<int>(route_.size())) {
-                        const RouteData& data = route_[std::size_t(pathSegmentStart_ - 1)];
-                        currentLocation_.cellX = data.x;
-                        currentLocation_.cellZ = data.z;
-                        currentLocation_.x = static_cast<float>(data.x << 4);
-                        currentLocation_.z = static_cast<float>(data.z << 4);
-                        setFlagsMask = 0x220;
-                        clearFlagsMask = 2;
-                        travelType = data.travelType;
+                        clearMask = 0x2002;
+                        newState = kMySimTripNone;
+                    } else {
+                        if (isBuilding(currentDestination_)) currentLocation_ = currentDestination_;
+                        arrive = true;
                     }
                 } else {
-                    setFlagsMask = 0x200;
-                    clearFlagsMask = 0x436;
-                    travelType = result;
+                    if (isBuilding(currentDestination_) && near) currentLocation_ = currentDestination_;
+                    arrive = true;
+                }
+                if (arrive) {
+                    currentLocation_.data28 = currentLocation_.data24 + time_;
+                    clearMask = 0xa403;
+                    newState = kMySimTripIdle;
                 }
             } else {
-                setFlagsMask = 3;
-                destinationQueue_.clear();
-                currentLocation_.data28 = time_ + minTimeIdling_;
+                if (animOffset >= 1) automaton->PlayAnim(static_cast<std::uint32_t>(animOffset));
+                clearMask = 0x2002;
+            }
+        }
+        if (automaton) automaton->Release();
+    } else if ((flags & kMySimDispatchFlagStuck) != 0) {
+        newState = kMySimTripNone;   // i386 0x00481d06
+    } else if (travelType == 0xfe && (flags & kMySimDispatchFlagCellOnly) == 0 &&
+               !(currentLocation_ == defaultDestination_) && !(currentLocation_ == commuteDestination_)) {
+        // walking somewhere that is neither home nor work: idle there
+        currentLocation_.data28 = time_ + minTimeIdling_;
+        travelType = 0xfe;
+        setMask = 1;
+        stuckMask = 1;
+    } else if ((flags & kMySimDispatchFlagAtBuilding) != 0) {
+        // --- at a transit stop (i386 0x004812dc) ---
+        const RouteData next = routeAt(pathSegmentStart_);
+        if (!currentLocation_.occupant && host) {
+            const std::uint32_t stopGroup = TransitStopGroupFor(next.travelType, transitGroup_);
+            const int minX = std::min<int>(currentLocation_.cellX, next.x), maxX = std::max<int>(currentLocation_.cellX, next.x);
+            const int minZ = std::min<int>(currentLocation_.cellZ, next.z), maxZ = std::max<int>(currentLocation_.cellZ, next.z);
+            const int rect[4] = {minX - 1, minZ - 1, maxX + 1, maxZ + 1};
+            std::deque<cISC4Occupant*> occupants;
+            host->OccupantsInCellRect(rect, occupants);
+            for (cISC4Occupant* occupant : occupants) {
+                if (!occupant || !occupant->IsOccupantGroup(stopGroup)) continue;
+                currentLocation_.occupant = occupant;
+                float position[3] = {0.0f, 0.0f, 0.0f};
+                occupant->GetPosition(position);
+                currentLocation_.x = position[0];
+                currentLocation_.z = position[2];
+                currentLocation_.cellX = cellFromPosition(position[0]);
+                currentLocation_.cellZ = cellFromPosition(position[2]);
+                currentLocation_.data28 = minTimeAtSwitch_ + time_;
+                transitSwitchStartTime_ = time_;
+                notifyMySim(kDispatchNotifyTransitStop, static_cast<int>(stopGroup), 0, 0);
+                setAutomataOccupant(nullptr);
+                break;
+            }
+            host->ClearOccupantList(occupants);
+        }
+        if (!currentLocation_.occupant) {
+            setMask = 0x40;
+        } else if (currentLocation_.data28 < time_) {
+            // the wait ran out: go on with the next leg without the transit automaton
+            const std::uint8_t result = basicDispatchOnNewPathLeg(nullptr, false);
+            travelType = result;
+            if (result == 0xff) {
+                setMask = 0x40;
+            } else {
+                clearMask = 0x436;
+                setMask = 0x200;
+            }
+        } else if (host) {
+            // board the transit automaton of the stop's group standing on the sim's cell
+            const int rect[4] = {currentLocation_.cellX, currentLocation_.cellZ, currentLocation_.cellX, currentLocation_.cellZ};
+            std::deque<cISC4Occupant*> occupants;
+            host->OccupantsInCellRect(rect, occupants);
+            IMySimDispatchAutomaton* transit = nullptr;
+            for (cISC4Occupant* occupant : occupants) {
+                if (occupant && occupant->IsOccupantGroup(transitGroup_)) transit = host->AutomatonOf(occupant);
+                if (transit) break;
+            }
+            if (transit) {
+                transit->AddCallback(this);
+                transit->SetAutomataFlag(0x1000000, true);
+                transit->SetAutomataFlag(0x10000, true);
+                transit->SetPriority(0xff);
+                const std::uint8_t result = basicDispatchOnNewPathLeg(transit, false);
+                travelType = result;
+                if (result == 0xff) {
+                    setMask = 0x40;
+                } else {
+                    clearMask = 0x436;
+                    setMask = 0x200;
+                }
+            }
+            host->ClearOccupantList(occupants);
+            if (transit) transit->Release();
+        }
+        stuckMask = setMask;
+    } else if ((flags & kMySimDispatchFlagCellOnly) != 0) {
+        // --- a cell-only location: leave once the dwell time ran out (i386 0x004817df) ---
+        if (time_ > currentLocation_.data28) {
+            const std::uint8_t result = basicDispatchOnNewPathLeg(nullptr, false);
+            travelType = result;
+            if (result == 0xff) {
+                setMask = 0x40;
+                stuckMask = 0x40;
+            } else {
+                clearMask = 0x436;
+                setMask = 0x200;
+            }
+        }
+    } else if ((flags & kMySimDispatchFlagCommute) != 0) {
+        // --- the leg ended (i386 0x0048185c) ---
+        const std::uint8_t legType = routeAt(pathSegmentStart_).travelType;
+        if (legType == 0xfe) {
+            // the walking leg: the sim reached the destination's lot
+            std::uint32_t arrival = 2;
+            if (!currentLocation_.hasOccupant || !currentDestination_.hasOccupant) {
+                currentLocation_.occupant = nullptr;
+                setAutomataOccupant(nullptr);
+                arrival = 6;
+            }
+            const int limit = destinationProximityMin_ * destinationProximityMin_;
+            std::uint32_t event = 0;
+            bool arrived = false;
+            if (limit < distance_between_locations(currentDestination_, currentLocation_)) {
+                // still too far from the destination: idle where the walk ended
+                currentLocation_.data28 = minTimeIdling_ + time_;
+                event = kDispatchNotifyFarFromDestination;
+            } else if ((flags_ & kMySimDispatchFlagCellOnly) != 0 || (arrival & 4) != 0 ||
+                       (flags_ & kMySimDispatchFlagPlayerDrive) != 0 || currentDestination_ == defaultDestination_ ||
+                       currentDestination_ == commuteDestination_) {
+                currentLocation_.data24 += time_;
+                if (isBuilding(currentDestination_)) currentLocation_ = currentDestination_;
+                notifyMySim(kDispatchNotifyLocation, 0, 0, 0);
                 travelType = 0xfe;
+                clearMask = 0x8460;
+                newState = kMySimTripIdle;
+                setMask = arrival;
+                arrived = true;
+            } else {
+                currentLocation_.data28 = minTimeIdling_ + time_;
+                event = kDispatchNotifyLocation;
+            }
+            if (!arrived) {
+                setMask = arrival | 0x421;
+                notifyMySim(event, 0, 0, 0);
+                travelType = 0xfe;
+                clearMask = 0x460;
             }
         } else {
-            // transit stop: the occupant-manager search and the automaton hand-off are not transcribed (see above)
-            setFlagsMask = 3;
+            const std::uint32_t current = static_cast<std::uint32_t>(travelType_);
+            clearMask = 0x20;
+            if (legType == current) {
+                // the next leg keeps the travel type: continue on the same automaton
+                IMySimDispatchAutomaton* automaton = acquireAutomaton();
+                const std::uint8_t result = basicDispatchOnNewPathLeg(automaton, false);
+                if (result == 0xff) {
+                    setStuck();
+                } else {
+                    setFlags(kMySimDispatchFlagPathLeg, true);
+                    setFlags(kMySimDispatchFlagSwitchTravel, false);
+                    if (static_cast<int>(result) != travelType_) ++changeCounter_;
+                    travelType_ = result;
+                }
+                if (automaton) automaton->Release();
+            } else if (static_cast<int>(current) < 9) {
+                if (current > 5 || current < 4) {
+                    // get off the vehicle: wait at the switch for a transit leg, idle before a car or walking leg
+                    if (legType < 9) {
+                        const std::uint32_t bit = 1u << legType;
+                        if ((bit & 0x1cc) != 0) {
+                            currentLocation_.occupant = nullptr;
+                            currentLocation_.data28 = minTimeAtSwitch_ + time_;
+                            setMask = 0x10;
+                        } else if ((bit & 3) != 0) {
+                            currentLocation_.occupant = nullptr;
+                            currentLocation_.data28 = minTimeIdling_ + time_;
+                            setMask = 1;
+                        }
+                    }
+                    setAutomataOccupant(nullptr);
+                }
+            } else if (current - 0xfe < 2) {
+                newState = kMySimTripNone;
+            }
+        }
+        stuckMask = setMask;
+        if ((setMask & 0x53) == 0) {
+            // nothing else to do at this switch: idle here
+            stuckMask = setMask | 3;
             destinationQueue_.clear();
-            currentLocation_.data28 = time_ + minTimeIdling_;
+            currentLocation_.data28 = minTimeIdling_ + time_;
             travelType = 0xfe;
+            setMask = stuckMask;
+        }
+    } else {
+        // --- dispatch the next leg (i386 0x00481c4e) ---
+        const std::uint8_t result = basicDispatchOnNewPathLeg(nullptr, false);
+        travelType = result;
+        if (result != 0xff) {
+            clearMask = 0x436;
+            setMask = 0x200;
+        } else if (jumpToNextSwitch()) {
+            moveToSwitchCell(travelType);
+            clearMask = 2;
+            setMask = 0x220;
+        } else {
+            notifyMySim(kDispatchNotifyPylon, 0, 0, 0);
+            newState = kMySimTripNone;
         }
     }
 
     if (static_cast<std::uint32_t>(travelType_) != travelType) ++changeCounter_;
     travelType_ = static_cast<int>(travelType);
     setState(newState);
-    if ((setFlagsMask & kMySimDispatchFlagStuck) != 0) setStuck();
-    if ((setFlagsMask & 1) != 0) setFlags(0x2401, true);
-    setFlags(clearFlagsMask, false);
-    setFlags(setFlagsMask, true);
+    if ((stuckMask & kMySimDispatchFlagStuck) != 0) setStuck();
+    if ((stuckMask & 1) != 0) setFlags(0x2401, true);
+    setFlags(clearMask, false);
+    setFlags(setMask, true);
 }
 // ---------------------------------------------------------------------------------------------------------------
 // U-Drive-It (0x1006b2dd6, 0x1006b2e9c, 0x1006b30a6)
