@@ -252,6 +252,7 @@ struct FakeOccupant final : cISC4Occupant {
     float position[3] = {0.0f, 0.0f, 0.0f};
     SC4CellRect cells{0, 0, 0, 0};
     std::uint32_t type = kOccupantDefaultType;
+    std::uint32_t group = 0;
     bool QueryInterface(std::uint32_t iid, void** out) override {
         if (iid == kGZIID_cISC4Occupant || iid == kGZIID_cIGZUnknown) {
             *out = static_cast<cIGZUnknown*>(static_cast<cISC4Occupant*>(this));
@@ -281,7 +282,7 @@ struct FakeOccupant final : cISC4Occupant {
     cISC43DPlaceableObject* GetPlaceableObject() const override { return nullptr; }
     cISC43DPlaceableObject* GetOrCreatePlaceableObject() override { return nullptr; }
     void SetPlaceableObject(cISC43DPlaceableObject*) override {}
-    bool IsOccupantGroup(std::uint32_t) const override { return false; }
+    bool IsOccupantGroup(std::uint32_t g) const override { return group != 0 && g == group; }
     void AddOccupantGroup(std::uint32_t) override {}
     bool GetOccupantGroups(std::set<std::uint32_t>&) const override { return false; }
     bool GetOccupantManagerBBox(std::uint8_t*) const override { return false; }
@@ -603,7 +604,14 @@ struct FakeHost final : IMySimHost {
     int hour = 10;
     int residentialAge = 30;
     float eq = 60.0f, hq = 70.0f;
-    int schoolGrade = 55, hospitalGrade = 66;
+    std::vector<cISC4Occupant*> schools, hospitals;
+    std::map<cISC4Occupant*, float> schoolGrades, hospitalGrades;
+    int lifeExpectancy = 71, crime = 33, policeCoverage = 44, fireCoverage = 45, desirability = -12;
+    bool powered = true, watered = false;
+    int crimeCell[2] = {-1, -1}, coverageRect[4] = {0, 0, 0, 0};
+    std::uint32_t desirabilityType = 0;
+    int fitWidth = 0, congestionCalls = 0;
+    std::vector<Station> policeStations, fireStations;
     bool cameraCalled = false;
     float cameraPosition[3] = {};
     std::string dialogTitle, dialogBody;
@@ -640,6 +648,8 @@ struct FakeHost final : IMySimHost {
         if (neighbor) neighbor->Release();
         for (auto& entry : occupantsAtCell) entry.second->Release();
         for (cISC4Occupant* o : cityOccupants) o->Release();
+        for (cISC4Occupant* o : schools) o->Release();
+        for (cISC4Occupant* o : hospitals) o->Release();
         SetMySimHost(nullptr);
     }
 
@@ -686,13 +696,36 @@ struct FakeHost final : IMySimHost {
     float ResidentialEducationQuotient(int, int, int) override { return eq; }
     float ResidentialHealthQuotient(int, int, int) override { return hq; }
     int HourOfDay() override { return hour; }
-    int TrafficCongestion(int, int) override { return 0; }
+    int TrafficCongestion(int x, int z) override { ++congestionCalls; return (x + 2 * z) & 0xff; }
     bool SimulatorTickEnabled() override { return simulatorTick; }
     bool GamePaused() override { return paused; }
-    void CityOccupants(std::vector<cISC4Occupant*>& out) override { out = cityOccupants; }
+    void SpecialBuildings(std::vector<cISC4Occupant*>& out) override { out = cityOccupants; }
     void BuildingOccupantGroups(std::uint32_t, std::vector<std::uint32_t>& out) override { out = {0x1001, 0x1002}; }
-    bool GetLocalSchoolGrade(std::uint32_t, float, float, int& grade) override { grade = schoolGrade; return true; }
-    bool GetLocalHospitalGrade(std::uint32_t, float, float, int& grade) override { grade = hospitalGrade; return true; }
+    void ResidentialServiceBuildings(bool hospital, std::vector<cISC4Occupant*>& out) override { out = hospital ? hospitals : schools; }
+    bool ResidentialServiceGrade(bool hospital, cISC4Occupant* building, float& grade) override {
+        const auto& grades = hospital ? hospitalGrades : schoolGrades;
+        const auto it = grades.find(building);
+        if (it == grades.end()) return false;
+        grade = it->second;
+        return true;
+    }
+    int ResidentialLifeExpectancy(int, int) override { return lifeExpectancy; }
+    std::uint8_t BuildingCondition(cISC4BuildingOccupant* building) override { return building == jobBuilding ? 3 : 2; }
+    bool OccupantPowered(cISC4Occupant*) override { return powered; }
+    bool BuildingWatered(cISC4Occupant*) override { return watered; }
+    int CrimeAtCell(int x, int z) override { crimeCell[0] = x; crimeCell[1] = z; return crime; }
+    int ProtectionCoverage(bool police, int x, int z, int width, int height) override {
+        coverageRect[0] = x; coverageRect[1] = z; coverageRect[2] = width; coverageRect[3] = height;
+        return police ? policeCoverage : fireCoverage;
+    }
+    int PollutionAtCell(int type, int, int) override { return -5 + type; }
+    bool DesirabilityAtCell(std::uint32_t type, int, int, int& value) override { desirabilityType = type; value = desirability; return true; }
+    void ProtectionStations(bool police, std::vector<Station>& out) override { out = police ? policeStations : fireStations; }
+    bool NeighborJobCityName(cIGZUnknown*, cIGZString& out) override { out.AssignFromCString("Neighborville"); return true; }
+    void FitTextToWidth(cIGZString& text, int width) override {
+        fitWidth = width;
+        if (text.Strlen() > 8) { cRZString whole(text); cRZString cut(whole, 0, 8); text.Copy(cut); }
+    }
     bool CameraLookAt(const float pos[3], bool) override { cameraCalled = true; std::memcpy(cameraPosition, pos, sizeof(cameraPosition)); return true; }
     void NotificationDialog(const cIGZString& title, const cIGZString& body) override { ++dialogCalls; dialogTitle = title.ToChar(); dialogBody = body.ToChar(); }
     bool CityName(cIGZString& out) override { out.AssignFromCString("SimCity"); return true; }
@@ -1295,8 +1328,78 @@ int main() {
         host.cityOccupants.push_back(special);
         CHECK(sim->DistanceToClosestSpecial(0x1001) == 0);
         CHECK(sim->DistanceToClosestSpecial(0x2222) == 0xffffffffu);
-        CHECK(sim->LocalSchoolGrade(0x4149) == host.schoolGrade);
-        CHECK(sim->LocalHospitalGrade(0x4149) == host.hospitalGrade);
+        // The grade of the closest school of the group (i386 0x00543a48), the hospital list for hospitals.
+        auto school = [&host](float x, float z, std::uint32_t group, float grade) {
+            auto* o = new FakeOccupant();
+            o->AddRef();
+            o->position[0] = x;
+            o->position[2] = z;
+            o->group = group;
+            host.schools.push_back(o);
+            host.schoolGrades[o] = grade;
+        };
+        school(130.0f, 240.0f, 0x4149, 0.8f);                           // distance 50
+        school(100.0f, 210.0f, 0x4149, 0.3f);                           // distance 10: the closest of the group
+        school(100.0f, 201.0f, 0x9999, 0.9f);                           // closer, another group
+        CHECK(sim->LocalSchoolGrade(0x4149) == 0.3f);
+        CHECK(sim->LocalSchoolGrade(0x9999) == 0.9f);
+        CHECK(sim->LocalSchoolGrade(0x1234) == 0.0f);                   // none of the group: kSC4PercentageZero
+        CHECK(sim->LocalHospitalGrade(0x4149) == 0.0f);                 // the hospital list is empty
+        // ---- UpdateVariables fills the opinion fields (i386 0x005481e6) ----
+        {
+            host.policeStations = {{{130.0f, 0.0f, 240.0f}, true, 0.5f},     // distance 50
+                                   {{101.0f, 0.0f, 200.0f}, false, 0.9f},    // closest, its funding does not answer
+                                   {{110.0f, 0.0f, 200.0f}, true, 0.75f}};   // distance 10: the closest funded one
+            FakeBuilding* home = dynamic_cast<FakeBuilding*>(sim->GetResidence());
+            CHECK(home != nullptr);
+            if (home) home->name = cRZString("A Very Long Home Name");
+            sim->UpdateVariables();
+            CHECK(sim->LuaTableRef() >= 1);
+            const LuaTable& t = *host.lua.refs[static_cast<std::size_t>(sim->LuaTableRef() - 1)].table;
+            auto num = [&t](const char* key) {
+                const auto it = t.fields.find(key);
+                return it != t.fields.end() && it->second.kind == LuaValue::Number ? it->second.number : -99999.0;
+            };
+            auto str = [&t](const char* key) -> std::string {
+                const auto it = t.fields.find(key);
+                if (it == t.fields.end() || it->second.kind != LuaValue::UserData || !it->second.user) return "<none>";
+                return static_cast<cIGZString*>(it->second.user)->ToChar();
+            };
+            CHECK(num("eq") == 60.0 && num("hq") == 70.0);
+            CHECK(num("le") == 71.0);
+            CHECK(num("home_condition") == 2.0);
+            CHECK(str("home_building") == "A Very Long Home Name");          // the home's name is not fitted
+            CHECK(num("home_has_power") == 1.0 && num("home_has_water") == 0.0);
+            CHECK(num("local_crime") == 33.0);
+            std::int32_t rect[4] = {};
+            host.lot->GetBoundingRect(rect);
+            CHECK(host.coverageRect[0] == rect[0] && host.coverageRect[1] == rect[1]);
+            CHECK(host.coverageRect[2] == rect[2] - rect[0] + 1 && host.coverageRect[3] == rect[3] - rect[1] + 1);
+            CHECK(num("home_police_coverage") == 44.0 && num("home_fire_coverage") == 45.0);
+            CHECK(num("local_air_pollution") == -5.0 && num("local_water_pollution") == -4.0);
+            CHECK(num("local_garbage") == -3.0 && num("local_radiation") == -2.0);
+            CHECK(sim->GetWealth() == 0 && host.desirabilityType == 0);   // wealth 0: no developer, no field
+            CHECK(t.fields.count("desirability") == 0);
+            CHECK(num("home_occupant_wealth") == 0.0);
+            CHECK(num("local_police_funding") == 75.0);
+            CHECK(num("local_fire_funding") == 0.0);                         // no fire station
+            // The highest congestion on the ring one cell outside the lot (the fake answers x + 2z).
+            // (the corner x1, z1 of the ring is the highest; the lot is small, below the byte limit)
+            const int x1 = std::min(rect[2] + 1, 127), z1 = std::min(rect[3] + 1, 127);
+            CHECK(num("local_traffic_congestion") == static_cast<double>(x1 + 2 * z1));
+            CHECK(host.congestionCalls > 0);
+            CHECK(num("last_commute_time") >= 0.0);
+            // The fake's job is across a neighbor connection: the neighbor fields, the "neighbor city" job building
+            // (fitted by the host to 200 pixels; the fake cuts at 8 characters) and the regional city's name.
+            CHECK(sim->GetJob() == nullptr);
+            CHECK(num("employed") == 1.0 && num("unemployed_days") == 0.0);
+            CHECK(num("job_is_neighbor") == 1.0 && num("job_condition") == 0.0);
+            CHECK(num("job_has_power") == 1.0 && num("job_has_water") == 1.0);
+            CHECK(str("job_building") == "str:6a66");
+            CHECK(str("job_city") == "Neighborville");
+            CHECK(host.fitWidth == 200);
+            CHECK(t.fields.count("job_title") == 1);
+        }
     }
 
     // ---- script commands ----

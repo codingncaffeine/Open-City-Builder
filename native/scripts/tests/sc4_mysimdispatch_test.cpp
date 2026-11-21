@@ -220,8 +220,13 @@ struct FakeAutomaton final : IMySimDispatchAutomaton, IMySimDispatchRoute {
     void AddCallback(cIGZMessageTarget2* target) override { callback = target; }
     void RemoveCallback(cIGZMessageTarget2* target) override { if (callback == target) callback = nullptr; }
     int GetStateId() const override { return static_cast<int>(state); }
-    bool SetState(std::uint32_t newState, IMySimDispatchAutomaton*, float, bool, std::uint32_t, std::uint32_t, const void*) override {
+    IMySimDispatchAutomaton* controllerSeen = reinterpret_cast<IMySimDispatchAutomaton*>(1);
+    std::uint32_t animOffsetSeen = 0xffffffffu, sfxSeen = 0xffffffffu;
+    bool SetState(std::uint32_t newState, IMySimDispatchAutomaton* controller, float, bool, std::uint32_t animOffset, std::uint32_t sfx, const void*) override {
         state = newState;
+        controllerSeen = controller;
+        animOffsetSeen = animOffset;
+        sfxSeen = sfx;
         return true;
     }
     void SetPriority(std::uint8_t value) override { priority = value; }
@@ -435,6 +440,21 @@ struct FakeHost final : IMySimDispatchHost {
     }
     void OccupantsInCellRect(const int[4], std::deque<cISC4Occupant*>&) override {}
     void ClearOccupantList(std::deque<cISC4Occupant*>& list) override { list.clear(); }
+    IMySimDispatchAutomaton* AutomatonOf(cISC4Occupant* occupant) override {
+        auto* fake = dynamic_cast<FakeOccupant*>(occupant);
+        if (!fake || !fake->automaton) return nullptr;
+        fake->automaton->AddRef();
+        return fake->automaton;
+    }
+    IMySimDispatchRoute* RouteOf(cISC4Occupant* occupant) override {
+        auto* fake = dynamic_cast<FakeOccupant*>(occupant);
+        if (!fake || !fake->automaton) return nullptr;
+        fake->automaton->AddRef();
+        return static_cast<IMySimDispatchRoute*>(fake->automaton);
+    }
+    cISC4Occupant* CallbackOccupant(void* automaton) override {
+        return automaton ? static_cast<IMySimDispatchAutomaton*>(automaton)->AsOccupant() : nullptr;
+    }
     bool UDriveViewAvailable() override { return false; }
     void EnterUDriveView(IMySimDispatchAutomaton*, cIGZMessageTarget2*) override { ++enterViewCalls; }
     void ShowUDriveAdvice() override { ++adviceCalls; }
@@ -724,6 +744,11 @@ int main() {
             CHECK(automaton->flags & 0x1000000);
             CHECK(automaton->occupant == &automatonOccupant);
             CHECK(automaton->removeCalls == 0);
+            // createAutomaton (i386 0x00480624): the leg's automata group and the model type's base key; SetState(0) runs
+            // without a controller
+            CHECK(fixture.host.vehicleManager.kindSeen == 0x420b);
+            CHECK(fixture.host.vehicleManager.keySeen.type == 11 && fixture.host.vehicleManager.keySeen.instance == 33);
+            CHECK(automaton->state == 0 && automaton->controllerSeen == nullptr && automaton->sfxSeen == 0);
         }
         bool requestedVehicleManager = false;
         for (std::uint32_t group : fixture.host.managerGroups) {

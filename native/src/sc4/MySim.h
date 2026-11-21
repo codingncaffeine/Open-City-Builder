@@ -338,7 +338,8 @@ public:
         // cMySimBuildingFilter(true).IsOccupantIncluded(building->AsOccupant()) @ 0x1007aaf18
     virtual void BuildingsNearResidence(int cellX, int cellZ, int radius,
                                         std::vector<cISC4BuildingOccupant*>& out) = 0;
-        // spCity vslot 0x110 -> GetOccupantsByOccupantManagerCells(rect +- radius, cMySimBuildingFilter(false))
+        // spCity vslot 0x110 (GetOccupantManager) -> vslot 0x148 GetOccupantsByStandardCityCells(rect +- radius,
+        // cMySimBuildingFilter(false)) (i386 0x88 -> 0xa4, UpdateLocalBuildings 0x00547eea)
     virtual cISC4Occupant* OccupantAtCell(int x, int z) = 0;                // spSC4 vslot 0x118 -> vslot 0x58(x, z)
     virtual cSC4Lot* LotByBuilding(cISC4BuildingOccupant* building) = 0;    // spLotManager vslot 0x70(lot key)
     virtual cSC4Lot* LotAtCell(int x, int z) = 0;                           // spLotManager vslot 0x28(x, z, 0)
@@ -352,20 +353,40 @@ public:
     virtual void StandardCellToPosition(int x, int z, float& px, float& pz) = 0;   // spCity vslot 0x308
     virtual int CityCellsX() = 0;                                           // spCity vslot 0x2e8
     virtual int CityCellsZ() = 0;                                           // spCity vslot 0x2f0
-    virtual int ResidentialAgeForWealth(int wealth) = 0;                    // spResidentialSim vslot 0x150
-    virtual int TrafficCongestion(int x, int z) = 0;                        // spCity 0x228 -> GetCongestion @ 0x1007a60fc
+    virtual int ResidentialAgeForWealth(int wealth) = 0;                    // spResidentialSim vslot 0x150 GetAverageNewAgeByWealth
+    virtual int TrafficCongestion(int x, int z) = 0;
+        // GetCongestion @ 0x1007a60fc (i386 0x0054150a): traffic GetCapacity(1, x, z) != 0 -> GetCongestionMap -> cell value
     virtual int ResidentialAgeAtCell(int x, int z) = 0;                     // spResidentialSim 0x148 -> vslot 0x38
     virtual float ResidentialEducationQuotient(int x, int z, int wealth) = 0;   // spResidentialSim vslot 0x128
     virtual float ResidentialHealthQuotient(int x, int z, int wealth) = 0;      // spResidentialSim vslot 0x130
     virtual int HourOfDay() = 0;                                            // sp24HourClock vslot 0x50
     virtual bool SimulatorTickEnabled() = 0;                                // spSimulator vslots 0x78/0x80/0x88 (any true)
-    virtual void CityOccupants(std::vector<cISC4Occupant*>& out) = 0;       // spCity 0x1a8 -> vslot 0x160 (borrowed)
+    virtual void SpecialBuildings(std::vector<cISC4Occupant*>& out) = 0;
+        // spCity 0x1a8 GetBuildingDevelopmentSimulator -> vslot 0x160 GetSpecialBuildings (borrowed; i386 0xd4 -> 0xb0)
     virtual void BuildingOccupantGroups(std::uint32_t buildingType, std::vector<std::uint32_t>& out) = 0;
         // spBuildingDevelopmentSim vslot 0x68(type, key) then cSC4Occupant::GetOccupantGroups(key, out)
-    virtual bool GetLocalSchoolGrade(std::uint32_t buildingType, float x, float z, int& grade) = 0;
-        // spResidentialSim vslot 0x178 (school list) -> occupant 0xb0(type)/0x40(pos), then vslot 0xd0
-    virtual bool GetLocalHospitalGrade(std::uint32_t buildingType, float x, float z, int& grade) = 0;
-        // same with vslot 0x188 (hospital list) and vslot 0xd8
+    virtual void ResidentialServiceBuildings(bool hospital, std::vector<cISC4Occupant*>& out) = 0;
+        // spResidentialSim GetSchoolBuildings / GetHospitalBuildings(list, no groups) (i386 0xbc / 0xc4); borrowed
+    virtual bool ResidentialServiceGrade(bool hospital, cISC4Occupant* building, float& grade) = 0;
+        // spResidentialSim GetSchoolQueryData / GetHospitalQueryData (i386 0x68 / 0x6c) -> the grade of tQueryData (+0x20)
+    // --- UpdateVariables (i386 0x005481e6) ------------------------------------------------------------------
+    virtual int ResidentialLifeExpectancy(int x, int z) = 0;                // spResidentialSim GetCellLifeExpectancy (i386 0x74)
+    virtual std::uint8_t BuildingCondition(cISC4BuildingOccupant* building) = 0;   // GetBuildingCondition (i386 0x005422a6)
+    virtual bool OccupantPowered(cISC4Occupant* occupant) = 0;              // spPowerSim IsOccupantPowered (i386 0x7c)
+    virtual bool BuildingWatered(cISC4Occupant* occupant) = 0;              // spPlumbingSim IsBuildingWatered (i386 0x24)
+    virtual int CrimeAtCell(int x, int z) = 0;                              // spCrimeSim GetCrimeGrid (0x14) -> GetCellValue (0x1c)
+    virtual int ProtectionCoverage(bool police, int x, int z, int width, int height) = 0;
+        // spPoliceSim GetPolicePowerGrid / spFireProtectionSim GetFireProtectionGrid (i386 0x14) -> GetAverageValueInCellRect (0x20)
+    virtual int PollutionAtCell(int type, int x, int z) = 0;                // spPollutionSim GetPollutionGrid(type) (0x14) -> GetCellValue
+    virtual bool DesirabilityAtCell(std::uint32_t developerType, int x, int z, int& value) = 0;
+        // spBuildingDevelopmentSim GetDeveloper(type) (i386 0x84) -> GetDesirabilityMap (0x34) -> GetCellValue; false without one
+    struct Station { float position[3]; bool funded; float funding; };
+    virtual void ProtectionStations(bool police, std::vector<Station>& out) = 0;
+        // spPoliceSim GetPoliceStations (i386 0x54) / spFireProtectionSim GetFireStations (0x58): each station's position and
+        // GetStationFunding(station, null, &fraction) (0x1c / 0x20)
+    virtual bool NeighborJobCityName(cIGZUnknown* city, cIGZString& out) = 0;   // the regional city's GetCityName (i386 0x84)
+    virtual void FitTextToWidth(cIGZString& text, int width) = 0;
+        // RZ::WCM() SystemFont(0x68963c4c) -> FormatForEllipsis(text, DefaultText(0x5377be31), {0, 0, width, line height})
     virtual bool GamePaused() = 0;                                          // RZGetFramework 0xa417445e -> vslot 0x150
     // --- UI / effects ---------------------------------------------------------------------------------------
     virtual bool CameraLookAt(const float pos[3], bool zoomIfFar) = 0;
@@ -483,8 +504,8 @@ public:
     virtual void DoNeighborConnectionRemoved(int cellX, int cellZ) = 0;                 // 0x180
     virtual int DistanceToClosest(std::uint32_t occupantGroup) = 0;                     // 0x188
     virtual std::uint32_t DistanceToClosestSpecial(std::uint32_t buildingType) = 0;     // 0x190
-    virtual int LocalSchoolGrade(std::uint32_t buildingType) = 0;                       // 0x198
-    virtual int LocalHospitalGrade(std::uint32_t buildingType) = 0;                     // 0x1a0
+    virtual float LocalSchoolGrade(std::uint32_t occupantGroup) = 0;                    // 0x198
+    virtual float LocalHospitalGrade(std::uint32_t occupantGroup) = 0;                  // 0x1a0
     virtual void PlayNightSound() = 0;                                                  // 0x1a8
     virtual bool GetCurrentScreenLocationXY(int* x, int* y) = 0;                        // 0x1b0
     virtual void GetJobTitle(cISC4BuildingOccupant* building, cIGZString& out) = 0;     // 0x1b8
@@ -586,8 +607,8 @@ public:
     void DoNeighborConnectionRemoved(int cellX, int cellZ) override;   // 0x260 @ 0x1007a9e64
     int DistanceToClosest(std::uint32_t occupantGroup) override;    // 0x268 @ 0x1007a6830
     std::uint32_t DistanceToClosestSpecial(std::uint32_t buildingType) override;   // 0x270 @ 0x1007a6896
-    int LocalSchoolGrade(std::uint32_t buildingType) override;      // 0x278 @ 0x1007a69ee
-    int LocalHospitalGrade(std::uint32_t buildingType) override;    // 0x280 @ 0x1007a6c06
+    float LocalSchoolGrade(std::uint32_t occupantGroup) override;   // 0x278 @ 0x1007a69ee (i386 0x00543a48)
+    float LocalHospitalGrade(std::uint32_t occupantGroup) override; // 0x280 @ 0x1007a6c06 (i386 0x0054392a)
     void PlayNightSound() override;                                 // 0x288 @ 0x1007a912a
     bool GetLocation(float* xyz) const override;                    // 0x290 @ 0x1007aa520
     bool RequestToPlaySound() override;                             // 0x298 @ 0x1007a8fc2
@@ -624,10 +645,12 @@ public:
     cGZPersistResourceKey GetRandomWalkModelKey();                  // @ 0x1007aa8d0
 
     // Non-virtual helpers (private in the original; public for the subclass and the test).
-    void UpdateVariables();                                        // @ 0x10079fcb2 (PARTIAL, see the .cpp)
+    void UpdateVariables();                                        // @ 0x10079fcb2 (i386 0x005481e6)
     void UpdateTripVariables(int fromState, int toState, int legFlags, int travelFlags, bool force);   // @ 0x1007a3e66 (PARTIAL)
     void UpdateQuickVariables();                                   // @ 0x1007a5800
     void UpdateLocalBuildings();                                   // @ 0x1007a5d5e
+    std::uint32_t DistanceToPosition(const float* xyz) const;      // DistanceToOccupant (i386 0x0054147a), from the position
+    float LocalServiceGrade(bool hospital, std::uint32_t occupantGroup);   // LocalSchoolGrade / LocalHospitalGrade body
     void UpdateJobTitle();                                         // @ 0x1007a6160
     void init_balloons();                                          // @ 0x1007a10f0
     bool InitFromTuning();                                         // @ 0x1007a191c
