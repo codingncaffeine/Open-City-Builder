@@ -476,7 +476,8 @@ src/app/hosts/StubOverlay.cpp
 src/app/hosts/StubPlaceLot.cpp
 src/app/hosts/StubPlaceable.cpp
 src/app/hosts/StubPortDeveloper.cpp
-src/app/hosts/StubPowerLineTool.cpp
+src/app/NativePowerLineTool.cpp
+src/sc4/PowerLineGeometry.cpp
 src/app/hosts/StubPreBuiltModelOccupant.cpp
 src/app/hosts/StubProp.cpp
 src/app/hosts/StubPropController.cpp

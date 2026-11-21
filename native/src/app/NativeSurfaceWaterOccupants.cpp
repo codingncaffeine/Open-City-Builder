@@ -63,7 +63,7 @@ IWaterNetworkOccupant* NetworkView(cSC4NetworkOccupant* piece) {
 IWaterCellOccupant* PoleView(cIGZUnknown* object) {
     void* raw = nullptr;
     if (!object || !object->QueryInterface(kGZCLSID_cSC4PowerPoleOccupant, &raw) || !raw) return nullptr;
-    auto* pole = static_cast<cSC4PowerPoleOccupant*>(raw);
+    auto* pole = static_cast<cSC4PowerPoleOccupant*>(static_cast<cISC4PowerPoleOccupant*>(raw));   // the interface view
     pole->Release();   // the occupant manager (or the message's sender) keeps the pole
     std::lock_guard<std::mutex> lock(g_viewsMutex);
     auto& slot = g_poleViews[pole];

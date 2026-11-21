@@ -1222,6 +1222,14 @@ int RunScenario(const std::string& path) {
             native::NativeToxicReport();
         } else if (command == "netmanager") {   // netmanager: what the network manager's host answers, its remaps, tools and filters
             native::PrintNetworkManagerHost();
+        } else if (command == "powerline") {   // powerline X1 Z1 X2 Z2: the power line tool lays a line between two cells (its placement API)
+            int x1 = 0, z1 = 0, x2 = 0, z2 = 0;
+            words >> x1 >> z1 >> x2 >> z2;
+            native::NativeLayPowerLine(x1, z1, x2, z2);
+        } else if (command == "poles") {   // poles X0 Z0 X1 Z1: the poles and wires of a cell rectangle and the power grid there
+            int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
+            words >> x0 >> z0 >> x1 >> z1;
+            native::NativePowerPoleReport(x0, z0, x1, z1);
         } else if (command == "walls") {   // walls: the lot retaining walls and their models
             native::NativeWallReport();
         } else if (command == "ports") {   // ports: the airport and seaport developers' ports

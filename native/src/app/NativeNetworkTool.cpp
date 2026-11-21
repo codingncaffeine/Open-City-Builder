@@ -35,6 +35,7 @@
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
 #include "sc4/OccupantManager.h"
+#include "sc4/PowerLineTool.h"
 
 namespace native {
 namespace {
@@ -209,7 +210,12 @@ public:
         return type < infos->size() ? &(*infos)[type] : nullptr;
     }
     sc4::cSC4NetworkCellInfo* GetCellInfo(std::uint32_t) override { return nullptr; }
-    cIGZUnknown* GetTuningProperty(std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t) override { return nullptr; }
+    // SL::spRM GetResource({type, group, instance}, iid): the power line tool's pole exemplars. One reference, or null.
+    cIGZUnknown* GetTuningProperty(std::uint32_t type, std::uint32_t group, std::uint32_t instance, std::uint32_t iid) override {
+        void* raw = nullptr;
+        if (!SL::spRM || !SL::spRM->GetResource(cGZPersistResourceKey{type, group, instance}, iid, &raw, 0, nullptr) || !raw) return nullptr;
+        return static_cast<cIGZUnknown*>(raw);
+    }
     bool LoadString(std::uint32_t, std::uint32_t, cIGZString&) override { return false; }
     // GetNetworkOccupant (i386 0x00126b82): the first occupant of the cell the tool's cSC4NetworkORFilter takes (a network
     // occupant with one of the tool's network flags), one reference.
@@ -356,9 +362,12 @@ public:
 class InputHost final : public sc4::INetworkInputToolHost {
 public:
     sc4::cISC4View3DWin* View() override { return g_view; }
-    // GetNetworkTool(type, true): cSC4NetworkTool for the surface types, the pipe tool for type 4 (shared, never destroyed).
+    // GetNetworkTool(type, true): cSC4NetworkTool for the surface types, the pipe tool for type 4 (shared, never destroyed),
+    // the power line tool (cSC4PowerLineTool, its own pole solver) for type 5.
     sc4::cISC4NetworkTool* CreateNetworkTool(std::uint32_t type) override {
-        sc4::cSC4NetworkTool* tool = type == 4 ? NativePipeTool() : new sc4::cSC4NetworkTool(type);
+        sc4::cSC4NetworkTool* tool = type == 4 ? NativePipeTool()
+                                   : type == sc4::kNetworkPowerLine ? static_cast<sc4::cSC4NetworkTool*>(new sc4::cSC4PowerLineTool())
+                                                                    : new sc4::cSC4NetworkTool(type);
         tool->AddRef();
         return tool;
     }

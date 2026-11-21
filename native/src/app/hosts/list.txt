@@ -48,7 +48,6 @@ Overlay
 PipeBurst
 Placeable
 PortDeveloper
-PowerLineTool
 PropDeveloper
 PropManager
 Prop

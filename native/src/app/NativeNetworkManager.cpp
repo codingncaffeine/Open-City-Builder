@@ -21,6 +21,7 @@
 #include "sc4/PathInfoFactory.h"
 #include "sc4/PipeConnectionOccupant.h"
 #include "sc4/PipeTool.h"
+#include "sc4/PowerLineTool.h"
 #include "sc4/ResourceAsFile.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/cSC424HourClock.h"
@@ -104,6 +105,9 @@ public:
     bool Init() override {
         if (!tool_ && type_ == sc4::kPipeNetworkType) {
             tool_ = NativePipeTool();
+        } else if (!tool_ && type_ == sc4::kNetworkPowerLine) {
+            tool_ = new sc4::cSC4PowerLineTool();   // GetNetworkTool case 5: operator new(0x400) + cSC4PowerLineTool()
+            tool_->AddRef();
         } else if (!tool_) {
             tool_ = new sc4::cSC4NetworkTool(type_);
             tool_->AddRef();
@@ -111,6 +115,7 @@ public:
         return tool_->Init();
     }
     bool Shutdown() override { return tool_ ? tool_->Shutdown() : true; }
+    sc4::cSC4NetworkTool* Tool() const { return tool_; }
     // The manager hands one reference per view; the tool borrows the pieces.
     void DestroyOccupantsAndResolve(std::vector<sc4::INetworkManagerOccupant*>& occupants) override {
         std::vector<sc4::cSC4NetworkOccupant*> pieces;
@@ -203,11 +208,11 @@ public:
         file->Release();
         return ini;
     }
-    // Init / GetNetworkTool(type, true): the surface types and the pipe get their tools; the power line tool (5) and the
-    // subway tool (7) are not wired to the manager yet, so their slots stay empty (DestroyNetworkOccupants skips an empty slot).
+    // Init / GetNetworkTool(type, true): the surface types, the pipe and the power line get their tools; the subway tool (7)
+    // is not wired to the manager yet, so its slot stays empty (DestroyNetworkOccupants skips an empty slot).
     sc4::INetworkManagerTool* CreateNetworkTool(sc4::eNetworkType type) override {
         const auto value = static_cast<std::uint32_t>(type);
-        if (value >= sc4::kNetworkToolCount || value == 5 || value == 7) return nullptr;
+        if (value >= sc4::kNetworkToolCount || value == 7) return nullptr;
         return new ManagerRoadTool(value);
     }
     sc4::cISC4OccupantFilter* CreateOccupantFilter(bool subway) override {
@@ -336,6 +341,17 @@ void NetworkIntersectionPieces(sc4::cSC4NetworkOccupant* occupant, std::vector<s
         if (auto* network = dynamic_cast<sc4::cSC4NetworkOccupant*>(piece)) out.push_back(network);   // keeps the list's reference
         else if (piece) piece->Release();
     }
+}
+
+
+// The network tool behind the city network manager's slot for a type (the borrowed tool Init made), or null.
+sc4::cSC4NetworkTool* NativeManagerNetworkTool(std::uint32_t type) {
+    sc4::cSC4NetworkManager* manager = CityNetworkManager();
+    if (!manager) return nullptr;
+    auto* view = dynamic_cast<ManagerRoadTool*>(manager->GetNetworkTool(static_cast<sc4::eNetworkType>(type), false));
+    if (!view) return nullptr;
+    if (!view->Tool()) view->Init();   // the adapter makes its tool on the first Init
+    return view->Tool();
 }
 
 }  // namespace native

@@ -279,7 +279,8 @@ the caller fills (see `scripts/terrain_shot.mm`).
 | `IPortSimulatorApi` | `src/sc4/PortDeveloper.h` | src/app/hosts/StubPortDeveloper.cpp, src/sc4/PortDeveloper.cpp | implemented | scripts/tests/sc4_airportdeveloper_test.cpp, scripts/tests/sc4_portdeveloper_test.cpp |
 | `IPortZoneManagerApi` | `src/sc4/PortDeveloper.h` | src/app/hosts/StubPortDeveloper.cpp, src/sc4/PortDeveloper.cpp | implemented | scripts/tests/sc4_airportdeveloper_test.cpp, scripts/tests/sc4_portdeveloper_test.cpp |
 | `IPowerHost` | `src/sc4/PowerSimulator.h` | src/app/NativePower.h, src/gz/SimHostRegistry.h, src/sc4/PowerSimulator.cpp | implemented | scripts/tests/sc4_powersimulator_test.cpp, src/app/NativePower.cpp |
-| `IPowerLineToolHost` | `src/sc4/PowerLineTool.h` | src/sc4/PowerLineTool.cpp | implemented | scripts/tests/sc4_powerlinetool_test.cpp, src/app/hosts/StubPowerLineTool.cpp |
+| `IPowerLineToolHost` | `src/sc4/PowerLineTool.h` | src/sc4/PowerLineTool.cpp | implemented | scripts/tests/sc4_powerlinetool_test.cpp, src/app/NativePowerLineTool.cpp |
+| `IPowerPoleOccupantHost` | `src/sc4/PowerPoleOccupant.h` | src/sc4/PowerPoleOccupant.cpp | implemented | src/app/NativePowerLineTool.cpp |
 | `IPreBuiltModelOccupantHost` | `src/sc4/NetworkOccupantWithPreBuiltModel.h` | src/sc4/NetworkOccupantWithPreBuiltModel.cpp | implemented | scripts/tests/sc4_networkoccupantwithprebuiltmodel_test.cpp, src/app/hosts/StubPreBuiltModelOccupant.cpp |
 | `IPrimitiveHost` | `src/render/gd/PrimitiveManager.h` |  | test fake only | scripts/tests/render_primitivemanager_test.cpp |
 | `IPrimitiveManagerHost` | `src/render/gd/SGLDX7Driver.h` | src/render/gd/SGLDX7Driver.cpp | implemented | scripts/tests/render_sgldx7driver_test.cpp, src/render/gd/PrimitiveManager.h |

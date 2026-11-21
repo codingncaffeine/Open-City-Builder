@@ -58,15 +58,15 @@ struct tConnectionInfo {
 };
 static_assert(sizeof(tConnectionInfo) == 0x08, "tConnectionInfo stride");
 
-// One cell of the wire between two poles (cSC4PowerLineOccupant::tLineInfo, 0x18 bytes). The tool only ever
-// appends cells from the drag to the per-pole lists at +0x658; the occupant's AddConnection walks them.
+// One cell of the wire between two poles (cSC4PowerLineOccupant::tLineInfo, 0x18 bytes). DeterminePolePositions
+// appends the drag cells between two poles to the per-pole lists at +0x658; PlacePoles creates the wire occupant of
+// each cell and the pole's AddConnection keeps a reference to it (UpdateLineOccupants).
 struct tLineInfo {
-    std::uint32_t x = 0;                      // +0x00
-    std::uint32_t z = 0;                      // +0x04
-    std::uint32_t unknown08 = 0;              // +0x08
-    std::uint32_t unknown0c = 0;              // +0x0c
-    bool first = false;                       // +0x10 (true for the first cell of a segment)
-    std::uint8_t pad11[7] = {};               // +0x11
+    std::uint32_t x = 0;                          // +0x00
+    std::uint32_t z = 0;                          // +0x04
+    cSC4PowerLineOccupant* line = nullptr;        // +0x08 the wire occupant of the cell (one reference)
+    bool first = false;                           // +0x10 the cell is the step's primary cell
+    std::uint8_t pad11[7] = {};                   // +0x11
 };
 static_assert(sizeof(tLineInfo) == 0x18, "tLineInfo stride");
 static_assert(offsetof(tLineInfo, first) == 0x10, "tLineInfo offsets");
@@ -138,18 +138,20 @@ public:
     virtual bool QueriesAs(std::uint32_t iid) = 0;                // QI iid, then Release; true when it answers
 };
 
-// cISC4PowerPoleOccupant / cSC4PowerPoleOccupant (0x1a0 bytes, ctor 0x100320cf6, not recovered). The methods
-// are the slots cSC4PowerLineTool calls; the slot offsets are the ones in the recovered call sites.
+// cISC4PowerPoleOccupant as cSC4PowerLineTool calls it; cSC4PowerPoleOccupant (sc4/PowerPoleOccupant.h) implements
+// it. The slot offsets are the 64-bit ones of the recovered call sites (i386: half).
 class IPowerPoleOccupant : public cISC4PowerPoleOccupant {
 public:
     virtual ~IPowerPoleOccupant() = default;
+    virtual int GetNumberOfConnections() = 0;                                 // +0x20
+    virtual IPowerPoleOccupant* GetConnectionOccupant(int index) = 0;         // +0x38 (not counted)
     virtual void GetCell(std::uint32_t& x, std::uint32_t& z) = 0;             // +0x40
-    virtual void InitFromExemplar(cIGZUnknown* exemplar, std::uint32_t directionMask) = 0;  // +0x90 (new pole)
-    virtual void SetExemplar(cIGZUnknown* exemplar) = 0;                      // +0x130 (existing pole)
+    virtual void InitFromExemplar(cIGZUnknown* exemplar, std::uint32_t directionMask) = 0;  // +0x90 Init(exemplar, int)
+    virtual void SetExemplar(cIGZUnknown* exemplar) = 0;                      // +0x130 SetDefaultExemplar
     virtual void SetPosition(const float* xyz) = 0;                           // +0xd0
     virtual void SetPreview(bool preview) = 0;                                // +0x70
-    virtual void SetModelState(int state, bool immediate) = 0;                // +0xe0
-    virtual void OnInserted() = 0;                                            // +0x48
+    virtual void SetModelState(int state, bool immediate) = 0;                // +0xe0 SetHighlight
+    virtual void OnInserted() = 0;                                            // +0x48 InsertAllPowerLineOccupants
     virtual std::uint32_t DirectionFlags() const = 0;                         // field +0x100
     virtual void SetDirectionFlags(std::uint32_t flags) = 0;                  // field +0x100
 };
@@ -232,6 +234,7 @@ public:
 
     // --- original methods ---
     static void AddConnection(tPoleInfo& a, tPoleInfo& b, int value);       // 0x1002e9c30
+    static void GetLineSlope(int x1, int z1, int x2, int z2, int& dx, int& dz);  // i386 0x0022b798
     static void AddPowerPoleInfo(const cRZString& key, const cRZString& value, void* context);  // 0x1002e9cd2
     void ComputePolePosition(int x, int z, float* out);                     // 0x1002e9d28
     void CreatePowerPole(tPoleInfo& info);                                  // 0x1002e9e2c
@@ -242,12 +245,12 @@ public:
     void ReleasePoleInfos();                                                // 0x1002ea4f2
     int GetPrimaryCell(int step, int anchorIndex);                          // 0x1002ea594
     bool PoleIsInList(IPowerPoleOccupant* pole);                            // 0x1002ea616
-    void DeterminePolePositions();                                          // 0x1002ea67e (PARTIAL)
+    void DeterminePolePositions();                                          // 0x1002ea67e
     std::uint8_t CellIsOKForPlacement(int x, int z);                        // 0x1002eb380
     void FindNewPolePosition(SC4CellRect rect, int startIndex, int endIndex, int step,
                              std::vector<SC4PointU>& cells, IPowerPoleOccupant* existing,
                              IPowerPoleOccupant* other);                    // 0x1002eb536
-    void PlacePoles(bool resolve);                                          // 0x1002eb7de (PARTIAL)
+    void PlacePoles(bool resolve);                                          // 0x1002eb7de
     static bool StaticInit();                                               // 0x1002ed0a4
     static void ReadPowerPoleInfos();                                       // 0x1002ed208
 

@@ -35,6 +35,7 @@
 #include "sc4/NetworkOccupantModel.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/PlaceableObject.h"
+#include "sc4/PowerPoleOccupant.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/ViewUtilities.h"
 #include "sc4/cSC4City.h"
@@ -809,6 +810,14 @@ bool AttachModelMaker(sc4::cSC43DRender& render, sc4::cSC4City& city) {
     static NetworkModelHost networkModelHost;
     sc4::SetNetworkModelHost(&networkModelHost);
     sc4::SetNetworkModelFactory([](sc4::cISC4Occupant* occupant) -> s3d::cIS3DModelInstance* {
+        // A power pole is its own model instance (cSC4PowerPoleOccupant::GetModelInstances): it draws its model, its
+        // foundation and its wires.
+        if (auto* pole = dynamic_cast<sc4::cSC4PowerPoleOccupant*>(occupant)) {
+            s3d::cIS3DModelInstance* instances[1] = {nullptr};
+            int count = 0;
+            pole->GetModelInstances(instances, count);
+            return count > 0 ? instances[0] : nullptr;
+        }
         if (auto* underground = dynamic_cast<sc4::cSC4UndergroundOccupant*>(occupant)) {   // pipes and subway pieces
             auto* model = new UndergroundPieceModel(*underground);
             model->AddRef();

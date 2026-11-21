@@ -148,6 +148,9 @@ struct FakeTypeInfo : INetworkTypeInfo {
 // cISC4PowerPoleOccupant / cSC4PowerPoleOccupant seam fake.
 struct FakePole : IPowerPoleOccupant {
     ~FakePole() override = default;
+    int GetNumberOfConnections() override { return static_cast<int>(connected.size()); }
+    IPowerPoleOccupant* GetConnectionOccupant(int index) override { return connected[static_cast<std::size_t>(index)]; }
+    std::vector<IPowerPoleOccupant*> connected;
     bool QueryInterface(std::uint32_t iid, void** out) override {
         if (iid == 1 || iid == kGZCLSID_cSC4PowerPoleOccupant) {
             *out = static_cast<IPowerPoleOccupant*>(this);
@@ -468,7 +471,9 @@ struct FakeHost : INetworkToolHost, IPowerLineToolHost {
     void ConnectPoles(IPowerPoleOccupant* from, IPowerPoleOccupant* to,
                       const std::vector<tLineInfo>* lineInfos) override {
         connects.push_back({from, to});
-        (void)lineInfos;
+        connectLines.push_back(lineInfos ? static_cast<int>(lineInfos->size()) : -1);
+        connectLineVectors.push_back(lineInfos);
+        if (auto* pole = dynamic_cast<FakePole*>(from)) pole->connected.push_back(to);   // AddConnection
     }
     void RemovePoleConnection(IPowerPoleOccupant* from, IPowerPoleOccupant* to, bool preview) override {
         removals.push_back({from, to});
@@ -536,6 +541,8 @@ struct FakeHost : INetworkToolHost, IPowerLineToolHost {
     std::vector<FakeWire*> ownedWires;
     std::vector<IPowerPoleOccupant*> inserted, removed;
     std::vector<std::pair<IPowerPoleOccupant*, IPowerPoleOccupant*>> connects, removals, draws;
+    std::vector<int> connectLines;
+    std::vector<const std::vector<tLineInfo>*> connectLineVectors;
     std::vector<std::pair<SC4PointU, SC4PointU>> drawnLines;
     int cellQueries = 0, rayCalls = 0, directionCalls = 0, baseClears = 0, attemptCalls = 0;
     int placeNeighborsCalls = 0, iniOpens = 0;
@@ -666,9 +673,9 @@ int main() {
         steps = {tDraggedStep{1, 4, 0}};
         cells = {Point(0, 8), Point(2, 2), Point(2, 2), Point(3, 3), Point(9, 9)};
         anchors = {Point(2, 2)};
-        CHECK(f.tool->GetPrimaryCell(0, 0) == 2);  // cells_[1] == (2,2): the scan starts at cells_[first-1]
+        CHECK(f.tool->GetPrimaryCell(0, 0) == 1);  // cells_[1] == (2,2): the scan runs from the step's first cell
         anchors[0] = Point(5, 5);
-        CHECK(f.tool->GetPrimaryCell(0, 0) == 2);  // |5-2| == |5-2|
+        CHECK(f.tool->GetPrimaryCell(0, 0) == 1);  // |5-2| == |5-2|
         anchors[0] = Point(9, 0);
         CHECK(f.tool->GetPrimaryCell(0, 0) == -1);  // no diagonal cell
         NetworkToolTestAccess::StraightSteps(*f.tool) = 1;
@@ -777,7 +784,7 @@ int main() {
         CHECK(created->masks.size() == 1 && created->masks[0] == 0x01);
         CHECK(f.host.tuningInstance == 0x5151);
         CHECK(created->positionCalls == 1);
-        CHECK(created->position[1] == f.host.terrainHeight + 0.5f + 3.5f);
+        CHECK(created->position[1] == f.host.terrainHeight + 0.5f);   // on the cell: the height offset is only the solver's sight line
         CHECK(created->previewCalls == 1 && created->preview);
         CHECK(created->directionFlags == 0x01);
         info.occupant->Release();
@@ -885,52 +892,116 @@ int main() {
         CHECK(f.host.loadStringCalls == 1 && f.host.loadStringInstance == 0x5);
     }
 
-    // ---- DeterminePolePositions (PARTIAL: one pole at the first/last placeable cell of each step) ------------
+    // ---- DeterminePolePositions: anchors force poles, the cells between them are the segment's wire cells --------
     {
         Fixture f;
         auto& steps = NetworkToolTestAccess::Steps(*f.tool);
         auto& cells = NetworkToolTestAccess::Cells(*f.tool);
         steps = {tDraggedStep{0, 2, 0}};
         cells = {Point(0, 0), Point(1, 0), Point(2, 0)};
+        NetworkToolTestAccess::Anchors(*f.tool) = {Point(0, 0), Point(2, 0)};
         NetworkToolTestAccess::ValidSteps(*f.tool) = 1;
         NetworkToolTestAccess::TotalSteps(*f.tool) = 1;
-        f.host.zoneValue = 0;  // unzoned: CellIsOKForPlacement == 0 -> placeable for the port
+        f.host.zoneValue = 0;  // unzoned: CellIsOKForPlacement == 0
         f.tool->DeterminePolePositions();
         auto& poles = PowerLineToolTestAccess::PoleInfos(*f.tool);
+        auto& lines = PowerLineToolTestAccess::LineInfos(*f.tool);
         CHECK(poles.size() == 2);
         CHECK(poles[0].x == 0 && poles[1].x == 2);
         CHECK(poles[0].connectionList.size() == 1 && poles[0].connectionList[0].poleIndex == 1);
+        CHECK(poles[0].connectionList[0].value == 1);   // the segment list of the second pole
+        CHECK(lines.size() == 2 && lines[0].empty() && lines[1].size() == 1 && lines[1][0].x == 1);
         CHECK(PowerLineToolTestAccess::PoleCount(*f.tool) == 2);
-        CHECK(PowerLineToolTestAccess::WireCellCount(*f.tool) == 2);  // Manhattan distance
+        CHECK(PowerLineToolTestAccess::WireCellCount(*f.tool) == 1);
+        CHECK(NetworkToolTestAccess::ValidSteps(*f.tool) == 1);
         // a second call releases the old pole occupants and rebuilds
         f.tool->DeterminePolePositions();
         CHECK(poles.size() == 2);
         CHECK(PowerLineToolTestAccess::PoleCount(*f.tool) == 2);
     }
 
-    // ---- PlacePoles (PARTIAL: occupants, lists, connection groups, intersection list) -----------------------
+    // ---- DeterminePolePositions: a pole every poleSpacing steps, the anchors at both ends ------------------------
+    {
+        Fixture f;
+        auto& steps = NetworkToolTestAccess::Steps(*f.tool);
+        auto& cells = NetworkToolTestAccess::Cells(*f.tool);
+        steps.clear();
+        cells.clear();
+        for (std::uint32_t i = 0; i < 25; ++i) {
+            steps.push_back(tDraggedStep{i, i, 0});
+            cells.push_back(Point(i, 4));
+        }
+        NetworkToolTestAccess::Anchors(*f.tool) = {Point(0, 4), Point(24, 4)};
+        NetworkToolTestAccess::ValidSteps(*f.tool) = 25;
+        NetworkToolTestAccess::TotalSteps(*f.tool) = 25;
+        NetworkToolTestAccess::StraightSteps(*f.tool) = 25;
+        PowerLineToolTestAccess::PoleSpacing(*f.tool) = 10;
+        f.host.zoneValue = 0;
+        f.host.rayHit = false;  // nothing between the poles: no sight-line pole
+        f.tool->DeterminePolePositions();
+        auto& poles = PowerLineToolTestAccess::PoleInfos(*f.tool);
+        auto& lines = PowerLineToolTestAccess::LineInfos(*f.tool);
+        CHECK(poles.size() == 4);
+        CHECK(poles.size() == 4 && poles[0].x == 0 && poles[1].x == 10 && poles[2].x == 20 && poles[3].x == 24);
+        CHECK(lines.size() == 4 && lines[1].size() == 9 && lines[2].size() == 9 && lines[3].size() == 3);
+        CHECK(PowerLineToolTestAccess::WireCellCount(*f.tool) == 21);
+        CHECK(f.host.rayCalls > 0);  // the primary cells between poles asked for the sight line
+        // a hill (the ray stops 1 m from the last pole) puts a pole on the next primary cell
+        f.host.rayHit = true;
+        f.host.rayEnd[0] = 0.5f * 16.0f + 1.0f;
+        f.host.rayEnd[1] = f.host.terrainHeight;
+        f.host.rayEnd[2] = 4.5f * 16.0f;
+        f.tool->DeterminePolePositions();
+        CHECK(poles.size() >= 2 && poles[1].x == 1);
+    }
+
+    // ---- PlacePoles: occupants, the wire occupants of each new connection, the city and the lists ---------------
     {
         Fixture f;
         auto& cells = NetworkToolTestAccess::Cells(*f.tool);
-        cells = {Point(0, 0), Point(1, 0)};
+        cells = {Point(0, 0), Point(1, 0), Point(2, 0)};
+        auto& lines = PowerLineToolTestAccess::LineInfos(*f.tool);
         tIntersectionInfo none;
         f.tool->PlacePole(0, false, 0, none);
-        f.tool->PlacePole(1, false, 0, none);
+        lines.push_back({});
+        f.tool->PlacePole(2, true, 1, none);
+        tLineInfo wireCell;
+        wireCell.x = 1;
+        wireCell.z = 0;
+        wireCell.first = true;
+        lines.push_back({wireCell});
         auto& poles = PowerLineToolTestAccess::PoleInfos(*f.tool);
-        auto& groups = PowerLineToolTestAccess::ConnectionGroups(*f.tool);
-        groups = {{0, 1}};  // one connection group listing both drag cell indices
+        NetworkToolTestAccess::Unknown98(*f.tool) = true;  // placing for good
         f.tool->PlacePoles(true);
         CHECK(poles.size() == 2);
-        CHECK(poles[0].occupant == nullptr && poles[1].occupant == nullptr);  // the lists own the references now
-        CHECK(poles[0].connectionList.size() == 1);  // pass A connected the one-apart poles
-        CHECK(groups.empty());
+        CHECK(poles[0].occupant == nullptr && poles[1].occupant == nullptr);  // the city holds them now
         CHECK(f.host.inserted.size() == 2);  // both were created -> inserted into the city
+        // both ends connected; the lower pole (0, 0) owns the segment's one wire occupant
+        CHECK(f.host.connects.size() == 2);
+        CHECK(f.host.connectLines.size() == 2 && f.host.connectLines[0] == 1 && f.host.connectLines[1] == -1);
+        CHECK(lines[1][0].line == nullptr);  // the segment dropped its reference after the connection took one
         auto& created = PowerLineToolTestAccess::CreatedPoles(*f.tool);
-        CHECK(created.size() == 2);
-        CHECK(f.host.preview->refs >= 1);
-        // the manager and the list each hold a reference; drop the list's one
-        for (IPowerPoleOccupant* pole : created) pole->Release();
-        created.clear();
+        CHECK(created.empty());  // previews only
+        CHECK(f.host.ownedPoles.size() == 2 && f.host.ownedPoles[0]->insertedCalls == 1 && f.host.ownedPoles[1]->insertedCalls == 1);
+
+        // a preview: the poles go to the created list highlighted, nothing is wired
+        Fixture g;
+        auto& gcells = NetworkToolTestAccess::Cells(*g.tool);
+        gcells = {Point(0, 0), Point(1, 0)};
+        g.tool->PlacePole(0, false, 0, none);
+        g.tool->PlacePole(1, false, 0, none);
+        auto& groups = PowerLineToolTestAccess::ConnectionGroups(*g.tool);
+        groups = {{0, 1}};  // one connection group listing both drag cell indices
+        NetworkToolTestAccess::Unknown98(*g.tool) = false;
+        g.tool->PlacePoles(true);
+        auto& gpoles = PowerLineToolTestAccess::PoleInfos(*g.tool);
+        CHECK(gpoles[0].connectionList.size() == 2);  // pass A connects every ordered pair one cell apart
+        CHECK(groups.empty());
+        auto& gcreated = PowerLineToolTestAccess::CreatedPoles(*g.tool);
+        CHECK(gcreated.size() == 2);
+        CHECK(g.host.connects.empty());
+        for (IPowerPoleOccupant* pole : gcreated) pole->Release();
+        gcreated.clear();
     }
 
     // ---- FindNewPolePosition --------------------------------------------------------------------------------
@@ -961,9 +1032,9 @@ int main() {
         NetworkToolTestAccess::TotalSteps(*f.tool) = 2;
         NetworkToolTestAccess::Anchors(*f.tool) = {Point(0, 0), Point(2, 0)};
         CHECK(f.tool->DoNetworkSpecificPlacement(false, true));
-        // the partial solver places poles at (0,0), (2,0) and (3,0); only (1,0) is highlighted
-        CHECK(f.host.preview->added.size() == 1);
-        CHECK(f.host.preview->added[0] == Point(1, 0));
+        // the anchors (0,0) and (2,0) get poles; the wire cell (1,0) and the unanchored last cell (3,0) are highlighted
+        CHECK(f.host.preview->added.size() == 2);
+        CHECK(f.host.preview->added.size() == 2 && f.host.preview->added[0] == Point(1, 0) && f.host.preview->added[1] == Point(3, 0));
         CHECK(f.host.preview->colors[0] == 0x800000ffu);
         CHECK(NetworkToolTestAccess::Unknown98(*f.tool) == false);
         NetworkToolTestAccess::Unknown98(*f.tool) = false;

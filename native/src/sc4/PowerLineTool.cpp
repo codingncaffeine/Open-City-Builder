@@ -1,8 +1,7 @@
 // cSC4PowerLineTool — see PowerLineTool.h for the layout, the vtable slots and the seams. Hand-written from
 // the Ghidra decompilation of the Aspyr macOS build (0x1002e9c30..0x1002ed8e0); every address below is the
-// original function / call site. The three large functions (DeterminePolePositions, PlacePoles,
-// UpdateOnZoneChange) are marked PARTIAL: the reduced implementations keep exactly what the comments say, no
-// more (also listed under PARTIAL: in notes/ledger_pending/cSC4PowerLineTool.txt).
+// original function / call site. UpdateOnZoneChange is marked PARTIAL: the reduced implementation keeps exactly
+// what its comment says (also listed under PARTIAL: in notes/ledger_pending/cSC4PowerLineTool.txt).
 #include "sc4/PowerLineTool.h"
 
 #include <algorithm>
@@ -149,15 +148,14 @@ int cSC4PowerLineTool::GetPrimaryCell(int step, int anchorIndex) {
     const int last = static_cast<int>(steps_[static_cast<std::size_t>(step)].lastCell);
     if (straightSteps_ != 0 && straightSteps_ > step) return first;
     if (first > last) return -1;
-    // The original reads anchors_[anchorIndex] unchecked. The port guards the index (the partial solver only
-    // asks for a valid one; a hook-up with an empty anchor list would otherwise read out of bounds).
+    // The original reads anchors_[anchorIndex] unchecked (the solver walks past the last anchor on the drag's last
+    // cell); the port keeps the step's first cell there.
     if (anchorIndex < 0 || anchorIndex >= static_cast<int>(anchors_.size())) return first;
-    int cell = first;
-    for (int index = first - 1; index < last; ++index, ++cell) {
+    for (int cell = first; cell <= last; ++cell) {
         const int dx = static_cast<int>(anchors_[static_cast<std::size_t>(anchorIndex)].x) -
-                       static_cast<int>(cells_[static_cast<std::size_t>(index)].x);
+                       static_cast<int>(cells_[static_cast<std::size_t>(cell)].x);
         const int dz = static_cast<int>(anchors_[static_cast<std::size_t>(anchorIndex)].z) -
-                       static_cast<int>(cells_[static_cast<std::size_t>(index)].z);
+                       static_cast<int>(cells_[static_cast<std::size_t>(cell)].z);
         if (std::abs(dx) == std::abs(dz)) return cell;
     }
     return -1;
@@ -323,80 +321,282 @@ void cSC4PowerLineTool::CreatePowerPole(tPoleInfo& info) {
     if (pole != nullptr) {
         pole->SetDirectionFlags(directionMask);
         float position[3] = {0.0f, 0.0f, 0.0f};
-        ComputePolePosition(static_cast<int>(info.x), static_cast<int>(info.z), position);
-        position[1] += poleHeightOffset_;  // the solver keeps the poles this far above the cell centre
+        ComputePolePosition(static_cast<int>(info.x), static_cast<int>(info.z), position);   // the pole stands on the cell
         pole->SetPosition(position);
         pole->SetPreview(unknown98_ == 0);
     }
 }
 
 // ============================================================================================================
-// solving (PARTIAL)
+// solving
 // ============================================================================================================
 
-// 0x1002ea67e, PARTIAL. The original (3271 bytes) walks every cell of every valid drag step and classifies it
-// with CellIsOKForPlacement: result 1 enters the pole-placement path (a pole at the remembered candidate cell,
-// connected to the previous one, with the intersection data from an existing pole/wire), result 0 remembers the
-// cell as the next candidate and looks up the pole or wire already there (FindPoleOccupant /
-// CellIsOccupiedByPowerLine, including the pole pair of a wire), 2 and 3 set the failure reason. It also
-// advances the anchor index, forces poles when the pole spacing (+0x6d8) is exceeded, feeds the per-pole line
-// info lists and re-writes validSteps_.
-//
-// This port recovers the entry bookkeeping (release the previous pole refs, drop the line-info lists, reset the
-// counters) and a reduced per-step pass: one pole at the first and one at the last placeable cell of each step
-// (result 0 or 1), connected to the previous pole; the failure reasons of the 2/3 results are kept. NOT
-// recovered: the candidate/pop-two logic, the anchor and spacing tests, the wire/intersection bookkeeping and
-// the line-info lists, so lineInfos_ stays empty and wireCellCount_ is the Manhattan length between the poles
-// this pass creates (the original counts pushed line-info cells).
+// i386 0x0022b798: the sign of each axis of the line between two cells, measured from the cell with the larger x.
+void cSC4PowerLineTool::GetLineSlope(int x1, int z1, int x2, int z2, int& dx, int& dz) {
+    if (x1 < x2) {
+        dx = x1 - x2;
+        dz = z1 - z2;
+    } else {
+        dx = x2 - x1;
+        dz = z2 - z1;
+    }
+    if (dx != 0) dx = dx / std::abs(dx);
+    if (dz != 0) dz = dz / std::abs(dz);
+}
+
+namespace {
+
+// The intersection data a pole carries when it is placed on (or right after) the wire of an existing line: the two
+// poles of that wire and their "connect to the new pole" flags (both start true).
+void ResetIntersection(tIntersectionInfo& info) {
+    info.first = nullptr;
+    info.second = nullptr;
+    info.firstNew = true;
+    info.secondNew = true;
+}
+
+void ReleaseIntersection(tIntersectionInfo& info) {
+    if (info.first != nullptr) info.first->Release();
+    if (info.second != nullptr) info.second->Release();
+    ResetIntersection(info);
+}
+
+}  // namespace
+
+// 0x1002ea67e (i386 0x0022c98a). Walks every cell of every valid drag step. A placeable cell (CellIsOKForPlacement 0)
+// becomes a pole when it is forced (an anchor, the drag's last cell, the first cell of the diagonal part that leaves the
+// first anchor's row and column, or the primary cell of a step after poleSpacing steps without a pole), when it sits on
+// an existing line whose wire the drag crosses at a right angle, or when the terrain hides the next pole from the last
+// one; otherwise it is a wire cell of the current segment. A zoned cell (1) places a pole at the last placeable cell
+// and breaks the chain; a lot or another network (2, 3) sets the failure reason. validSteps ends after the last step
+// that placed a pole or a wire cell.
 void cSC4PowerLineTool::DeterminePolePositions() {
+    IPowerLineToolHost* host = GetPowerLineToolHost();
+    std::vector<tLineInfo> segment;
+    const int anchorCount = static_cast<int>(anchors_.size());
     wireCellCount_ = 0;
+    tIntersectionInfo intersection;
+    ResetIntersection(intersection);
     ReleasePoleInfos();
     lineInfos_.clear();
 
-    int lastPole = -1;
-    for (int step = 0; step < validSteps_; ++step) {
-        const int first = static_cast<int>(steps_[static_cast<std::size_t>(step)].firstCell);
-        const int last = static_cast<int>(steps_[static_cast<std::size_t>(step)].lastCell);
-        if (first > last) continue;
-        int firstPlaceable = -1;
-        int lastPlaceable = -1;
-        for (int index = first; index <= last; ++index) {
-            const std::uint8_t result = CellIsOKForPlacement(static_cast<int>(cells_[static_cast<std::size_t>(index)].x),
-                                                             static_cast<int>(cells_[static_cast<std::size_t>(index)].z));
-            if (result == 2) {
-                failureReason_ = 0xf0000012;
-                break;
-            }
-            if (result == 3) {
-                failureReason_ = 0xf0000013;
-                break;
-            }
-            if (result <= 1) {
-                if (firstPlaceable < 0) firstPlaceable = index;
-                lastPlaceable = index;
-            }
+    // The first cell of the diagonal part that leaves the first anchor's row and column is a forced pole.
+    int forcedCell = -1;
+    if (straightSteps_ < validSteps_ && straightSteps_ > 0) {
+        const tDraggedStep& step = steps_[static_cast<std::size_t>(straightSteps_)];
+        bool found = false;
+        for (int cell = static_cast<int>(step.firstCell); cell <= static_cast<int>(step.lastCell); ++cell) {
+            if (anchors_.empty()) { forcedCell = cell; found = true; break; }
+            const SC4PointU& c = cells_[static_cast<std::size_t>(cell)];
+            if (c.x == anchors_[0].x || c.z == anchors_[0].z) { forcedCell = cell; found = true; break; }
         }
-        if (firstPlaceable < 0) continue;
-        const tIntersectionInfo none;
-        PlacePole(firstPlaceable, !poleInfos_.empty(), 0, none);
-        if (lastPole >= 0) {
-            const tPoleInfo& a = poleInfos_[poleInfos_.size() - 2];
-            const tPoleInfo& b = poleInfos_.back();
-            wireCellCount_ += std::abs(static_cast<int>(a.x) - static_cast<int>(b.x)) +
-                              std::abs(static_cast<int>(a.z) - static_cast<int>(b.z));
-        }
-        lastPole = firstPlaceable;
-        if (lastPlaceable != firstPlaceable) {
-            PlacePole(lastPlaceable, true, 0, none);
-            const tPoleInfo& a = poleInfos_[poleInfos_.size() - 2];
-            const tPoleInfo& b = poleInfos_.back();
-            wireCellCount_ += std::abs(static_cast<int>(a.x) - static_cast<int>(b.x)) +
-                              std::abs(static_cast<int>(a.z) - static_cast<int>(b.z));
-            lastPole = lastPlaceable;
+        if (!found) forcedCell = -1;
+    }
+
+    int lastPoleStep = -1;      // the step of the last pole placed (-1: none yet)
+    int candidateCell = -1;     // the last placeable cell since the last pole (-1: none)
+    int lastStep = 0;           // the last step that placed something
+    bool force = false;
+    bool connect = false;       // the next pole connects to the previous one
+    int polesInChain = 0;
+    int anchorIndex = 0;
+    float lastPolePosition[3] = {0.0f, 0.0f, 0.0f};
+
+    for (int s = 0; s < validSteps_; ++s) {
+        const int first = static_cast<int>(steps_[static_cast<std::size_t>(s)].firstCell);
+        const int last = static_cast<int>(steps_[static_cast<std::size_t>(s)].lastCell);
+        const int primary = GetPrimaryCell(s, anchorIndex);
+        for (int cell = first; cell <= last; ++cell) {
+            const std::uint32_t x = cells_[static_cast<std::size_t>(cell)].x;
+            const std::uint32_t z = cells_[static_cast<std::size_t>(cell)].z;
+            const std::uint8_t result = CellIsOKForPlacement(static_cast<int>(x), static_cast<int>(z));
+            const bool isPrimary = cell == primary;
+            bool forced = forcedCell == cell;
+            if (forced) {
+                forcedCell = -1;
+                force = true;
+            }
+            if (anchorIndex < anchorCount &&
+                ((anchors_[static_cast<std::size_t>(anchorIndex)].x == x && anchors_[static_cast<std::size_t>(anchorIndex)].z == z) ||
+                 (s == validSteps_ - 1 && cell == last))) {
+                ++anchorIndex;
+                force = true;
+                forced = true;
+            }
+            if (isPrimary && connect && lastPoleStep >= 0 &&
+                static_cast<std::uint32_t>(poleSpacing_) <= static_cast<std::uint32_t>(s - lastPoleStep)) {
+                force = true;
+                forced = true;
+            }
+            const int lastValidCell = static_cast<int>(steps_[static_cast<std::size_t>(validSteps_ - 1)].lastCell);
+            bool placePole = false;
+            bool wireCell = false;
+            if (result == 0) {
+                failureReason_ = 0;
+                IPowerPoleOccupant* existing = nullptr;
+                const bool foundPole = FindPoleOccupant(static_cast<int>(x), static_cast<int>(z), existing);
+                candidateCell = cell;
+                if (!foundPole) {
+                    IPowerLineOccupant* wire = nullptr;
+                    if (CellIsOccupiedByPowerLine(x, z, wire)) {
+                        IPowerPoleOccupant* a = nullptr;
+                        IPowerPoleOccupant* b = nullptr;
+                        bool connected = false;
+                        wire->GetConnectedPoles(a, b, connected);
+                        intersection.first = a;
+                        intersection.second = b;
+                        intersection.firstNew = true;
+                        intersection.secondNew = true;
+                        std::uint32_t ax = 0, az = 0, bx = 0, bz = 0;
+                        if (a != nullptr) a->GetCell(ax, az);
+                        if (b != nullptr) b->GetCell(bx, bz);
+                        int dx = 0, dz = 0;
+                        GetLineSlope(static_cast<int>(ax), static_cast<int>(az), static_cast<int>(bx), static_cast<int>(bz), dx, dz);
+                        if (s < straightSteps_ && (dx == 0 || dz == 0)) {
+                            // The wire runs along an axis and the drag crosses it: a pole here joins the two lines,
+                            // unless the crossing was already taken by this drag.
+                            if ((IntersectionIsInList(intersection) || PoleIsInList(a) || PoleIsInList(b)) && !forced) {
+                                force = false;
+                                ReleaseIntersection(intersection);
+                            } else {
+                                force = true;
+                            }
+                        } else {
+                            ReleaseIntersection(intersection);
+                        }
+                        wire->Release();
+                    }
+                    if (!isPrimary) {
+                        if (force) placePole = true;
+                        else { lastStep = s; wireCell = true; }
+                    } else if (force) {
+                        placePole = true;
+                    } else {
+                        // Line of sight from the last pole's top to the next cell's pole top (SL::spRenderer +0x1e0):
+                        // a hill in between needs a pole here.
+                        if (cell < lastValidCell && !poleInfos_.empty() && host != nullptr) {
+                            float next[3] = {0.0f, 0.0f, 0.0f};
+                            const SC4PointU& n = cells_[static_cast<std::size_t>(cell + 1)];
+                            ComputePolePosition(static_cast<int>(n.x), static_cast<int>(n.z), next);
+                            next[1] += poleHeightOffset_;
+                            float direction[3] = {next[0] - lastPolePosition[0], next[1] - lastPolePosition[1],
+                                                  next[2] - lastPolePosition[2]};
+                            const float length = std::sqrt(direction[0] * direction[0] + direction[1] * direction[1] +
+                                                           direction[2] * direction[2]);
+                            if (length > 0.0f) {
+                                direction[0] /= length;
+                                direction[1] /= length;
+                                direction[2] /= length;
+                            }
+                            float hit[3] = {0.0f, 0.0f, 0.0f};
+                            if (host->RendererRayTest(lastPolePosition, direction, hit)) {
+                                const float hx = hit[0] - lastPolePosition[0], hy = hit[1] - lastPolePosition[1],
+                                            hz = hit[2] - lastPolePosition[2];
+                                if (std::sqrt(hx * hx + hy * hy + hz * hz) <= length) placePole = true;
+                            }
+                        }
+                        if (!placePole) {
+                            lastStep = s;
+                            force = false;
+                            wireCell = true;
+                        }
+                    }
+                } else {
+                    // An existing pole on the cell. The original drops its reference only on the primary cell; the
+                    // port drops it in every case (the pole stays referenced by the city).
+                    if (existing != nullptr) existing->Release();
+                    if (isPrimary || force) placePole = true;
+                    else { lastStep = s; wireCell = true; }
+                }
+                if (placePole) {
+                    PlacePole(cell, connect, static_cast<int>(lineInfos_.size()), intersection);
+                    lineInfos_.push_back(segment);
+                    segment.clear();
+                    ResetIntersection(intersection);
+                    ++polesInChain;
+                    ComputePolePosition(static_cast<int>(x), static_cast<int>(z), lastPolePosition);
+                    lastPolePosition[1] += poleHeightOffset_;
+                    lastPoleStep = s;
+                    lastStep = s;
+                    candidateCell = -1;
+                    force = false;
+                    connect = true;
+                }
+            } else if (result == 1) {
+                // A zoned cell ends the chain; the last placeable cell gets the pole that closes it.
+                if (polesInChain != 1 || candidateCell != -1) {
+                    if (candidateCell > 0 && connect) {
+                        PlacePole(candidateCell, true, static_cast<int>(lineInfos_.size()), intersection);
+                        lineInfos_.push_back(segment);
+                        segment.clear();
+                        ResetIntersection(intersection);
+                        lastPoleStep = s;
+                        candidateCell = -1;
+                        force = true;
+                        connect = false;
+                        polesInChain = 0;
+                    } else {
+                        force = true;
+                        connect = false;
+                    }
+                    continue;
+                }
+                // A chain of one unconnected pole is dropped (its intersection references stay with it, as the original).
+                if (!poleInfos_.empty() && poleInfos_.back().connectionList.empty()) poleInfos_.pop_back();
+                candidateCell = -1;
+                force = true;
+                connect = false;
+                polesInChain = 0;
+            } else {
+                if ((!connect || lastPoleStep < 0) && !forced) {
+                    wireCell = true;
+                } else {
+                    bool stop = true;
+                    if (result == 2) {
+                        failureReason_ = 0xf0000012;
+                    } else {
+                        if (result == 3) failureReason_ = 0xf0000013;
+                        if (!forced) { wireCell = true; stop = false; }
+                    }
+                    if (stop) {
+                        if (polesInChain != 1 || candidateCell != -1) {
+                            candidateCell = -1;
+                            continue;
+                        }
+                        if (!poleInfos_.empty() && poleInfos_.back().connectionList.empty()) {
+                            tPoleInfo& back = poleInfos_.back();
+                            if (back.poleA != nullptr) back.poleA->Release();
+                            if (back.poleB != nullptr) back.poleB->Release();
+                            poleInfos_.pop_back();
+                        } else {
+                            candidateCell = -1;
+                        }
+                        polesInChain = 0;
+                    }
+                }
+            }
+            if (wireCell && cell < lastValidCell) {
+                tLineInfo info;
+                info.x = x;
+                info.z = z;
+                info.line = nullptr;
+                info.first = isPrimary;
+                segment.push_back(info);
+                ++wireCellCount_;
+            }
         }
     }
+    if (polesInChain == 1 && !poleInfos_.empty() && poleInfos_.back().connectionList.empty()) {
+        tPoleInfo& back = poleInfos_.back();
+        if (back.poleA != nullptr) back.poleA->Release();
+        if (back.poleB != nullptr) back.poleB->Release();
+        poleInfos_.pop_back();
+    }
+    ReleaseIntersection(intersection);   // the original leaves a pending crossing's references alive
+    validSteps_ = lastStep + 1;
     poleCount_ = static_cast<int>(poleInfos_.size());
 }
+
 
 // 0x1002eb536: walk the cells from startIndex to endIndex by step and take the first one outside `rect` that is
 // placeable (CellIsOKForPlacement == 0), create a pole there, connect it to `existing` and re-solve the drag.
@@ -452,76 +652,73 @@ void cSC4PowerLineTool::FindNewPolePosition(SC4CellRect rect, int startIndex, in
 }
 
 // ============================================================================================================
-// placement (PARTIAL)
+// placement
 // ============================================================================================================
 
-// 0x1002eb7de, PARTIAL. Recovered: the connection-group pass (+0x6c0 -> AddConnection for pole chains whose
-// cells are one apart), creating every pole occupant, the intersection bookkeeping of the poles' +0x38/+0x40
-// fields (draw/remove the connection, build the tIntersectionInfo list), the insertion of the created poles
-// into the city and the created/preview pole lists, and the final connection pass.
-// NOT recovered: the per-pole exemplar matching and the creation of the cSC4PowerLineOccupant wire objects
-// (the `ConnectPoles` vector argument is always null here, so no wire occupants are created and lineInfos_ is
-// not consumed). Marked recovered-partial in the ledger for that reason.
+// 0x1002eb7de (i386 0x0022d4c2). Pass A joins the poles of each connection group whose cells are one apart. Every pole
+// info then gets its occupant (CreatePowerPole). Per pole: the wire of an existing line it splits is hidden (preview) or
+// removed (placement), the poles of that wire that connect to the new pole are queued, the pair goes to the preview
+// list, and, when placing, every new connection gets its wire occupants (one per drag cell of the segment, owned by the
+// pole with the lower cell) and is added on both poles. Then the created poles go into the city (as highlighted
+// previews or for good, with their wire occupants), and the queued poles are connected to the new ones: directly for a
+// preview, through a re-solve of the drag between them when placing.
 void cSC4PowerLineTool::PlacePoles(bool resolve) {
     IPowerLineToolHost* host = GetPowerLineToolHost();
+    std::vector<tIntersectionInfo> pending;
 
-    // --- pass A: turn the pole-index groups into connections between neighbouring poles ---------------------
+    // --- pass A: connection groups ------------------------------------------------------------------------------
     for (const std::vector<int>& group : connectionGroups_) {
         std::vector<int> indices;
         for (int groupCell : group) {
-            int counter = 0;  // the original restarts the pole counter for every cell index of the group
+            int counter = 0;
             for (const tPoleInfo& info : poleInfos_) {
                 if ((unknown98_ == 0 && info.occupant != nullptr) || info.cellIndex != groupCell) {
                     ++counter;
                     continue;
                 }
                 indices.push_back(counter);
-                ++counter;
+                break;
             }
         }
-        for (std::size_t k = 1; k < indices.size(); ++k) {
-            tPoleInfo& a = poleInfos_[static_cast<std::size_t>(indices[k - 1])];
-            tPoleInfo& b = poleInfos_[static_cast<std::size_t>(indices[k])];
-            const float distance = std::abs(static_cast<float>(a.x) - static_cast<float>(b.x)) +
-                                   std::abs(static_cast<float>(a.z) - static_cast<float>(b.z));
-            if (distance == 1.0f) AddConnection(a, b, -1);
+        for (int a : indices) {
+            for (int b : indices) {
+                tPoleInfo& pa = poleInfos_[static_cast<std::size_t>(a)];
+                tPoleInfo& pb = poleInfos_[static_cast<std::size_t>(b)];
+                const float distance = std::fabs(static_cast<float>(pa.z) - static_cast<float>(pb.z)) +
+                                       std::fabs(static_cast<float>(pa.x) - static_cast<float>(pb.x));
+                if (distance == 1.0f) AddConnection(pa, pb, -1);
+            }
         }
     }
     connectionGroups_.clear();
 
-    // --- pass B: every pole info gets its occupant ------------------------------------------------
+    // --- pass B: every pole info gets its occupant --------------------------------------------------------------
     for (tPoleInfo& info : poleInfos_) CreatePowerPole(info);
 
-    // --- pass C: existing intersection data, and build the connection list -------------------------------
+    // --- pass C: split wires, queue the joining poles, build the wires of the new connections ---------------------
     for (tPoleInfo& info : poleInfos_) {
         IPowerPoleOccupant* first = info.poleA;
         IPowerPoleOccupant* second = info.poleB;
         if (first != nullptr) {
             if (second != nullptr && host != nullptr) {
-                if (unknown98_ == 0) {
-                    host->DrawPoleConnection(first, second, false);
-                } else {
-                    host->RemovePoleConnection(first, second, false);
-                }
+                if (unknown98_ == 0) host->DrawPoleConnection(first, second, false);
+                else host->RemovePoleConnection(first, second, false);
             }
             if (info.flagA) {
                 first->AddRef();
                 if (info.occupant != nullptr) info.occupant->AddRef();
-                connectionList_.push_back(tIntersectionInfo{first, info.occupant, false, false, {}});
+                pending.push_back(tIntersectionInfo{first, info.occupant, false, false, {}});
             }
         }
         if (second != nullptr) {
             if (first != nullptr && host != nullptr) {
-                if (unknown98_ == 0) {
-                    host->DrawPoleConnection(second, first, false);
-                } else {
-                    host->RemovePoleConnection(second, first, false);
-                }
+                if (unknown98_ == 0) host->DrawPoleConnection(second, first, false);
+                else host->RemovePoleConnection(second, first, false);
             }
             if (info.flagB) {
                 second->AddRef();
                 if (info.occupant != nullptr) info.occupant->AddRef();
-                connectionList_.push_back(tIntersectionInfo{second, info.occupant, false, false, {}});
+                pending.push_back(tIntersectionInfo{second, info.occupant, false, false, {}});
             }
         }
         if (unknown98_ == 0 && first != nullptr && second != nullptr) {
@@ -532,20 +729,70 @@ void cSC4PowerLineTool::PlacePoles(bool resolve) {
         }
         info.poleA = nullptr;
         info.poleB = nullptr;
+
+        IPowerPoleOccupant* pole = info.occupant;
+        if (pole == nullptr || host == nullptr) continue;
+        const int existingCount = pole->GetNumberOfConnections();
+        for (const tConnectionInfo& connection : info.connectionList) {
+            tPoleInfo& other = poleInfos_[connection.poleIndex];
+            bool alreadyConnected = false;
+            for (int i = 0; i < existingCount; ++i) {
+                if (pole->GetConnectionOccupant(i) == other.occupant) {
+                    alreadyConnected = true;
+                    break;
+                }
+            }
+            if (alreadyConnected || unknown98_ == 0) continue;
+            std::vector<tLineInfo>* mine = nullptr;
+            std::vector<tLineInfo>* theirs = nullptr;
+            if (connection.value >= 0) {
+                // The wire belongs to the pole with the lower cell (z first, then x).
+                const bool lower = info.z < other.z || (info.z == other.z && info.x < other.x);
+                std::vector<tLineInfo>& lines = lineInfos_[static_cast<std::size_t>(connection.value)];
+                (lower ? mine : theirs) = &lines;
+                for (tLineInfo& line : lines) {
+                    if (line.line != nullptr) continue;
+                    auto* wire = new cSC4PowerLineOccupant();
+                    wire->AddRef();
+                    wire->Init();
+                    wire->SetPreview(unknown98_ == 0);
+                    if (lower) wire->SetConnectedPoles(info.occupant, other.occupant, line.first);
+                    else wire->SetConnectedPoles(other.occupant, info.occupant, line.first);
+                    float position[3] = {0.0f, 0.0f, 0.0f};
+                    ComputePolePosition(static_cast<int>(line.x), static_cast<int>(line.z), position);
+                    wire->SetPosition(position);
+                    line.line = wire;
+                }
+            }
+            host->ConnectPoles(info.occupant, other.occupant, mine);
+            host->ConnectPoles(other.occupant, info.occupant, theirs);
+        }
     }
 
-    // --- pass F: put the created poles into the city and keep them in one of the two lists -----------------
+    // --- the segments' wire references: the poles hold their own now ---------------------------------------------
+    if (unknown98_ != 0) {
+        for (tPoleInfo& info : poleInfos_) {
+            for (const tConnectionInfo& connection : info.connectionList) {
+                if (connection.value <= 0) continue;   // quirk kept: the original skips segment 0
+                for (tLineInfo& line : lineInfos_[static_cast<std::size_t>(connection.value)]) {
+                    if (line.line != nullptr) {
+                        line.line->Release();
+                        line.line = nullptr;
+                    }
+                }
+            }
+        }
+    }
+
+    // --- the poles go into the city --------------------------------------------------------------------------------
     for (tPoleInfo& info : poleInfos_) {
         IPowerPoleOccupant* pole = info.occupant;
         if (pole == nullptr) continue;
         if (info.created && host != nullptr) host->InsertPoleOccupant(pole);
         if (unknown98_ == 0) {
             pole->SetModelState(3, false);
-            if (info.created) {
-                createdPoles_.push_back(pole);
-            } else {
-                previewPoles_.push_back(pole);
-            }
+            if (info.created) createdPoles_.push_back(pole);
+            else previewPoles_.push_back(pole);
             pole->AddRef();
         } else {
             pole->OnInserted();
@@ -554,9 +801,7 @@ void cSC4PowerLineTool::PlacePoles(bool resolve) {
         info.occupant = nullptr;
     }
 
-    // --- pass G: connect the pairs, or re-solve the drag for the ones that changed ------------------------
-    std::vector<tIntersectionInfo> pending(connectionList_.begin(), connectionList_.end());
-    connectionList_.clear();
+    // --- the poles of split wires join the new poles -----------------------------------------------------------------
     for (tIntersectionInfo& pair : pending) {
         IPowerPoleOccupant* first = pair.first;
         IPowerPoleOccupant* second = pair.second;
@@ -570,7 +815,7 @@ void cSC4PowerLineTool::PlacePoles(bool resolve) {
                 SC4PointU from{}, to{};
                 first->GetCell(from.x, from.z);
                 second->GetCell(to.x, to.z);
-                host->DrawNetworkLine(from, to, false, networkType_);
+                DrawNetworkLine(from, to, false, networkType_);
                 validSteps_ = totalSteps_;
                 DeterminePolePositions();
                 PlacePoles(false);
@@ -580,6 +825,7 @@ void cSC4PowerLineTool::PlacePoles(bool resolve) {
         if (second != nullptr) second->Release();
     }
 }
+
 
 // 0x1002ec3c2, PARTIAL. The original (1739 bytes) sets the +0x98 update flag, then walks every pole and wire
 // occupant of the changed rectangle: poles outside the rectangle are destroyed, poles inside it have their
@@ -788,16 +1034,18 @@ void cSC4PowerLineTool::GetFailureReasonString(std::uint32_t reason, cRZString& 
     }
 }
 
-// 0x1002ed0c6: destroy the preview poles, remove them from the city and clear the intersection list. Quirk
-// kept: the first list's poles are only released when the base occupant manager exists (this+0x88); when it is
-// null the original drops the pointers without releasing them.
+// 0x1002ed0c6: destroy the preview poles, remove them from the city and clear the intersection list. The original
+// tests the base tool's occupant manager (this+0x88, always there in a city) before it removes and releases the created
+// poles; the port removes them through the host, so it tests the host.
 void cSC4PowerLineTool::ClearCellPreviews() {
     IPowerLineToolHost* host = GetPowerLineToolHost();
     for (IPowerPoleOccupant* pole : createdPoles_) {
         if (pole == nullptr) continue;
         pole->SetModelState(0, false);
-        if (occupantManager_ != nullptr && host != nullptr) host->RemovePoleOccupant(pole, true);
-        if (occupantManager_ != nullptr) pole->Release();
+        if (host != nullptr) {
+            host->RemovePoleOccupant(pole, true);
+            pole->Release();
+        }
     }
     createdPoles_.clear();
     for (IPowerPoleOccupant* pole : previewPoles_) {

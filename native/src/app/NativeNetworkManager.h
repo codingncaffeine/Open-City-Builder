@@ -13,6 +13,8 @@ void InstallNetworkManagerHost();
 // The read-only kit verb `netmanager`: what the host answers (message server, ini, language flag, night) and the city manager's
 // remap tables, tools and filters.
 void PrintNetworkManagerHost();
+void NativeLayPowerLine(int x1, int z1, int x2, int z2);   // NativePowerLineTool.cpp: kit verb `powerline`
+void NativePowerPoleReport(int x0, int z0, int x1, int z1);   // NativePowerLineTool.cpp: kit verb `poles`
 // The pipe tool (cSC4PipeTool): one for the program (its destructor traps), shared by the network manager's demolition
 // and the pipe drawing tool. Borrowed.
 sc4::cSC4NetworkTool* NativePipeTool();
