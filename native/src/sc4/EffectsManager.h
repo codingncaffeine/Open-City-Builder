@@ -234,6 +234,8 @@ public:
     virtual int CityHemisphere() = 0;                                               // SL::spCity vslot 0xf0
     virtual bool WeatherEnabled() = 0;                                              // weather sim vslot 0x70
     virtual bool ViewportPositionToRay(int x, int y, float* origin, float* direction) = 0;   // SC4ViewUtilities::ViewportPositionToRay
+    // SL::spTerrainMap GetAltitude(x, z) (i386 vslot 0x30), for SurfacePointTo3D; 0 without a terrain.
+    virtual float TerrainAltitude(float x, float z) { (void)x; (void)z; return 0.0f; }
     virtual float SimulatorSpeed() = 0;                                             // SL::spSimulator vslot 0x100
     virtual void WeatherWind(float& x, float& z) = 0;                               // weather sim vslot 0xb0 (u64 payload)
 };
@@ -299,6 +301,11 @@ public:
     cSC4EffectMaps* GetEffectMaps() const { return effectMaps_; }           // @ 0x1005e341a (vslot 0x48)
     float GetTallestBuildingAltitude() const { return tallestBuildingAltitude_; }   // @ 0x1005e3428 (vslot 0x50)
     bool DoMessage(cIGZMessage2* message);                                  // @ 0x1005dd7b8 (PARTIAL, vslot 0x70)
+    // i386 0x00404318: the surface point (x, z) lifted to the terrain's altitude there.
+    cS3DVector3 SurfacePointTo3D(float x, float z) const;
+    // The message-trigger branch of DoMessage (i386 0x0040a90a): the effect the data binds to `type`, started over the city's
+    // centre; false when no trigger names the message.
+    bool StartMessageTriggerEffect(std::uint32_t type);
     bool Update(SC4DrawContext* context);                                   // @ 0x1005df48a (PARTIAL, vslot 0x78)
     bool Pick(const cS3DVector3& origin, const cS3DVector3& direction, SC4DrawContext* context,
               float* distance);                                            // @ 0x1005e06be (always false, vslot 0x80)

@@ -53,6 +53,7 @@
 #include "app/NativeGameData.h"
 #include "app/NativeBoot.h"
 #include "app/NativeCity.h"
+#include "sc4/cSC4City.h"
 #include "app/NativeGrowthDevelopers.h"
 #include "app/NativeLotConstruction.h"
 #include "app/NativeAnimationTicks.h"
@@ -1708,6 +1709,11 @@ int RunScenario(const std::string& path) {
         } else if (command == "savecity") {   // savecity: what the Save menu item does (cSC4App::RequestSaveCity) without the "saved" message box
             cSC4App* app = native::BootApplication();
             std::printf("savecity: %s\n", app && app->RequestSaveCity(false, false) ? "saved" : "not saved");
+        } else if (command == "establish") {   // establish: the open city becomes established, as the establish dialog's OK does it
+            sc4::cSC4City* city = native::HostCity();
+            const bool before = city && city->GetEstablished();
+            if (city) city->SetEstablished(true);
+            std::printf("establish: %s\n", !city ? "no city" : before ? "already established" : "established");
         } else if (command == "regionview") {   // regionview: back to the region without the save question (RequestGoToRegionView(false), after a savecity)
             cSC4App* app = native::BootApplication();
             std::printf("regionview: %s\n", app && app->RequestGoToRegionView(false) ? "done" : "refused");

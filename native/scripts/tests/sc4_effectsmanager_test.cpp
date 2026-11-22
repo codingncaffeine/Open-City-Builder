@@ -85,6 +85,8 @@ public:
     float TerrainCellSize() override { return 16.0f; }
     int TerrainCellsX() override { return 8; }
     int TerrainCellsZ() override { return 6; }
+    float altitude = 0.0f;
+    float TerrainAltitude(float, float) override { return altitude; }
     cIGZUnknown* Renderer() override {
         if (!makeRenderer) return nullptr;
         auto* renderer = new FakeUnknown();
@@ -1226,6 +1228,45 @@ void TestRegionGlobalEffectPipeline() {
 
 }  // namespace
 
+// A message the effects data binds to an effect (a message trigger, as 0x26d31ec4 -> fireworks_establish) starts that effect
+// over the city's centre (half the terrain map's extent, set by Init), 4 m above the ground there (i386 0x0040a90a).
+void TestMessageTriggerEffect() {
+    FakeHost host;
+    host.altitude = 250.0f;
+    SetEffectsManagerHost(&host);
+    cSC4EffectsManager manager;
+    manager.SetHost(&host);
+    CHECK(manager.Init());
+    manager.BeginCollection();
+    cSC4EffectDescription burst;
+    burst.version = 3;
+    manager.Collection().AddEffectDescription("burst", burst);
+    cSC4MessageTriggerDescription trigger;
+    trigger.message = 0x26d31ec4u;
+    trigger.name = "burst";
+    manager.Collection().AddMessageTrigger(trigger);
+    manager.EndCollection();
+    const std::size_t before = manager.VisualEffects().size();
+    cRZMessage2Standard other;
+    other.SetType(0x26d31ec5u);                          // no trigger: nothing starts
+    CHECK(manager.DoMessage(&other));
+    CHECK(manager.VisualEffects().size() == before);
+    cRZMessage2Standard established;
+    established.SetType(0x26d31ec4u);
+    CHECK(manager.DoMessage(&established));
+    CHECK(manager.VisualEffects().size() == before + 1);
+    if (manager.VisualEffects().size() == before + 1) {
+        const cSC4VisualEffect* effect = manager.VisualEffects().back().get();
+        CHECK(effect->Name() == "burst");
+        CHECK(effect->IsStarted());
+        const cS3DTransform& source = effect->SourceTransform();
+        CHECK((source.flags & 1) != 0);
+        CHECK(source.translation[0] == 8 * 16.0f * 0.5f && source.translation[2] == 6 * 16.0f * 0.5f);
+        CHECK(source.translation[1] == 254.0f);
+    }
+    manager.Shutdown();
+}
+
 int main() {
     TestCom();
     TestRegistry();
@@ -1239,6 +1280,7 @@ int main() {
     TestParseEffectsFiles();
     TestCreateEffectCommand();
     TestRegionGlobalEffectPipeline();
+    TestMessageTriggerEffect();
     SetEffectsManagerHost(nullptr);
     if (failures == 0) {
         std::printf("all effects manager tests passed\n");

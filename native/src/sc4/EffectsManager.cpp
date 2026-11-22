@@ -1239,13 +1239,52 @@ void cSC4EffectsManager::DoAnimationTick(std::uint32_t elapsedMs) {
     }
 }
 
-// @ 0x1005dd7b8 (PARTIAL). The dispatch of the recovered message types is ported: the zoom/rotation notifications,
-// the snowline update, the effects tick, the "effects active" flag and the cursor-ray broadcast. The message-trigger
-// effects, the cheat console, the occupant insertion/removal, the animation tick and the render-properties refresh
+// @ 0x1005dd7b8 (PARTIAL). The dispatch of the recovered message types is ported: the message-trigger effects, the
+// zoom/rotation notifications, the snowline update, the effects tick, the "effects active" flag and the cursor-ray
+// broadcast. The cheat console, the occupant insertion/removal, the animation tick and the render-properties refresh
 // need the payload/transform reconstruction Ghidra dropped or the unrecovered neighbours; they are left out.
+cS3DVector3 cSC4EffectsManager::SurfacePointTo3D(float x, float z) const {
+    cS3DVector3 point;
+    point.x = x;
+    point.y = host_ ? host_->TerrainAltitude(x, z) : 0.0f;
+    point.z = z;
+    return point;
+}
+
+// i386 0x0040a90a (the head of DoMessage, before the type dispatch): a message the effects data binds to an effect (a
+// message trigger, e.g. 0x26d31ec4 -> "fireworks_establish" when a city is established) starts that effect, created by
+// name, at the city's centre (+0xdd8, half the terrain map's extent, set in Init) on the ground and 4 m above it, with a
+// transform that carries only the translation.
+bool cSC4EffectsManager::StartMessageTriggerEffect(std::uint32_t type) {
+    if (messageTriggers_.empty()) return false;
+    const auto found = messageTriggers_.find(type);
+    if (found == messageTriggers_.end()) return false;
+    const auto& triggers = collection_.MessageTriggers();
+    if (found->second < 0 || static_cast<std::size_t>(found->second) >= triggers.size()) return false;
+    cSC4VisualEffect* effect = nullptr;
+    if (CreateVisualEffect(triggers[static_cast<std::size_t>(found->second)].name.c_str(), &effect) && effect) {
+        cS3DVector3 at = SurfacePointTo3D(halfExtentX_, halfExtentZ_);
+        at.y += 4.0f;
+        cS3DTransform source;
+        source.flags |= 1;
+        source.changeCounter += 1;
+        source.translation[0] = at.x;
+        source.translation[1] = at.y;
+        source.translation[2] = at.z;
+        effect->SetSourceTransform(source);
+        effect->Start(0);
+        if (std::getenv("SC4_FXDEBUG"))
+            std::fprintf(stderr, "effects: message %08x starts '%s' at %.1f %.1f %.1f\n", type,
+                         triggers[static_cast<std::size_t>(found->second)].name.c_str(), at.x, at.y, at.z);
+    }
+    if (effect) effect->Release();
+    return true;
+}
+
 bool cSC4EffectsManager::DoMessage(cIGZMessage2* message) {
     if (!message) return false;
     const std::uint32_t type = message->GetType();
+    StartMessageTriggerEffect(type);
     if (type == 0xa6b79602 || type == 0xa6b79620) {
         auto* standard = static_cast<cIGZMessage2Standard*>(message);
         const auto* oldZoom = static_cast<const int*>(standard->GetVoid1());

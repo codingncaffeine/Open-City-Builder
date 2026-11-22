@@ -70,6 +70,7 @@ public:
     void Start(int transition);                                            // @ 0x1005fa7da
     void Stop(int transition);                                             // @ 0x1005fa922
     bool IsStarted() const { return started_; }
+    const cS3DTransform& SourceTransform() const { return source_; }   // the port's read-back of SetSourceTransform
     bool IsStopping() const { return stopping_; }
     void SetEffectTransform(const cS3DTransform& effect);
     void SetSourceTransform(const cS3DTransform& source);

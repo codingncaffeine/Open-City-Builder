@@ -330,6 +330,10 @@ public:
     }
     int CityHemisphere() override { sc4::cSC4City* city = HostCity(); return city ? city->GetWorldHemisphere() : 0; }   // SL::spCity vslot 0xf0
     bool WeatherEnabled() override { return false; }
+    float TerrainAltitude(float x, float z) override {
+        sc4::cSTETerrain* t = CityTerrain();
+        return t ? t->GetAltitude(x, z) : 0.0f;
+    }
     bool ViewportPositionToRay(int x, int y, float* origin, float* direction) override {
         return SL::spViewUtilities && SL::spViewUtilities->ViewportPositionToRay(x, y, origin, direction);
     }
@@ -653,6 +657,8 @@ bool CityComponentInit_cSC4EffectsManager(cIGZUnknown* object, bool init) {
     if (const char* part = std::getenv("SC4_EFFECTNAMES")) {   // every effect name that holds the given text
         for (const auto& entry : manager->Collection().EffectNames())
             if (entry.first.find(part) != std::string::npos) std::fprintf(stderr, "fxname: %s [%d]\n", entry.first.c_str(), entry.second);
+        for (const auto& trigger : manager->Collection().MessageTriggers())   // the effects a posted message starts
+            if (trigger.name.find(part) != std::string::npos) std::fprintf(stderr, "fxtrigger: message %08x -> %s\n", trigger.message, trigger.name.c_str());
     }
     if (const char* names = std::getenv("SC4_EFFECTDUMP")) {
         std::set<std::string> seen;
@@ -704,7 +710,13 @@ sc4::cSC4VisualEffect* CreateKeyedEffect(std::uint32_t group, std::uint32_t type
     if (!g_manager) return nullptr;
     sc4::cSC4VisualEffect* effect = nullptr;
     const bool ok = g_manager->CreateVisualEffect(group, type, &effect) && effect;
-    if (std::getenv("SC4_FXDEBUG")) std::fprintf(stderr, "effects: keyed effect %08x/%08x -> %s\n", group, type, ok ? "made" : "none");
+    if (std::getenv("SC4_FXDEBUG")) {
+        std::string name = "-";
+        if (ok)
+            for (const auto& entry : g_manager->Collection().EffectNames())
+                if (entry.second == effect->Slot()) { name = entry.first; break; }
+        std::fprintf(stderr, "effects: keyed effect %08x/%08x -> %s %s\n", group, type, ok ? "made" : "none", name.c_str());
+    }
     return ok ? effect : nullptr;
 }
 
