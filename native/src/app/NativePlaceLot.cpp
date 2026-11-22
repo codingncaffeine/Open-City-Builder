@@ -1,5 +1,7 @@
 // The civic building menus and the place-lot tool's services on the native application.
 #include "app/NativePlaceLot.h"
+#include "platform/Unwired.h"
+#include "app/NativeTutorial.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -315,7 +317,9 @@ public:
     std::uint32_t LastSelectedLot() override { return lastLot_; }
     void SetLastSelectedBuilding(std::uint32_t type) override { lastBuilding_ = type; }
     void SetLastSelectedLot(std::uint32_t id) override { lastLot_ = id; }
-    void AddGlobalEffect(std::uint32_t) override {}      // the view manager's data views are not ported
+    void AddGlobalEffect(std::uint32_t) override {       // the view manager's data views are not ported
+        SC4_UNWIRED("cSC4ViewInputControlPlaceLot: the view manager's global effect (the data view shown while placing) is not added");
+    }
     void RemoveGlobalEffect(std::uint32_t) override {}
 
 private:
@@ -366,7 +370,12 @@ struct City final : IPlaceLotCity {
     void PositionToCell(float x, float z, int& cx, int& cz) override { if (cSC4City* c = HostCity()) c->PositionToCell(x, z, cx, cz); }
     void CellToPosition(int cx, int cz, float& x, float& z) override { x = static_cast<float>(cx) * 16.0f; z = static_cast<float>(cz) * 16.0f; }
     IPlaceLotNetworkMap* NetworkMap() override { return &g_networkMap; }
-    IPlaceLotMission* Mission() override { return nullptr; }   // the tutorial system is not ported
+    // SL::spCity vslot 0x290, the tutorial system: it runs natively (app/NativeTutorial.cpp) but is not asked here, so a
+    // running tutorial does not restrict placement to its target rectangle.
+    IPlaceLotMission* Mission() override {
+        if (NativeTutorialRunning()) SC4_UNWIRED("cSC4ViewInputControlPlaceLot: the running tutorial's target rectangle (city vslot 0x290) does not restrict placement");
+        return nullptr;
+    }
 } g_city;
 
 struct LotDeveloperView final : IPlaceLotLotDeveloper {
@@ -565,7 +574,10 @@ private:
     bool shown_ = false;
 };
 struct PropManager final : IPlaceLotPropManager {
-    bool PropTypeExists(std::uint32_t) override { return false; }   // PARTIAL: the lot's preview props
+    bool PropTypeExists(std::uint32_t) override {   // PARTIAL: the lot's preview props
+        SC4_UNWIRED("cSC4ViewInputControlPlaceLot preview: the lot's props are not shown on the preview");
+        return false;
+    }
     IPlaceLotProp* CreateProp(std::uint32_t) override { return nullptr; }
     IPlaceLotProp* CreateBuildingProp(std::uint32_t type) override { return new PreviewBuilding(type); }
 } g_propManager;

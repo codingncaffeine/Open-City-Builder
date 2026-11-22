@@ -7,6 +7,7 @@
 //   and the MySim answer null; cSC4DispatchVehicleView (the situation indicators) is not recovered (NativeDispatch.cpp
 //   CreateDispatchVehicleView), so DispatchView answers null as the dispatch manager does.
 #include <cmath>
+#include "platform/Unwired.h"
 #include <cstdio>
 #include <cstdlib>
 #include <sstream>
@@ -155,22 +156,52 @@ public:
     ISituationApp* App() override { return SL::spSC4 ? &g_app : nullptr; }
     ISituationCheatCodes* CheatCodes() override { return GameCheatCodeManager() ? &g_cheats : nullptr; }
     ISituationView3D* View3D() override { return &g_view; }
-    ISituationDispatchView* DispatchView() override { return nullptr; }
-    ISituationCity* City() override { return nullptr; }   // PARTIAL: the city geometry seam (escape / coverage missions, landfill targets)
-    ISituationLotManager* LotManager() override { return nullptr; }
-    ISituationEffectsManager* EffectsManager() override { return nullptr; }
+    ISituationDispatchView* DispatchView() override {
+        SC4_UNWIRED("ICitySituationManagerHost::DispatchView: cSC4DispatchVehicleView (the situation indicators) is not recovered");
+        return nullptr;
+    }
+    ISituationCity* City() override {   // PARTIAL: the city geometry seam (escape / coverage missions, landfill targets)
+        SC4_UNWIRED("ICitySituationManagerHost::City: the city geometry seam (escape / coverage missions, landfill targets) is not wired");
+        return nullptr;
+    }
+    ISituationLotManager* LotManager() override {
+        SC4_UNWIRED("ICitySituationManagerHost::LotManager: the lot manager is not handed to the situations");
+        return nullptr;
+    }
+    ISituationEffectsManager* EffectsManager() override {
+        SC4_UNWIRED("ICitySituationManagerHost::EffectsManager: the effects manager is not handed to the situations");
+        return nullptr;
+    }
     int AutomataManagerCount() override { return SituationAutomataManagerCount(); }
     ISituationAutomataManager* AutomataManager(int index) override { return SituationAutomataManager(index); }
     ISituationAutomataManager* VehicleManager() override { return SituationAutomataManager(0); }
-    ISituationDriveView* PlayerDriveView() override { return nullptr; }
-    ISituationMissionActor* MySimActor() override { return nullptr; }
+    ISituationDriveView* PlayerDriveView() override {
+        SC4_UNWIRED("ICitySituationManagerHost::PlayerDriveView: the player-drive view is not handed to the situations");
+        return nullptr;
+    }
+    ISituationMissionActor* MySimActor() override {
+        SC4_UNWIRED("ICitySituationManagerHost::MySimActor: the MySim is not handed to the situations");
+        return nullptr;
+    }
     ISituationOccupantManager* OccupantManager() override { return SituationOccupantManager(); }
-    ISituationZoneManager* ZoneManager() override { return nullptr; }
-    ISituationTerrain* Terrain() override { return nullptr; }
-    ISituationTrafficNetwork* TrafficNetwork() override { return nullptr; }
+    ISituationZoneManager* ZoneManager() override {
+        SC4_UNWIRED("ICitySituationManagerHost::ZoneManager: the zone manager is not handed to the situations");
+        return nullptr;
+    }
+    ISituationTerrain* Terrain() override {
+        SC4_UNWIRED("ICitySituationManagerHost::Terrain: the terrain is not handed to the situations");
+        return nullptr;
+    }
+    ISituationTrafficNetwork* TrafficNetwork() override {
+        SC4_UNWIRED("ICitySituationManagerHost::TrafficNetwork: the traffic network is not handed to the situations");
+        return nullptr;
+    }
     ISituationAuraSim* AuraSim() override { return SituationAura::Aura() ? &g_aura : nullptr; }
     ISituationBudgetSim* BudgetSim() override { return SituationBudget::Budget() ? &g_budget : nullptr; }
-    ISituationLandfillDeveloper* LandfillDeveloper() override { return nullptr; }
+    ISituationLandfillDeveloper* LandfillDeveloper() override {
+        SC4_UNWIRED("ICitySituationManagerHost::LandfillDeveloper: the landfill developer is not handed to the situations");
+        return nullptr;
+    }
     void EnterPlayerDriveView(ISituationAutomaton* automaton, cIGZMessageTarget2* target) override { SituationEnterPlayerDriveView(automaton, target); }
     cIGZWinMgr* WindowManager() override { return ActiveWinMgr(); }
     bool DoURL(const void* text) override { return text && NativeHtmlLinkDoURL(*static_cast<const cIGZString*>(text)); }

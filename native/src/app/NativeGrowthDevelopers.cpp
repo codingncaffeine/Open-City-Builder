@@ -1,6 +1,7 @@
 // cSC4GrowthDeveloper behind plain functions: GrowthDeveloper.h (through TractDeveloper.h) and BuildingDevelopmentSimulator.h
 // define the same names (TractOutcome, ConstructionProfile), so the building development host reaches the class from this TU.
 #include "app/NativeGrowthDevelopers.h"
+#include "platform/Unwired.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -215,7 +216,10 @@ struct BuildingDevelopmentApi final : IGrowthBuildingDevelopmentApi {
     float GetMaxCapacity(int zoneType, int purpose, int wealth) override {
         return NativeMaxCapacity(zoneType, static_cast<std::uint32_t>(purpose), static_cast<std::uint32_t>(wealth));
     }
-    float GetStagePopulationMultiplier() override { return 1.0f; }   // PARTIAL: the simulator's +0x178 is not modelled
+    float GetStagePopulationMultiplier() override {   // PARTIAL: the simulator's +0x178 is not modelled
+        SC4_UNWIRED("cSC4BuildingDevelopmentSimulator::GetStagePopulationMultiplier: stageMultiplier[difficulty] is not read (always 1)");
+        return 1.0f;
+    }
     void UpdateTractPopulation(cISC4GrowthDeveloper*, int, int) override {}   // the tract developer is layer 3
 } g_buildingDevelopment;
 

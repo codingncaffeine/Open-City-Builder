@@ -3,9 +3,10 @@
 // developer's "completed at once" stand-in: StartConstruction now creates the occupant, gives it the lot and inserts it into the
 // occupant manager (i386 0x000f4d5c..0x000f4dd0), and the occupant takes the lot to state 3 when the scaffold is down.
 //
-// PARTIAL (each named where it is answered): the construction crew automata (CreateAutomaton has no automata manager natively,
-// so no crew walks the site) and the render detail level (high).
+// PARTIAL: the render detail level (always high). The construction crew automata come from the pedestrian manager
+// (CreateAutomaton); a crew loaded from a city file is driven through app/NativeConstructionCrew.cpp.
 #include <cstdio>
+#include "platform/Unwired.h"
 #include <cstdlib>
 
 #include "sc4/Render3D.h"
@@ -339,7 +340,10 @@ public:
         if (const SC4ViewUtilities* view = render ? render->GetViewUtilities() : nullptr) view->ProjectPointToViewCoordinates(point);
     }
     void TransformBoundingBox(const cS3DTransform& transform, cS3DBoundingBox& box) override { SC4ViewUtilities::TransformBoundingBox(transform, box); }
-    int RenderDetailLevel() override { return 3; }   // PARTIAL: the render properties' detail level; high
+    int RenderDetailLevel() override {   // PARTIAL: the render properties' detail level; high
+        SC4_UNWIRED("cSC4ConstructionOccupant: the render properties' detail level is not read (always high)");
+        return 3;
+    }
     // SL::spLightingManager vslot 0xb8; the fixed sun the network pieces are lit with when there is no city lighting yet.
     void LightColourForDirection(const float n[3], std::uint8_t rgb[3]) override {
         if (cSC4LightingManager* lighting = LightingManager()) {

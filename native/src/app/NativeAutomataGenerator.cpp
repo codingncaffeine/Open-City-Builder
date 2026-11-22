@@ -6,8 +6,9 @@
 // The city's answers (population, schools and hospitals, lots, networks, terrain, the automata managers) come from the
 // loaded city.
 //   PARTIAL: the network manager's own position test (its vslot 0x158) is not recovered; a spawn point on a network cell of
-//   the wanted kind is accepted. The watercraft manager is not asked for a group.
+//   the wanted kind is accepted. The watercraft manager is not asked for a group (NativeAutomataManagerForGroup).
 #include <cstdint>
+#include "platform/Unwired.h"
 #include <cstdio>
 #include <cstdlib>
 #include <set>
@@ -212,6 +213,7 @@ private:
     }
     bool NetworkCellHasType(int x, int z, std::uint32_t mask) override { return (NativeNetworkTypesAt(x, z) & mask) != 0; }
     bool NetworkPositionAccepts(const float position[3], std::uint32_t mask) override {
+        SC4_UNWIRED("cSC4AutomataGenerator spawn point: the network manager's position test (vslot 0x158) is not recovered; a network cell of the wanted kind stands in");
         return NetworkCellHasType(static_cast<int>(position[0] / 16.0f), static_cast<int>(position[2] / 16.0f), mask);
     }
     float NetworkHeight(float x, float z) override { return AutomataControllerHost()->GroundHeight(x, z); }

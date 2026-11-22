@@ -4,6 +4,7 @@
 // (sc4/TextDecalOccupant.h): the terrain view's overlay managers, the glyph texture manager's string textures, the terrain.
 // All replace the generated stubs.
 #include "app/NativeSignLabel.h"
+#include "platform/Unwired.h"
 
 #include "sc4/Render3D.h"   // first: its filter forward declaration must not meet sc4/OccupantManager.h's first
 #include "app/NativeAudio.h"
@@ -95,6 +96,7 @@ public:
         cSC43DRender* render = CityRenderer();
         s3d::cIS3DModelInstance* model = nullptr;
         // The renderer's pick takes no filter natively (PARTIAL): the nearest model is tested against the tool's filter.
+        if (filter) SC4_UNWIRED("cSC4ViewInputControlSign pick: the renderer's filtered pick is not recovered (only the nearest model is tested)");
         if (!render || !render->Pick(x, y, nullptr, model) || !model) return false;
         cIGZUnknown* owner = model->GetOwner();
         if (filter && owner) {

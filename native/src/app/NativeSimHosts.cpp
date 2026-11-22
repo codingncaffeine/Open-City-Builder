@@ -3,6 +3,7 @@
 // Each host answers from the city's own components (terrain, zone manager, lot developer, growth developers, history warehouse) and
 // registers the simulator's agents with the city simulator, as the original's Init does through SL::spSimulator / SL::spMS2.
 #include <algorithm>
+#include "platform/Unwired.h"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -250,12 +251,21 @@ public:
         return ordinances ? ordinances->GetCumulativeFactor(property, index) : 1.0f;
     }
     int ZoneTypeAt(int x, int z) override { cSC4ZoneManager* m = Zones(); return m ? m->GetZoneType(x, z) : 0; }
-    // PARTIAL: the traffic simulator is not running natively, so traffic adds no air pollution yet.
-    std::uint8_t TrafficAirAt(int, int) override { return 0; }
+    // PARTIAL: the traffic simulator runs natively, but its air-polluting traffic map (GetAirPollutingTrafficMap) is not read
+    // here, so traffic adds no air pollution yet.
+    std::uint8_t TrafficAirAt(int, int) override {
+        SC4_UNWIRED("cSC4PollutionSimulator: the traffic simulator's air-polluting traffic map is not read (traffic adds no air pollution)");
+        return 0;
+    }
     // PARTIAL: no neighbour deals natively (the region's connections are not modelled).
-    void GarbageDeals(std::uint32_t, std::vector<IPollutionDeal*>& out) override { out.clear(); }
+    void GarbageDeals(std::uint32_t, std::vector<IPollutionDeal*>& out) override {
+        SC4_UNWIRED("cSC4PollutionSimulator: the neighbor garbage deals are not read (none)");
+        out.clear();
+    }
     // PARTIAL: the sanitation department's line items are not created natively.
-    void SetSanitationLineItemCost(int, std::int64_t) override {}
+    void SetSanitationLineItemCost(int, std::int64_t) override {
+        SC4_UNWIRED("cSC4PollutionSimulator: the sanitation department's line item costs are not set (the line items are not created)");
+    }
     bool OccupantFootprint(void* raw, PollutionOccupantFootprint& out) override {
         auto* occupant = static_cast<cISC4Occupant*>(raw);
         cSC4City* city = HostCity();
@@ -515,7 +525,9 @@ class ResidentialHost final : public IResidentialHost {
 public:
     std::uint32_t CurrentDay() override { cSC4Simulator* s = Simulator(); return s ? s->GetSimDateNumber() : 0; }
     void PostStrikeMessage(std::uint32_t message, IResidentialOccupant*, bool, std::uint32_t) override { PostCityMessage(message); }
-    void SetStrikerGroup(bool, IResidentialOccupant*, bool) override {}   // PARTIAL: no automata controllers for strikers yet
+    void SetStrikerGroup(bool, IResidentialOccupant*, bool) override {   // PARTIAL: no automata controllers for strikers yet
+        SC4_UNWIRED("cSC4ResidentialSimulator strike: the strikers' automata controller on the building is not created");
+    }
     bool CityHasOccupantManager() override { cSC4City* c = HostCity(); return c && c->GetComponent(CityComponent::OccupantManager); }
     std::uint8_t CellWorkforce(unsigned, unsigned) override { return 0; }   // only without grids (the class answers itself)
     std::uint8_t GlobalWorkforce() override { return 0; }
@@ -571,8 +583,7 @@ public:
         const std::int16_t v = grid->GetCellValue(x, z);
         return static_cast<std::uint16_t>(v < 0 ? 0 : v);
     }
-    // PARTIAL: the building development simulator keeps no building map natively, so no proximity tract is seeded (the original's
-    // maps differ from that only along the z = 0 edge, residential.md 5.3).
+    // The building development simulator's building map (the proximity tract's seed, residential.md 5.3).
     const cSC4SimGrid<std::uint8_t>* BuildingMap() override {   // SL::spBuildingDevelopmentSim vslot 0xa4
         cSC4BuildingDevelopmentSimulator* simulator = NativeBuildingDevelopmentSimulator();
         return simulator ? simulator->GetBuildingMap() : nullptr;

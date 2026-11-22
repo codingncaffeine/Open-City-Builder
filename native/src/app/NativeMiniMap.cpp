@@ -3,8 +3,10 @@
 // the animation tick and the anti-aliased line the view rectangle is drawn with (DrawLineAntialiased, Mac i386 0x002b4148 /
 // DrawLineAntialiasedNoClip 0x002b2f02, ported here: the minimap is its only caller).
 //
-// PARTIAL: the city situation manager's target marker (no situation manager view natively).
+// PARTIAL: the city situation manager's target marker: the manager runs natively (NativeCitySituations.cpp), but no
+// IMiniMapSituation view of it is made here.
 #include <algorithm>
+#include "platform/Unwired.h"
 #include <cstdint>
 #include <vector>
 
@@ -296,7 +298,10 @@ public:
     int CityCellCountZ() override { cSC4City* c = HostCity(); return c ? c->CellCountZ() : 0; }
     float CitySizeX() override { cSC4City* c = HostCity(); return c ? c->SizeX() : 0.0f; }
     float CitySizeZ() override { cSC4City* c = HostCity(); return c ? c->SizeZ() : 0.0f; }
-    IMiniMapSituation* CitySituationManager() override { return nullptr; }
+    IMiniMapSituation* CitySituationManager() override {
+        SC4_UNWIRED("cSC4WinMiniMap: the city situation manager's target marker is not drawn (no IMiniMapSituation view of the manager)");
+        return nullptr;
+    }
     IMiniMapTerrain* Terrain() override { return native::Terrain() ? &g_terrain : nullptr; }
     IMiniMapZoneGrid* ZoneGrid() override { return HostCity() ? &g_zones : nullptr; }
     IMiniMapOccupantQuery* CreateSurfaceNetworkOccupantQuery() override { return Occupants() ? new OccupantQuery() : nullptr; }

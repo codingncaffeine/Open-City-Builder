@@ -1,6 +1,7 @@
 // The demolition utility's host on the native application (src/sc4/Demolition.h; demolition.md §4). What is not wired is
 // marked PARTIAL where the original calls it.
 #include "app/NativeDemolition.h"
+#include "platform/Unwired.h"
 #include "app/NativeZoneDeveloperHost.h"
 
 #include <algorithm>
@@ -106,6 +107,7 @@ public:
     bool TestFlag(std::uint32_t group) override { return occupant_->IsOccupantGroup(group); }
     // PARTIAL: the network occupant's flag query (only the demolition effect's road / rail pick reads it).
     bool NetworkHasFlag(int, bool* isNetwork) override {
+        SC4_UNWIRED("cSC4Demolition: the network occupant's flag query (demolition effect road / rail pick) answers false");
         if (isNetwork) *isNetwork = dynamic_cast<cSC4NetworkOccupant*>(occupant_) != nullptr;
         return false;
     }
@@ -242,7 +244,9 @@ bool PhiIncludes(cISC4Occupant* occupant, const DemolitionFilterState& state) {
         return false;
     }
     switch (occupant->GetType()) {
-    case kDemolishTypeFoundation: return true;
+    case kDemolishTypeFoundation:
+        SC4_UNWIRED("cSC4Demolition filter step 5: the foundation interface's slot 9 test is not ported (every foundation passes)");
+        return true;
     case kDemolishTypeBuilding: case kDemolishTypePole: case kDemolishTypeSpecial: case kDemolishTypeProp:
     case kDemolishTypeNetwork: case kDemolishTypeFlora: break;
     default: return false;
@@ -313,6 +317,7 @@ public:
     }
     std::vector<IDemolishable*> OccupantsForTerrain(const DemolitionCellRect& cells, int) override {
         DemolitionFilterState none;
+        SC4_UNWIRED("cSC4Demolition::ModifyTerrainHeight: the terrain occupant filter is not ported (the plain rect scan stands in)");
         return OccupantsInRect(cells, none);   // PARTIAL: the terrain filter (ModifyTerrainHeight has no native caller yet)
     }
     bool RemoveOccupant(IDemolishable* occupant, bool shutdown, bool) override {
@@ -365,8 +370,8 @@ public:
     float TerrainHeight(int x, int z) override { cSTETerrain* t = Terrain(); return t ? t->GetAltitudeAtVertex(x, z) : 0.0f; }
     bool TerrainCellSkipped(int, int) override { return false; }
     // PARTIAL: the terrain levelling of ModifyTerrainHeight (no native caller yet).
-    void TerrainLevelCell(int, int) override {}
-    void TerrainLevelRect(const DemolitionCellRect&, std::uint32_t) override {}
+    void TerrainLevelCell(int, int) override { SC4_UNWIRED("cSC4Demolition::ModifyTerrainHeight: terrain vslot 0x190 (level a cell) is not wired"); }
+    void TerrainLevelRect(const DemolitionCellRect&, std::uint32_t) override { SC4_UNWIRED("cSC4Demolition::ModifyTerrainHeight: terrain vslot 0x198 (level a rect) is not wired"); }
     void TerrainUpdateRect(const DemolitionCellRect&, std::uint32_t) override {}
     float TerrainHeightAtMetres(float x, float z) override { cSTETerrain* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
     bool PropManagerAvailable() override { return Props() != nullptr; }

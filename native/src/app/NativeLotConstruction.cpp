@@ -6,6 +6,7 @@
 // PARTIAL (each named here and where it is called): the terrain leveller (LevelVertices changes nothing, so a steep lot keeps its
 // slope) and levelled-vertex flags. The construction occupant is NativeConstruction.cpp.
 #include <cfloat>
+#include "platform/Unwired.h"
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -158,12 +159,18 @@ public:
         const float depth = t->GetWaterDepthAtVertex(vx, vz);
         return depth > 0.0f ? t->GetAltitudeAtVertex(vx, vz) + depth : -FLT_MAX;
     }
-    bool VertexIsLevelled(int, int) override { return false; }                        // PARTIAL: vslot 0x128 (the levelled flag)
+    bool VertexIsLevelled(int, int) override {                                        // PARTIAL: vslot 0x128 (the levelled flag)
+        SC4_UNWIRED("cSC4LotDeveloper: terrain vslot 0x128 (vertex levelled flag) is not wired (never levelled)");
+        return false;
+    }
     int VerticesPerRow() override { cSTETerrain* t = Terrain(); return t ? static_cast<int>(t->CellCountX()) + 1 : 0; }
     float CityWidthMetres() override { cSTETerrain* t = Terrain(); return t ? static_cast<float>(t->CellCountX()) * 16.0f : 0.0f; }
     float CityDepthMetres() override { cSTETerrain* t = Terrain(); return t ? static_cast<float>(t->CellCountZ()) * 16.0f : 0.0f; }
     // PARTIAL: the terrain leveller (vslot 0x48) is not ported; no vertex changes, so the slope tests see the land as it is.
-    int LevelVertices(float, bool, bool, int, int, int, int, void*, int, int) override { return 0; }
+    int LevelVertices(float, bool, bool, int, int, int, int, void*, int, int) override {
+        SC4_UNWIRED("cSC4LotDeveloper: the terrain leveller (vslot 0x48) is not ported; a lot keeps the slope under it");
+        return 0;
+    }
     void CellOfPosition(float x, float z, int& cellX, int& cellZ) override {         // city vslot 0x2f8
         if (cSC4City* city = HostCity()) city->PositionToCell(x, z, cellX, cellZ);
         else { cellX = static_cast<int>(x / 16.0f); cellZ = static_cast<int>(z / 16.0f); }

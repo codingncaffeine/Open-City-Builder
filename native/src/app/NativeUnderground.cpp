@@ -2,11 +2,11 @@
 // (pipes and subway pieces) reach through engine globals in the original. The tool's hosts are the terrain, the occupant
 // manager and the resource manager; the occupant's are the city's cell mapping and the cell queries.
 //
-// PARTIAL: the occupant's custom piece models, mesh access and renderer registration answer nothing (the model maker
-// draws the pieces). The base InsertRangeConstraintsForCell the tool's
-// drag reaches (i386 0x1001b37e4) is not recovered, so dragging pipes is not wired either; the tool serves the network
-// manager's demolition and re-solve of pipes.
+// The occupant's custom junction models, mesh access and renderer ChangeModel are answered; PrepareRenderer and the network
+// occupant statics are empty. PARTIAL: the base InsertRangeConstraintsForCell the tool's drag reaches (i386 0x1001b37e4) is
+// not recovered, so dragging pipes is not wired; the tool serves the network manager's demolition and re-solve of pipes.
 #include "app/NativeUnderground.h"
+#include "platform/Unwired.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -118,7 +118,9 @@ public:
         return holder;
     }
     // i386 0x1001b37e4 (base drag constraints): not recovered; only placement reaches it.
-    void InsertRangeConstraintsForCellBase(std::uint32_t) override {}
+    void InsertRangeConstraintsForCellBase(std::uint32_t) override {
+        SC4_UNWIRED("cSC4UndergroundNetworkTool: the base InsertRangeConstraintsForCell (i386 0x1001b37e4) is not recovered (pipe drag constraints)");
+    }
 };
 
 // The connection piece as the occupant's walls ask for it: only its release.

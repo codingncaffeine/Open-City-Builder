@@ -3,9 +3,9 @@
 // exemplars come from the resource manager, props go into the city's occupant manager and read the city's clock and date.
 //
 // PARTIAL (named): the registered prop classes and terrain-decal props (a plain cSC4PropOccupant stands in, as the manager does
-// when a class is not registered), the prop-data-updated message, the city cell conversions the street props use
-// (the city's own) and text decals.
+// when a class is not registered), the prop-data-updated message, the lot at a cell (street props) and text decals.
 #include <map>
+#include "platform/Unwired.h"
 
 #include "app/NativeCity.h"
 #include "app/NativeProps.h"
@@ -80,14 +80,22 @@ public:
         auto it = held_.find(exemplar);
         if (it != held_.end() && prop) prop->SetDefaultExemplar(it->second);
     }
-    cSC4PropOccupant* CreateRegisteredProp(std::uint32_t) override { return nullptr; }   // PARTIAL: no registered prop classes
-    cSC4PropOccupant* CreateTerrainDecalProp() override { return nullptr; }               // PARTIAL
+    cSC4PropOccupant* CreateRegisteredProp(std::uint32_t) override {   // PARTIAL: no registered prop classes
+        SC4_UNWIRED("cSC4PropManager: registered prop classes are not created (a plain cSC4PropOccupant stands in)");
+        return nullptr;
+    }
+    cSC4PropOccupant* CreateTerrainDecalProp() override {   // PARTIAL
+        SC4_UNWIRED("cSC4PropManager: terrain-decal props are not created (a plain cSC4PropOccupant stands in)");
+        return nullptr;
+    }
     cSC4PropOccupant* CreateVisualEffectProp() override {                                  // prop class 0x2977aa49 (one reference)
         auto* prop = new cSC4PropOccupantVisualEffect();
         prop->AddRef();
         return prop->AsPropOccupant();
     }
-    void PostPropExemplarDataUpdated() override {}                                        // PARTIAL: message 0x896fdc70
+    void PostPropExemplarDataUpdated() override {   // PARTIAL: message 0x896fdc70
+        SC4_UNWIRED("cSC4PropManager: the prop exemplar data updated message (0x896fdc70) is not posted");
+    }
     void PositionToCityCell(float x, float z, int& cx, int& cz) override {
         if (cSC4City* city = HostCity()) city->PositionToCell(x, z, cx, cz);
         else { cx = static_cast<int>(x / 16.0f); cz = static_cast<int>(z / 16.0f); }
@@ -96,8 +104,13 @@ public:
         if (cSC4City* city = HostCity()) city->CellCornerToPosition(cx, cz, x, z);
         else { x = static_cast<float>(cx) * 16.0f; z = static_cast<float>(cz) * 16.0f; }
     }
-    cSC4Lot* LotAtCell(int, int) override { return nullptr; }   // PARTIAL: lot manager vslot 0x28 (street props only)
-    void CreateTextDecal(const std::vector<std::uint32_t>&) override {}   // PARTIAL: message 0xbeaf1a2
+    cSC4Lot* LotAtCell(int, int) override {   // PARTIAL: lot manager vslot 0x28 (street props only)
+        SC4_UNWIRED("cSC4PropManager street props: the lot manager's lot at a cell (vslot 0x28) answers none");
+        return nullptr;
+    }
+    void CreateTextDecal(const std::vector<std::uint32_t>&) override {   // PARTIAL: message 0xbeaf1a2
+        SC4_UNWIRED("cSC4PropManager: the text decal message (0xbeaf1a2) is not posted");
+    }
 private:
     std::map<cISCPropertyHolder*, cISCResExemplar*> held_;
 } g_managerHost;

@@ -5,8 +5,7 @@
 //
 // The cell services are the city's simulators: the land value simulator's total map, the fire protection grid, the aura
 // simulator's park map, the traffic simulator's trip length map, power and water; the tunables are the simulator exemplar's.
-// Neutral here (each named, PARTIAL): the lot developer's NeedsAnchorBuilding (false); DemolishLots (an empty lot has nothing
-// to demolish; a built one is reported).
+// Neutral here (PARTIAL): the lot developer's NeedsAnchorBuilding (false). DemolishLots goes to the demolition utility.
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -146,7 +145,10 @@ struct BuildingDevelopmentApi final : ITractBuildingDevelopmentApi {
     bool CheatIgnorePlumbing() override { return NativeBuildingCheat(0); }
     bool CheatIgnorePower() override { return NativeBuildingCheat(1); }
     bool CheatIgnoreCaps() override { return NativeBuildingCheat(2); }
-    bool NeedsAnchorBuilding(const std::int32_t*, std::int32_t) override { return false; }   // PARTIAL: cSC4LotDeveloper vslot 0x120
+    bool NeedsAnchorBuilding(const std::int32_t*, std::int32_t) override {   // PARTIAL: cSC4LotDeveloper vslot 0x120
+        SC4_UNWIRED("cSC4TractDeveloper: cSC4LotDeveloper::NeedsAnchorBuilding (vslot 0x120) is not wired (never needs one)");
+        return false;
+    }
     IGrowthDeveloperApi* GetDeveloper(std::uint32_t purpose, std::int32_t wealth) override {
         return ViewOf(GrowthDeveloperOfType(NativeDeveloperType(purpose, wealth)));
     }

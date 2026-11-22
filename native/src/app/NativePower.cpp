@@ -1,6 +1,7 @@
 // The power simulator's city services (sc4::IPowerHost): the occupant manager, the zones, the budget's power department, the lots,
 // the neighbour deals and connections, history, messages, the simulator agents and the city file's nested references.
 #include "app/NativePower.h"
+#include "platform/Unwired.h"
 
 #include <list>
 #include <vector>
@@ -160,6 +161,7 @@ public:
     std::int64_t DepartmentExpense() override {
         cSC4DepartmentBudget* department = Department();
         cSC4LineItem* item = department ? department->GetLineItem(1) : nullptr;
+        SC4_UNWIRED("cSC4PowerSimulator department expense: only the generation line item is read (budget vslot 0x88 sums the whole department)");
         return item ? item->GetFullExpenses() : 0;   // PARTIAL: the generation line only (budget vslot 0x88 sums the department)
     }
     // @ i386 0x00183b7a (DoOccupantInserted's tail): the plant's budget item (0xca58e540) lives on a locally funded line item of its

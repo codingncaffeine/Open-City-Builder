@@ -1,9 +1,11 @@
 // The query tool's services on the native application (sc4::IQueryHost): every answer goes through the simulator method the
 // original calls (slots resolved from the Mac i386 vtables; the header names the x64 slot = twice the i386 one).
 //   PARTIAL: the occupant filters accept any occupant with a model (the original builds one cSC4OccupantFilter subclass per
-//   query kind); the view's mouse tips, the coverage ring, the path view, following an automaton, stoplight props, the
-//   legend window proc, the residential tract tracking (a debug toggle), the landfill and port developers (still stubs).
+//   query kind); the coverage ring, the path view, following an automaton, stoplight props, the legend window proc, the
+//   residential tract tracking (a debug toggle), the landfill and port developers (not asked: their rows read nothing). The
+//   mouse tips go to the view's cursor text.
 #include <cstdint>
+#include "platform/Unwired.h"
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -116,7 +118,7 @@ struct QueryView final : IQueryView {
         if (cSC4View3DWin* v = View()) v->SetCursorText(id, static_cast<std::uint32_t>(order), title, text, icon);
     }
     void ClearTip(std::uint32_t id) override { if (cSC4View3DWin* v = View()) v->ClearCursorText(id); }
-    void RecalcCoverage() override {}
+    void RecalcCoverage() override { SC4_UNWIRED("cSC4ViewInputControlQuery: the coverage ring of the queried building is not drawn (RecalcCoverage)"); }
 } g_view;
 
 struct AnyFilter final : IOccupantFilter {
@@ -150,6 +152,7 @@ private:
 
 struct QueryRenderer final : IQueryRenderer {
     IOccupantFilter* CreateFilter(int kind) override {
+        SC4_UNWIRED("cSC4ViewInputControlQuery: the per-kind cSC4OccupantFilter is not built (any occupant with a model is accepted)");
         if (Trace()) std::fprintf(stderr, "query: filter %d\n", kind);
         return new AnyFilter();
     }
@@ -178,8 +181,8 @@ struct QueryCity final : IQueryCity {
     }
     int CellCountX() override { cSC4City* c = HostCity(); return c ? static_cast<int>(c->CellCountX()) : 0; }
     int CellCountZ() override { cSC4City* c = HostCity(); return c ? static_cast<int>(c->CellCountZ()) : 0; }
-    void FollowAutomaton(cIGZUnknown*) override {}
-    void SelectStoplightProp(cIGZUnknown*) override {}
+    void FollowAutomaton(cIGZUnknown*) override { SC4_UNWIRED("cSC4ViewInputControlQuery: following a queried automaton with the camera is not wired"); }
+    void SelectStoplightProp(cIGZUnknown*) override { SC4_UNWIRED("cSC4ViewInputControlQuery: selecting a stoplight prop is not wired"); }
 } g_city;
 
 // cSC4Lot as the query reads it. The lot manager hands lots out borrowed (the tool AddRefs some and reads others bare), so
@@ -638,8 +641,10 @@ public:
     void EndModalDialog(cIGZWin* dialog, std::uint32_t result) override {
         if (WinMgr* manager = ActiveWinMgr()) manager->EndDialog(0xf, dialog, result);
     }
-    // PARTIAL: there is no window location saver natively; the dialog opens centered over the game window each time.
+    // PARTIAL: the window location saver runs natively (SL::spWinLocationSaver) but is not asked here; the dialog opens
+    // centered over the game window each time.
     void RestoreDialogPlace(cIGZWin* dialog) override {
+        SC4_UNWIRED("cSC4ViewInputControlQuery: the query dialog's place is not restored from the window location saver");
         WinMgr* manager = ActiveWinMgr();
         cIGZWin* main = manager ? manager->GetMainWindow() : nullptr;
         if (main) dialog->GZWinMoveTo((main->GetW() - dialog->GetW()) / 2, (main->GetH() - dialog->GetH()) / 2);
@@ -665,7 +670,10 @@ public:
     IQueryBudgetSim* BudgetSim() override { return &g_budget; }
     IQueryNeighborsSim* NeighborsSim() override { return &g_neighbors; }
     IQueryTrafficSim* TrafficSim() override { return &g_traffic; }
-    IQueryPathView* CreatePathView() override { return nullptr; }
+    IQueryPathView* CreatePathView() override {
+        SC4_UNWIRED("cSC4ViewInputControlQuery: the path view (a queried lot's routes) is not created");
+        return nullptr;
+    }
     cISC4WinCalloutBox* CreateCalloutBox() override { return native::CreateCalloutBox(); }
     cIGZWin* CreateWindowFromScript(std::uint32_t instance, cIGZWin* parent, std::uint32_t id) override {
         if (!parent) {   // SC4CreateWindowFromScript puts a parentless window on the main window
@@ -676,7 +684,7 @@ public:
         if (Trace()) std::fprintf(stderr, "query: script window %08x -> %p\n", instance, static_cast<void*>(window));
         return window;
     }
-    void AttachLegendWinProc(cIGZWin*) override {}
+    void AttachLegendWinProc(cIGZWin*) override { SC4_UNWIRED("cSC4ViewInputControlQuery: the legend window proc is not attached"); }
     void DetachWinProc(cIGZWin*) override {}
     bool IsKeyDown(std::uint32_t) override { return false; }
     bool IsDebugMode() override { return false; }
@@ -687,6 +695,18 @@ public:
     }
     IQueryLandValueSim* LandValueSim() override { return &g_landValue; }
     IQueryPollutionSim* PollutionSim() override { return &g_pollution; }
+    IQueryLandfillDeveloper* LandfillDeveloper() override {
+        SC4_UNWIRED("cSC4ViewInputControlQuery: the landfill developer is not asked (landfill usage rows read nothing)");
+        return nullptr;
+    }
+    IQueryPortDeveloper* AirportDeveloper() override {
+        SC4_UNWIRED("cSC4ViewInputControlQuery: the airport developer is not asked (airport usage rows read nothing)");
+        return nullptr;
+    }
+    IQueryPortDeveloper* SeaportDeveloper() override {
+        SC4_UNWIRED("cSC4ViewInputControlQuery: the seaport developer is not asked (seaport usage rows read nothing)");
+        return nullptr;
+    }
     // the rating rows' per-cell maps (pollution sim 0x14(map) -> 0x1c, residential 0x9c / 0xa0, crime 0x14, traffic 0x24 / 0x34)
     std::uint16_t PollutionMapValue(int map, int x, int z) override {
         auto* pollution = CityAs<cSC4PollutionSimulator>(CityComponent::PollutionSimulator);

@@ -2,8 +2,10 @@
 // grid without tracts: once the automata scripts ran and a saved controller found its template, the grid wrote outside its
 // empty table). The answers come from the loaded city: its size, the terrain, the zone developer's lot map, the controller
 // manager's queues and tract grid, the network cells and the city renderer's view utilities.
-//   PARTIAL: effect triggers (the 3D view's active-effect query) answer "no effect"; controller loop sounds are not posted.
+//   PARTIAL: effect triggers (the 3D view's active-effect query) answer "no effect". The controllers' sounds go to the sound
+//   system (PostSound).
 #include <cstdint>
+#include "platform/Unwired.h"
 #include <cstdio>
 #include <cstdlib>
 
@@ -88,7 +90,10 @@ struct NativeAutomataControllerHost final : IAutomataControllerHost {
         if (auto* manager = CityComponentAs<cSC4AutomataControllerManager>(CityComponent::AutomataControllerManager))
             manager->MoveController(static_cast<cSC4AutomataController*>(controller));
     }
-    bool BeginEffectQuery() override { return false; }
+    bool BeginEffectQuery() override {
+        SC4_UNWIRED("cSC4AutomataController effect trigger: the 3D view's active-effect query is not wired (no effect is ever active)");
+        return false;
+    }
     bool IsEffectActive(std::uint32_t) override { return false; }
     void EndEffectQuery() override {}
     bool SoundAvailable() override { return SoundSystemAvailable(); }

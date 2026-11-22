@@ -1,4 +1,5 @@
 #include "app/NativeRegionScreen.h"
+#include "platform/Unwired.h"
 #include "app/NativeRegion.h"
 
 #include <cmath>
@@ -288,8 +289,8 @@ public:
 // ---- the neighbours simulator and its connections -----------------------------------------------------------------------------
 // The region side of the city's border connections: the cities around this one (the region's cities by region cell), their saved
 // connections and the cell conversions, so the neighbours simulator and the traffic simulator find the city and the connection on
-// the other side. PARTIAL: the deal pass (power / water / garbage trades) is not run natively (no simulator agent is registered and
-// every budget / utility seam answers neutrally), and no connection occupants are created or moved.
+// the other side. PARTIAL: the deal pass (power / water / garbage trades) runs on the simulator agent the neighbours simulator
+// registers, but every budget / utility seam below answers neutrally, and no connection occupants are created or moved.
 cISC4RegionalCity* RegionCity(int x, int z) {
     cISC4Region* region = g_app ? g_app->GetRegion() : nullptr;
     cRZAutoRefCount<cISC4RegionalCity>* entry = region ? region->GetCity(x, z) : nullptr;
@@ -349,19 +350,32 @@ public:
     float TerrainAltitudeAtCell(int, int) override { return 0.0f; }
     float TerrainAltitudeAtPosition(float, float) override { return 0.0f; }
     void RecordHistory(std::uint32_t, int) override {}
-    double BudgetTotal() override { return 0.0; }
+    double BudgetTotal() override {
+        SC4_UNWIRED("cSC4NeighborsSimulator deal pass: the budget seams (total, income, line items) answer 0");
+        return 0.0;
+    }
     double BudgetIncome() override { return 0.0; }
     bool BudgetLineItemAmount(std::uint32_t, double&) override { return false; }
     bool BudgetSubLineItemAmount(std::uint32_t, std::uint32_t, double&) override { return false; }
-    int PowerCapacity() override { return 0; }
+    int PowerCapacity() override {
+        SC4_UNWIRED("cSC4NeighborsSimulator deal pass: power / water capacity and demand answer 0 (no utility deals)");
+        return 0;
+    }
     int PowerDemand() override { return 0; }
     int WaterCapacity() override { return 0; }
     int WaterDemand() override { return 0; }
-    void LandfillRange(int& start, int& end) override { start = end = 0; }
+    void LandfillRange(int& start, int& end) override {
+        SC4_UNWIRED("cSC4NeighborsSimulator deal pass: the landfill range answers none (no garbage deals)");
+        start = end = 0;
+    }
     int PollutionValue(int) override { return 0; }
     void OccupantsInRect(int, int, int, int, std::vector<sc4::cISC4Occupant*>&) override {}
     void DeleteProp(sc4::cISC4Occupant*) override {}
-    bool CreateProp(std::uint32_t, void** out) override { if (out) *out = nullptr; return false; }
+    bool CreateProp(std::uint32_t, void** out) override {
+        SC4_UNWIRED("cSC4NeighborsSimulator: the neighbor connection occupants (border props) are not created");
+        if (out) *out = nullptr;
+        return false;
+    }
     void FinishProp(void*) override {}
     void SetPropPosition(void*, const float[3]) override {}
     void SetPropEdgeFlags(void*, std::uint32_t) override {}
@@ -371,7 +385,9 @@ public:
     void DeactivateOccupant(sc4::cISC4Occupant*) override {}
     const sc4::cISCPropertyHolder* OccupantProperties(sc4::cISC4Occupant*) override { return nullptr; }
     void OccupantPosition(sc4::cISC4Occupant*, float& x, float& z) override { x = z = 0.0f; }
-    void SetOccupantPosition(sc4::cISC4Occupant*, const float[3]) override {}
+    void SetOccupantPosition(sc4::cISC4Occupant*, const float[3]) override {
+        SC4_UNWIRED("cSC4NeighborsSimulator: the neighbor connection occupants are not moved");
+    }
     std::uint32_t OccupantType(sc4::cISC4Occupant*) override { return 0; }
     bool OccupantHasNetworkType(sc4::cISC4Occupant*, std::uint32_t) override { return false; }
     bool OccupantRetained(sc4::cISC4Occupant*) override { return true; }
@@ -417,7 +433,9 @@ public:
         Concrete(city)->GetLocalDeals(deals);
         out.assign(deals.begin(), deals.end());
     }
-    void CityUpdateImportExport(cISC4RegionalCity*) override {}
+    void CityUpdateImportExport(cISC4RegionalCity*) override {
+        SC4_UNWIRED("cSC4NeighborsSimulator: the regional city's import / export update is not wired");
+    }
     double CityGetExported(const cISC4RegionalCity*, int) override { return 0.0; }
     void CitySetExported(cISC4RegionalCity*, int, double) override {}
     double CityGetImported(const cISC4RegionalCity*, int) override { return 0.0; }
@@ -428,7 +446,10 @@ public:
     void CitySetDemanded(cISC4RegionalCity*, int, double) override {}
     double CityGetCostPerUnit(const cISC4RegionalCity*, int) override { return 0.0; }
     void CitySetCostPerUnit(cISC4RegionalCity*, int, double) override {}
-    bool ConfirmationDialog(std::uint32_t, std::uint32_t, std::uint32_t, const cIGZString&) override { return false; }
+    bool ConfirmationDialog(std::uint32_t, std::uint32_t, std::uint32_t, const cIGZString&) override {
+        SC4_UNWIRED("cSC4NeighborsSimulator: the neighbor deal confirmation dialog is not shown (answers no)");
+        return false;
+    }
 } g_neighborsHost;
 
 class ConnectionHost final : public sc4::INeighborConnectionHost {

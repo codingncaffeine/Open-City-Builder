@@ -7,6 +7,7 @@
 // DoPreCityInit; vslot 0x100: AddViewObject(manager, list 5, priority 0x76c)), the animation tick manager
 // (AddTickableObject(manager, 0xc0)) and the message server. The props reach it as SL::spEffectsManager.
 #include "app/NativeCheats.h"
+#include "platform/Unwired.h"
 #include "app/NativeEffects.h"
 #include "app/NativeEffectComponents.h"
 #include "sc4/NetworkOccupant.h"
@@ -377,7 +378,10 @@ void ManagerHost::DetachRenderable(cIGZUnknown*) {
 class ComponentsHost final : public sc4::IEffectsHost {
 public:
     sc4::ICameraControl* Camera() override { return nullptr; }
-    bool CameraEffectsEnabled() override { return false; }
+    bool CameraEffectsEnabled() override {
+        SC4_UNWIRED("cSC4EffectsManager camera effects: no ICameraControl natively, camera effect components do nothing");
+        return false;
+    }
     void AddNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->AddNotification(target, message); }
     void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->RemoveNotification(target, message); }
     void PostSoundEvent(std::uint32_t event, std::uint32_t a, std::uint64_t b, std::uint64_t c, std::uint64_t d) override {
