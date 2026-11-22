@@ -363,10 +363,9 @@ void cSC4ZoneDeveloper::DeferOccupantOperations(bool defer) {
     message->Release();
 }
 
-// @ 0x10012959a. PARTIAL: the message dispatch, the highlight-scale word and the reload walk are
-// recovered. The occupant-removed path stops after DeleteLot: CreateLotRemnants (0x100129956), the road/rail
-// connection helpers (0x10012a040, 0x10012a534) and PlopAllLotTypes (0x10012abe4) are recovered below but not called
-// from here yet, and PlopAllBuildingTypes (0x10012ad80) is not recovered, so those branches leave the city untouched.
+// @ 0x10012959a (i386 0x000e2d6c). An occupant removed from a lot deletes the lot and refills its zoned cells with lot
+// remnants; a removed road (kind 1, 2) or rail (kind 3) reconnects the streets next to it; the plop-all-lots cheat plops
+// every lot type. PARTIAL: PlopAllBuildingTypes (0x10012ad80) is not recovered.
 bool cSC4ZoneDeveloper::DoMessage(cIGZMessage2* message) {
     if (!message) return false;
     auto* standard = dynamic_cast<cIGZMessage2Standard*>(message);
@@ -401,32 +400,25 @@ bool cSC4ZoneDeveloper::DoMessage(cIGZMessage2* message) {
             if (lot) {
                 std::int32_t rect[4] = {0, 0, 0, 0};
                 lot->GetBoundingRect(rect);                         // cISC4Lot vslot 0x70
+                const int facing = static_cast<int>(lot->GetFacing());   // vslot 0xb8, read before the lot goes
                 const std::uint32_t zoneType = lot->GetZoneType();  // vslot 0xf8
                 currentZoneType_ = static_cast<int>(zoneType);
                 DeleteLot(lot);                                     // primary vslot 0x118
-                if (zoneManager_ && zoneManager_->IsZoneTypeValid(currentZoneType_)) {
-                    // The original calls CreateLotRemnants(rect.x0, rect.z0, rect.x2 + 1 - rect.x0, rect.z2 + 1 - rect.z0,
-                    // lot->GetFacing()) here (0x100129956); the function is recovered below but not called from this path yet.
-                    SC4_UNWIRED("cSC4ZoneDeveloper::DoMessage: CreateLotRemnants after a lot's building is removed not called");
-                }
+                // The zoned cells the lot covered get new lots of their own (i386 0x000e2d6c).
+                if (zoneManager_ && zoneManager_->IsZoneTypeValid(currentZoneType_))
+                    CreateLotRemnants(rect[0], rect[1], rect[2] + 1 - rect[0], rect[3] + 1 - rect[1], facing);
                 currentZoneType_ = 0;
             }
             const std::uint64_t removalKind = standard->GetData4();
-            if (removalKind == 1 || removalKind == 2) {
-                // The original calls ConnectRoadToAnyAdjacentStreets (0x10012a040), recovered below but not called here yet.
-                SC4_UNWIRED("cSC4ZoneDeveloper::DoMessage: ConnectRoadToAnyAdjacentStreets after a road removal not called");
-            } else if (removalKind == 3) {
-                // The original calls ConnectStreetsAcrossRail (0x10012a534), recovered below but not called here yet.
-                SC4_UNWIRED("cSC4ZoneDeveloper::DoMessage: ConnectStreetsAcrossRail after a rail removal not called");
-            }
+            if (removalKind == 1 || removalKind == 2) ConnectRoadToAnyAdjacentStreets(occupant);
+            else if (removalKind == 3) ConnectStreetsAcrossRail(occupant);
         } else if (type == static_cast<std::int32_t>(kZoneMessageHighLightScale)) {
             if (void* data = standard->GetVoid2()) highlightScale_ = *static_cast<int*>(data);
         }
     } else if (type == static_cast<std::int32_t>(kZoneMessageCheatCode)) {
         const std::uint64_t command = standard->GetData1();
         if (command == kCheatPlopAllLots) {
-            // The original runs PlopAllLotTypes (0x10012abe4), recovered below but not called here yet.
-            SC4_UNWIRED("cSC4ZoneDeveloper::DoMessage: plop-all-lots cheat (PlopAllLotTypes) not called");
+            PlopAllLotTypes();
         } else if (command == kCheatPlopAllBuildings) {
             // PlopAllBuildingTypes (0x10012ad80) is not recovered.
             SC4_UNWIRED("cSC4ZoneDeveloper::DoMessage: plop-all-buildings cheat (PlopAllBuildingTypes) not ported");

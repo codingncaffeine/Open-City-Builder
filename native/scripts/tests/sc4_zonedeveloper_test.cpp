@@ -1805,6 +1805,26 @@ void TestOnDezoneAndRemnants() {
     developer->CreateLotRemnants(4, 4, 2, 2, 3);
     CHECK(developer->GetLotCount() == 2);
 
+    // A building removed from a zoned lot (0x99ef1142, subtype 0xc7729698): the lot goes and its cells get remnant lots
+    // (i386 0x000e2d6c), facing as the old lot did; a cell outside the old lot stays empty.
+    developer->DeleteLots(0, 0, 15, 15);
+    cSC4Lot* built = nullptr;
+    CHECK(TrackedCreateLot(developer, 4, 4, 2, 2, 0, built));
+    built->UpdateZoneType();
+    FakeOccupant building;
+    building.position[0] = 4 * 16.0f + 8.0f;
+    building.position[2] = 4 * 16.0f + 8.0f;
+    cRZMessage2Standard removed;
+    removed.SetType(0x99ef1142u);
+    removed.SetVoid1(&building);
+    removed.SetData3(0xc7729698u);
+    removed.SetData4(0);
+    CHECK(developer->DoMessage(&removed));
+    CHECK(developer->GetLotCount() == 2);
+    CHECK(developer->GetLot(4, 4, false) != nullptr && developer->GetLot(4, 4, false) != developer->GetLot(5, 4, false));
+    CHECK(developer->GetLot(5, 4, false) != nullptr);
+    CHECK(developer->GetLot(6, 4, false) == nullptr);
+
     SetLotHost(nullptr);
     developer->Shutdown();
     developer->Release();
