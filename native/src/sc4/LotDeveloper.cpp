@@ -1117,23 +1117,21 @@ cISC4Occupant* cSC4LotDeveloper::GetFirstBuilding(cSC4Lot* lot) {
     return lot && g_construction ? g_construction->FirstBuildingOnLot(lot) : nullptr;
 }
 
-// i386 0x000ec5f6: the lot takes `state`, then every building on it goes (its props, optionally its foundation, then the
-// occupant itself with `flags`). PARTIAL: the building foundation removal (slot 60) and the zot props are not done here
-// (RemoveBuildingZotProp now exists but is not called), as in StartConstruction.
+// i386 0x000ec5f6: the lot takes `state`, then every building on it goes (its props, with `removeFoundation` its foundation
+// (slot 60), then the occupant itself with `flags`); the zot the lot shows goes last (slot 11, RemoveBuildingZotProp(lot)).
 bool cSC4LotDeveloper::ClearLotBuildings(cSC4Lot* lot, std::uint32_t state, bool removeFoundation, std::uint32_t flags) {
     if (!lot || !g_construction) return false;
-    SC4_UNWIRED("cSC4LotDeveloper::ClearLotBuildings: the lot's zot props are not removed (RemoveBuildingZotProp)");
-    if (removeFoundation && GetFirstBuilding(lot))
-        SC4_UNWIRED("cSC4LotDeveloper::ClearLotBuildings: the buildings' foundations are not removed (slot 60)");
     cISC4Occupant* building = GetFirstBuilding(lot);
     lot->SetState(state, 0, 0);                                                     // lot vslot 0x88
     for (int guard = 0; building && guard < 64; ++guard) {
         building->AddRef();
         g_construction->RemoveBuildingProps(building);                                // prop manager slot 38
+        if (removeFoundation) RemoveBuildingFoundation(building);                     // vslot 0xf0
         g_construction->RemoveOccupant(building, flags);                              // occupant manager slot 21 (b, 1, flags)
         building->Release();
         building = GetFirstBuilding(lot);
     }
+    RemoveBuildingZotProp(*lot, 0);                                                 // vslot 0x2c: whatever zot is shown
     return true;
 }
 
@@ -1712,6 +1710,35 @@ bool cSC4LotDeveloper::RemoveLotFoundation(cSC4Lot* lot) {
     const bool removed = RemoveLotFoundation(x, z);                                 // vslot 0xd4
     lot->SetFlags(static_cast<std::uint8_t>(lot->GetFlags() & ~3u));
     return removed;
+}
+
+cISC4Occupant* cSC4LotDeveloper::GetFoundationByPosition(int usage, float x, float z) {
+    return g_construction ? g_construction->FoundationAtPosition(usage, x, z) : nullptr;
+}
+
+// @ i386 0x000ec9c8: the foundation of the usage at the position goes; for a lot foundation (usage 2) the lot on that cell is
+// no longer fixed (flags bits 0..1), whether or not a foundation was found.
+bool cSC4LotDeveloper::RemoveFoundation(int usage, float x, float z) {
+    if (!g_construction) return false;
+    cISC4Occupant* foundation = GetFoundationByPosition(usage, x, z);              // vslot 0xc8
+    if (foundation) {
+        foundation->AddRef();
+        g_construction->RemoveFoundation(foundation);                               // +0x28 vslot 0x54 (occupant, true, 0)
+        foundation->Release();
+    }
+    if (usage == 2) {
+        if (cSC4Lot* lot = g_construction->LotAt(static_cast<int>(x * 0.0625f), static_cast<int>(z * 0.0625f)))
+            lot->SetFlags(static_cast<std::uint8_t>(lot->GetFlags() & ~3u));
+    }
+    return foundation != nullptr;
+}
+
+// @ i386 0x000ece44: the building foundation (usage 1) at the building's position goes.
+bool cSC4LotDeveloper::RemoveBuildingFoundation(cISC4Occupant* building) {
+    if (!building) return false;
+    float position[3] = {0.0f, 0.0f, 0.0f};
+    building->GetPosition(position);                                                // occupant vslot 0x20
+    return RemoveFoundation(1, position[0], position[2]);                           // vslot 0xd0
 }
 
 // @ i386 0x000ecbee: a fixed lot's foundation is rebuilt at its altitude (the same type), or made when it has none.

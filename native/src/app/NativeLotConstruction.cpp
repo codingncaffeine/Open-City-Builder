@@ -336,6 +336,23 @@ public:
         occupants->ReleaseOccupantList(list);   // the city keeps the occupant: the answer is borrowed
         return found;
     }
+    // GetFoundationByPosition: the box query on the vertical line at (x - 0.05, z + 0.05) (the original's min and max share x and
+    // z), the first foundation of the usage
+    cISC4Occupant* FoundationAtPosition(int usage, float x, float z) override {
+        cISC4OccupantManager* occupants = Occupants();
+        if (!occupants) return nullptr;
+        const float minimum[3] = {x - 0.05f, -FLT_MAX, z + 0.05f}, maximum[3] = {x - 0.05f, FLT_MAX, z + 0.05f};
+        OccupantList list;
+        cISC4Occupant* found = nullptr;
+        if (occupants->GetOccupantsByBBox(list, minimum, maximum, sc4::kOccupantTypeFoundation, 0xffffffffu)) {
+            for (cISC4Occupant* occupant : list) {
+                auto* foundation = dynamic_cast<sc4::cSC4FoundationOccupant*>(occupant);
+                if (!found && foundation && foundation->GetUsage() == usage) found = occupant;
+            }
+        }
+        occupants->ReleaseOccupantList(list);   // the city keeps the occupant: the answer is borrowed
+        return found;
+    }
     std::uint32_t FoundationTypeOf(cISC4Occupant* foundation) override {
         auto* f = dynamic_cast<sc4::cSC4FoundationOccupant*>(foundation);
         return f ? f->GetFoundationType() : 0;
