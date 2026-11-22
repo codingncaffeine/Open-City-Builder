@@ -1,4 +1,5 @@
 #include "sc4/SubBudgetWindow.h"
+#include "platform/Unwired.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -134,6 +135,7 @@ bool cSC4SubBudgetWindow::Create(cIGZWin** window, std::uint32_t purpose, std::u
 // DestroySubBudgetWindow (i386 0x0026961a): the neighbor-deal proposals are dropped (ReleaseDeals), then end_dialog.
 void cSC4SubBudgetWindow::Destroy() {
     // PARTIAL: the simulator pause around the dialog (spSimulator 0x28 in on_init, 0x34 here) is not applied.
+    SC4_UNWIRED("cSC4SubBudgetWindow::Destroy: simulator resume (spSimulator 0x34) after the dialog not applied");
     if (Trace())
         for (const BudgetRestoreInfo& info : restore_)
             if (info.department) std::fprintf(stderr, "sub budget: destroy: department %08x funding %.2f (opened at %.2f)\n", info.department->GetDepartmentID(),
@@ -223,8 +225,7 @@ bool cSC4SubBudgetWindow::OnShutdown() {
 }
 
 // on_button_activated (i386 0x0027825c): OK keeps the funding, Cancel restores it; both close the dialog.
-//   PARTIAL: the department buttons' individual-building windows, the ordinance / neighbor deal buttons and the scroll
-//   arrows.
+//   PARTIAL: the ordinance info popups (500+n) and the scroll arrows of the department path.
 bool cSC4SubBudgetWindow::OnButtonActivated(cIGZWin* window, std::uint32_t id) {
     if (Trace()) std::fprintf(stderr, "sub budget: button %08x\n", id);
     if (id == 0xcd) {   // the ordinance dialog's Accept: every changed ordinance switched (spOrdinanceSim 0x34)
@@ -299,6 +300,10 @@ bool cSC4SubBudgetWindow::OnButtonActivated(cIGZWin* window, std::uint32_t id) {
         EndDialog(window, kResultClose);
         return true;
     }
+    if (id >= 500 && id < 700)
+        SC4_UNWIRED("cSC4SubBudgetWindow::OnButtonActivated: ordinance info popup (button 500+n) not ported");
+    if (id >= 0x451 && id <= 0x454)
+        SC4_UNWIRED("cSC4SubBudgetWindow::OnButtonActivated: row scrolling of the department path not ported");
     return false;
 }
 
@@ -360,6 +365,7 @@ void cSC4SubBudgetWindow::SetupWindow(cIGZWin* window, std::uint32_t incomeRows,
 
 // SetEmptyWindow (i386 0x00265ef4): a group without rows says so. PARTIAL: the empty dialog keeps the default size.
 void cSC4SubBudgetWindow::SetEmptyWindow(cIGZWin*, const cIGZString& title, const cIGZString& text) {
+    SC4_UNWIRED("cSC4SubBudgetWindow::SetEmptyWindow: resize of the empty dialog not ported (keeps the default size)");
     AddText(body_, 0xabcde00, 0x14, 8, title, 0, kFontTitle, 'D', 'U', 'f');
     AddText(body_, 0xabcde01, 0x14, 0x30, text, 0, kFontHeader, 'D', 'U', 'f');
 }
@@ -416,6 +422,7 @@ void cSC4SubBudgetWindow::AddImageButton(cIGZWin* parent, std::uint32_t id, int 
     cIGZBuffer* buffer = g_host->UiImage(image);
     gz::cIGZWinBtn* button = g_host->CreateButton(2, id, cRZString(), buffer);
     if (!button) return;
+    SC4_UNWIRED("cSC4SubBudgetWindow::AddImageButton: framed highlight frame (GZCOM 0xc2afa76e), button text colors and sound not ported");
     cIGZWin* win = button->AsIGZWin();
     if (!buffer) win->SetSize(0x1a, 0x10);
     if (framed) {
@@ -483,6 +490,7 @@ void cSC4SubBudgetWindow::Departments(std::vector<cSC4DepartmentBudget*>& out) {
 // total) or per listed line item, on the income side and the expense side; OK and Cancel at the bottom.
 bool cSC4SubBudgetWindow::OnInit(cIGZWin* window) {
     if (!window) return false;
+    SC4_UNWIRED("cSC4SubBudgetWindow::OnInit: simulator pause (spSimulator 0x28) while the dialog is open not applied");
     if (initialized_) return true;
     if (Trace()) std::fprintf(stderr, "sub budget: on_init purpose 0x%08x\n", purpose_);
     if (period_ == 0) {

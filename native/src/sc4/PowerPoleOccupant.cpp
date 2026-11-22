@@ -1,4 +1,5 @@
 #include "sc4/PowerPoleOccupant.h"
+#include "platform/Unwired.h"
 
 #include <cmath>
 #include <map>
@@ -921,7 +922,10 @@ bool cSC4PowerPoleOccupant::Read(cIGZIStream& stream) {
     if (!sbInited) StaticInit();
     std::uint16_t version = 0;
     stream.GetUint16(version);
-    if (version < 5) return false;   // PARTIAL: the legacy transform of versions 3 and 4 is not recovered
+    if (version < 5) {   // PARTIAL: the legacy transform of versions 3 and 4 is not recovered
+        SC4_UNWIRED("cSC4PowerPoleOccupant::Read: version 3 / 4 record (legacy transform) refused");
+        return false;
+    }
     if (cSC4Occupant::Read(stream)) {
         stream >> transform_;
         for (float& value : position_) stream.GetFloat32(value);

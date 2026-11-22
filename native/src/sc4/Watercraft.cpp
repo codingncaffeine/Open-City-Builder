@@ -1,4 +1,5 @@
 #include "sc4/Watercraft.h"
+#include "platform/Unwired.h"
 
 #include <algorithm>
 #include <cmath>
@@ -350,6 +351,7 @@ bool cSC4Watercraft::DoMessage(cIGZMessage2* message) {
         const std::uint32_t type = message->GetType();
         if (type == kWatercraftMessageTow) {
             if (towSearchActive_) towSearchActive_ = false;
+            SC4_UNWIRED("cSC4Watercraft::DoMessage: tow-request payload (position and occupant groups of the boat asking for a tow) not read");
         } else if (type == kWatercraftMessageReloadDriveParams) {
             LoadDriveParameters();
             handled = true;

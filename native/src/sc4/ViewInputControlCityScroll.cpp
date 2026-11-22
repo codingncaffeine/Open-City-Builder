@@ -1,4 +1,5 @@
 #include "sc4/ViewInputControlCityScroll.h"
+#include "platform/Unwired.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -56,7 +57,10 @@ bool cSC4ViewInputControlCityScroll::OnMouseMove(int x, int y, std::uint32_t mod
     if (absX <= fullSpeed_ && absX <= deadZone_) velocityX_ = 0;
     if (absY <= fullSpeed_ && absY <= deadZone_) velocityY_ = 0;
     const bool scrolling = deadZone_ < absX || deadZone_ < absY;
-    if (scrolling) moved_ = true;
+    if (scrolling) {
+        moved_ = true;
+        SC4_UNWIRED("cSC4ViewInputControlCityScroll::OnMouseMove: the eight direction cursors are not switched (cursor art)");
+    }
     float speed = std::sqrt(static_cast<float>(halfY * halfY) + static_cast<float>(halfX) * static_cast<float>(halfX)) /
                   static_cast<float>(fullSpeed_ - deadZone_);
     if (speed > 1.0f) speed = 1.0f;

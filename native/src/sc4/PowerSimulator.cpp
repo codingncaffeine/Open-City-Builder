@@ -1,4 +1,5 @@
 #include "sc4/PowerSimulator.h"
+#include "platform/Unwired.h"
 
 #include <algorithm>
 #include <cmath>
@@ -123,7 +124,17 @@ bool cSC4PowerSimulator::DoMessage(cIGZMessage2* message) {
     case kMsgPowerTick:
     case kMsgPowerTickFast: DoIdle(); break;
     case kMsgPowerTunablesChanged: ReadSimulatorTunableValues(host_->SimulatorExemplar()); break;
+    case kMsgPowerTerrain:
+        SC4_UNWIRED("cSC4PowerSimulator::DoMessage: terrain message 0x278e6003 (power line geometry follows the ground) not ported");
+        break;
+    case kMsgPowerPoleCosts:
+        SC4_UNWIRED("cSC4PowerSimulator::DoMessage: pole cost refresh 0x26d31ec1 not ported");
+        break;
+    case kMsgPowerCheat:
+        SC4_UNWIRED("cSC4PowerSimulator::DoMessage: meltdown cheat 0xc2c09554 not ported");
+        break;
     case kMsgPowerNetworkCells:
+        SC4_UNWIRED("cSC4PowerSimulator::DoMessage: the network manager half of 0x07699455 not ported");
         if (const auto* rect = static_cast<const std::uint32_t*>(standard->GetVoid2())) CellChanged(rect[0], rect[1], rect[2], rect[3]);
         break;
     case kMsgPowerLotStateChanged: {   // a lot reaching state 1 on a powered cell has power at once
@@ -595,7 +606,7 @@ void cSC4PowerSimulator::UpdatePoweredLots() {
 // counters reset), 1 floods a grid from every plant not reached yet and books the generation costs (and the plants' wear once a
 // month), 2 floods from the live neighbour connections the city buys over and publishes the new powered set, 3 records the
 // statistics, 4 waits for a change (a refresh request starts the next pass).
-//   PARTIAL: the plants' budget items (0x2a58d350 by the 0x0911e2e7 wear curve) go through the host, which keeps them as they are.
+//   The plants' budget items (0x2a58d350 by the 0x0911e2e7 wear curve) are set through the host (SetPlantExpense).
 void cSC4PowerSimulator::DoIdle() {
     if (!enabled_) return;
     if (pending_) {
@@ -901,6 +912,8 @@ void cSC4PowerSimulator::AgePowerPlant(cISC4Occupant* plant) {
                 ++distressedPlants;
                 host_->DistressPlantLot(plant);
             }
+        } else {
+            SC4_UNWIRED("cSC4PowerSimulator::AgePowerPlant: a plant past its failure limit with failure flags is not destroyed (disaster and pollution burst)");
         }
     }
 }

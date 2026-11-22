@@ -1,5 +1,6 @@
 // cSC4WatercraftManager — see WatercraftManager.h for the class notes, the original layout and the quirks.
 #include "sc4/WatercraftManager.h"
+#include "platform/Unwired.h"
 
 #include <bit>
 #include <cmath>
@@ -175,6 +176,7 @@ void cSC4WatercraftManager::DoAnimationTick(std::uint32_t data, float millisecon
         return;
     }
     PopulateVisibleArea(milliseconds);
+    SC4_UNWIRED("cSC4WatercraftManager::DoAnimationTick: docking-rights sweep, marina-boat sweep and ferry rebuild (message 0x2c06ba82) not ported");
     base_->DoAnimationTick(data, milliseconds);
 }
 
@@ -865,6 +867,7 @@ FerryRouteInformation* cSC4WatercraftManager::CreateFerry(FerryTerminalInformati
     int sizeX = 0, sizeZ = 0;
     host_->CityCellCount(sizeX, sizeZ);
     if (cellX < 3 || sizeX - 3 < cellX || cellZ < 3 || sizeZ - 3 < cellZ) return nullptr;
+    SC4_UNWIRED("cSC4WatercraftManager::CreateFerry: ferry boat creation and station wiring not ported");
     return nullptr;
 }
 
@@ -877,6 +880,7 @@ void cSC4WatercraftManager::CreateFerryStruct(FerryTerminalInformation* station,
     (void)route;
     (void)stationA;
     (void)stationB;
+    SC4_UNWIRED("cSC4WatercraftManager::CreateFerryStruct: ferry station records from the compressed route not ported");
 }
 
 // @ 0x1004f212e. PARTIAL: creates the boat a marina/seaport occupant owns. The recovered prefix is the occupant
@@ -893,6 +897,7 @@ bool cSC4WatercraftManager::CreateMarinaBoat(cISC4Occupant* occupant, std::uint3
     int sizeX = 0, sizeZ = 0;
     host_->CityCellCount(sizeX, sizeZ);
     if (cellX <= 2 || sizeX - 3 < cellX || cellZ <= 2 || sizeZ - 3 < cellZ) return false;
+    SC4_UNWIRED("cSC4WatercraftManager::CreateMarinaBoat: marina / seaport boat creation (neighbor travel routes) not ported");
     return false;
 }
 

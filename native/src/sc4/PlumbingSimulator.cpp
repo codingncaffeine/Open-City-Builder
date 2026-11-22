@@ -1,4 +1,5 @@
 #include "sc4/PlumbingSimulator.h"
+#include "platform/Unwired.h"
 
 #include <algorithm>
 #include <cmath>
@@ -639,6 +640,7 @@ bool cSC4PlumbingSimulator::DoIdle(std::uint32_t) {
                              pipeCount_, in.size(), out.size());
             }
         }
+        SC4_UNWIRED("cSC4PlumbingSimulator::DoIdle: state 7 changed-cell rectangle not sent to the terrain view refresh (city vslot 0x150, vslot 0x110)");
         state_ = 8;
         return true;
     }

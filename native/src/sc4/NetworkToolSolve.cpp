@@ -10,6 +10,7 @@
 // Port note: the original's sets are __gnu_cxx::hash_set; std::unordered_set walks them in another order. Where the
 // walk order matters (which unsolved cell ApplyNetworkRules picks first) a different but equally valid order results.
 #include "sc4/NetworkTool.h"
+#include "platform/Unwired.h"
 #include "sc4/NetworkConstructionCrew.h"
 
 #include <cfloat>
@@ -1213,11 +1214,17 @@ void cSC4NetworkTool::ApplyNetworkRules(std::unordered_set<std::uint32_t>& padde
 // i386 0x00146290: the tile conflict rules (cSC4NetworkTypeInfo::LoadTileConflictRules, sTileConflictRules) patch pairs of
 // neighbouring pieces that may not meet. With no rules loaded it returns true at once, which is what this port does until
 // the conflict rules are loaded (NOT PORTED: the patch loop and PatchTilePair).
-bool cSC4NetworkTool::AdjustTileSubsets(std::vector<tSolvedCell>&, bool) { return true; }
+bool cSC4NetworkTool::AdjustTileSubsets(std::vector<tSolvedCell>&, bool) {
+    SC4_UNWIRED("cSC4NetworkTool::AdjustTileSubsets: tile conflict rules (PatchTilePair patch loop) not ported");
+    return true;
+}
 
 // i386 0x00145f40: the tile pattern verifiers (sTilePatternVerifyRules, "TileVerifiers"). With no verifiers loaded it
 // returns true (0x00145f68), as here (NOT PORTED: the pattern walk).
-bool cSC4NetworkTool::VerifyTileSubsets(std::vector<tSolvedCell>&) { return true; }
+bool cSC4NetworkTool::VerifyTileSubsets(std::vector<tSolvedCell>&) {
+    SC4_UNWIRED("cSC4NetworkTool::VerifyTileSubsets: TileVerifiers pattern walk not ported (verifiers not loaded)");
+    return true;
+}
 
 // ============================================================================================================
 // the checks before the solve, and the steps not ported yet
@@ -1289,6 +1296,7 @@ int cSC4NetworkTool::UpdateOccupantHighlights(int validSteps) {
         }
     }
     demolitionCells_ = cells;
+    SC4_UNWIRED("cSC4NetworkTool::UpdateOccupantHighlights: cSC4NetworkRoutines::UpdateHighlights (highlight what the network will demolish) not ported");
     std::int64_t cost = 0;
     INetworkToolHost* host = GetNetworkToolHost();
     const bool ok = !host || host->DemolishForNetwork(false, demolitionCells_, cost);
@@ -1973,6 +1981,8 @@ void cSC4NetworkTool::InsertOccupantsForSolvedCells(std::vector<tSolvedCell>& ce
     for (const tSolvedCell& solved : cells) {
         cSC4NetworkCellInfo* cell = GetCellInfo(solved.cellKey);
         if (!cell) continue;
+        if (cell->buildable)
+            SC4_UNWIRED("cSC4NetworkTool::InsertOccupantsForSolvedCells: connection-piece / one-way update of an existing occupant not ported (a new occupant is made)");
         cell->hasOccupant = true;
         InsertNetworkOccupant(*cell, solved, out);                                       // vslot 0x128
     }
@@ -2012,6 +2022,8 @@ void cSC4NetworkTool::AddCellPreview(cSC4NetworkCellInfo& cell, const tSolvedCel
             return;
         }
     }
+    if (flags & (flags - 1))
+        SC4_UNWIRED("cSC4NetworkTool::AddCellPreview: preview of a two-network-type cell (SolveMultiTypeSeparation) not ported");
 }
 
 // i386 0x001262b4 (vslot 0xe0): a new occupant of the class `clsid` (0 = cSC4NetworkOccupant) over the cell's four corners.
@@ -2034,6 +2046,7 @@ void cSC4NetworkTool::CreateNetworkOccupant(cSC4NetworkCellInfo* cell, cSC4Netwo
     } else if (clsid == kGZCLSID_cSC4NetworkOccupantWithPreBuiltModel) {
         occupant = new cSC4NetworkOccupantWithPreBuiltModel();                           // the intersection pieces
     } else {
+        SC4_UNWIRED("cSC4NetworkTool::CreateNetworkOccupant: network occupant class not ported, a plain network occupant stands in");
         std::fprintf(stderr, "network tool: occupant class %08x not ported, using a plain network occupant\n", clsid);
         occupant = new cSC4NetworkOccupant();
     }
@@ -2450,6 +2463,7 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, cSC4NetworkConstructionCrew* crew
     if (validSteps_ > 0) {
         if (!place) {
             // UpdatePositionChangedPreviewsForPreviousSegments: not ported (anchored multi-segment previews).
+            SC4_UNWIRED("cSC4NetworkTool::PlaceNetwork: UpdatePositionChangedPreviewsForPreviousSegments (anchored multi-segment previews) not ported");
         } else {
             StartPlacing();                                                          // vslot 0x120
             DestroyHilightedOccupants();                                             // vslot 0xf8
@@ -2529,6 +2543,7 @@ std::uint32_t FirstTypeOf(std::uint32_t flags) {
 // for placement).
 void cSC4NetworkTool::DestroyOccupantsAndResolve(const std::vector<cSC4NetworkOccupant*>& occupants) {
     if (occupants.empty()) return;
+    SC4_UNWIRED("cSC4NetworkTool::DestroyOccupantsAndResolve: constraint satisfier Shutdown / Init before the re-solve not ported");
     INetworkToolHost* host = GetNetworkToolHost();
     forceReload_ = true;                       // +0x53
     const bool saved = unknown98_;             // +0x50, restored at the end

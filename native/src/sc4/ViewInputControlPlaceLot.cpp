@@ -1,6 +1,7 @@
 // cSC4ViewInputControlPlaceLot — see the header for the layout, the quirks and the seams. The addresses in
 // the comments are the original's (Sim City 4 Deluxe Editionsub 1.2.1, x86_64).
 #include "sc4/ViewInputControlPlaceLot.h"
+#include "platform/Unwired.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1252,6 +1253,7 @@ void cSC4ViewInputControlPlaceLot::GetBuildingPreviewModel() {
     // PARTIAL: the preview building model itself (the local grid helper's occupant, the model instances and
     // the cS3DTextureBinding grid) is not built. The port creates the preview building prop one step further
     // down and derives the same coverage categories / effect id / placement count from the building type.
+    SC4_UNWIRED("cSC4ViewInputControlPlaceLot::GetBuildingPreviewModel: preview model instances and the lot grid texture (cS3DTextureBinding) not built, a prop stands in");
     if (previewProp_ == nullptr) {
         if (cSC4LotConfigurationObject* object = configuration->GetPrimaryBuildingConfigurationObject()) {
             buildingRotation_ = object->orientation;

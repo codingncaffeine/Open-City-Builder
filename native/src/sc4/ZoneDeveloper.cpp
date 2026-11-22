@@ -5,6 +5,7 @@
 // original vtable slot of every such call.
 
 #include "sc4/ZoneDeveloper.h"
+#include "platform/Unwired.h"
 #include "sc4/DBSegment.h"
 
 #include <algorithm>
@@ -363,9 +364,9 @@ void cSC4ZoneDeveloper::DeferOccupantOperations(bool defer) {
 }
 
 // @ 0x10012959a. PARTIAL: the message dispatch, the highlight-scale word and the reload walk are
-// recovered. The occupant-removed path stops after DeleteLot: CreateLotRemnants (0x100129956) and the
-// road/rail connection helpers (0x10012a040, 0x10012a534) are not recovered, and the two plop cheat
-// commands (0x10012abe4, 0x10012ad80) are skipped, so those branches leave the city untouched.
+// recovered. The occupant-removed path stops after DeleteLot: CreateLotRemnants (0x100129956), the road/rail
+// connection helpers (0x10012a040, 0x10012a534) and PlopAllLotTypes (0x10012abe4) are recovered below but not called
+// from here yet, and PlopAllBuildingTypes (0x10012ad80) is not recovered, so those branches leave the city untouched.
 bool cSC4ZoneDeveloper::DoMessage(cIGZMessage2* message) {
     if (!message) return false;
     auto* standard = dynamic_cast<cIGZMessage2Standard*>(message);
@@ -404,16 +405,19 @@ bool cSC4ZoneDeveloper::DoMessage(cIGZMessage2* message) {
                 currentZoneType_ = static_cast<int>(zoneType);
                 DeleteLot(lot);                                     // primary vslot 0x118
                 if (zoneManager_ && zoneManager_->IsZoneTypeValid(currentZoneType_)) {
-                    // CreateLotRemnants(rect.x0, rect.z0, rect.x2 + 1 - rect.x0, rect.z2 + 1 - rect.z0,
-                    // lot->GetFacing()) is not recovered (0x100129956); the remnants are left unbuilt.
+                    // The original calls CreateLotRemnants(rect.x0, rect.z0, rect.x2 + 1 - rect.x0, rect.z2 + 1 - rect.z0,
+                    // lot->GetFacing()) here (0x100129956); the function is recovered below but not called from this path yet.
+                    SC4_UNWIRED("cSC4ZoneDeveloper::DoMessage: CreateLotRemnants after a lot's building is removed not called");
                 }
                 currentZoneType_ = 0;
             }
             const std::uint64_t removalKind = standard->GetData4();
             if (removalKind == 1 || removalKind == 2) {
-                // ConnectRoadToAnyAdjacentStreets (0x10012a040) is not recovered.
+                // The original calls ConnectRoadToAnyAdjacentStreets (0x10012a040), recovered below but not called here yet.
+                SC4_UNWIRED("cSC4ZoneDeveloper::DoMessage: ConnectRoadToAnyAdjacentStreets after a road removal not called");
             } else if (removalKind == 3) {
-                // ConnectStreetsAcrossRail (0x10012a534) is not recovered.
+                // The original calls ConnectStreetsAcrossRail (0x10012a534), recovered below but not called here yet.
+                SC4_UNWIRED("cSC4ZoneDeveloper::DoMessage: ConnectStreetsAcrossRail after a rail removal not called");
             }
         } else if (type == static_cast<std::int32_t>(kZoneMessageHighLightScale)) {
             if (void* data = standard->GetVoid2()) highlightScale_ = *static_cast<int*>(data);
@@ -421,9 +425,11 @@ bool cSC4ZoneDeveloper::DoMessage(cIGZMessage2* message) {
     } else if (type == static_cast<std::int32_t>(kZoneMessageCheatCode)) {
         const std::uint64_t command = standard->GetData1();
         if (command == kCheatPlopAllLots) {
-            // PlopAllLotTypes (0x10012abe4) is not recovered.
+            // The original runs PlopAllLotTypes (0x10012abe4), recovered below but not called here yet.
+            SC4_UNWIRED("cSC4ZoneDeveloper::DoMessage: plop-all-lots cheat (PlopAllLotTypes) not called");
         } else if (command == kCheatPlopAllBuildings) {
             // PlopAllBuildingTypes (0x10012ad80) is not recovered.
+            SC4_UNWIRED("cSC4ZoneDeveloper::DoMessage: plop-all-buildings cheat (PlopAllBuildingTypes) not ported");
         }
     } else if (type == static_cast<std::int32_t>(kZoneMessageCityInit)) {
         if (!terrainView_ && g_host) {
@@ -1357,8 +1363,7 @@ void cSC4ZoneDeveloper::SetOptions(bool swapOrientation, bool extendAsStreets, b
     examineBoundaries_ = examineBoundaries ? 1 : 0;
 }
 
-// @ 0x100130914. PARTIAL: the flag bookkeeping and the zone-validity test are recovered; OnZone and
-// UpdateHighlightTextures are part of the unrecovered parcellization pipeline.
+// @ 0x100130914: the flag bookkeeping, the zone-validity test, then OnZone and UpdateHighlightTextures (both below).
 void cSC4ZoneDeveloper::HighlightParcels(const SC4CellRegion<int>& region, int zoneType,
                                          const SC4Point<int>* origin, SC4CellRegion<int>** out) {
     lotChangesEnabled_ = 0;
@@ -1374,7 +1379,7 @@ void cSC4ZoneDeveloper::HighlightParcels(const SC4CellRegion<int>& region, int z
     highlightOrigin_ = nullptr;
 }
 
-// @ 0x10012b046. PARTIAL for the same reason: both branches call the unrecovered parcellization.
+// @ 0x10012b046: OnDezone for an invalid zone type, else OnZone (both below).
 void cSC4ZoneDeveloper::DoParcellization(const SC4CellRegion<int>& region, int zoneType, bool arg) {
     currentZoneType_ = zoneType;
     if (!zoneManager_ || !zoneManager_->IsZoneTypeValid(zoneType)) {
@@ -2987,6 +2992,7 @@ void cSC4ZoneDeveloper::PlopAllLotTypes() {
 // catalogue. Left out; see notes/ledger_pending/cSC4ZoneDeveloper.txt.
 void cSC4ZoneDeveloper::PlopAllBuildingTypes() {
     // SKIPPED: 0x10012ad80
+    SC4_UNWIRED("cSC4ZoneDeveloper::PlopAllBuildingTypes (0x10012ad80) not ported");
 }
 
 // @ 0x100130994. Writes one zone highlight overlay instance per cell of the region: for every pending

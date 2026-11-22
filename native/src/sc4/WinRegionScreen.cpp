@@ -1,4 +1,5 @@
 #include "sc4/WinRegionScreen.h"
+#include "platform/Unwired.h"
 #include "sc4/RegionDialogs.h"
 
 #include <algorithm>
@@ -471,6 +472,7 @@ bool cSC4WinRegionScreen::Init() {   // @ 0x100237bf2 (PARTIAL)
         }
         LoadGUI();
         hideCountdown_ = 2;
+        SC4_UNWIRED("cSC4WinRegionScreen::Init: the \"region_global\" effect (cSC4EffectsManager vslot 0x30) is not started");
         // PARTIAL: the "region_global" effect at +0x280 (0x1002386ec..0x1002387e9): the original asks the
         // cSC4EffectsManager (vslot 0x30) for the effect named "region_global", gives it a transform built from
         // SL::spTerrainMap (vslots 0x30 / 0x38 / 0x40 -> cell size and cell counts) and starts it (effect vslot
@@ -705,8 +707,8 @@ void cSC4WinRegionScreen::LoadGUI() {   // @ 0x10023927a
 void cSC4WinRegionScreen::PutCitiesInView() {   // @ 0x100236398 (PARTIAL)
     // One record per city place of the active region, in the original's formulas: the cell corner (x - 1 + 2^size, z - 1 + 2^size),
     // the map position (-37.49 * (z + 2^size) + 90.51 * x, 45.25 * (z + 2^size) + 18.75 * (x + 2^size)) and the default snapshots of
-    // the city's size. PARTIAL: the city file thumbnails (SC4ReadCityRegionViewThumbnails) and their resampling are not
-    // recovered, so every city keeps the default picture.
+    // the city's size, replaced by the city file's own thumbnails (the host's LoadCityThumbnails). PARTIAL: their resampling
+    // (RecalculateImagesFromCitySnapshots) is not recovered.
     IRegionScreenHost* host = RegionScreenHost();
     if (host) {
         std::vector<cISC4Region::cLocation> locations;
@@ -736,6 +738,7 @@ void cSC4WinRegionScreen::PutCitiesInView() {   // @ 0x100236398 (PARTIAL)
             IWinBuffer* image = nullptr;
             IWinBuffer* mask = nullptr;
             if (host->LoadCityThumbnails(location.x, location.z, &image, &mask) && image) {
+                SC4_UNWIRED("cSC4WinRegionScreen::PutCitiesInView: thumbnail resample by the map-position fraction, mask to alpha and span lists not done");
                 city.snapshot = image;
                 city.mask = mask;
             }
@@ -755,6 +758,7 @@ void cSC4WinRegionScreen::RecalculateImagesFromCitySnapshots(RegionViewCity&) { 
     // PARTIAL: Resample (0x10023c642), SC4MoveMaskToAlpha (0x10023ce10) and SC4CreateSpanList (0x10023cf28) work on
     // cIGZBuffer lock bits and are not recovered; the city snapshots (the double resample by (1 - fract(x)) /
     // (1 - fract(y))), the alpha masks and the three span lists stay unimplemented.
+    SC4_UNWIRED("cSC4WinRegionScreen::RecalculateImagesFromCitySnapshots: Resample / SC4MoveMaskToAlpha / SC4CreateSpanList not ported");
 }
 
 void cSC4WinRegionScreen::SetCitySnapshotsToDefault(RegionViewCity& city) {   // @ 0x100236b66
@@ -785,6 +789,7 @@ void cSC4WinRegionScreen::MakeWholeRegion() {   // @ 0x10023a66c (PARTIAL)
     // size (^64 cells + 1) and then copies it cell by cell into a fresh cISC4RegionalCity per city. It needs
     // cSC4WinLoadHeightField's location saver / file browser wiring and the regional-city image API (vslots
     // 0x800/0x8080/0xc0), which are not recovered.
+    SC4_UNWIRED("cSC4WinRegionScreen::MakeWholeRegion: build the region from a height-field bitmap not ported");
 }
 
 // ===================================================================================================================
@@ -794,8 +799,8 @@ void cSC4WinRegionScreen::MakeWholeRegion() {   // @ 0x10023a66c (PARTIAL)
 RegionCityRef* cSC4WinRegionScreen::GetOrCreateRegionalCity(const RegionViewCity& city, bool create) {   // @ 0x10023ae9c (PARTIAL)
     // PARTIAL: the original builds the city name from the region name (region vslot 0x28 vslots 0x40 / 0x48 +
     // city-list vslot 0x28) and then creates the cSC4RegionalCity through its constructor, Init (vslot 0x18),
-    // SetCitySize (0x40), SetPosition (0x30), SetName (0x110) and AddCity (list 0x60). cSC4RegionalCity is not
-    // recovered, so the find-or-create flow goes through the host; the lookup itself is the same slot the original
+    // SetCitySize (0x40), SetPosition (0x30), SetName (0x110) and AddCity (list 0x60). The port keeps the region's city list in
+    // the host, so the find-or-create flow goes through it; the lookup itself is the same slot the original
     // uses first (city list vslot 0x58).
     IRegionScreenHost* host = RegionScreenHost();
     if (!host) return nullptr;
@@ -1208,12 +1213,16 @@ bool cSC4WinRegionScreen::GZOnCommand(std::uint32_t command, std::uint64_t param
         }
         return true;
     }
-    if (command != 0x287259f6) return true;   // PARTIAL: only the button command is wired
+    if (command != 0x287259f6) {   // PARTIAL: only the button command is wired
+        SC4_UNWIRED("cSC4WinRegionScreen::GZOnCommand: a command other than a button or check box is not handled (unsure the original acts on it)");
+        return true;
+    }
     switch (param) {
     case 0x4a560000: {   // open the selected city
         if (getenv("SC4_DEBUG")) fprintf(stderr, "open city: selected=%p\n", view_ ? (void*)view_->GetSelectedCity() : nullptr);
         RegionViewCity* selected = view_ ? view_->GetSelectedCity() : nullptr;
         // PARTIAL: the original also sets the difficulty level on the application (cISC4App vslot 0x58) first.
+        SC4_UNWIRED("cSC4WinRegionScreen::GZOnCommand: difficulty level not set on the application (cISC4App vslot 0x58) before opening a city");
         RegionCityRef* cityRef = selected ? GetOrCreateRegionalCity(*selected, true) : nullptr;
         if (getenv("SC4_DEBUG")) fprintf(stderr, "open city: ref=%p\n", (void*)cityRef);
         if (cityRef && !LaunchRegionalCity(cityRef)) RestoreSignposts();
@@ -1254,6 +1263,7 @@ bool cSC4WinRegionScreen::GZOnCommand(std::uint32_t command, std::uint64_t param
         return true;
     }
     case 0x2a5b0000:   // new region: cSC4NewRegionDialog is not ported yet
+        SC4_UNWIRED("cSC4WinRegionScreen::GZOnCommand: the new-region dialog (cSC4NewRegionDialog) not ported");
         if (getenv("SC4_DEBUG")) fprintf(stderr, "region screen: the new-region dialog is not ported yet\n");
         return true;
     case 0x0a5510a9:   // the options menu's game options button
@@ -1323,11 +1333,11 @@ bool cSC4WinRegionScreen::GZOnCommand(std::uint32_t command, std::uint64_t param
     }
     default:
         if (getenv("SC4_DEBUG")) fprintf(stderr, "region screen: button %#llx not wired\n", static_cast<unsigned long long>(param));
+        SC4_UNWIRED("cSC4WinRegionScreen::GZOnCommand: region screen button not wired (import / export city, snapshot album, web links)");
         break;
     }
-    // PARTIAL: the new/load/delete region dialogs, the import/export city dialogs, the video / audio / game
-    // preferences windows, the snapshot album and the web links (0x10023b92a is 2739 bytes of that dispatch) are not
-    // recovered.
+    // PARTIAL: the new-region dialog, the import/export city dialogs, the snapshot album and the web links (0x10023b92a is
+    // 2739 bytes of that dispatch) are not recovered; load / delete region and the options dialogs are wired above.
     return true;
 }
 

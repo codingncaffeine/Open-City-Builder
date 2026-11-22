@@ -1,4 +1,5 @@
 #include "sc4/ResidentialSimulator.h"
+#include "platform/Unwired.h"
 #include "sc4/DBSegment.h"
 
 #include <algorithm>
@@ -1276,6 +1277,7 @@ void cSC4ResidentialSimulator::CopyProximity(int wealth) {
 
 // 7.1. PARTIAL: the ordinance decay products (education/health half) are 1.
 void cSC4ResidentialSimulator::ReadTunablePopulationValues(const cISCPropertyHolder* exemplar) {
+    SC4_UNWIRED("cSC4ResidentialSimulator::ReadTunablePopulationValues: ordinance decay products (education / health) fixed at 1");
     PopulationTuning& t = tuning_;
     t.eqDecay = 1.0f;
     t.hqDecay = 1.0f;

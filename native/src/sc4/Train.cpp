@@ -1,4 +1,5 @@
 #include "sc4/Train.h"
+#include "platform/Unwired.h"
 
 #include <algorithm>
 #include <cmath>
@@ -285,6 +286,7 @@ bool cSC4Train::DoAnimationTick(std::uint32_t unknown, float milliseconds) {
     }
     if (cars_.size() < desiredCars_) AddCarAtEnd();
     if (GetBehavior() != kStateCollide) TickFollowingCars(milliseconds);
+    else SC4_UNWIRED("cSC4Train::DoAnimationTick (0x00394646): derail wobble of a wrecked train (+0x300) not ported");
     if (!CheckAutomataFlag(kTrafficFlagStopped)) {
         standStill_ = 0.0f;
     } else if (0.01f < GetSpeedModifier()) {

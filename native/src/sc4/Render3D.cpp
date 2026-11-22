@@ -6,6 +6,7 @@
 // handling (DoMessage 0x100762b36, UpdateVisibleTerrainMetrics 0x1007630ca) and picking; the pending ledger file
 // says why.
 #include "sc4/Render3D.h"
+#include "platform/Unwired.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1015,6 +1016,7 @@ bool cSC43DRender::SetBackgroundPicture(cIGZBuffer* buffer, bool visible) {
     if (!buffer) return false;
     if (!mpGDriver) return false;
     backgroundPicture_ = buffer;
+    SC4_UNWIRED("cSC43DRender::SetBackgroundPicture: texture upload (nsTexUtil::SetupTexture) not ported, the picture is not drawn");
     return true;
 }
 
@@ -3017,8 +3019,14 @@ void cSC43DRender::SetShakeOffsetsAt(float now) {
 // ---------------------------------------------------------------------------------------------
 // Snapshots / picking (not ported; see the pending ledger file)
 // ---------------------------------------------------------------------------------------------
-bool cSC43DRender::TakeSnapshot(cIGZBuffer**, bool) { return false; }
-bool cSC43DRender::TakeSnapshot(cIGZString&, bool) { return false; }
+bool cSC43DRender::TakeSnapshot(cIGZBuffer**, bool) {
+    SC4_UNWIRED("cSC43DRender::TakeSnapshot(buffer) (0x100769718): view snapshot not ported");
+    return false;
+}
+bool cSC43DRender::TakeSnapshot(cIGZString&, bool) {
+    SC4_UNWIRED("cSC43DRender::TakeSnapshot(path) (0x100769760): view snapshot to a file not ported");
+    return false;
+}
 // Where the ray meets the terrain: the terrain view's pick, then again from 4 m higher (a ray that starts just under a slope),
 // and with `groundPlane` the y = 0 plane when the terrain was missed.
 bool cSC43DRender::PickTerrain(const float* origin, const float* direction, float* out, bool groundPlane, bool includeWater) {
@@ -3134,8 +3142,12 @@ bool cSC43DRender::PickTerrainAlways(int x, int y, float* out, bool includeWater
     if (length > 0.0f) { direction.x /= length; direction.y /= length; direction.z /= length; }
     return PickTerrainAlways(&origin.x, &direction.x, out, includeWater);
 }
-bool cSC43DRender::Pick(int, int, cISC4OccupantFilter*, s3d::cIS3DModelInstance*&) { return false; }
+bool cSC43DRender::Pick(int, int, cISC4OccupantFilter*, s3d::cIS3DModelInstance*&) {
+    SC4_UNWIRED("cSC43DRender::Pick(x, y) [64]: model picking under the cursor not ported");
+    return false;
+}
 bool cSC43DRender::Pick(int, int, const float*, const float*, cISC4OccupantFilter*, s3d::cIS3DModelInstance*&) {
+    SC4_UNWIRED("cSC43DRender::Pick(ray) [65]: model picking along a ray not ported");
     return false;
 }
 
@@ -3177,6 +3189,8 @@ bool cSC43DRender::DoMessage(cIGZMessage2* message) {
         if (viewUtilities_) QueueDirtyRectangleForBox(3, boxMin, boxMax, nullptr, extra);
     } else if (type == 0xc53d10aa) {
         ReadProperties();
+    } else if (type == 0x8acaa95f) {
+        SC4_UNWIRED("cSC43DRender::DoMessage: lighting-manager swap 0x8acaa95f not ported");
     }
     return true;
 }

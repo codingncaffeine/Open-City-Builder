@@ -473,11 +473,11 @@ public:
     void StopScreenShake(std::uint32_t serial) override;            // @ 0x10076929a
     void GetShakeOffsets(float& x, float& y) override;              // @ 0x10076937e
     void SetViewportClearColor(const float* color) override;        // @ 0x1007693a0
-    void ClearViewport(bool clearDepth) override;                   // @ 0x100766d5e (PARTIAL)
-    void ClearViewportWithSolidColor(const float* color, bool a, bool b) override;   // @ 0x100767716 (PARTIAL)
-    void DrawViewportRectangle(const cRZRect& rect, const float* color, bool a, bool b) override;   // @ 0x1007677da (PARTIAL)
+    void ClearViewport(bool clearDepth) override;                   // @ 0x100766d5e
+    void ClearViewportWithSolidColor(const float* color, bool a, bool b) override;   // @ 0x100767716
+    void DrawViewportRectangle(const cRZRect& rect, const float* color, bool a, bool b) override;   // @ 0x1007677da
     void DrawTexturedViewportRectangle(const cRZRect& rect, std::uint32_t texture, float alpha,
-                                       bool a, bool b) override;    // @ 0x1007695a2 (PARTIAL)
+                                       bool a, bool b) override;    // @ 0x1007695a2
     void EnableBackgroundPicture(bool enable) override;             // @ 0x1007697f6
     cIGZBuffer* GetBackgroundPicture(bool* visible) const override;  // @ 0x100769804
     bool SetBackgroundPicture(cIGZBuffer* buffer, bool visible) override;   // @ 0x10076981e (PARTIAL)
@@ -534,7 +534,7 @@ public:
     void TurnOnLighting(bool enable);                               // @ 0x100764062
     void AddDirtyRectangle(int kind, const cRZRect& rect, s3d::cIS3DModelInstance* model, int extra);   // @ 0x100769c44
     void DoViewTranslationChange3();                                // @ i386 0x00504c0c
-    void AddDirtyRectangleInternal(int kind, const cRZRect& rect, s3d::cIS3DModelInstance* model, int extra);   // @ 0x100769cca (PARTIAL)
+    void AddDirtyRectangleInternal(int kind, const cRZRect& rect, s3d::cIS3DModelInstance* model, int extra);   // @ 0x100769cca
     bool AttemptTranslatedViewUpdate(int dx, int dy);               // @ 0x1007658be
     void SetClipRect(const cRZRect& rect);                          // @ 0x10076160e
     void UnsetClipRect();                                           // @ 0x1007616de

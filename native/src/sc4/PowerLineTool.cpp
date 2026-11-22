@@ -3,6 +3,7 @@
 // original function / call site. UpdateOnZoneChange is marked PARTIAL: the reduced implementation keeps exactly
 // what its comment says (also listed under PARTIAL: in notes/ledger_pending/cSC4PowerLineTool.txt).
 #include "sc4/PowerLineTool.h"
+#include "platform/Unwired.h"
 
 #include <algorithm>
 #include <cfloat>
@@ -834,6 +835,7 @@ void cSC4PowerLineTool::PlacePoles(bool resolve) {
 // occupant-level work is reproduced here; only the update flag the rest of the tool reads is recovered.
 void cSC4PowerLineTool::UpdateOnZoneChange(SC4RectU rect, std::uint32_t network) {
     (void)rect;
+    SC4_UNWIRED("cSC4PowerLineTool::UpdateOnZoneChange: poles and wires of the changed rectangle are not destroyed / disconnected / re-routed");
     if (network != 0) unknown98_ = true;
 }
 
@@ -927,7 +929,7 @@ void cSC4PowerLineTool::SetTerrainHilight(int step) {
 
 // 0x1002ecde4: solve the drag, place the poles, optionally auto-connect to the neighbours, then drop the pole
 // infos again. The base calls AttemptNeighborConnections / PlaceNeighborConnections (0x10018bdc6 / 0x10018c640)
-// which the base port does not define, so they go through the host seam.
+// through the host seam, which calls the base tool's own AttemptNeighborConnections / PlaceNeighborConnections.
 bool cSC4PowerLineTool::DoNetworkSpecificPlacement(bool first, bool checkNeighbors) {
     wireCellCount_ = 0;
     ReleasePoleInfos();

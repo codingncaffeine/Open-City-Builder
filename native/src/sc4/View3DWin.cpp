@@ -1,5 +1,6 @@
 // cSC4View3DWin — see View3DWin.h for the layout, the vtable groups, the seams and the quirks.
 #include "sc4/View3DWin.h"
+#include "platform/Unwired.h"
 #include "platform/PerfLog.h"
 
 #include <chrono>
@@ -2881,10 +2882,8 @@ bool cSC4View3DWin::DoMessage(cIGZWin* window, cGZMessage& message) {
     return true;
 }
 
-// DoPanelCommandGUI (0x10078c2dc, 837 bytes). PARTIAL: the four panel toggles are recovered, but the
-// "establish city" path needs cSC4View3DWin::DoEstablishCityDialog (0x10078ff30, 1625 bytes, not recovered) and
-// the panel commands are driven from HandleButtonActivated (also PARTIAL), so the function is registered as
-// recovered-partial rather than claiming the whole body.
+// DoPanelCommandGUI (0x10078c2dc, 837 bytes): the four panel toggles. The "establish city" dialog
+// (cSC4View3DWin::DoEstablishCityDialog, 0x10078ff30) is the host's (ShowEstablishCityDialog).
 void cSC4View3DWin::DoPanelCommandGUI(std::uint32_t command) {
     // The panel's own toggle button (GetChildAsRecursive(id, cIGZWinBtn); the caller releases it).
     auto panelButton = [this](std::uint32_t id) -> gz::cIGZWinBtn* {
@@ -3406,6 +3405,9 @@ bool cSC4View3DWin::ProcessCheatCode(std::uint32_t id, const cRZCmdLine& line) {
     default:
         // GOL (cSC4ViewInputControlGameOfLife), TastyZots / Zoneria (cSC4RealisticOccupantFilter's flags), Recorder
         // (cSC4WinAnimationRecorder) and the debug-only LotPlop / BuildingPlop / toll are not ported yet.
+        if (id == kCheatGameOfLife || id == kCheatToggleZots || id == kCheatToggleZones || id == kCheatAnimationRecorder ||
+            id == kCheatLotPlop || id == kCheatBuildingPlop || id == kCheatTollBooth)
+            SC4_UNWIRED("cSC4View3DWin::ProcessCheatCode: GOL / TastyZots / Zoneria / Recorder / LotPlop / BuildingPlop / toll cheats not ported");
         return false;
     }
 }

@@ -4,14 +4,12 @@
 // its slot); cSC4Lot and cSC4LotConfiguration are used directly through the recovered methods of
 // Lot.h / LotConfiguration.h. The comments name the original vtable slot of every such call.
 //
-// The growth pass itself (Grow's candidate collection and build loop, TakeOverAbandoned, the three
-// ListCandidateLots_* passes, Build/BuildFarm/PickBuilding, the compatibility predicates, FindNetworks
-// and UpdatePopulation) is PARTIAL: it needs cISC4GrowthDeveloper's growth/decline lists and the
-// occupant-manager occupant interface, neither of which is recovered. Grow still performs its whole
-// per-pass setup (the part that reads the growth developer and fills the attempt record), then stops;
-// the reason is repeated on every partial function below.
+// The growth pass (Grow, the existing-lot candidate search, Build, PickBuilding, the compatibility predicates,
+// FindNetworks, TakeOverAbandoned and Decline) is recovered. PARTIAL: the aggregation and subdivision searches and
+// their Perform* steps, IsAggregationLegal, BuildFarm and UpdatePopulation (see TractDeveloper.h).
 
 #include "sc4/TractDeveloper.h"
+#include "platform/Unwired.h"
 
 #include <algorithm>
 #include <bit>
@@ -937,6 +935,7 @@ void cSC4TractDeveloper::UpdatePopulation(const GrowthProfile& profile) {
     // population of the matching developer type with cRZRandom seeds derived from the tract
     // coordinates. That needs the occupant-manager/occupant interfaces of the unrecovered building
     // occupant path, so this port leaves the population untouched.
+    SC4_UNWIRED("cSC4TractDeveloper::UpdatePopulation (0x10013beb6): tract population rescale not ported");
     (void)profile;
 }
 
@@ -1541,24 +1540,34 @@ int cSC4TractDeveloper::TakeOverAbandoned() {
 // PARTIAL: the other growth decisions (see the file comment)
 //==================================================================================================
 
-int cSC4TractDeveloper::ListCandidateLots_Aggregation() { return 0; }   // PARTIAL (0x100137b04)
-int cSC4TractDeveloper::ListCandidateLots_Subdivision() { return 0; }   // PARTIAL (0x100137f44)
+int cSC4TractDeveloper::ListCandidateLots_Aggregation() {   // PARTIAL (0x100137b04)
+    SC4_UNWIRED("cSC4TractDeveloper::ListCandidateLots_Aggregation: lot aggregation candidates not ported");
+    return 0;
+}
+int cSC4TractDeveloper::ListCandidateLots_Subdivision() {   // PARTIAL (0x100137f44)
+    SC4_UNWIRED("cSC4TractDeveloper::ListCandidateLots_Subdivision: lot subdivision candidates not ported");
+    return 0;
+}
 
 int cSC4TractDeveloper::BuildFarm(CandidateLot* candidate) {     // PARTIAL (0x10013845e)
+    SC4_UNWIRED("cSC4TractDeveloper::BuildFarm: farm building and fields not ported");
     (void)candidate;
     return 0;
 }
 
 void cSC4TractDeveloper::PerformAggregation(CandidateLot* candidate, cSC4Lot*& out) {  // PARTIAL 0x100139dd2
+    SC4_UNWIRED("cSC4TractDeveloper::PerformAggregation: merging lots not ported");
     (void)candidate;
     out = nullptr;
 }
 
 void cSC4TractDeveloper::PerformSubdivision(CandidateLot* candidate) {   // PARTIAL (0x10013a04e)
+    SC4_UNWIRED("cSC4TractDeveloper::PerformSubdivision: splitting lots not ported");
     (void)candidate;
 }
 
 bool cSC4TractDeveloper::IsAggregationLegal(CandidateLot* candidate) {   // PARTIAL (0x10013ae4a)
+    SC4_UNWIRED("cSC4TractDeveloper::IsAggregationLegal: aggregation legality test not ported");
     (void)candidate;
     return false;
 }

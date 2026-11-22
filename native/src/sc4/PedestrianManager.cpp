@@ -1,6 +1,7 @@
 // cSC4PedestrianManager — see PedestrianManager.h for the layout, the messages, the seams and the quirks. Every function
 // here is a hand port of the exported decompile; the building property arrays are the only PARTIAL.
 #include "sc4/PedestrianManager.h"
+#include "platform/Unwired.h"
 
 #include <cmath>
 #include <cstring>
@@ -163,6 +164,7 @@ float cSC4PedestrianManager::GetCommotionMultiplier(ITrafficNetworkMapOccupant* 
 // 0x1000f121c PARTIAL: the building property arrays (0xe9aee3dc / 0xe9aee3dd) that name the response groups and flags are
 // unrecovered; only the base traffic handling runs.
 bool cSC4PedestrianManager::HandleNewBuilding(IAutomataBuildingOccupant* building) {
+    SC4_UNWIRED("cSC4PedestrianManager::HandleNewBuilding: per-building pedestrians from property arrays 0xe9aee3dc / 0xe9aee3dd not spawned");
     return cSC4TrafficAutomataManager::HandleNewBuilding(building);
 }
 

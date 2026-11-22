@@ -2,6 +2,7 @@
 // port of the exported decompile; where the decompiler dropped SIMD lanes, arguments or the float/int rounding idiom the
 // disassembly was used and the comment names the address (scripts/dec_addrs.py, /disassemble_function).
 #include "sc4/Vehicle.h"
+#include "platform/Unwired.h"
 #include <cstdlib>
 
 #include <algorithm>
@@ -1526,6 +1527,7 @@ bool cSC4Vehicle::DoPlayerDriveOffRoadTick(float /*unused*/, tAutomataStatePlaye
         direction = forward;
     } else {
         // PARTIAL: the reflected step is kept as "stay put and stop" (see the function comment).
+        SC4_UNWIRED("cSC4Vehicle::DoPlayerDriveOffRoadTick: collision reset to the network and speed reflection not reconstructed (stops instead)");
         state->drivePos54 = pathPos_;
         state->driveDir60 = direction;
         speedTween_.SetDesired(0.0f, 0.0f);
@@ -1703,6 +1705,7 @@ bool cSC4Vehicle::DoPlayerDriveTick(float milliseconds) {
     if (!vehicleHost_ || !vehicleHost_->FindPlayerDriveParams(this, &params) || !params) return false;
     const float damage = static_cast<float>(static_cast<std::uint32_t>(state->damage70));
     if (damage > params->F(0x5c)) return true;
+    SC4_UNWIRED("cSC4Vehicle::DoPlayerDriveTick: dynamic-particle writes (+0x90) and the skid path query (path info vslot 0x138) not ported");
     const float reverseBefore = state->history[1];
     const float easedSpeed = EasedTween(speedTween_);
     if (trafficHost_) {

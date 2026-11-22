@@ -1228,7 +1228,7 @@ void cSTEOverlayManager::UpdateRingDecalOverlays(const cRingDecal& ring, const s
 
     // 0 top cap, 1 bottom cap, 2 left middle band, 3 right middle band, 4 left upper corner, 5 left lower corner,
     // 6 right upper corner, 7 right lower corner. (The original's sixteen SIMD blocks assign the same tiles; the
-    // slot -> rectangle mapping is the part its listing does not resolve - see the PARTIAL note.)
+    // slot -> rectangle mapping is the part its listing does not resolve, so the order of the slots is a reconstruction.)
     const cRZRect tiles[8] = {
         cRZRect{atTop10.outerLo, it, atTop10.outerHi, top10},
         cRZRect{atBottom10.outerLo, bottom10, atBottom10.outerHi, ib},

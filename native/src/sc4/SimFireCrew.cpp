@@ -1,4 +1,5 @@
 #include "sc4/SimFireCrew.h"
+#include "platform/Unwired.h"
 
 #include <cfloat>
 #include <cmath>
@@ -339,6 +340,7 @@ void cSC4SimFireCrew::SetupFireCrew() {
         SendFireCrewMessage(kMessageFireCrewHoseOn, truck_, kCompetenceSoundIDs[level_], 0, 0, 0);
     } else {
         // PARTIAL: the original moves the figure to the engine's other side when this one is off the engine's network lot.
+        SC4_UNWIRED("cSC4SimFireCrew::SetupFireCrew: off-lot check that moves the crew figure to the engine's other side not ported");
         cS3DTransform place;
         truck_->GetTransform(place);
         cS3DVector3 side{0.0f, 0.0f, -1.0f};

@@ -1,4 +1,5 @@
 #include "sc4/SignpostOccupant.h"
+#include "platform/Unwired.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -365,6 +366,7 @@ bool cSC4SignpostOccupant::DoMessage(cIGZMessage2* message) {
             cursorVisible_ = !cursorVisible_;   // this[0x109] ^= 1
             tickMs_ = 0;
         }
+        SC4_UNWIRED("cSC4SignpostOccupant::DoMessage: tail call to cSC4PropOccupant::DoMessage (animated model frame update) not made");
     }
     return DoPropMessage(message);
 }
