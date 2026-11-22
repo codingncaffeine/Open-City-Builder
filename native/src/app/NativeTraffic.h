@@ -15,4 +15,5 @@ sc4::cSC4SimGrid<std::uint8_t>* NativeTrafficCommercialMap();
 // traffic vslot 0x130 GetConnectedDestinationCount(lot, kind): the most destinations of `kind` in any of the lot's subnetworks
 std::uint32_t NativeTrafficConnectedDestinationCount(const sc4::cISCPropertyHolder* lot, int kind);
 
+void NativeAccidentCheck(int tries);   // kit command `accidentcheck N`
 }  // namespace native

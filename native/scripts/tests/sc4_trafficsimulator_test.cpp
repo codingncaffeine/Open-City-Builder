@@ -1,3 +1,4 @@
+#include <set>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
@@ -116,6 +117,18 @@ struct Host : ITrafficHost {
     float funding = 1.0f;
     bool rightHand = true;
     std::map<std::uint32_t, short> grids;
+    // CheckForAccident
+    float visible[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    std::set<std::pair<int, int>> pieces;
+    std::vector<std::array<std::uint32_t, 4>> accidents;   // x, z, type, ms
+    std::vector<std::pair<int, int>> accidentMessages;
+    bool VisibleTerrainRect(float out[4]) override { for (int i = 0; i < 4; ++i) out[i] = visible[i]; return true; }
+    bool CreateAccidentAtCell(int x, int z, int type, std::uint32_t ms) override {
+        if (!pieces.count({x, z})) return false;
+        accidents.push_back({std::uint32_t(x), std::uint32_t(z), std::uint32_t(type), ms});
+        return true;
+    }
+    void PostAccidentMessage(int x, int z) override { accidentMessages.emplace_back(x, z); }
     std::vector<std::vector<std::int32_t>> ordinances;
 
     // lots by cell, separately per lot-manager filter
@@ -278,7 +291,7 @@ int main() {
     CHECK(std::fabs(pct[2].value - 0.40f) < 1e-6f);
     // default funding curve (0, 0.02) (100, -0.01) (120, -0.04) since the exemplar has none
     CHECK(std::fabs(sim.FundingCurve().GetOutputValue(100.0f) + 0.01f) < 1e-6f);
-    CHECK(t.value_ff8 == 10.0f && t.value_ffc == 60.0f && t.railAccidentChance == 1.0f);
+    CHECK(t.accidentDurationSeconds == 10.0f && t.accidentIntervalSeconds == 60.0f && t.railAccidentChance == 1.0f);
 
     // ordinances adjust wealth classes 1..3 (clamped to 0..100)
     host.ordinances = {{5, 5, 5, 0, 0, 0, 0, 0, 0}, {-100, 200, 0, 0, 0, 0, 0, 0, 0}};
@@ -1230,6 +1243,34 @@ int main() {
         host.listed.clear();
     }
 
+    {   // CheckForAccident (i386 0x00059a46): the published accident-prone intersections (FinishedAccidentProneList copies the
+        // working list and clears it); an intersection outside the visible cells (min floored, max rounded up), one whose chance
+        // the draw beats, or one without a network piece is passed over; the first that hits gets an accident of type 2 lasting
+        // accidentDurationSeconds (10 s) and the 0x0c05e4c3 message, and the check stops there.
+        cSC4TrafficSimulator acc(&host, &random);
+        host.visible[0] = 160.0f; host.visible[1] = 160.0f; host.visible[2] = 330.0f; host.visible[3] = 330.0f;   // cells 10..21
+        acc.AddIntersectionToAccidentProneList(5, 15, 1.0f);    // outside (x < 10)
+        acc.AddIntersectionToAccidentProneList(15, 22, 1.0f);   // outside (z > 21)
+        acc.AddIntersectionToAccidentProneList(12, 12, 0.0f);   // never hits
+        acc.AddIntersectionToAccidentProneList(20, 20, 1.0f);   // no piece
+        CHECK(acc.AccidentProneIntersections().empty());
+        acc.FinishedAccidentProneList();
+        CHECK(acc.AccidentProneIntersections().size() == 4);
+        host.pieces = {{5, 15}, {15, 22}, {12, 12}};            // only the visible-cell test keeps the outside two out
+        acc.ClearAccidentClock();
+        acc.CheckForAccident();
+        CHECK(host.accidents.empty() && host.accidentMessages.empty());
+        host.pieces = {{20, 20}, {21, 21}};
+        acc.AddIntersectionToAccidentProneList(21, 21, 1.0f);   // inside, on the rounded-up edge
+        acc.FinishedAccidentProneList();
+        CHECK(acc.AccidentProneIntersections().size() == 1);   // the new cycle's list replaced the old one
+        acc.CheckForAccident();                                  // held back: the real-time spacing has not passed
+        CHECK(host.accidents.empty());
+        acc.ClearAccidentClock();
+        acc.CheckForAccident();
+        CHECK(host.accidents.size() == 1 && host.accidents[0] == (std::array<std::uint32_t, 4>{21, 21, 2, 10000}));
+        CHECK(host.accidentMessages.size() == 1 && host.accidentMessages[0] == std::make_pair(21, 21));
+    }
 
     if (failures) return 1;
     std::printf("sc4_trafficsimulator: all passed\n");

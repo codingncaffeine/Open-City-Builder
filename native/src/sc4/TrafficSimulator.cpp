@@ -40,8 +40,8 @@ constexpr std::uint32_t kNeighborConnectionCost = 0xca947077;
 constexpr std::uint32_t kConnectionTrafficVolumeBase = 0xaa9ea81a;   // + trip type: 9 volumes per network type
 constexpr std::uint32_t kConnectionTrafficVolumeArrivedBase = 0xaa9ea81d;  // + trip type: last cycle's volumes
 
-constexpr std::uint32_t kExemplarProperty_curveF78 = 0xca5f7821, kExemplarProperty_curveFB8 = 0x4be09ec9,
-                        kExemplarProperty_curveFD8 = 0x4be09eca, kExemplarProperty_fundingCurve = 0x0bd86fd4;
+constexpr std::uint32_t kExemplarProperty_curveF78 = 0xca5f7821, kExemplarProperty_accidentByCongestion = 0x4be09ec9,
+                        kExemplarProperty_accidentByCapacity = 0x4be09eca, kExemplarProperty_fundingCurve = 0x0bd86fd4;
 }  // namespace
 
 const std::array<std::uint8_t, 9> cSC4TrafficSimulator::kTravelModeToTransitNetwork = {0, 1, 1, 2, 1, 2, 3, 4, 5};
@@ -686,12 +686,12 @@ bool cSC4TrafficSimulator::ReadSimulatorTunableValues(const cISCPropertyHolder* 
         else curve.SetResponseCurveData(fallback);
     };
     loadCurve(curveF78_, kExemplarProperty_curveF78, {{0.0f, 0.0f}, {1.0f, 1.0f}});
-    loadCurve(curveFB8_, kExemplarProperty_curveFB8, {{0.25f, 0.0f}, {1.0f, 0.05f}, {2.0f, 0.25f}});
-    loadCurve(curveFD8_, kExemplarProperty_curveFD8, {{0.0f, 1.0f}, {1000.0f, 1.0f}});
-    t.value_ff8 = 10.0f;
-    H::GetPropertyValue(exemplar, 0x4be09ecb, t.value_ff8);
-    t.value_ffc = 60.0f;
-    H::GetPropertyValue(exemplar, 0x4be09ecc, t.value_ffc);
+    loadCurve(accidentByCongestion_, kExemplarProperty_accidentByCongestion, {{0.0f, 0.0f}, {0.25f, 0.0f}, {1.0f, 0.05f}, {2.0f, 0.25f}});
+    loadCurve(accidentByCapacity_, kExemplarProperty_accidentByCapacity, {{0.0f, 1.0f}, {1000.0f, 1.0f}});
+    t.accidentDurationSeconds = 10.0f;
+    H::GetPropertyValue(exemplar, 0x4be09ecb, t.accidentDurationSeconds);
+    t.accidentIntervalSeconds = 60.0f;
+    H::GetPropertyValue(exemplar, 0x4be09ecc, t.accidentIntervalSeconds);
     loadCurve(fundingCurve_, kExemplarProperty_fundingCurve, {{0.0f, 0.02f}, {100.0f, -0.01f}, {120.0f, -0.04f}});
     t.railAccidentChance = 1.0f;
     H::GetPropertyValue(exemplar, 0x0bd86fd5, t.railAccidentChance);

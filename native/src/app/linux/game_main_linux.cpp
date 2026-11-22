@@ -39,6 +39,7 @@
 #include "app/NativeCitySystems.h"
 #include "app/NativeSnapshot.h"
 #include "app/NativeCheats.h"
+#include "app/NativeTraffic.h"
 #include "app/NativeKeyboard.h"
 #include "rz/cRZKeyboard.h"
 #include "gz/CommandServer.h"
@@ -1431,6 +1432,10 @@ int RunScenario(const std::string& path) {
         } else if (command == "tunnels") {   // tunnels: every tunnel portal, its model, its other end and its paths
             native::NativeTunnelReport();
             native::NativeTrafficTunnelReport();
+        } else if (command == "accidentcheck") {   // accidentcheck N: up to N traffic accident checks, until one makes an accident
+            int tries = 1;
+            words >> tries;
+            native::NativeAccidentCheck(tries);
         } else if (command == "plantwear") {   // plantwear: every power plant's wear just past its failure limit (the next month fails it)
             native::NativeWearOutPowerPlants();
         } else if (command == "powerfunding") {   // powerfunding PERCENT: the power department's funding (as the budget window sets it)

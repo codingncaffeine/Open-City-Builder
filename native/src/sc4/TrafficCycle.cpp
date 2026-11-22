@@ -5,6 +5,7 @@
 // Not modelled yet (PARTIAL): ferries and water routes (cycle state 19). The save record of a city file is replayed as it was read
 // (TrafficSimulator.cpp), a new city writes the original's fresh record.
 #include "sc4/TrafficSimulator.h"
+#include "sc4/RandomIterator.h"
 #include "platform/Unwired.h"
 
 #include <algorithm>
@@ -244,6 +245,9 @@ bool cSC4TrafficSimulator::Init() {
     for (std::uint32_t m : {0x99ef1142u, 0x99ef1143u, 0x26d31ec1u, 0xe8bda2e7u, 0xc53d10aau, 0x8a0d15dau, 0xea0d163eu, 0x08dac3e7u, 0xc2c09554u})
         host_->AddNotification(target, m);
     host_->CityCellCount(cellsX_, cellsZ_);
+    nextAccidentCheck_ = 0;                  // i386 Init: the accident clock counts seconds from here
+    accidentTimer_.SetUnits(cRZTimer::kSeconds);
+    accidentTimer_.Start();
     host_->EnsureDepartments(tunables_.value_de0, tunables_.value_de4);   // 0x0071f1af..0x0071f45e
     InitGrid(cellsX_, cellsZ_);
     AdoptSavedGrid(airMap_, 0x89d5c3a2);
@@ -1619,6 +1623,15 @@ void cSC4TrafficSimulator::CreateMaps() {
                 if (n != 2 && n != 3) b = std::max(b, vol);
                 const float r = vol * info.inverseCapacity;
                 d = std::max(d, r);
+                // i386 WorkOnCreateMaps: a road or street cell joining more than three pieces is accident prone with the chance
+                // accidentByCongestion(volume / capacity) x accidentByCapacity(capacity)
+                if (std::uint32_t(n - 1) < 2u && info.connectionCount > 3) {
+                    const float byCongestion = accidentByCongestion_.GetOutputValue(r);
+                    if (0.0f < byCongestion) {
+                        const float chance = accidentByCapacity_.GetOutputValue(1.0f / info.inverseCapacity) * byCongestion;
+                        if (0.0f < chance) AddIntersectionToAccidentProneList(x, z, chance);
+                    }
+                }
                 const std::size_t slot = (info.flag7 & 1) ? 13 : std::size_t(std::min<int>(info.pieceType, 12));
                 TrafficStatsRow& row = statsWork_[slot];
                 sum[slot] += r;
@@ -1652,6 +1665,45 @@ void cSC4TrafficSimulator::CreateMaps() {
     counters_.c930 = cellCounts_[10]; counters_.c938 = cellCounts_[12];
     UpdateRoadsBudget();
     UpdateMassTransitBudget();
+    FinishedAccidentProneList();
+}
+
+void cSC4TrafficSimulator::AddIntersectionToAccidentProneList(int x, int z, float chance) { accidentProne_.push_back({x, z, chance}); }
+
+// The cycle's list replaces the published one (the original copies, then clears its working list).
+void cSC4TrafficSimulator::FinishedAccidentProneList() {
+    accidentProneFinished_ = accidentProne_;
+    accidentProne_.clear();
+}
+
+// Monthly, at most once per accidentIntervalSeconds of real time: the published accident-prone intersections in a shuffled
+// order, each drawn against its chance; the first one that hits, lies in the visible terrain rectangle (as cells: min floored,
+// max rounded up) and has a network piece gets an accident (type 2, accidentDurationSeconds long) and the 0x0c05e4c3 message.
+void cSC4TrafficSimulator::CheckForAccident() {
+    const std::uint32_t now = accidentTimer_.GetElapsedTimeU32();
+    if (Debug()) std::fprintf(stderr, "traffic: accident check at %u s (next %u), %zu prone intersections\n", now, nextAccidentCheck_, accidentProneFinished_.size());
+    if (now <= nextAccidentCheck_ && !forceAccidentCheck_) return;
+    forceAccidentCheck_ = false;
+    const float interval = tunables_.accidentIntervalSeconds <= 0.0f ? 0.0f : tunables_.accidentIntervalSeconds;
+    nextAccidentCheck_ = now + std::uint32_t(std::int64_t(interval));
+    float rect[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    host_->VisibleTerrainRect(rect);
+    const int minX = int(std::floor(rect[0] * 0.0625f)), minZ = int(std::floor(rect[1] * 0.0625f));
+    const int maxX = int(std::ceil(rect[2] * 0.0625f)), maxZ = int(std::ceil(rect[3] * 0.0625f));
+    LinearRandomIterator order(int(accidentProneFinished_.size()), false);
+    order.Reset(true);
+    std::uint32_t index = 0;
+    while (order.Next(index)) {
+        const PotentialAccident& candidate = accidentProneFinished_[index];
+        const float draw = float(random_->RandomDoubleRangeUniform(0.0, 1.0));
+        if (candidate.chance <= draw) continue;
+        if (candidate.x < minX || candidate.z < minZ || maxX < candidate.x || maxZ < candidate.z) continue;
+        const float ms = tunables_.accidentDurationSeconds * 1000.0f;
+        if (!host_->CreateAccidentAtCell(candidate.x, candidate.z, 2, ms <= 0.0f ? 0u : std::uint32_t(std::int64_t(ms)))) continue;
+        host_->PostAccidentMessage(candidate.x, candidate.z);
+        if (Debug()) std::fprintf(stderr, "traffic: accident at %d,%d (chance %.4f, %zu prone)\n", candidate.x, candidate.z, double(candidate.chance), accidentProneFinished_.size());
+        return;
+    }
 }
 
 // §4.10
@@ -1883,6 +1935,7 @@ void cSC4TrafficSimulator::DoMonthlySimulation() {
     ApplyRoadFunding(roads);
     ApplyMassTransitFunding(transit);
     UpdateStrikes();
+    CheckForAccident();
     host_->RecordHistory(0xea5ba01d, std::uint32_t(std::int64_t(statsPublished_[0].average * 100.0f)));
     host_->RecordHistory(0x8a5d4116, std::uint32_t(std::int64_t(avgCarCommute_ * 25.0f)));
     for (std::uint32_t i = 0; i < 9; ++i) host_->RecordHistory(0xabb8faac + i, typeCountsPublished_[i]);

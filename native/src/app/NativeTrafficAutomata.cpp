@@ -628,4 +628,16 @@ void NativeFreightReport(int x0, int z0, int x1, int z1) {
 namespace native {
 // The automata tuning's boolean 0x49be9565 (the original's sTuningParams + 0xf9), read by the regional city's connection pass.
 bool NativeDriveSideFlag() { return sc4::AutomataTuning().f219fd; }
+// cSC4TrafficSimulator::CheckForAccident's accident: the vehicle manager's (SL::spCity vslot 0xac) CreateAccident on the network
+// piece the traffic map holds at the cell (tile occupant, as a city occupant); false when the cell has none.
+bool NativeCreateTrafficAccidentAtCell(int x, int z, int type, std::uint32_t milliseconds) {
+    auto* map = Component<sc4::cSC4TrafficNetworkMap>(sc4::CityComponent::TrafficNetwork);
+    sc4::TrafficTileInfo* tile = map ? map->SafeGetTileInfoAtCell(x, z) : nullptr;
+    if (!tile || !tile->occupant) return false;
+    auto* vehicles = Component<sc4::cSC4TrafficAutomataManager>(sc4::CityComponent::VehicleManager);
+    if (!vehicles) return false;
+    vehicles->CreateAccident(tile->occupant->AsOccupant(), type, milliseconds);
+    return true;
+}
+
 }  // namespace native

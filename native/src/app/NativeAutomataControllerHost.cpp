@@ -177,6 +177,21 @@ bool NativeControllerManagerNow(float& time, std::int32_t& day) {
     return true;
 }
 
+// The controller manager's AddControllersFromOccupantGroup(group, occupant, position) / RemoveControllers(occupant): a traffic
+// accident's controllers.
+bool NativeAddControllersFromOccupantGroup(const char* group, sc4::cISC4Occupant* occupant, const float* position) {
+    auto* manager = CityComponentAs<cSC4AutomataControllerManager>(CityComponent::AutomataControllerManager);
+    const bool ok = manager && occupant && manager->AddControllersFromOccupantGroup(cRZString(group), occupant, position);
+    if (std::getenv("SC4_DEBUG"))
+        std::fprintf(stderr, "controllers: group %s at %.0f,%.0f -> %s\n", group, position ? position[0] : 0.0f, position ? position[2] : 0.0f,
+                     ok ? "added" : "none");
+    return ok;
+}
+void NativeRemoveOccupantControllers(sc4::cISC4Occupant* occupant) {
+    auto* manager = CityComponentAs<cSC4AutomataControllerManager>(CityComponent::AutomataControllerManager);
+    if (manager && occupant) manager->RemoveControllers(occupant);
+}
+
 void InstallAutomataControllerHost() { static NativeAutomataControllerHost s; sc4::SetAutomataControllerHost(&s); }
 
 }  // namespace native

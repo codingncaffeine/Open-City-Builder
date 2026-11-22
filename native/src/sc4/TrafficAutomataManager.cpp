@@ -1334,19 +1334,16 @@ void cSC4TrafficAutomataManager::PositionToCell(float x, float z, int& cellX, in
     if (ITrafficAutomataManagerHost* host = TrafficHostOrGlobal()) host->WorldToCell(x, z, cellX, cellZ);
 }
 
+// The accident's controllers (i386 cSC4TrafficEffectManager::CreateAccident 0x000ce1da / its removal): the occupant group
+// kTrafficAccidentControllerGroupName ("traffic_accident_2", set by a static initializer) at the vehicle's position; removing
+// takes every controller of the occupant.
 bool cSC4TrafficAutomataManager::AttachAccidentController(cISC4Occupant* occupant, const float* position) {
-    (void)occupant;
-    (void)position;
-    // PARTIAL: the traffic-accident controller service (city vslot 0x178, group "kTrafficAccidentControllerGroupName")
-    // is unrecovered; no seam carries it yet.
-    SC4_UNWIRED("cSC4TrafficAutomataManager::AttachAccidentController: traffic-accident controller service (city vslot 0x178) not ported");
-    return false;
+    ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
+    return host && host->AddControllersFromOccupantGroup("traffic_accident_2", occupant, position);
 }
 
 void cSC4TrafficAutomataManager::DetachController(cISC4Occupant* occupant) {
-    (void)occupant;
-    // PARTIAL: same service as AttachAccidentController.
-    SC4_UNWIRED("cSC4TrafficAutomataManager::DetachController: traffic-accident controller service not ported");
+    if (ITrafficAutomataManagerHost* host = TrafficHostOrGlobal()) host->RemoveOccupantControllers(occupant);
 }
 
 }  // namespace sc4

@@ -46,6 +46,10 @@ float NativeAttractionCommotion(const float* xyz);   // app/NativeAutomataScript
 }
 
 namespace native { int NativeViewZoom(); }
+namespace native {   // NativeAutomataControllerHost.cpp
+bool NativeAddControllersFromOccupantGroup(const char* group, sc4::cISC4Occupant* occupant, const float* position);
+void NativeRemoveOccupantControllers(sc4::cISC4Occupant* occupant);
+}
 namespace native {
 sc4::IAutomataPlayerDriveControl* NativeCreatePlayerDriveControl();   // app/NativePlayerDrive.cpp
 void NativeSetPlayerDriveControl(sc4::IAutomataPlayerDriveControl* control);
@@ -333,6 +337,10 @@ public:
     }
     ITrafficAutomataAutomaton* AsTrafficAutomaton(IAutomataAutomaton* automaton) override { return TrafficAutomatonView(automaton); }
     cISC4Occupant* AsCityOccupant(IAutomataOccupant* view) override { return CityOccupantOf(view); }   // a dispatch's source station
+    bool AddControllersFromOccupantGroup(const char* group, cISC4Occupant* occupant, const float* position) override {
+        return native::NativeAddControllersFromOccupantGroup(group, occupant, position);
+    }
+    void RemoveOccupantControllers(cISC4Occupant* occupant) override { native::NativeRemoveOccupantControllers(occupant); }
     IAutomataOccupant* AsAutomataOccupant(cISC4Occupant* occupant) override { return CityOccupantView(occupant); }   // a response's road and building
     ITrafficNetworkOccupant* AsTrafficNetworkOccupant(IAutomataNetworkOccupant*) override { return nullptr; }
     // GetRandomCreationPoint's network path: the lot at a cell and the traffic network map's surrounding roads.

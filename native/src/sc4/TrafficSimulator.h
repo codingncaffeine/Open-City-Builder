@@ -28,6 +28,7 @@
 #include "gz/cIGZMessage2.h"
 #include "gz/cIGZSerializable.h"
 #include "rz/cRZRandom.h"
+#include "rz/cRZTimer.h"
 #include "sc4/CommonIIDs.h"
 #include "sc4/MiscTypes.h"
 #include "sc4/RecordTape.h"
@@ -256,6 +257,12 @@ public:
     virtual bool OrdinanceOn(std::uint32_t id) { (void)id; return false; }                         // carpool 0xa2bf1ddc
     virtual float ResidentialWorkforcePercent(int x, int z) { (void)x; (void)z; return 1.0f; }    // residential slot 30
     virtual void PostTrafficMapChanged() {}                                                         // 0x69247dc7
+    // CheckForAccident: the view utilities' visible terrain rectangle (i386 +0x3ec..+0x3f8: min x, min z, max x, max z; false
+    // without a view); an accident on the network piece at a cell (SL::spCity vslot 0xac's CreateAccident(the traffic map tile's
+    // occupant, type, milliseconds); false when the cell has no piece); then message 0x0c05e4c3 (data 1 / 2 = the cell) posted.
+    virtual bool VisibleTerrainRect(float out[4]) { (void)out; return false; }
+    virtual bool CreateAccidentAtCell(int x, int z, int type, std::uint32_t milliseconds) { (void)x; (void)z; (void)type; (void)milliseconds; return false; }
+    virtual void PostAccidentMessage(int x, int z) { (void)x; (void)z; }
     virtual void PostPotholeMessage3(int x, int z, std::uint32_t data3) { (void)x; (void)z; (void)data3; }   // 0x69247dc8 with data3
     // The end of a day's work: adapters the host handed out (LotAt) may be dropped now.
     virtual void EndOfWork() {}
@@ -307,7 +314,8 @@ struct TrafficTunables {
     float value_f60 = 0.75f, value_f64 = 0.5f, value_f68 = 4.0f;
     float railAccidentChance = 1.0f;                   // +0xf6c, 0x0bd86fd5
     float value_f70 = 0.001f;                          // 0x8c3caef5
-    float value_ff8 = 10.0f, value_ffc = 60.0f;
+    float accidentDurationSeconds = 10.0f;               // 0x4be09ecb: how long a car accident lasts
+    float accidentIntervalSeconds = 60.0f;               // 0x4be09ecc: the least real time between two accident checks
     float tripScaleForDisplay = 0.0f;                  // +0xf64 (also tunable 0xca76013b)
 };
 
@@ -413,6 +421,13 @@ public:
     // ---- strikes and budgets ----
     enum StrikeState { kStrikeThreatened = 0, kStrikeOn = 1, kStrikeNone = 2 };
     void UpdateStrikes();
+    struct PotentialAccident { std::int32_t x = 0, z = 0; float chance = 0.0f; };   // i386 tPotentialAccident
+    void AddIntersectionToAccidentProneList(int x, int z, float chance);   // i386 0x00055468
+    void FinishedAccidentProneList();                                      // i386 0x0005549a
+    void CheckForAccident();                                               // i386 0x00059a46
+    const std::vector<PotentialAccident>& AccidentProneIntersections() const { return accidentProneFinished_; }
+    // Kit command `accidentcheck` and the tests: the next check runs whatever the real-time spacing says.
+    void ClearAccidentClock() { nextAccidentCheck_ = 0; forceAccidentCheck_ = true; }
     StrikeState GetStrikeState() const { return strikeState_; }
     int StrikeDays() const { return strikeDays_; }
     void SetStrikeEligible(std::int64_t count) { strikeEligible_ = count; }
@@ -592,7 +607,7 @@ private:
     std::uint32_t refCount_ = 0;                        // COM refcount (shared by the three sub-objects)
     TrafficTunables tunables_;
     cSC4ResponseCurve congestionToInverseSpeed_;
-    cSC4ResponseCurve curveF78_, fundingCurve_, curveFB8_, curveFD8_;
+    cSC4ResponseCurve curveF78_, fundingCurve_, accidentByCongestion_, accidentByCapacity_;
     std::array<bool, 9> travelTypeAffectedByTraffic_{};
     int lastX_ = -1, lastZ_ = -1;
     mutable std::vector<std::vector<std::vector<NetworkInfo>>> grid_;
@@ -679,7 +694,12 @@ private:
     bool continueSearch_ = false;
     std::array<TrafficStatsRow, 14> statsWork_{}, statsPublished_{};
     std::array<float, 14> statsCompare_{};
-    std::vector<std::pair<std::uint16_t, float>> accidentList_, accidentCheck_;
+    // Car accidents (i386 +0x140 / +0x14c / +0x158 / +0x16c): the intersections CreateMaps finds accident-prone this cycle, the
+    // list the last finished cycle published, and the real-time clock (seconds) that spaces the monthly checks.
+    std::vector<PotentialAccident> accidentProne_, accidentProneFinished_;
+    cRZTimer accidentTimer_{cRZTimer::kSeconds};
+    std::uint32_t nextAccidentCheck_ = 0;
+    bool forceAccidentCheck_ = false;
     bool networkChanged_ = false, subnetworksStale_ = false;
 
     void EnterState(std::uint32_t state);

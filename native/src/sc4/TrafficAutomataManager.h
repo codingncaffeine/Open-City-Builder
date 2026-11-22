@@ -202,6 +202,13 @@ public:
 class ITrafficAutomataManagerHost : public IAutomataManagerHost {
 public:
     ~ITrafficAutomataManagerHost() override = default;
+    // SL::spCity slot 0x178 (i386 0xbc), the automata controller manager: AddControllersFromOccupantGroup(group, occupant, position)
+    // (vslot 0x48 / i386 0x24) and RemoveControllers(occupant) (vslot 0x70 / i386 0x38). False / nothing without the manager.
+    virtual bool AddControllersFromOccupantGroup(const char* group, cISC4Occupant* occupant, const float* position) {
+        (void)group; (void)occupant; (void)position;
+        return false;
+    }
+    virtual void RemoveOccupantControllers(cISC4Occupant* occupant) { (void)occupant; }
     virtual ITrafficSimulatorApi* TrafficSimulator() = 0;                         // SL::spCity vslot 0x228
     virtual ITrafficNetworkManagerApi* TrafficNetworkManager() = 0;               // the same object as NetworkManager()
     // SL::spCity GetResidentialSimulator (i386 slot 0x110) -> GetPopulation (0x40): the input of the layers' density curves

@@ -39,10 +39,15 @@
 #include "sc4/ServiceLocator.h"
 #include "sc4/Simulator.h"
 #include "sc4/TrafficSimulator.h"
+#include "sc4/TrafficAutomataManager.h"
 #include "sc4/ZoneDeveloper.h"
 #include "sc4/cSC4SimGrid.h"
 #include "sc4/cSC4City.h"
 
+namespace native {   // NativeAutomataManagerHost.cpp / NativeTrafficAutomata.cpp
+void NativeVisibleTerrainRect(float out[4]);
+bool NativeCreateTrafficAccidentAtCell(int x, int z, int type, std::uint32_t milliseconds);
+}
 namespace native {
 namespace {
 using namespace sc4;
@@ -132,6 +137,11 @@ public:
     void PostPotholeMessage(int x, int z, bool potholed) override { Post(kTrafficMessagePotholeChanged, std::uint32_t(x), std::uint32_t(z), potholed ? 1 : 0); }
     void PostPotholeMessage3(int x, int z, std::uint32_t data3) override { Post(kTrafficMessagePotholeChanged, std::uint32_t(x), std::uint32_t(z), data3); }
     void PostTrafficMapChanged() override { Post(0x69247dc7); }
+    bool VisibleTerrainRect(float out[4]) override { NativeVisibleTerrainRect(out); return true; }
+    bool CreateAccidentAtCell(int x, int z, int type, std::uint32_t milliseconds) override {
+        return NativeCreateTrafficAccidentAtCell(x, z, type, milliseconds);
+    }
+    void PostAccidentMessage(int x, int z) override { Post(0x0c05e4c3, std::uint32_t(x), std::uint32_t(z)); }
     void SetRoadBudgetExpense(int line, int amount) override { SetExpense(kRoadsDepartment, line, amount); }
     // spec traffic-simulator.md 9.1 TG7 (i386 0x0071f1af / 0x0071f263, then 0x0071f336..0x0071f45e)
     void EnsureDepartments(float roadsMax, float transitMax) override {
@@ -419,4 +429,26 @@ void NativeTrafficTunnelReport() {
                         far ? far->subnetwork[1] : 0, far ? far->subnetwork[2] : 0, far ? far->subnetwork[3] : 0);
         }
 }
+// Kit command `accidentcheck N`: up to N monthly accident checks in a row (the real-time spacing cleared before each), stopping at
+// the first that makes an accident. Lists the published accident-prone intersections first.
+void NativeAccidentCheck(int tries) {
+    cSC4TrafficSimulator* traffic = Traffic();
+    if (!traffic) { std::printf("accidentcheck: no traffic simulator\n"); return; }
+    std::printf("accidentcheck: %zu accident-prone intersections\n", traffic->AccidentProneIntersections().size());
+    cSC4City* city = HostCity();
+    auto* vehicles = city ? dynamic_cast<cSC4TrafficAutomataManager*>(city->GetComponent(CityComponent::VehicleManager)) : nullptr;
+    int x0 = -1, z0 = -1;
+    const bool before = vehicles && vehicles->EffectManager().GetMostRecentAccidentLocation(x0, z0);
+    for (int i = 0; i < tries; ++i) {
+        traffic->ClearAccidentClock();
+        traffic->CheckForAccident();
+        int x = -1, z = -1;
+        if (vehicles && vehicles->EffectManager().GetMostRecentAccidentLocation(x, z) && (!before || x != x0 || z != z0)) {
+            std::printf("accidentcheck: accident at %d,%d after %d checks\n", x, z, i + 1);
+            return;
+        }
+    }
+    std::printf("accidentcheck: no accident in %d checks\n", tries);
+}
+
 }  // namespace native
