@@ -32,6 +32,7 @@
 // leave their table on the Lua stack (the caller pops the latter); GetHexFromVariant only accepts the string (0x800e) and uint32 types.
 #pragma once
 #include <cstdint>
+#include <cstdlib>
 #include <list>
 #include <string>
 #include <unordered_map>
@@ -40,7 +41,9 @@
 #include "gz/cGZMessageServer.h"
 #include "gz/cIGZMessage2.h"
 #include "gz/cIGZSerializable.h"
+#include "gz/cIGZVariant.h"
 #include "lua/ISCLua.h"
+#include "rz/cRZString.h"
 #include "sc4/AutomataAttractor.h"
 #include "sc4/AutomataControllerManager.h"
 #include "sc4/GameDataRegistry.h"
@@ -176,7 +179,18 @@ public:
     bool ImportLotFlags(int tableIndex, tControllerTemplate* tmpl);               // @ 0x1001dd56c
     bool ImportSFXList(int tableIndex, tControllerTemplate* tmpl);                // @ 0x1001dd7be
     bool ImportIgnoreStateList(int tableIndex, tControllerTemplate* tmpl);        // @ 0x1001dd8ca
-    static std::uint32_t GetHexFromVariant(cIGZVariant& value);                   // @ 0x1001ddc44
+    // @ 0x1001ddc44: a hex string (type 0x800e, a Lua string) goes through strtoul; anything else has to convert to uint32, else 0.
+    // Inline so the other script commands that take a GUID (the city situation manager's) use it without this class.
+    static std::uint32_t GetHexFromVariant(cIGZVariant& value) {
+        if (value.GetType() == 0x800e) {
+            cRZString text;
+            value.GetValString(text);
+            return static_cast<std::uint32_t>(std::strtoul(text.ToChar(), nullptr, 16));
+        }
+        std::uint32_t result = 0;
+        if (value.GetValUint32(result)) return result;
+        return 0;
+    }
 
     cISCLua* Lua() const { return lua_; }
     void SetLua(cISCLua* lua);                                                    // test hook: adopt a prepared Lua state (counted)

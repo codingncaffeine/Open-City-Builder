@@ -13,7 +13,10 @@
 #include "gz/StreamOps.h"
 #include "platform/Unwired.h"
 #include "rz/cRZCmdLine.h"
+#include "gz/CommandParameterSet.h"
 #include "rz/cRZMessage2Standard.h"
+#include "rz/cRZVariant.h"
+#include "sc4/AutomataScriptSystem.h"
 #include "sc4/GameDataRegistry.h"
 
 namespace sc4 {
@@ -416,6 +419,100 @@ namespace sc4 {
 // stores the variant's u32.
 namespace {
 
+// The sitmgr script commands (i386 0x0049dd46..0x0049e1b4). Each finds the manager through the registry entry of the handle
+// it was called with, reads its arguments from `in` and leaves its answer in `out` parameter 1.
+cSC4CitySituationManager* SitMgr(void* handle, cISC4GameDataRegistry* registry) {
+    return registry ? static_cast<cSC4CitySituationManager*>(registry->GetEntryContext(registry->GetEntryID(handle))) : nullptr;
+}
+void Answer(cIGZCommandParameterSet* out, const cRZVariant& value) { if (out) out->SetParameter(1, value); }
+// The real game object behind a situation seam (the seams forward QueryInterface to it), as the original hands it to Lua.
+cIGZUnknown* RealObject(cIGZUnknown* seam) {
+    void* raw = nullptr;
+    if (!seam || !seam->QueryInterface(1, &raw) || !raw) return nullptr;
+    auto* object = static_cast<cIGZUnknown*>(raw);
+    object->Release();   // the seam's object outlives the call; the variant takes its own reference
+    return object;
+}
+
+// get_success_count(guid): how often the mission succeeded (0 for an unknown guid or a missing argument).
+bool sGetSuccessCount(void* handle, cIGZCommandParameterSet* in, cIGZCommandParameterSet* out, cISC4GameDataRegistry* registry) {
+    cSC4CitySituationManager* self = SitMgr(handle, registry);
+    std::uint16_t count = 0;
+    if (cIGZVariant* guid = in ? in->GetParameter(0) : nullptr) {
+        const std::uint32_t id = cSC4AutomataScriptSystem::GetHexFromVariant(*guid);
+        if (self && id != 0) count = self->GetMissionSuccessCount(id);
+    }
+    cRZVariant value;
+    value.SetValUint16(count);
+    Answer(out, value);
+    return true;
+}
+// activate_situation(guid, showBriefing): posts 0xac1045ef (data1 guid, data2 the flag, data3 0); answers whether it posted.
+bool sActivateSituation(void* handle, cIGZCommandParameterSet* in, cIGZCommandParameterSet* out, cISC4GameDataRegistry* registry) {
+    cSC4CitySituationManager* self = SitMgr(handle, registry);
+    std::uint32_t guid = 0;
+    bool briefing = false;   // the original reads it into an uninitialised byte
+    if (in) {
+        guid = cSC4AutomataScriptSystem::GetHexFromVariant((*in)[0]);
+        (*in)[1].GetValBool(briefing);
+    }
+    bool posted = false;
+    cIGZMessageServer2* server = g_host ? g_host->MessageServer() : nullptr;
+    if (self && guid != 0 && server) {
+        cRZMessage2Standard* message = new cRZMessage2Standard();
+        message->AddRef();
+        message->SetType(kSituationMsgActivateAdvice);
+        message->SetData1(guid);
+        message->SetData2(briefing ? 1u : 0u);
+        message->SetData3(0);
+        server->MessagePost(message, false);
+        message->Release();
+        posted = true;
+    }
+    cRZVariant value;
+    value.SetValBool(posted);
+    Answer(out, value);
+    return true;
+}
+bool sGetCurrentTarget(void* handle, cIGZCommandParameterSet*, cIGZCommandParameterSet* out, cISC4GameDataRegistry* registry) {
+    cSC4CitySituationManager* self = SitMgr(handle, registry);
+    Answer(out, cRZVariant(RealObject(self ? self->GetCurrentTarget() : nullptr)));
+    return true;
+}
+bool sGetActiveAuto(void* handle, cIGZCommandParameterSet*, cIGZCommandParameterSet* out, cISC4GameDataRegistry* registry) {
+    cSC4CitySituationManager* self = SitMgr(handle, registry);
+    Answer(out, cRZVariant(RealObject(self ? self->GetActiveAuto() : nullptr)));
+    return true;
+}
+bool sGetTargetName(void* handle, cIGZCommandParameterSet*, cIGZCommandParameterSet* out, cISC4GameDataRegistry* registry) {
+    cSC4CitySituationManager* self = SitMgr(handle, registry);
+    cRZString name;
+    if (self) self->GetCurrentTargetName(name);
+    Answer(out, cRZVariant(static_cast<const cIGZString&>(name)));
+    return true;
+}
+// show_CSI(visible = true): sets the situation indicator's visibility and answers the previous one (true without a manager).
+bool sShowCSI(void* handle, cIGZCommandParameterSet* in, cIGZCommandParameterSet* out, cISC4GameDataRegistry* registry) {
+    cSC4CitySituationManager* self = SitMgr(handle, registry);
+    bool previous = true;
+    if (self) {
+        bool visible = true;
+        if (in) (*in)[0].GetValBool(visible);
+        previous = self->GetVisible();
+        self->SetVisible(visible);
+    }
+    cRZVariant value;
+    value.SetValBool(previous);
+    Answer(out, value);
+    return true;
+}
+// num_targets_remaining(): 1 without a manager.
+bool sGetNumTargetsRemaining(void* handle, cIGZCommandParameterSet*, cIGZCommandParameterSet* out, cISC4GameDataRegistry* registry) {
+    cSC4CitySituationManager* self = SitMgr(handle, registry);
+    Answer(out, cRZVariant(self ? self->GetNumTargetsRemaining() : 1u));
+    return true;
+}
+
 bool ExchangeUint32(void* context, cIGZVariant& value, bool write, cISC4GameDataRegistry* registry) {
     (void)registry;
     if (context == nullptr) return false;
@@ -434,10 +531,8 @@ bool ExchangeUint32(void* context, cIGZVariant& value, bool write, cISC4GameData
 // the lot/occupant managers and the script state, registers the "sitmgr" game-data node and seeds the mission-success
 // map from the preferences' completed-mission array. Answers true (also when already initialised).
 //
-// Recovered-partial: the six script command entries of the game-data registry (get_success_count, activate_situation,
-// get_current_target, get_active_auto, get_target_name, show_CSI, num_targets_remaining) go through
-// cSC4AutomataScriptSystem::GetHexFromVariant, which is not recovered, so only the node and the two raw u32 values are
-// registered here.
+// The node carries the seven script commands (get_success_count, activate_situation, get_current_target, get_active_auto,
+// get_target_name, show_CSI, num_targets_remaining) and the two raw u32 values (num_targets, cur_target_index).
 bool cSC4CitySituationManager::Init() {
     if (initialized_) return true;
     ICitySituationManagerHost* host = g_host;
@@ -474,7 +569,14 @@ bool cSC4CitySituationManager::Init() {
             const auto node = registry->AddChildEntry(static_cast<cIGZUnknown*>(static_cast<cIGZMessageTarget2*>(this)), "sitmgr", registry->GetRootNodeEntry(), 0, nullptr);
             registry->AddChildEntry(&numTargets_, "num_targets", &ExchangeUint32, node, 2, nullptr);
             registry->AddChildEntry(&currentTargetIndex_, "cur_target_index", &ExchangeUint32, node, 2, nullptr);
-            SC4_UNWIRED("cSC4CitySituationManager::Init: the sitmgr script commands (get_success_count, activate_situation, get_current_target, ...) are not registered");
+            // The commands, each registered with its own function as the entry handle and the manager as the context.
+            const std::pair<const char*, GameDataCommandFn> commands[] = {
+                {"get_success_count", &sGetSuccessCount},   {"activate_situation", &sActivateSituation},
+                {"get_current_target", &sGetCurrentTarget}, {"get_active_auto", &sGetActiveAuto},
+                {"get_target_name", &sGetTargetName},       {"show_CSI", &sShowCSI},
+                {"num_targets_remaining", &sGetNumTargetsRemaining}};
+            for (const auto& command : commands)
+                registry->AddChildEntry(reinterpret_cast<void*>(command.second), command.first, command.second, node, 0, this);
         }
         if (ISituationMySim* mySim = host->MySimActor() ? nullptr : nullptr) mySim_ = mySim;   // (no MySim source yet)
     }

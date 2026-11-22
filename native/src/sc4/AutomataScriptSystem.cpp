@@ -333,18 +333,6 @@ int cSC4AutomataScriptSystem::GetDriveCommand(std::uint32_t keyCode) const {
     return it == driveCommands_.end() ? kPlayerDriveCommandNone : it->second;
 }
 
-// ---- variants ---------------------------------------------------------------------------------------------------------
-// @ 0x1001ddc44: a hex string (type 0x800e) goes through strtoul; anything else has to convert to uint32, else 0.
-std::uint32_t cSC4AutomataScriptSystem::GetHexFromVariant(cIGZVariant& value) {
-    if (value.GetType() == kVariantString) {
-        cRZString text;
-        value.GetValString(text);
-        return HexFromText(text.ToChar());
-    }
-    std::uint32_t result = 0;
-    if (value.GetValUint32(result)) return result;
-    return 0;
-}
 
 // ---- registry commands ------------------------------------------------------------------------------------------------
 // @ 0x1001d6542
