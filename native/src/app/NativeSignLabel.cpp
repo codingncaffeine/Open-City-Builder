@@ -95,18 +95,10 @@ public:
         *out = nullptr;
         cSC43DRender* render = CityRenderer();
         s3d::cIS3DModelInstance* model = nullptr;
-        // The renderer's pick takes no filter natively (PARTIAL): the nearest model is tested against the tool's filter.
-        if (filter) SC4_UNWIRED("cSC4ViewInputControlSign pick: the renderer's filtered pick is not recovered (only the nearest model is tested)");
-        if (!render || !render->Pick(x, y, nullptr, model) || !model) return false;
+        // cSC43DRender::Pick with the tool's filter (each candidate's occupant is tested before its hit test).
+        if (!render || !render->Pick(x, y, filter, model) || !model) return false;
         cIGZUnknown* owner = model->GetOwner();
-        if (filter && owner) {
-            void* raw = nullptr;
-            if (!owner->QueryInterface(kGZIID_cISC4Occupant, &raw) || !raw) return false;
-            auto* occupant = static_cast<sc4::cISC4Occupant*>(raw);
-            const bool included = filter->IsOccupantIncluded(occupant);
-            occupant->Release();
-            if (!included) return false;
-        }
+        model->Release();
         *out = new Picked(owner);
         return true;
     }

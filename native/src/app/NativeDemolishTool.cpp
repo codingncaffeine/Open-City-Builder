@@ -4,6 +4,8 @@
 #include "app/NativeDemolishTool.h"
 #include "platform/Unwired.h"
 
+#include "sc4/NetworkOccupant.h"
+#include "sc4/PropOccupant.h"
 #include "sc4/DrawContext.h"
 #include "sc4/PackedRenderState.h"
 #include "sc4/Render3D.h"
@@ -61,6 +63,40 @@ std::uint32_t Argb(float r, float g, float b, float a) {
     return byte(a) << 24 | byte(r) << 16 | byte(g) << 8 | byte(b);
 }
 
+// cSC4DemolishableOccupantFilter (bulldozer-tool.md 1.1, Mac i386 0x006fa8d4): flora, buildings, power poles and network
+// pieces that CanRemove(2) allows (at view level 3 not the surface networks, flags 0x1f4f); props only when they are signposts.
+class DemolishableFilter final : public sc4::cSC4OccupantFilter {
+public:
+    bool IsOccupantIncluded(sc4::cISC4Occupant* occupant) override {
+        const std::uint32_t type = occupant->GetType();
+        if (type == 0xa823821eu) {
+            void* raw = nullptr;
+            if (!occupant->QueryInterface(sc4::kGZIID_cISC4PropOccupant, &raw) || !raw) return false;
+            auto* prop = static_cast<sc4::cISC4PropOccupant*>(raw);
+            const bool signpost = prop->GetPropType() == 0xab72fbb3u;
+            prop->Release();
+            return signpost;
+        }
+        if (type != 0x74758926u && type != 0x278128a0u && type != 0x2890d4deu && type != 0xc772bf98u) return false;
+        bool allowed = true;
+        if (g_view && g_view->GetCurrentViewLevel() == 3) {   // spView3D vslot 0x58 (i386)
+            auto* network = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);   // the original asks for 0xa821ef94
+            if (network && (network->GetNetworkFlag() & 0x1f4fu) != 0) allowed = false;
+        }
+        return occupant->CanRemove(2) && allowed;
+    }
+};
+
+}  // namespace
+
+sc4::cSC4OccupantFilter* NativeDemolishableFilter() {
+    auto* filter = new DemolishableFilter();
+    filter->AddRef();
+    return filter;
+}
+
+namespace {
+
 class Host final : public IDemolishToolHost {
 public:
     bool PickCell(int x, int y, int& cellX, int& cellZ, float position[3]) override {
@@ -69,14 +105,17 @@ public:
         city->PositionToCell(position[0], position[2], cellX, cellZ);
         return true;
     }
-    // PARTIAL: the pick runs without cSC4DemolishableOccupantFilter (any occupant with a model).
+    // i386 0x002e34a6: the renderer's pick with the tool's cSC4DemolishableOccupantFilter.
     sc4::cISC4Occupant* PickOccupant(int x, int y, bool& signpost) override {
-        SC4_UNWIRED("cSC4ViewInputControlDemolish pick: cSC4DemolishableOccupantFilter is not applied (the nearest model is picked)");
         signpost = false;
         s3d::cIS3DModelInstance* model = nullptr;
         sc4::cSC43DRender* render = CityRenderer();
-        if (!render || !render->Pick(x, y, nullptr, model) || !model) return nullptr;
+        sc4::cSC4OccupantFilter* filter = NativeDemolishableFilter();
+        const bool hit = render && render->Pick(x, y, filter, model) && model;
+        filter->Release();
+        if (!hit) return nullptr;
         sc4::cISC4Occupant* occupant = AsOccupant(model->GetOwner());
+        model->Release();
         if (!occupant) return nullptr;
         void* raw = nullptr;
         if (occupant->QueryInterface(kIIDSignpost, &raw) && raw) {

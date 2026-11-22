@@ -611,6 +611,7 @@ src/gz/LineGraph.cpp
 src/gz/PieGraph.cpp
 src/gz/WinTextEdit.cpp
 src/sc4/OccupantFilters.cpp
+src/sc4/TrafficFilters.cpp
 src/tools/city_probe_creators2.cpp
 src/tools/city_probe_creators3.cpp
 src/tools/city_probe_creators4.cpp

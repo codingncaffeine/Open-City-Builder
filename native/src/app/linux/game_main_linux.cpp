@@ -1378,9 +1378,10 @@ int RunScenario(const std::string& path) {
             words >> type >> x1 >> z1 >> x2 >> z2 >> row;
             native::NativeBridgeChooser(type, x1, z1, x2, z2, row);
         } else if (command == "pick") {   // pick X Y: the occupant whose model the renderer picks at a logical view point (read only)
-            int px = 0, py = 0;
+            int px = 0, py = 0, kind = -1;
             words >> px >> py;
-            native::PickOccupantAt(px, py);
+            if (!(words >> kind)) kind = -1;
+            native::PickOccupantAt(px, py, kind);
         } else if (command == "zonerect") {   // zonerect TYPE X0 Z0 X1 Z1: the zoning tool places a cell rectangle as its mouse-up does
             int type = 0, x0 = 0, z0 = 0, x1 = 0, z1 = 0;
             words >> type >> x0 >> z0 >> x1 >> z1;

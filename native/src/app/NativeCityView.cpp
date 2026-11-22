@@ -267,10 +267,14 @@ void ProbeBuildingsAt(float x, float z, float radius) {
 sc4::cSC43DRender* g_cityRender = nullptr;
 sc4::cSC43DRender* CityRenderer() { return g_cityRender; }
 
-void PickOccupantAt(int x, int y) {
+void PickOccupantAt(int x, int y, int kind) {
     s3d::cIS3DModelInstance* model = nullptr;
-    if (!g_cityRender || !g_cityRender->Pick(x, y, nullptr, model) || !model) {
-        std::printf("pick %d,%d: nothing\n", x, y);
+    sc4::cSC4OccupantFilter* filter = kind == 9 ? NativeDemolishableFilter() : kind >= 0 ? NativeQueryFilter(kind) : nullptr;
+    if (filter && kind != 9) filter->AddRef();
+    const bool hit = g_cityRender && g_cityRender->Pick(x, y, filter, model) && model;
+    if (filter) filter->Release();
+    if (!hit) {
+        std::printf("pick %d,%d kind %d: nothing\n", x, y, kind);
         return;
     }
     cIGZUnknown* owner = model->GetOwner();
@@ -281,7 +285,7 @@ void PickOccupantAt(int x, int y) {
         if (sc4::cISCPropertyHolder* holder = o->AsPropertyHolder()) sc4::cSCPropertyHelp::GetPropertyValue(holder, 0x00000020, name);
         float p[3];
         o->GetPosition(p);
-        std::printf("pick %d,%d: %s type %08x at %.0f,%.0f\n", x, y, name.str().c_str(), o->GetType(), p[0], p[2]);
+        std::printf("pick %d,%d kind %d: %s type %08x at %.0f,%.0f\n", x, y, kind, name.str().c_str(), o->GetType(), p[0], p[2]);
         o->Release();
     } else {
         std::printf("pick %d,%d: a model without an occupant owner\n", x, y);

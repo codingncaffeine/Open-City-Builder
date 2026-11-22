@@ -33,6 +33,8 @@
 #include "sc4/BudgetSimulator.h"
 #include "sc4/BuildingDevelopmentSimulator.h"
 #include "sc4/BuildingOccupant.h"
+#include "sc4/TrafficFilters.h"
+#include "sc4/OccupantFilters.h"
 #include "sc4/CrimeSimulator.h"
 #include "sc4/FireProtectionSimulator.h"
 #include "sc4/LandValueSimulator.h"
@@ -121,7 +123,27 @@ struct QueryView final : IQueryView {
     void RecalcCoverage() override { SC4_UNWIRED("cSC4ViewInputControlQuery: the coverage ring of the queried building is not drawn (RecalcCoverage)"); }
 } g_view;
 
-struct AnyFilter final : IOccupantFilter {
+}  // namespace
+
+sc4::cSC4OccupantFilter* NativeQueryFilter(int kind) {
+    switch (kind) {
+    case 0: return new sc4::cSC4TrafficQueryOccupantFilter();
+    case 1: return new sc4::cSC4HoverQueriableOccupantFilter();
+    case 2: return new sc4::cSC4AutomatonOccupantFilter();
+    case 3: return new sc4::cStoplightPropFilter();   // = cSC4StoplightPropOccupantFilter's test
+    case 4: return new sc4::cSC4QueriableOccupantFilter();
+    default: return nullptr;
+    }
+}
+
+namespace {
+
+// The query tool's cSC4OccupantFilter of one kind (Mac i386 0x00216b3a / 0x0020acb4 / 0x00207090): 0 the network
+// hover's cSC4TrafficQueryOccupantFilter, 1 cSC4HoverQueriableOccupantFilter, 2 cSC4AutomatonOccupantFilter, 3
+// cSC4StoplightPropOccupantFilter (cStoplightPropFilter, the same test), 4 cSC4QueriableOccupantFilter (the query's pick, occupant-manager.md).
+struct KindFilter final : IOccupantFilter {
+    explicit KindFilter(sc4::cSC4OccupantFilter* f) : filter(f) { filter->AddRef(); }
+    ~KindFilter() { filter->Release(); }
     bool QueryInterface(std::uint32_t, void**) override { return false; }
     std::uint32_t AddRef() override { return ++refs; }
     std::uint32_t Release() override {
@@ -129,7 +151,10 @@ struct AnyFilter final : IOccupantFilter {
         delete this;
         return 0;
     }
-    bool IsValid(const sc4::cISC4Occupant*) override { return true; }
+    bool IsValid(const sc4::cISC4Occupant* occupant) override {
+        return filter->IsOccupantIncluded(const_cast<sc4::cISC4Occupant*>(occupant));
+    }
+    sc4::cSC4OccupantFilter* filter;
     std::uint32_t refs = 1;
 };
 
@@ -152,18 +177,21 @@ private:
 
 struct QueryRenderer final : IQueryRenderer {
     IOccupantFilter* CreateFilter(int kind) override {
-        SC4_UNWIRED("cSC4ViewInputControlQuery: the per-kind cSC4OccupantFilter is not built (any occupant with a model is accepted)");
         if (Trace()) std::fprintf(stderr, "query: filter %d\n", kind);
-        return new AnyFilter();
+        sc4::cSC4OccupantFilter* filter = NativeQueryFilter(kind);
+        return filter ? new KindFilter(filter) : nullptr;   // holds the filter's one reference
     }
+    // cSC43DRender::Pick with the filter: each candidate model's occupant is tested before its hit test (render3d.md 11.5).
     IPickResult* Pick(int x, int y, IOccupantFilter* filter) override {
         s3d::cIS3DModelInstance* model = nullptr;
         cSC43DRender* render = CityRenderer();
         if (Trace()) std::fprintf(stderr, "query: pick %d,%d renderer %p\n", x, y, static_cast<void*>(render));
-        if (!render || !render->Pick(x, y, nullptr, model) || !model) return nullptr;
+        auto* kind = dynamic_cast<KindFilter*>(filter);
+        if (!render || !render->Pick(x, y, kind ? kind->filter : nullptr, model) || !model) return nullptr;
         sc4::cISC4Occupant* occupant = AsOccupant(model->GetOwner());
+        model->Release();
         if (!occupant) return nullptr;
-        if (filter && !filter->IsValid(occupant)) {
+        if (filter && !kind && !filter->IsValid(occupant)) {
             occupant->Release();
             return nullptr;
         }

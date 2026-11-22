@@ -80,7 +80,8 @@ public:
 class IQueryRenderer {
 public:
     virtual ~IQueryRenderer() = default;
-    virtual IOccupantFilter* CreateFilter(int kind) = 0;      // cSC4OccupantFilter subclass (vtables 0x100b05448..)
+    // cSC4OccupantFilter subclass: 0 traffic query, 1 hover queriable, 2 automaton, 3 stoplight prop, 4 queriable
+    virtual IOccupantFilter* CreateFilter(int kind) = 0;
     virtual IPickResult* Pick(int x, int y, IOccupantFilter* filter) = 0;                 // vslot 0x200
     virtual void AddLayer(cIGZUnknown* layer) = 0;                                        // vslot 0x100
     virtual void RemoveLayer(cIGZUnknown* layer) = 0;                                     // vslot 0x108

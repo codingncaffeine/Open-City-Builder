@@ -8,7 +8,7 @@
 namespace gd { class cIGZGDriver; }
 namespace gz { class cIGZDrawContext; }
 namespace s3d { class cIS3DModelInstance; }
-namespace sc4 { class cSC4View3DWin; class cSC43DRender; class cISC4Occupant; }
+namespace sc4 { class cSC4View3DWin; class cSC43DRender; class cISC4Occupant; class cSC4OccupantFilter; }
 class cISC4City;
 class cIGZBuffer;
 struct cRZRect;
@@ -45,8 +45,9 @@ bool CityAutomataLayersActive();
 void PrintOccupantCensus(cISC4City* city, const char* label);
 // The buildings near a ground point with their models and texture sizes (scenario `probe`).
 void ProbeBuildingsAt(float x, float z, float radius);
-// Kit verb `pick X Y`: what cSC43DRender::Pick (no filter) answers at a logical view point: the model's occupant, read only.
-void PickOccupantAt(int x, int y);
+// Kit verb `pick X Y [KIND]`: what cSC43DRender::Pick answers at a logical view point, with no filter or the query tool's
+// filter of that kind (9: the bulldozer's filter): the model's occupant, read only.
+void PickOccupantAt(int x, int y, int kind = -1);
 // app/NativeDispatch.cpp: the dispatch tool's drop without a call box (police 0, fire 1) at a world position; the dispatch id or 0.
 std::uint32_t NativeDispatchAt(std::uint32_t type, float x, float z);
 void NativePedestriansInBox(const float* lo, const float* hi, std::vector<sc4::cISC4Occupant*>& out);   // app/NativeTrafficAutomata.cpp: the pedestrians in a box (one reference each)
@@ -65,6 +66,11 @@ void NativeWallReport();                           // kit command `walls` (app/N
 void NativeStartRiot(int cellX, int cellZ);       // kit command `riot` (app/NativeRiot.cpp)
 void NativePolicePowerReport(int x0, int z0, int x1, int z1, int step);   // kit command `policepower` (app/NativeRiot.cpp)
 void NativeRiotReport();                          // kit command `riots`
+// The query tool's occupant filter of one kind, new and not yet referenced (the caller AddRefs; null for an unknown kind): 0 traffic query, 1 hover
+// queriable, 2 automaton, 3 stoplight prop, 4 queriable (app/NativeQuery.cpp).
+sc4::cSC4OccupantFilter* NativeQueryFilter(int kind);
+// The bulldozer's cSC4DemolishableOccupantFilter, one reference (app/NativeDemolishTool.cpp).
+sc4::cSC4OccupantFilter* NativeDemolishableFilter();
 void NativeQueryReport(std::uint32_t skipUi, int limit);   // the query tool's buildings (querylist kit command; app/NativeQuery.cpp)
 void NativeTrailerReport(int limit);  // the trailer vehicles on screen and the cars they pull (app/NativeAutomataGenerator.cpp)
 void NativeCarReport(int samples);  // the vehicle manager's traffic automata: paths, states, samples over time (app/NativeTrafficReport.cpp)

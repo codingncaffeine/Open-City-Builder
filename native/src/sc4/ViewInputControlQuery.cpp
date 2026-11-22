@@ -2686,7 +2686,7 @@ void cSC4ViewInputControlQuery::DescribePick(int x, int y, cRZString& line1, cRZ
     if (!view) return;
     cISC4Occupant* occupant = nullptr;
     IQueryLotManager* lots = host->LotManager();
-    IOccupantFilter* filter = host->Renderer() ? host->Renderer()->CreateFilter(1) : nullptr;   // cSC4QueriableOccupantFilter
+    IOccupantFilter* filter = host->Renderer() ? host->Renderer()->CreateFilter(4) : nullptr;   // cSC4QueriableOccupantFilter
     // The lot's building stands in for the picked occupant (or for the empty cell under the cursor).
     auto takeBuilding = [&](IQueryLot* lot) {
         if (!lot) return;
