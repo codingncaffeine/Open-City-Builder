@@ -110,9 +110,23 @@ bool cSC4PowerSimulator::Shutdown() {
     return true;
 }
 
+// RecomputeInfrastructureCosts (spec power.md 5.6): the cost base is the sum over the pole list of the low 32 bits of each
+// pole's int64 upkeep 0x09132de8 (high word 0); true when it changed.
+bool cSC4PowerSimulator::RecomputeInfrastructureCosts() {
+    std::int64_t total = 0;
+    for (cISC4Occupant* pole : poles_) {
+        std::int64_t upkeep = 0;
+        if (pole) cSCPropertyHelp::GetPropertyValue(pole->AsPropertyHolder(), kPowerPoleUpkeep, upkeep);
+        total += static_cast<std::int64_t>(static_cast<std::uint32_t>(upkeep));
+    }
+    const bool changed = total != poleUpkeep;
+    poleUpkeep = total;
+    return changed;
+}
+
 // ---- messages ---------------------------------------------------------------------------------------------
-// PARTIAL: the terrain message (0x278e6003, power line geometry follows the ground), the pole cost refresh (0x26d31ec1), the
-// network manager's half of 0x07699455 and the meltdown cheat (0xc2c09554) are not ported.
+// PARTIAL: the terrain message (0x278e6003, power line geometry follows the ground), the network manager's half of 0x07699455
+// and the meltdown cheat (0xc2c09554) are not ported.
 bool cSC4PowerSimulator::DoMessage(cIGZMessage2* message) {
     if (!message) return true;
     auto* standard = static_cast<cIGZMessage2Standard*>(message);
@@ -127,9 +141,28 @@ bool cSC4PowerSimulator::DoMessage(cIGZMessage2* message) {
     case kMsgPowerTerrain:
         SC4_UNWIRED("cSC4PowerSimulator::DoMessage: terrain message 0x278e6003 (power line geometry follows the ground) not ported");
         break;
-    case kMsgPowerPoleCosts:
-        SC4_UNWIRED("cSC4PowerSimulator::DoMessage: pole cost refresh 0x26d31ec1 not ported");
+    case kMsgPowerPoleCosts: {
+        // PostCityInit (spec power.md 5.6, i386 0x001863f4): a pole no longer in the occupant manager (its occupant's flag 1
+        // clear) leaves the list; then RecomputeInfrastructureCosts, whose change asks for a recompute pass.
+        for (auto it = poles_.begin(); it != poles_.end();) {
+            cISC4Occupant* pole = *it;
+            void* raw = nullptr;
+            bool keep = true;
+            if (pole && pole->QueryInterface(0x26bb767e, &raw) && raw) {
+                auto* occupant = static_cast<cISC4Occupant*>(raw);
+                keep = occupant->IsFlagSet(1);
+                occupant->Release();
+            }
+            if (keep) {
+                ++it;
+                continue;
+            }
+            pole->Release();
+            it = poles_.erase(it);
+        }
+        if (RecomputeInfrastructureCosts()) refresh_ = true;
         break;
+    }
     case kMsgPowerCheat:
         SC4_UNWIRED("cSC4PowerSimulator::DoMessage: meltdown cheat 0xc2c09554 not ported");
         break;

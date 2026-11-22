@@ -24,8 +24,14 @@ struct Building final : cISC4Occupant {
     SC4CellRect cells;
     cSCPropertyHolder properties;
     int refs = 1;
+    bool answersOccupant = false, inManager = true;   // the pole sweep (PostCityInit) asks QI 0x26bb767e then IsFlagSet(1)
     Building(int x0, int z0, int x1, int z1) { cells.x0 = x0; cells.z0 = z0; cells.x1 = x1; cells.z1 = z1; }
-    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (!answersOccupant || iid != 0x26bb767e) return false;
+        *out = static_cast<cISC4Occupant*>(this);
+        ++refs;
+        return true;
+    }
     std::uint32_t AddRef() override { return std::uint32_t(++refs); }
     std::uint32_t Release() override { return std::uint32_t(--refs); }
     bool Init() override { return true; }
@@ -64,7 +70,7 @@ struct Building final : cISC4Occupant {
     void SetFlag(std::uint32_t) override {}
     void SetAllFlags(std::uint32_t) override {}
     void ClearFlag(std::uint32_t) override {}
-    bool IsFlagSet(std::uint32_t) override { return false; }
+    bool IsFlagSet(std::uint32_t flag) override { return flag == 1 && answersOccupant && inManager; }
     std::uint32_t GetFlags() override { return 0; }
 };
 
@@ -186,6 +192,30 @@ int main() {
     CHECK((host.supply[{4, 4}] == 1));                    // still wired (the consumers wire their neighbourhood)
     CHECK(plant.refs == 1);                             // the plant list released its reference
 
+    {   // PostCityInit (0x26d31ec1, spec 5.6): a pole out of the occupant manager leaves the list; the cost base is the sum of the
+        // remaining poles' upkeep (low 32 bits), and its change asks for a recompute
+        Building kept(10, 10, 10, 10), gone(11, 10, 11, 10), plain(12, 10, 12, 10);
+        kept.answersOccupant = gone.answersOccupant = true;
+        gone.inManager = false;
+        cSCPropertyHelp::SetPropertyValue(&kept.properties, kPowerPoleUpkeep, std::int64_t{0x100000005});   // high word dropped
+        cSCPropertyHelp::SetPropertyValue(&gone.properties, kPowerPoleUpkeep, std::int64_t{7});
+        cSCPropertyHelp::SetPropertyValue(&plain.properties, kPowerPoleUpkeep, std::int64_t{3});
+        std::vector<cISC4Occupant*>& poles = power->Poles();
+        for (cISC4Occupant* p : poles) if (p) p->Release();
+        poles.clear();
+        for (Building* b : {&kept, &gone, &plain}) { b->AddRef(); poles.push_back(b); }
+        CHECK(!power->RefreshRequested());   // the last pass cleared it
+        auto* message = new cRZMessage2Standard();
+        message->AddRef();
+        message->SetType(0x26d31ec1);
+        power->DoMessage(message);
+        message->Release();
+        CHECK(poles.size() == 2 && poles[0] == &kept && poles[1] == &plain);   // a pole that does not answer the QI stays
+        CHECK(power->poleUpkeep == 8 && power->RefreshRequested());
+        CHECK(gone.refs == 1);   // released when it left
+        for (cISC4Occupant* p : poles) p->Release();
+        poles.clear();
+    }
     CHECK(power->Shutdown());
     power->Release();
     std::printf(failures ? "FAILED\n" : "sc4_powersimulator: all passed\n");

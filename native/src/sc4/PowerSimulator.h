@@ -212,6 +212,7 @@ public:
 
     // ---- poles and funding ----
     std::vector<cISC4Occupant*>& Poles() { return poles_; }
+    bool RecomputeInfrastructureCosts();
     void ApplyPoleFunding(const SC4Percentage& funding);             // i386 0x00184118
     std::uint32_t GetPowerPoleCount() const { return std::uint32_t(poles_.size()); }
 
