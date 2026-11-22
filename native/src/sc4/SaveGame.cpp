@@ -114,6 +114,15 @@ bool SC4WriteRegionalCity(cIGZPersistDBSegment* segment, cISC4RegionalCity* city
     return ok;
 }
 
+// i386 0x001636e4: the city file at `path` opened for writing (a known version required), the record written, the file closed.
+bool SC4WriteRegionalCity(const cIGZString& path, cISC4RegionalCity* city) {
+    cIGZPersistDBSegment* segment = SC4OpenSaveGame(path, true, true);
+    if (!segment) return false;
+    const bool ok = SC4WriteRegionalCity(segment, city);
+    SC4CloseSaveGame(segment);
+    return ok;
+}
+
 std::uint32_t SC4CreateCitySerialNumber() {
     const std::time_t now = std::time(nullptr);
     cRZRandom random(0xffffffffu);

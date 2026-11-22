@@ -31,6 +31,7 @@ bool SC4ReadStringRecord(cIGZPersistDBSegment* segment, std::uint32_t group, std
 bool SC4WriteStringRecord(cIGZPersistDBSegment* segment, std::uint32_t group, std::uint32_t instance, const cIGZString& value);   // @ 0x1001e94ea
 bool SC4ReadRegionalCity(cIGZPersistDBSegment* segment, cRZAutoRefCount<cISC4RegionalCity>& out);   // @ 0x1001e9603
 bool SC4WriteRegionalCity(cIGZPersistDBSegment* segment, cISC4RegionalCity* city);                  // @ 0x1001e97dc
+bool SC4WriteRegionalCity(const cIGZString& path, cISC4RegionalCity* city);                          // @ 0x1001e9799
 std::uint32_t SC4CreateCitySerialNumber();                                    // @ 0x1001e9ff4
 
 }  // namespace sc4

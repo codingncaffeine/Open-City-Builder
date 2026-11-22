@@ -1770,7 +1770,7 @@ int RunScenario(const std::string& path) {
             auto* screen = gAppWindow ? dynamic_cast<sc4::cSC4WinRegionScreen*>(gAppWindow->CurrentScreen()) : nullptr;
             const bool loaded = screen && screen->LoadRegion(cRZString(want.c_str()));
             std::printf("open-region %s: %s\n", want.c_str(), loaded ? "loaded" : (!screen ? "no region screen" : "not loaded"));
-        } else if (command == "open-city") {   // open-city NAME: enters a region city the way the region screen's launch does (no input)
+        } else if (command == "open-city") {   // open-city NAME | @X,Z: enters a region city the way the region screen's launch does (no input)
             std::string want; std::getline(words >> std::ws, want);   // the rest of the line (names have spaces)
             auto lower = [](std::string t) { for (char& c : t) c = char(std::tolower(static_cast<unsigned char>(c))); return t; };
             sc4::IRegionScreenHost* host = sc4::RegionScreenHost();
@@ -1783,7 +1783,9 @@ int RunScenario(const std::string& path) {
                 cRZString name;
                 if (ref && ref->get()) ref->get()->GetName(name);
                 std::printf("open-city: city at %d,%d \"%s\"\n", at.x, at.z, name.ToChar());
-                if (!found && ref && lower(name.ToChar()) == lower(want)) found = ref;
+                // "@X,Z" names the city by its region cell (several cities share a name)
+                const bool byCell = want.size() > 1 && want[0] == '@' && want.substr(1) == std::to_string(at.x) + "," + std::to_string(at.z);
+                if (!found && ref && (byCell || lower(name.ToChar()) == lower(want))) found = ref;
             }
             const bool launched = screen && found && screen->LaunchRegionalCity(found);
             std::printf("open-city %s: %s\n", want.c_str(), launched ? "launched" : (!screen ? "no region screen" : !found ? "no such city" : "refused"));

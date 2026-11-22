@@ -33,6 +33,9 @@
 #include "sc4/DBSegment.h"
 #include "sc4/ISC4City.h"
 #include "sc4/SaveGame.h"
+#include "sc4/NeighborsSimulator.h"
+#include "app/NativeDemolition.h"
+#include <list>
 #include "sc4/cSC4City.h"
 #include "sc4/Simulator.h"
 #include "rz/cRZFile.h"
@@ -275,6 +278,21 @@ bool LoadCityFile(cSC4App& app, const std::string& path, cRZAutoRefCount<cISC4Re
         hooks.readLoadSaveVersion = [](cIGZPersistDBSegment* segment) { return sc4::SC4ReadAppLoadSaveVersion(segment); };
         hooks.writeLoadSaveVersion = [](cIGZPersistDBSegment* segment) { return sc4::SC4WriteAppLoadSaveVersion(segment); };
         hooks.writeRegionalCity = [](cIGZPersistDBSegment* segment, cISC4RegionalCity* city) { return sc4::SC4WriteRegionalCity(segment, city); };
+        // SaveCity's last step (i386 SaveCity: SL::spNeighborsSim vslot 0x50 GetAdjacentCities(list, true), then each city's
+        // SC4WriteRegionalCity(path, city)): the neighbors' records, with the connection changes queued for them, go into their files.
+        hooks.connectedCities = [](std::vector<cISC4RegionalCity*>& out) {
+            out.clear();
+            sc4::cSC4NeighborsSimulator* neighbors = native::CityNeighborsSimulator();
+            if (!neighbors) return;
+            std::list<cRZAutoRefCount<cISC4RegionalCity>> cities;
+            neighbors->GetAdjacentCities(cities, true);
+            for (auto& city : cities) if (city.get()) out.push_back(city.get());   // the region keeps them alive
+        };
+        hooks.writeRegionalCityFile = [](const cRZString& path, cISC4RegionalCity* city) {
+            const bool ok = sc4::SC4WriteRegionalCity(path, city);
+            if (std::getenv("SC4_DEBUG")) std::printf("save: neighbor record %s %s\n", path.ToChar(), ok ? "written" : "FAILED");
+            return ok;
+        };
         hooks.readRegionalCity = [](cIGZPersistDBSegment* segment, cRZAutoRefCount<cISC4RegionalCity>& out) { return sc4::SC4ReadRegionalCity(segment, out); };
         // SC4CreateSavePathForCity (0x1001e98a4 -> 0x1001e9aa9): "City - <name>.sc4", sanitised, resolved in the current region's
         // directory (natively the directory the open city was read from), " (n)" appended while another city's file holds the name.
