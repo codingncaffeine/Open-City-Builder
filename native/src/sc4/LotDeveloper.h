@@ -228,6 +228,8 @@ public:
     virtual void RemoveFoundation(cISC4Occupant* foundation) { (void)foundation; }   // +0x28 vslot 0x54 (occupant, true, 0)
     // +0x24 vslot 0x20 GetLotsSurroundingLot(lot, list, 0xf): the lots touching `lot`, borrowed
     virtual void LotsAround(cSC4Lot* lot, std::vector<cSC4Lot*>& out) { (void)lot; (void)out; }
+    // +0x24 lot manager i386 vslot 0x28 GetLotsSurroundingRect(rect, list, edge): appends the lots along one edge (1, 2, 4, 8), borrowed
+    virtual void LotsSurroundingRect(const std::int32_t rect[4], int edge, std::vector<cSC4Lot*>& out) { (void)rect; (void)edge; (void)out; }
     virtual bool CellHasWater(int x, int z) { (void)x; (void)z; return false; }        // spTerrain vslot 0x88
     virtual float WaterLevelAt(float x, float z) { (void)x; (void)z; return 0.0f; }    // spTerrain vslot 0x7c
     virtual void CellCenterToPosition(int cellX, int cellZ, float& x, float& z) {     // +0x1c vslot 0x184
@@ -329,6 +331,10 @@ public:
     // joins an adjoining lot of its purpose that reaches a road (a farm field joins a lot with a building); the unit's travel
     // populations gather on its designate, a member with road access.
     void PickUnitToJoin(cSC4Lot* lot);
+    // slot 36 (Mac i386 0x000f39ae, lot-developer.md 5.7): an industrial lot (purpose 6..8) on `rect` {x0, z0, x1, z1} needs an anchor
+    // building unless a lot on the rect is already one (occupant group 0x3000) or a lot along its edges has a building of the same
+    // purpose under construction or later (or in a business unit).
+    bool NeedsAnchorBuilding(const std::int32_t rect[4], std::int32_t purpose) const;
     void RemoveLotFromItsBusinessUnit(cSC4Lot* lot);
     void UpdateTravelDesignates(cISC4BusinessUnit*& unit);
     void UpdateTravelPopulations(cISC4BusinessUnit* unit);

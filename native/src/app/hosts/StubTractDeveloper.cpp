@@ -39,6 +39,8 @@ struct StubTractDeveloper final : ITractDeveloperHost {
     bool HasTripLengthAt(int x, int z) override { SC4_UNWIRED("StubTractDeveloper::HasTripLengthAt"); return {}; }
     void DemolishLots(const std::list<cRZAutoRefCount<cSC4Lot>>& lots, std::uint32_t flags) override { SC4_UNWIRED("StubTractDeveloper::DemolishLots"); }
     void BuildingExemplarBool(const cGZPersistResourceKey& key, std::uint32_t property, bool& value) override { SC4_UNWIRED("StubTractDeveloper::BuildingExemplarBool"); }
+    bool BuildingExemplarUint32s(const cGZPersistResourceKey&, std::uint32_t, std::vector<std::uint32_t>&) override { SC4_UNWIRED("StubTractDeveloper::BuildingExemplarUint32s"); return false; }
+    void RedisplayTerrain(const std::int32_t*) override { SC4_UNWIRED("StubTractDeveloper::RedisplayTerrain"); }
 };
 }  // namespace
 

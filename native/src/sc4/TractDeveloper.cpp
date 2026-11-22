@@ -5,8 +5,8 @@
 // Lot.h / LotConfiguration.h. The comments name the original vtable slot of every such call.
 //
 // The growth pass (Grow, the existing-lot candidate search, Build, PickBuilding, the compatibility predicates,
-// FindNetworks, TakeOverAbandoned and Decline) is recovered. PARTIAL: the aggregation and subdivision searches and
-// their Perform* steps, IsAggregationLegal, BuildFarm and UpdatePopulation (see TractDeveloper.h).
+// FindNetworks, TakeOverAbandoned and Decline), the aggregation and subdivision searches with their Perform* steps,
+// BuildFarm and UpdatePopulation are recovered (Mac i386 0x000e713c..0x000eac52; OpenSC4 tract-developer.md 4.9.2-4.18).
 
 #include "sc4/TractDeveloper.h"
 #include "platform/Unwired.h"
@@ -22,6 +22,7 @@
 #include "sc4/LotConfiguration.h"
 #include "sc4/LotConfigurationManager.h"
 #include "sc4/Occupant.h"
+#include "rz/cRZRandom.h"
 
 namespace sc4 {
 
@@ -874,6 +875,11 @@ int cSC4TractDeveloper::Grow(const GrowthProfile& profile, std::list<int>& outco
                     outcome = result;
                     outcomes.push_back(result);
                     RecordBuildAttempt();
+                    if (aggregationLostLots_) {                    // see aggregationLostLots_ (port choice)
+                        aggregationLostLots_ = false;
+                        verdict = attempted_ != 0;
+                        break;
+                    }
                     if (result == kTractOutcomeBuildFailed) {      // the pass is over; a second one only after the first
                         verdict = attempted_ != 0;
                         break;
@@ -928,15 +934,44 @@ int cSC4TractDeveloper::Decline(const GrowthProfile& profile) {
     return total;
 }
 
-void cSC4TractDeveloper::UpdatePopulation(const GrowthProfile& profile) {
-    // PARTIAL (0x10013beb6): the original lists every lot of the tract with
-    // cISC4LotManager::GetLotsInCellRect (lot manager vslot 0x38), asks each lot's building occupant
-    // for its type and capacity (cISC4BuildingOccupant slots 0x130/0x148/0x1a0) and rescales the
-    // population of the matching developer type with cRZRandom seeds derived from the tract
-    // coordinates. That needs the occupant-manager/occupant interfaces of the unrecovered building
-    // occupant path, so this port leaves the population untouched.
-    SC4_UNWIRED("cSC4TractDeveloper::UpdatePopulation (0x10013beb6): tract population rescale not ported");
-    (void)profile;
+// Rescales the population of every lot of the tract that this developer's type and wealth live in: the tract's desirability
+// (percent) times a jitter of +-populationJitter, and a lot that would be full keeps a vacancy drawn from the two vacancy
+// tunables. One temporary generator per tract, seeded from its coordinates (Mac i386 0x000e713c; tract-developer.md 4.18).
+void cSC4TractDeveloper::UpdatePopulation(const GrowthProfile& profile) {   // @ 0x10013beb6
+    IGrowthDeveloperApi* developer = profile.developer;
+    if (!developer || !lotManager_) return;
+    ITractValueMap* map = developer->GetDesirabilityMap();                         // vslot 0x68
+    if (!map) return;
+    const int shift = map->GetTractShift();                                        // map vslot 0x58
+    std::list<cRZAutoRefCount<cSC4Lot>> lots;
+    lotManager_->GetLotsInCellRect(lots, profile.tractX << shift, profile.tractZ << shift,
+                                   ((profile.tractX + 1) << shift) - 1, ((profile.tractZ + 1) << shift) - 1, true);   // vslot 0x38
+    if (lots.empty()) return;
+    const auto desirability = static_cast<std::int16_t>(map->GetCellValue(profile.tractX, profile.tractZ));   // map vslot 0xb0
+    const float scale = static_cast<float>(desirability) * 0.01f;
+    const auto developerType = static_cast<std::uint32_t>(developer->GetDeveloperType());   // vslot 0x30
+    const std::int32_t wealth = developer->GetWealth();                            // vslot 0x40
+    cRZRandom random(static_cast<std::uint32_t>(((profile.tractX << 16) + profile.tractZ) << 4));
+    for (const cRZAutoRefCount<cSC4Lot>& entry : lots) {
+        cSC4Lot* lot = entry.get();
+        if (!lot || !lot->HasCapacity() || lot->GetOccupantWealth() != wealth) continue;   // lot vslots 0x130 / 0x148
+        const std::uint16_t maximum = lot->GetAvailableCapacity(developerType, false);    // lot vslot 0x1a0
+        if (!maximum) continue;
+        const double jitter = random.RandomDoubleRangeUniform(-static_cast<double>(populationJitter_),
+                                                              static_cast<double>(populationJitter_));
+        float occupancy = static_cast<float>(static_cast<float>(jitter + 1.0) * scale);
+        if (occupancy < 0.0f) {
+            occupancy = 0.0f;
+        } else if (!(occupancy < 1.0f)) {
+            occupancy = static_cast<float>(1.0 - random.RandomDoubleRangeUniform(static_cast<double>(declineJitterLow_),
+                                                                                 static_cast<double>(declineJitterHigh_)));
+        }
+        // The PC rounds to nearest even (fistp) and keeps the low 16 bits; a NaN occupancy gives 0.
+        const float people = static_cast<float>(maximum) * occupancy;
+        const auto population = std::isnan(people) ? std::uint16_t{0}
+                                                   : static_cast<std::uint16_t>(static_cast<std::int32_t>(std::nearbyint(people)));
+        lot->SetPopulation(developerType, population);                             // lot vslot 0x1b8
+    }
 }
 
 //==================================================================================================
@@ -1182,7 +1217,7 @@ int cSC4TractDeveloper::PickBuilding(CandidateLot* candidate) {   // @ 0x1001392
     if (!attempted_) {
         minimum = maximumBuildAttempts_ - builtCount_ + existing;
         if (candidate->kind == 4) {
-            minimum += reserved110_;
+            minimum += subdivisionBuilt_;
             if (minimum < existing) minimum = existing;
             minimum /= candidate->ratio;
         } else if (minimum < existing) {
@@ -1537,39 +1572,318 @@ int cSC4TractDeveloper::TakeOverAbandoned() {
 }
 
 //==================================================================================================
-// PARTIAL: the other growth decisions (see the file comment)
+// Merging and splitting lots, and farms (Mac i386 0x000e85c8..0x000eac52; tract-developer.md 4.9.2, 4.9.3, 4.13, 4.15.2-4.15.4)
 //==================================================================================================
 
-int cSC4TractDeveloper::ListCandidateLots_Aggregation() {   // PARTIAL (0x100137b04)
-    SC4_UNWIRED("cSC4TractDeveloper::ListCandidateLots_Aggregation: lot aggregation candidates not ported");
-    return 0;
-}
-int cSC4TractDeveloper::ListCandidateLots_Subdivision() {   // PARTIAL (0x100137f44)
-    SC4_UNWIRED("cSC4TractDeveloper::ListCandidateLots_Subdivision: lot subdivision candidates not ported");
-    return 0;
+// Every existing lot paired with every suitable configuration that is larger in at least one direction and not smaller in
+// either, whose growth stage fits the lot's zone and whose slope range holds the lot's slope, gives two merge trials of the
+// configuration's size with the lot's facing: anchored at the lot, and anchored at the lot shifted by the width difference
+// along the facing's street. A trial whose cells are all suitable lots of one zone (IsAggregationLegal) and that fits the
+// configuration becomes a kind-3 candidate.
+int cSC4TractDeveloper::ListCandidateLots_Aggregation() {   // @ 0x100137b04 (i386 0x000ea80c)
+    int best = 0;
+    auto& histogram = currentAttempt_.histograms[kHistogramAggregation];
+    for (cSC4Lot* lot : existingLots_) {
+        std::uint8_t sizeX, sizeZ;
+        lot->GetSize(sizeX, sizeZ);                                                // lot vslot 0xb0
+        int x, z;
+        lot->GetLocation(x, z);                                                    // lot vslot 0xa8
+        const float slope = lot->GetSlope();                                       // lot vslot 0x90
+        for (cSC4LotConfiguration* configuration : configurations_) {
+            std::uint32_t configurationX, configurationZ;
+            configuration->GetSize(configurationX, configurationZ);                // vslot 0x38
+            if (configurationX < sizeX || configurationZ < sizeZ || (sizeX == configurationX && sizeZ == configurationZ)) {
+                ++histogram[5];
+                best = std::max(best, 5);
+                continue;
+            }
+            const std::uint8_t stage = configuration->GetGrowthStage();            // vslot 0x58
+            if (!GrowthStageFitsInZone(stage, static_cast<std::uint32_t>(zoneManager_->ZoneTypeAt(x, z)))) {
+                ++histogram[6];
+                best = std::max(best, 5);                                          // the original raises it to 5 only
+                continue;
+            }
+            const float minimum = configuration->GetMinimumSlope();                // vslot 0x48
+            const float maximum = configuration->GetMaximumSlope();                // vslot 0x40
+            if (slope < minimum || maximum < slope) {
+                ++histogram[10];
+                best = std::max(best, 5);
+                continue;
+            }
+            for (int trial = 0; trial < 2; ++trial) {
+                CandidateLot* candidate = NewCandidateLot();
+                candidate->kind = 3;
+                candidate->sizeX = static_cast<std::uint8_t>(configurationX);
+                candidate->sizeZ = static_cast<std::uint8_t>(configurationZ);
+                candidate->facing = lot->GetFacing();                              // lot vslot 0xb8
+                lot->GetLocation(candidate->x, candidate->z);
+                if (trial == 1) {
+                    const int shift = static_cast<int>(configurationX) - static_cast<int>(sizeX);
+                    if (shift > 0) {
+                        switch (candidate->facing) {
+                        case 0: candidate->x += shift; break;
+                        case 1: candidate->z += shift; break;
+                        case 2: candidate->x -= shift; break;
+                        case 3: candidate->z -= shift; break;
+                        default: break;
+                        }
+                    }
+                    candidate->rectZ0 = -1;
+                }
+                FindNetworks(candidate);
+                if (IsAggregationLegal(candidate) &&
+                    IsLotConfigurationCompatible(configuration, candidate, false) == kTractOutcomeSuccess) {
+                    candidates_.push_back(candidate);
+                    ++histogram[kTractOutcomeSuccess];
+                    best = kTractOutcomeSuccess;
+                } else {
+                    DeleteCandidateLot(candidate);
+                    best = std::max(best, 5);
+                }
+            }
+        }
+    }
+    return best;
 }
 
-int cSC4TractDeveloper::BuildFarm(CandidateLot* candidate) {     // PARTIAL (0x10013845e)
-    SC4_UNWIRED("cSC4TractDeveloper::BuildFarm: farm building and fields not ported");
-    (void)candidate;
-    return 0;
+// A suitable lot whose width is a whole multiple of a narrower configuration of the same depth (growth stage and slope
+// fitting) becomes a kind-4 candidate that splits it into width / configuration-width pieces. Not used for farms.
+int cSC4TractDeveloper::ListCandidateLots_Subdivision() {   // @ 0x100137f44 (i386 0x000eac52)
+    int best = 0;
+    auto& histogram = currentAttempt_.histograms[kHistogramSubdivision];
+    for (cSC4Lot* lot : existingLots_) {
+        std::uint8_t sizeX, sizeZ;
+        lot->GetSize(sizeX, sizeZ);
+        int x, z;
+        lot->GetLocation(x, z);
+        const float slope = lot->GetSlope();
+        const int suitable = IsLotSuitable(lot, true);
+        if (suitable != kTractOutcomeSuccess) {
+            best = std::max(best, suitable);
+            continue;
+        }
+        for (cSC4LotConfiguration* configuration : configurations_) {
+            std::uint32_t configurationX, configurationZ;
+            configuration->GetSize(configurationX, configurationZ);
+            if (sizeX < configurationX || sizeZ < configurationZ || (sizeX == configurationX && sizeZ == configurationZ) ||
+                configurationX == 0 || sizeX % configurationX != 0 || sizeZ != configurationZ) {
+                ++histogram[3];
+                best = std::max(best, 3);
+                continue;
+            }
+            const std::uint8_t stage = configuration->GetGrowthStage();
+            if (!GrowthStageFitsInZone(stage, static_cast<std::uint32_t>(zoneManager_->ZoneTypeAt(x, z)))) {
+                ++histogram[6];
+                best = std::max(best, 6);
+                continue;
+            }
+            const float minimum = configuration->GetMinimumSlope();
+            const float maximum = configuration->GetMaximumSlope();
+            if (slope < minimum || maximum < slope) {
+                ++histogram[10];
+                best = std::max(best, 10);
+                continue;
+            }
+            CandidateLot* candidate = NewCandidateLot();
+            candidate->kind = 4;
+            candidate->lot = lot;
+            candidate->sizeX = static_cast<std::uint8_t>(configurationX);
+            candidate->sizeZ = static_cast<std::uint8_t>(configurationZ);
+            candidate->facing = lot->GetFacing();
+            lot->GetLocation(candidate->x, candidate->z);
+            candidate->ratio = static_cast<std::uint8_t>(sizeX / configurationX);
+            FindNetworks(candidate);
+            if (IsLotConfigurationCompatible(configuration, candidate, false) == kTractOutcomeSuccess) {
+                candidates_.push_back(candidate);
+                ++histogram[kTractOutcomeSuccess];
+                best = kTractOutcomeSuccess;
+            } else {
+                DeleteCandidateLot(candidate);                                     // best is left as it was
+            }
+        }
+    }
+    return best;
 }
 
-void cSC4TractDeveloper::PerformAggregation(CandidateLot* candidate, cSC4Lot*& out) {  // PARTIAL 0x100139dd2
-    SC4_UNWIRED("cSC4TractDeveloper::PerformAggregation: merging lots not ported");
-    (void)candidate;
+// A farm needs at least 15 suitable empty lots around its own (walking outward lot by lot): it claims their count plus 30
+// construction units, gives 30 back and builds the farm building; then every one of those lots becomes a field of a type the
+// farm's exemplar lists (property 0x29b55f73, one drawn at random), facing the farm, and keeps its claimed unit.
+int cSC4TractDeveloper::BuildFarm(CandidateLot* candidate) {     // @ 0x10013845e (i386 0x000e98e6)
+    std::list<cRZAutoRefCount<cSC4Lot>> near;
+    const std::int32_t* rect = &candidate->rectX0;
+    for (int edge : {1, 2, 4, 8}) lotManager_->GetLotsSurroundingRect(rect, near, edge);      // i386 vslot 0x28
+    std::list<cSC4Lot*> fields;
+    for (auto it = near.begin(); it != near.end(); ++it) {                         // the list grows while it is walked
+        cSC4Lot* lot = it->get();
+        if (!lot) continue;
+        std::int32_t r[4];
+        lot->GetBoundingRect(r);                                                   // lot vslot 0x70
+        const bool overlaps = !(r[2] < candidate->rectX0 || candidate->rectX1 < r[0] || r[3] < candidate->rectZ0 ||
+                                candidate->rectZ1 < r[1]);
+        if (overlaps) continue;
+        const int suitable = IsLotSuitable(lot, true);
+        if (suitable != kTractOutcomeSuccess && suitable != 21) continue;
+        if (std::find(fields.begin(), fields.end(), lot) != fields.end()) continue;
+        fields.push_back(lot);
+        for (int edge : {1, 2, 4, 8}) lotManager_->GetLotsSurroundingLot(lot, near, edge);   // i386 vslot 0x20
+    }
+    const auto count = static_cast<std::uint32_t>(fields.size());
+    if (count < 15 || !buildingDevelopment_->ClaimConstructionResources(static_cast<std::uint16_t>(count + 30))) return 0;
+    buildingDevelopment_->ReleaseConstructionResources(30);
+    const int result = Build(candidate);
+    if (result != kTractOutcomeSuccess) {
+        buildingDevelopment_->ReleaseConstructionResources(static_cast<std::uint16_t>(count));
+        return result;
+    }
+    std::uint32_t fieldType = 0;
+    cGZPersistResourceKey key;
+    std::vector<std::uint32_t> fieldTypes;
+    if (buildingDevelopment_->GetBuildingKeyFromType(buildingType_, key) &&                 // vslot 0x68
+        g_host->BuildingExemplarUint32s(key, 0x29b55f73, fieldTypes) && !fieldTypes.empty()) {
+        fieldType = fieldTypes[g_host->RandomBelow(static_cast<std::uint32_t>(fieldTypes.size()))];
+    }
+    const std::uint16_t fieldCapacity = buildingDevelopment_->GetBuildingProfile(fieldType).capacity;   // vslot 0x138
+    cSC4LotConfiguration* fieldConfiguration =
+        lotConfigurationManager_ ? lotConfigurationManager_->GetLotConfiguration(fieldType) : nullptr;  // i386 vslot 0x20
+    if (!fieldConfiguration) {
+        buildingDevelopment_->ReleaseConstructionResources(static_cast<std::uint16_t>(count));
+        return result;
+    }
+    for (cSC4Lot* lot : fields) {
+        lot->SetFacing(candidate->facing);                                         // lot vslot 0xc0
+        lotDeveloper_->StartConstruction(lot, fieldConfiguration, fieldType, false);
+        lotOutcomes_.erase(lot);
+        lot->SetState(3, 0, 0);                                                    // lot vslot 0x110
+        lot->SetPopulation(0x4100, fieldCapacity);                                 // I-Agriculture, lot vslot 0x1b8
+    }
+    return result;
+}
+
+// Demolishes and deletes every lot of the merge (keeping the zone), takes their capacity off the built total and creates one
+// lot over the merged rectangle; a square farm or industry lot is created without a facing (the lot manager picks one).
+void cSC4TractDeveloper::PerformAggregation(CandidateLot* candidate, cSC4Lot*& out) {  // @ 0x100139dd2 (i386 0x000e8864)
+    for (cSC4Lot* lot : candidate->neighbours) {
+        lot->AddRef();
+        lotOutcomes_.erase(lot);
+        std::list<cRZAutoRefCount<cSC4Lot>> lots;
+        lots.push_back(cRZAutoRefCount<cSC4Lot>(lot));
+        g_host->DemolishLots(lots, 0x800);
+        lotManager_->DeleteLot(lot);                                               // i386 vslot 0x60
+        lot->Release();
+    }
+    builtCount_ -= candidate->existingCapacity;
     out = nullptr;
+    int facing = candidate->facing;
+    if (static_cast<std::uint32_t>(growthDeveloper_->GetPurpose() - 5) < 4 && configuration_) {
+        std::uint32_t w = 0, h = 0;
+        configuration_->GetSize(w, h);
+        if (w == h) facing = -1;
+    }
+    lotManager_->CreateLotIfPossible(candidate->rectX0, candidate->rectZ0, candidate->rectX1 - candidate->rectX0 + 1,
+                                     candidate->rectZ1 - candidate->rectZ0 + 1, facing, out);   // i386 vslot 0x58
+    if (!out) aggregationLostLots_ = true;
+    g_host->RedisplayTerrain(&candidate->rectX0);
 }
 
-void cSC4TractDeveloper::PerformSubdivision(CandidateLot* candidate) {   // PARTIAL (0x10013a04e)
-    SC4_UNWIRED("cSC4TractDeveloper::PerformSubdivision: splitting lots not ported");
-    (void)candidate;
+// Demolishes and deletes the parent lot and creates its pieces along its width; the first piece takes the building already
+// picked, every further one picks again, while the built capacity stays under the target. Pieces not built stay zoned.
+void cSC4TractDeveloper::PerformSubdivision(CandidateLot* candidate) {   // @ 0x10013a04e (i386 0x000e92be)
+    cSC4Lot* parent = candidate->lot;
+    const int cw = candidate->sizeX;
+    const int ch = candidate->sizeZ;
+    int x = candidate->x;
+    int z = candidate->z;
+    int pieceX = cw, pieceZ = ch, stepX = 0, stepZ = 0;
+    switch (candidate->facing) {
+    case 0: x += 1 - cw; stepX = -cw; break;
+    case 1: pieceX = ch; pieceZ = cw; x += 1 - ch; z += 1 - cw; stepZ = -cw; break;
+    case 2: z += 1 - ch; stepX = cw; break;
+    case 3: pieceX = ch; pieceZ = cw; stepZ = cw; break;
+    default: break;
+    }
+    // Port choice: the parent stays referenced until the pieces are made. The original deletes it and then repeats PickBuilding
+    // for pieces 2..n, whose IsLotConfigurationCompatible reads the deleted parent's slope through the candidate (a freed lot).
+    parent->AddRef();
+    lotOutcomes_.erase(parent);
+    {
+        std::list<cRZAutoRefCount<cSC4Lot>> lots;
+        lots.push_back(cRZAutoRefCount<cSC4Lot>(parent));
+        g_host->DemolishLots(lots, 0x800);
+    }
+    builtCount_ -= candidate->existingCapacity;
+    lotManager_->DeleteLot(parent);
+    int target = secondAttemptLimit_ - builtCount_ + candidate->existingCapacity;
+    if (target == 0) target = 1;
+    subdivisionBuilt_ = 0;
+    for (int i = 0; i < candidate->ratio; ++i) {
+        cSC4Lot* lot = nullptr;
+        lotManager_->CreateLotIfPossible(x, z, pieceX, pieceZ, candidate->facing, lot);
+        if (lot) {
+            if (builtCount_ < target) {
+                const bool picked = i < 1 || PickBuilding(candidate) == kTractOutcomeSuccess;
+                const std::uint16_t capacity = buildingDevelopment_->GetBuildingProfile(buildingType_).capacity;
+                if (picked && buildingDevelopment_->ClaimConstructionResources(capacity)) {
+                    lotDeveloper_->StartConstruction(lot, configuration_, buildingType_, true);
+                    builtCount_ += capacity;
+                    subdivisionBuilt_ += capacity;
+                }
+            }
+            lot->Release();
+        }
+        x += stepX;
+        z += stepZ;
+    }
+    parent->Release();
 }
 
-bool cSC4TractDeveloper::IsAggregationLegal(CandidateLot* candidate) {   // PARTIAL (0x10013ae4a)
-    SC4_UNWIRED("cSC4TractDeveloper::IsAggregationLegal: aggregation legality test not ported");
-    (void)candidate;
-    return false;
+// The merge rectangle must lie in the city and be covered entirely by lots that are suitable (27) or only short of roads
+// (21), all of one zone type, at least two of them, every one inside the rectangle, and one fully suitable lot must already
+// face the new lot's way. The lots are collected into the candidate (borrowed).
+bool cSC4TractDeveloper::IsAggregationLegal(CandidateLot* candidate) {   // @ 0x10013ae4a (i386 0x000e85c8)
+    GetBoundingRect(candidate);
+    if (candidate->rectX0 < 0 || candidate->rectZ0 < 0 || !city_ || candidate->rectX1 >= city_->CellCountX() ||
+        candidate->rectZ1 >= city_->CellCountZ()) {
+        return false;
+    }
+    auto& histogram = currentAttempt_.histograms[kHistogramAggregationLegal];
+    bool sameFacing = false;
+    int zone = 0;
+    for (int x = candidate->rectX0; x <= candidate->rectX1; ++x) {
+        for (int z = candidate->rectZ0; z <= candidate->rectZ1; ++z) {
+            cSC4Lot* lot = lotManager_->GetLot(x, z, false);                       // vslot 0x28
+            if (!lot) return false;
+            const int suitable = IsLotSuitable(lot, true);
+            if (suitable == kTractOutcomeSuccess) {
+                if (lot->GetFacing() == candidate->facing) sameFacing = true;
+            } else if (suitable != 21) {
+                return false;
+            }
+            if (zone == 0) zone = lot->GetZoneType();                              // lot vslot 0xf8
+            if (zone != lot->GetZoneType()) {
+                ++histogram[6];
+                return false;
+            }
+            candidate->neighbours.insert(lot);
+        }
+    }
+    if (!sameFacing) {
+        ++histogram[21];
+        return false;
+    }
+    if (candidate->neighbours.size() < 2) {
+        ++histogram[3];
+        return false;
+    }
+    for (cSC4Lot* lot : candidate->neighbours) {
+        std::int32_t r[4];
+        lot->GetBoundingRect(r);
+        if (r[1] < candidate->rectZ0 || candidate->rectZ1 < r[3] || r[0] < candidate->rectX0 || candidate->rectX1 < r[2]) {
+            ++histogram[3];
+            return false;
+        }
+    }
+    ++histogram[kTractOutcomeSuccess];
+    return true;
 }
 
 }  // namespace sc4

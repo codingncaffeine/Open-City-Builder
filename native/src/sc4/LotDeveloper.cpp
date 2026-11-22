@@ -1016,6 +1016,31 @@ void cSC4LotDeveloper::RemoveLotBaseTexture(cSC4Lot* lot) {
 
 void cSC4LotDeveloper::SetConstructionServices(ILotConstructionServices* services) { g_construction = services; }
 
+bool cSC4LotDeveloper::NeedsAnchorBuilding(const std::int32_t rect[4], std::int32_t purpose) const {   // @ 0x000f39ae
+    if (static_cast<std::uint32_t>(purpose - 6) >= 3) return false;
+    std::vector<cSC4Lot*> lots;
+    if (g_city) g_city->LotsInCellRect(rect[0], rect[1], rect[2], rect[3], lots);    // +0x24 vslot 0x1c (list, rect, false)
+    for (cSC4Lot* lot : lots) {
+        cIGZUnknown* building = lot ? lot->GetBuilding() : nullptr;                 // lot vslot 0xc0
+        void* raw = nullptr;
+        if (!building || !building->QueryInterface(kGZIID_cISC4Occupant, &raw) || !raw) continue;   // building vslot 0xc
+        auto* occupant = static_cast<cISC4Occupant*>(raw);
+        const bool anchor = occupant->IsOccupantGroup(0x3000);                      // occupant vslot 0x58
+        occupant->Release();
+        if (anchor) return true;
+    }
+    if (!g_construction) return true;
+    std::vector<cSC4Lot*> around;
+    for (const int edge : {1, 2, 4, 8}) g_construction->LotsSurroundingRect(rect, edge, around);   // +0x24 vslot 0x28
+    for (cSC4Lot* neighbour : around) {
+        const std::uint32_t type = neighbour->GetBuildingType(true);                // vslot 0xb8
+        if (type == 0) continue;
+        if (neighbour->GetState() < 2 && !neighbour->GetUnit()) continue;           // vslots 0x84 / 0x64
+        if (g_construction->BuildingPurpose(type) == purpose) return false;         // +0x18 vslot 0x9c
+    }
+    return true;
+}
+
 // @ i386 0x000f3dbc. Only an industrial lot (purposes 5-8) outside a unit joins one. The candidates are the lots along its four
 // edges with a building type of the same purpose that are under construction or later (or already in a unit): a farm (5) takes
 // one with its building, the others one that reaches a road itself or through its designate. A random candidate's unit (a new

@@ -212,6 +212,12 @@ public:
                                   int z1, bool unique) = 0;                 // vslot 0x38
     virtual int CanCreateLot(int x, int z, int sizeX, int sizeZ, bool param5, bool param6,
                              cSC4LotConfiguration* configuration) = 0;      // vslot 0xa0
+    // i386 vslot 0x20 GetLotsSurroundingLot(lot, list, edge) / 0x28 GetLotsSurroundingRect(rect, list, edge): append (edge 1, 2, 4, 8).
+    virtual int GetLotsSurroundingLot(cSC4Lot* lot, std::list<cRZAutoRefCount<cSC4Lot>>& out, int edgeMask) = 0;
+    virtual int GetLotsSurroundingRect(const std::int32_t rect[4], std::list<cRZAutoRefCount<cSC4Lot>>& out, int edgeMask) = 0;
+    // i386 vslot 0x58 CreateLotIfPossible(x, z, sizeX, sizeZ, facing, &lot, 0, 0, null): the new lot comes back AddRef'd.
+    virtual bool CreateLotIfPossible(int x, int z, int sizeX, int sizeZ, int facing, cSC4Lot*& out) = 0;
+    virtual void DeleteLot(cSC4Lot* lot) = 0;                               // i386 vslot 0x60
 };
 
 class ITractLotDeveloperApi : public ITractDeveloperService {
@@ -330,6 +336,10 @@ public:
     virtual void DemolishLots(const std::list<cRZAutoRefCount<cSC4Lot>>& lots, std::uint32_t flags) = 0;
     // SL::spRM vslot 0x18 GetResource(key, 0xa52160f5 exemplar) -> cSCPropertyHelp::GetPropertyValue(bool).
     virtual void BuildingExemplarBool(const cGZPersistResourceKey& key, std::uint32_t property, bool& value) = 0;
+    // The same exemplar's uint32 array property (BuildFarm's field list 0x29b55f73); false when the exemplar or property is missing.
+    virtual bool BuildingExemplarUint32s(const cGZPersistResourceKey& key, std::uint32_t property, std::vector<std::uint32_t>& out) = 0;
+    // SL::spTerrain i386 vslot 0x114 RedisplayTerrain(false, false, rect, 0) on an inclusive cell rect {x0, z0, x1, z1}.
+    virtual void RedisplayTerrain(const std::int32_t rect[4]) = 0;
 };
 ITractDeveloperHost* TractDeveloperHost();
 void SetTractDeveloperHost(ITractDeveloperHost* host);
@@ -464,6 +474,7 @@ enum TractHistogramBucket : std::size_t {
     kHistogramBuild = 6,            // Build (+0x90)
     kHistogramSuitable = 7,         // IsLotConfigurationSuitable (+0xa8)
     kHistogramLotSuitable = 8,      // IsLotSuitable (+0xc0)
+    kHistogramAggregationLegal = 9, // IsAggregationLegal (+0xd8)
     kHistogramStyle = 10,           // PickBuilding's style filter (+0xf0)
     kHistogramCompatible = 11,      // IsLotConfigurationCompatible (+0x108)
     kHistogramBuilding = 12,        // IsBuildingCompatible (+0x120)
@@ -637,7 +648,7 @@ private:
     std::int32_t maximumBuildAttempts_ = 0;            // +0x104
     std::int32_t secondAttemptLimit_ = 0;              // +0x108
     std::int32_t builtCount_ = 0;                      // +0x10c
-    std::int32_t reserved110_ = 0;                     // +0x110
+    std::int32_t subdivisionBuilt_ = 0;                // +0x110 capacity PerformSubdivision started (i386 +0xc4)
     std::uint8_t attempted_ = 0;                       // +0x114
     std::uint8_t reserved115_[3] = {};                 // +0x115
     std::set<cSC4Lot*> existingLots_;                  // +0x118
@@ -662,6 +673,10 @@ private:
     // original names mAttempt and copies into the growth database).
     GrowthAttemptRecord currentAttempt_;               // +0x1e0
     std::map<std::uint32_t, std::map<std::pair<int, int>, GrowthRecord>> growthDatabase_;  // +0x250
+    // Not in the original: set when PerformAggregation deleted its lots but could not create the merged one. The original goes
+    // on to the next candidate, whose borrowed lot pointers may be the deleted lots (tract-developer.md 4.15.3, ZG34); the
+    // port ends the pass there instead.
+    bool aggregationLostLots_ = false;
 };
 
 }  // namespace sc4

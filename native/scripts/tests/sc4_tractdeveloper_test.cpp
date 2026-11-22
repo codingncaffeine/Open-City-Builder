@@ -10,9 +10,11 @@
 
 #include "sc4/TractDeveloper.h"
 
+#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <list>
 #include <map>
@@ -71,11 +73,66 @@ struct FakeLotManager : ITractLotManagerApi {
         auto it = lots.find({x, z});
         return it == lots.end() ? nullptr : it->second;
     }
-    int GetLotsInCellRect(std::list<cRZAutoRefCount<cSC4Lot>>&, int, int, int, int, bool) override {
-        return 0;
+    // Every distinct lot on the cells, in x-then-z order, with a reference each.
+    void Collect(std::list<cRZAutoRefCount<cSC4Lot>>& out, int x0, int z0, int x1, int z1) {
+        std::set<cSC4Lot*> seen;
+        for (const auto& entry : out) seen.insert(entry.get());
+        for (int x = x0; x <= x1; ++x)
+            for (int z = z0; z <= z1; ++z) {
+                auto it = lots.find({x, z});
+                if (it != lots.end() && seen.insert(it->second).second) out.push_back(cRZAutoRefCount<cSC4Lot>(it->second));
+            }
+    }
+    int GetLotsInCellRect(std::list<cRZAutoRefCount<cSC4Lot>>& out, int x0, int z0, int x1, int z1, bool) override {
+        const std::size_t before = out.size();
+        Collect(out, x0, z0, x1, z1);
+        return static_cast<int>(out.size() - before);
     }
     int canCreate = 7;
     int CanCreateLot(int, int, int, int, bool, bool, cSC4LotConfiguration*) override { return canCreate; }
+    // Edge 1 = the column west of the rect, 2 = the row north, 4 = east, 8 = south (the fake's own convention).
+    int GetLotsSurroundingRect(const std::int32_t r[4], std::list<cRZAutoRefCount<cSC4Lot>>& out, int edge) override {
+        const std::size_t before = out.size();
+        if (edge == 1) Collect(out, r[0] - 1, r[1], r[0] - 1, r[3]);
+        if (edge == 2) Collect(out, r[0], r[1] - 1, r[2], r[1] - 1);
+        if (edge == 4) Collect(out, r[2] + 1, r[1], r[2] + 1, r[3]);
+        if (edge == 8) Collect(out, r[0], r[3] + 1, r[2], r[3] + 1);
+        return static_cast<int>(out.size() - before);
+    }
+    int GetLotsSurroundingLot(cSC4Lot* lot, std::list<cRZAutoRefCount<cSC4Lot>>& out, int edge) override {
+        std::int32_t r[4];
+        lot->GetBoundingRect(r);
+        return GetLotsSurroundingRect(r, out, edge);
+    }
+    bool createFails = false;
+    std::vector<cSC4Lot*> created;      // the manager's reference to each lot it made
+    std::vector<int> createdFacings;
+    bool CreateLotIfPossible(int x, int z, int sizeX, int sizeZ, int facing, cSC4Lot*& out) override {
+        out = nullptr;
+        if (createFails) return false;
+        out = new cSC4Lot(x, z, sizeX, sizeZ, facing < 0 ? 0 : facing);
+        out->AddRef();                  // the caller's
+        out->AddRef();                  // the manager's
+        out->UpdateZoneType();
+        created.push_back(out);
+        createdFacings.push_back(facing);
+        for (int cx = x; cx < x + sizeX; ++cx)
+            for (int cz = z; cz < z + sizeZ; ++cz) lots[{cx, cz}] = out;
+        return true;
+    }
+    std::vector<cSC4Lot*> deleted;
+    void DeleteLot(cSC4Lot* lot) override {
+        for (auto it = lots.begin(); it != lots.end();) it = it->second == lot ? lots.erase(it) : std::next(it);
+        deleted.push_back(lot);
+        lot->Release();                 // the manager's
+    }
+    std::vector<cSC4Lot*> added;        // lots a test placed (the manager's reference)
+    ~FakeLotManager() override {
+        for (cSC4Lot* lot : added)
+            if (std::find(deleted.begin(), deleted.end(), lot) == deleted.end()) lot->Release();
+        for (cSC4Lot* lot : created)
+            if (std::find(deleted.begin(), deleted.end(), lot) == deleted.end()) lot->Release();
+    }
 };
 
 struct FakeLotDeveloper : ITractLotDeveloperApi {
@@ -201,7 +258,8 @@ struct FakeGrowthDeveloper : IGrowthDeveloperApi {
 struct FakeLotHost : ILotHost {
     LotBuildingProfile profile;
     int day = 100;
-    std::uint8_t ZoneTypeAt(int, int) override { return 2; }
+    std::uint8_t zone = 2;
+    std::uint8_t ZoneTypeAt(int, int) override { return zone; }
     std::int32_t SimulatorDay() override { return day; }
     float TerrainAltitude(float, float) override { return 270.0f; }
     const LotBuildingProfile* BuildingProfile(std::uint32_t type) override { return type ? &profile : nullptr; }
@@ -231,7 +289,12 @@ struct FakeLotHost : ILotHost {
     bool TrafficHasJobAccess(const cSC4Lot&, int) override { return false; }
     void NeighborLots(const cSC4Lot&, int, std::vector<cSC4Lot*>&) override {}
     void GetLotOccupants(const cSC4Lot&, std::vector<cIGZUnknown*>&) override {}
-    bool RoadAccessCells(const cSC4Lot&, int) override { return false; }
+    std::set<std::pair<int, int>> roadLots;   // lots (by bounding-rect origin) with a road on their front
+    bool RoadAccessCells(const cSC4Lot& lot, int) override {
+        std::int32_t r[4];
+        lot.GetBoundingRect(r);
+        return roadLots.count({r[0], r[1]}) != 0;
+    }
     bool IsFerryTerminal(const cSC4Lot&) override { return false; }
     bool FerryTerminalRoadAccess(const cSC4Lot&) override { return false; }
     cIGZUnknown* FindBuildingOccupant(const cSC4Lot&) override { return nullptr; }
@@ -373,6 +436,15 @@ struct FakeHost : ITractDeveloperHost {
         demolitions += static_cast<int>(lots.size());
     }
     void BuildingExemplarBool(const cGZPersistResourceKey&, std::uint32_t, bool&) override {}
+    std::map<std::uint32_t, std::vector<std::uint32_t>> exemplarArrays;   // property -> values (any building)
+    bool BuildingExemplarUint32s(const cGZPersistResourceKey&, std::uint32_t property, std::vector<std::uint32_t>& out) override {
+        auto it = exemplarArrays.find(property);
+        if (it == exemplarArrays.end()) return false;
+        out = it->second;
+        return true;
+    }
+    int redisplays = 0;
+    void RedisplayTerrain(const std::int32_t*) override { ++redisplays; }
 
     const cISC4LotConfigurationFilter* lastFilter = nullptr;
 };
@@ -389,15 +461,16 @@ cSC4LotConfiguration* MakeConfiguration(std::uint32_t id, std::uint8_t growthSta
                                         std::vector<std::uint8_t> purposes,
                                         std::vector<std::uint8_t> wealthTypes, std::uint16_t minCapacity,
                                         std::uint16_t maxCapacity, std::vector<std::uint32_t> styles,
-                                        bool withBuilding = true) {
+                                        bool withBuilding = true, std::vector<std::uint8_t> size = {2, 2},
+                                        std::uint8_t zone = 2) {
     cSCPropertyHolder holder;
     holder.AddRef();
     cSCPropertyHelp::SetPropertyValue(&holder, kLotConfigVersion, static_cast<std::uint8_t>(2));
-    cSCPropertyHelp::SetPropertyValue(&holder, kLotConfigSize, std::vector<std::uint8_t>{2, 2});
+    cSCPropertyHelp::SetPropertyValue(&holder, kLotConfigSize, size);
     cSCPropertyHelp::SetPropertyValue(&holder, kLotConfigGrowthStage, growthStage);
     cSCPropertyHelp::SetPropertyValue(&holder, kLotConfigPurposeTypes, purposes);
     cSCPropertyHelp::SetPropertyValue(&holder, kLotConfigWealthTypes, wealthTypes);
-    cSCPropertyHelp::SetPropertyValue(&holder, kLotConfigZoneTypes, std::vector<std::uint8_t>{2});
+    cSCPropertyHelp::SetPropertyValue(&holder, kLotConfigZoneTypes, std::vector<std::uint8_t>{zone});
     if (withBuilding) {
         // version 2 object: type 0 (building), flag 0, orientation 0, x/y/z 0, limits 0, value, id, 2 extras
         cSCPropertyHelp::SetPropertyValue(&holder, kLotConfigObjectFirst,
@@ -1236,6 +1309,249 @@ void TestTakeOverAbandoned() {
     SetTractDeveloperHost(nullptr);
 }
 
+// The common setup of the growth tests below: a developer of purpose/wealth 1 (or `purpose`), every cell next to a lot has a
+// road, one building 0x2000 of capacity `capacity`, tract (1,1) = cells 4..7.
+void SetUpGrowth(FakeHost& host, int purpose, std::uint16_t capacity) {
+    host.growthDeveloper.purpose = purpose;
+    host.growthDeveloper.wealth = 1;
+    host.growthDeveloper.construction.purpose = static_cast<std::uint32_t>(purpose);
+    host.growthDeveloper.construction.value8 = std::bit_cast<float>(std::int32_t{1});
+    host.growthDeveloper.construction.value12 = 1;
+    host.growthDeveloper.desirability.tractSize = 1;
+    host.growthDeveloper.desirability.shift = 2;
+    BuildingProfile profile;
+    profile.purpose = static_cast<std::uint32_t>(purpose);
+    profile.wealth = 1;
+    profile.capacity = capacity;
+    host.buildingDevelopment.profiles[0x2000] = profile;
+    host.buildingDevelopment.families[0] = {0x2000};
+    host.roads = true;
+}
+
+cSC4Lot* AddLot(FakeHost& host, int x, int z, int sizeX, int sizeZ, int facing) {
+    auto* lot = new cSC4Lot(x, z, sizeX, sizeZ, facing);
+    lot->AddRef();                                          // the lot manager's reference (DeleteLot drops it)
+    lot->UpdateZoneType();
+    host.lotManager.added.push_back(lot);
+    for (int cx = x; cx < x + sizeX; ++cx)
+        for (int cz = z; cz < z + sizeZ; ++cz) host.lotManager.lots[{cx, cz}] = lot;
+    return lot;
+}
+
+GrowthProfile TractOneOne(FakeHost& host) {
+    GrowthProfile grow;
+    grow.developer = &host.growthDeveloper;
+    grow.tractX = 1;
+    grow.tractZ = 1;
+    grow.growthStage = 2;
+    return grow;
+}
+
+// Two 1x1 lots side by side facing 0 and only a 2x1 configuration: the merge of the two is the only candidate (the left lot's
+// trial shifted by one, and the right lot's own trial). Grow demolishes and deletes both, creates one 2x1 lot over them and
+// starts the building on it. When the merged lot cannot be created the pass ends there (port guard, no stale lots touched).
+void TestAggregation() {
+    FakeHost host;
+    FakeLotHost lotHost;
+    SetTractDeveloperHost(&host);
+    SetLotHost(&lotHost);
+    SetUpGrowth(host, 1, 2);
+    cSC4TractDeveloper developer;
+    CHECK(developer.Init());
+    cSC4Lot* left = AddLot(host, 4, 4, 1, 1, 0);
+    cSC4Lot* right = AddLot(host, 5, 4, 1, 1, 0);
+    cSC4LotConfiguration* configuration = MakeConfiguration(31, 1, {1}, {1}, 0, 10, {}, true, {2, 1});
+    host.configurations = {configuration};
+    GrowthProfile grow = TractOneOne(host);
+    std::list<int> outcomes;
+    bool declined = false;
+    CHECK(developer.Grow(grow, outcomes, declined) == 2);
+    CHECK(host.lotManager.deleted.size() == 2);
+    CHECK(host.demolitions == 2);
+    CHECK(host.lotManager.created.size() == 1);
+    CHECK(host.redisplays == 1);
+    if (host.lotManager.created.size() == 1) {
+        std::int32_t r[4];
+        host.lotManager.created[0]->GetBoundingRect(r);
+        CHECK(r[0] == 4 && r[1] == 4 && r[2] == 5 && r[3] == 4);
+        CHECK(host.lotManager.createdFacings[0] == 0);      // not a farm/industry lot: the facing is kept
+        CHECK(host.lotDeveloper.lastLot == host.lotManager.created[0]);
+    }
+    CHECK(host.lotDeveloper.constructions == 1);
+    CHECK(host.lotDeveloper.lastConfiguration == configuration);
+    CHECK(developer.Histograms()[kHistogramAggregation][kTractOutcomeSuccess] == 2);   // both trials of the same rect
+    CHECK(developer.Histograms()[kHistogramAggregationLegal][kTractOutcomeSuccess] == 2);
+
+    // the merged lot cannot be created: both lots are gone, Build reports 0 and the pass ends at once
+    FakeHost host2;
+    SetTractDeveloperHost(&host2);
+    SetUpGrowth(host2, 1, 2);
+    cSC4TractDeveloper developer2;
+    CHECK(developer2.Init());
+    AddLot(host2, 4, 4, 1, 1, 0);
+    AddLot(host2, 5, 4, 1, 1, 0);
+    host2.configurations = {configuration};
+    host2.lotManager.createFails = true;
+    GrowthProfile grow2 = TractOneOne(host2);
+    outcomes.clear();
+    developer2.Grow(grow2, outcomes, declined);
+    CHECK(host2.lotManager.deleted.size() == 2);            // only the first candidate's lots, once each
+    CHECK(host2.lotDeveloper.constructions == 0);
+    CHECK(!outcomes.empty() && outcomes.front() == 0);
+    developer2.Shutdown();
+
+    configuration->Release();
+    developer.Shutdown();
+    (void)left;
+    (void)right;
+    SetLotHost(nullptr);
+    SetTractDeveloperHost(nullptr);
+}
+
+// A 2x1 lot facing 0 and only a 1x1 configuration: the lot is split into two 1x1 lots; the first takes the picked building,
+// the second picks again, and both start while the built capacity stays under the target.
+void TestSubdivision() {
+    FakeHost host;
+    FakeLotHost lotHost;
+    SetTractDeveloperHost(&host);
+    SetLotHost(&lotHost);
+    SetUpGrowth(host, 1, 1);
+    host.growthDeveloper.demand.value = 4.0f;               // desired 4 (desiredMax 6): room for both pieces
+    cSC4TractDeveloper developer;
+    CHECK(developer.Init());
+    cSC4Lot* parent = AddLot(host, 4, 4, 2, 1, 0);
+    cSC4LotConfiguration* configuration = MakeConfiguration(41, 1, {1}, {1}, 0, 10, {}, true, {1, 1});
+    host.configurations = {configuration};
+    GrowthProfile grow = TractOneOne(host);
+    std::list<int> outcomes;
+    bool declined = false;
+    developer.Grow(grow, outcomes, declined);
+    CHECK(!host.lotManager.deleted.empty() && host.lotManager.deleted.front() == parent);
+    CHECK(host.lotManager.created.size() >= 2);
+    if (host.lotManager.created.size() >= 2) {
+        std::int32_t a[4], b[4];
+        host.lotManager.created[0]->GetBoundingRect(a);
+        host.lotManager.created[1]->GetBoundingRect(b);
+        CHECK(a[0] == 5 && a[2] == 5 && a[1] == 4);         // facing 0: origin x + 1 - cw = 5, then x -= cw
+        CHECK(b[0] == 4 && b[2] == 4 && b[1] == 4);
+    }
+    CHECK(host.lotDeveloper.constructions >= 2);
+    CHECK(developer.BuiltCapacity() >= 2);
+    configuration->Release();
+    developer.Shutdown();
+    SetLotHost(nullptr);
+    SetTractDeveloperHost(nullptr);
+}
+
+// A farm developer (purpose 5) with a 5x5 block of 1x1 lots: the farm goes on the first candidate, and every other suitable
+// lot reached outward from it (24, at least 15 needed) becomes a field of the type the farm's exemplar lists, facing the farm,
+// in the livable state. With fewer than 15 lots around it no farm is built.
+void TestBuildFarm() {
+    FakeHost host;
+    FakeLotHost lotHost;
+    lotHost.zone = 5;
+    lotHost.roadLots = {{4, 4}};                            // only the farm's own lot is on a road; fields need none
+    host.zoneManager.zone = 5;
+    SetTractDeveloperHost(&host);
+    SetLotHost(&lotHost);
+    SetUpGrowth(host, 5, 1);
+    BuildingProfile field;
+    field.purpose = 5;
+    field.capacity = 3;
+    host.buildingDevelopment.profiles[0x3000] = field;
+    host.exemplarArrays[0x29b55f73] = {0x3000};
+    cSC4LotConfiguration* fieldConfiguration = MakeConfiguration(0x3000, 1, {5}, {1}, 0, 10, {}, true, {1, 1}, 5);
+    cSC4LotConfigurationManager::GetLotConfigurationMap()[0x3000] = fieldConfiguration;
+    cSC4LotConfiguration* configuration = MakeConfiguration(51, 1, {5}, {1}, 0, 10, {}, true, {1, 1}, 5);
+    host.configurations = {configuration};
+    cSC4TractDeveloper developer;
+    CHECK(developer.Init());
+    for (int x = 2; x <= 6; ++x)
+        for (int z = 2; z <= 6; ++z) AddLot(host, x, z, 1, 1, 1);
+    GrowthProfile grow = TractOneOne(host);
+    std::list<int> outcomes;
+    bool declined = false;
+    developer.Grow(grow, outcomes, declined);
+    if (std::getenv("TRACT_TEST_DEBUG")) {
+        for (int o : outcomes) std::fprintf(stderr, "farm outcome %d\n", o);
+        const auto& h = developer.Histograms();
+        for (std::size_t r = 0; r < h.size(); ++r)
+            for (std::size_t o = 0; o < h[r].size(); ++o)
+                if (h[r][o]) std::fprintf(stderr, " %zu:%zu=%u", r, o, h[r][o]);
+        std::fprintf(stderr, "\n");
+    }
+    CHECK(!outcomes.empty() && outcomes.back() == kTractOutcomeSuccess);
+    CHECK(host.lotDeveloper.constructions == 25);           // the farm and 24 fields
+    CHECK(host.lotDeveloper.lastConfiguration == fieldConfiguration);
+    CHECK(host.lotDeveloper.lastBuilding == 0x3000);
+    int fields = 0;
+    std::set<cSC4Lot*> seen;
+    for (const auto& [cell, lot] : host.lotManager.lots)
+        if (seen.insert(lot).second && lot->GetState() == 3) ++fields;
+    CHECK(fields == 24);
+
+    // a 3x3 block only has 8 lots around the farm: nothing is built
+    FakeHost small;
+    SetTractDeveloperHost(&small);
+    small.zoneManager.zone = 5;
+    SetUpGrowth(small, 5, 1);
+    small.configurations = {configuration};
+    cSC4TractDeveloper developer2;
+    CHECK(developer2.Init());
+    for (int x = 4; x <= 6; ++x)
+        for (int z = 4; z <= 6; ++z) AddLot(small, x, z, 1, 1, 1);
+    GrowthProfile grow2 = TractOneOne(small);
+    outcomes.clear();
+    developer2.Grow(grow2, outcomes, declined);
+    CHECK(small.lotDeveloper.constructions == 0);
+    developer2.Shutdown();
+
+    cSC4LotConfigurationManager::GetLotConfigurationMap().erase(0x3000);
+    fieldConfiguration->Release();
+    configuration->Release();
+    developer.Shutdown();
+    SetLotHost(nullptr);
+    SetTractDeveloperHost(nullptr);
+}
+
+// UpdatePopulation: a livable lot of the developer's wealth gets capacity x desirability% (jitter 0); when that would fill it,
+// 1 - vacancy instead. A lot of another wealth is left alone.
+void TestUpdatePopulation() {
+    FakeHost host;
+    FakeLotHost lotHost;
+    SetTractDeveloperHost(&host);
+    SetLotHost(&lotHost);
+    host.tunablesResult.populationJitter = 0.0f;
+    host.tunablesResult.declineJitterLow = 0.25f;
+    host.tunablesResult.declineJitterHigh = 0.25f;
+    host.growthDeveloper.developerType = 0x1010;
+    host.growthDeveloper.wealth = 1;
+    host.growthDeveloper.desirability.shift = 2;
+    host.growthDeveloper.desirability.cells[{1, 1}] = 50;
+    lotHost.profile.purpose = 1;
+    lotHost.profile.wealth = 1;
+    lotHost.profile.capacities = {{{0x1010, 12}}};
+    cSC4TractDeveloper developer;
+    CHECK(developer.Init());
+    cSC4Lot* lot = AddLot(host, 4, 4, 1, 1, 0);
+    lot->SetBuildingType(0x1234);
+    lot->SetState(kLotStateOccupied, 1, 0);
+    lot->SetState(kLotStateLivable, 1, 0);
+    GrowthProfile grow = TractOneOne(host);
+    developer.UpdatePopulation(grow);
+    CHECK(lot->GetPopulation(0x1010) == 6);
+    host.growthDeveloper.desirability.cells[{1, 1}] = 150;
+    developer.UpdatePopulation(grow);
+    CHECK(lot->GetPopulation(0x1010) == 9);                 // 12 x (1 - 0.25)
+    host.growthDeveloper.wealth = 2;
+    host.growthDeveloper.desirability.cells[{1, 1}] = 50;
+    developer.UpdatePopulation(grow);
+    CHECK(lot->GetPopulation(0x1010) == 9);
+    developer.Shutdown();
+    SetLotHost(nullptr);
+    SetTractDeveloperHost(nullptr);
+}
+
 int main() {
     TestLayoutAndCom();
     TestStyles();
@@ -1253,6 +1569,10 @@ int main() {
     TestNullHost();
     TestBuildOnEmptyLot();
     TestTakeOverAbandoned();
+    TestAggregation();
+    TestSubdivision();
+    TestBuildFarm();
+    TestUpdatePopulation();
     if (g_failures == 0) std::puts("sc4_tractdeveloper ok");
     return g_failures == 0 ? 0 : 1;
 }

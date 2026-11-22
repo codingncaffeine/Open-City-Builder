@@ -33,6 +33,8 @@ sc4::cSC4GrowthDeveloper* GrowthDeveloperOfType(std::uint32_t type); // the deve
 // cSC4TractDeveloper::Grow for one developer's tract (NativeTractDevelopment.cpp); > 0 when something was built
 bool NativeLotConfigurationsByFilter(std::vector<sc4::cSC4LotConfiguration*>& out, sc4::cISC4LotConfigurationFilter* filter);   // manager vslot 0x48
 int NativeTractGrow(void* developer, int tractX, int tractZ, std::uint8_t style);
+// cSC4TractDeveloper::UpdatePopulation for one developer's tract (building development vslot 0x118 -> tract developer vslot 0x38).
+void NativeTractUpdatePopulation(void* developer, int tractX, int tractZ);
 void InstallTractDeveloperHost();
 void NativeDeclineReport();   // kit verb "decline": lots by state, abandonments and reoccupations
 // The demand simulator's view (NativeDemandHost.cpp): the zone kind (+0x28, 1..3), the source demand channel, the desirability at a

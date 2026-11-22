@@ -37,6 +37,7 @@
 #include "sc4/Simulator.h"
 #include "sc4/ZoneDeveloper.h"
 #include "sc4/cSC4City.h"
+#include "sc4/cSTETerrain.h"
 #include "sc4/cSC4ZoneManager.h"
 
 namespace native {
@@ -145,9 +146,9 @@ struct BuildingDevelopmentApi final : ITractBuildingDevelopmentApi {
     bool CheatIgnorePlumbing() override { return NativeBuildingCheat(0); }
     bool CheatIgnorePower() override { return NativeBuildingCheat(1); }
     bool CheatIgnoreCaps() override { return NativeBuildingCheat(2); }
-    bool NeedsAnchorBuilding(const std::int32_t*, std::int32_t) override {   // PARTIAL: cSC4LotDeveloper vslot 0x120
-        SC4_UNWIRED("cSC4TractDeveloper: cSC4LotDeveloper::NeedsAnchorBuilding (vslot 0x120) is not wired (never needs one)");
-        return false;
+    bool NeedsAnchorBuilding(const std::int32_t* rect, std::int32_t purpose) override {   // BDS vslot 0x120 -> lot developer slot 36
+        cSC4LotDeveloper* developer = LotDeveloper();
+        return developer && developer->NeedsAnchorBuilding(rect, purpose);
     }
     IGrowthDeveloperApi* GetDeveloper(std::uint32_t purpose, std::int32_t wealth) override {
         return ViewOf(GrowthDeveloperOfType(NativeDeveloperType(purpose, wealth)));
@@ -163,6 +164,34 @@ struct LotManagerApi final : ITractLotManagerApi {   // SL::spLotManager: the po
     int CanCreateLot(int x, int z, int sizeX, int sizeZ, bool param5, bool param6, cSC4LotConfiguration* configuration) override {
         cSC4ZoneDeveloper* d = ZoneDeveloper();
         return d ? d->CanCreateLot(x, z, sizeX, sizeZ, param5, param6, configuration) : 0;
+    }
+    int GetLotsSurroundingLot(cSC4Lot* lot, std::list<cRZAutoRefCount<cSC4Lot>>& out, int edgeMask) override {
+        cSC4ZoneDeveloper* d = ZoneDeveloper();
+        return d ? d->GetLotsSurroundingLot(lot, out, edgeMask) : 0;
+    }
+    int GetLotsSurroundingRect(const std::int32_t rect[4], std::list<cRZAutoRefCount<cSC4Lot>>& out, int edgeMask) override {
+        cSC4ZoneDeveloper* d = ZoneDeveloper();
+        if (!d) return 0;
+        SC4Rect<int> r;
+        r.x0 = rect[0]; r.z0 = rect[1]; r.x1 = rect[2]; r.z1 = rect[3];
+        return d->GetLotsSurroundingRect(r, out, edgeMask);
+    }
+    bool CreateLotIfPossible(int x, int z, int sizeX, int sizeZ, int facing, cSC4Lot*& out) override {
+        out = nullptr;
+        cSC4ZoneDeveloper* d = ZoneDeveloper();
+        const bool made = d && d->CreateLotIfPossible(x, z, sizeX, sizeZ, facing, out, false, false, nullptr);
+        if (std::getenv("SC4_SIMDEBUG"))
+            std::fprintf(stderr, "tract developer: CreateLotIfPossible (%d,%d) %dx%d facing %d -> %s\n", x, z, sizeX, sizeZ, facing,
+                         out ? "lot" : (made ? "deferred" : "FAILED"));
+        return made;
+    }
+    void DeleteLot(cSC4Lot* lot) override {
+        if (std::getenv("SC4_SIMDEBUG") && lot) {
+            int x = 0, z = 0;
+            lot->GetLocation(x, z);
+            std::fprintf(stderr, "tract developer: DeleteLot (%d,%d)\n", x, z);
+        }
+        if (cSC4ZoneDeveloper* d = ZoneDeveloper()) d->DeleteLot(lot);
     }
 } g_lotManager;
 
@@ -288,6 +317,16 @@ bool ReadTractTunables(TractTunables& io) {
     return true;
 }
 
+sc4::cSTETerrain* CityTerrain() {   // SL::spTerrain: the city's terrain component
+    cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::Terrain) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(0xab953253, &raw) || !raw) return nullptr;
+    auto* serializable = static_cast<cIGZSerializable*>(raw);
+    serializable->Release();
+    return static_cast<sc4::cSTETerrain*>(serializable);
+}
+
 struct TractHost final : ITractDeveloperHost {
     cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
     bool SimulatorPresent() override { return CitySimulatorPresent(); }
@@ -353,6 +392,17 @@ struct TractHost final : ITractDeveloperHost {
         cSCPropertyHelp::GetPropertyValue(exemplar->AsISCPropertyHolder(), property, value);
         exemplar->Release();
     }
+    bool BuildingExemplarUint32s(const cGZPersistResourceKey& key, std::uint32_t property, std::vector<std::uint32_t>& out) override {
+        void* raw = nullptr;
+        if (!SL::spRM || !SL::spRM->GetResource(key, 0xa52160f5, &raw, 0, nullptr) || !raw) return false;
+        auto* exemplar = static_cast<cISCResExemplar*>(raw);
+        const bool found = cSCPropertyHelp::GetPropertyValue(exemplar->AsISCPropertyHolder(), property, out);
+        exemplar->Release();
+        return found;
+    }
+    void RedisplayTerrain(const std::int32_t rect[4]) override {   // terrain i386 vslot 0x114 (false, false, rect, 0)
+        if (sc4::cSTETerrain* t = CityTerrain()) t->RedisplayTerrain(false, false, sc4::TerrainRect{rect[0], rect[1], rect[2], rect[3]}, 0);
+    }
 } g_host;
 
 }  // namespace
@@ -391,6 +441,19 @@ int NativeTractGrow(void* developer, int tractX, int tractZ, std::uint8_t style)
         }
     }
     return result;
+}
+
+// The original's GrowthProfile here carries the tract and the developer; its stage byte is left uninitialised (growth.md), and
+// UpdatePopulation does not read it.
+void NativeTractUpdatePopulation(void* developer, int tractX, int tractZ) {
+    cSC4TractDeveloper* tract = TractDeveloper();
+    GrowthView* view = ViewOf(static_cast<cSC4GrowthDeveloper*>(developer));
+    if (!tract || !view) return;
+    GrowthProfile profile;
+    profile.developer = view;
+    profile.tractX = tractX;
+    profile.tractZ = tractZ;
+    tract->UpdatePopulation(profile);   // vslot 0x38
 }
 
 static int g_declineOutcomes = 0;          // decline-plan outcomes the tract developer executed

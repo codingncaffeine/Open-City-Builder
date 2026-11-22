@@ -366,6 +366,16 @@ public:
         if (!lots || !lot || lots->GetLotsSurroundingLot(lot, around, 0xf) <= 0) return;
         for (auto& other : around) out.push_back(other.get());   // the lot manager keeps them: borrowed
     }
+    void LotsSurroundingRect(const std::int32_t rect[4], int edge, std::vector<cSC4Lot*>& out) override {
+        cSC4City* city = HostCity();
+        auto* lots = city ? dynamic_cast<sc4::cSC4ZoneDeveloper*>(city->GetComponent(sc4::CityComponent::ZoneDeveloper)) : nullptr;
+        if (!lots) return;
+        sc4::SC4Rect<int> r;
+        r.x0 = rect[0]; r.z0 = rect[1]; r.x1 = rect[2]; r.z1 = rect[3];
+        std::list<cRZAutoRefCount<cSC4Lot>> around;
+        lots->GetLotsSurroundingRect(r, around, edge);
+        for (auto& other : around) out.push_back(other.get());   // the lot manager keeps them: borrowed
+    }
     bool CellHasWater(int x, int z) override { cSTETerrain* t = Terrain(); return t && t->CellHasWater(std::uint32_t(x), std::uint32_t(z)); }
     float WaterLevelAt(float x, float z) override { cSTETerrain* t = Terrain(); return t ? t->GetWaterLevel(x, z) : 0.0f; }
     void CellCenterToPosition(int cellX, int cellZ, float& x, float& z) override {

@@ -220,7 +220,9 @@ struct BuildingDevelopmentApi final : IGrowthBuildingDevelopmentApi {
         SC4_UNWIRED("cSC4BuildingDevelopmentSimulator::GetStagePopulationMultiplier: stageMultiplier[difficulty] is not read (always 1)");
         return 1.0f;
     }
-    void UpdateTractPopulation(cISC4GrowthDeveloper*, int, int) override {}   // the tract developer is layer 3
+    void UpdateTractPopulation(cISC4GrowthDeveloper* developer, int tractX, int tractZ) override {   // vslot 0x118
+        NativeTractUpdatePopulation(static_cast<cSC4GrowthDeveloper*>(developer), tractX, tractZ);
+    }
 } g_buildingDevelopment;
 
 struct LandValueApi final : IGrowthLandValueApi {

@@ -100,6 +100,10 @@ public:
         return true;
     }
     void AddRetainingWallOccupant(cSC4Lot*, bool) override { ++wallCalls; }
+    std::map<int, std::vector<cSC4Lot*>> around;   // NeedsAnchorBuilding: the lots along each edge of the asked rect
+    void LotsSurroundingRect(const std::int32_t*, int edge, std::vector<cSC4Lot*>& out) override {
+        for (cSC4Lot* lot : around[edge]) out.push_back(lot);
+    }
 };
 
 // An occupant of a given type standing at a position (the refit test).
@@ -267,6 +271,32 @@ int main() {
         CHECK(!field->GetUnit() && !field->GetTravelDesignate());
         farm->Release();
         field->Release();
+        bare->Release();
+    }
+
+    // NeedsAnchorBuilding (Mac i386 0x000f39ae): only industry (6..8) asks; a built neighbour of the same purpose under construction
+    // or later serves as the anchor, a bare one (state 1, no unit) or one of another purpose does not.
+    {
+        const std::int32_t rect[4] = {10, 10, 11, 11};
+        construction.around.clear();
+        CHECK(!dev.NeedsAnchorBuilding(rect, 3));
+        CHECK(!dev.NeedsAnchorBuilding(rect, 5));
+        CHECK(dev.NeedsAnchorBuilding(rect, 7));
+        cSC4Lot* factory = MakeLot(9, kFactory, 0);           // state 3, purpose 7
+        cSC4Lot* farm = MakeLot(12, kFarm, 0);                // purpose 5
+        auto* bare = new cSC4Lot(13, 0, 1, 1, 0);
+        bare->AddRef();
+        bare->Init();
+        bare->SetBuildingType(kFactory);
+        bare->SetState(1, 0, 0);
+        construction.around[2] = {farm, bare};
+        CHECK(dev.NeedsAnchorBuilding(rect, 7));
+        construction.around[8] = {factory};
+        CHECK(!dev.NeedsAnchorBuilding(rect, 7));
+        CHECK(dev.NeedsAnchorBuilding(rect, 6));               // the factory is purpose 7, not 6
+        construction.around.clear();
+        factory->Release();
+        farm->Release();
         bare->Release();
     }
 
