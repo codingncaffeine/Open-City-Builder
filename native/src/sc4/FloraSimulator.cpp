@@ -720,14 +720,16 @@ bool cSC4FloraSimulator::AddNewFloraOccupant(cISC4Occupant* occupant) {
 // today and sits on the ground (the sea surface for land flora in the water).
 cISC4Occupant* cSC4FloraSimulator::AddNewFloraOccupant(std::uint32_t type, float* xyz, bool skipClusters) {
     if (!g_host) return nullptr;
-    if (!IsFloraTypeValid(type)) {
-        if (type != 0) return nullptr;
+    // Type 0 asks for the best species even though Init registers a default record under key 0 (flora.md 6.5 step 1).
+    if (type == 0) {
         float score = 0.0f;
         type = GetBestFloraTypeForLocation(xyz[0], xyz[2], score);
         if (type == 0) {
             if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "flora: no species suits %.0f,%.0f\n", xyz[0], xyz[2]);
             return nullptr;
         }
+    } else if (!IsFloraTypeValid(type)) {
+        return nullptr;
     }
     if (!skipClusters) {
         cISC4OccupantManager* occupants = g_host->OccupantManager();

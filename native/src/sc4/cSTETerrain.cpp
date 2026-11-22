@@ -23,6 +23,13 @@
 #include "sc4/Region.h"
 #include "sc4/SCProperty.h"
 
+namespace {
+// SC4_DEBUG: what the flora brush did with the cells of one stroke (printed after the stroke).
+struct FloraBrushStats { int cells, lowTexture, notChosen, water, outside, planted; };
+FloraBrushStats g_floraBrushStats{};
+}  // namespace
+
+
 namespace sc4 {
 
 namespace {
@@ -3156,8 +3163,10 @@ void cSTETerrain::ApplyBrushComponents(TerrainBrushDescription& description, Ter
         case 1:
             if (floraBrushCount_ != 0) {
                 fn = &cSTETerrain::BrushFnFlora;
+                g_floraBrushStats = {};
                 break;
             }
+            if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "flora brush: no brushable flora types, nothing planted\n");
             DoPostBrushApplicationOperation(component.type, context, rect);
             UnionRect(parameters.rect, parameters.rect, rect);
             continue;
@@ -3215,6 +3224,12 @@ void cSTETerrain::ApplyBrushComponents(TerrainBrushDescription& description, Ter
             ApplyBrushAtLocation(static_cast<std::int32_t>(cellX), static_cast<std::int32_t>(cellZ), radius, angle,
                                  fn, 1, context, rect);
         }
+        if (component.type == 1 && std::getenv("SC4_DEBUG"))
+            std::fprintf(stderr, "flora brush at %.0f,%.0f: types %u radius %.1f texture %s cells %d low-texture %d not-chosen %d "
+                         "water %d outside %d sent-to-simulator %d\n", context.x, context.z, floraBrushCount_, radius,
+                         textureInfo ? "yes" : "no", g_floraBrushStats.cells, g_floraBrushStats.lowTexture,
+                         g_floraBrushStats.notChosen, g_floraBrushStats.water, g_floraBrushStats.outside,
+                         g_floraBrushStats.planted);
         DoPostBrushApplicationOperation(component.type, context, rect);
         UnionRect(parameters.rect, parameters.rect, rect);
     }
@@ -3344,8 +3359,10 @@ bool cSTETerrain::BrushFnFlora(std::int32_t index, const TerrainBrushContext& co
     // the cell, but only on dry land (the surface water's depth at the vertex <= 0) and inside the grid.
     ITerrainHost* host = TerrainHost();
     if (!host) return false;
-    if (context.textureValue <= 9) return false;
-    if (host->RandomUint32UniformBelow(100) < 0x1f) {
+    ++g_floraBrushStats.cells;
+    if (context.textureValue <= 9) { ++g_floraBrushStats.lowTexture; return false; }
+    if (host->RandomUint32UniformBelow(100) >= 0x1f) ++g_floraBrushStats.notChosen;
+    else {
         if (GetWaterDepthAtVertex(index) <= 0.0f) {
             const std::uint32_t row = static_cast<std::uint32_t>(index) / vertsX_;
             const std::uint32_t column = static_cast<std::uint32_t>(index) % vertsX_;
@@ -3357,9 +3374,13 @@ bool cSTETerrain::BrushFnFlora(std::int32_t index, const TerrainBrushContext& co
                 (void)host->RandomUint32UniformBelow(floraBrushCount_);   // the original picks an id and drops it
                 const float y = GetAltitude(x, z);                        // vslot 0x60
                 host->AddFloraAt(x, y, z);
+                ++g_floraBrushStats.planted;
                 if (host->CityEstablished()) host->AddFloraAura(x, z);
+            } else {
+                ++g_floraBrushStats.outside;
             }
         } else {
+            ++g_floraBrushStats.water;
             // the original posts "cannot plant here" through the sound server
             host->PostBrushSound(0xaa62c9d5, 0, 0);
         }

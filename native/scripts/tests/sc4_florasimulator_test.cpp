@@ -529,6 +529,17 @@ int main() {
         for (void* p : {primary, one, serializable}) static_cast<cIGZSerializable*>(p)->Release();
         // the key-0 record, the state, the tuning (flora.md 3.2, 4.1 steps 6 - 10, 7)
         CHECK(s->IsFloraTypeValid(0) && s->GetStaticFloraData(0) && s->GetStaticFloraData(0)->flags == 0x01);
+        {   // type 0 still asks for the best species with key 0 registered (flora.md 6.5 step 1): the god-mode brush plants so
+            float position[3] = {100.0f, 0.0f, 100.0f};
+            cISC4Occupant* planted = s->AddNewFloraOccupant(0, position, true);
+            void* raw = nullptr;
+            CHECK(planted && planted->QueryInterface(kGZIID_cISC4FloraOccupant, &raw) && raw);
+            if (raw) {
+                CHECK(static_cast<cISC4FloraOccupant*>(raw)->GetFloraType() == kTree);
+                static_cast<cISC4FloraOccupant*>(raw)->Release();
+            }
+            if (planted) manager->RemoveOccupant(planted, true, 0);
+        }
         std::uint32_t count = 0;
         s->GetAllFloraTypes(nullptr, count);
         CHECK(count == 3);

@@ -376,6 +376,7 @@ struct NativeTerrainHost final : ITerrainHost {
         cSC4FloraSimulator* flora = native::CityFloraSimulator();
         float xyz[3] = {x, y, z};
         if (flora) flora->AddNewFloraOccupant(0, xyz, false);
+        else if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "flora brush: the city has no flora simulator\n");
     }
     bool CityEstablished() override { sc4::cSC4City* city = native::HostCity(); return city && city->GetEstablished(); }
     void AddFloraAura(float x, float z) override {          // SL::spAuraSim vslot 0x38: AddTransientEffect(x, z, 1)
