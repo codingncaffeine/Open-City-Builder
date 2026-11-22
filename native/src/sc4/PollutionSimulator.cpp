@@ -1132,8 +1132,8 @@ bool cSC4PollutionSimulator::Init() {
         for (auto& slots : effects_) slots.assign(static_cast<std::size_t>(blocksX > 0 && blocksZ > 0 ? blocksX * blocksZ : 0), nullptr);
         effectWalk_.SetModular(true);
         effectWalk_.SetRect(0, 0, blocksX - 1, blocksZ - 1);
+        host_->EnsureSanitationDepartment();
         host_->CreateHistory(kHistoryTotal, 2);
-        SC4_UNWIRED("cSC4PollutionSimulator::Init: sanitation department budget line items 10 / 20 / 30 not set up");
     }
     return true;
 }
@@ -1480,7 +1480,6 @@ void cSC4PollutionSimulator::DoOccupantChanged(void* occupant, bool added) {
     }
     IPollutionOccupant* plant = footprint.occupant;
     if (!plant) return;
-    SC4_UNWIRED("cSC4PollutionSimulator::DoOccupantChanged: sanitation building maintenance line item (spBudgetSim vslots 0xcc / 0xdc / 0xe0) not booked");
     const auto startEmpty = [&](std::uint32_t usedProperty, std::uint32_t savedProperty) {
         cSCPropertyHelp::SetPropertyValue(holder, usedProperty, std::uint32_t{0});
         cSCPropertyHelp::SetPropertyValue(holder, savedProperty, std::uint32_t{0});
@@ -1512,6 +1511,7 @@ void cSC4PollutionSimulator::DoOccupantChanged(void* occupant, bool added) {
         AddOrRemoveOccupant(recyclingCenters_, plant, added);
         recyclingCenterCountSnapshot = static_cast<std::uint32_t>(recyclingCenters_.size());
     }
+    host_->BookSanitationBuilding(holder, added);
 }
 
 }  // namespace sc4

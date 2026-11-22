@@ -169,6 +169,12 @@ public:
     virtual std::uint8_t TrafficAirAt(int cellX, int cellZ) = 0;
     virtual void GarbageDeals(std::uint32_t kind, std::vector<IPollutionDeal*>& out) = 0;   // 0x4773ffe5 import, 0x4773ffe4 export
     virtual void SetSanitationLineItemCost(int item, std::int64_t cost) = 0;               // the sanitation department's line item
+    // Init (spec pollution.md 3.6): a city without the sanitation department gets it (0x6a42a8f5 in group 0x4a357eaf, named
+    // 0xca4938f8, funding cap 1.2) with its line items 10 / 20 / 30 (not locally funded).
+    virtual void EnsureSanitationDepartment() {}
+    // DoOccupantChanged's budget step (i386 0x0006ad02 tail, spec 4.2.4): the building's budget item for purpose 0xca58edc7; on
+    // line 10 it is added to (removed from) the budget; any line stores its cost in the int64 property 0x2a58d350.
+    virtual void BookSanitationBuilding(cISCPropertyHolder* holder, bool added) { (void)holder; (void)added; }
     virtual bool OccupantFootprint(void* occupant, PollutionOccupantFootprint& out) = 0;    // false: not a city occupant
     // cSC4PowerSimulator::IsOccupantPowered (i386 vslot 0x7c): GetCurrentOccupantEfficiency asks SL::spPowerSim, GetCurrentCapacity
     // the power simulator it keeps at +0x34; both pass the occupant.

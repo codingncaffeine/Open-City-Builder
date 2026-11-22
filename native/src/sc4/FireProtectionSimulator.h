@@ -61,6 +61,8 @@ public:
     virtual bool FundingInfo(IFireOccupant* occupant, std::uint32_t propertyId, int& cost, float& fraction) = 0;
     virtual bool SetFundingFraction(IFireOccupant* occupant, std::uint32_t propertyId, const SC4Percentage& fraction) = 0;
     virtual float DepartmentBudgetFraction() = 0;          // fire department +0x50
+    // Init (i386 0x00237e72): a city without the fire department gets it (as IPoliceHost::EnsureDepartment).
+    virtual void EnsureDepartment(std::uint32_t id, std::uint32_t nameInstance, float maxFunding) { (void)id; (void)nameInstance; (void)maxFunding; }
     virtual void* DepartmentBudget() = 0;
     virtual void SetStrikerGroup(IFireOccupant* occupant, bool add) = 0;
     virtual void RegisterFundedStation(IFireOccupant* occupant, std::uint32_t propertyId, bool add) = 0;

@@ -124,7 +124,13 @@ public:
     std::uint8_t TrafficAirAt(int, int) override { return 0; }
     void GarbageDeals(std::uint32_t, std::vector<IPollutionDeal*>&) override {}
     void SetSanitationLineItemCost(int, std::int64_t) override {}
-    bool OccupantFootprint(void*, PollutionOccupantFootprint&) override { return false; }
+    bool footprintOk = false;
+    PollutionOccupantFootprint footprint;
+    bool OccupantFootprint(void*, PollutionOccupantFootprint& out) override { if (footprintOk) out = footprint; return footprintOk; }
+    int sanitationDepartments = 0;
+    void EnsureSanitationDepartment() override { ++sanitationDepartments; }
+    std::vector<std::pair<cISCPropertyHolder*, bool>> booked;
+    void BookSanitationBuilding(cISCPropertyHolder* holder, bool added) override { booked.push_back({holder, added}); }
     int dealRefreshes = 0;
     void RefreshNeighborDeals() override { ++dealRefreshes; }
 };
@@ -347,6 +353,21 @@ int main() {
         CHECK(fresh->Init());
         CHECK(h2.requesters.size() == 1 && h2.requesters[0] == static_cast<cISC4PropRequester*>(fresh));
         CHECK(fresh->Init() && h2.requesters.size() == 1);
+        CHECK(h2.sanitationDepartments == 1);   // Init asks for the sanitation department once
+        // a sanitation building added and removed books its maintenance through the budget (spec 4.2.4); an exempt one does not
+        Occupant building;
+        cSCPropertyHolder buildingProps;
+        h2.footprintOk = true;
+        h2.footprint.occupant = &building;
+        h2.footprint.holder = &buildingProps;
+        int token = 0;
+        fresh->DoOccupantChanged(&token, true);
+        fresh->DoOccupantChanged(&token, false);
+        CHECK(h2.booked.size() == 2 && h2.booked[0].first == &buildingProps && h2.booked[0].second && !h2.booked[1].second);
+        cSCPropertyHelp::SetPropertyValue(&buildingProps, 0x029244db, true);
+        fresh->DoOccupantChanged(&token, true);
+        CHECK(h2.booked.size() == 2);
+        h2.footprintOk = false;
         void* raw = nullptr;
         CHECK(fresh->QueryInterface(kGZIID_cISC4PropRequester, &raw) && raw == static_cast<cISC4PropRequester*>(fresh));
         auto* view = static_cast<cISC4PropRequester*>(raw);

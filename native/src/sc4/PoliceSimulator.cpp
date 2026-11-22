@@ -58,8 +58,8 @@ constexpr std::uint32_t kPoliceTuningInstance = 0x28dfcf89;
 
 // ProtectionInit: the coverage grids (police's instance ids), the sweep, the daily and monthly agents, the notifications.
 // The simulator registers as the police cars' dispatch source through the host, then makes its helicopter dispatch source
-// (unless a city file named one) and initializes it. PARTIAL: the police department's budget lines and the crime simulator
-// reference are not set up.
+// (unless a city file named one) and initializes it. The police and jail departments are made when the city has none; the
+// crime simulator is reached through the host when needed rather than held.
 bool cSC4PoliceSimulator::Init() {
     if (running_) return true;
     running_ = true;
@@ -74,7 +74,9 @@ bool cSC4PoliceSimulator::Init() {
     host_->RegisterDispatchSource(true);
     if (!helicopterSource_) helicopterSource_ = new cSC4PoliceHelicopterDispatchSource();
     if (helicopterSource_) helicopterSource_->Init();
-    SC4_UNWIRED("cSC4PoliceSimulator::Init: police department budget lines and the crime simulator reference not set up");
+    // the police and jail departments (i386 0x00077b50 / 0x00077bd6), each with its line item 1, capped at the tuned funding
+    host_->EnsureDepartment(0xa2963983, 0xaa493855, tunables_.value1c8);
+    host_->EnsureDepartment(0xa2963984, 0x4a4fc955, tunables_.value1c8);
     return true;
 }
 

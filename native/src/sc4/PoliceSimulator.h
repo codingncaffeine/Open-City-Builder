@@ -78,6 +78,10 @@ public:
         (void)occupant; (void)propertyId; (void)fraction; return false;
     }
     virtual float DepartmentBudgetFraction() = 0;          // police department +0x50
+    // Init (i386 0x00077ae4): a city without the department gets it: budget sim 0x6c CreateDepartmentBudget(id, 0x4a357b40),
+    // department 0x1c SetDepartmentName(0x6a3ff01c, name), 0x3c SetMaxAllowedFundingPercentage, 0x4c CreateLineItem(1, true),
+    // line item 0x50 SetDisplayFlag(1, false).
+    virtual void EnsureDepartment(std::uint32_t id, std::uint32_t nameInstance, float maxFunding) { (void)id; (void)nameInstance; (void)maxFunding; }
     virtual void SetStrikerGroup(IPoliceOccupant* occupant, bool add) = 0;
     virtual void SetJailbreakGroup(IPoliceOccupant* occupant, bool add) = 0;
     virtual void RegisterFundedStation(IPoliceOccupant* occupant, std::uint32_t propertyId, bool add) = 0;

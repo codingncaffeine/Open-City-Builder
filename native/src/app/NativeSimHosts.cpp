@@ -296,9 +296,32 @@ public:
         SC4_UNWIRED("cSC4PollutionSimulator: the neighbor garbage deals are not read (none)");
         out.clear();
     }
-    // PARTIAL: the sanitation department's line items are not created natively.
-    void SetSanitationLineItemCost(int, std::int64_t) override {
-        SC4_UNWIRED("cSC4PollutionSimulator: the sanitation department's line item costs are not set (the line items are not created)");
+    // department 0x6a42a8f5 GetLineItem(item) -> SetFullExpenses(cost) (spec pollution.md 4.9.2)
+    void SetSanitationLineItemCost(int item, std::int64_t cost) override {
+        auto* budget = Component<cSC4BudgetSimulator>(CityComponent::BudgetSimulator, kGZCLSID_cSC4BudgetSimulator);
+        cSC4DepartmentBudget* department = budget ? budget->GetDepartmentBudget(0x6a42a8f5) : nullptr;
+        if (cSC4LineItem* line = department ? department->GetLineItem(static_cast<std::uint32_t>(item)) : nullptr) line->SetFullExpenses(cost);
+    }
+    void EnsureSanitationDepartment() override {
+        auto* budget = Component<cSC4BudgetSimulator>(CityComponent::BudgetSimulator, kGZCLSID_cSC4BudgetSimulator);
+        if (!budget || budget->GetDepartmentBudget(0x6a42a8f5)) return;
+        cSC4DepartmentBudget* department = budget->CreateDepartmentBudget(0x6a42a8f5, 0x4a357eaf);
+        if (!department) return;
+        department->SetDepartmentName(0x6a3ff01c, 0xca4938f8);
+        department->SetMaxAllowedFundingPercentage(1.2f);
+        static constexpr std::pair<std::uint32_t, std::uint32_t> kLines[] = {{10, 0xca57fe96}, {20, 0x4a57fff0}, {30, 0x0a580005}};
+        for (const auto& line : kLines)
+            if (cSC4LineItem* item = department->CreateLineItem(line.first, false)) item->SetName(0x6a3ff01c, line.second);
+    }
+    void BookSanitationBuilding(cISCPropertyHolder* holder, bool added) override {
+        auto* budget = Component<cSC4BudgetSimulator>(CityComponent::BudgetSimulator, kGZCLSID_cSC4BudgetSimulator);
+        BudgetItem item;
+        if (!budget || !holder || !budget->GetBudgetItemForPurpose(holder, 0xca58edc7, item)) return;
+        if (item.lineItemId == 10) {
+            if (added) budget->AddBudgetItemToBudget(holder, static_cast<int>(item.purpose));
+            else budget->RemoveBudgetItemFromBudget(holder, static_cast<int>(item.purpose));
+        }
+        cSCPropertyHelp::SetPropertyValue(holder, 0x2a58d350, item.cost);
     }
     bool OccupantFootprint(void* raw, PollutionOccupantFootprint& out) override {
         auto* occupant = static_cast<cISC4Occupant*>(raw);
@@ -344,6 +367,17 @@ bool StationFundingFraction(cISCPropertyHolder* holder, std::uint32_t purpose, f
     return true;
 }
 
+// The protection simulators' Init: a department the city has no record of (a new city) is created in budget group 0x4a357b40,
+// named from table 0x6a3ff01c, capped at the tuned funding, with its line item 1 (locally funded, display flag 1 off).
+void EnsureProtectionDepartment(std::uint32_t id, std::uint32_t nameInstance, float maxFunding) {
+    auto* budget = Component<cSC4BudgetSimulator>(CityComponent::BudgetSimulator, kGZCLSID_cSC4BudgetSimulator);
+    if (!budget || budget->GetDepartmentBudget(id)) return;
+    cSC4DepartmentBudget* department = budget->CreateDepartmentBudget(id, 0x4a357b40);
+    if (!department) return;
+    department->SetDepartmentName(0x6a3ff01c, nameInstance);
+    department->SetMaxAllowedFundingPercentage(maxFunding);
+    if (cSC4LineItem* item = department->CreateLineItem(1, true)) item->SetDisplayFlag(1, false);
+}
 // GetStationFunding's record (fire/police i386 0x00237880 / 0x00077324): budget simulator vslot 0xcc GetBudgetItemForPurpose; the
 // item's cost (+0x10) and local funding (+0x1c).
 bool StationFundingInfo(cISCPropertyHolder* holder, std::uint32_t purpose, int& cost, float& fraction) {
@@ -404,6 +438,7 @@ public:
         return department ? department->GetFundingPercentage() : 1.0f;
     }
     void* DepartmentBudget() override { return nullptr; }
+    void EnsureDepartment(std::uint32_t id, std::uint32_t name, float maxFunding) override { EnsureProtectionDepartment(id, name, maxFunding); }
     void SetStrikerGroup(IFireOccupant*, bool) override {}
     void RegisterFundedStation(IFireOccupant*, std::uint32_t, bool) override {}
     float PoliceCoverageShare() override {
@@ -475,6 +510,7 @@ public:
         cSC4DepartmentBudget* department = budget ? budget->GetDepartmentBudget(0xa2963983) : nullptr;
         return department ? department->GetFundingPercentage() : 1.0f;
     }
+    void EnsureDepartment(std::uint32_t id, std::uint32_t name, float maxFunding) override { EnsureProtectionDepartment(id, name, maxFunding); }
     void SetStrikerGroup(IPoliceOccupant*, bool) override {}
     void SetJailbreakGroup(IPoliceOccupant*, bool) override {}
     void RegisterFundedStation(IPoliceOccupant*, std::uint32_t, bool) override {}
@@ -813,5 +849,38 @@ void NativeTrafficAirReport() {
     if (maxX >= 0) p->GetAirValue(unsigned(maxX), unsigned(maxZ), air);
     std::printf("trafficair: %d cells with traffic air, sum %llu, busiest (%d,%d) = %d (its air %d), city average air %d, traffic air factor %g\n",
                 cells, static_cast<unsigned long long>(sum), maxX, maxZ, maxValue, air, p->GetAverageAirValue(), p->Tunables().trafficAirFactor);
+}
+}  // namespace native
+
+namespace native {
+// kit command `budget`: every budget group with its departments (funding, cap) and their line items (full / current expenses).
+void NativeBudgetReport() {
+    auto* budget = Component<cSC4BudgetSimulator>(CityComponent::BudgetSimulator, kGZCLSID_cSC4BudgetSimulator);
+    if (!budget) { std::printf("budget: no budget simulator\n"); return; }
+    std::vector<cSC4BudgetSimulator::BudgetGroupInfo> groups;
+    budget->GetAllGroups(groups);
+    for (const auto& group : groups) {
+        std::printf("budget group %08x \"%s\" expense %lld income %lld\n", group.id, group.name.c_str(),
+                    static_cast<long long>(group.expense), static_cast<long long>(group.income));
+        std::vector<cSC4DepartmentBudget*> departments;
+        budget->GetDepartmentBudgetsInGroup(group.id, departments);
+        for (cSC4DepartmentBudget* department : departments) {
+            if (!department) continue;
+            cRZString name;
+            department->GetDepartmentName(name);
+            std::printf("budget department %08x \"%s\" funding %.2f cap %.2f\n", department->GetDepartmentID(), name.ToChar(),
+                        department->GetFundingPercentage(), department->GetMaxAllowedFundingPercentage());
+            std::vector<cSC4LineItem*> items;
+            department->GetAllLineItems(items);
+            for (cSC4LineItem* item : items) {
+                cRZString itemName;
+                item->GetName(itemName);
+                std::printf("budget   line %u \"%s\" full %lld current %lld local %d flags %u\n", item->GetID(), itemName.ToChar(),
+                            static_cast<long long>(item->GetFullExpenses()), static_cast<long long>(item->GetCurrentExpenses()),
+                            item->IsLocalFundingItem() ? 1 : 0, item->GetDisplayFlags());
+                item->Release();
+            }
+        }
+    }
 }
 }  // namespace native

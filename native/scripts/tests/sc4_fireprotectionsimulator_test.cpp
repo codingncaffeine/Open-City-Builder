@@ -47,6 +47,9 @@ struct Host : IFireHost {
     bool FundingInfo(IFireOccupant*, std::uint32_t, int& cost, float& f) override { cost = 1234; f = funding; return hasRecord; }
     bool SetFundingFraction(IFireOccupant*, std::uint32_t, const SC4Percentage& p) override { setFraction = p.value; return hasRecord; }
     float DepartmentBudgetFraction() override { return funding; }
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> departments;
+    float departmentCap = 0.0f;
+    void EnsureDepartment(std::uint32_t id, std::uint32_t name, float maxFunding) override { departments.push_back({id, name}); departmentCap = maxFunding; }
     void* DepartmentBudget() override { return this; }
     void SetStrikerGroup(IFireOccupant*, bool add) override { (add ? strikerAdds : strikerRemoves)++; }
     void RegisterFundedStation(IFireOccupant*, std::uint32_t, bool add) override { (add ? registered : unregistered)++; }
@@ -179,6 +182,7 @@ int main() {
     // Init makes the fire plane dispatch source (class 0x4c0ae114) and initializes it; Shutdown shuts it down and lets it go.
     CHECK(sim.PlaneDispatchSource() == nullptr);
     sim.Init();
+    CHECK(host.departments.size() == 1 && host.departments[0].first == 0x28f55a9f && host.departments[0].second == 0xaa4935fe && host.departmentCap == 1.2f);
     CHECK(sim.PlaneDispatchSource() && sim.PlaneDispatchSource()->IsInitialized() && sim.PlaneDispatchSource()->GetGZCLSID() == 0x4c0ae114);
     CHECK(sim.PlaneDispatchSource() && sim.PlaneDispatchSource()->CanHandleDispatchType(5));
     sim.Shutdown();

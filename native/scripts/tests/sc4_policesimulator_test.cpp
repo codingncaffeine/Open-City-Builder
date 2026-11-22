@@ -48,6 +48,9 @@ struct Host : IPoliceHost {
         fundingInfoProperty = property; cost = 4321; f = funding; return hasRecord;
     }
     float DepartmentBudgetFraction() override { return funding; }
+    struct Department { std::uint32_t id, name; float maxFunding; };
+    std::vector<Department> departments;
+    void EnsureDepartment(std::uint32_t id, std::uint32_t name, float maxFunding) override { departments.push_back({id, name, maxFunding}); }
     void SetStrikerGroup(IPoliceOccupant*, bool add) override { (add ? strikerAdds : strikerRemoves)++; }
     void SetJailbreakGroup(IPoliceOccupant*, bool add) override { (add ? jailbreakAdds : jailbreakRemoves)++; }
     void RegisterFundedStation(IPoliceOccupant*, std::uint32_t, bool) override {}
@@ -176,6 +179,9 @@ int main() {
     // Init makes the helicopter dispatch source (class 0x0c0b06e8) and initializes it; Shutdown shuts it down and lets it go.
     CHECK(sim.HelicopterDispatchSource() == nullptr);
     sim.Init();
+    // Init asks for the police and jail departments with their names and the tuned funding cap (1.2 by default)
+    CHECK(host.departments.size() == 2 && host.departments[0].id == 0xa2963983 && host.departments[0].name == 0xaa493855 &&
+          host.departments[1].id == 0xa2963984 && host.departments[1].name == 0x4a4fc955 && host.departments[0].maxFunding == 1.2f);
     CHECK(sim.HelicopterDispatchSource() && sim.HelicopterDispatchSource()->IsInitialized() && sim.HelicopterDispatchSource()->GetGZCLSID() == 0x0c0b06e8);
     CHECK(sim.HelicopterDispatchSource() && sim.HelicopterDispatchSource()->CanHandleDispatchType(6));
     sim.Shutdown();

@@ -60,6 +60,7 @@ bool cSC4FireProtectionSimulator::Init() {
     running_ = true;
     ReadSimulatorTunableValues(host_->SimulatorExemplar());
     protection_.CreateGrids(0, 0);
+    host_->EnsureDepartment(0x28f55a9f, 0xaa4935fe, tunables_.value148);   // i386 0x00237eb4: made when the city has none
     if (auto* grid = protection_.AdjustedGrid()) grid->SetInstanceID(0x49d5b8f9);
     if (auto* grid = protection_.UnadjustedGrid()) grid->SetInstanceID(0x89d5b91a);
     static const char* const kName = "cSC4ProtectionSimulator";
