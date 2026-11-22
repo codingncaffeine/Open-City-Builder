@@ -1,4 +1,6 @@
 #include "sc4/RegionalCity.h"
+
+#include <algorithm>
 #include "platform/Unwired.h"
 
 #include <cstdio>
@@ -669,11 +671,148 @@ bool cSC4RegionalCity::DoMessage(cIGZMessage2* message) {
         MarkConnectionsForRemoval();
         if (connectionsChanged_) TreatAllIncomingConnectionsAsNew();
     }
-    // CreateSymmetricConnections (i386 0x002cc2d0): PARTIAL, the connections are not made (the changes stay queued); its last step is
-    // ported, the 0x6ac284f3 it sends once the city's connections stand (the power, plumbing and neighbours simulators start on it).
-    SC4_UNWIRED("cSC4RegionalCity::DoMessage: CreateSymmetricConnections (0x1003b0ae0) not ported, neighbor connections are not made");
-    if (host_) host_->SendMessage(0x6ac284f3);
+    CreateSymmetricConnections();
     return true;
+}
+
+namespace {
+// The side of an edge cell (spec regional-city-records.md 4.2): West 0, North 1, South (x inside the city) 3, else East 2.
+int EdgeSide(const cSC4RegionalCity::ConnectionChange& c, int cellsX) {
+    if (c.x < 0) return 0;
+    if (c.z < 0) return 1;
+    if (c.x < cellsX) return 3;
+    return 2;
+}
+}  // namespace
+
+// @ 0x1003b0ae0 (i386 0x002cc2d0, spec regional-city-records.md 4). Applies the queued connection changes to the open city: the
+// last change of each (type, cell) wins; they are applied along the edges; a connection added with a network gets its edge
+// strip cleared and its pieces laid by that network's tool, and loses the connection again when no piece stands next to the
+// edge; a removed one has its border edge closed. Ends by sending 0x6ac284f3 (the connections stand).
+void cSC4RegionalCity::CreateSymmetricConnections() {
+    if (!host_) return;
+    int cellsX = 0, cellsZ = 0;
+    host_->CityCellCounts(cellsX, cellsZ);
+    std::vector<ConnectionChange>& queue = connectionChanges_;
+    // 4.1: a later entry of the same type and cell removes the earlier one (the flag is not compared)
+    for (std::size_t i = 0; i < queue.size();) {
+        bool later = false;
+        for (std::size_t j = i + 1; j < queue.size(); ++j)
+            if (queue[j].type == queue[i].type && queue[j].x == queue[i].x && queue[j].z == queue[i].z) { later = true; break; }
+        if (later) queue.erase(queue.begin() + static_cast<std::ptrdiff_t>(i));
+        else ++i;
+    }
+    // 4.2: by side, then x, then z (OrderAlongEdge)
+    std::sort(queue.begin(), queue.end(), [cellsX](const ConnectionChange& a, const ConnectionChange& b) {
+        const int sa = EdgeSide(a, cellsX), sb = EdgeSide(b, cellsX);
+        if (sa != sb) return sa < sb;
+        if (a.x != b.x) return a.x < b.x;
+        return a.z < b.z;
+    });
+    // 4.3: the added wide types (highway 3, ground highway 12, avenue 8) pair up in order; each entry gets its direction bit
+    std::vector<bool> secondHalf(queue.size(), true), direction(queue.size(), false);
+    bool odd = false;
+    const bool driveSide = host_->DriveSideFlag();
+    for (std::size_t i = 0; i < queue.size(); ++i) {
+        const ConnectionChange& c = queue[i];
+        if (!c.flag || (c.type != 3 && c.type != 12 && c.type != 8)) continue;
+        bool dir = odd;
+        secondHalf[i] = odd;
+        if (c.x >= 0 && c.z <= cellsZ - 1) dir = !dir;   // the North and East edges
+        if (!driveSide) dir = !dir;
+        direction[i] = dir;
+        odd = !odd;
+    }
+    // 4.4: connection type -> network type, and the view layer of its demolition filter
+    auto networkOf = [](std::uint32_t type, int& network, std::uint8_t& layer) {
+        static constexpr int kNetworks[13] = {-1, 1, 0, 2, 5, 4, 7, 8, 6, -1, 11, 9, 12};
+        network = type < 13 ? kNetworks[type] : -1;
+        layer = type == 5 ? 3 : type == 6 ? 2 : 1;
+        return network >= 0;
+    };
+    static const bool trace = std::getenv("SC4_NEIGHBORDEBUG") != nullptr;
+    if (trace) std::fprintf(stderr, "symmetric connections: %zu changes, city %dx%d\n", queue.size(), cellsX, cellsZ);
+    for (std::size_t i = 0; i < queue.size(); ++i) {
+        const ConnectionChange& c = queue[i];
+        if (trace)
+            std::fprintf(stderr, "symmetric connections: %s type %u at %d,%d second-half %d dir %d existing %d\n", c.flag ? "add" : "remove", c.type, c.x,
+                         c.z, secondHalf[i] ? 1 : 0, direction[i] ? 1 : 0, host_->NeighborsHasConnection(c.type, c.x, c.z) ? 1 : 0);
+        int network = -1;
+        std::uint8_t layer = 1;
+        if (!networkOf(c.type, network, layer)) {   // no network (ferry, out of range): add and remove alike create
+            host_->NeighborsCreateConnection(c.type, c.x, c.z, direction[i]);
+            continue;
+        }
+        // the strip: the inner cell and the two beyond it, perpendicular to the edge; the side's byte of the edge word
+        int innerX = c.x, innerZ = c.z, endX = c.x, endZ = c.z, shift = 0;
+        if (c.x < 0) { innerX = 0; endX = 2; shift = 0; }
+        else if (c.z < 0) { innerZ = 0; endZ = 2; shift = 8; }
+        else if (c.x > cellsX - 1) { innerX = cellsX - 1; endX = cellsX - 3; shift = 16; }
+        else { innerZ = cellsZ - 1; endZ = cellsZ - 3; shift = 24; }
+        const std::uint32_t sideMask = 0xffu << shift;
+        if (!host_->BeginNetworkTool(static_cast<std::uint32_t>(network))) continue;   // no network of that type
+        // the border byte of every matching piece in a cell := value; answers the last matching piece's original grouped sides
+        auto setBorder = [&](int x, int z, std::uint32_t value) {
+            std::vector<void*> pieces;
+            host_->NetworkOccupantsAt(x, z, 0xc772bf98, network, pieces);
+            std::uint32_t groups = 0;
+            for (void* piece : pieces) {
+                const std::uint32_t word = host_->EdgeWord(piece, network);
+                groups = word & 0x04040404u;
+                host_->SetEdgeWord(piece, network, (word & ~sideMask) | (value << shift));
+            }
+            return groups;
+        };
+        // ...and on the neighbouring cell of the first grouped side (West, North, East, South)
+        auto propagate = [&](std::uint32_t groups, int x, int z, std::uint32_t value) {
+            if (groups == 0) return;
+            if (groups & 0x4u) --x;
+            else if (groups & 0x400u) --z;
+            else if (groups & 0x40000u) ++x;
+            else if (groups & 0x4000000u) ++z;
+            std::vector<void*> pieces;
+            host_->NetworkOccupantsAt(x, z, 0xc772bf98, network, pieces);
+            for (void* piece : pieces) host_->SetEdgeWord(piece, network, (host_->EdgeWord(piece, network) & ~sideMask) | (value << shift));
+        };
+        if (!c.flag) {
+            // 4.7: a removal deletes the connection, closes the border edge and re-solves the inner cell
+            if (host_->NeighborsHasConnection(c.type, c.x, c.z)) {
+                host_->NeighborsDeleteConnection(c.type, c.x, c.z);
+                propagate(setBorder(innerX, innerZ, 0), innerX, innerZ, 0);
+                host_->InitNetworkTool();
+                host_->PlaceToolOccupants(innerX, innerZ, innerX, innerZ);
+            }
+        } else if (!host_->NeighborsHasConnection(c.type, c.x, c.z)) {
+            if (secondHalf[i]) {
+                // 4.6 steps 1-3: clear the strip's cells that hold nothing of the network yet (power: no pole or line)
+                std::vector<std::pair<int, int>> cells;
+                const int x0 = std::min(innerX, endX), x1 = std::max(innerX, endX), z0 = std::min(innerZ, endZ), z1 = std::max(innerZ, endZ);
+                for (int x = x0; x <= x1; ++x)
+                    for (int z = z0; z <= z1; ++z) {
+                        const bool taken = c.type == 4 ? (host_->CellHasOccupantOfType(x, z, 0x2890d4de) || host_->CellHasOccupantOfType(x, z, 0x0990b2ea))
+                                                       : host_->TrafficMapCellOccupied(x, z);
+                        if (!taken) cells.emplace_back(x, z);
+                    }
+                host_->DemolishCellsOnLayer(cells, layer);
+                host_->InitNetworkTool();
+                if (c.type == 4) host_->DezoneCells(cells);
+            }
+            host_->NeighborsCreateConnection(c.type, c.x, c.z, direction[i]);
+            if (secondHalf[i]) {
+                // 4.6 step 5: lay the strip; no piece next to the edge takes the connection away again
+                host_->PlaceToolOccupants(innerX, innerZ, endX, endZ);
+                std::vector<void*> found;
+                const bool present = c.type == 4 ? host_->NetworkOccupantsAt(innerX, innerZ, 0x2890d4de, -1, found) > 0
+                                                 : host_->NetworkOccupantsAt(innerX, innerZ, 0xc772bf98, network, found) > 0;
+                if (!present) host_->NeighborsDeleteConnection(c.type, c.x, c.z);
+                propagate(setBorder(innerX, innerZ, 2), innerX, innerZ, 2);
+                host_->PlaceToolOccupants(innerX, innerZ, endX, endZ);
+            }
+        }
+        host_->EndNetworkTool();
+    }
+    queue.clear();
+    host_->SendMessage(0x6ac284f3);
 }
 
 //---------------------------------------------------------------------------------------------------------------------

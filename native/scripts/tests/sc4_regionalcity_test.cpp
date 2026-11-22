@@ -1,3 +1,7 @@
+#include <algorithm>
+#include <tuple>
+#include <set>
+#include <cstdarg>
 // cSC4RegionalCity — tests the region's view of a city against the recovered behaviour: the constructor's
 // defaults, COM plumbing, the statistics/tax/population accessors, the connection and deal bookkeeping, the
 // city/preferences cache updates, the message handler and the version-13 save record (round trip, older
@@ -146,6 +150,51 @@ struct TestDealHost final : sc4::INeighborDealHost {
 TestDealHost g_dealHost;
 
 struct FakeHost final : IRegionalCityHost {
+    // -- CreateSymmetricConnections: every call logged; connections, cell contents and edge words kept here
+    std::vector<std::string> pass;
+    int cellsX = 0, cellsZ = 0;
+    bool toolOk = false, driveSide = true;
+    std::set<std::tuple<std::uint32_t, int, int>> links;
+    std::set<std::pair<int, int>> trafficCells, laidCells;
+    std::map<std::pair<int, int>, std::uint32_t> edges;   // the edge word of the network piece in a cell (one piece per laid cell)
+    std::uint32_t laidNetwork = 0;
+    void Log(const char* fmt, ...) {
+        char buffer[160];
+        va_list args;
+        va_start(args, fmt);
+        std::vsnprintf(buffer, sizeof buffer, fmt, args);
+        va_end(args);
+        pass.push_back(buffer);
+    }
+    void CityCellCounts(int& x, int& z) override { x = cellsX; z = cellsZ; }
+    bool DriveSideFlag() override { return driveSide; }
+    bool NeighborsHasConnection(std::uint32_t type, int x, int z) override { return links.count({type, x, z}) != 0; }
+    void NeighborsCreateConnection(std::uint32_t type, int x, int z, bool flag) override { Log("create %u %d,%d dir %d", type, x, z, flag ? 1 : 0); links.insert({type, x, z}); }
+    void NeighborsDeleteConnection(std::uint32_t type, int x, int z) override { Log("delete %u %d,%d", type, x, z); links.erase({type, x, z}); }
+    bool BeginNetworkTool(std::uint32_t network) override { Log("tool %u", network); laidNetwork = network; return toolOk; }
+    void InitNetworkTool() override { Log("init"); }
+    void PlaceToolOccupants(int x0, int z0, int x1, int z1) override {
+        Log("place %d,%d-%d,%d", x0, z0, x1, z1);
+        for (int x = std::min(x0, x1); x <= std::max(x0, x1); ++x)
+            for (int z = std::min(z0, z1); z <= std::max(z0, z1); ++z) { laidCells.insert({x, z}); edges.emplace(std::make_pair(x, z), 0u); }
+    }
+    void EndNetworkTool() override { Log("end"); }
+    bool TrafficMapCellOccupied(int x, int z) override { return trafficCells.count({x, z}) != 0; }
+    void DemolishCellsOnLayer(const std::vector<std::pair<int, int>>& cells, std::uint8_t layer) override {
+        std::string list;
+        for (auto& c : cells) list += " " + std::to_string(c.first) + "," + std::to_string(c.second);
+        Log("demolish layer %u:%s", layer, list.c_str());
+    }
+    void DezoneCells(const std::vector<std::pair<int, int>>& cells) override { Log("dezone %zu", cells.size()); }
+    int NetworkOccupantsAt(int x, int z, std::uint32_t, int, std::vector<void*>& out) override {
+        out.clear();
+        auto it = edges.find({x, z});
+        if (it != edges.end()) out.push_back(&it->second);
+        return static_cast<int>(out.size());
+    }
+    std::uint32_t EdgeWord(void* occupant, int) override { return *static_cast<std::uint32_t*>(occupant); }
+    void SetEdgeWord(void* occupant, int, std::uint32_t word) override { *static_cast<std::uint32_t*>(occupant) = word; }
+
     static std::string Hex(std::uint32_t value) {
         char buffer[16];
         std::snprintf(buffer, sizeof buffer, "%x", value);
@@ -711,13 +760,12 @@ void testConnections() {
     cRZMessage2Standard changed;
     changed.SetType(kRegionalCityMessageCityChanged);
     changed.SetData3(1);                      // data3 != 0 takes the first branch
+    host.pass.clear();
     CHECK(city.DoMessage(&changed));
-    // The handler clears the pending list first, then MarkConnectionsForRemoval queues one entry.
-    CHECK(city.ConnectionChangesForTest().size() == 1);
-    CHECK(city.ConnectionChangesForTest()[0].type == 7);
-    CHECK(city.ConnectionChangesForTest()[0].x == 1);
-    CHECK(city.ConnectionChangesForTest()[0].z == 2);
-    CHECK(city.ConnectionChangesForTest()[0].flag == false);
+    // The handler clears the pending list first, then MarkConnectionsForRemoval queues one entry (type 7 at 1,2, a removal), which
+    // CreateSymmetricConnections applies at once: it asks for the light rail tool (network 8) and, with none, skips the entry.
+    CHECK(city.ConnectionChangesForTest().empty());
+    CHECK(host.pass.size() == 1 && host.pass[0] == "tool 8");
 
     // TreatAllIncomingConnectionsAsNew records the connections of adjacent cities whose other side is this one.
     auto* adjacency = new FakeRegionalCity();
@@ -731,13 +779,11 @@ void testConnections() {
     NeighborConnectionList incomingList;
     incomingList.push_back(cRZAutoRefCount<sc4::cISC4NeighborConnection>(incoming));
     host.regionalConnections = incomingList;
+    host.pass.clear();
     CHECK(city.DoMessage(&changed));
-    const auto& changes = city.ConnectionChangesForTest();
-    CHECK(changes.size() == 2);
-    CHECK(changes[1].type == 3);
-    CHECK(changes[1].x == 30);
-    CHECK(changes[1].z == 40);
-    CHECK(changes[1].flag == true);
+    // ...and the incoming highway (type 3 at 30,40, an add) after it, along the edge: the highway tool (network 2) is asked next.
+    CHECK(city.ConnectionChangesForTest().empty());
+    CHECK(host.pass.size() == 2 && host.pass[0] == "tool 8" && host.pass[1] == "tool 2");
     host.regionalConnections.clear();
 
     // Not established, or no city: MarkConnectionsForRemoval queues nothing.
@@ -751,6 +797,48 @@ void testConnections() {
     fake->Release();   // the fakes start with the test's own reference
     adjacency->Release();
     incoming->Release();
+}
+
+// CreateSymmetricConnections (spec regional-city-records.md 4, i386 0x002cc2d0) on a 64 x 64 city with the tools present.
+void testSymmetricConnections() {
+    FakeHost host;
+    cSC4RegionalCity city(&host);
+    host.cellsX = host.cellsZ = 64;
+    host.toolOk = true;
+    using Change = cSC4RegionalCity::ConnectionChange;
+    auto join = [&] { std::string all; for (auto& line : host.pass) all += line + "|"; return all; };
+    // a west road: its strip (0..2, 5) cleared on layer 1, the connection made, the strip laid, the border byte (West) := 2, laid again
+    city.RunSymmetricConnectionsForTest({Change{2, -1, 5, true}});
+    CHECK(join() == "tool 0|demolish layer 1: 0,5 1,5 2,5|init|create 2 -1,5 dir 0|place 0,5-2,5|place 0,5-2,5|end|");
+    CHECK(host.edges[std::make_pair(0, 5)] == 0x02u && city.ConnectionChangesForTest().empty());
+    // an existing connection is not added twice; cells the traffic map already holds are not demolished
+    host.pass.clear();
+    city.RunSymmetricConnectionsForTest({Change{2, -1, 5, true}});
+    CHECK(join() == "tool 0|end|");
+    host.pass.clear();
+    host.trafficCells = {{1, 9}};
+    city.RunSymmetricConnectionsForTest({Change{2, -1, 9, true}});
+    CHECK(host.pass.size() >= 2 && host.pass[1] == "demolish layer 1: 0,9 2,9");
+    // a highway pair on the west edge: the first half only makes its connection (direction false), the second gets the strip (true)
+    host.pass.clear();
+    city.RunSymmetricConnectionsForTest({Change{3, -1, 11, true}, Change{3, -1, 10, true}});
+    CHECK(join() == "tool 2|create 3 -1,10 dir 0|end|tool 2|demolish layer 1: 0,11 1,11 2,11|init|create 3 -1,11 dir 1|place 0,11-2,11|place 0,11-2,11|end|");
+    // the last change of a cell wins: add then remove leaves the removal, which deletes the link, closes the border byte, re-solves the inner cell
+    host.pass.clear();
+    host.edges[{0, 5}] = 0x00000402u;   // West active, North grouped
+    host.edges[{0, 4}] = 0x00000002u;
+    city.RunSymmetricConnectionsForTest({Change{2, -1, 5, true}, Change{2, -1, 5, false}});
+    CHECK(join() == "tool 0|delete 2 -1,5|init|place 0,5-0,5|end|");
+    CHECK(host.edges[std::make_pair(0, 5)] == 0x00000400u && host.edges[std::make_pair(0, 4)] == 0x0u);   // the North group carries the West byte to 0,4
+    // an east pipe (layer 3) and a north subway (layer 2); a ferry (no network) only creates its connection, even when removed
+    host.pass.clear();
+    city.RunSymmetricConnectionsForTest({Change{5, 64, 20, true}, Change{6, 30, -1, true}, Change{9, -1, 40, false}});
+    CHECK(join() == "create 9 -1,40 dir 0|tool 7|demolish layer 2: 30,0 30,1 30,2|init|create 6 30,-1 dir 0|place 30,0-30,2|place 30,0-30,2|end|"
+                    "tool 4|demolish layer 3: 61,20 62,20 63,20|init|create 5 64,20 dir 0|place 63,20-61,20|place 63,20-61,20|end|");
+    // a power pole connection dezones the cleared cells; the queue ends empty either way
+    host.pass.clear();
+    city.RunSymmetricConnectionsForTest({Change{4, 10, 64, true}});
+    CHECK(join().find("dezone 3|create 4 10,64") != std::string::npos && city.ConnectionChangesForTest().empty());
 }
 
 void testDeals() {
@@ -1330,6 +1418,7 @@ int main() {
     testPopulationAndTax();
     testCommodityStats();
     testConnections();
+    testSymmetricConnections();
     testDeals();
     testPreferencesAndSetupCity();
     testCityCache();

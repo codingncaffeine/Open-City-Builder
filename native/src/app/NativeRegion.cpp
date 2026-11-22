@@ -29,6 +29,15 @@
 #include "sc4/Simulator.h"
 #include "sc4/Region.h"
 #include "sc4/RegionalCity.h"
+#include "app/NativeDemolition.h"
+#include "sc4/ZoneDeveloper.h"
+#include "sc4/cSC4ZoneManager.h"
+#include "sc4/TrafficNetworkMap.h"
+#include "sc4/OccupantManager.h"
+#include "sc4/OccupantFilters2.h"
+#include "sc4/NetworkTool.h"
+#include "sc4/NetworkOccupant.h"
+#include "sc4/Demolition.h"
 #include "sc4/PlumbingSimulator.h"
 #include "sc4/PollutionSimulator.h"
 #include "sc4/PowerSimulator.h"
@@ -38,6 +47,8 @@
 
 namespace native {
 void NativeLandfillUsage(int& used, int& capacity);   // app/NativeLandfill.cpp
+sc4::cSC4NetworkTool* NativeManagerNetworkTool(std::uint32_t type);   // app/NativeNetworkManager.cpp
+bool NativeDriveSideFlag();   // app/NativeTrafficAutomata.cpp
 
 namespace {
 
@@ -206,6 +217,109 @@ public:
     }
     void AirportPointsOfInterest(std::vector<cISC4RegionalCity::PointOfInterest>& out) override { PortPointsOfInterest<sc4::cSC4AirportDeveloper>(SL::spAirportDeveloper, out); }
     void SeaportPointsOfInterest(std::vector<cISC4RegionalCity::PointOfInterest>& out) override { PortPointsOfInterest<sc4::cSC4SeaportDeveloper>(SL::spSeaportDeveloper, out); }
+
+    // ---- CreateSymmetricConnections (sc4/RegionalCity.cpp) ----
+    void CityCellCounts(int& x, int& z) override {
+        sc4::cSC4City* city = HostCity();
+        x = city ? city->CellCountX() : 0;
+        z = city ? city->CellCountZ() : 0;
+    }
+    bool DriveSideFlag() override { return NativeDriveSideFlag(); }
+    sc4::cSC4NeighborsSimulator* Neighbors() { return CityPart<sc4::cSC4NeighborsSimulator>(HostCity(), sc4::CityComponent::NeighborsSimulator); }
+    bool NeighborsHasConnection(std::uint32_t type, int x, int z) override { auto* n = Neighbors(); return n && n->FindConnection(type, x, z) != nullptr; }
+    void NeighborsCreateConnection(std::uint32_t type, int x, int z, bool flag) override { if (auto* n = Neighbors()) n->CreateConnection(type, x, z, flag); }
+    void NeighborsDeleteConnection(std::uint32_t type, int x, int z) override { if (auto* n = Neighbors()) n->DeleteConnection(type, x, z); }
+    bool BeginNetworkTool(std::uint32_t network) override {
+        tool_ = NativeManagerNetworkTool(network);
+        if (tool_) tool_->AddRef();
+        return tool_ != nullptr;
+    }
+    void InitNetworkTool() override { if (tool_) tool_->Init(); }
+    void PlaceToolOccupants(int x0, int z0, int x1, int z1) override { if (tool_) tool_->PlaceNetworkOccupants(x0, z0, x1, z1, 0, nullptr, true, -1); }
+    void EndNetworkTool() override {
+        if (!tool_) return;
+        tool_->Shutdown();
+        tool_->Release();
+        tool_ = nullptr;
+    }
+    static sc4::cISC4OccupantManager* OccupantManager() {
+        sc4::cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::OccupantManager) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(sc4::kGZIID_cISC4OccupantManager, &raw) || !raw) return nullptr;
+        auto* manager = static_cast<sc4::cISC4OccupantManager*>(raw);
+        manager->Release();
+        return manager;
+    }
+    bool CellHasOccupantOfType(int x, int z, std::uint32_t type) override {
+        sc4::cISC4OccupantManager* manager = OccupantManager();
+        sc4::cISC4Occupant* found = nullptr;
+        if (!manager || !manager->GetFirstOccupantByStandardCityCell(found, x, z, type) || !found) return false;
+        found->Release();
+        return true;
+    }
+    bool TrafficMapCellOccupied(int x, int z) override {
+        sc4::cSC4City* city = HostCity();
+        auto* map = city ? dynamic_cast<sc4::cSC4TrafficNetworkMap*>(city->GetComponent(sc4::CityComponent::TrafficNetwork)) : nullptr;
+        return map && map->FindNetworkOccupant(x, z) != nullptr;
+    }
+    // the view-level occupant filter of the original (layer in +0x14) as the demolition utility asks it
+    struct LayerFilter final : sc4::IDemolishFilter {
+        sc4::cSC4ViewLevelOccupantFilter filter;
+        bool IsOccupantIncluded(sc4::IDemolishable* d) override { sc4::cISC4Occupant* o = DemolitionOccupant(d); return o && filter.IsOccupantIncluded(o); }
+        bool IsOccupantTypeIncluded(std::uint32_t) override { return true; }
+    };
+    static sc4::DemolitionRegion RegionOf(const std::vector<std::pair<int, int>>& cells, sc4::DemolitionCellRect& box) {
+        box = sc4::DemolitionCellRect{cells[0].first, cells[0].second, cells[0].first, cells[0].second};
+        for (const auto& c : cells) {
+            box.x0 = std::min(box.x0, c.first); box.x1 = std::max(box.x1, c.first);
+            box.z0 = std::min(box.z0, c.second); box.z1 = std::max(box.z1, c.second);
+        }
+        sc4::DemolitionRegion region;
+        region.bounds = box;
+        region.mask.assign(std::size_t(box.x1 - box.x0 + 1), std::vector<bool>(std::size_t(box.z1 - box.z0 + 1), false));
+        for (const auto& c : cells) region.mask[std::size_t(c.first - box.x0)][std::size_t(c.second - box.z0)] = true;
+        return region;
+    }
+    void DemolishCellsOnLayer(const std::vector<std::pair<int, int>>& cells, std::uint8_t layer) override {
+        if (cells.empty()) return;
+        sc4::DemolitionCellRect box;
+        const sc4::DemolitionRegion region = RegionOf(cells, box);
+        LayerFilter filter;
+        filter.filter.SetViewLevel(layer);
+        DemolishRegion(true, region, 0, 1, false, nullptr, nullptr, 0, 0, &filter);
+    }
+    void DezoneCells(const std::vector<std::pair<int, int>>& cells) override {
+        if (cells.empty()) return;
+        auto* zones = CityPart<sc4::cSC4ZoneManager>(HostCity(), sc4::CityComponent::ZoneManager);
+        if (!zones) return;
+        sc4::DemolitionCellRect box;
+        RegionOf(cells, box);
+        auto region = sc4::SC4CellRegion<int>::Make(sc4::SC4Rect<int>{box.x0, box.z0, box.x1, box.z1}, false);
+        for (const auto& c : cells) region.SetBit(c.first, c.second);
+        zones->PlaceZone(region, 0, true, true, false, true, false, nullptr, nullptr, nullptr);
+    }
+    int NetworkOccupantsAt(int x, int z, std::uint32_t type, int network, std::vector<void*>& out) override {
+        out.clear();
+        sc4::cISC4OccupantManager* manager = OccupantManager();
+        if (!manager) return 0;
+        sc4::OccupantList list;
+        const int cell[2] = {x, z};
+        manager->GetOccupantsByStandardCityCells(list, cell, cell, type, 0xffffffffu);
+        for (sc4::cISC4Occupant* o : list) {
+            if (network < 0) { out.push_back(o); continue; }
+            // cSC4NetworkOccupant does not answer QI 0xa821ef94 natively; its class stands for the interface
+            auto* piece = dynamic_cast<sc4::cSC4NetworkOccupant*>(o);
+            if (piece && piece->IsOfType(static_cast<std::uint32_t>(network))) out.push_back(piece);
+        }
+        manager->ReleaseOccupantList(list);
+        return static_cast<int>(out.size());
+    }
+    std::uint32_t EdgeWord(void* occupant, int network) override { return static_cast<sc4::cSC4NetworkOccupant*>(occupant)->GetEdgeTypesFlag(std::uint8_t(network)); }
+    void SetEdgeWord(void* occupant, int network, std::uint32_t word) override { static_cast<sc4::cSC4NetworkOccupant*>(occupant)->SetEdgeTypesFlag(std::uint8_t(network), word); }
+
+private:
+    sc4::cSC4NetworkTool* tool_ = nullptr;
 } g_cityHost;
 
 // ---- cSC4Region -----------------------------------------------------------------------------------------------------------

@@ -173,6 +173,40 @@ public:
     // SC4LoadString(group, instance, out) @ 0x100120e10.
     virtual bool LoadString(std::uint32_t group, std::uint32_t instance, cIGZString& out) = 0;
 
+    // --- CreateSymmetricConnections (i386 0x002cc2d0, spec regional-city-records.md 4) ---------------
+    // SL::spCity vslots 0x174 / 0x178: the city's size in cells.
+    virtual void CityCellCounts(int& x, int& z) { x = z = 0; }
+    // the automata tuning's drive-side boolean 0x49be9565 (sTuningParams + 0xf9; true in the shipped data)
+    virtual bool DriveSideFlag() { return true; }
+    // SL::spNeighborsSim: vslot 0x2c FindConnection (as a bool), 0x18 CreateConnection(type, x, z, flag), 0x1c DeleteConnection.
+    virtual bool NeighborsHasConnection(std::uint32_t type, int x, int z) { (void)type; (void)x; (void)z; return false; }
+    virtual void NeighborsCreateConnection(std::uint32_t type, int x, int z, bool flag) { (void)type; (void)x; (void)z; (void)flag; }
+    virtual void NeighborsDeleteConnection(std::uint32_t type, int x, int z) { (void)type; (void)x; (void)z; }
+    // SL::NetworkManager() vslot 0x14 GetNetworkTool(network, false): a tool of that network exists; Begin/EndNetworkTool hold one
+    // (AddRef), Init (0xc) / Shutdown (0x10) it, and PlaceToolOccupants is its vslot 0x1c PlaceNetworkOccupants(x0, z0, x1, z1, 0,
+    // null, true, -1).
+    virtual bool BeginNetworkTool(std::uint32_t network) { (void)network; return false; }
+    virtual void InitNetworkTool() {}
+    virtual void PlaceToolOccupants(int x0, int z0, int x1, int z1) { (void)x0; (void)z0; (void)x1; (void)z1; }
+    virtual void EndNetworkTool() {}
+    // spOccupantManager GetFirstOccupantByStandardCityCell(x, z, type): an occupant of the type stands in the cell.
+    virtual bool CellHasOccupantOfType(int x, int z, std::uint32_t type) { (void)x; (void)z; (void)type; return false; }
+    // city vslot 0xa0 (the traffic network map) vslot 0x24 FindNetworkOccupant(x, z) != null.
+    virtual bool TrafficMapCellOccupied(int x, int z) { (void)x; (void)z; return false; }
+    // spDemolition vslot 0x18 DemolishRegion(true, cells, 0, 1, false, view-level filter of `layer`, ...); spZoneManager vslot 0x2c
+    // PlaceZone(cells, 0, true, true, false, true, false, ...) dezones them.
+    virtual void DemolishCellsOnLayer(const std::vector<std::pair<int, int>>& cells, std::uint8_t layer) { (void)cells; (void)layer; }
+    virtual void DezoneCells(const std::vector<std::pair<int, int>>& cells) { (void)cells; }
+    // spOccupantManager GetOccupantsByStandardCityCells(cell, cell, type, -1) then, per occupant, QI 0xa821ef94 and IsOfType(network):
+    // the network occupants of `network` in the cell (`type` 0xc772bf98), or the occupants of `type` (power poles) when network < 0.
+    // Each returned entry is an opaque handle valid until the next call.
+    virtual int NetworkOccupantsAt(int x, int z, std::uint32_t type, int network, std::vector<void*>& out) {
+        (void)x; (void)z; (void)type; (void)network; out.clear(); return 0;
+    }
+    // cISC4NetworkOccupant slots 38 GetEdgeTypesFlag(network) / 37 SetEdgeTypesFlag(network, word) on a handle of NetworkOccupantsAt.
+    virtual std::uint32_t EdgeWord(void* occupant, int network) { (void)occupant; (void)network; return 0; }
+    virtual void SetEdgeWord(void* occupant, int network, std::uint32_t word) { (void)occupant; (void)network; (void)word; }
+
     // --- the city object, as SetupCity / UpdateCityCache(cISC4City*) reach it ------------------------
     virtual void CityName(const cISC4City* city, cIGZString& out) = 0;               // city vslot 0x60
     virtual void CityMayorName(const cISC4City* city, cIGZString& out) = 0;          // 0x80
@@ -323,6 +357,7 @@ public:
     // Present only so the test can look inside; the original keeps these private as well.
     IRegionalCityHost* Host() const { return host_; }
     const std::vector<ConnectionChange>& ConnectionChangesForTest() const { return connectionChanges_; }
+    void RunSymmetricConnectionsForTest(const std::vector<ConnectionChange>& queue) { connectionChanges_ = queue; CreateSymmetricConnections(); }
     const NeighborConnectionList& ConnectionsForTest() const { return connections_; }
     const NeighborDealList& DealsForTest() const { return deals_; }
     const NeighborDealList& LocalDealsForTest() const { return localDeals_; }
@@ -337,6 +372,7 @@ private:
     void RepairConnectionsAfterImport();                        // 0x1003b1efe
     void MarkConnectionsForRemoval();                           // 0x1003b0824
     void TreatAllIncomingConnectionsAsNew();                    // 0x1003b0948
+    void CreateSymmetricConnections();                          // 0x1003b0ae0 (i386 0x002cc2d0)
     // The original's signature has a phantom cISC4City* parameter that actually receives `this`
     // (0x1003b05fb); the port works on `this` directly.
     void CalculatePotentialPopulations();                       // 0x1003b06e4

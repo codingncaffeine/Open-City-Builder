@@ -624,3 +624,8 @@ void NativeFreightReport(int x0, int z0, int x1, int z1) {
 }
 
 }  // namespace native
+
+namespace native {
+// The automata tuning's boolean 0x49be9565 (the original's sTuningParams + 0xf9), read by the regional city's connection pass.
+bool NativeDriveSideFlag() { return sc4::AutomataTuning().f219fd; }
+}  // namespace native
