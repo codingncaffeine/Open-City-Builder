@@ -1,5 +1,7 @@
 #include "sc4/SpiralIterator.h"
 
+#include <cstdint>
+
 namespace sc4 {
 
 SpiralIterator SpiralIterator::Over(int startX, int startZ, int width, int height) {
@@ -22,6 +24,40 @@ SpiralIterator SpiralIterator::Over(int startX, int startZ, int width, int heigh
         it.edgesHit = 0xf;
     }
     return it;
+}
+
+SpiralIterator SpiralIterator::Unbounded() {
+    SpiralIterator it;
+    it.minX = it.minZ = INT32_MIN;
+    it.maxX = it.maxZ = INT32_MAX;
+    it.mode = 1;
+    it.turns = 0;
+    it.Reset(0, 0);
+    return it;
+}
+
+// A start outside the clip rect finishes the walk at once.
+void SpiralIterator::Reset(int startX, int startZ) {
+    x = startX;
+    z = startZ;
+    turns = 0;
+    targetX = mode == 1 ? startX + 1 : startX - 1;
+    targetZ = startZ;
+    onZ = 1;
+    direction = mode == 1 ? 1 : -1;
+    edgesHit = 0;
+    state = 0;
+    if (x < minX || z < minZ || maxX < x || maxZ < z) {
+        state = 2;
+        edgesHit = 0xf;
+    }
+}
+
+void SpiralIterator::SetClipRect(int x0, int z0, int x1, int z1) {
+    minX = x0;
+    minZ = z0;
+    maxX = x1 < x0 ? x0 : x1;
+    maxZ = z1 < z0 ? z0 : z1;
 }
 
 bool SpiralIterator::GetNext(int& outX, int& outZ) {

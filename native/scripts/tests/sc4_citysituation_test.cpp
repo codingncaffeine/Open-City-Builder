@@ -2,7 +2,10 @@
 // successes, visibility, maximum CSI, target counters), the serialization round trip with its version gate, the
 // tutorial reset over the preferences, the situation track list (trigger/untrigger), automaton tracking through the
 // dispatch view, the occupant routing and the Init/Shutdown subscriptions.
+#include <algorithm>
 #include <cmath>
+#include <set>
+#include <map>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -224,8 +227,9 @@ public:
     }
     ISituationPropertyHolder* PropertyHolder() override { return &holder; }
     std::uint32_t OccupantType() override { return 0x480e6151; }
-    void Position(float xyz[3]) override { xyz[0] = xyz[1] = xyz[2] = 0; }
-    void SetPosition(const float[3]) override {}
+    void Position(float xyz[3]) override { xyz[0] = position[0]; xyz[1] = position[1]; xyz[2] = position[2]; }
+    void SetPosition(const float xyz[3]) override { position[0] = xyz[0]; position[1] = xyz[1]; position[2] = xyz[2]; }
+    float position[3] = {0, 0, 0};
     bool IsInGroup(std::uint32_t group) override { return group == this->group; }
     ISituationAutomaton* AsAutomaton() override { return automaton; }
     bool IsNetworkOccupant() override { return false; }
@@ -285,15 +289,16 @@ public:
     const cRZString& GetRewardProgressText() const override { return text; }
     const cRZString& GetRewardUnlockedText() const override { return text; }
     std::uint32_t GetRewardUnlockedImageId() const override { return 0; }
-    std::uint32_t GetCoverageType() const override { return 0; }
-    std::uint32_t GetCoverageZone() const override { return 0; }
+    std::uint32_t GetCoverageType() const override { return coverageType; }
+    std::uint32_t GetCoverageZone() const override { return coverageZone; }
     std::uint32_t GetCoverageOccupantGroup() const override { return 0; }
-    std::uint32_t GetCoverageNetworkType() const override { return 0; }
+    std::uint32_t GetCoverageNetworkType() const override { return coverageNetwork; }
+    std::uint32_t coverageType = 0, coverageZone = 0, coverageNetwork = 0, coverageMin = 0, coverageMax = 0, coverageSuccess = 0;
     const std::uint16_t* GetCoverageRect() const override { return coverageRect; }
     const std::list<SituationCell>& GetCellCoverageList() const override { return cells; }
-    std::uint32_t GetCoverageCellsMin() const override { return 0; }
-    std::uint32_t GetCoverageCellsMax() const override { return 0; }
-    std::uint32_t GetCoverageSuccessCount() const override { return 0; }
+    std::uint32_t GetCoverageCellsMin() const override { return coverageMin; }
+    std::uint32_t GetCoverageCellsMax() const override { return coverageMax; }
+    std::uint32_t GetCoverageSuccessCount() const override { return coverageSuccess; }
     float GetCoverageSuccessPct() const override { return 0; }
     bool GetSuccessAura(float& radius, float& magnitude) const override {
         radius = successAuraRadius;
@@ -421,7 +426,20 @@ public:
         return neighbors;
     }
     ISituationLotManager* LotManager() override { return nullptr; }
-    ISituationEffectsManager* EffectsManager() override { return nullptr; }
+    ISituationEffectsManager* EffectsManager() override { return effects; }
+    ISituationEffectsManager* effects = nullptr;
+    ISituationTerrain* terrain = nullptr;
+    ISituationTrafficNetwork* network = nullptr;
+    ISituationZoneManager* zones = nullptr;
+    ISituationOccupant* coverageTarget = nullptr;
+    int coverageTargetsMade = 0;
+    ISituationOccupant* NewCoverageTarget(const float position[3]) override {
+        ++coverageTargetsMade;
+        if (!coverageTarget) return nullptr;
+        coverageTarget->SetPosition(position);
+        coverageTarget->AddRef();
+        return coverageTarget;
+    }
     int AutomataManagerCount() override { return static_cast<int>(managers.size()); }
     ISituationAutomataManager* AutomataManager(int index) override {
         return index >= 0 && index < static_cast<int>(managers.size()) ? managers[static_cast<std::size_t>(index)] : nullptr;
@@ -430,9 +448,9 @@ public:
     ISituationDriveView* PlayerDriveView() override { return nullptr; }
     ISituationMissionActor* MySimActor() override { return nullptr; }
     ISituationOccupantManager* OccupantManager() override { return nullptr; }
-    ISituationZoneManager* ZoneManager() override { return nullptr; }
-    ISituationTerrain* Terrain() override { return nullptr; }
-    ISituationTrafficNetwork* TrafficNetwork() override { return nullptr; }
+    ISituationZoneManager* ZoneManager() override { return zones; }
+    ISituationTerrain* Terrain() override { return terrain; }
+    ISituationTrafficNetwork* TrafficNetwork() override { return network; }
     ISituationAuraSim* AuraSim() override { return aura; }
     ISituationBudgetSim* BudgetSim() override { return budget; }
     ISituationLandfillDeveloper* LandfillDeveloper() override { return nullptr; }
@@ -483,6 +501,53 @@ public:
         xyz[1] = 0.0f;
         xyz[2] = cellZ * 16.0f + 8.0f;
     }
+};
+
+class FakeEffect final : public ISituationEffect {
+public:
+    explicit FakeEffect(std::string n) : name(std::move(n)) {}
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return ++refs; }
+    std::uint32_t Release() override {
+        if (--refs == 0) { delete this; return 0; }
+        return refs;
+    }
+    void Start(bool) override { ++starts; }
+    void Stop(bool) override { ++stops; }
+    void SetTransform(const SituationEffectTransform&) override {}
+    void SetCellRect(const float r[4]) override { for (int i = 0; i < 4; ++i) rect[i] = r[i]; }
+    std::string name;
+    float rect[4] = {};
+    int starts = 0, stops = 0;
+    std::uint32_t refs = 1;
+};
+class FakeEffects final : public ISituationEffectsManager {
+public:
+    bool CreateEffect(const char* name, ISituationEffect*& out) override {
+        names.push_back(name);
+        out = new FakeEffect(name);
+        return true;
+    }
+    std::vector<std::string> names;
+};
+class FakeTerrain final : public ISituationTerrain {
+public:
+    bool IsWaterAt(int x, int z) override { return water.count({x, z}) != 0; }
+    float HeightAt(float, float) override { return 100.0f; }
+    float SurfaceWaterDepthAt(int x, int z) override { return water.count({x, z}) ? 5.0f : 0.0f; }
+    bool IsCellWaterZoneCandidate(int x, int z) override { return water.count({x, z}) != 0; }
+    std::set<std::pair<int, int>> water;
+};
+class FakeNetwork final : public ISituationTrafficNetwork {
+public:
+    bool HasNetworkAt(int x, int z) override { return roads.count({x, z}) != 0; }
+    bool CellHasNetworkWithFlags(int x, int z, std::uint32_t) override { return roads.count({x, z}) != 0; }
+    std::set<std::pair<int, int>> roads;
+};
+class FakeZones final : public ISituationZoneManager {
+public:
+    int ZoneTypeAt(int x, int z) override { auto it = zone.find({x, z}); return it == zone.end() ? 0 : it->second; }
+    std::map<std::pair<int, int>, int> zone;
 };
 
 cRZMessage2Standard* MakeMessage(std::uint32_t type) {
@@ -1124,6 +1189,130 @@ int main() {
         manager->Release();
         advice->Release();
         occupant->Release();
+    }
+
+    // --- coverage (condition 5) ------------------------------------------------------------------------------------------
+    {
+        FakeHost host;
+        FakeApp app;
+        FakeCity city;
+        FakeEffects effects;
+        FakeTerrain terrain;
+        FakeNetwork network;
+        FakeZones zones;
+        FakeAutomataManager vehicles;
+        FakeAutomaton automaton;
+        auto* occupant = new FakeOccupant();
+        auto* target = new FakeOccupant();
+        automaton.occupant = occupant;
+        occupant->automaton = &automaton;
+        automaton.position[0] = 8.0f;
+        automaton.position[2] = 8.0f;
+        vehicles.instances = {&automaton};
+        host.app = &app;
+        host.city = &city;
+        host.effects = &effects;
+        host.terrain = &terrain;
+        host.network = &network;
+        host.zones = &zones;
+        host.coverageTarget = target;
+        host.managers = {&vehicles};
+        auto* advice = new FakeAdvice();
+        advice->successCondition = 5;
+        advice->coverageType = kCoverageRect;
+        advice->coverageRect[0] = 10; advice->coverageRect[1] = 20; advice->coverageRect[2] = 12; advice->coverageRect[3] = 20;
+        advice->activeRadius = 0.0f;
+        advice->flags = kSituationFlagTraining;
+        advice->adviceId = 0x777;
+        host.situationByGuid = advice;
+        host.situationGuid = 0x777;
+        SetCitySituationManagerHost(&host);
+        auto* manager = new cSC4CitySituationManager();
+        manager->AddRef();
+        CHECK(manager->Init());
+        cRZMessage2Standard* initiate = MakeMessage(kSituationMsgActivateAdvice);
+        initiate->SetData1(0x777);
+        initiate->SetData2(1);
+        initiate->SetData3(0);
+        CHECK(manager->DoMessage(initiate));
+        initiate->Release();
+        // three cells (10..12, 20), a yellow highlight each, the centre (11, 20) and the target made there
+        CHECK(manager->CoverageCellCount() == 3 && manager->CoverageTotal() == 3);
+        CHECK(std::count(effects.names.begin(), effects.names.end(), std::string("mission_selection_yellow")) == 3);
+        CHECK(manager->CoverageCenter().x == 11 && manager->CoverageCenter().z == 20);
+        CHECK(host.coverageTargetsMade == 1 && manager->GetCurrentTarget() == target);
+        float at[3] = {};
+        target->Position(at);
+        CHECK(at[0] == 11 * 16 + 8 && at[2] == 20 * 16 + 8 && at[1] == 100.0f);
+        cGZMessage accept;
+        accept.type = 3;
+        accept.param1 = kSituationButtonSender;
+        accept.param2 = kSituationButtonAccept;
+        CHECK(manager->DoWinProcMessage(nullptr, accept));
+        manager->DoAnimationTick(16.0f);
+        manager->DoAnimationTick(4000.0f);
+        CHECK(manager->GetCurrentStatus() == kSituationRunning && manager->CoverageCovered() == 0);
+        // over cell (10, 20): it is covered, its highlight shrinks
+        automaton.position[0] = 10 * 16 + 4.0f;
+        automaton.position[2] = 20 * 16 + 4.0f;
+        manager->DoAnimationTick(16.0f);
+        CHECK(manager->CoverageCovered() == 1 && !manager->CoverageHas(10, 20) && manager->CoverageCellCount() == 2);
+        CHECK(std::count(effects.names.begin(), effects.names.end(), std::string("mission_selection_yellow_shrink")) == 1);
+        CHECK(manager->GetCurrentStatus() == kSituationRunning);
+        automaton.position[0] = 11 * 16 + 4.0f;
+        manager->DoAnimationTick(16.0f);
+        automaton.position[0] = 12 * 16 + 4.0f;
+        manager->DoAnimationTick(16.0f);
+        CHECK(manager->CoverageCovered() == 3 && manager->GetCurrentStatus() == kSituationSuccess);
+
+        // the cell list (type 7) is offset to the city centre (32, 32)
+        advice->coverageType = kCoverageCells;
+        advice->cells = {SituationCell{1, 2}, SituationCell{3, 4}};
+        CHECK(manager->InitCoverageCells());
+        CHECK(manager->CoverageHas(33, 34) && manager->CoverageHas(35, 36) && manager->CoverageTotal() == 2);
+
+        // a network walk: from (5, 5) along a road to the east, branching nowhere else
+        for (int x = 5; x <= 9; ++x) network.roads.insert({x, 5});
+        manager->InitCoverageCells();   // resets the set (cells list again)
+        std::uint32_t left = 3;
+        manager->WalkCoverageNetwork(SituationCellPoint{5, 5}, 2, 1, left);
+        CHECK(left == 0 && manager->CoverageHas(6, 5) && manager->CoverageHas(8, 5) && !manager->CoverageHas(9, 5));
+        // growing a lot's 3 x 1 cells (wider than tall) to 7: whole rows past z1 first
+        advice->coverageType = kCoverageCells;
+        advice->cells.clear();
+        manager->InitCoverageCells();
+        manager->AddCellsToCoverage(20, 20, 22, 20, 3, 7);
+        CHECK(manager->CoverageHas(20, 21) && manager->CoverageHas(22, 21) && manager->CoverageHas(20, 22) && !manager->CoverageHas(20, 19));
+
+        // zone coverage: a block of zone 3 two cells east of the automaton, outside the inner square
+        advice->coverageType = kCoverageZone;
+        advice->coverageZone = 3;
+        advice->coverageMin = 4;
+        advice->coverageMax = 6;
+        automaton.position[0] = 8.0f;
+        automaton.position[2] = 8.0f;
+        for (int x = 3; x <= 5; ++x)
+            for (int z = 0; z <= 1; ++z) zones.zone[{x, z}] = 3;
+        CHECK(manager->InitCoverageCells());
+        CHECK(manager->CoverageTotal() >= 4 && manager->CoverageTotal() <= 6 && manager->CoverageHas(3, 0));
+        // the water kind of the zone: the flood fill keeps to navigable cells
+        advice->coverageType = kCoverageWater;
+        advice->coverageZone = 0;
+        zones.zone.clear();
+        for (int x = 3; x <= 4; ++x)
+            for (int z = 0; z <= 1; ++z) {
+                zones.zone[{x, z}] = 0;
+                terrain.water.insert({x, z});
+            }
+        CHECK(manager->InitCoverageCells());
+        CHECK(manager->CoverageHas(3, 0) && manager->CoverageHas(4, 1) && !manager->CoverageHas(2, 0));
+        CHECK(std::count(effects.names.begin(), effects.names.end(), std::string("mission_selection_water_yellow")) >= 3);
+
+        manager->Shutdown();
+        manager->Release();
+        advice->Release();
+        occupant->Release();
+        target->Release();
     }
 
     SetCitySituationManagerHost(nullptr);

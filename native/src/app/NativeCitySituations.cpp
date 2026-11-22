@@ -51,6 +51,7 @@ namespace native {
 sc4::ISituationLua* NativeSituationLua();   // NativeCitySituationAdvice.cpp
 // app/NativeSituationAutomata.cpp
 sc4::ISituationOccupant* SituationOccupantOf(void* engineOccupant);
+sc4::ISituationOccupant* NativeNewCoverageTarget(const float position[3]);   // NativeCoverageTarget.cpp
 sc4::ISituationAutomaton* SituationAutomatonOf(void* engineAutomaton);
 int SituationAutomataManagerCount();
 sc4::ISituationAutomataManager* SituationAutomataManager(int index);
@@ -241,6 +242,7 @@ public:
         return situation;
     }
     std::uint32_t SourceBuildingGroup(std::uint32_t group) override { return SituationSourceBuildingGroup(group); }
+    ISituationOccupant* NewCoverageTarget(const float position[3]) override { return NativeNewCoverageTarget(position); }
     bool NeighborConnectionCells(std::vector<std::pair<int, int>>& out) override {
         sc4::cSC4NeighborsSimulator* neighbors = CityNeighborsSimulator();
         if (!neighbors) return false;

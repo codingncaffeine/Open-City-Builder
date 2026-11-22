@@ -243,6 +243,9 @@ public:
     // SL::spNeighborsSim vslot 0x40 GetAllConnections, each connection's vslot 0x18 GetConnectionCell: the off-map cells of
     // every neighbor connection. False when there is no neighbors simulator.
     virtual bool NeighborConnectionCells(std::vector<std::pair<int, int>>& out) { (void)out; return false; }
+    // operator new + cSC4PropOccupantAutomataController() + vslot 0x38(position): the coverage mission's target, a prop that is
+    // never placed in the city. One reference; null when it cannot be made.
+    virtual ISituationOccupant* NewCoverageTarget(const float position[3]) { (void)position; return nullptr; }
     // ActivateSituation of an evade mission: SL::spCity vslot 0x178 (the automata controller manager) -> vslot 0x28
     // (occupant, "pursuit generator" template, 0) makes a controller on the automaton's occupant, then vslot 0x80 hands it
     // the evade groups the vehicle manager can create.
@@ -368,6 +371,28 @@ public:
     std::uint32_t CheckReachTargetSuccess(float elapsedMilliseconds);   // i386 0x004a5c46
     std::uint32_t CheckEscapeCitySuccess(float elapsedMilliseconds);    // i386 0x004a11d2
     std::uint32_t CheckEvadeListSuccess(float elapsedMilliseconds);     // i386 0x004a319a
+    std::uint32_t CheckCellCoverageSuccess(float elapsedMilliseconds);  // i386 0x004a4eae
+    // ---- coverage missions (condition 5): the cells to drive over, their highlights and the moving target
+    bool InitCoverageCells();                                        // i386 0x004a8da0
+    void InitZoneCoverageCells();                                    // i386 0x004a1a9c
+    void InitLotCoverageCells();                                     // i386 0x004a35ce
+    void InitNetworkCoverageCells();                                 // i386 0x004a237c
+    void AddCellsToCoverage(int x0, int z0, int x1, int z1, std::uint32_t count, std::uint32_t wanted);   // i386 0x004a1450
+    void FloodFillWaterZone(int x, int z, int zoneType, std::unordered_set<SituationCellPoint, SituationCellPointHash>& cells,
+                            std::uint32_t& count, std::uint32_t maxCount, int sizeX, int sizeZ);   // i386 0x004a16a2
+    bool FloodFillIsGoodCell(SituationCellPoint cell, int zoneType, std::uint32_t count, std::uint32_t maxCount, int sizeX,
+                             int sizeZ);                             // i386 0x0049dbae
+    void WalkCoverageNetwork(SituationCellPoint cell, std::uint8_t direction, std::uint32_t networkType, std::uint32_t& left);   // i386 0x004a21e8
+    ISituationOccupant* ChooseRandomOccupant(const std::vector<ISituationOccupant*>& list);   // i386 0x0049ed98 (borrowed)
+    bool FindClosestTargetCell(SituationCellPoint from, SituationCellPoint& out) const;       // i386 0x004a0926
+    void UpdateCoverageTarget();                                     // i386 0x004a4d36
+    static float GetFlashPeriod(float distance);                     // i386 0x0049dc32
+    void FlashTargetIndicator();                                     // the dispatch view's target indicator, flashing by distance
+    std::size_t CoverageCellCount() const { return coverageCells_.size(); }
+    std::uint32_t CoverageCovered() const { return coverageCovered_; }
+    std::uint32_t CoverageTotal() const { return coverageTotal_; }
+    SituationCellPoint CoverageCenter() const { return coverageCenter_; }
+    bool CoverageHas(int x, int z) const { return coverageCells_.count(SituationCellPoint{std::uint16_t(x), std::uint16_t(z)}) != 0; }
     void HandleSituationTriggered(cISC4CitySituationAdvice* situation);      // @ 0x1006d9318
     void HandleSituationUntriggered(cISC4CitySituationAdvice* situation);    // @ 0x1006d96c4
     void HandleSituationSuccess(cISC4CitySituationAdvice* situation);        // @ 0x1006da64e (i386 0x004a7e4a)
@@ -388,7 +413,6 @@ public:
     void HandleSituationComplete(cISC4CitySituationAdvice* situation);   // i386 0x0049e366
     std::uint32_t HandleTimeLimitReached();                          // i386 0x0049ed2a
     std::uint32_t HandleActiveAutoRemoved();                         // i386 0x0049ed5e
-    ISituationOccupant* ChooseRandomOccupant(const std::vector<ISituationOccupant*>& list);   // i386 0x0049ed98
     ISituationOccupant* FindOccupantByGroup(std::uint32_t group);    // i386 0x004a3378 (counted)
     ISituationAutomaton* CreateAutomatonForPlayerDrive(const std::vector<std::uint32_t>& groups);   // i386 0x004a3d0c (not counted)
     void GetCurrentTargetGroups(std::vector<std::uint32_t>& out);    // i386 0x0049f2aa
@@ -446,6 +470,9 @@ private:
     cRZAutoRefCount<ISituationEffect> greenArrow_;               // +0xb68 ("greenarrow" pointing at the target)
     std::unordered_set<SituationCellPoint, SituationCellPointHash> coverageCells_;   // +0xb70
     std::unordered_map<SituationCellPoint, cRZAutoRefCount<ISituationEffect>, SituationCellPointHash> coverageEffects_;   // +0xba0
+    std::uint32_t coverageCovered_ = 0;                          // i386 +0xac0 cells driven over
+    std::uint32_t coverageTotal_ = 0;                            // i386 +0xac4 cells at the start
+    SituationCellPoint coverageCenter_;                          // i386 +0xadc the middle of the cells' bounds
     int scriptRefs_[7] = {-2, -2, -2, -2, -2, -2, -2};           // +0xbcc..+0xbe4
     cRZAutoRefCount<ISituationMySim> mySim_;                     // +0xbe8
     std::uint32_t unusedBf0_ = 0;                                // +0xbf0

@@ -16,6 +16,7 @@
 #include "rz/cRZVariant.h"
 #include "s3d/S3DMath.h"
 #include "sc4/CitySituationManager.h"
+#include "sc4/SpiralIterator.h"
 #include "sc4/GeometryUtilities.h"
 
 namespace sc4 {
@@ -289,10 +290,7 @@ bool cSC4CitySituationManager::InitiateSituation(cISC4CitySituationAdvice* situa
         if (condition == 2) {
             result = setUp = true;
         } else if (condition == 5) {
-            // Recovered-partial: InitCoverageCells (the zone / network / lot coverage cells) is not recovered; a coverage
-            // mission is reported as not available.
-            SC4_UNWIRED("cSC4CitySituationManager::InitiateSituation: InitCoverageCells (cell-coverage missions) is not ported; the mission is unavailable");
-            result = setUp = false;
+            result = setUp = InitCoverageCells();
         } else {
             numTargets_ = 1;
             if (activeSituation_->HasTargetSequence()) numTargets_ = static_cast<std::uint32_t>(activeSituation_->GetTargetSequence().size());
@@ -471,13 +469,6 @@ void cSC4CitySituationManager::InitiatePlayerDriveMode(bool enter) {
         return;
     }
     if (ISituationView3D* view = host->View3D()) view->EndPlayerDriveTool();
-}
-
-// i386 0x0049ed98: a uniformly random entry of the list (the manager's own generator).
-ISituationOccupant* cSC4CitySituationManager::ChooseRandomOccupant(const std::vector<ISituationOccupant*>& list) {
-    if (list.empty()) return nullptr;
-    const std::uint32_t pick = random_.RandomUint32Uniform(static_cast<std::uint32_t>(list.size()));
-    return pick < list.size() ? list[pick] : nullptr;
 }
 
 // i386 0x004a3378: an occupant of `group`: the MySim's residence for group 0x193a, else a random one of the group inside
@@ -873,9 +864,7 @@ float cSC4CitySituationManager::GetTimeLimitSecondsFromScript() {
 std::uint32_t cSC4CitySituationManager::CheckReachTargetSuccess(float elapsedMilliseconds) {
     std::uint32_t status = status_;
     const float distance = GetDistanceToTarget(false) - activeSituation_->GetActiveRadius();
-    // Recovered-partial: GetFlashPeriod (the indicator's flash rate by distance) is not recovered; the dispatch view that
-    // would flash is not either.
-    SC4_UNWIRED("cSC4CitySituationManager::CheckReachTargetSuccess: the target indicator's flash period by distance (GetFlashPeriod) is not set");
+    FlashTargetIndicator();
     bool next = false;
     if (activeSituation_->GetSuccessDistance() > distance) {
         reachTimer_ += elapsedMilliseconds;
@@ -895,6 +884,7 @@ std::uint32_t cSC4CitySituationManager::CheckReachTargetSuccess(float elapsedMil
 std::uint32_t cSC4CitySituationManager::CheckEscapeCitySuccess(float elapsedMilliseconds) {
     (void)elapsedMilliseconds;
     std::uint32_t status = status_;
+    FlashTargetIndicator();
     float position[3] = {0.0f, 0.0f, 0.0f};
     ICitySituationManagerHost* host = CitySituationManagerHost();
     ISituationCity* city = host ? host->City() : nullptr;
@@ -921,6 +911,412 @@ std::uint32_t cSC4CitySituationManager::CheckEscapeCitySuccess(float elapsedMill
                 }
             }
         }
+    }
+    HandleStatusChanged(status);
+    return status;
+}
+
+// ---------------------------------------------------------------------------------------------- coverage missions
+
+namespace {
+constexpr const char* kCoverageHighlightEffect = "mission_selection_yellow";              // _kszCoverageHighlightEffectName
+constexpr const char* kCoverageHighlightWaterEffect = "mission_selection_water_yellow";   // _kszCoverageHighlightWaterEffectName
+constexpr const char* kCoverageShrinkEffect = "mission_selection_yellow_shrink";         // _kszCoverageHighlightShrinkEffectName
+constexpr const char* kCoverageShrinkWaterEffect = "mission_selection_water_yellow_shrink";
+template <class T> T ClampCell(T value, T high) { return value < 0 ? 0 : (high < value ? high : value); }
+}  // namespace
+
+// i386 0x0049dc32: 0.2 s next to the target up to 0.5 s from 250 m.
+float cSC4CitySituationManager::GetFlashPeriod(float distance) {
+    const float period = distance / 250.0f * 0.3f + 0.2f;
+    if (period < 0.2f) return 0.2f;
+    return period <= 0.5f ? period : 0.5f;
+}
+
+// The first lines of the reach, escape and coverage checks: the dispatch view flashes the target's indicator.
+void cSC4CitySituationManager::FlashTargetIndicator() {
+    if (!dispatchView_ || !targetIndicator_) return;
+    dispatchView_->FlashIndicator(targetIndicator_, true, GetFlashPeriod(GetDistanceToTarget(false)));
+}
+
+// i386 0x0049ed98: an even draw over the list (null when the draw passes its end).
+ISituationOccupant* cSC4CitySituationManager::ChooseRandomOccupant(const std::vector<ISituationOccupant*>& list) {
+    const std::uint32_t pick = random_.RandomUint32Uniform(static_cast<std::uint32_t>(list.size()));
+    return pick < list.size() ? list[pick] : nullptr;
+}
+
+// i386 0x004a8da0: the cells of the coverage type (zone, lot, network, the advice's rect, or its cell list offset to the
+// city centre), one "mission_selection_yellow" (water: "..._water_yellow") effect over each, the centre of their bounds and
+// the target there. False when no cell was found (the mission is then unavailable).
+bool cSC4CitySituationManager::InitCoverageCells() {
+    coverageCells_.clear();
+    if (!activeSituation_ || !activeAutomaton_) return false;
+    ICitySituationManagerHost* host = CitySituationManagerHost();
+    ISituationCity* city = host ? host->City() : nullptr;
+    const std::uint32_t type = activeSituation_->GetCoverageType();
+    switch (type) {
+        case kCoverageZone:
+        case kCoverageZoneAlt:
+        case kCoverageWater: InitZoneCoverageCells(); break;
+        case kCoverageLot: InitLotCoverageCells(); break;
+        case kCoverageNetwork: InitNetworkCoverageCells(); break;
+        case kCoverageRect: {
+            const std::uint16_t* rect = activeSituation_->GetCoverageRect();
+            if (!rect) break;
+            for (std::uint32_t x = rect[0]; x <= rect[2]; ++x)
+                for (std::uint16_t z = rect[1]; z <= rect[3]; ++z) {
+                    coverageCells_.insert(SituationCellPoint{static_cast<std::uint16_t>(x), z});
+                    if (z == 0xffff) break;
+                }
+            break;
+        }
+        case kCoverageCells: {
+            const int halfX = city ? city->CellsX() / 2 : 0;
+            const int halfZ = city ? city->CellsZ() / 2 : 0;
+            for (const SituationCell& cell : activeSituation_->GetCellCoverageList())
+                coverageCells_.insert(SituationCellPoint{static_cast<std::uint16_t>(cell.x + halfX), static_cast<std::uint16_t>(cell.z + halfZ)});
+            break;
+        }
+        default: break;
+    }
+    coverageTotal_ = static_cast<std::uint32_t>(coverageCells_.size());
+    coverageCovered_ = 0;
+    ISituationEffectsManager* effects = host ? host->EffectsManager() : nullptr;
+    if (!coverageCells_.empty() && effects) {
+        int minX = coverageCells_.begin()->x, maxX = minX;
+        int minZ = coverageCells_.begin()->z, maxZ = minZ;
+        for (const SituationCellPoint& cell : coverageCells_) {
+            minX = cell.x < minX ? cell.x : minX;
+            maxX = maxX < cell.x ? cell.x : maxX;
+            minZ = cell.z < minZ ? cell.z : minZ;
+            maxZ = maxZ < cell.z ? cell.z : maxZ;
+            ISituationEffect* effect = nullptr;
+            if (!effects->CreateEffect(type == kCoverageWater ? kCoverageHighlightWaterEffect : kCoverageHighlightEffect, effect) || !effect) continue;
+            const float rect[4] = {float(cell.x), float(cell.z), float(cell.x + 1), float(cell.z + 1)};
+            effect->SetCellRect(rect);
+            effect->Start(false);
+            coverageEffects_.emplace(cell, cRZAutoRefCount<ISituationEffect>(effect));   // an existing entry stays
+            effect->Release();
+        }
+        coverageCenter_ = SituationCellPoint{static_cast<std::uint16_t>(minX + (maxX - minX) / 2), static_cast<std::uint16_t>(minZ + (maxZ - minZ) / 2)};
+        UpdateCoverageTarget();
+    }
+    return coverageTotal_ != 0;
+}
+
+// i386 0x004a1a9c: zone coverage. Candidate cells spiral out from the active automaton's cell within the outer band (the
+// advice's maximum distance, or the whole city below 1 m) and outside the inner square (its minimum distance), with the
+// advice's zone (coverage type 1; 0 for the other types). From each candidate a second spiral (clipped to the city, its rect
+// pulled in at every cell that fails) gathers dry cells of that zone (type 5: also without a network); water coverage (6)
+// floods the navigable cells of the zone instead. The first candidate whose cells number between the advice's minimum and
+// maximum (the city's cell count when 0 or above it) wins.
+void cSC4CitySituationManager::InitZoneCoverageCells() {
+    ICitySituationManagerHost* host = CitySituationManagerHost();
+    ISituationZoneManager* zones = host ? host->ZoneManager() : nullptr;
+    ISituationTrafficNetwork* networks = host ? host->TrafficNetwork() : nullptr;
+    ISituationCity* city = host ? host->City() : nullptr;
+    ISituationTerrain* terrain = host ? host->Terrain() : nullptr;
+    if (!zones || !city || !activeSituation_ || !activeAutomaton_) return;
+    const int sizeX = city->CellsX();
+    const int sizeZ = city->CellsZ();
+    const float inner = activeSituation_->GetMinTargetDistance();
+    float outer = activeSituation_->GetMaxTargetDistance();
+    if (outer < 1.0f) outer = static_cast<float>(sizeX) * city->CellSizeXMeters();   // kfMaxStoplightDistance
+    const std::uint32_t type = activeSituation_->GetCoverageType();
+    const int wantedZone = type == kCoverageZone ? static_cast<int>(activeSituation_->GetCoverageZone()) : 0;
+    const std::uint32_t minCells = activeSituation_->GetCoverageCellsMin();
+    std::uint32_t maxCells = activeSituation_->GetCoverageCellsMax();
+    const std::uint32_t cityCells = static_cast<std::uint32_t>(sizeX * sizeZ);
+    if (maxCells == 0 || cityCells < maxCells) maxCells = cityCells;
+    const std::uint32_t needed = minCells <= maxCells ? minCells : maxCells;
+    float position[3] = {0.0f, 0.0f, 0.0f};
+    activeAutomaton_->Position(position);
+    int cx = 0, cz = 0, ox0 = 0, oz0 = 0, ox1 = 0, oz1 = 0, ix0 = 0, iz0 = 0, ix1 = 0, iz1 = 0;
+    city->WorldToCell(position[0], position[2], cx, cz);
+    city->WorldToCell(position[0] - outer, position[2] - outer, ox0, oz0);
+    city->WorldToCell(outer + position[0], outer + position[2], ox1, oz1);
+    city->WorldToCell(position[0] - inner, position[2] - inner, ix0, iz0);
+    city->WorldToCell(inner + position[0], inner + position[2], ix1, iz1);
+    const int lastX = sizeX - 1, lastZ = sizeZ - 1;
+    ox0 = ClampCell(ox0, lastX); oz0 = ClampCell(oz0, lastZ); ox1 = ClampCell(ox1, lastX); oz1 = ClampCell(oz1, lastZ);
+    ix0 = ClampCell(ix0, lastX); iz0 = ClampCell(iz0, lastZ); ix1 = ClampCell(ix1, lastX); iz1 = ClampCell(iz1, lastZ);
+    SpiralIterator outerWalk = SpiralIterator::Unbounded();
+    outerWalk.SetClipRect(ox0, oz0, ox1, oz1);
+    outerWalk.Reset(cx, cz);
+    int sx = 0, sz = 0;
+    while (outerWalk.GetNext(sx, sz)) {
+        if (ix0 <= sx && sx <= ix1 && iz0 <= sz && sz <= iz1) continue;
+        const int zone = zones->ZoneTypeAt(sx, sz);
+        if (zone != wantedZone) continue;
+        std::unordered_set<SituationCellPoint, SituationCellPointHash> cells;
+        std::uint32_t count = 0;
+        if (type == kCoverageWater) {
+            FloodFillWaterZone(sx, sz, zone, cells, count, maxCells, sizeX, sizeZ);
+        } else {
+            SpiralIterator walk = SpiralIterator::Unbounded();
+            walk.Reset(sx, sz);
+            walk.minX = 0;
+            walk.minZ = 0;
+            walk.maxX = lastX < 0 ? 0 : lastX;
+            walk.maxZ = lastZ < 0 ? 0 : lastZ;
+            int highX = lastX, highZ = lastZ, lowX = 0, lowZ = 0;
+            int px = 0, pz = 0;
+            while (walk.GetNext(px, pz) && count < maxCells) {
+                const bool good = zones->ZoneTypeAt(px, pz) == zone && !(terrain && terrain->IsWaterAt(px, pz)) &&
+                                  (type != kCoverageZoneAlt || !(networks && networks->HasNetworkAt(px, pz)));
+                if (good) {
+                    cells.insert(SituationCellPoint{static_cast<std::uint16_t>(px), static_cast<std::uint16_t>(pz)});
+                    ++count;
+                    continue;
+                }
+                // The failing cell bounds the walk on its side of the start (the original rewrites the clip rect in place).
+                if (sx < px) highX = px;
+                else if (px < sx) lowX = px;
+                if (sz < pz) highZ = pz;
+                else if (pz < sz) lowZ = pz;
+                walk.minX = lowX;
+                walk.minZ = lowZ;
+                walk.maxX = highX < lowX ? lowX : highX;
+                walk.maxZ = highZ < lowZ ? lowZ : highZ;
+            }
+        }
+        if (needed <= count && count <= maxCells) {
+            coverageCells_ = std::move(cells);
+            return;
+        }
+    }
+}
+
+// i386 0x0049dbae: below the count, inside the city, of the zone, and navigable for a size-2 boat.
+bool cSC4CitySituationManager::FloodFillIsGoodCell(SituationCellPoint cell, int zoneType, std::uint32_t count, std::uint32_t maxCount, int sizeX,
+                                                   int sizeZ) {
+    ICitySituationManagerHost* host = CitySituationManagerHost();
+    ISituationZoneManager* zones = host ? host->ZoneManager() : nullptr;
+    ISituationTerrain* terrain = host ? host->Terrain() : nullptr;
+    return count < maxCount && static_cast<int>(cell.x) < sizeX && static_cast<int>(cell.z) < sizeZ && zones &&
+           zones->ZoneTypeAt(cell.x, cell.z) == zoneType && terrain && terrain->IsCellWaterZoneCandidate(cell.x, cell.z);
+}
+
+// i386 0x004a16a2: a good cell adds itself (when new) and each good neighbor (-x, -z, +x, +z), then recurses into the four
+// neighbors. Quirk kept: a neighbor already in the set still adds one to the count.
+void cSC4CitySituationManager::FloodFillWaterZone(int x, int z, int zoneType, std::unordered_set<SituationCellPoint, SituationCellPointHash>& cells,
+                                                  std::uint32_t& count, std::uint32_t maxCount, int sizeX, int sizeZ) {
+    const auto point = [](int px, int pz) { return SituationCellPoint{static_cast<std::uint16_t>(px), static_cast<std::uint16_t>(pz)}; };
+    if (!FloodFillIsGoodCell(point(x, z), zoneType, count, maxCount, sizeX, sizeZ)) return;
+    if (cells.insert(point(x, z)).second) ++count;
+    const int dx[4] = {-1, 0, 1, 0}, dz[4] = {0, -1, 0, 1};
+    for (int i = 0; i < 4; ++i) {
+        if (!FloodFillIsGoodCell(point(x + dx[i], z + dz[i]), zoneType, count, maxCount, sizeX, sizeZ)) continue;
+        cells.insert(point(x + dx[i], z + dz[i]));
+        ++count;
+    }
+    for (int i = 0; i < 4; ++i) FloodFillWaterZone(x + dx[i], z + dz[i], zoneType, cells, count, maxCount, sizeX, sizeZ);
+}
+
+// i386 0x004a35ce: lot coverage. The lot of the first occupant of the advice's group: its cells up to the advice's maximum per
+// row (the original's break leaves only the inner loop), then AddCellsToCoverage grows the set to the minimum.
+void cSC4CitySituationManager::InitLotCoverageCells() {
+    if (!activeSituation_) return;
+    ISituationOccupant* occupant = FindOccupantByGroup(activeSituation_->GetCoverageOccupantGroup());
+    if (!occupant) return;
+    ICitySituationManagerHost* host = CitySituationManagerHost();
+    ISituationLotManager* lots = host ? host->LotManager() : nullptr;
+    ISituationLot* lot = lots ? lots->LotOfOccupant(occupant) : nullptr;
+    if (lot) {
+        const std::uint32_t minCells = activeSituation_->GetCoverageCellsMin();
+        const std::uint32_t maxCells = activeSituation_->GetCoverageCellsMax();
+        int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
+        lot->Bounds(x0, z0, x1, z1);
+        std::uint32_t count = 0;
+        for (int x = x0; x <= x1; ++x) {
+            for (int z = z0; z <= z1; ++z) {
+                coverageCells_.insert(SituationCellPoint{static_cast<std::uint16_t>(x), static_cast<std::uint16_t>(z)});
+                ++count;
+                if (maxCells != 0 && maxCells <= count) break;
+            }
+        }
+        AddCellsToCoverage(x0, z0, x1, z1, count, minCells);
+    }
+    occupant->Release();
+}
+
+// i386 0x004a1450: grows the cells around the rect until `wanted` are added: whole rows past the far z side then before the
+// near one when the rect is wider than tall, whole columns past the far x side then before the near one otherwise.
+void cSC4CitySituationManager::AddCellsToCoverage(int x0, int z0, int x1, int z1, std::uint32_t count, std::uint32_t wanted) {
+    ICitySituationManagerHost* host = CitySituationManagerHost();
+    ISituationCity* city = host ? host->City() : nullptr;
+    if (!city || wanted == 0 || wanted <= count) return;
+    const auto add = [this, &count](int x, int z) {
+        coverageCells_.insert(SituationCellPoint{static_cast<std::uint16_t>(x), static_cast<std::uint16_t>(z)});
+        ++count;
+    };
+    if (z1 - z0 < x1 - x0) {
+        for (int z = z1 + 1; z < city->CellsZ() && count < wanted; ++z)
+            for (int x = x0; x <= x1; ++x) add(x, z);
+        for (int z = z0 - 1; z >= 0 && count < wanted; --z)
+            for (int x = x0; x <= x1; ++x) add(x, z);
+    } else {
+        for (int x = x1 + 1; x < city->CellsX() && count < wanted; ++x)
+            for (int z = z0; z <= z1; ++z) add(x, z);
+        for (int x = x0 - 1; x >= 0 && count < wanted; --x)
+            for (int z = z0; z <= z1; ++z) add(x, z);
+    }
+}
+
+// i386 0x004a237c: network coverage. A random network occupant of the advice's network type in the square of half side max
+// distance SQUARED (quirk kept) around the active automaton, beyond the minimum distance; its cell starts the walk, which takes
+// between 8 and 50 cells (an even draw between the advice's minimum and maximum) along the network, trying the four directions
+// from a random one.
+void cSC4CitySituationManager::InitNetworkCoverageCells() {
+    ICitySituationManagerHost* host = CitySituationManagerHost();
+    ISituationOccupantManager* occupants = host ? host->OccupantManager() : nullptr;
+    if (!occupants || !activeSituation_ || !activeAutomaton_) return;
+    const float reach = activeSituation_->GetMaxTargetDistance() * activeSituation_->GetMaxTargetDistance();
+    const float minDistance = activeSituation_->GetMinTargetDistance();
+    const std::uint32_t networkType = activeSituation_->GetCoverageNetworkType();
+    float center[3] = {0.0f, 0.0f, 0.0f};
+    activeAutomaton_->Position(center);
+    const float boxMin[3] = {center[0] - reach, -3.4028235e+38f, center[2] - reach};
+    const float boxMax[3] = {reach + center[0], 3.4028235e+38f, reach + center[2]};
+    std::vector<ISituationOccupant*> list = occupants->NetworkOccupantsInBox(boxMin, boxMax, networkType, center, minDistance * minDistance);
+    if (!list.empty()) {
+        ISituationOccupant* chosen = ChooseRandomOccupant(list);
+        if (chosen && chosen->IsNetworkOccupant()) {
+            int x = 0, z = 0;
+            chosen->NetworkCell(x, z);
+            const SituationCellPoint start{static_cast<std::uint16_t>(x), static_cast<std::uint16_t>(z)};
+            coverageCells_.insert(start);
+            const std::int32_t drawn = random_.RandomSint32RangeUniform(static_cast<std::int32_t>(activeSituation_->GetCoverageCellsMin()),
+                                                                      static_cast<std::int32_t>(activeSituation_->GetCoverageCellsMax()));
+            std::uint32_t left = static_cast<std::uint32_t>(drawn);
+            left = left < 8 ? 8 : (left < 51 ? left : 50);
+            const std::uint32_t first = random_.RandomUint32Uniform(4);
+            for (std::uint32_t i = 0; i < 4 && left != 0; ++i)
+                WalkCoverageNetwork(start, static_cast<std::uint8_t>((first + i) & 3), networkType, left);
+        }
+    }
+    occupants->ReleaseOccupants(list);
+}
+
+// i386 0x004a21e8: one step in `direction` (0 -x, 1 -z, 2 +x, 3 +z; the city edge ends it); a cell with a network of the type
+// that is not in the set yet joins it and the walk branches in the four directions from this one's onwards. A cell already in
+// the set, or without the network, ends that branch.
+void cSC4CitySituationManager::WalkCoverageNetwork(SituationCellPoint cell, std::uint8_t direction, std::uint32_t networkType, std::uint32_t& left) {
+    if (left == 0) return;
+    ICitySituationManagerHost* host = CitySituationManagerHost();
+    ISituationCity* city = host ? host->City() : nullptr;
+    ISituationTrafficNetwork* networks = host ? host->TrafficNetwork() : nullptr;
+    if (!city || !networks) return;
+    if (direction == 1) {
+        if (cell.z == 0) return;
+        --cell.z;
+    } else if (direction == 0) {
+        if (cell.x == 0) return;
+        --cell.x;
+    } else if (direction == 2) {
+        if (city->CellsX() <= static_cast<int>(cell.x)) return;
+        ++cell.x;
+    } else if (direction == 3) {
+        if (city->CellsZ() <= static_cast<int>(cell.z)) return;
+        ++cell.z;
+    }
+    if (!networks->CellHasNetworkWithFlags(cell.x, cell.z, networkType)) return;
+    if (coverageCells_.count(cell) != 0) return;
+    coverageCells_.insert(cell);
+    if (--left == 0) return;
+    for (int i = 0; i < 4; ++i) WalkCoverageNetwork(cell, static_cast<std::uint8_t>((direction + i) & 3), networkType, left);
+}
+
+// i386 0x004a0926: the cell itself when it is in the set, else the nearest set cell. Quirk kept: the deltas are taken as
+// unsigned 16-bit values, so a cell to the -x / -z side measures as far away.
+bool cSC4CitySituationManager::FindClosestTargetCell(SituationCellPoint from, SituationCellPoint& out) const {
+    if (coverageCells_.count(from) != 0) {
+        out = from;
+        return true;
+    }
+    bool found = false;
+    std::int32_t best = 0x7fffffff;
+    for (const SituationCellPoint& cell : coverageCells_) {
+        const std::uint32_t dx = static_cast<std::uint16_t>(cell.x - from.x);
+        const std::uint32_t dz = static_cast<std::uint16_t>(cell.z - from.z);
+        const std::int32_t distance = static_cast<std::int32_t>(dx * dx + dz * dz);
+        if (distance < best) {
+            out = cell;
+            found = true;
+            best = distance;
+        }
+    }
+    return found;
+}
+
+// i386 0x004a4d36: the target stands on the centre cell (on the water surface where the cell has water): made the first time
+// (a prop occupant controller), moved afterwards. Quirk kept: the closest cell FindClosestTargetCell finds is not used; it only
+// decides whether there is a cell at all.
+void cSC4CitySituationManager::UpdateCoverageTarget() {
+    SituationCellPoint closest;
+    if (coverageCells_.empty() || !FindClosestTargetCell(coverageCenter_, closest)) return;
+    ICitySituationManagerHost* host = CitySituationManagerHost();
+    ISituationCity* city = host ? host->City() : nullptr;
+    ISituationTerrain* terrain = host ? host->Terrain() : nullptr;
+    if (!city) return;
+    float position[3] = {0.0f, 0.0f, 0.0f};
+    city->CellToWorld(coverageCenter_.x, coverageCenter_.z, position);
+    const float depth = terrain ? terrain->SurfaceWaterDepthAt(coverageCenter_.x, coverageCenter_.z) : 0.0f;
+    position[1] = terrain ? terrain->HeightAt(position[0], position[2]) : position[1];
+    if (0.0f < depth) position[1] += depth;
+    if (!currentTarget_) {
+        if (ISituationOccupant* target = host->NewCoverageTarget(position)) {
+            SetTarget(target);
+            target->Release();
+        }
+    } else {
+        currentTarget_->SetPosition(position);
+    }
+}
+
+// i386 0x004a4eae: every cell within the active radius of the active position that is still in the set is covered: its
+// highlight gives way to the shrinking one, it leaves the set and counts. Done when the count reaches the advice's success
+// count (all the cells when 0; its success percentage is read and not used); otherwise the target moves on.
+std::uint32_t cSC4CitySituationManager::CheckCellCoverageSuccess(float elapsedMilliseconds) {
+    (void)elapsedMilliseconds;
+    std::uint32_t status = status_;
+    FlashTargetIndicator();
+    ICitySituationManagerHost* host = CitySituationManagerHost();
+    ISituationCity* city = host ? host->City() : nullptr;
+    ISituationEffectsManager* effects = host ? host->EffectsManager() : nullptr;
+    const float radius = activeSituation_->GetActiveRadius();
+    float position[3] = {0.0f, 0.0f, 0.0f};
+    if (GetActivePosition(position) && city) {
+        int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
+        city->WorldToCell(position[0] - radius, position[2] - radius, x0, z0);
+        city->WorldToCell(radius + position[0], radius + position[2], x1, z1);
+        for (int z = z0; z <= z1; ++z) {
+            for (int x = x0; x <= x1; ++x) {
+                const SituationCellPoint cell{static_cast<std::uint16_t>(x), static_cast<std::uint16_t>(z)};
+                if (coverageCells_.count(cell) == 0) continue;
+                auto effect = coverageEffects_.find(cell);
+                if (effect != coverageEffects_.end()) {
+                    if (effect->second) effect->second->Stop(true);
+                    effect->second = nullptr;
+                    const bool water = activeSituation_->GetCoverageType() == kCoverageWater;
+                    ISituationEffect* shrink = nullptr;
+                    if (effects && effects->CreateEffect(water ? kCoverageShrinkWaterEffect : kCoverageShrinkEffect, shrink) && shrink) {
+                        effect->second = shrink;
+                        shrink->Release();
+                        const float rect[4] = {float(cell.x), float(cell.z), float(cell.x + 1), float(cell.z + 1)};
+                        effect->second->SetCellRect(rect);
+                        effect->second->Start(false);
+                    }
+                }
+                coverageCells_.erase(cell);
+                ++coverageCovered_;
+            }
+        }
+        std::uint32_t required = activeSituation_->GetCoverageSuccessCount();
+        if (required == 0) required = coverageTotal_;
+        (void)activeSituation_->GetCoverageSuccessPct();
+        if (coverageCovered_ < required) UpdateCoverageTarget();
+        else status = kSituationSuccess;
     }
     HandleStatusChanged(status);
     return status;
@@ -972,9 +1368,7 @@ std::uint32_t cSC4CitySituationManager::CheckForSuccess(float elapsedMillisecond
             if (condition == 2) {
                 status = CheckEscapeCitySuccess(elapsedMilliseconds);
             } else if (condition == 5) {
-                // Recovered-partial: CheckCellCoverageSuccess (5) is not ported.
-                SC4_UNWIRED("cSC4CitySituationManager::CheckForSuccess: CheckCellCoverageSuccess (coverage missions) is not ported");
-                status = kSituationRunning;
+                status = CheckCellCoverageSuccess(elapsedMilliseconds);
             } else if (condition == 1 && currentTarget_) {
                 status = CheckReachTargetSuccess(elapsedMilliseconds);
             } else {

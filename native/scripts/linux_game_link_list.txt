@@ -499,6 +499,7 @@ src/app/hosts/StubCameraControl.cpp
 src/app/hosts/StubCatalogView.cpp
 src/app/NativeCitySituationAdvice.cpp
 src/app/NativeCitySituations.cpp
+src/app/NativeCoverageTarget.cpp
 src/app/NativeSituationAutomata.cpp
 src/app/NativeControllerManagerHost.cpp
 src/app/NativeAutomataGenerator.cpp

@@ -19,6 +19,10 @@ struct SpiralIterator {
 
     // The constructor the callers inline: a spiral over [0, width) x [0, height) starting at (startX, startZ).
     static SpiralIterator Over(int startX, int startZ, int width, int height);
+    // The original's constructor (i386 0x0061d480): an unbounded clip rect, mode 1, started at (0, 0).
+    static SpiralIterator Unbounded();
+    void Reset(int startX, int startZ);                       // i386 0x0061ca90
+    void SetClipRect(int x0, int z0, int x1, int z1);         // i386 0x00620606 (a max below its min is raised to it)
     bool GetNext(int& outX, int& outZ);        // @ 0x1004f45e0
     bool DoXZEnd();                            // @ 0x1004fe1f0
 };
