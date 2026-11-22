@@ -49,6 +49,7 @@ public:
     float SpeedMax() const override { return group_->kphMax; }
     void GetGroupHierarchyDepth() override { (void)group_->GetGroupHierarchyDepth(); }
     const std::list<std::uint32_t>* TrailerGroupIds() const override { return &group_->trailerGroupIds; }
+    bool AnimOffset(const cRZString& name, std::uint32_t& offset) const override { return group_->GetAnimOffset(name, offset); }
     void KeyEffects(std::vector<AutomatonKeyEffect>& out) const override {
         out.clear();
         for (const auto& entry : group_->keyEffects)

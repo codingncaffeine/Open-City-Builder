@@ -1,3 +1,4 @@
+#include <map>
 // cSC4Automaton — construction/QueryInterface/refcounting, the occupant plumbing, position/heading/speed state, the
 // controller handshake and the behaviour state machine, the simulated step (DoAnimationTick) and the placement path.
 // The model, effect, city, sound and controller-manager neighbours are fakes (the automaton only ever reaches them
@@ -87,6 +88,13 @@ struct FakeGroup final : IAutomatonGroupTemplate {
     float SpeedMin() const override { return speedMin; }
     float SpeedMax() const override { return speedMax; }
     void GetGroupHierarchyDepth() override { ++depthCalls; }
+    std::map<std::string, std::uint32_t> anims;
+    bool AnimOffset(const cRZString& name, std::uint32_t& offset) const override {
+        auto it = anims.find(name.ToChar());
+        if (it == anims.end()) return false;
+        offset = it->second;
+        return true;
+    }
 };
 
 struct FakeMessageTarget final : cIGZMessageTarget2 {
@@ -1214,6 +1222,23 @@ int main() {
         CHECK(automaton->Release() == 0);
         SetAutomatonRegistrySource({});
         registry->Release();
+    }
+
+    {   // GetAnimOffsetByName (i386 0x000bbb98): the first group of property 0xaa1dd396 whose template names the animation
+        FakeHost host;
+        host.group.id = 0x1001;
+        host.secondary.id = 0x2002;
+        host.secondary.anims["wave"] = 7;
+        host.group.anims["spray"] = 3;
+        cSC4Automaton* automaton = MakeAutomaton(host);
+        CHECK(automaton->GetAnimOffsetByName(cRZString("wave")) == 0);   // no groups yet
+        cSCPropertyHelp::SetPropertyValue(automaton->AsPropertyHolder(), 0xaa1dd396, std::vector<std::uint32_t>{0x9999, 0x2002, 0x1001});
+        CHECK(automaton->GetAnimOffsetByName(cRZString("wave")) == 7);
+        CHECK(automaton->GetAnimOffsetByName(cRZString("spray")) == 3);
+        CHECK(automaton->GetAnimOffsetByName(cRZString("jump")) == 0);
+        host.group.anims["wave"] = 9;   // the earlier group in the list wins
+        CHECK(automaton->GetAnimOffsetByName(cRZString("wave")) == 7);
+        CHECK(automaton->Release() == 0);
     }
 
     for (FakeModel* model : std::vector<FakeModel*>(g_models)) delete model;

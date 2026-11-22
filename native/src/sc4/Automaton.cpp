@@ -1671,11 +1671,15 @@ bool cSC4Automaton::PlayAnimByName(const cRZString& name) {
     return true;
 }
 
-// 0x10010aee2: resolves the animation offset through the occupant's group templates. The script system's group
-// templates are a seam and their animation tables are not recovered, so no offset is produced (PARTIAL).
+// 0x10010aee2 (i386 0x000bbb98): the first of the automaton's occupant groups (property 0xaa1dd396) whose group template (the
+// script system's, through the city) knows the named animation gives its offset; 0 when none does.
 std::uint32_t cSC4Automaton::GetAnimOffsetByName(const cRZString& name) const {
-    (void)name;
-    SC4_UNWIRED("cSC4Automaton::GetAnimOffsetByName: the group templates' animation tables are not read (no named animation plays)");
+    std::vector<std::uint32_t> groups;
+    if (!cSCPropertyHelp::GetPropertyValue(const_cast<cSC4Automaton*>(this)->AsPropertyHolder(), 0xaa1dd396, groups)) return 0;
+    for (std::uint32_t groupId : groups) {
+        std::uint32_t offset = 0;
+        if (IAutomatonGroupTemplate* group = Host()->FindAutomataGroup(groupId); group && group->AnimOffset(name, offset)) return offset;
+    }
     return 0;
 }
 

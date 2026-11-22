@@ -251,6 +251,8 @@ public:
     virtual const std::list<std::uint32_t>* TrailerGroupIds() const { return nullptr; }
     // +0x80 (i386): the group's player-drive key effects.
     virtual void KeyEffects(std::vector<AutomatonKeyEffect>& out) const { out.clear(); }
+    // cSC4OccupantGroupTemplate::GetAnimOffset (@ 0x1001de014): the offset of a named animation of this group; false when it has none.
+    virtual bool AnimOffset(const cRZString& name, std::uint32_t& offset) const { (void)name; (void)offset; return false; }
 };
 
 class cSC4AutomataController;
