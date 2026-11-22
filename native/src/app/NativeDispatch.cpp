@@ -247,13 +247,12 @@ public:
         if (mask & bit) return;
         WriteMask(station, mask | bit);
     }
-    // Slot 11: fire ground 0x4202; police 0x4207 during a disaster, else 0x4228; key (0,0,0), flags 0x11882.
-    // PARTIAL: the disaster layer's query exists natively (NativeDisasterOngoing) but is not asked here yet.
+    // Slot 11: fire ground 0x4202; police (Mac i386 0x00076684) 0x4207 while the city's disaster layer has a disaster ongoing
+    // (vslot 0x28), else 0x4228; key (0,0,0), flags 0x11882.
     bool GetDispatchAutomataProperties(cISC4Occupant*, std::uint32_t& group, cGZPersistResourceKey& key, std::uint32_t& flags,
                                        const float*) override {
-        group = type_ == kDispatchTypeFire ? 0x4202u : 0x4228u;
-        if (type_ != kDispatchTypeFire && NativeDisasterOngoing())
-            SC4_UNWIRED("cSC4PoliceSimulator::GetDispatchAutomataProperties: during a disaster the original dispatches police group 0x4207, the port 0x4228");
+        if (type_ == kDispatchTypeFire) group = 0x4202u;
+        else group = NativeDisasterOngoing() ? 0x4207u : 0x4228u;
         key = cGZPersistResourceKey{};
         flags = 0x11882;
         return true;
@@ -777,6 +776,14 @@ void NativeDispatchReport() {
     }
     std::printf("dispatches: %d fire, %d police, %d fire plane, %d police helicopter\n", NativeDispatchCount(1), NativeDispatchCount(0),
                 NativeDispatchCount(5), NativeDispatchCount(6));
+    {   // what the police source answers the dispatch manager now (its group follows the disaster layer)
+        std::uint32_t group = 0, flags = 0;
+        cGZPersistResourceKey key;
+        g_policeSource.GetDispatchAutomataProperties(nullptr, group, key, flags, nullptr);
+        cSC4TrafficAutomataManager* vehicles = Vehicles();
+        std::printf("dispatches: police automata group 0x%x (disaster ongoing %d), the vehicle manager can create it %d\n", static_cast<unsigned>(group),
+                    NativeDisasterOngoing() ? 1 : 0, vehicles && vehicles->CanCreateGroup(group) ? 1 : 0);
+    }
     // The aircraft sources: the one the dispatch manager answers for the type against the simulator's own, and their stations.
     for (std::uint32_t type : {5u, 6u}) {
         cSC4AircraftDispatchSource* source = AircraftSource(type);
