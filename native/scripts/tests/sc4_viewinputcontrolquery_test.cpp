@@ -2041,6 +2041,7 @@ int main() {
         // police: the jail (0x1501) is tested before the station (0x1500) and the fire station (0x1502)
         host.policeSim.jailEfficiency = 0.9f;
         host.policeSim.jailCapacity = 100;
+        host.policeSim.effectiveness = 0.25f;   // a station value unlike the jail's, so the jail branch must be the one taken
         tip({0x1502, 0x1500, 0x1501}, icon, meter, value, title, text);
         CHECK(icon == 0x14416207 && meter == 0x14416212 && std::fabs(value - 0.5f) < 1e-3f);
         host.policeSim.effectiveness = 0.3f;
