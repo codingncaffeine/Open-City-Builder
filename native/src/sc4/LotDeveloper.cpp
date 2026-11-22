@@ -1117,23 +1117,21 @@ cISC4Occupant* cSC4LotDeveloper::GetFirstBuilding(cSC4Lot* lot) {
     return lot && g_construction ? g_construction->FirstBuildingOnLot(lot) : nullptr;
 }
 
-// i386 0x000ec5f6: the lot takes `state`, then every building on it goes (its props, optionally its foundation, then the
-// occupant itself with `flags`). PARTIAL: the building foundation removal (slot 60) and the zot props are not done here
-// (RemoveBuildingZotProp now exists but is not called), as in StartConstruction.
+// i386 0x000ec5f6: the lot takes `state`, then every building on it goes (its props, with `removeFoundation` its foundation
+// (slot 60), then the occupant itself with `flags`); the zot the lot shows goes last (slot 11, RemoveBuildingZotProp(lot)).
 bool cSC4LotDeveloper::ClearLotBuildings(cSC4Lot* lot, std::uint32_t state, bool removeFoundation, std::uint32_t flags) {
     if (!lot || !g_construction) return false;
-    SC4_UNWIRED("cSC4LotDeveloper::ClearLotBuildings: the lot's zot props are not removed (RemoveBuildingZotProp)");
-    if (removeFoundation && GetFirstBuilding(lot))
-        SC4_UNWIRED("cSC4LotDeveloper::ClearLotBuildings: the buildings' foundations are not removed (slot 60)");
     cISC4Occupant* building = GetFirstBuilding(lot);
     lot->SetState(state, 0, 0);                                                     // lot vslot 0x88
     for (int guard = 0; building && guard < 64; ++guard) {
         building->AddRef();
         g_construction->RemoveBuildingProps(building);                                // prop manager slot 38
+        if (removeFoundation) RemoveBuildingFoundation(building);                     // vslot 0xf0
         g_construction->RemoveOccupant(building, flags);                              // occupant manager slot 21 (b, 1, flags)
         building->Release();
         building = GetFirstBuilding(lot);
     }
+    RemoveBuildingZotProp(*lot, 0);                                                 // vslot 0x2c: whatever zot is shown
     return true;
 }
 
@@ -1148,10 +1146,15 @@ bool cSC4LotDeveloper::StartDemolishLot(cSC4Lot* lot) {
     return ClearLotBuildings(lot, 5, true, 0);
 }
 
-// i386 0x000f385c: the lot goes back to an empty lot of its zone. PARTIAL: the retaining walls and the lot / surrounding
-// foundations are not removed here (RemoveLotFoundation now exists but is not called).
+// i386 0x000f385c: the lot goes back to an empty lot of its zone: its retaining wall occupant and its foundation go, the
+// neighboring foundations and retaining walls follow the change, then the lot is unlocked, emptied and given the empty base texture.
 void cSC4LotDeveloper::ClearLot(cSC4Lot* lot) {
-    SC4_UNWIRED("cSC4LotDeveloper::ClearLot: the lot's retaining walls and lot / surrounding foundations are not removed");
+    int x = 0, z = 0;
+    lot->GetLocation(x, z);                                                         // lot vslot 0x54
+    if (g_construction) g_construction->AddRetainingWallOccupant(lot, false);       // cSC4LotRetainingWallOccupant 0x005E3070(lot, 0)
+    RemoveLotFoundation(x, z);                                                      // vslot 0xd4
+    UpdateSurroundingLotFoundations(lot);
+    if (g_construction) g_construction->UpdateSurroundingRetainingWalls(lot);
     lot->SetVerticesAreLocked(false);                                               // lot vslot 0x114
     lot->SetState(1, 0, 0);                                                         // 0x88
     lot->SetBuildingType(0);                                                        // 0xbc
@@ -1258,8 +1261,7 @@ bool cSC4LotDeveloper::ConstructDefaultLot(cSC4Lot* lot, cSC4LotConfiguration* c
 // condition 1 and locked vertices; the footprint is levelled (or given a foundation) when it is steeper than the tunable allows,
 // the blocking flora is demolished and the building is placed through the building development simulator. With `construct` a
 // construction occupant takes the lot through its stages, else the lot is built at once (state 3). Returns false when the
-// building could not be placed.
-//   PARTIAL: RemoveBuildingZotProp (it exists now but is not called here).
+// building could not be placed. The lot's road zot (6) goes before anything is built.
 bool cSC4LotDeveloper::StartConstruction(cSC4Lot* lot, cSC4LotConfiguration* configuration, std::uint32_t buildingType,
                                          bool construct) {
     if (!lot || !g_construction) return false;
@@ -1271,8 +1273,7 @@ bool cSC4LotDeveloper::StartConstruction(cSC4Lot* lot, cSC4LotConfiguration* con
     PickUnitToJoin(lot);
     lot->SetFlags(lot->GetFlags() & ~7);                                            // 0x30 / 0x34
     lot->SetVerticesAreLocked(true);                                                // 0x114
-    // PARTIAL: RemoveBuildingZotProp(lot, 6) (i386 0x000f0684) exists now but is not called here.
-    SC4_UNWIRED("cSC4LotDeveloper::StartConstruction: the lot's zot props are not removed (RemoveBuildingZotProp(lot, 6))");
+    RemoveBuildingZotProp(*lot, 6);                                                 // i386 0x000f0684: the road zot goes
     bool result = true;
     if (buildingType != 0) {
         const std::int32_t purpose = g_construction->BuildingPurpose(buildingType);   // +0x18 vslot 0x9c
@@ -1524,7 +1525,7 @@ std::uint32_t cSC4LotDeveloper::PickLotBaseTextureForLot(cSC4Lot* lot, const std
 // @ i386 0x000f2b1c. Only developed lots (state 2 and up). A lot at a fixed altitude (flag bits 0..1) has its foundation and
 // retaining walls updated; any other lot, unless the reason is 5, takes its new slope: past the configuration's maximum slope it
 // needs a foundation, and a slope past 0.25 moves its buildings, props and flora to the new ground. The base texture follows the
-// ground either way and the lot keeps the new slope. (UpdateLotRetainingWalls, vslot 0xf8, is empty in the original.)
+// ground either way and the lot keeps the new slope.
 bool cSC4LotDeveloper::UpdateLotElements(cSC4Lot* lot, std::uint32_t reason) {
     if (!lot || lot->GetState() < 2) return true;                                  // lot vslot 0x84
     bool needsFoundation = false;
@@ -1538,6 +1539,7 @@ bool cSC4LotDeveloper::UpdateLotElements(cSC4Lot* lot, std::uint32_t reason) {
         }
     } else {
         UpdateLotFoundation(lot);                                                  // vslot 0xf4
+        UpdateLotRetainingWalls(lot);                                              // vslot 0xf8
     }
     UpdateLotBaseTextureOccupant(lot, needsFoundation);                            // vslot 0xb4
     lot->UpdateSlope();                                                            // lot vslot 0x50
@@ -1546,9 +1548,9 @@ bool cSC4LotDeveloper::UpdateLotElements(cSC4Lot* lot, std::uint32_t reason) {
 
 // @ i386 0x000f28ce. The lot's buildings (0x278128a0), props (0xa823821e) and flora (0x74758926) stand where their configuration
 // object puts them on the new ground (an occupant that is no configuration object keeps x / z and takes the terrain under it); one
-// that is off by more than 0.1 in height is moved there and the occupant manager is told.
-// PARTIAL: a moved building that needs a foundation and has none gets one (vslots 0xc0 GetFoundationByOccupant -> 0xc8
-// GetFoundationByPosition, 0xe4, 0xec): the position lookup is not ported yet, so a moved building gets no foundation of its own.
+// that is off by more than 0.1 in height is moved there and the occupant manager is told. A moved building's foundation goes and,
+// when the building's ground is steeper than the tunable allows, a foundation of the same type (of the configuration's type when
+// it had none) is built under it (the PC build, 0x006C91F0; the Mac build only adds one to a building that has none).
 void cSC4LotDeveloper::UpdateLotObjectAltitudes(cSC4Lot* lot) {
     if (!lot || !g_construction) return;
     cSC4LotConfiguration* configuration = g_construction->Configuration(lot->GetLotConfiguration());   // lot vslot 0x24
@@ -1572,8 +1574,19 @@ void cSC4LotDeveloper::UpdateLotObjectAltitudes(cSC4Lot* lot) {
         position[1] = target[1];
         occupant->SetPosition(position);                                           // occupant vslot 0x24
         g_construction->MoveOccupant(occupant, true);                              // +0x28 vslot 0x60
-        if (type == 0x278128a0u)
-            SC4_UNWIRED("cSC4LotDeveloper::UpdateLotObjectAltitudes: a moved building is not checked for a foundation of its own (GetFoundationByOccupant / ByPosition)");
+        if (type != 0x278128a0u) continue;
+        std::uint32_t foundationType = 0;
+        if (cISC4Occupant* foundation = GetFoundationByOccupant(occupant)) {       // vslot 0xc0
+            foundationType = g_construction->FoundationTypeOf(foundation);          // foundation vslot 0x10
+            RemoveBuildingFoundation(occupant);                                     // vslot 0xf0
+        }
+        if (!IsLotObjectFoundationRequired(occupant)) continue;
+        void* raw = nullptr;
+        if (!occupant->QueryInterface(kGZIID_cISC4BuildingOccupant, &raw) || !raw) continue;
+        auto* building = static_cast<cISC4BuildingOccupant*>(raw);
+        if (foundationType != 0) AddBuildingFoundation(building, foundationType);
+        else AddBuildingFoundation(building, configuration);
+        building->Release();
     }
 }
 
@@ -1644,7 +1657,7 @@ bool cSC4LotDeveloper::AddLotFoundation(cSC4Lot* lot, std::uint32_t type, bool f
     lot->SetAltitude(altitude);                                                     // lot vslot 0x44
     lot->SetFlags(static_cast<std::uint8_t>((lot->GetFlags() & ~4u) | 3u));        // lot vslots 0x30 / 0x34
     if (walls && altitude < highest) {
-        g_construction->AddRetainingWallOccupant(lot);
+        g_construction->AddRetainingWallOccupant(lot, true);
         UpdateSurroundingLotFoundations(lot);
         g_construction->UpdateSurroundingRetainingWalls(lot);
     }
@@ -1707,6 +1720,55 @@ bool cSC4LotDeveloper::RemoveLotFoundation(cSC4Lot* lot) {
     const bool removed = RemoveLotFoundation(x, z);                                 // vslot 0xd4
     lot->SetFlags(static_cast<std::uint8_t>(lot->GetFlags() & ~3u));
     return removed;
+}
+
+cISC4Occupant* cSC4LotDeveloper::GetFoundationByPosition(int usage, float x, float z) {
+    return g_construction ? g_construction->FoundationAtPosition(usage, x, z) : nullptr;
+}
+
+// @ i386 0x000ec9c8: the foundation of the usage at the position goes; for a lot foundation (usage 2) the lot on that cell is
+// no longer fixed (flags bits 0..1), whether or not a foundation was found.
+bool cSC4LotDeveloper::RemoveFoundation(int usage, float x, float z) {
+    if (!g_construction) return false;
+    cISC4Occupant* foundation = GetFoundationByPosition(usage, x, z);              // vslot 0xc8
+    if (foundation) {
+        foundation->AddRef();
+        g_construction->RemoveFoundation(foundation);                               // +0x28 vslot 0x54 (occupant, true, 0)
+        foundation->Release();
+    }
+    if (usage == 2) {
+        if (cSC4Lot* lot = g_construction->LotAt(static_cast<int>(x * 0.0625f), static_cast<int>(z * 0.0625f)))
+            lot->SetFlags(static_cast<std::uint8_t>(lot->GetFlags() & ~3u));
+    }
+    return foundation != nullptr;
+}
+
+// @ i386 0x000ece44: the building foundation (usage 1) at the building's position goes.
+bool cSC4LotDeveloper::RemoveBuildingFoundation(cISC4Occupant* building) {
+    if (!building) return false;
+    float position[3] = {0.0f, 0.0f, 0.0f};
+    building->GetPosition(position);                                                // occupant vslot 0x20
+    return RemoveFoundation(1, position[0], position[2]);                           // vslot 0xd0
+}
+
+// @ i386 0x000ec876: the foundation under an occupant, by its position: usage 1 for a building, 3 for a prop, 4 for anything else.
+cISC4Occupant* cSC4LotDeveloper::GetFoundationByOccupant(cISC4Occupant* occupant) {
+    if (!occupant) return nullptr;
+    float position[3] = {0.0f, 0.0f, 0.0f};
+    occupant->GetPosition(position);                                                // occupant vslot 0x20
+    const std::uint32_t type = occupant->GetType();                                 // occupant vslot 0x1c
+    const int usage = type == 0x278128a0u ? 1 : type == 0xa823821eu ? 3 : 4;
+    return GetFoundationByPosition(usage, position[0], position[2]);                // vslot 0xc8
+}
+
+// @ i386 0x000ecca2: an object needs a foundation when the ground it covers (water included) is steeper than the flatness tunable.
+bool cSC4LotDeveloper::IsLotObjectFoundationRequired(cISC4Occupant* occupant) {
+    return tunables_.value12c < GetOccupantSlope(occupant, true);                   // vslot 0x7c, +0xd4
+}
+
+// @ i386 0x000ece8c: the lot's retaining walls follow its new altitude.
+void cSC4LotDeveloper::UpdateLotRetainingWalls(cSC4Lot* lot) {
+    if (lot && g_construction) g_construction->UpdateRetainingWalls(lot);
 }
 
 // @ i386 0x000ecbee: a fixed lot's foundation is rebuilt at its altitude (the same type), or made when it has none.

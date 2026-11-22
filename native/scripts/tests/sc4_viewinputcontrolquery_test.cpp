@@ -10,6 +10,7 @@
 #include "sc4/BuildingOccupant.h"
 #include "gz/Win.h"
 #include "gz/WinBMP.h"
+#include "gz/WinBtn.h"
 #include "gz/WinSlider.h"
 #include "gz/WinText.h"
 #include "gz/WinTextEdit.h"
@@ -1029,6 +1030,29 @@ int main() {
         host.lots.byOccupant = nullptr;
         CHECK(!tool->SetOrGetWhyOccupantAbandoned(dialog, 0x1310, false, &occupant));
         delete lot;
+
+        // the historical toggle (0x107a, i386 0x0020a4c2): the button shows the lot's flag; reading back writes the button's state
+        // to the lot; no lot answers false
+        auto* toggle = new gz::cGZWinBtn(&host.mgr);
+        toggle->SetID(0x1320);
+        CHECK(dialog->ChildAdd(toggle));
+        auto* historic = new Lot();
+        host.lots.byOccupant = historic;
+        historic->historical = true;
+        CHECK(tool->SetOrGetOccupantIsHistorical(dialog, 0x1320, true, &occupant));
+        CHECK(toggle->IsOn());
+        historic->historical = false;
+        CHECK(tool->SetOrGetOccupantIsHistorical(dialog, 0x1320, true, &occupant));
+        CHECK(!toggle->IsOn());
+        toggle->ToggleOn();
+        CHECK(tool->SetOrGetOccupantIsHistorical(dialog, 0x1320, false, &occupant));
+        CHECK(historic->historical);
+        toggle->ToggleOff();
+        CHECK(tool->SetOrGetOccupantIsHistorical(dialog, 0x1320, false, &occupant));
+        CHECK(!historic->historical);
+        host.lots.byOccupant = nullptr;
+        CHECK(!tool->SetOrGetOccupantIsHistorical(dialog, 0x1320, true, &occupant));
+        delete historic;
 
         // rating thresholds and the mayor approval row
         cRZString rating;

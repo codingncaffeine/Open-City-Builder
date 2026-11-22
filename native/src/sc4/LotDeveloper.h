@@ -221,6 +221,9 @@ public:
     // GetFoundationByStandardCityCell(usage, x, z) (vslot 0xc4): the foundation occupant (type 0x68fd0c69) of a usage on a cell
     // (1 building, 2 lot, 3 prop, 4 flora), borrowed; null without one
     virtual cISC4Occupant* FoundationAt(int usage, int x, int z) { (void)usage; (void)x; (void)z; return nullptr; }
+    // GetFoundationByPosition (vslot 0xc8): +0x28 slot 36 GetOccupantsByBBox(the vertical line at (x - 0.05, z + 0.05), 0x68fd0c69),
+    // the first foundation of the usage (borrowed); null without one
+    virtual cISC4Occupant* FoundationAtPosition(int usage, float x, float z) { (void)usage; (void)x; (void)z; return nullptr; }
     virtual std::uint32_t FoundationTypeOf(cISC4Occupant* foundation) { (void)foundation; return 0; }   // foundation vslot 0x10
     virtual void RemoveFoundation(cISC4Occupant* foundation) { (void)foundation; }   // +0x28 vslot 0x54 (occupant, true, 0)
     // +0x24 vslot 0x20 GetLotsSurroundingLot(lot, list, 0xf): the lots touching `lot`, borrowed
@@ -231,8 +234,10 @@ public:
         x = static_cast<float>(cellX) * 16.0f + 8.0f;
         z = static_cast<float>(cellZ) * 16.0f + 8.0f;
     }
-    // cSC4LotRetainingWallOccupant::AddRetainingWallOccupant(lot, true) / UpdateSurroundingRetainingWalls(lot)
-    virtual void AddRetainingWallOccupant(cSC4Lot* lot) { (void)lot; }
+    // cSC4LotRetainingWallOccupant::AddRetainingWallOccupant(lot, create) (create false removes the lot's wall occupant and clears
+    // lot flag 4) / UpdateSurroundingRetainingWalls(lot)
+    virtual void AddRetainingWallOccupant(cSC4Lot* lot, bool create) { (void)lot; (void)create; }
+    virtual void UpdateRetainingWalls(cSC4Lot* lot) { (void)lot; }                    // cSC4LotRetainingWallOccupant::UpdateRetainingWalls
     virtual void UpdateSurroundingRetainingWalls(cSC4Lot* lot) { (void)lot; }
 };
 
@@ -439,6 +444,13 @@ public:
     bool RemoveLotFoundation(int x, int z);                            // vslot 0xd4 @ i386 0x000ecaca
     bool RemoveLotFoundation(cSC4Lot* lot);                            // @ i386 0x000ecb8c
     void UpdateLotFoundation(cSC4Lot* lot);                            // vslot 0xf4 @ i386 0x000ecbee
+    // GetFoundationByPosition: the foundation of a usage on the vertical line at (x - 0.05, z + 0.05) (borrowed, null without one)
+    cISC4Occupant* GetFoundationByPosition(int usage, float x, float z);   // vslot 0xc8 @ i386 0x000f10a6
+    bool RemoveFoundation(int usage, float x, float z);                    // vslot 0xd0 @ i386 0x000ec9c8
+    bool RemoveBuildingFoundation(cISC4Occupant* building);                // vslot 0xf0 @ i386 0x000ece44
+    cISC4Occupant* GetFoundationByOccupant(cISC4Occupant* occupant);       // vslot 0xc0 @ i386 0x000ec876 (borrowed)
+    bool IsLotObjectFoundationRequired(cISC4Occupant* occupant);           // @ i386 0x000ecca2 (PC slot 56)
+    void UpdateLotRetainingWalls(cSC4Lot* lot);                            // vslot 0xf8 @ i386 0x000ece8c
     void UpdateSurroundingLotFoundations(cSC4Lot* lot);                // @ i386 0x000f2e7c
     float GetLotFoundationBottomAltitude(cSC4Lot* lot);                // @ i386 0x000f34de
     float PickLotFoundationAltitude(cSC4Lot* lot, const float corners[4]);   // @ i386 (the bottom / highest arguments are unused)

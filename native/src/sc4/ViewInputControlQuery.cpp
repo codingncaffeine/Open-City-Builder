@@ -10,6 +10,7 @@
 #include "gz/DrawContext.h"
 #include "gz/StreamOps.h"
 #include "gz/Win.h"
+#include "gz/WinUtils.h"
 #include "gz/WinBMP.h"
 #include "gz/WinGen.h"
 #include "gz/WinSlider.h"
@@ -2024,17 +2025,17 @@ bool cSC4ViewInputControlQuery::SetOrGetOccupantIsWatered(cIGZWin* win, std::uin
     return true;
 }
 
-// @ 0x1002daed6
-// PARTIAL: the original reads/writes the toggle state of a button control through nsGZWinUtils::GetButtonToggleState
-// (0x1006a21eb) / SetButtonToggleState (0x1006a215d); both exist now (gz/WinUtils) but only the lot lookup is ported here.
-bool cSC4ViewInputControlQuery::SetOrGetOccupantIsHistorical(cIGZWin*, std::uint32_t, bool, cISC4Occupant* occupant) {
+// @ 0x1002daed6 (i386 0x0020a4c2): the toggle button shows the lot's historical flag (lot vslot 0xac IsHistorical); reading the
+// dialog back writes the button's state to the lot (vslot 0xb0 SetHistorical). False when the occupant has no lot.
+bool cSC4ViewInputControlQuery::SetOrGetOccupantIsHistorical(cIGZWin* win, std::uint32_t id, bool set, cISC4Occupant* occupant) {
     IQueryHost* host = QueryHost();
     if (!host || !host->LotManager()) return false;
-    IQueryLot* lot = host->LotManager()->GetLotForOccupant(occupant);
+    IQueryLot* lot = host->LotManager()->GetLotForOccupant(occupant);             // spLotManager vslot 0x38
     if (!lot) return false;
     lot->AddRef();
+    if (set) nsGZWinUtils::SetButtonToggleState(win, id, lot->IsHistorical());
+    else lot->SetHistorical(nsGZWinUtils::GetButtonToggleState(win, id));
     lot->Release();
-    SC4_UNWIRED("cSC4ViewInputControlQuery::SetOrGetOccupantIsHistorical: the historical toggle is neither shown nor applied to the lot");
     return true;
 }
 

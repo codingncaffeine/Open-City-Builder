@@ -58,7 +58,8 @@
 #include "rz/cRZAutoRefCount.h"
 
 namespace native {
-void NativeAddRetainingWallOccupant(sc4::cSC4Lot* lot);           // app/NativeLotWalls.cpp
+void NativeAddRetainingWallOccupant(sc4::cSC4Lot* lot, bool create);           // app/NativeLotWalls.cpp
+void NativeUpdateRetainingWalls(sc4::cSC4Lot* lot);
 void NativeUpdateSurroundingRetainingWalls(sc4::cSC4Lot* lot);
 bool NativeAddNewFoundationOccupant(std::uint32_t type, int usage, float position[3], float width, float depth, int rotation, float bottom);
 }  // namespace native
@@ -336,6 +337,23 @@ public:
         occupants->ReleaseOccupantList(list);   // the city keeps the occupant: the answer is borrowed
         return found;
     }
+    // GetFoundationByPosition: the box query on the vertical line at (x - 0.05, z + 0.05) (the original's min and max share x and
+    // z), the first foundation of the usage
+    cISC4Occupant* FoundationAtPosition(int usage, float x, float z) override {
+        cISC4OccupantManager* occupants = Occupants();
+        if (!occupants) return nullptr;
+        const float minimum[3] = {x - 0.05f, -FLT_MAX, z + 0.05f}, maximum[3] = {x - 0.05f, FLT_MAX, z + 0.05f};
+        OccupantList list;
+        cISC4Occupant* found = nullptr;
+        if (occupants->GetOccupantsByBBox(list, minimum, maximum, sc4::kOccupantTypeFoundation, 0xffffffffu)) {
+            for (cISC4Occupant* occupant : list) {
+                auto* foundation = dynamic_cast<sc4::cSC4FoundationOccupant*>(occupant);
+                if (!found && foundation && foundation->GetUsage() == usage) found = occupant;
+            }
+        }
+        occupants->ReleaseOccupantList(list);   // the city keeps the occupant: the answer is borrowed
+        return found;
+    }
     std::uint32_t FoundationTypeOf(cISC4Occupant* foundation) override {
         auto* f = dynamic_cast<sc4::cSC4FoundationOccupant*>(foundation);
         return f ? f->GetFoundationType() : 0;
@@ -354,7 +372,8 @@ public:
         if (cSC4City* city = HostCity()) city->CellCenterToPosition(cellX, cellZ, x, z);
         else { x = float(cellX) * 16.0f + 8.0f; z = float(cellZ) * 16.0f + 8.0f; }
     }
-    void AddRetainingWallOccupant(cSC4Lot* lot) override { NativeAddRetainingWallOccupant(lot); }   // app/NativeLotWalls.cpp
+    void AddRetainingWallOccupant(cSC4Lot* lot, bool create) override { NativeAddRetainingWallOccupant(lot, create); }   // app/NativeLotWalls.cpp
+    void UpdateRetainingWalls(cSC4Lot* lot) override { NativeUpdateRetainingWalls(lot); }
     void UpdateSurroundingRetainingWalls(cSC4Lot* lot) override { NativeUpdateSurroundingRetainingWalls(lot); }
     void MoveOccupant(cISC4Occupant* occupant, bool post) override {
         if (cISC4OccupantManager* occupants = Occupants()) occupants->MoveOccupant(occupant, post);
