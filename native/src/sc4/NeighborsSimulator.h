@@ -257,10 +257,11 @@ public:
     virtual void CitySetCostPerUnit(cISC4RegionalCity* city, int commodity, double value) = 0;    // 0x1f8
 
     // --- the confirmation dialog --------------------------------------------------------------------
-    // nSC4UI::GenericConfirmationDialog @ 0x10030b655 with the three cSLString ids (group 0x6a231eaa); the
-    // format string (0x0a8e152d) is Sprintf'd with the neighbour city name in `arg`.
-    virtual bool ConfirmationDialog(std::uint32_t titleId, std::uint32_t formatId, std::uint32_t okId,
-                                    const cIGZString& arg) = 0;
+    // nSC4UI::GenericConfirmationDialog @ 0x10030b655 (no OK / cancel text) with the cSLStrings (group 0x6a231eaa) of the
+    // title and the format; the format (0x0a8e152d) is Sprintf'd with `name`, or, when null (no established city on the
+    // other side), with the default name string `defaultNameId` (i386 0x0004ce32: the city name overwrites that string).
+    virtual bool ConfirmationDialog(std::uint32_t titleId, std::uint32_t formatId, std::uint32_t defaultNameId,
+                                    const cIGZString* name) = 0;
 };
 
 INeighborsHost* NeighborsHost();

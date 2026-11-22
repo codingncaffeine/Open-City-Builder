@@ -979,17 +979,18 @@ void cSC4NeighborsSimulator::GetAllConnectedCities(std::list<cRZAutoRefCount<cIS
 // connection creation / deletion
 //---------------------------------------------------------------------------------------------------------------------
 
-// @ 0x100070e58. Asks the player before building a link. The original only builds the localized dialog text
-// (cSLString 0x6a231eaa/0xaa8e151b + 0x0a8e152d + 0x0a8e15f9) and returns the confirmation.
+// @ 0x100070e58. Asks the player before building a link: the localized dialog (cSLString 0x6a231eaa/0xaa8e151b title,
+// 0x0a8e152d format, 0x0a8e15f9 default neighbor name) and the player's answer.
 bool cSC4NeighborsSimulator::RequestCreateConnection(std::uint32_t type, int x, int z, bool /*fromOther*/) {
     if (HasConnection(type, x, z)) return false;
     INeighborsHost* h = Host();
     if (!h) return false;
     cRZString cityName;
     cISC4RegionalCity* city = FindCityOnOtherSideOfConnection(x, z);
-    if (city && h->CityEstablished(city)) h->CityName(city, cityName);
-    // cSLString 0x6a231eaa / {0xaa8e151b title, 0x0a8e152d format, 0x0a8e15f9 OK}; the format is Sprintf'd with the name.
-    return h->ConfirmationDialog(0xaa8e151b, 0x0a8e152d, 0x0a8e15f9, cityName);
+    const bool named = city && h->CityEstablished(city);
+    if (named) h->CityName(city, cityName);
+    // cSLString 0x6a231eaa / {0xaa8e151b title, 0x0a8e152d format, 0x0a8e15f9 default name}; the format is Sprintf'd with the name.
+    return h->ConfirmationDialog(0xaa8e151b, 0x0a8e152d, 0x0a8e15f9, named ? &cityName : nullptr);
 }
 
 // @ 0x100071026. Creates the connection record, tells the city on the other side and, unless the type has no

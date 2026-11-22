@@ -29,9 +29,15 @@
 #include "sc4/Simulator.h"
 #include "sc4/Region.h"
 #include "sc4/RegionalCity.h"
+#include "sc4/PlumbingSimulator.h"
+#include "sc4/PollutionSimulator.h"
+#include "sc4/PowerSimulator.h"
+#include "sc4/SC4UI.h"
+#include "sc4/SLString.h"
 #include "gz/cGZPersistResourceManager.h"
 
 namespace native {
+void NativeLandfillUsage(int& used, int& capacity);   // app/NativeLandfill.cpp
 
 namespace {
 
@@ -300,6 +306,8 @@ int CurrentCellsX() { cISC4City* city = g_app ? g_app->GetCity() : nullptr; auto
 int CurrentCellsZ() { cISC4City* city = g_app ? g_app->GetCity() : nullptr; auto* live = LiveCity(city); return live ? live->CellCountZ() : 0; }
 
 class NeighborsHost final : public sc4::INeighborsHost {
+    // the open city's component `c` as its recovered class (null when missing)
+    template <class T> static T* Part(sc4::CityComponent c) { return CityPart<T>(HostCity(), c); }
     static sc4::cSC4Simulator* Simulator() {
         sc4::cSC4City* city = HostCity();
         cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::Simulator) : nullptr;
@@ -350,25 +358,45 @@ public:
     float TerrainAltitudeAtCell(int, int) override { return 0.0f; }
     float TerrainAltitudeAtPosition(float, float) override { return 0.0f; }
     void RecordHistory(std::uint32_t, int) override {}
-    double BudgetTotal() override {
-        SC4_UNWIRED("cSC4NeighborsSimulator deal pass: the budget seams (total, income, line items) answer 0");
-        return 0.0;
+    // The budget simulator (i386 0x20 GetTotalFunds, 0x48 GetTotalMonthlyIncome; a department's 0x44 GetTotalExpenses; its line
+    // item's 0x30 GetFullExpenses): false when the department (line item) does not exist.
+    double BudgetTotal() override { auto* b = Part<sc4::cSC4BudgetSimulator>(sc4::CityComponent::BudgetSimulator); return b ? double(b->GetTotalFunds()) : 0.0; }
+    double BudgetIncome() override { auto* b = Part<sc4::cSC4BudgetSimulator>(sc4::CityComponent::BudgetSimulator); return b ? double(b->GetTotalMonthlyIncome()) : 0.0; }
+    bool BudgetLineItemAmount(std::uint32_t department, double& out) override {
+        auto* b = Part<sc4::cSC4BudgetSimulator>(sc4::CityComponent::BudgetSimulator);
+        sc4::cSC4DepartmentBudget* d = b ? b->GetDepartmentBudget(department) : nullptr;
+        if (!d) return false;
+        out = double(d->GetTotalExpenses());
+        return true;
     }
-    double BudgetIncome() override { return 0.0; }
-    bool BudgetLineItemAmount(std::uint32_t, double&) override { return false; }
-    bool BudgetSubLineItemAmount(std::uint32_t, std::uint32_t, double&) override { return false; }
-    int PowerCapacity() override {
-        SC4_UNWIRED("cSC4NeighborsSimulator deal pass: power / water capacity and demand answer 0 (no utility deals)");
-        return 0;
+    bool BudgetSubLineItemAmount(std::uint32_t department, std::uint32_t line, double& out) override {
+        auto* b = Part<sc4::cSC4BudgetSimulator>(sc4::CityComponent::BudgetSimulator);
+        sc4::cSC4DepartmentBudget* d = b ? b->GetDepartmentBudget(department) : nullptr;
+        sc4::cSC4LineItem* item = d ? d->GetLineItem(line) : nullptr;
+        if (!item) return false;
+        out = double(item->GetFullExpenses());
+        return true;
     }
-    int PowerDemand() override { return 0; }
-    int WaterCapacity() override { return 0; }
-    int WaterDemand() override { return 0; }
-    void LandfillRange(int& start, int& end) override {
-        SC4_UNWIRED("cSC4NeighborsSimulator deal pass: the landfill range answers none (no garbage deals)");
-        start = end = 0;
+    // power i386 0x38 GetMonthlyProduction / 0x34 GetMonthlyRequirement; plumbing 0x40 GetWaterProductionCapacity / GetWaterDemand
+    int PowerCapacity() override { auto* p = Part<sc4::cSC4PowerSimulator>(sc4::CityComponent::PowerSimulator); return p ? int(p->GetMonthlyProduction()) : 0; }
+    int PowerDemand() override { auto* p = Part<sc4::cSC4PowerSimulator>(sc4::CityComponent::PowerSimulator); return p ? int(p->GetMonthlyDemand()) : 0; }
+    int WaterCapacity() override { auto* p = Part<sc4::cSC4PlumbingSimulator>(sc4::CityComponent::PlumbingSimulator); return p ? int(p->GetWaterProductionCapacity()) : 0; }
+    int WaterDemand() override { auto* p = Part<sc4::cSC4PlumbingSimulator>(sc4::CityComponent::PlumbingSimulator); return p ? int(p->GetWaterDemand()) : 0; }
+    // the landfill developer's GetLandfillUsage (used, capacity): the deal pass reads capacity - used as the free space
+    void LandfillRange(int& start, int& end) override { NativeLandfillUsage(start, end); }
+    // pollution i386 0x84 incinerator capacity, 0x88 waste-to-energy capacity, 0xa0 recycled, 0x90 abducted, 0x94 produced
+    int PollutionValue(int which) override {
+        auto* p = Part<sc4::cSC4PollutionSimulator>(sc4::CityComponent::PollutionSimulator);
+        if (!p) return 0;
+        switch (which) {
+            case 0: return int(p->GetMonthlyIncineratorCapacity());
+            case 1: return int(p->GetMonthlyWasteToEnergyCapacity());
+            case 2: return int(p->GetGarbageRecycledPrevMonth());
+            case 3: return int(p->GetGarbageAbductedPrevMonth());
+            case 4: return int(p->GetGarbageProducedPrevMonth());
+            default: return 0;
+        }
     }
-    int PollutionValue(int) override { return 0; }
     void OccupantsInRect(int, int, int, int, std::vector<sc4::cISC4Occupant*>&) override {}
     void DeleteProp(sc4::cISC4Occupant*) override {}
     bool CreateProp(std::uint32_t, void** out) override {
@@ -399,9 +427,9 @@ public:
         Concrete(city)->GetCityName(name);
         out.AssignFromCString(name.ToChar());
     }
-    double CityGetBudget(const cISC4RegionalCity*) override { return 0.0; }
-    void CitySetBudget(cISC4RegionalCity*, double) override {}
-    void CitySetIncome(cISC4RegionalCity*, double) override {}
+    double CityGetBudget(const cISC4RegionalCity* city) override { return Concrete(city)->GetBudget(); }
+    void CitySetBudget(cISC4RegionalCity* city, double value) override { Concrete(city)->SetBudget(value); }
+    void CitySetIncome(cISC4RegionalCity* city, double value) override { Concrete(city)->SetIncome(value); }
     sc4::cISC4NeighborConnection* CityFindConnection(const cISC4RegionalCity* city, int type, int x, int z) override {
         sc4::cISC4NeighborConnection* found = Concrete(city)->FindConnection(type, x, z);
         static const bool trace = std::getenv("SC4_TRAFFICDEBUG") != nullptr;
@@ -419,7 +447,9 @@ public:
         return found;
     }
     void CityAllConnections(const cISC4RegionalCity* city, sc4::ConnectionList& out) override { Concrete(city)->GetAllConnections(out); }
-    void CityChangeSymmetricConnection(cISC4RegionalCity*, sc4::cISC4NeighborConnection*, bool) override {}
+    void CityChangeSymmetricConnection(cISC4RegionalCity* city, sc4::cISC4NeighborConnection* connection, bool add) override {
+        if (city) Concrete(city)->ChangeSymmetricConnection(connection, add);
+    }
     // The region city's own deal list (cSC4RegionalCity vslots 0x220 / 0x228 / 0x230).
     void CityUpdateLocalDeals(cISC4RegionalCity* city) override { if (city) Concrete(city)->UpdateLocalDeals(); }
     void CitySetLocalDeals(cISC4RegionalCity* city, const sc4::DealList& deals) override {
@@ -433,22 +463,24 @@ public:
         Concrete(city)->GetLocalDeals(deals);
         out.assign(deals.begin(), deals.end());
     }
-    void CityUpdateImportExport(cISC4RegionalCity*) override {
-        SC4_UNWIRED("cSC4NeighborsSimulator: the regional city's import / export update is not wired");
-    }
-    double CityGetExported(const cISC4RegionalCity*, int) override { return 0.0; }
-    void CitySetExported(cISC4RegionalCity*, int, double) override {}
-    double CityGetImported(const cISC4RegionalCity*, int) override { return 0.0; }
-    void CitySetImported(cISC4RegionalCity*, int, double) override {}
-    double CityGetProduced(const cISC4RegionalCity*, int) override { return 0.0; }
-    void CitySetProduced(cISC4RegionalCity*, int, double) override {}
-    double CityGetDemanded(const cISC4RegionalCity*, int) override { return 0.0; }
-    void CitySetDemanded(cISC4RegionalCity*, int, double) override {}
-    double CityGetCostPerUnit(const cISC4RegionalCity*, int) override { return 0.0; }
-    void CitySetCostPerUnit(cISC4RegionalCity*, int, double) override {}
-    bool ConfirmationDialog(std::uint32_t, std::uint32_t, std::uint32_t, const cIGZString&) override {
-        SC4_UNWIRED("cSC4NeighborsSimulator: the neighbor deal confirmation dialog is not shown (answers no)");
-        return false;
+    // The regional city's commodity record (cSC4RegionalCity vslots 0x1b0..0x1f8) and its import / export pass (0x238).
+    void CityUpdateImportExport(cISC4RegionalCity* city) override { if (city) Concrete(city)->UpdateImportExport(); }
+    double CityGetExported(const cISC4RegionalCity* city, int c) override { return Concrete(city)->GetExported(c); }
+    void CitySetExported(cISC4RegionalCity* city, int c, double v) override { Concrete(city)->SetExported(c, v); }
+    double CityGetImported(const cISC4RegionalCity* city, int c) override { return Concrete(city)->GetImported(c); }
+    void CitySetImported(cISC4RegionalCity* city, int c, double v) override { Concrete(city)->SetImported(c, v); }
+    double CityGetProduced(const cISC4RegionalCity* city, int c) override { return Concrete(city)->GetProduced(c); }
+    void CitySetProduced(cISC4RegionalCity* city, int c, double v) override { Concrete(city)->SetProduced(c, v); }
+    double CityGetDemanded(const cISC4RegionalCity* city, int c) override { return Concrete(city)->GetDemanded(c); }
+    void CitySetDemanded(cISC4RegionalCity* city, int c, double v) override { Concrete(city)->SetDemanded(c, v); }
+    double CityGetCostPerUnit(const cISC4RegionalCity* city, int c) override { return Concrete(city)->GetCostPerUnit(c); }
+    void CitySetCostPerUnit(cISC4RegionalCity* city, int c, double v) override { Concrete(city)->SetCostPerUnit(c, v); }
+    // i386 0x0004ce32: title, the format Sprintf'd with the neighbor's name (else the default name string), no OK / cancel text
+    bool ConfirmationDialog(std::uint32_t titleId, std::uint32_t formatId, std::uint32_t defaultNameId, const cIGZString* name) override {
+        sc4::cSLString title(0x6a231eaa, titleId, true), format(0x6a231eaa, formatId, true), fallback(0x6a231eaa, defaultNameId, true);
+        cRZString text;
+        text.Sprintf(format.ToChar(), name ? name->ToChar() : fallback.ToChar());
+        return nSC4UI::GenericConfirmationDialog(title, text, nullptr, nullptr);
     }
 } g_neighborsHost;
 
@@ -542,6 +574,33 @@ void InstallRegionServices(cSC4App& app, const RegionCallbacks& callbacks) {
         city->AddRef();
         return city;
     };
+}
+
+// kit command `neighbors`: the open city's deals (type, amount, cost, flags) and its regional commodity record (power, water,
+// garbage), after the neighbors simulator refreshed it (UpdateCommodityStats); with `propose`, the deals ProposeDeals would offer.
+void NativeNeighborsReport(bool propose) {
+    sc4::cSC4City* city = HostCity();
+    auto* neighbors = city ? CityPart<sc4::cSC4NeighborsSimulator>(city, sc4::CityComponent::NeighborsSimulator) : nullptr;
+    if (!neighbors) { std::printf("neighbors: no simulator\n"); return; }
+    neighbors->UpdateCommodityStats(city);
+    sc4::DealList deals;
+    neighbors->FindDealsAll(deals);
+    std::printf("neighbors: %zu deals\n", deals.size());
+    for (auto& deal : deals)
+        if (deal) std::printf("neighbors deal %08x amount %d cost %lld flags %08x\n", deal->GetType(), deal->GetAmount(),
+                              static_cast<long long>(deal->GetCost()), deal->GetFlags());
+    if (cISC4RegionalCity* current = g_app ? g_app->GetRegionalCity() : nullptr) {
+        auto* r = Concrete(current);
+        for (int c = 1; c <= 3; ++c)
+            std::printf("neighbors commodity %d produced %.0f demanded %.0f imported %.0f exported %.0f price %g budget %.0f\n", c, r->GetProduced(c),
+                        r->GetDemanded(c), r->GetImported(c), r->GetExported(c), r->GetCostPerUnit(c), r->GetBudget());
+    }
+    if (propose) {
+        sc4::DealList offers;
+        neighbors->ProposeDeals(offers, false);
+        std::printf("neighbors: %zu proposals\n", offers.size());
+        for (auto& deal : offers) if (deal) std::printf("neighbors proposal %08x cost %lld\n", deal->GetType(), static_cast<long long>(deal->GetCost()));
+    }
 }
 
 cISC4Nation* CreateNation() {

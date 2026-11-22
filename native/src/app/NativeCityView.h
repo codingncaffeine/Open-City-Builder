@@ -57,6 +57,7 @@ void NativePedestrianReport(int limit);  // the pedestrian manager's count and t
 void NativeIgniteCell(int x, int z, bool force);   // kit command `ignite` (app/NativeDisasters.cpp)
 void NativeFireReport();                          // kit command `fires`
 void NativeBudgetReport();                        // kit command `budget` (app/NativeSimHosts.cpp)
+void NativeNeighborsReport(bool propose);         // kit command `neighbors [propose]` (app/NativeRegion.cpp)
 void NativePipeBurstStart(int x, int z);           // kit command `pipeburst X Z` (-1 -1: the manager's own search)
 void NativePipeBurstReport();                      // kit command `pipebursts`
 void NativeLandfillReport();                        // kit command `landfill` (app/NativeLandfill.cpp)

@@ -383,11 +383,11 @@ struct TestHost final : sc4::INeighborsHost {
         static_cast<FakeRegionalCity*>(cityPtr)->costPerUnit[commodity] = value;
     }
     bool ConfirmationDialog(std::uint32_t titleId, std::uint32_t textId, std::uint32_t okId,
-                            const cIGZString& arg) override {
+                            const cIGZString* arg) override {
         dialogTitle = titleId;
         dialogText = textId;
         dialogOk = okId;
-        dialogArg = arg.ToChar();
+        dialogArg = arg ? arg->ToChar() : "<default>";
         return confirmResult;
     }
 
@@ -801,6 +801,9 @@ int main() {
         CHECK(f.host.dialogText == 0x0a8e152d);
         CHECK(f.host.dialogOk == 0x0a8e15f9);
         CHECK(f.host.dialogArg == "Springfield");
+        west->established = false;   // an unestablished neighbor: the default name string fills the format
+        CHECK(!sim->RequestCreateConnection(0, -1, 5, false) && f.host.dialogArg == "<default>");
+        west->established = true;
         f.host.confirmResult = true;
         CHECK(sim->RequestCreateConnection(0, -1, 5, false));
         sim->CreateConnection(0, -1, 5, false);

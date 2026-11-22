@@ -1660,6 +1660,9 @@ int RunScenario(const std::string& path) {
             const std::uint32_t id = std::uint32_t(std::strtoul(hex.c_str(), nullptr, 16));
             sc4::cSC4View3DWin* view = native::CityView3DWin();
             std::printf("viewcmd %08x -> %s\n", id, view ? (view->ProcessViewCommand(id, flag != 0) ? "handled" : "not handled") : "no city view");
+        } else if (command == "neighbors") {   // neighbors [propose]: the city's deals and regional commodity record (propose: list what ProposeDeals offers, not added)
+            std::string what; words >> what;
+            native::NativeNeighborsReport(what == "propose");
         } else if (command == "budget") {   // budget: the budget groups, departments and line items (read only)
             native::NativeBudgetReport();
         } else if (command == "hover") {   // hover X Y: the current query tool's own OnMouseMove at a logical view point, then its tip message (read only, no input event)

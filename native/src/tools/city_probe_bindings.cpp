@@ -559,7 +559,7 @@ public:
     double CityGetCostPerUnit(const cISC4RegionalCity* city, int commodity) override { Seam("INeighborsHost::CityGetCostPerUnit"); return 0; }
     void CitySetCostPerUnit(cISC4RegionalCity* city, int commodity, double value) override { Seam("INeighborsHost::CitySetCostPerUnit");}
     bool ConfirmationDialog(std::uint32_t titleId, std::uint32_t formatId, std::uint32_t okId,
-                                    const cIGZString& arg) override { return false; }
+                                    const cIGZString* arg) override { return false; }
 };
 Probe18 g_INeighborsHost;
 }
