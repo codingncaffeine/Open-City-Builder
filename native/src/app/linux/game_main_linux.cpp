@@ -42,6 +42,7 @@
 #include "app/NativeKeyboard.h"
 #include "rz/cRZKeyboard.h"
 #include "gz/CommandServer.h"
+#include "gz/WinUtils.h"
 #include "app/NativeNetworkManager.h"
 #include "app/NativeNetworkTool.h"
 #include "app/NativeWinControls.h"
@@ -1635,6 +1636,12 @@ int RunScenario(const std::string& path) {
             words >> hex;
             const std::uint32_t id = std::uint32_t(std::strtoul(hex.c_str(), nullptr, 16));
             std::printf("command %08x -> status %u\n", id, native::ExecuteGameCommand(id));
+        } else if (command == "mysimpanel") {   // mysimpanel: the MySim panel opened as its toolbar toggle does it (toggle 0x4988bc6a on, then DoPanelCommandGUI(0x6a935ca8))
+            sc4::cSC4View3DWin* view = native::CityView3DWin();
+            cIGZWin* panel = view ? view->PanelWindow() : nullptr;
+            const bool toggled = panel && nsGZWinUtils::SetButtonToggleState(panel, 0x4988bc6au, true);
+            if (view) view->DoPanelCommandGUI(0x6a935ca8u);
+            std::printf("mysimpanel: %s (toggle %s)\n", view ? "panel 2 command sent" : "no city view", toggled ? "on" : "not found");
         } else if (command == "viewcmd") {   // viewcmd HEXID [P0]: the city view's command switch, as its toolbar buttons reach it (P0 = its first flag)
             std::string hex;
             int flag = 0;

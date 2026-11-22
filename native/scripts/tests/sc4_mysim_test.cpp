@@ -305,6 +305,7 @@ struct FakeBuilding final : cISC4BuildingOccupant, cISC4Occupant {
     SC4CellRect cells{1, 2, 3, 4};
     float completion = 1.0f;
     bool lit = false;
+    std::uint32_t group = 0;   // the one occupant group IsOccupantGroup answers
     bool QueryInterface(std::uint32_t iid, void** out) override {
         if (iid == kGZIID_cISC4BuildingOccupant) {
             *out = static_cast<cIGZUnknown*>(static_cast<cISC4BuildingOccupant*>(this));
@@ -362,7 +363,7 @@ struct FakeBuilding final : cISC4BuildingOccupant, cISC4Occupant {
     cISC43DPlaceableObject* GetPlaceableObject() const override { return nullptr; }
     cISC43DPlaceableObject* GetOrCreatePlaceableObject() override { return nullptr; }
     void SetPlaceableObject(cISC43DPlaceableObject*) override {}
-    bool IsOccupantGroup(std::uint32_t) const override { return false; }
+    bool IsOccupantGroup(std::uint32_t g) const override { return group != 0 && g == group; }
     void AddOccupantGroup(std::uint32_t) override {}
     bool GetOccupantGroups(std::set<std::uint32_t>&) const override { return false; }
     bool GetOccupantManagerBBox(std::uint8_t*) const override { return false; }
@@ -618,6 +619,7 @@ struct FakeHost final : IMySimHost {
     int dialogCalls = 0;
     int registryAdds = 0, registryRemoves = 0;
     std::vector<std::tuple<std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t>> posts;
+    std::vector<cIGZUnknown*> postedObjects;
     std::vector<std::pair<std::uint32_t, std::uint32_t>> loadStringCalls;
     cIGZUnknown* inputControl = nullptr;
     cIGZUnknown* viewInputControl = nullptr;
@@ -721,6 +723,30 @@ struct FakeHost final : IMySimHost {
     int PollutionAtCell(int type, int, int) override { return -5 + type; }
     bool DesirabilityAtCell(std::uint32_t type, int, int, int& value) override { desirabilityType = type; value = desirability; return true; }
     void ProtectionStations(bool police, std::vector<Station>& out) override { out = police ? policeStations : fireStations; }
+    // the trip surroundings: each grid answers its own value; the last sampled position and rect are kept
+    bool tripSimulators = true;
+    std::map<int, double> tripGrids;
+    float tripPosition[2] = {0.0f, 0.0f};
+    int tripRect[4] = {0, 0, 0, 0};
+    std::vector<TripLot> tripLots;
+    std::vector<TripDisaster> tripDisasters;
+    float landmarkFunding = 0.0f;
+    std::uint32_t fundingPurpose = 0;
+    float travelRatio = 1.0f;
+    int travelRatioType = -1;
+    bool TripSimulatorsPresent() override { return tripSimulators; }
+    double TripGridValue(TripGrid grid, float x, float z) override {
+        tripPosition[0] = x; tripPosition[1] = z;
+        const auto it = tripGrids.find(static_cast<int>(grid));
+        return it == tripGrids.end() ? 0.0 : it->second;
+    }
+    float TravelTimeRatio(int, int, int type) override { travelRatioType = type; return travelRatio; }
+    void LotsInCellRect(int x0, int z0, int x1, int z1, std::vector<TripLot>& out) override {
+        tripRect[0] = x0; tripRect[1] = z0; tripRect[2] = x1; tripRect[3] = z1;
+        out = tripLots;
+    }
+    float BuildingLocalFunding(cISC4BuildingOccupant*, std::uint32_t purpose) override { fundingPurpose = purpose; return landmarkFunding; }
+    void DisasterLocations(std::vector<TripDisaster>& out) override { out = tripDisasters; }
     bool NeighborJobCityName(cIGZUnknown*, cIGZString& out) override { out.AssignFromCString("Neighborville"); return true; }
     void FitTextToWidth(cIGZString& text, int width) override {
         fitWidth = width;
@@ -810,8 +836,9 @@ struct FakeHost final : IMySimHost {
         return subject;
     }
     cIGZUnknown* Messages2() { return nullptr; }
-    void PostMessage2(std::uint32_t type, std::uint32_t d1, std::uint32_t d2, std::uint32_t d3, std::uint32_t d4, cIGZUnknown*) override {
+    void PostMessage2(std::uint32_t type, std::uint32_t d1, std::uint32_t d2, std::uint32_t d3, std::uint32_t d4, cIGZUnknown* unknown) override {
         posts.emplace_back(type, d1, d2, d3, d4);
+        postedObjects.push_back(unknown);
     }
     cIGZMessageServer2* Messages() override { return &bus; }
     IMySimHomeSound* CreateHomeSound(std::uint32_t) override {
@@ -1536,6 +1563,93 @@ int main() {
         CHECK(num("trip_in_transit") == 1.0 && num("trip_at_location") == 0.0);
         notify(kDispatchNotifyTripLeg, 2, 3);              // arriving
         CHECK(num("trip_in_transit") == 0.0 && num("trip_at_location") == 1.0);
+        // the arrival bookkeeping of the state block (i386 0x00546994)
+        MySimLocation home, work, elsewhere;
+        home.SetCellPosition(5, 5);
+        work.SetCellPosition(9, 9);
+        elsewhere.SetCellPosition(20, 20);
+        host.dispatchLog.defaultDestination = home;
+        host.dispatchLog.commuteDestination = work;
+        host.dispatchLog.current = home;
+        sim->SetStateForTest(1);                           // moving in: the first arrival home announces it
+        sim->SetLastSoundTimeForTest(-100);
+        const std::size_t before = sim->Events().size();
+        const std::size_t posted = host.posts.size();
+        notify(kDispatchNotifyTripLeg, 2, 3);
+        CHECK(sim->State() == 2);
+        CHECK(sim->Events().size() > before && sim->Events().back().first == static_cast<int>(kEventMySimMovedIn));
+        // a state change without the flag block posts "this sim changed" with the sim itself as the object
+        CHECK(host.posts.size() == posted + 1 && std::get<0>(host.posts.back()) == kMessageMySimChanged);
+        CHECK(host.postedObjects.back() == static_cast<cIGZUnknown*>(static_cast<cISC4MySim*>(sim)));
+        sim->SetStateForTest(3);                           // back from work: the home sound
+        sim->SetLastSoundTimeForTest(-100);
+        const int sounds = host.homeSounds;
+        notify(kDispatchNotifyTripLeg, 2, 3);
+        CHECK(sim->State() == 2 && host.homeSounds == sounds + 1);
+        host.dispatchLog.current = work;                   // at work
+        notify(kDispatchNotifyTripLeg, 2, 3);
+        CHECK(sim->State() == 3);
+        host.dispatchLog.current = elsewhere;              // elsewhere: the state stays, the subject is the location
+        notify(kDispatchNotifyTripLeg, 2, 3);
+        CHECK(sim->State() == 3);
+
+        // the surroundings: grids at the location's position, the local area's lots and disasters
+        host.dispatchLog.current = work;                   // cell 9,9 -> the local area (MYSIM_TRIP_LOCAL_AREA_SIZE 10) 4..14
+        host.dispatchLog.state = 2;
+        host.dispatchLog.travelType = 1;
+        host.dispatchLog.checkFlags = false;
+        host.tripGrids = {{static_cast<int>(IMySimHost::TripGrid::Congestion), 300.0},
+                          {static_cast<int>(IMySimHost::TripGrid::PollutionAir), -7.0},
+                          {static_cast<int>(IMySimHost::TripGrid::PollutionGarbage), 12.0},
+                          {static_cast<int>(IMySimHost::TripGrid::Crime), 40.0},
+                          {static_cast<int>(IMySimHost::TripGrid::MayorRating), -56.0},
+                          {static_cast<int>(IMySimHost::TripGrid::EducationQuotient), 87.9},
+                          {static_cast<int>(IMySimHost::TripGrid::HealthQuotient), 55.2}};
+        host.travelRatio = 2.5f;
+        auto* tower = new FakeBuilding();
+        tower->AddRef();
+        tower->group = kOccupantGroupLandmark;
+        tower->name = cRZString("Big Tower");
+        auto* plain = new FakeBuilding();
+        plain->AddRef();
+        host.tripLots = {{plain, 2, 1}, {nullptr, 5, 3}, {tower, 3, 2}, {plain, 5, 3}};
+        host.landmarkFunding = 0.75f;
+        host.tripDisasters = {{kDisasterIdFire, 7, 11}, {kDisasterIdRiot, 30, 30}};
+        const int top = host.lua.GetTop();
+        notify(kDispatchNotifyTripEnd, 0, 0);              // no state or flag change: only the sampling
+        CHECK(host.lua.GetTop() == top);
+        CHECK(host.tripPosition[0] == 144.0f && host.tripPosition[1] == 144.0f);
+        CHECK(num("trip_traffic_congestion") == 44.0);
+        CHECK(num("trip_time_ratio") == 2.0 && host.travelRatioType == 1);
+        CHECK(num("trip_wait_length") == 0.0);
+        CHECK(num("trip_pollution_air") == -7.0 && num("trip_pollution_water") == 0.0 && num("trip_pollution_garbage") == 12.0);
+        CHECK(num("trip_crime") == 40.0 && num("trip_mayor_rating") == -56.0);
+        CHECK(num("trip_eq") == 87.0 && num("trip_hq") == 55.0);
+        CHECK(host.tripRect[0] == 4 && host.tripRect[1] == 4 && host.tripRect[2] == 14 && host.tripRect[3] == 14);
+        CHECK(num("trip_distress1_p") == 33.0 && num("trip_distress2_p") == 33.0 && num("trip_distress3_p") == 33.0);
+        CHECK(num("trip_wealth_low_p") == 33.0 && num("trip_wealth_med_p") == 33.0 && num("trip_wealth_high_p") == 33.0);
+        CHECK(num("trip_landmark_nearby") == 1.0 && num("trip_landmark_funding_p") == 75.0);
+        CHECK(host.fundingPurpose == kBudgetPurposeLandmark);
+        CHECK(num("trip_fire_nearby") == 1.0 && num("trip_riot_nearby") == 0.0 && num("trip_any_disaster_nearby") == 1.0);
+        // travelling by bus and idle-free: no local area; a 0xfe travel type rates 1 without asking the simulator
+        host.tripLots.clear();
+        host.tripDisasters.clear();
+        host.tripRect[0] = -1;
+        host.dispatchLog.travelType = 0xfe;
+        host.travelRatioType = -1;
+        notify(kDispatchNotifyTripEnd, 0, 0);
+        CHECK(num("trip_time_ratio") == 1.0 && host.travelRatioType == -1);
+        host.dispatchLog.travelType = 2;
+        notify(kDispatchNotifyTripEnd, 0, 0);
+        CHECK(host.tripRect[0] == -1 && num("trip_landmark_nearby") == 1.0);
+        host.dispatchLog.state = 3;                        // at a location: the local area again, now empty
+        notify(kDispatchNotifyTripEnd, 0, 0);
+        CHECK(host.tripRect[0] == 4 && num("trip_landmark_nearby") == 0.0 && num("trip_fire_nearby") == 0.0);
+        host.tripLots.clear();
+        tower->Release();
+        plain->Release();
+        host.dispatchLog.current = MySimLocation();
+        host.dispatchLog.state = 0;
         host.dispatchLog.travelType = 0;
         host.dispatchLog.checkFlags = false;
     }

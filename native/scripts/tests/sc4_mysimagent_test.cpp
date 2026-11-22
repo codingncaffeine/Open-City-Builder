@@ -311,6 +311,19 @@ int main() {
     agent->MoveIn(8, name, true, 3, bio, 77, file);
     CHECK(sims[1].moveSlot == 0 && sims[4].moveSlot == 0);                 // nobody idle: nothing happens
 
+    // the active sims of the five ordinary slots (the special sixth is never listed)
+    {
+        std::vector<cRZAutoRefCount<cISC4MySim>> active;
+        CHECK(agent->GetActiveMySims(active) && active.size() == 5);
+        CHECK(active[0].get() == &sims[0] && active[4].get() == &sims[4]);
+        sims[1].active = false;
+        sims[3].active = false;
+        CHECK(agent->GetActiveMySims(active) && active.size() == 3 && active[1].get() == &sims[2]);
+        for (int i = 0; i < 5; ++i) sims[i].active = false;
+        CHECK(!agent->GetActiveMySims(active) && active.empty());
+        for (auto& s : sims) s.active = true;
+    }
+
     // who lives where
     sims[2].residence = reinterpret_cast<cISC4BuildingOccupant*>(&building);
     CHECK(agent->MySimLivesHere(reinterpret_cast<cISC4BuildingOccupant*>(&building)) == &sims[2]);

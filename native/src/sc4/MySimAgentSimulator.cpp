@@ -167,6 +167,13 @@ void cSC4MySimAgentSimulator::SetActiveUIPanelSim(int slot) {
     }
     activePanel_ = -1;
 }
+bool cSC4MySimAgentSimulator::GetActiveMySims(std::vector<cRZAutoRefCount<cISC4MySim>>& out) const {
+    out.clear();
+    for (int i = 0; i < kMySimAgentOrdinarySlots; ++i) {
+        if (sims_[i] && sims_[i]->IsActive()) out.emplace_back(sims_[i]);
+    }
+    return !out.empty();
+}
 cISC4MySim* cSC4MySimAgentSimulator::GetActiveUIPanelSim(int& slot) {
     if (activePanel_ < 0 || activePanel_ >= kMySimAgentSlots) return nullptr;
     slot = activePanel_;

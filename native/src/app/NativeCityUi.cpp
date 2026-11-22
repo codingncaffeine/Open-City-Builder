@@ -1,23 +1,72 @@
 #include "app/NativeCityUi.h"
 
+#include "app/NativeCitySystems.h"
 #include "app/NativeGameData.h"
 #include "app/NativeUi.h"
 #include "gz/WinInterfaces.h"
 #include "sc4/GraphsViewWinProc.h"
+#include "sc4/MySimAgentSimulator.h"
 #include "sc4/MySimWinProc.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/View3DWin.h"
 
 namespace native {
+sc4::cSC4MySimAgentSimulator* NativeMySimAgentSimulator();   // app/NativeMySim.cpp
+// The city view as its window (SL::spView3DWin; null without a city view).
+cIGZWin* NativeCityView3DWindow() {
+    sc4::cSC4View3DWin* view = CityView3DWin();
+    return view ? view->AsIGZWin() : nullptr;
+}
 namespace {
 
-// The MySim panel's services. The MySim agent simulator, the game-data registry, the vehicle / pedestrian managers and
+// The MySim panel's view of the city's cSC4MySimAgentSimulator (the original hands the panel the simulator itself; its
+// interface slots 0x28..0x60 forward to the recovered class). It looks the simulator up on every call, so it follows the
+// city that is open.
+class MySimAgentView final : public sc4::IMySimAgentSimulator {
+public:
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid != kGZIID_cIGZUnknown) return false;
+        *out = static_cast<cIGZUnknown*>(this);
+        AddRef();
+        return true;
+    }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override { return refs_ > 1 ? --refs_ : (refs_ = 1); }   // owned by the panel host
+    void GetActiveMySims(std::vector<cRZAutoRefCount<sc4::cISC4MySim>>& out) override {
+        out.clear();
+        if (sc4::cSC4MySimAgentSimulator* agent = NativeMySimAgentSimulator()) agent->GetActiveMySims(out);
+    }
+    void TrackLocation(sc4::cISC4MySim* sim) override {
+        if (sc4::cSC4MySimAgentSimulator* agent = NativeMySimAgentSimulator()) agent->TrackLocation(sim);
+    }
+    void HideLocation() override {
+        if (sc4::cSC4MySimAgentSimulator* agent = NativeMySimAgentSimulator()) agent->HideLocation();
+    }
+    bool MySimLivesHere(sc4::cISC4BuildingOccupant* building) override {
+        sc4::cSC4MySimAgentSimulator* agent = NativeMySimAgentSimulator();
+        return agent && agent->MySimLivesHere(building) != nullptr;
+    }
+    void CancelMoveIn() override {
+        if (sc4::cSC4MySimAgentSimulator* agent = NativeMySimAgentSimulator()) agent->CancelMoveIn();
+    }
+    void SetActiveUIPanelSim(int index) override {
+        if (sc4::cSC4MySimAgentSimulator* agent = NativeMySimAgentSimulator()) agent->SetActiveUIPanelSim(index);
+    }
+    void GetActiveUIPanelSim(int& index) override {
+        if (sc4::cSC4MySimAgentSimulator* agent = NativeMySimAgentSimulator()) agent->GetActiveUIPanelSim(index);
+    }
+
+private:
+    std::uint32_t refs_ = 1;
+};
+
+// The MySim panel's services. The game-data registry, the vehicle / pedestrian managers and
 // the window-location saver are not up in the native city yet, so those answer null and the panel runs without them.
 class MySimHost final : public sc4::IMySimWinProcHost {
 public:
     cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
     sc4::cISC4GameDataRegistry* GameDataRegistry() override { return NativeGameDataRegistry(); }
-    sc4::IMySimAgentSimulator* MySimAgentSimulator() override { return nullptr; }
+    sc4::IMySimAgentSimulator* MySimAgentSimulator() override { return NativeMySimAgentSimulator() ? &agentView_ : nullptr; }
     sc4::IModelManager* VehicleManager() override { return nullptr; }
     sc4::IModelManager* PedestrianManager() override { return nullptr; }
     void RestoreWindowLocation(cIGZWin*) override {}
@@ -38,6 +87,7 @@ public:
     bool ExemplarString(cRZString&, sc4::cISCPropertyHolder*, std::uint32_t) override { return false; }
 
     cIGZWin* window_ = nullptr;   // any window of the UI, for its window manager
+    MySimAgentView agentView_;
 };
 
 // cSC4View3DWin keeps the MySim procedure as IMySimWindow; the recovered class is a plain window procedure, so this

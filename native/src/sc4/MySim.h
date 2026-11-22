@@ -154,6 +154,11 @@ constexpr std::uint32_t kEventMySimPipeBurst = 0x6a5e598c;
 constexpr std::uint32_t kEventMySimTornado = 0x0a5e8243;
 constexpr std::uint32_t kEventMySimDisasterA = 0x8ac11a9b;           // disaster 0xca380b06
 constexpr std::uint32_t kEventMySimDisasterB = 0x2ac14492;           // disaster 0xc4c90997
+// UpdateTripVariables: the landmark occupant group, the landmark budget purpose and the disaster ids it looks for.
+constexpr std::uint32_t kOccupantGroupLandmark = 0x150a;
+constexpr std::uint32_t kBudgetPurposeLandmark = 0xaa59670c;
+constexpr std::uint32_t kDisasterIdFire = 0x621cda33;
+constexpr std::uint32_t kDisasterIdRiot = 0xca380b06;
 constexpr std::uint32_t kMessageMySimsChanged = 0xaa25827c;          // SendMySimsChangedMessage @ 0x1007a787b
 constexpr std::uint32_t kMessageMySimMovedIn = 0xea3ada33;           // AnnounceMoveIn
 // Script commands (DoScriptCommand @ 0x1007a93a0).
@@ -384,6 +389,32 @@ public:
     virtual void ProtectionStations(bool police, std::vector<Station>& out) = 0;
         // spPoliceSim GetPoliceStations (i386 0x54) / spFireProtectionSim GetFireStations (0x58): each station's position and
         // GetStationFunding(station, null, &fraction) (0x1c / 0x20)
+    // --- the surroundings of a trip (UpdateTripVariables, i386 0x00546994) ----------------------------------------
+    // spTrafficSim, spPollutionSim and spCrimeSim are all present (the original samples nothing otherwise).
+    virtual bool TripSimulatorsPresent() = 0;
+    // The grids UpdateTripVariables reads at a world position: grid vslot 0x4c PositionToTract, then 0x58 GetTractValue.
+    enum class TripGrid {
+        Congestion,         // spTrafficSim 0x28 GetCongestionMap (uint8)
+        PollutionAir,       // spPollutionSim 0x14 GetPollutionGrid(0) (int16)
+        PollutionWater,     // GetPollutionGrid(1)
+        PollutionGarbage,   // GetPollutionGrid(2)
+        Crime,              // spCrimeSim 0x14 GetCrimeGrid (uint8)
+        MayorRating,        // spAuraSim 0x30 GetAuraGrid (int8)
+        EducationQuotient,  // spResidentialSim 0x54 GetAverageEQGrid (a new float grid per call)
+        HealthQuotient,     // spResidentialSim 0x58 GetAverageHQGrid
+    };
+    virtual double TripGridValue(TripGrid grid, float x, float z) = 0;
+    virtual float TravelTimeRatio(int cellX, int cellZ, int travelType) = 0;   // spTrafficSim 0x60 GetTravelTimeRatio
+    // One entry of the lot manager's GetLotsInCellRect (iid 0x681905bd vslot 0x1c, unique = false: one entry per cell):
+    // the lot's building (lot 0xc0, borrowed, may be null), GetCondition (0x8c) and GetOccupantWealth (0xa4).
+    struct TripLot { cISC4BuildingOccupant* building; int condition; int wealth; };
+    virtual void LotsInCellRect(int x0, int z0, int x1, int z1, std::vector<TripLot>& out) = 0;
+    // spBudgetSim 0xcc GetBudgetItemForPurpose(building's property holder, purpose, item): the item's local funding.
+    virtual float BuildingLocalFunding(cISC4BuildingOccupant* building, std::uint32_t purpose) = 0;
+    // spDisasterLayer 0x40 GetDisasterLocationCount / 0x44 GetDisasterLocationByIndex: each location's disaster id
+    // (instance 0x14 GetID) and cell.
+    struct TripDisaster { std::uint32_t id; int x; int z; };
+    virtual void DisasterLocations(std::vector<TripDisaster>& out) = 0;
     virtual bool NeighborJobCityName(cIGZUnknown* city, cIGZString& out) = 0;   // the regional city's GetCityName (i386 0x84)
     virtual void FitTextToWidth(cIGZString& text, int width) = 0;
         // RZ::WCM() SystemFont(0x68963c4c) -> FormatForEllipsis(text, DefaultText(0x5377be31), {0, 0, width, line height})
@@ -646,7 +677,7 @@ public:
 
     // Non-virtual helpers (private in the original; public for the subclass and the test).
     void UpdateVariables();                                        // @ 0x10079fcb2 (i386 0x005481e6)
-    void UpdateTripVariables(int newState, int oldState, int newFlags, int oldFlags, bool force);   // @ 0x1007a3e66 (PARTIAL)
+    void UpdateTripVariables(int newState, int oldState, int newFlags, int oldFlags, bool force);   // @ 0x1007a3e66
     void UpdateQuickVariables();                                   // @ 0x1007a5800
     void UpdateLocalBuildings();                                   // @ 0x1007a5d5e
     std::uint32_t DistanceToPosition(const float* xyz) const;      // DistanceToOccupant (i386 0x0054147a), from the position
@@ -671,6 +702,7 @@ public:
     bool DispatchCommute();                                        // @ 0x1007a7bec
     void QuitJob();                                                // @ 0x1007a8ebe
     void PlayHomeSound(std::uint32_t soundId);                     // @ 0x1007a9042
+    void PostChangedMessage();   // SC4PostMessage2(0x4bc42c48, 0, 0, 0, 0, the cISC4MySim view)
     void Spawn();                                                  // @ 0x1007a9480
     void IncreaseWealth();                                         // @ 0x1007a94fe
     void Die();                                                    // @ 0x1007a953e
@@ -694,6 +726,7 @@ public:
     IMySimDispatch* Dispatch() const { return dispatch_.get(); }        // +0x328
     IMySimCallout* Callout() const { return callout_.get(); }           // +0x218
     IMySimPylon* Pylon() const { return pylon_.get(); }                 // +0x3b8
+    IMySimBalloonWinProc* BalloonWinProc() const { return balloonWinProc_.get(); }   // +0x3a0
     cRZRandom& Random() { return random_; }                             // +0x290
     void SetStateForTest(std::int32_t state) { state_ = state; }
     void SetLastSoundTimeForTest(std::int32_t value) { lastSoundTime_ = value; }

@@ -3,7 +3,7 @@
 // component the original reaches through its SL:: global; the slot comments name the original call (Mac i386 decompile).
 //
 // Not native yet (the methods report SC4_UNWIRED with the missing class): the MySim UI neighbours (cSC4WinCalloutBox over the
-// residence, cSC4MySimBalloonWinProc, the four MySim input controls, the portrait bitmaps), the home sounds, the ghost
+// residence, the four MySim input controls, the portrait bitmaps), the ghost
 // effect and the U-Drive-It view. A MySim without them still lives: it is stored and read back with its city, keeps its
 // residence, job and commute state, ages, rides its trips and runs its advices.
 #include <cstdio>
@@ -15,6 +15,11 @@
 #include "app/NativeAnimationTicks.h"
 #include "app/NativeAutomataViews.h"
 #include "app/NativeBuildingDevelopment.h"
+#include "app/NativeCitySystems.h"
+#include "audio/AudioServices.h"
+#include "audio/interfaces/cIGZSndSys.h"
+#include "gz/GZCOMDirector.h"
+#include "gz/WinGen.h"
 #include "app/NativeCity.h"
 #include "app/NativeGameData.h"
 #include "app/NativeGrowthDevelopers.h"
@@ -23,16 +28,21 @@
 #include "gz/WinCtrlFactory.h"
 #include "gz/WinCtrlMgr.h"
 #include "gz/WinFont.h"
+#include "sc4/AuraSimulator.h"
 #include "sc4/AutomataManager.h"
+#include "sc4/BudgetSimulator.h"
 #include "sc4/AutomataStates.h"
 #include "sc4/Automaton.h"
 #include "sc4/BuildingDevelopmentSimulator.h"
 #include "sc4/DispatchManager.h"
 #include "sc4/CrimeSimulator.h"
+#include "sc4/Disaster.h"
 #include "sc4/FireProtectionSimulator.h"
 #include "sc4/ISC4RegionalCity.h"
 #include "sc4/Occupant.h"
 #include "sc4/PlumbingSimulator.h"
+#include "sc4/PropManager.h"
+#include "sc4/PropOccupant.h"
 #include "sc4/PoliceSimulator.h"
 #include "sc4/PollutionSimulator.h"
 #include "sc4/RegionalCity.h"
@@ -50,6 +60,7 @@
 #include "sc4/MySim.h"
 #include "sc4/MySimAdvice.h"
 #include "sc4/MySimAgentSimulator.h"
+#include "sc4/MySimBalloonWinProc.h"
 #include "sc4/MySimDispatch.h"
 #include "sc4/MySimFilters.h"
 #include "sc4/NeighborsSimulator.h"
@@ -69,6 +80,7 @@
 #include "sc4/cSTETerrain.h"
 
 namespace native {
+cIGZWin* NativeCityView3DWindow();                                                // app/NativeCityUi.cpp
 const sc4::cISCPropertyHolder* NativeSimulatorExemplar(std::uint32_t instance);   // app/NativeSimHosts.cpp
 bool NativeProjectToViewport(const float* xyz, float out[3]);                     // app/NativeAutomataManagerHost.cpp
 sc4::cSC4CrimeSimulator* NativeCrimeSimulator();                                  // app/NativeCrime.cpp
@@ -111,6 +123,34 @@ cSC4Simulator* Simulator() { return Comp<cSC4Simulator>(CityComponent::Simulator
 cSC424HourClock* Clock24() { return Plain<cSC424HourClock>(CityComponent::Clock24Hour); }
 cSTETerrain* Terrain() { return As<cSTETerrain>(CityComponent::Terrain); }
 cISC4NeighborsSimulator* Neighbors() { return As<cISC4NeighborsSimulator>(CityComponent::NeighborsSimulator); }
+
+// The MySim home sound (PlayHomeSound, i386 0x00543126): a prop occupant the prop manager makes from the sound prop
+// exemplar {0x6534284a, 0xc977c536, sound id} (vslot 0x40 CreateGenericProp); the sim keeps it while it plays.
+class HomeSound final : public IMySimHomeSound {
+public:
+    explicit HomeSound(cSC4PropOccupant* prop) : prop_(prop) {}   // takes the prop's one reference
+    ~HomeSound() { if (prop_) prop_->Release(); }
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid != kGZIID_cIGZUnknown) return false;
+        *out = static_cast<cIGZUnknown*>(this);
+        AddRef();
+        return true;
+    }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override {
+        if (refs_ > 1) return --refs_;
+        delete this;
+        return 0;
+    }
+    void SetPosition(const float* xyz) override { prop_->SetPosition(xyz); }        // occupant 0x24
+    bool IsPlaying() const override { return prop_->IsFlagSet(1); }                  // occupant 0x80(1): in the city
+    cISC4Occupant* Occupant() const { return static_cast<cISC4Occupant*>(prop_); }
+
+private:
+    cSC4PropOccupant* prop_ = nullptr;
+    std::uint32_t refs_ = 0;
+};
+cSC4PropManager* PropManager() { return Plain<cSC4PropManager>(CityComponent::PropManager); }
 
 cSC4Lot* LotOf(cISC4Occupant* occupant) {   // spLotManager GetOccupantLot (borrowed)
     cSC4ZoneDeveloper* lots = LotManager();
@@ -426,6 +466,95 @@ public:
         const cSC4SimGrid<std::uint8_t>* grid = crime ? crime->GetCrimeGrid() : nullptr;
         return grid ? grid->GetCellValue(x, z) : 0;
     }
+    // --- UpdateTripVariables: the surroundings of a trip ---
+    bool TripSimulatorsPresent() override {
+        return Traffic() && Comp<cSC4PollutionSimulator>(CityComponent::PollutionSimulator) && NativeCrimeSimulator();
+    }
+    // The grid's tract at the world position (PositionToTract, then GetTractValue). A position outside the grid answers 0.
+    template <class T> static double TractValue(const cSC4SimGrid<T>* grid, float x, float z) {
+        if (!grid) return 0.0;
+        std::int32_t tx = 0, tz = 0;
+        grid->PositionToTract(x, z, tx, tz);
+        return grid->TractIsInBounds(tx, tz) ? static_cast<double>(grid->GetTractValue(tx, tz)) : 0.0;
+    }
+    double TripGridValue(TripGrid which, float x, float z) override {
+        switch (which) {
+        case TripGrid::Congestion: {
+            cSC4TrafficSimulator* traffic = Traffic();
+            return TractValue(traffic ? traffic->GetCongestionMap() : nullptr, x, z);
+        }
+        case TripGrid::PollutionAir:
+        case TripGrid::PollutionWater:
+        case TripGrid::PollutionGarbage: {
+            auto* pollution = Comp<cSC4PollutionSimulator>(CityComponent::PollutionSimulator);
+            const int type = static_cast<int>(which) - static_cast<int>(TripGrid::PollutionAir);
+            return TractValue(pollution ? pollution->GetPollutionGrid(static_cast<PollutionType>(type)) : nullptr, x, z);
+        }
+        case TripGrid::Crime: {
+            cSC4CrimeSimulator* crime = NativeCrimeSimulator();
+            return TractValue(crime ? crime->GetCrimeGrid() : nullptr, x, z);
+        }
+        case TripGrid::MayorRating: {
+            auto* aura = Comp<cSC4AuraSimulator>(CityComponent::AuraSimulator);
+            return TractValue(aura ? aura->GetAuraGrid() : nullptr, x, z);
+        }
+        case TripGrid::EducationQuotient:
+        case TripGrid::HealthQuotient: {
+            cSC4ResidentialSimulator* r = Residential();
+            if (!r) return 0.0;
+            cSC4SimGrid<float>* grid = which == TripGrid::EducationQuotient ? r->GetAverageEQGrid(nullptr, nullptr)
+                                                                            : r->GetAverageHQGrid(nullptr, nullptr);
+            const double value = TractValue(grid, x, z);
+            if (grid) grid->Release();   // the new grid's one reference
+            return value;
+        }
+        }
+        return 0.0;
+    }
+    float TravelTimeRatio(int cellX, int cellZ, int travelType) override {
+        cSC4TrafficSimulator* traffic = Traffic();
+        return traffic ? traffic->GetTravelTimeRatio(cellX, cellZ, travelType) : 1.0f;
+    }
+    void LotsInCellRect(int x0, int z0, int x1, int z1, std::vector<TripLot>& out) override {
+        out.clear();
+        cSC4ZoneDeveloper* lots = LotManager();
+        if (!lots) return;
+        std::list<cRZAutoRefCount<cSC4Lot>> list;
+        lots->GetLotsInCellRect(list, x0, z0, x1, z1, false);
+        for (const cRZAutoRefCount<cSC4Lot>& lot : list) {
+            if (!lot) continue;
+            TripLot entry{nullptr, lot->GetCondition(), lot->GetOccupantWealth()};
+            if (cIGZUnknown* object = lot->GetBuilding()) {   // borrowed
+                cISC4BuildingOccupant* building = nullptr;
+                if (object->QueryInterface(kGZIID_cISC4BuildingOccupant, reinterpret_cast<void**>(&building)) && building) {
+                    entry.building = building;
+                    building->Release();   // the lot keeps the building alive
+                }
+            }
+            out.push_back(entry);
+        }
+    }
+    float BuildingLocalFunding(cISC4BuildingOccupant* building, std::uint32_t purpose) override {
+        auto* budget = Comp<cSC4BudgetSimulator>(CityComponent::BudgetSimulator);
+        if (!budget || !building) return 0.0f;
+        BudgetItem item;
+        budget->GetBudgetItemForPurpose(building->AsOccupant()->AsPropertyHolder(), purpose, item);
+        return item.localFunding;
+    }
+    void DisasterLocations(std::vector<TripDisaster>& out) override {
+        out.clear();
+        cISC4DisasterLayer* layer = As<cISC4DisasterLayer>(CityComponent::DisasterLayer);
+        if (!layer) layer = Comp<cISC4DisasterLayer>(CityComponent::DisasterLayer);
+        if (!layer) return;
+        const int count = layer->GetDisasterLocationCount();
+        for (int i = 0; i < count; ++i) {
+            cISC4DisasterInstance* instance = nullptr;
+            int x = 0, z = 0;
+            if (!layer->GetDisasterLocationByIndex(i, &instance, &x, &z) || !instance) continue;
+            out.push_back({instance->GetID(), x, z});
+            instance->Release();
+        }
+    }
     // GetPolicePowerGrid / GetFireProtectionGrid: the protection simulator's adjusted grid, averaged over the cell rect.
     int ProtectionCoverage(bool police, int x, int z, int width, int height) override {
         const cSC4SimGrid<std::uint8_t>* grid = nullptr;
@@ -536,9 +665,23 @@ public:
         automaton->Release();
         return true;
     }
-    IMySimHomeSound* CreateHomeSound(std::uint32_t) override { SC4_UNWIRED("IMySimHost::CreateHomeSound (MySim home sounds)"); return nullptr; }
-    void DestroyHomeSound(IMySimHomeSound*) override {}
-    void PlayCitySound(IMySimHomeSound*, const float*) override {}
+    IMySimHomeSound* CreateHomeSound(std::uint32_t soundId) override {   // spPropManager 0x40 CreateGenericProp
+        cSC4PropManager* props = PropManager();
+        if (!props) return nullptr;
+        cSC4PropOccupant* prop = nullptr;
+        if (!props->CreateGenericProp(cGZPersistResourceKey(0x6534284au, 0xc977c536u, soundId), prop) || !prop) return nullptr;
+        auto* sound = new HomeSound(prop);
+        sound->AddRef();
+        return sound;
+    }
+    void DestroyHomeSound(IMySimHomeSound* sound) override {   // spPropManager 0x74 RemovePropA(the prop)
+        cSC4PropManager* props = PropManager();
+        if (props && sound) props->RemovePropA(static_cast<HomeSound*>(sound)->Occupant());
+    }
+    void PlayCitySound(IMySimHomeSound* sound, const float*) override {   // spCity 0x88 GetOccupantManager -> 0x50 InsertOccupant
+        cISC4OccupantManager* occupants = Occupants();
+        if (occupants && sound) occupants->InsertOccupant(static_cast<HomeSound*>(sound)->Occupant(), 0);
+    }
     IMySimEffect* CreateGhostEffect() override { SC4_UNWIRED("IMySimHost::CreateGhostEffect (the MySimGhost effect)"); return nullptr; }
     bool DispatchIconRect(int, int*) override { SC4_UNWIRED("IMySimHost::DispatchIconRect (dispatch view icon of a tracked MySim)"); return false; }
     // --- objects ---
@@ -547,7 +690,11 @@ public:
         dispatch->AddRef();
         return dispatch;
     }
-    IMySimBalloonWinProc* CreateBalloonWinProc(cISC4MySim*) override { SC4_UNWIRED("IMySimHost::CreateBalloonWinProc (cSC4MySimBalloonWinProc)"); return nullptr; }
+    IMySimBalloonWinProc* CreateBalloonWinProc(cISC4MySim* owner) override {   // cSC4MySimBalloonWinProc (i386 0x0047ceb8)
+        auto* proc = new cSC4MySimBalloonWinProc(owner);
+        proc->AddRef();
+        return proc;
+    }
     IMySimPylon* CreatePylon() override { SC4_UNWIRED("IMySimHost::CreatePylon (MySim dispatch tool call box)"); return nullptr; }
     // --- view input controls (the MySim tools are not native) ---
     cIGZUnknown* CurrentViewInputControl() override { return nullptr; }
@@ -886,9 +1033,46 @@ const char* StateName(int state) {
     }
 }
 
+// The balloon's services (IMySimBalloonHost): the generic window it draws into, the city view it lives in, the message
+// server that ticks it, the advisor system's random generator for the sound chance and the sound system.
+class BalloonHost final : public IMySimBalloonHost {
+public:
+    gz::cIGZWinGen* CreateWinGen() override {   // GZCOM()->CreateInstance(0x4386d516, 0x5386d516)
+        void* raw = nullptr;
+        return GZCOM() && GZCOM()->CreateInstance(gz::kGZCLSID_cGZWinGen, gz::kGZIID_cIGZWinGen, &raw) && raw
+                   ? static_cast<gz::cIGZWinGen*>(raw) : nullptr;
+    }
+    cIGZWin* View3DWin() override {   // SL::spView3DWin as its window
+        return native::NativeCityView3DWindow();
+    }
+    cIGZMessageServer2* Messages() override { return SL::spMS2; }
+    double RandomPercent() override {   // spCity GetAdvisorSystem (0x144) -> GetRandom (0x24)
+        cSC4AdvisorSystem* system = cSC4AdvisorSystem::Instance();
+        cRZRandom* random = system ? system->GetRandom() : nullptr;
+        return random ? random->RandomDoubleRangeUniform(0.0, 100.0) : 100.0;
+    }
+    // The sound system events take the sim as their object (the 32-bit original passes the pointer in an integer
+    // field of the same event).
+    bool SoundSystemPresent() override { return Audio::SoundSystem() != nullptr; }
+    void StartBalloonSound(std::uint32_t soundId, cISC4MySim* sim) override {
+        if (cIGZSndSys* system = Audio::SoundSystem()) system->PostEventUnknown(1, sim, soundId, 0, 0, 0);
+    }
+    void PlaceBalloonSound(cISC4MySim* sim, int x, int y, int z) override {
+        if (cIGZSndSys* system = Audio::SoundSystem()) {
+            system->PostEventUnknown(0xca45190f, sim, static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(y),
+                                     static_cast<std::uint32_t>(z), 0);
+        }
+    }
+    void StopBalloonSound(cISC4MySim* sim, bool immediate) override {
+        if (cIGZSndSys* system = Audio::SoundSystem()) system->PostEventUnknown(2, sim, immediate ? 1 : 0, 0, 0, 0);
+    }
+};
+BalloonHost g_balloonHost;
+
 }  // namespace
 
 void InstallMySimHosts() {
+    sc4::SetMySimBalloonHost(&g_balloonHost);
     static MySimHost sim;
     static DispatchHost dispatch;
     static FilterHost filter;
@@ -944,9 +1128,37 @@ static void PrintOpinionFields(cSC4MySim& sim, int slot) {
         line += "\"";
         lua->Pop(1);
     }
+    // the trip fields UpdateTripVariables writes (state, flag word and the surroundings of the current location)
+    static const char* const kTrip[] = {
+        "trip_idle", "trip_at_transit_switch", "last_trip_type", "trip_traffic_congestion", "trip_time_ratio",
+        "trip_wait_length", "trip_pollution_air", "trip_pollution_water", "trip_pollution_garbage", "trip_crime",
+        "trip_mayor_rating", "trip_eq", "trip_hq", "trip_distress1_p", "trip_distress2_p", "trip_distress3_p",
+        "trip_wealth_low_p", "trip_wealth_med_p", "trip_wealth_high_p", "trip_landmark_nearby",
+        "trip_landmark_funding_p", "trip_fire_nearby", "trip_riot_nearby", "trip_any_disaster_nearby"};
+    std::string trip;
+    int tripMissing = 0;
+    for (const char* key : kTrip) {
+        lua->PushString(key);
+        lua->GetTable(-2);
+        if (lua->IsNumber(-1)) std::snprintf(buffer, sizeof(buffer), " %s=%g", key, lua->ToNumber(-1));
+        else { std::snprintf(buffer, sizeof(buffer), " %s=nil", key); ++tripMissing; }
+        trip += buffer;
+        lua->Pop(1);
+    }
+    lua->PushString("trip_landmark_name");
+    lua->GetTable(-2);
+    auto* landmark = lua->IsUserData(-1) ? static_cast<cIGZString*>(lua->ToUserTag(-1)) : nullptr;
+    trip += " landmark_name=\"";
+    trip += landmark ? landmark->ToChar() : "<nil>";
+    trip += "\"";
+    lua->Pop(1);
     lua->SetTop(top);
     std::printf("mysims: slot %d opinions (%d nil):%s\n", slot, missing, line.c_str());
+    std::printf("mysims: slot %d trip fields (%d nil):%s\n", slot, tripMissing, trip.c_str());
 }
+
+// The city's MySim agent simulator (borrowed; null without a city).
+sc4::cSC4MySimAgentSimulator* NativeMySimAgentSimulator() { return Agent(); }
 
 // Kit command `mysims`: the agent simulator's sims and their state (read only).
 void NativeMySimReport() {
@@ -974,6 +1186,17 @@ void NativeMySimReport() {
                     xyz[0], xyz[1], xyz[2], sim->Retired() ? 1 : 0, dispatch ? "yes" : "no", dispatch ? dispatch->GetState() : 0,
                     dispatch ? static_cast<cSC4MySimDispatch*>(dispatch)->Flags() : 0u);
         if (sim->IsActive()) PrintOpinionFields(*sim, i);
+        if (sim->IsActive()) {   // the speech balloon: its state, advice, icons and window
+            auto* balloon = dynamic_cast<cSC4MySimBalloonWinProc*>(sim->BalloonWinProc());
+            cIGZWin* window = balloon && balloon->Window() ? balloon->Window()->AsIGZWin() : nullptr;
+            int sx = 0, sy = 0;
+            const bool onScreen = sim->GetCurrentScreenLocationXY(&sx, &sy);
+            std::printf("mysims: slot %d balloon %s state %d advice %s icons %zu window %s visible %d at %d,%d size %dx%d (sim on screen %d at %d,%d)\n",
+                        i, balloon ? "yes" : "no", balloon ? balloon->State() : -1,
+                        balloon && balloon->CurrentAdvice() ? "yes" : "no", balloon ? balloon->IconCount() : 0u,
+                        window ? "yes" : "no", window && window->IsVisible() ? 1 : 0, window ? window->GetL() : 0,
+                        window ? window->GetT() : 0, window ? window->GetW() : 0, window ? window->GetH() : 0, onScreen ? 1 : 0, sx, sy);
+        }
         if (sim->IsActive() && dispatch) {   // the automaton the sim rides, if any
             auto* trip = static_cast<cSC4MySimDispatch*>(dispatch);
             cISC4Occupant* rider = trip->AutomataOccupant();
