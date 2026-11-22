@@ -181,6 +181,8 @@ public:
     virtual float RecyclingCapacitySlots() = 0;                        // this+0x50 vslot 0x80
     // A new city: the simulator joins the prop developer's requesters (spPropDeveloper vslot 0x14, this + 8).
     virtual void AddPropRequester(cISC4PropRequester* /*requester*/) {}
+    // The month's end marks the neighbor deals dirty so the garbage deals are recomputed (spNeighborsSim vslot 0x7c MarkDealsDirty).
+    virtual void RefreshNeighborDeals() {}
     // UpdatePollutionVisualEffect: the effects manager the simulator keeps at +0x38 (vslot 0x1c CreateVisualEffect(group, type), one
     // reference; null for an unbound key) and the terrain altitude (SL::spTerrain vslot 0x30).
     virtual IPollutionVisualEffect* CreateVisualEffect(std::uint32_t /*group*/, std::uint32_t /*type*/) { return nullptr; }

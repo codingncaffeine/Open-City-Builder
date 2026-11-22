@@ -125,6 +125,8 @@ public:
     void GarbageDeals(std::uint32_t, std::vector<IPollutionDeal*>&) override {}
     void SetSanitationLineItemCost(int, std::int64_t) override {}
     bool OccupantFootprint(void*, PollutionOccupantFootprint&) override { return false; }
+    int dealRefreshes = 0;
+    void RefreshNeighborDeals() override { ++dealRefreshes; }
 };
 }  // namespace
 
@@ -251,6 +253,11 @@ int main() {
         sim.GetGarbageBuildings(out);
         CHECK(out.size() == 4);
         sim.IncineratorList().clear(); sim.WasteToEnergyList().clear(); sim.RecyclingList().clear();
+    }
+    {   // the monthly pass ends by marking the neighbor deals dirty, once
+        host.dealRefreshes = 0;
+        sim.DoMonthlySimulation();
+        CHECK(host.dealRefreshes == 1);
     }
     {   // occupant passes
         struct Lot final : IPollutionLot { std::uint32_t state = 0; void SetState(std::uint32_t v) override { state = v; } };

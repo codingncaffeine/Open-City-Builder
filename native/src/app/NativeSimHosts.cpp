@@ -42,6 +42,7 @@
 #include "app/NativeDemolition.h"
 #include "app/NativePlumbing.h"
 namespace native { void InstallTrafficNetworkMapHost(); }   // app/NativeTrafficNetworkMap.cpp
+namespace native { void NativeMarkNeighborDealsDirty(); }   // app/NativeRegion.cpp
 namespace sc4 { class ITrafficAutomatonHost; extern ITrafficAutomatonHost* g_loadTrafficHost; }   // tools/city_probe_hostglobals.cpp
 namespace sc4 {
 class IVehicleHost;
@@ -283,6 +284,8 @@ public:
         SC4_UNWIRED("cSC4PollutionSimulator: the traffic simulator's air-polluting traffic map is not read (traffic adds no air pollution)");
         return 0;
     }
+    // SL::spNeighborsSim vslot 0x7c MarkDealsDirty at the month's end, as the power and plumbing hosts do.
+    void RefreshNeighborDeals() override { NativeMarkNeighborDealsDirty(); }
     // PARTIAL: no neighbour deals natively (the region's connections are not modelled).
     void GarbageDeals(std::uint32_t, std::vector<IPollutionDeal*>& out) override {
         SC4_UNWIRED("cSC4PollutionSimulator: the neighbor garbage deals are not read (none)");

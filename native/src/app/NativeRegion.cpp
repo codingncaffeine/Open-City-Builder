@@ -509,6 +509,11 @@ private:
 
 cISC4RegionalCity* NativeCurrentRegionalCity() { return g_app ? g_app->GetRegionalCity() : nullptr; }
 
+// SL::spNeighborsSim vslot 0x7c MarkDealsDirty: the simulators that change what the neighbor deals carry ask for a recount.
+void NativeMarkNeighborDealsDirty() {
+    if (sc4::cSC4NeighborsSimulator* neighbors = NeighborsSim()) neighbors->MarkDealsDirty();
+}
+
 void InstallNeighborHosts() {
     sc4::SetNeighborsHost(&g_neighborsHost);
     sc4::SetNeighborConnectionHost(&g_connectionHost);
