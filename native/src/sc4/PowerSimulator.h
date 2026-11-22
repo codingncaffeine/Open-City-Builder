@@ -56,7 +56,7 @@ constexpr std::uint32_t kMsgPowerOccupantInserted = 0x99ef1142, kMsgPowerOccupan
 constexpr std::uint32_t kMsgPowerTick = 0x66956814, kMsgPowerTickFast = 0x6695681a, kMsgPowerMonth = 0x66956816;
 constexpr std::uint32_t kMsgPowerTunablesChanged = 0xca1b151c, kMsgPowerLotStateChanged = 0xe8bda2e7;
 constexpr std::uint32_t kMsgPowerDealsChanged = 0xea418d8f, kMsgPowerPoleCosts = 0x26d31ec1, kMsgPowerNetworkCells = 0x07699455;
-constexpr std::uint32_t kMsgPowerTerrain = 0x278e6003, kMsgPowerCheat = 0xc2c09554;
+constexpr std::uint32_t kMsgPowerTerrain = 0x278e6003, kMsgPowerOrdinanceChanged = 0xc2c09554;
 constexpr std::uint32_t kMsgPowerCellsChanged = 0x8a07ae00, kMsgPowerGridChanged = 0x6a07c2ee;
 
 struct PowerRect { int left = 0, top = 0, right = 0, bottom = 0; };   // inclusive
@@ -112,6 +112,19 @@ public:
     virtual bool LotCentreIfStateOne(cIGZUnknown* object, int& x, int& z) { (void)object; (void)x; (void)z; return false; }
     // AgePowerPlant past the plant's second wear limit: its lot gets condition 2
     virtual void DistressPlantLot(cISC4Occupant* plant) { (void)plant; }
+    // AgePowerPlant past the plant's failure limit (i386 0x001821de): the lot at the plant's cell (lot manager vslot 0x14) is
+    // demolished through the simulator's demolition (+0x34 vslot 0x1c DemolishLots(true, {lot}, 0, flags, false)). False when
+    // there is no lot there.
+    virtual bool DestroyPlantLot(cISC4Occupant* plant, std::uint32_t flags) { (void)plant; (void)flags; return false; }
+    // SL::spPollutionSim vslot 0x108 AddRadiationToCity(position, amount, radius)
+    virtual void AddRadiation(const float position[3], float amount, float radius) { (void)position; (void)amount; (void)radius; }
+    // SC4PostMessage2(type, 0, 0, 0, 0, plant): a nuclear plant that failed (0xaa552f77)
+    virtual void PostPlantMessage(std::uint32_t type, cISC4Occupant* plant) { (void)type; (void)plant; }
+    // The nuclear free zone ordinance (0xe0d0722e) going on: the plants' lots (lot manager vslot 0x38) demolished in one call
+    // (spDemolition vslot 0x1c DemolishLots(true, lots, 0, 1, false)), then the 3D view's current tool (vslot 0x60) is dropped
+    // (vslot 0x68(0)) when its class (vslot 0x14) is 0x88f154fb.
+    virtual void DestroyPlantLots(const std::vector<cISC4Occupant*>& plants, std::uint32_t flags) { (void)plants; (void)flags; }
+    virtual void DropViewToolOfClass(std::uint32_t clsid) { (void)clsid; }
     // neighbours (+0x30): deals of a type (vslot 0x74), power connections (0x44, or 0x48 to one city), an unvisited connection to a
     // city (0x3c) and whether the connection's other side is live (0x38 -> 0x34); the deal's city is its vslot [7]
     virtual void Deals(std::uint32_t type, std::vector<cISC4NeighborDeal*>& out) { (void)type; (void)out; }

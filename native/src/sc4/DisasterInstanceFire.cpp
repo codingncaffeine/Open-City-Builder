@@ -442,7 +442,7 @@ void cSC4DisasterInstanceFire::ToastOccupant(cISC4Occupant* occupant) {
             float position[3] = {};
             occupant->GetPosition(position);
             g_host->DemolishRegion(lot, rubble | 0x300);
-            if (amount > 0.0f) g_host->AddRadiation(position, radius, amount);
+            if (radius > 0.0f) g_host->AddRadiation(position, amount, radius);
         }
     }
     ++damaged_;

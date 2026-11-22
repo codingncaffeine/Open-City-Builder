@@ -131,6 +131,27 @@ public:
     }
     void PostMessage(std::uint32_t type, std::uint32_t, const PowerRect*) override { posted.push_back(type); }
     void AddHistory(std::uint32_t id, std::int64_t value) override { history[id] = value; }
+    // plant failure and the nuclear free zone
+    bool hasLot = true;
+    std::vector<std::pair<cISC4Occupant*, std::uint32_t>> destroyed;
+    std::vector<std::pair<float, float>> radiation;   // amount, radius
+    std::vector<std::pair<std::uint32_t, cISC4Occupant*>> plantMessages;
+    std::vector<std::vector<cISC4Occupant*>> destroyedGroups;
+    std::vector<std::uint32_t> groupFlags, droppedTools;
+    int distressed = 0;
+    void DistressPlantLot(cISC4Occupant*) override { ++distressed; }
+    bool DestroyPlantLot(cISC4Occupant* plant, std::uint32_t flags) override {
+        if (!hasLot) return false;
+        destroyed.emplace_back(plant, flags);
+        return true;
+    }
+    void AddRadiation(const float*, float amount, float radius) override { radiation.emplace_back(amount, radius); }
+    void PostPlantMessage(std::uint32_t type, cISC4Occupant* plant) override { plantMessages.emplace_back(type, plant); }
+    void DestroyPlantLots(const std::vector<cISC4Occupant*>& plants, std::uint32_t flags) override {
+        destroyedGroups.push_back(plants);
+        groupFlags.push_back(flags);
+    }
+    void DropViewToolOfClass(std::uint32_t clsid) override { droppedTools.push_back(clsid); }
 };
 
 void MakeConsumer(Building& b, std::uint32_t draw) { cSCPropertyHelp::SetPropertyValue(&b.properties, kPowerConsumed, draw); }
@@ -261,6 +282,62 @@ int main() {
         CHECK(host.disconnected.size() == 1 && host.disconnected[0].first == &inside && host.disconnected[0].second == &outside);
         host.poles.clear();
         host.lines.clear();
+    }
+    {   // AgePowerPlant (i386 0x001821de): past the failure limit with failure flags the plant's lot is demolished with flags | 0x300,
+        // its radiation (0xaa5c04c5 amount, 0xaa5c04c8 radius) released, and a nuclear plant (type 5) posts 0xaa552f77; without
+        // flags it is only distressed; without a lot nothing happens; no radius: no radiation and no message
+        Building nuke(20, 20, 21, 21);
+        MakePlant(nuke, 50);
+        cSCPropertyHelp::SetPropertyValue(&nuke.properties, kPowerPlantPowerType, std::int32_t(5));
+        cSCPropertyHelp::SetPropertyValue(&nuke.properties, 0xc910b4cf, 1.5f);   // wear
+        cSCPropertyHelp::SetPropertyValue(&nuke.properties, 0xea1cf221, 0.9f);   // distress limit
+        cSCPropertyHelp::SetPropertyValue(&nuke.properties, 0xea1cf222, 1.0f);   // failure limit
+        cSCPropertyHelp::SetPropertyValue(&nuke.properties, 0xaa5c04c5, 40.0f);  // radiation amount
+        cSCPropertyHelp::SetPropertyValue(&nuke.properties, 0xaa5c04c8, 6.0f);   // radiation radius
+        power->AgePowerPlant(&nuke);                          // no failure flags: distressed only
+        CHECK(host.distressed == 1 && host.destroyed.empty());
+        cSCPropertyHelp::SetPropertyValue(&nuke.properties, 0x6a43150f, std::uint32_t(0x4));
+        power->AgePowerPlant(&nuke);
+        CHECK(host.distressed == 1);
+        CHECK(host.destroyed.size() == 1 && host.destroyed[0].first == &nuke && host.destroyed[0].second == 0x304);
+        CHECK(host.radiation.size() == 1 && host.radiation[0].first == 40.0f && host.radiation[0].second == 6.0f);
+        CHECK(host.plantMessages.size() == 1 && host.plantMessages[0].first == 0xaa552f77 && host.plantMessages[0].second == &nuke);
+        cSCPropertyHelp::SetPropertyValue(&nuke.properties, kPowerPlantPowerType, std::int32_t(1));   // coal: no message
+        power->AgePowerPlant(&nuke);
+        CHECK(host.destroyed.size() == 2 && host.radiation.size() == 2 && host.plantMessages.size() == 1);
+        cSCPropertyHelp::SetPropertyValue(&nuke.properties, 0xaa5c04c8, 0.0f);   // no radius: nothing released
+        power->AgePowerPlant(&nuke);
+        CHECK(host.destroyed.size() == 3 && host.radiation.size() == 2);
+        host.hasLot = false;                                  // no lot under it: nothing
+        power->AgePowerPlant(&nuke);
+        CHECK(host.destroyed.size() == 3 && host.distressed == 1);
+        host.hasLot = true;
+    }
+    {   // 0xc2c09554 with the nuclear free zone (0xe0d0722e) going on: the nuclear plants' lots go in one call (flags 1) and a
+        // current place-lot tool (0x88f154fb) is dropped; another ordinance, or the zone going off, does nothing
+        Building nuke(30, 30, 31, 31);
+        MakePlant(nuke, 50);
+        cSCPropertyHelp::SetPropertyValue(&nuke.properties, kPowerPlantPowerType, std::int32_t(5));
+        host.occupants.push_back(&nuke);
+        power->DoOccupantInserted(&nuke);
+        auto* message = new cRZMessage2Standard();
+        message->AddRef();
+        message->SetType(0xc2c09554);
+        message->SetData1(0xe0d0722e);
+        message->SetData2(0);
+        power->DoMessage(message);
+        message->SetData1(0x12345678);
+        message->SetData2(1);
+        power->DoMessage(message);
+        CHECK(host.destroyedGroups.empty() && host.droppedTools.empty());
+        message->SetData1(0xe0d0722e);
+        power->DoMessage(message);
+        message->Release();
+        CHECK(host.destroyedGroups.size() == 1 && host.destroyedGroups[0].size() == 1 && host.destroyedGroups[0][0] == &nuke);
+        CHECK(host.groupFlags.size() == 1 && host.groupFlags[0] == 1);
+        CHECK(host.droppedTools.size() == 1 && host.droppedTools[0] == 0x88f154fb);
+        power->DoOccupantRemoved(&nuke);
+        host.occupants.pop_back();
     }
     CHECK(power->Shutdown());
     power->Release();

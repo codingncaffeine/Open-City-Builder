@@ -29,6 +29,7 @@ constexpr std::uint32_t kPlantExpenseByWear = 0x0911e2e7;    // curve: wear -> e
 constexpr std::uint32_t kPlantWearRate = 0xea1cf220;
 constexpr std::uint32_t kPlantWearDistress = 0xea1cf221, kPlantWearFail = 0xea1cf222;
 constexpr std::uint32_t kPlantFailureFlags = 0x6a43150f;
+constexpr std::uint32_t kPlantRadiationAmount = 0xaa5c04c5, kPlantRadiationRadius = 0xaa5c04c8;
 }  // namespace
 
 cSC4PowerSimulator::cSC4PowerSimulator(IPowerHost* host, cRZRandom* random) : host_(host), random_(random) {}
@@ -75,7 +76,7 @@ bool cSC4PowerSimulator::Init() {
                              0xaa120d6du})
         host_->CreateHistory(id, 2);
     for (std::uint32_t message : {kMsgPowerOccupantInserted, kMsgPowerOccupantRemoved, kMsgPowerNetworkCells, kMsgPowerTunablesChanged,
-                                  kMsgPowerTerrain, kMsgPowerCheat, kMsgPowerLotStateChanged, kMsgPowerDealsChanged,
+                                  kMsgPowerTerrain, kMsgPowerOrdinanceChanged, kMsgPowerLotStateChanged, kMsgPowerDealsChanged,
                                   kMsgPowerCityEstablished, kMsgPowerPoleCosts})
         host_->AddNotification(self, message);
     const int cellsX = host_->CityCellsX(), cellsZ = host_->CityCellsZ();
@@ -96,7 +97,7 @@ bool cSC4PowerSimulator::Shutdown() {
     initialised_ = false;
     cIGZMessageTarget2* self = this;
     for (std::uint32_t message : {kMsgPowerOccupantInserted, kMsgPowerOccupantRemoved, kMsgPowerNetworkCells, kMsgPowerTunablesChanged,
-                                  kMsgPowerTerrain, kMsgPowerCheat, kMsgPowerLotStateChanged, kMsgPowerDealsChanged,
+                                  kMsgPowerTerrain, kMsgPowerOrdinanceChanged, kMsgPowerLotStateChanged, kMsgPowerDealsChanged,
                                   kMsgPowerCityEstablished, kMsgPowerPoleCosts})
         host_->RemoveNotification(self, message);
     host_->RemoveAgent(self);
@@ -160,7 +161,7 @@ void cSC4PowerSimulator::DoTerrainHeightsChanged(const PowerRect& rect) {
 }
 
 // ---- messages ---------------------------------------------------------------------------------------------
-// PARTIAL: the network manager's half of 0x07699455 and the meltdown cheat (0xc2c09554) are not ported.
+// PARTIAL: the network manager's half of 0x07699455 is not ported.
 bool cSC4PowerSimulator::DoMessage(cIGZMessage2* message) {
     if (!message) return true;
     auto* standard = static_cast<cIGZMessage2Standard*>(message);
@@ -208,8 +209,20 @@ bool cSC4PowerSimulator::DoMessage(cIGZMessage2* message) {
         if (RecomputeInfrastructureCosts()) refresh_ = true;
         break;
     }
-    case kMsgPowerCheat:
-        SC4_UNWIRED("cSC4PowerSimulator::DoMessage: meltdown cheat 0xc2c09554 not ported");
+    case kMsgPowerOrdinanceChanged:
+        // The nuclear free zone (0xe0d0722e) going on: every nuclear plant (power type 5) is demolished, and a current tool of
+        // class 0x88f154fb is dropped.
+        if (static_cast<std::uint32_t>(standard->GetData1()) == 0xe0d0722eu && standard->GetData2() != 0) {
+            std::vector<cISC4Occupant*> nuclear;
+            for (const PowerPlantEntry& entry : plants_) {
+                std::uint32_t powerType = 0;
+                if (entry.occupant && cSCPropertyHelp::GetPropertyValue(entry.occupant->AsPropertyHolder(), kPowerPlantPowerType, powerType) && powerType == 5)
+                    nuclear.push_back(entry.occupant);
+            }
+            if (std::getenv("SC4_POWERDEBUG")) std::fprintf(stderr, "power: nuclear free zone, %zu nuclear plants demolished\n", nuclear.size());
+            host_->DestroyPlantLots(nuclear, 1);
+            host_->DropViewToolOfClass(0x88f154fbu);
+        }
         break;
     case kMsgPowerNetworkCells:
         SC4_UNWIRED("cSC4PowerSimulator::DoMessage: the network manager half of 0x07699455 not ported");
@@ -965,7 +978,7 @@ void cSC4PowerSimulator::DoOccupantRemoved(cISC4Occupant* occupant) {
 
 // @ i386 0x001821de. Once a month: the plant wears by its wear rate, scaled by the department's funding and by how much of its
 // output it delivers. Past 100% use it counts as overworked, from 0.8 wear as aged; at its first wear limit its lot is distressed.
-//   PARTIAL: a plant past its failure limit with failure flags (0x6a43150f) is not demolished (the disaster and its pollution burst).
+// Past its failure limit, with failure flags (0x6a43150f), the plant's lot is demolished and its radiation released.
 void cSC4PowerSimulator::AgePowerPlant(cISC4Occupant* plant) {
     cISCPropertyHolder* holder = plant->AsPropertyHolder();
     float wear = 0.0f, rate = 0.0f, distressAt = 99.0f, failAt = 99.0f;
@@ -991,7 +1004,27 @@ void cSC4PowerSimulator::AgePowerPlant(cISC4Occupant* plant) {
                 host_->DistressPlantLot(plant);
             }
         } else {
-            SC4_UNWIRED("cSC4PowerSimulator::AgePowerPlant: a plant past its failure limit with failure flags is not destroyed (disaster and pollution burst)");
+            // The plant fails: its lot is demolished with its failure flags (the rubble kind) and 0x300, then its radiation
+            // (0xaa5c04c5 amount, 0xaa5c04c8 radius) goes into the city, and a nuclear plant (power type 5) posts 0xaa552f77.
+            // The values are read before the demolition, which can release the plant.
+            float position[3] = {0.0f, 0.0f, 0.0f};
+            plant->GetPosition(position);
+            float amount = 0.0f, radius = 0.0f;
+            std::uint32_t powerType = 0;
+            cSCPropertyHelp::GetPropertyValue(holder, kPlantRadiationRadius, radius);
+            cSCPropertyHelp::GetPropertyValue(holder, kPlantRadiationAmount, amount);
+            const bool nuclear = cSCPropertyHelp::GetPropertyValue(holder, kPowerPlantPowerType, powerType) && powerType == 5;
+            plant->AddRef();
+            if (host_->DestroyPlantLot(plant, failureFlags | 0x300)) {
+                if (std::getenv("SC4_POWERDEBUG"))
+                    std::fprintf(stderr, "power: plant at %.0f,%.0f failed (wear %.3f, limit %.3f, flags %x) radiation %.1f radius %.1f%s\n", position[0],
+                                 position[2], double(wear), double(failAt), failureFlags, double(amount), double(radius), nuclear ? " nuclear" : "");
+                if (0.0f < radius) {
+                    host_->AddRadiation(position, amount, radius);
+                    if (nuclear) host_->PostPlantMessage(0xaa552f77, plant);
+                }
+            }
+            plant->Release();
         }
     }
 }

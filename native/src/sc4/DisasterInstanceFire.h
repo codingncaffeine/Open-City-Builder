@@ -35,7 +35,7 @@ constexpr std::uint32_t kMessageSimTick = 0x66956813, kMessageAnimationTick = 0x
 constexpr std::uint32_t kPropertyFlammability = 0x29244db5;       // nonzero: the occupant can burn
 constexpr std::uint32_t kPropertyRubbleFlags = 0x6a43150f;        // demolition effect flags of the burnt lot
 constexpr std::uint32_t kPropertyDemolishLotWhenBurnt = 0x2a89b677;
-constexpr std::uint32_t kPropertyRadiationAmount = 0xaa5c04c8, kPropertyRadiationRadius = 0xaa5c04c5;
+constexpr std::uint32_t kPropertyRadiationRadius = 0xaa5c04c8, kPropertyRadiationAmount = 0xaa5c04c5;
 constexpr std::uint32_t kFireTargetTypeFlora = 0x74758926, kFireTargetTypeProp = 0xa823821e;
 constexpr std::uint32_t kFireTickPriority = 0xc0;
 constexpr int kLotConditionBurning = 5, kLotConditionBurntOut = 6;
@@ -67,7 +67,7 @@ public:
     virtual bool OccupantLotRect(cISC4Occupant* occupant, SC4CellRect& rect) = 0;    // lot manager vslot 0x38 + lot vslot 0x38
     virtual void SetOccupantLotCondition(cISC4Occupant* occupant, int condition) = 0;   // lot vslot 0x90
     virtual void DemolishRegion(const SC4CellRect& rect, std::uint32_t flags) = 0;   // demolition vslot 0x18 (commit, privilege 0)
-    virtual void AddRadiation(const float position[3], float radius, float amount) = 0;   // pollution simulator vslot 0x108
+    virtual void AddRadiation(const float position[3], float amount, float radius) = 0;   // pollution simulator vslot 0x108 AddRadiationToCity
     virtual void RecordHistory(std::uint32_t id, std::int32_t value) = 0;            // history warehouse vslot 0x30
     virtual void AddTickable(cIGZMessageTarget2* target, std::uint32_t priority) = 0;      // SL::ATM() vslot 0x14
     virtual void RemoveTickable(cIGZMessageTarget2* target, std::uint32_t priority) = 0;   // vslot 0x18

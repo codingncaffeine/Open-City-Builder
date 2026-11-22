@@ -1431,6 +1431,8 @@ int RunScenario(const std::string& path) {
         } else if (command == "tunnels") {   // tunnels: every tunnel portal, its model, its other end and its paths
             native::NativeTunnelReport();
             native::NativeTrafficTunnelReport();
+        } else if (command == "plantwear") {   // plantwear: every power plant's wear just past its failure limit (the next month fails it)
+            native::NativeWearOutPowerPlants();
         } else if (command == "powerfunding") {   // powerfunding PERCENT: the power department's funding (as the budget window sets it)
             int percent = 100;
             words >> percent;

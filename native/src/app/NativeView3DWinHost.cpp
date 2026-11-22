@@ -1043,3 +1043,11 @@ void NativeCityViewReport() {
 
 
 }  // namespace native
+
+namespace native {
+void DropViewToolOfClass(std::uint32_t clsid) {
+    sc4::cSC4View3DWin* view = CityView3DWin();
+    sc4::cSC4ViewInputControl* tool = view ? view->GetCurrentViewInputControl() : nullptr;
+    if (tool && tool->GetID() == clsid) view->RemoveCurrentViewInputControl(false);
+}
+}  // namespace native

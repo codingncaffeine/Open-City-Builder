@@ -524,9 +524,9 @@ public:
         native::DemolishRegion(true, region, 0, flags, false, &cost);
         if (Trace()) std::fprintf(stderr, "fire: demolished %d,%d..%d,%d flags %x\n", rect.x0, rect.z0, rect.x1, rect.z1, flags);
     }
-    void AddRadiation(const float position[3], float radius, float amount) override {
+    void AddRadiation(const float position[3], float amount, float radius) override {
         if (auto* pollution = CityAs<cSC4PollutionSimulator>(CityComponent::PollutionSimulator))
-            pollution->AddRadiationToCity(position, radius, amount);
+            pollution->AddRadiationToCity(position, amount, radius);
     }
     void RecordHistory(std::uint32_t id, std::int32_t value) override {
         if (auto* history = CityAs<cSC4HistoryWarehouse>(CityComponent::HistoryWarehouse)) history->RecordHistoryData(id, value);

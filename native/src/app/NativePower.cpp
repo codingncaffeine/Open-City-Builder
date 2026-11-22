@@ -7,6 +7,9 @@
 #include <vector>
 
 #include "app/NativeCity.h"
+#include "app/NativeCitySystems.h"
+#include "app/NativeDemolition.h"
+#include "sc4/PollutionSimulator.h"
 #include "gz/cIGZIStream.h"
 #include "gz/cIGZOStream.h"
 #include "rz/cRZMessage2Standard.h"
@@ -256,6 +259,32 @@ public:
         return true;
     }
     void DistressPlantLot(cISC4Occupant* plant) override { if (cSC4Lot* lot = LotUnder(plant)) lot->SetCondition(2); }
+    bool DestroyPlantLot(cISC4Occupant* plant, std::uint32_t flags) override {
+        cSC4Lot* lot = LotUnder(plant);
+        if (!lot) return false;
+        native::DemolishLots(true, &lot, 1, 0, flags, false, nullptr);
+        return true;
+    }
+    void AddRadiation(const float position[3], float amount, float radius) override {
+        if (auto* pollution = Component<cSC4PollutionSimulator>(CityComponent::PollutionSimulator, kGZCLSID_cSC4PollutionSimulator))
+            pollution->AddRadiationToCity(position, amount, radius);
+    }
+    void PostPlantMessage(std::uint32_t type, cISC4Occupant* plant) override {   // SC4PostMessage2(type, 0, 0, 0, 0, plant)
+        if (!SL::spMS2) return;
+        auto* message = new cRZMessage2Standard();
+        message->AddRef();
+        message->SetType(type);
+        message->SetIGZUnknown(plant);
+        SL::spMS2->MessagePost(message, false);
+        message->Release();
+    }
+    void DestroyPlantLots(const std::vector<cISC4Occupant*>& plants, std::uint32_t flags) override {
+        std::vector<cSC4Lot*> lots;
+        for (cISC4Occupant* plant : plants)
+            if (cSC4Lot* lot = LotUnder(plant)) lots.push_back(lot);
+        native::DemolishLots(true, lots.data(), static_cast<int>(lots.size()), 0, flags, false, nullptr);
+    }
+    void DropViewToolOfClass(std::uint32_t clsid) override { native::DropViewToolOfClass(clsid); }
     void Deals(std::uint32_t type, std::vector<cISC4NeighborDeal*>& out) override {
         cSC4NeighborsSimulator* neighbors = Neighbors();
         if (!neighbors) return;
@@ -410,6 +439,35 @@ void NativeSetPowerFunding(int percent) {
     cSC4DepartmentBudget* department = g_power.Department();
     if (department) department->SetFundingPercentage(static_cast<float>(percent) * 0.01f, 0);
     std::printf("powerfunding %d -> %s %.2f\n", percent, department ? "department" : "no department", department ? department->GetFundingPercentage() : 0.0f);
+}
+
+// Kit command `plantwear`: every power plant's wear is set just past its failure limit (0xea1cf222) and the monthly
+// AgePowerPlant runs on it at once (no wear growth: the funding curve's share is added to a value already past the limit),
+// so the plants that have failure flags (0x6a43150f) fail now. Lists each plant.
+void NativeWearOutPowerPlants() {
+    cSC4PowerSimulator* simulator = NativePowerSimulator();
+    if (!simulator) { std::printf("plantwear: no power simulator\n"); return; }
+    std::vector<cISC4Occupant*> plants;   // AgePowerPlant can demolish a plant, which takes it off the list
+    for (const PowerPlantEntry& entry : simulator->Plants()) {
+        if (!entry.occupant) continue;
+        entry.occupant->AddRef();
+        plants.push_back(entry.occupant);
+    }
+    for (cISC4Occupant* plant : plants) {
+        struct { cISC4Occupant* occupant; } entry{plant};
+        auto* holder = entry.occupant->AsPropertyHolder();
+        float failAt = 99.0f;
+        std::uint32_t flags = 0, type = 0;
+        cSCPropertyHelp::GetPropertyValue(holder, 0xea1cf222, failAt);
+        cSCPropertyHelp::GetPropertyValue(holder, 0x6a43150f, flags);
+        cSCPropertyHelp::GetPropertyValue(holder, kPowerPlantPowerType, type);
+        float position[3] = {};
+        entry.occupant->GetPosition(position);
+        cSCPropertyHelp::SetPropertyValue(holder, 0xc910b4cf, failAt + 0.01f);
+        std::printf("plantwear: plant type %u at %.0f,%.0f failure limit %.2f flags %x\n", type, position[0], position[2], double(failAt), flags);
+        simulator->AgePowerPlant(plant);
+        plant->Release();
+    }
 }
 
 bool NativeCellPowered(int x, int z) {
