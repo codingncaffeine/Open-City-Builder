@@ -313,6 +313,7 @@ void NativeWallReport() {
 // The lot developer's foundations ask for a lot's retaining walls and for its neighbours' (cSC4LotDeveloper::AddLotFoundation); ClearLot
 // removes them (create false).
 void NativeAddRetainingWallOccupant(sc4::cSC4Lot* lot, bool create) { cSC4LotRetainingWallOccupant::AddRetainingWallOccupant(lot, create); }
+void NativeUpdateRetainingWalls(sc4::cSC4Lot* lot) { cSC4LotRetainingWallOccupant::UpdateRetainingWalls(lot); }
 void NativeUpdateSurroundingRetainingWalls(sc4::cSC4Lot* lot) { cSC4LotRetainingWallOccupant::UpdateSurroundingRetainingWalls(lot); }
 
 // The model maker's retaining wall case (cSC4ModelMaker::AddModels, i386 0x0024aee0).

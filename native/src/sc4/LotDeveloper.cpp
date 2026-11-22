@@ -1525,7 +1525,7 @@ std::uint32_t cSC4LotDeveloper::PickLotBaseTextureForLot(cSC4Lot* lot, const std
 // @ i386 0x000f2b1c. Only developed lots (state 2 and up). A lot at a fixed altitude (flag bits 0..1) has its foundation and
 // retaining walls updated; any other lot, unless the reason is 5, takes its new slope: past the configuration's maximum slope it
 // needs a foundation, and a slope past 0.25 moves its buildings, props and flora to the new ground. The base texture follows the
-// ground either way and the lot keeps the new slope. (UpdateLotRetainingWalls, vslot 0xf8, is empty in the original.)
+// ground either way and the lot keeps the new slope.
 bool cSC4LotDeveloper::UpdateLotElements(cSC4Lot* lot, std::uint32_t reason) {
     if (!lot || lot->GetState() < 2) return true;                                  // lot vslot 0x84
     bool needsFoundation = false;
@@ -1539,6 +1539,7 @@ bool cSC4LotDeveloper::UpdateLotElements(cSC4Lot* lot, std::uint32_t reason) {
         }
     } else {
         UpdateLotFoundation(lot);                                                  // vslot 0xf4
+        UpdateLotRetainingWalls(lot);                                              // vslot 0xf8
     }
     UpdateLotBaseTextureOccupant(lot, needsFoundation);                            // vslot 0xb4
     lot->UpdateSlope();                                                            // lot vslot 0x50
@@ -1547,9 +1548,9 @@ bool cSC4LotDeveloper::UpdateLotElements(cSC4Lot* lot, std::uint32_t reason) {
 
 // @ i386 0x000f28ce. The lot's buildings (0x278128a0), props (0xa823821e) and flora (0x74758926) stand where their configuration
 // object puts them on the new ground (an occupant that is no configuration object keeps x / z and takes the terrain under it); one
-// that is off by more than 0.1 in height is moved there and the occupant manager is told.
-// PARTIAL: a moved building that needs a foundation and has none gets one (vslots 0xc0 GetFoundationByOccupant -> 0xc8
-// GetFoundationByPosition, 0xe4, 0xec): the position lookup is not ported yet, so a moved building gets no foundation of its own.
+// that is off by more than 0.1 in height is moved there and the occupant manager is told. A moved building's foundation goes and,
+// when the building's ground is steeper than the tunable allows, a foundation of the same type (of the configuration's type when
+// it had none) is built under it (the PC build, 0x006C91F0; the Mac build only adds one to a building that has none).
 void cSC4LotDeveloper::UpdateLotObjectAltitudes(cSC4Lot* lot) {
     if (!lot || !g_construction) return;
     cSC4LotConfiguration* configuration = g_construction->Configuration(lot->GetLotConfiguration());   // lot vslot 0x24
@@ -1573,8 +1574,19 @@ void cSC4LotDeveloper::UpdateLotObjectAltitudes(cSC4Lot* lot) {
         position[1] = target[1];
         occupant->SetPosition(position);                                           // occupant vslot 0x24
         g_construction->MoveOccupant(occupant, true);                              // +0x28 vslot 0x60
-        if (type == 0x278128a0u)
-            SC4_UNWIRED("cSC4LotDeveloper::UpdateLotObjectAltitudes: a moved building is not checked for a foundation of its own (GetFoundationByOccupant / ByPosition)");
+        if (type != 0x278128a0u) continue;
+        std::uint32_t foundationType = 0;
+        if (cISC4Occupant* foundation = GetFoundationByOccupant(occupant)) {       // vslot 0xc0
+            foundationType = g_construction->FoundationTypeOf(foundation);          // foundation vslot 0x10
+            RemoveBuildingFoundation(occupant);                                     // vslot 0xf0
+        }
+        if (!IsLotObjectFoundationRequired(occupant)) continue;
+        void* raw = nullptr;
+        if (!occupant->QueryInterface(kGZIID_cISC4BuildingOccupant, &raw) || !raw) continue;
+        auto* building = static_cast<cISC4BuildingOccupant*>(raw);
+        if (foundationType != 0) AddBuildingFoundation(building, foundationType);
+        else AddBuildingFoundation(building, configuration);
+        building->Release();
     }
 }
 
@@ -1737,6 +1749,26 @@ bool cSC4LotDeveloper::RemoveBuildingFoundation(cISC4Occupant* building) {
     float position[3] = {0.0f, 0.0f, 0.0f};
     building->GetPosition(position);                                                // occupant vslot 0x20
     return RemoveFoundation(1, position[0], position[2]);                           // vslot 0xd0
+}
+
+// @ i386 0x000ec876: the foundation under an occupant, by its position: usage 1 for a building, 3 for a prop, 4 for anything else.
+cISC4Occupant* cSC4LotDeveloper::GetFoundationByOccupant(cISC4Occupant* occupant) {
+    if (!occupant) return nullptr;
+    float position[3] = {0.0f, 0.0f, 0.0f};
+    occupant->GetPosition(position);                                                // occupant vslot 0x20
+    const std::uint32_t type = occupant->GetType();                                 // occupant vslot 0x1c
+    const int usage = type == 0x278128a0u ? 1 : type == 0xa823821eu ? 3 : 4;
+    return GetFoundationByPosition(usage, position[0], position[2]);                // vslot 0xc8
+}
+
+// @ i386 0x000ecca2: an object needs a foundation when the ground it covers (water included) is steeper than the flatness tunable.
+bool cSC4LotDeveloper::IsLotObjectFoundationRequired(cISC4Occupant* occupant) {
+    return tunables_.value12c < GetOccupantSlope(occupant, true);                   // vslot 0x7c, +0xd4
+}
+
+// @ i386 0x000ece8c: the lot's retaining walls follow its new altitude.
+void cSC4LotDeveloper::UpdateLotRetainingWalls(cSC4Lot* lot) {
+    if (lot && g_construction) g_construction->UpdateRetainingWalls(lot);
 }
 
 // @ i386 0x000ecbee: a fixed lot's foundation is rebuilt at its altitude (the same type), or made when it has none.

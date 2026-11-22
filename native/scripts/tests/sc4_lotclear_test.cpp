@@ -1,9 +1,11 @@
 // The lot developer's clearing paths and what they take with them: ClearLot (Mac i386 0x000f385c) removes the lot's retaining
 // wall occupant and its foundation and updates the neighbors' foundations and walls; ClearLotBuildings (0x000ec5f6) removes the
-// buildings with their foundations and the lot's zot; StartConstruction (0x000f48d0) takes the road zot down.
+// buildings with their foundations and the lot's zot; StartConstruction (0x000f48d0) takes the road zot down; UpdateLotElements
+// (0x000f2b1c) updates a fixed lot's retaining walls and the refit gives a moved building its foundation.
 #include <cstdio>
 #include <vector>
 
+#include "sc4/BuildingOccupant.h"
 #include "sc4/Lot.h"
 #include "sc4/LotDeveloper.h"
 #include "sc4/Occupant.h"
@@ -81,6 +83,46 @@ public:
     void PostLotNotification(cSC4Lot&, std::uint32_t data1) override { notifications.push_back(data1); }
 };
 
+// A building occupant standing at a position (the refit after a terrain change asks for its building interface).
+class Building final : public cISC4BuildingOccupant, public cSC4Occupant {
+public:
+    Building(float x, float y, float z) : at_{x, y, z} { type_ = 0x278128a0u; }
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid == kGZIID_cISC4BuildingOccupant) { *out = static_cast<cISC4BuildingOccupant*>(this); AddRef(); return true; }
+        return cSC4Occupant::QueryInterface(iid, out);
+    }
+    std::uint32_t AddRef() override { return cSC4Occupant::AddRef(); }
+    std::uint32_t Release() override { return cSC4Occupant::Release(); }
+    void GetPosition(float* xyz) override { for (int i = 0; i < 3; ++i) xyz[i] = at_[i]; }
+    void SetPosition(const float* xyz) override { for (int i = 0; i < 3; ++i) at_[i] = xyz[i]; }
+    void GetBoundingBox(float* lo, float* hi) override {
+        for (int i = 0; i < 3; ++i) { lo[i] = at_[i] - 4.0f; hi[i] = at_[i] + 4.0f; }
+    }
+    cISC4Occupant* AsOccupant() override { return static_cast<cSC4Occupant*>(this); }
+    std::uint32_t GetBuildingType() const override { return 0x1234u; }
+    void SetBuildingType(std::uint32_t) override {}
+    std::int32_t GetBuildingAge() const override { return 0; }
+    void SetBuildingAge(std::int32_t) override {}
+    void SetBoundingBox(const float*, const float*) override {}
+    const float& GetCompletionPercent() override { return completion_; }
+    void SetCompletionPercent(float) override {}
+    const BuildingProfile& GetBuildingProfile() const override { return profile_; }
+    const cRZString& GetBuildingName() const override { return name_; }
+    const cRZString& GetExemplarName() const override { return name_; }
+    std::int32_t GetOrientation() const override { return 2; }
+    bool SetOrientation(std::int32_t) override { return false; }
+    bool IsLit() const override { return false; }
+    void SetLit(bool) override {}
+    void SetName(const cRZString&) override {}
+    bool GetName(cRZString&) override { return false; }
+    float Height() const { return at_[1]; }
+private:
+    float at_[3];
+    float completion_ = 1.0f;
+    BuildingProfile profile_;
+    cRZString name_;
+};
+
 class Construction final : public ILotConstructionServices {
 public:
     cISC4LotConfigurationRef* ConfigurationRef(cSC4LotConfiguration*) override { return nullptr; }
@@ -89,7 +131,7 @@ public:
     std::uint32_t BuildingWealth(std::uint32_t) override { return 1; }
     cISC4BuildingOccupant* AddNewBuildingOccupant(std::uint32_t, float[3], int) override { return nullptr; }
     void CellCornerToPosition(int, int, float&, float&) override {}
-    float TerrainAltitude(float, float) override { return 0.0f; }
+    float TerrainAltitude(float, float) override { return ground; }
     void DemolishBlockingOccupants(const float[3], const float[3], cISC4OccupantFilter*) override {}
     void StartConstructionOccupant(cSC4Lot*) override {}
     cSC4Lot* lot = nullptr;   // the one lot of the city
@@ -129,6 +171,19 @@ public:
         return buildingFoundationMin[0] < lineX && lineX < buildingFoundationMax[0] && buildingFoundationMin[1] < lineZ &&
                        lineZ < buildingFoundationMax[1] ? buildingFoundation : nullptr;
     }
+    std::uint32_t FoundationTypeOf(cISC4Occupant* foundation) override { return foundation ? 0x5150u : 0; }
+    // new foundations: usage, type and top
+    struct NewFoundation { std::uint32_t type; int usage; float top; };
+    std::vector<NewFoundation> newFoundations;
+    bool AddNewFoundationOccupant(std::uint32_t type, int usage, float position[3], float, float, int, float) override {
+        newFoundations.push_back({type, usage, position[1]});
+        return true;
+    }
+    std::vector<cSC4Lot*> wallUpdates;
+    void UpdateRetainingWalls(cSC4Lot* l) override { wallUpdates.push_back(l); }
+    float ground = 0.0f;
+    std::vector<cISC4Occupant*> moved;
+    void MoveOccupant(cISC4Occupant* occupant, bool) override { moved.push_back(occupant); }
     // the retaining walls
     int wallsAdded = 0, wallsRemoved = 0, surroundingWallUpdates = 0, lotsAroundAsked = 0;
     void AddRetainingWallOccupant(cSC4Lot* l, bool create) override {
@@ -142,7 +197,8 @@ public:
 
 class DeveloperHost final : public IBaseLotDeveloperHost {
 public:
-    float VertexHeight(int) override { return 0; }
+    bool steep = false;   // vertex heights rise with the index: every area has a slope
+    float VertexHeight(int v) override { return steep ? static_cast<float>(v) : 0.0f; }
     float VertexWaterHeight(int) override { return 0; }
     float HeightAt(float, float) override { return 0; }
     float WaterHeightAt(float, float) override { return 0; }
@@ -249,6 +305,73 @@ int main() {
             lot->Shutdown();
             lot->Release();
         }
+    }
+
+    {   // UpdateLotElements (i386 0x000f2b1c) on a lot at a fixed altitude: its foundation and then its retaining walls are updated
+        auto* lot = new cSC4Lot(40, 40, 1, 1, 0);
+        lot->AddRef();
+        lot->Init();
+        lot->SetState(3, 0, 0);
+        lot->SetFlags(3);
+        construction.wallUpdates.clear();
+        CHECK(dev.UpdateLotElements(lot, 1));
+        CHECK(construction.wallUpdates.size() == 1 && construction.wallUpdates[0] == lot);
+        // a lot that is not fixed has no walls to update
+        lot->SetFlags(0);
+        construction.wallUpdates.clear();
+        CHECK(dev.UpdateLotElements(lot, 5));
+        CHECK(construction.wallUpdates.empty());
+        lot->Release();
+    }
+
+    {   // the refit (i386 0x000f28ce, PC 0x006C91F0): a building moved to the new ground loses its foundation (usage 1, found at its
+        // position) and, on ground steeper than the flatness tunable, gets one of the same type at its new height; one with no
+        // foundation gets the default type (no configuration: the building's property, else the tunable default)
+        auto* lot = new cSC4Lot(50, 50, 1, 1, 0);
+        lot->AddRef();
+        lot->Init();
+        lot->SetState(3, 0, 0);
+        auto* building = new Building(808.0f, 20.0f, 808.0f);
+        building->AddRef();
+        auto* foundation = new Standing(0x68fd0c69u, 808.0f, 16.0f, 808.0f);
+        foundation->AddRef();
+        host.lotOccupants = {static_cast<cISC4Occupant*>(building)};
+        construction.ground = 0.0f;   // no configuration: the building takes the terrain (TerrainAltitude 0)
+        construction.buildingFoundation = foundation;
+        construction.buildingFoundationMin[0] = 800.0f; construction.buildingFoundationMin[1] = 800.0f;
+        construction.buildingFoundationMax[0] = 816.0f; construction.buildingFoundationMax[1] = 816.0f;
+        construction.removedFoundations.clear();
+        construction.newFoundations.clear();
+        devHost.steep = true;
+        dev.UpdateLotObjectAltitudes(lot);
+        CHECK(building->Height() == 0.0f && construction.moved.size() == 1);
+        CHECK(construction.removedFoundations.size() == 1 && construction.removedFoundations[0] == foundation);
+        CHECK(construction.newFoundations.size() == 1 && construction.newFoundations[0].usage == 1 &&
+              construction.newFoundations[0].type == 0x5150u && construction.newFoundations[0].top == 0.0f);
+        // on flat ground the old foundation still goes and no new one is built
+        building->SetPosition(std::vector<float>{808.0f, 20.0f, 808.0f}.data());
+        construction.buildingFoundation = foundation;
+        construction.removedFoundations.clear();
+        construction.newFoundations.clear();
+        devHost.steep = false;
+        dev.UpdateLotObjectAltitudes(lot);
+        CHECK(construction.removedFoundations.size() == 1 && construction.newFoundations.empty());
+        // without a foundation, on steep ground: one of the default type
+        building->SetPosition(std::vector<float>{808.0f, 20.0f, 808.0f}.data());
+        construction.buildingFoundation = nullptr;
+        construction.removedFoundations.clear();
+        devHost.steep = true;
+        dev.Tunables().buildingFoundationType = 0x890b7312u;   // the code default the exemplar normally gives
+        dev.UpdateLotObjectAltitudes(lot);
+        CHECK(construction.removedFoundations.empty());
+        CHECK(construction.newFoundations.size() == 1 && construction.newFoundations[0].usage == 1 &&
+              construction.newFoundations[0].type == dev.Tunables().buildingFoundationType);
+        devHost.steep = false;
+        host.lotOccupants.clear();
+        construction.moved.clear();
+        foundation->Release();
+        building->Release();
+        lot->Release();
     }
 
     std::printf(failures ? "FAILED\n" : "sc4_lotclear: all passed\n");

@@ -237,6 +237,7 @@ public:
     // cSC4LotRetainingWallOccupant::AddRetainingWallOccupant(lot, create) (create false removes the lot's wall occupant and clears
     // lot flag 4) / UpdateSurroundingRetainingWalls(lot)
     virtual void AddRetainingWallOccupant(cSC4Lot* lot, bool create) { (void)lot; (void)create; }
+    virtual void UpdateRetainingWalls(cSC4Lot* lot) { (void)lot; }                    // cSC4LotRetainingWallOccupant::UpdateRetainingWalls
     virtual void UpdateSurroundingRetainingWalls(cSC4Lot* lot) { (void)lot; }
 };
 
@@ -447,6 +448,9 @@ public:
     cISC4Occupant* GetFoundationByPosition(int usage, float x, float z);   // vslot 0xc8 @ i386 0x000f10a6
     bool RemoveFoundation(int usage, float x, float z);                    // vslot 0xd0 @ i386 0x000ec9c8
     bool RemoveBuildingFoundation(cISC4Occupant* building);                // vslot 0xf0 @ i386 0x000ece44
+    cISC4Occupant* GetFoundationByOccupant(cISC4Occupant* occupant);       // vslot 0xc0 @ i386 0x000ec876 (borrowed)
+    bool IsLotObjectFoundationRequired(cISC4Occupant* occupant);           // @ i386 0x000ecca2 (PC slot 56)
+    void UpdateLotRetainingWalls(cSC4Lot* lot);                            // vslot 0xf8 @ i386 0x000ece8c
     void UpdateSurroundingLotFoundations(cSC4Lot* lot);                // @ i386 0x000f2e7c
     float GetLotFoundationBottomAltitude(cSC4Lot* lot);                // @ i386 0x000f34de
     float PickLotFoundationAltitude(cSC4Lot* lot, const float corners[4]);   // @ i386 (the bottom / highest arguments are unused)

@@ -59,6 +59,7 @@
 
 namespace native {
 void NativeAddRetainingWallOccupant(sc4::cSC4Lot* lot, bool create);           // app/NativeLotWalls.cpp
+void NativeUpdateRetainingWalls(sc4::cSC4Lot* lot);
 void NativeUpdateSurroundingRetainingWalls(sc4::cSC4Lot* lot);
 bool NativeAddNewFoundationOccupant(std::uint32_t type, int usage, float position[3], float width, float depth, int rotation, float bottom);
 }  // namespace native
@@ -372,6 +373,7 @@ public:
         else { x = float(cellX) * 16.0f + 8.0f; z = float(cellZ) * 16.0f + 8.0f; }
     }
     void AddRetainingWallOccupant(cSC4Lot* lot, bool create) override { NativeAddRetainingWallOccupant(lot, create); }   // app/NativeLotWalls.cpp
+    void UpdateRetainingWalls(cSC4Lot* lot) override { NativeUpdateRetainingWalls(lot); }
     void UpdateSurroundingRetainingWalls(cSC4Lot* lot) override { NativeUpdateSurroundingRetainingWalls(lot); }
     void MoveOccupant(cISC4Occupant* occupant, bool post) override {
         if (cISC4OccupantManager* occupants = Occupants()) occupants->MoveOccupant(occupant, post);
