@@ -436,9 +436,50 @@ sc4::cSC43DRender* g_render = nullptr;
 // The current city: SL::spCity, as the original asks (a pointer kept from an earlier city outlives it).
 sc4::cSC4City* CurrentCity() { return dynamic_cast<sc4::cSC4City*>(SL::spCity); }
 
+// One loaded mesh record (SC4Mesh: vertex group, index buffer, draw records) as SC4ViewUtilities::MeshPick walks it: the draw
+// records are the primitive groups, the vertex stride follows the vertex group's format.
+class MeshPickView final : public IMeshPickHost {
+public:
+    explicit MeshPickView(const SC4Mesh& mesh) : mesh_(mesh) {}
+    bool HasPickableVertices() const override { return mesh_.vertices && mesh_.vertices->count != 0; }
+    int PrimitiveGroupCount() const override {
+        return mesh_.draws && mesh_.draws->begin ? static_cast<int>(mesh_.draws->end - mesh_.draws->begin) : 0;
+    }
+    void InitTriangleIterator(s3d::cS3DTriangleIterator& iterator, int group) const override {
+        s3d::MeshView view;
+        view.vertexFormat = mesh_.vertices->format;
+        view.vertexStride = static_cast<std::uint16_t>(s3d::StandardVertexStride(static_cast<std::int32_t>(mesh_.vertices->format)));
+        view.vertexData = static_cast<const std::uint8_t*>(mesh_.vertices->data);
+        view.indexData = mesh_.indexGroup ? *mesh_.indexGroup : nullptr;
+        static_assert(sizeof(s3d::MeshPrimitive) == sizeof(SC4MeshDrawRecord), "a draw record is a primitive group");
+        view.primitives = reinterpret_cast<const s3d::MeshPrimitive*>(mesh_.draws->begin);
+        iterator.Init(view, group);
+    }
+private:
+    SC4Mesh mesh_;
+};
+class MeshListView final : public IMeshMaterialHost {
+public:
+    explicit MeshListView(s3d::cS3DMeshAndMaterial* meshes) {
+        const int count = meshes ? meshes->MeshCount() : 0;
+        for (int i = 0; i < count; ++i) {
+            SC4Mesh mesh;
+            std::memcpy(&mesh, meshes->Mesh(static_cast<unsigned>(i)).data(), sizeof mesh);
+            views_.emplace_back(mesh);
+        }
+    }
+    int MeshCount() const override { return static_cast<int>(views_.size()); }
+    const IMeshPickHost* Mesh(int index) const override { return &views_[static_cast<std::size_t>(index)]; }
+private:
+    std::vector<MeshPickView> views_;
+};
+
 class ModelInstanceHost final : public s3d::IModelInstanceHost {
 public:
-    void ModelPick(cSC4PickContext*, s3d::cIS3DModelInstance*, s3d::cS3DMeshAndMaterial*) override {}
+    bool ModelPick(cSC4PickContext* context, s3d::cIS3DModelInstance* instance, s3d::cS3DMeshAndMaterial* meshes) override {
+        if (!context || !instance) return false;
+        return SC4ViewUtilities::ModelPick(context, instance, MeshListView(meshes));
+    }
     void RenderModelInstance(SC4DrawContext* context, s3d::cIS3DModelInstance* instance, s3d::cS3DMeshAndMaterial* meshes,
                              const s3d::SC4DrawAttributes* attributes, bool flag) override {
         static int drawn = 0;

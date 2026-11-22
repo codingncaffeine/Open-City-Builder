@@ -123,9 +123,9 @@ void cS3DModelInstance::SetTransform(const cS3DTransform& transform) {   // @ 0x
     transform_.flags = transform.flags;
 }
 
-bool cS3DModelInstance::Pick(cSC4PickContext* context) {   // @ 0x1000d909e
-    if (IModelInstanceHost* host = ModelInstanceHost()) host->ModelPick(context, this, this);
-    return false;
+bool cS3DModelInstance::Pick(cSC4PickContext* context) {   // @ 0x1000d909e (i386 0x0009f834: returns ModelPick's answer)
+    IModelInstanceHost* host = ModelInstanceHost();
+    return host && host->ModelPick(context, this, this);
 }
 
 int cS3DModelInstance::Draw(SC4DrawContext* context, bool flag) {   // @ 0x1000d90e4

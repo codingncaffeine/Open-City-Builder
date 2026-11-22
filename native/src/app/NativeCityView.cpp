@@ -152,7 +152,7 @@ public:
     bool SetZoomAndRotation(int zoom, int rotation) override { render_->SetZoomAndRotation(zoom, rotation); return true; }
     // The pointer's terrain point: the renderer's pick (the camera's eye ray through the pixel onto the terrain view).
     bool PickTerrain(int x, int y, float* out3, bool always, bool arg5) override { return render_->PickTerrain(x, y, out3, always, arg5); }
-    bool Pick(int x, int y, cISC4OccupantFilter* filter, s3d::cIS3DModelInstance*& model) override { return render_->Pick(x, y, filter, model); }
+    bool Pick(int x, int y, sc4::cISC4OccupantFilter* filter, s3d::cIS3DModelInstance*& model) override { return render_->Pick(x, y, filter, model); }
     SC4ViewUtilities* ViewUtilities() override { return render_->GetViewUtilities(); }
     cIGZUnknown* LightingManager() override { return nullptr; }
 
@@ -266,6 +266,28 @@ void ProbeBuildingsAt(float x, float z, float radius) {
 
 sc4::cSC43DRender* g_cityRender = nullptr;
 sc4::cSC43DRender* CityRenderer() { return g_cityRender; }
+
+void PickOccupantAt(int x, int y) {
+    s3d::cIS3DModelInstance* model = nullptr;
+    if (!g_cityRender || !g_cityRender->Pick(x, y, nullptr, model) || !model) {
+        std::printf("pick %d,%d: nothing\n", x, y);
+        return;
+    }
+    cIGZUnknown* owner = model->GetOwner();
+    void* raw = nullptr;
+    if (owner && owner->QueryInterface(sc4::kGZIID_cISC4Occupant, &raw) && raw) {
+        auto* o = static_cast<sc4::cISC4Occupant*>(raw);
+        cRZString name;
+        if (sc4::cISCPropertyHolder* holder = o->AsPropertyHolder()) sc4::cSCPropertyHelp::GetPropertyValue(holder, 0x00000020, name);
+        float p[3];
+        o->GetPosition(p);
+        std::printf("pick %d,%d: %s type %08x at %.0f,%.0f\n", x, y, name.str().c_str(), o->GetType(), p[0], p[2]);
+        o->Release();
+    } else {
+        std::printf("pick %d,%d: a model without an occupant owner\n", x, y);
+    }
+    model->Release();
+}
 void AnnounceCameraZoomRotation() {
     if (sc4::cSC4CameraControl* camera = g_cityRender ? g_cityRender->GetCameraControl() : nullptr) camera->SendPostViewChangeMessage(sc4::kCameraUpdateZoomRotation);
 }

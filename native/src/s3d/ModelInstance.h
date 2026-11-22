@@ -92,7 +92,8 @@ public:
 class IModelInstanceHost {
 public:
     virtual ~IModelInstanceHost() = default;
-    virtual void ModelPick(cSC4PickContext* context, cIS3DModelInstance* instance, cS3DMeshAndMaterial* meshes) = 0;
+    // SC4ViewUtilities::ModelPick: true when a mesh triangle lies on the ray closer than the context's distance
+    virtual bool ModelPick(cSC4PickContext* context, cIS3DModelInstance* instance, cS3DMeshAndMaterial* meshes) = 0;
     virtual void RenderModelInstance(SC4DrawContext* context, cIS3DModelInstance* instance, cS3DMeshAndMaterial* meshes,
                                      const SC4DrawAttributes* attributes, bool flag) = 0;
     virtual void TransformBoundingBox(const cS3DTransform& transform, cS3DBoundingBox& box) = 0;

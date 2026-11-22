@@ -24,6 +24,8 @@
 
 #include "sc4/CameraControl.h"
 #include "sc4/GeometryUtilities.h"
+#include "sc4/Occupant.h"
+#include "sc4/OccupantManager.h"
 #include "sc4/DBSegment.h"
 #include "sc4/QuadGrid.h"
 #include "sc4/RenderProperties.h"
@@ -3142,13 +3144,76 @@ bool cSC43DRender::PickTerrainAlways(int x, int y, float* out, bool includeWater
     if (length > 0.0f) { direction.x /= length; direction.y /= length; direction.z /= length; }
     return PickTerrainAlways(&origin.x, &direction.x, out, includeWater);
 }
-bool cSC43DRender::Pick(int, int, cISC4OccupantFilter*, s3d::cIS3DModelInstance*&) {
-    SC4_UNWIRED("cSC43DRender::Pick(x, y) [64]: model picking under the cursor not ported");
-    return false;
+// The screen point's eye ray (not normalised; GetEyeRay's answer is ignored, as in the original), picked below.
+bool cSC43DRender::Pick(int x, int y, cISC4OccupantFilter* filter, s3d::cIS3DModelInstance*& out) {   // i386 0x00504220
+    if (!camera_) return false;
+    cS3DVector3 origin, direction;
+    camera_->GetEyeRay(cS3DVector2{static_cast<float>(x), static_cast<float>(y)}, origin, direction);
+    return Pick(x, y, &origin.x, &direction.x, filter, out);
 }
-bool cSC43DRender::Pick(int, int, const float*, const float*, cISC4OccupantFilter*, s3d::cIS3DModelInstance*&) {
-    SC4_UNWIRED("cSC43DRender::Pick(ray) [65]: model picking along a ray not ported");
-    return false;
+
+// render3d.md 11.5 (i386 0x0050c64e): the models of the quad-grid quadrants around the point's container rect (each
+// once), the terrain hit as the farthest distance a model may be at, then every candidate the filter lets through is
+// asked to hit the ray closer than the distance so far; the last that does is the answer (each hit shortens the
+// distance, so it is the closest).
+bool cSC43DRender::Pick(int x, int y, const float* origin, const float* direction, cISC4OccupantFilter* filter,
+                        s3d::cIS3DModelInstance*& out) {
+    out = nullptr;
+    cSC4PickContext context;
+    context.origin = cS3DVector3{origin[0], origin[1], origin[2]};
+    context.direction = cS3DVector3{direction[0], direction[1], direction[2]};
+    context.maxDistance = 3.4028235e38f;
+    pickCandidates_.clear();
+    SC4RectFloat rect;
+    GetViewportRayContainerRect(x, y, rect);
+    if (quadGrid_) {
+        SC4QuadGridQuadrant* quadrants[6] = {};
+        int count = 6;
+        quadGrid_->GetQuadrantsOfScreenRect(rect, quadrants, count);
+        for (int i = 0; i < count; ++i) {
+            for (SC4GridElement* element : quadrants[i]->elements) {
+                if (element->flags & 2) continue;
+                element->flags |= 2;
+                pickCandidates_.push_back(static_cast<SC43DGridElement*>(element));
+            }
+        }
+    }
+    if (IRender3DHost* host = Render3DHost()) {   // the terrain view (+0x198) slot 4: the ground the ray meets first
+        float hit[3] = {};
+        const auto distance = [&](const float* from) {
+            const float dx = hit[0] - from[0], dy = hit[1] - from[1], dz = hit[2] - from[2];
+            return std::sqrt(dx * dx + dy * dy + dz * dz);
+        };
+        if (host->PickTerrainView(origin, direction, hit, false)) {
+            context.maxDistance = distance(origin);
+        } else {
+            const float raised[3] = {origin[0], origin[1] + 4.0f, origin[2]};
+            if (host->PickTerrainView(raised, direction, hit, false)) context.maxDistance = distance(raised);
+        }
+    }
+    bool picked = false;
+    for (SC43DGridElement* element : pickCandidates_) {
+        s3d::cIS3DModelInstance* model = element->model;
+        bool test = model != nullptr;
+        if (test && filter) {   // the model's owner as an occupant (iid 0x26bb767e), then the filter's slot 3
+            test = false;
+            cIGZUnknown* owner = model->GetOwner();
+            void* raw = nullptr;
+            if (owner && owner->QueryInterface(kGZIID_cISC4Occupant, &raw) && raw) {
+                auto* occupant = static_cast<cISC4Occupant*>(raw);
+                test = filter->IsOccupantIncluded(occupant);
+                occupant->Release();
+            }
+        }
+        if (test && model->Pick(&context)) {
+            if (out) out->Release();
+            out = model;
+            model->AddRef();
+            picked = true;
+        }
+        element->flags = static_cast<std::uint16_t>(element->flags & ~2u);
+    }
+    return picked;
 }
 
 bool cSC43DRender::DoMessage(cIGZMessage2* message) {

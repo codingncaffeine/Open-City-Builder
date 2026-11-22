@@ -45,6 +45,8 @@ bool CityAutomataLayersActive();
 void PrintOccupantCensus(cISC4City* city, const char* label);
 // The buildings near a ground point with their models and texture sizes (scenario `probe`).
 void ProbeBuildingsAt(float x, float z, float radius);
+// Kit verb `pick X Y`: what cSC43DRender::Pick (no filter) answers at a logical view point: the model's occupant, read only.
+void PickOccupantAt(int x, int y);
 // app/NativeDispatch.cpp: the dispatch tool's drop without a call box (police 0, fire 1) at a world position; the dispatch id or 0.
 std::uint32_t NativeDispatchAt(std::uint32_t type, float x, float z);
 void NativePedestriansInBox(const float* lo, const float* hi, std::vector<sc4::cISC4Occupant*>& out);   // app/NativeTrafficAutomata.cpp: the pedestrians in a box (one reference each)

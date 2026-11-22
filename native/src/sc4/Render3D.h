@@ -139,7 +139,7 @@
 #include "sc4/SCProperty.h"
 #include "sc4/ViewUtilities.h"
 
-class cISC4OccupantFilter;
+namespace sc4 { class cISC4OccupantFilter; }   // sc4/OccupantManager.h
 class cISC4ViewObject3D;
 class cIGZBuffer;
 class SC43DGridElement;
@@ -346,9 +346,9 @@ public:
     virtual bool PickTerrain(int x, int y, float* out, bool a, bool b) = 0;           // [61] +0x1e8
     virtual bool PickTerrainAlways(const float* origin, const float* direction, float* out, bool a) = 0;    // [62]
     virtual bool PickTerrainAlways(int x, int y, float* out, bool a) = 0;             // [63] +0x1f8
-    virtual bool Pick(int x, int y, cISC4OccupantFilter* filter, s3d::cIS3DModelInstance*& out) = 0;       // [64]
+    virtual bool Pick(int x, int y, sc4::cISC4OccupantFilter* filter, s3d::cIS3DModelInstance*& out) = 0;       // [64]
     virtual bool Pick(int x, int y, const float* origin, const float* direction,
-                      cISC4OccupantFilter* filter, s3d::cIS3DModelInstance*& out) = 0;   // [65] +0x208
+                      sc4::cISC4OccupantFilter* filter, s3d::cIS3DModelInstance*& out) = 0;   // [65] +0x208
     virtual bool GetModelsInVolume(const cS3DBoundingBox& box, s3d::cIS3DModelInstance** out,
                                    std::uint32_t& capacity) = 0;                      // [66] +0x210
     virtual bool IsModelVisible(s3d::cIS3DModelInstance* model, FrustumType frustum) = 0;   // [67] +0x218
@@ -683,6 +683,7 @@ private:
     SC4QuadGrid* quadGrid_ = nullptr;             // +0x188
     float unknown190_ = 0.0f;                     // +0x190 (the quad-grid size cached by CreateQuadGrid)
     std::vector<SC43DGridElement*> highlightElements_;    // +0x198 (the 0x80-flagged models, drawn last with an offset)
+    std::vector<SC43DGridElement*> pickCandidates_;      // i386 +0x118: the elements one Pick collects from the quad grid
     std::vector<cSC4ModelSortElement> modelSortFront_;    // +0x1b0 (sorted front-to-back, drawn first)
     std::vector<cSC4ModelSortElement> modelSortBack_;     // +0x1c8 (sorted back-to-front, drawn second)
     std::vector<cSC4ModelSortElement> modelSortUnused_;   // +0x1e0 (filled by DrawDynamicView, never drawn — quirk)

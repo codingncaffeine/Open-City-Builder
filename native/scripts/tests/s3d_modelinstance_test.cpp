@@ -29,7 +29,8 @@ struct Host final : IModelInstanceHost {
     cS3DMeshAndMaterial* meshes = nullptr;
     SC4DrawAttributes attributes;
     bool flag = false;
-    void ModelPick(cSC4PickContext*, cIS3DModelInstance* i, cS3DMeshAndMaterial* m) override { calls.push_back("pick"); instance = i; meshes = m; }
+    bool pickResult = false;
+    bool ModelPick(cSC4PickContext*, cIS3DModelInstance* i, cS3DMeshAndMaterial* m) override { calls.push_back("pick"); instance = i; meshes = m; return pickResult; }
     void RenderModelInstance(SC4DrawContext*, cIS3DModelInstance* i, cS3DMeshAndMaterial* m, const SC4DrawAttributes* a, bool f) override {
         calls.push_back("render"); instance = i; meshes = m; attributes = *a; flag = f;
     }
@@ -156,6 +157,9 @@ int main() {
 
         // picking and drawing go to the host with the instance and its mesh list
         CHECK(!face->Pick(nullptr) && host.calls.back() == std::string("pick") && host.instance == face && host.meshes == static_cast<cS3DMeshAndMaterial*>(instance));
+        host.pickResult = true;                             // the instance answers what the model pick answers
+        CHECK(face->Pick(nullptr));
+        host.pickResult = false;
         CHECK(face->Draw(nullptr, true) == 1 && host.calls.back() == std::string("render") && host.flag && host.attributes.flags == 0x21);
 
         // sort value: the first material's texture binding

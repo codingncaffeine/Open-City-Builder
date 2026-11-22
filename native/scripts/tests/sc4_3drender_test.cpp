@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "fake_gdriver.h"
+#include "sc4/OccupantManager.h"
 #include "sc4/Render3D.h"
 #include "sc4/SCProperty.h"
 #include "rz/cRZString.h"
@@ -99,7 +100,14 @@ struct FakeModel final : s3d::cIS3DModelInstance {
     void GetWorldBounds(cS3DBoundingBox& out) override { out = worldBox; }
     void GetTransform(cS3DTransform&) override {}
     void SetTransform(const cS3DTransform&) override {}
-    bool Pick(cSC4PickContext*) override { return false; }
+    bool pickHit = false;
+    int picks = 0;
+    float pickDistance = 0.0f;   // the context's distance when the renderer asked
+    bool Pick(cSC4PickContext* context) override {
+        ++picks;
+        if (context) pickDistance = context->maxDistance;
+        return pickHit;
+    }
     int Draw(SC4DrawContext*, bool highlight) override {
         ++draws;
         if (highlight) ++highlightDraws;
@@ -971,6 +979,33 @@ int main() {
         CHECK(render->ModelChanges().front().model == &model);
         CHECK(render->ModelChanges().front().change == 0);
         CHECK(render->IsModelInserted(&model));
+
+        // Pick (render3d.md 11.5): the grid's model under the point is asked once with the full distance (no terrain view);
+        // a hit is the answer with a reference, a miss leaves it null; the collection mark (flag 2) is cleared again.
+        {
+            const float origin[3] = {0.0f, 100.0f, 0.0f}, direction[3] = {0.0f, -1.0f, 0.0f};
+            s3d::cIS3DModelInstance* picked = nullptr;
+            const std::uint32_t refsBefore = model.refs;
+            CHECK(!render->Pick(320, 240, origin, direction, nullptr, picked) && picked == nullptr);
+            CHECK(model.picks == 1 && model.pickDistance == 3.4028235e38f);
+            CHECK((element->flags & 2) == 0);
+            model.pickHit = true;
+            CHECK(render->Pick(320, 240, origin, direction, nullptr, picked) && picked == &model);
+            CHECK(model.picks == 2 && model.refs == refsBefore + 1);
+            picked->Release();
+            // a filter only sees occupants: a model without an occupant owner is never asked
+            struct AnyOccupant final : sc4::cISC4OccupantFilter {
+                bool QueryInterface(std::uint32_t, void**) override { return false; }
+                std::uint32_t AddRef() override { return 1; }
+                std::uint32_t Release() override { return 1; }
+                bool IsOccupantIncluded(sc4::cISC4Occupant*) override { return true; }
+                bool IsOccupantTypeIncluded(std::uint32_t) override { return true; }
+                bool IsPropertyHolderIncluded(cISCPropertyHolder*) override { return true; }
+            } filter;
+            picked = nullptr;
+            CHECK(!render->Pick(320, 240, origin, direction, &filter, picked) && picked == nullptr && model.picks == 2);
+            model.pickHit = false;
+        }
 
         // Draw drains the queue before the static pass: the element becomes static and the model is drawn by
         // DrawStaticView. This is the whole point of the queue (RENDER3D-2).

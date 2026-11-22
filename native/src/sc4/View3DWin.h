@@ -127,7 +127,7 @@ class cIGZCmdLine;
 class SC4ViewUtilities;   // global scope (src/sc4/ViewUtilities.h)
 class cRZCmdLine;
 class cISC4Occupant;
-class cISC4OccupantFilter;
+namespace sc4 { class cISC4OccupantFilter; }   // sc4/OccupantManager.h
 namespace gz { class cIGZWinGen; }
 namespace s3d { class cIS3DModelInstance; }
 
