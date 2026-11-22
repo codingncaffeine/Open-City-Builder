@@ -29,6 +29,7 @@
 #include "s3d/S3DModel.h"
 #include "sc4/CellTextureModel.h"
 #include "sc4/DrawContext.h"
+#include "sc4/RenderProperties.h"
 #include "sc4/LotBaseTextureOccupant.h"
 #include "sc4/ModelMaker.h"
 #include "sc4/ModelMakerUtility.h"
@@ -74,12 +75,15 @@ struct TextureBinding {
     const std::uint32_t* record = &id;
     std::uint32_t id = 0;
     int width = 0, height = 0;   // SC4_TEXDEBUG
+    std::uint32_t group = 0, instance = 0;   // the key it was asked for (the binding factory's GetTextureKey)
 };
 const TextureBinding* TextureRecord(std::uint32_t group, std::uint32_t instance) {
     static std::map<std::pair<std::uint32_t, std::uint32_t>, std::unique_ptr<TextureBinding>> cache;
     auto& slot = cache[{group, instance}];
     if (slot) return slot.get();
     slot = std::make_unique<TextureBinding>();
+    slot->group = group;
+    slot->instance = instance;
     std::vector<std::uint8_t> bytes;
     if (!g_driver) return slot.get();
     if (!LoadResourceBytes(kFshType, kModelTextureGroup, instance, bytes) && !LoadResourceBytes(kFshType, group, instance, bytes)) {
@@ -95,6 +99,35 @@ const TextureBinding* TextureRecord(std::uint32_t group, std::uint32_t instance)
     g_driver->LoadTextureLevel(id, 0, 0, 0, static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h), 3, 1, static_cast<std::uint32_t>(w), rgba.data());
     static const char* only = std::getenv("SC4_GDONLYTEX");   // debug: draw only the meshes of this FSH instance
     if (only && std::strtoul(only, nullptr, 16) == instance) gd::cGLGDriver::SetDebugOnlyTexture(id);
+    slot->id = id;
+    slot->width = w;
+    slot->height = h;
+    return slot.get();
+}
+
+// RebuildDynamicTexture's tinted texture (model-maker.md 11.2): the FSH `instance` of the model texture group, every texel's
+// colour multiplied by the tint, (p * c + 128) >> 8 per channel. The DXT3 kernel copies the alpha block, so alpha is kept.
+// Approximation: the original tints the DXT colour endpoints; this tints the decoded texels (the same up to rounding).
+const TextureBinding* TintedTextureRecord(std::uint32_t instance, std::uint32_t argb) {
+    static std::map<std::pair<std::uint32_t, std::uint32_t>, std::unique_ptr<TextureBinding>> cache;
+    auto& slot = cache[{instance, argb}];
+    if (slot) return slot.get();
+    slot = std::make_unique<TextureBinding>();
+    slot->group = kModelTextureGroup;
+    slot->instance = instance;
+    std::vector<std::uint8_t> bytes;
+    s3d::FshFile file;
+    std::vector<std::uint8_t> rgba;
+    int w = 0, h = 0;
+    if (!g_driver || !LoadResourceBytes(kFshType, kModelTextureGroup, instance, bytes) || !file.Open(bytes.data(), bytes.size()) ||
+        file.FrameCount() == 0 || !file.DecodeRgba8(0, rgba, w, h))
+        return slot.get();
+    const std::uint32_t tint[3] = {(argb >> 16) & 0xff, (argb >> 8) & 0xff, argb & 0xff};
+    for (std::size_t p = 0; p + 3 < rgba.size(); p += 4)
+        for (int c = 0; c < 3; ++c) rgba[p + c] = static_cast<std::uint8_t>((rgba[p + c] * tint[c] + 128) >> 8);
+    for (std::size_t p = 0; p + 3 < rgba.size(); p += 4) std::swap(rgba[p], rgba[p + 2]);   // RGBA -> BGRA
+    const std::uint32_t id = g_driver->CreateTexture(4, static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h), 1, 1);
+    g_driver->LoadTextureLevel(id, 0, 0, 0, static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h), 3, 1, static_cast<std::uint32_t>(w), rgba.data());
     slot->id = id;
     slot->width = w;
     slot->height = h;
@@ -696,6 +729,20 @@ public:
     }
     float ModelSizeThreshold() override { return 0.0f; }
     float TextureTintAlpha() override { return 0.5f; }
+    std::uint64_t SwappedTexture(std::uint64_t binding, std::uint32_t delta) override {
+        const auto* base = reinterpret_cast<const TextureBinding*>(binding);
+        if (!base || !base->instance) return 0;
+        const TextureBinding* swapped = TextureRecord(base->group, base->instance + delta);
+        return swapped && swapped->id ? reinterpret_cast<std::uint64_t>(swapped) : 0;
+    }
+    std::uint64_t DynamicTexture(std::uint32_t instance, std::uint32_t argb) override {
+        const TextureBinding* tinted = TintedTextureRecord(instance, argb);
+        return tinted && tinted->id ? reinterpret_cast<std::uint64_t>(tinted) : 0;
+    }
+    float DynamicTextureScale() override {   // kSplatTextureScale (render float property 1)
+        auto* properties = dynamic_cast<sc4::cSC4RenderProperties*>(SL::spRenderProperties);
+        return properties ? properties->FloatValue(1) : 50.0f;
+    }
     int RenderDetailLevel() override { return 0; }
     void LightingColour(float out[4]) override { out[0] = out[1] = out[2] = out[3] = 1.0f; }
     int TerrainSizeX() override { sc4::cSTETerrain* t = native::Terrain(); return t ? static_cast<int>(t->CellCountX()) : 64; }

@@ -285,6 +285,14 @@ public:
     virtual bool UndergroundHiddenTriangles(cISC4Occupant* occupant, bool& even, bool& odd) { (void)occupant; even = odd = false; return false; }
     // cISC4FoundationOccupant (0xc8fce101) vslot 0x24 GetUsage; -1 = not a foundation
     virtual int FoundationUsage(cISC4Occupant* occupant) { (void)occupant; return -1; }
+    // cIS3DTextureBindingFactory (service 0x1ac0e11a): a material layer's texture binding is an opaque word here (the native
+    // bindings are cached for the process, so no reference is counted). SwappedTexture: the FSH of the binding's group and
+    // instance + delta (SwapTexturesByOffset; 0 when it does not exist). DynamicTexture: the texture `instance` of the
+    // binding factory's group tinted by `argb` (RebuildDynamicTexture; each channel (p * c + 128) >> 8), 0 when missing.
+    virtual std::uint64_t SwappedTexture(std::uint64_t binding, std::uint32_t delta) { (void)binding; (void)delta; return 0; }
+    virtual std::uint64_t DynamicTexture(std::uint32_t instance, std::uint32_t argb) { (void)instance; (void)argb; return 0; }
+    // SL::spRenderProperties float property 1 (the dynamic textures' layer scale, ApplyLotStateEffect).
+    virtual float DynamicTextureScale() { return 1.0f; }
     // cSC4LotRetainingWallOccupant::AddRetainingWallModels(occupant, create, addToRenderer) (sc4/LotRetainingWallOccupant.h): a
     // retaining wall builds its own models. False without a wall implementation.
     virtual bool AddRetainingWallModels(cISC4Occupant* occupant, bool create, bool addToRenderer) {
@@ -420,6 +428,13 @@ public:
     bool AddModels(cISC4Occupant* occupant, int zoom, int rotation, std::uint32_t type, bool visible);   // 0x1003110be
     bool DoTerrainHidingForOccupantCells(cISC4Occupant* occupant, std::uint32_t type, bool hide);   // 0x1003115f2
     void RebuildDynamicTexture(int slot);                                // 0x1003116d8
+    // model-maker.md 12.4 over one occupant's model instances (their cS3DMeshAndMaterial records): true when a material changed.
+    static bool RestoreStaticTextures(cISC43DPlaceableObject* models);                                   // i386 0x0048F380
+    static void ApplyTextureToModels(cISC43DPlaceableObject* models, std::uint64_t binding, float scale); // i386 0x004906B0
+    static bool SwapTexturesByOffset(cISC43DPlaceableObject* models, std::uint32_t delta);             // i386 0x00490820
+    // model-maker.md 9.1 step 3 x = 0: whether the occupant is lit (a building, a lit network piece, or a night-light prop on
+    // a lit building's lot).
+    bool IsOccupantLit(cISC4Occupant* occupant);
     void CommitDeferredOccupantOperations();                             // 0x100311bc2
     bool OccupantFilterIterationFunction(cISC4Occupant* occupant);       // 0x100311ee4
     bool DoTerrainHidingForCells(const SC4RectT<int>& rect, bool hide);  // 0x10031200e
@@ -525,6 +540,9 @@ private:
     bool unloadPending_ = false;                    // +0x10a
     bool loadingSuspended_ = false;                 // +0x10b
     float lighting_[3] = {};                        // +0x10c / +0x110 / +0x114
+    // The five dynamic texture bindings as the native host hands them out (opaque words, see IModelMakerHost::DynamicTexture);
+    // the original keeps counted cS3DTextureBinding pointers at +0xd0..+0xe0 (dynamicTexture_ above stays unused).
+    std::uint64_t dynamicBinding_[5] = {};
     std::uint8_t pad118_[4] = {};
     cIGZUnknown* dynamicTexture_[5] = {};           // +0x118 (counted texture bindings)
     std::vector<DeferredOccupantOperation> deferred_;   // +0x140

@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <list>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -15,6 +16,10 @@
 #include "rz/cRZVersion.h"
 #include "sc4/Lot.h"
 #include "sc4/ModelMaker.h"
+#include "sc4/SCPropertyHelp.h"
+#include "sc4/SCProperty.h"
+#include "s3d/MaterialManager.h"
+#include "s3d/MeshAndMaterial.h"
 #include "sc4/BuildingOccupant.h"
 #include "sc4/Occupant.h"
 #include "sc4/OccupantManager.h"
@@ -61,8 +66,15 @@ struct FakeModel final : s3d::cIS3DModelInstance {
     s3d::SC4DrawAttributes attributes;
     std::uint32_t sortValue = 0;
     int refCount = 1;
+    s3d::cS3DMeshAndMaterial* meshes = nullptr;   // answered for iid 0x26a68448 when set
+    ~FakeModel() { if (meshes) meshes->Release(); }
 
     bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid == s3d::kGZIID_cIS3DMeshAndMaterial && meshes) {
+            meshes->AddRef();
+            *out = meshes;
+            return true;
+        }
         if (iid != 1 && iid != s3d::kGZIID_cIS3DModelInstance) return false;
         *out = this;
         ++refCount;
@@ -186,7 +198,9 @@ struct FakeOccupant final : cISC4Occupant {
     bool Init() override { return true; }
     bool Shutdown() override { return true; }
     bool IsInitialized() const override { return true; }
-    sc4::cISCPropertyHolder* AsPropertyHolder() override { return nullptr; }
+    sc4::cSCPropertyHolder properties;   // handed out only when hasProperties is set
+    bool hasProperties = false;
+    sc4::cISCPropertyHolder* AsPropertyHolder() override { return hasProperties ? &properties : nullptr; }
     std::uint32_t GetType() const override { return type; }
     void GetPosition(float* xyz) override { std::memcpy(xyz, position, sizeof position); }
     void SetPosition(const float* xyz) override { std::memcpy(position, xyz, sizeof position); }
@@ -697,6 +711,21 @@ struct FakeHost final : sc4::IModelMakerHost {
     }
     float ModelSizeThreshold() override { return modelSizeThreshold; }
     float TextureTintAlpha() override { return textureAlpha; }
+    std::map<std::uint64_t, std::uint64_t> swapped;     // base binding -> its +delta binding
+    std::uint32_t swapDelta = 0;
+    std::uint64_t SwappedTexture(std::uint64_t binding, std::uint32_t delta) override {
+        swapDelta = delta;
+        auto it = swapped.find(binding);
+        return it == swapped.end() ? 0 : it->second;
+    }
+    std::uint64_t dynamicBinding = 0;
+    std::uint32_t dynamicInstance = 0, dynamicTint = 0;
+    std::uint64_t DynamicTexture(std::uint32_t instance, std::uint32_t argb) override {
+        dynamicInstance = instance;
+        dynamicTint = argb;
+        return dynamicBinding;
+    }
+    float DynamicTextureScale() override { return 50.0f; }
     int RenderDetailLevel() override { return detailLevel; }
     void LightingColour(float out[4]) override {
         for (int i = 0; i < 4; ++i) out[i] = lighting[i];
@@ -1712,6 +1741,73 @@ int main() {
         maker->RebuildDynamicTexture(4);
         maker->RebuildDynamicTexture(5);   // out of range
         CHECK(maker->DynamicTexture(0) == nullptr);
+        maker->Release();
+        occupant->Release();
+        placeable->Release();
+        sc4::SetModelMakerHost(nullptr);
+    }
+
+    // ---- 11b. the state textures on the materials (model-maker.md 9.1, 11.2, 12.4) ---------------------------
+    {
+        FakeHost host;
+        host.viewZoom = 4;
+        sc4::SetModelMakerHost(&host);
+        auto* maker = new sc4::cSC4ModelMaker();
+        auto* placeable = new FakePlaceable();
+        auto* occupant = new FakeOccupant();
+        occupant->placeable = placeable;
+        auto* model = new FakeModel();
+        model->meshes = new s3d::cS3DMeshAndMaterial();
+        model->meshes->AddRef();
+        model->meshes->Materials().resize(2);
+        const auto material = [&](int i) {
+            s3d::cS3DMaterial m;
+            std::memcpy(&m, model->meshes->Materials()[static_cast<std::size_t>(i)].data(), sizeof m);
+            return m;
+        };
+        for (int i = 0; i < 2; ++i) {   // two one-layer textured materials (bindings 0x1110 / 0x2220)
+            s3d::cS3DMaterial m;
+            m.layerCount = 1;
+            m.layers[0].textureId = 0x1000u * static_cast<std::uint32_t>(i + 1);
+            m.layers[0].texture = 0x1110u * static_cast<std::uint64_t>(i + 1);
+            std::memcpy(model->meshes->Materials()[static_cast<std::size_t>(i)].data(), &m, sizeof m);
+        }
+        placeable->models.push_back(model);
+
+        // abandoned (condition 2 = dynamic texture 0): 0x294ecdd0 + zoom, the grime on every material's second layer
+        host.dynamicBinding = 0xabc0;
+        maker->ApplyLotStateEffect(occupant, sc4::kModelOccupantTypeBuilding, 2);
+        CHECK(host.dynamicInstance == 0x294ecdd4u && (host.dynamicTint >> 24) == 0xffu);
+        for (int i = 0; i < 2; ++i) {
+            const s3d::cS3DMaterial m = material(i);
+            CHECK(m.layerCount == 2 && m.layers[1].texture == 0xabc0 && m.layers[1].used == 2 && m.layers[1].pad16 == 1);
+            CHECK(m.layers[1].scale == 50.0f && m.layers[1].sampler[0] == 3 && m.layers[1].sampler[2] == 1);
+        }
+        CHECK(host.rendererChanges == 1);
+        // burnt (condition 4 = dynamic texture 4): 0x894fd650 + zoom
+        maker->ApplyLotStateEffect(occupant, sc4::kModelOccupantTypeBuilding, 4);
+        CHECK(host.dynamicInstance == 0x894fd654u);
+        // a normal state restores the static textures
+        maker->ApplyLotStateEffect(occupant, sc4::kModelOccupantTypeBuilding, 1);
+        CHECK(material(0).layerCount == 1 && material(0).layers[1].texture == 0 && host.rendererChanges == 3);
+        // nothing to restore: no change is sent
+        maker->ApplyLotStateEffect(occupant, sc4::kModelOccupantTypeBuilding, 1);
+        CHECK(host.rendererChanges == 3);
+        // the night swap: a material whose texture has a +0x8000 twin shows it, the other stays static
+        host.swapped[0x1110] = 0x9990;
+        CHECK(sc4::cSC4ModelMaker::SwapTexturesByOffset(placeable, 0x8000));
+        CHECK(host.swapDelta == 0x8000);
+        CHECK(material(0).layerCount == 2 && material(0).layers[1].texture == 0x9990 && material(0).layers[1].textureId == 0x9000);
+        CHECK(material(0).layers[1].sampler[0] == 2 && material(0).layers[1].sampler[2] == 0 && material(0).layers[1].pad16 == 0);
+        CHECK(material(1).layerCount == 1);
+        CHECK(sc4::cSC4ModelMaker::RestoreStaticTextures(placeable) && material(0).layerCount == 1);
+        // an exemplar that keeps its models (0x09f00e59) is left alone
+        occupant->hasProperties = true;
+        occupant->properties.AddRef();
+        sc4::cSCPropertyHelp::SetPropertyValue(occupant->AsPropertyHolder(), 0x09f00e59, true);
+        maker->ApplyLotStateEffect(occupant, sc4::kModelOccupantTypeBuilding, 2);
+        CHECK(material(0).layerCount == 1);
+
         maker->Release();
         occupant->Release();
         placeable->Release();

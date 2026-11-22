@@ -24,6 +24,10 @@
 #include "sc4/DBSegment.h"
 #include "sc4/GeometryUtilities.h"
 #include "sc4/Lot.h"
+#include "sc4/ZoneDeveloper.h"
+#include "s3d/MeshAndMaterial.h"
+#include "s3d/MaterialManager.h"
+#include "sc4/PropOccupant.h"
 #include "sc4/LotBaseTextureOccupant.h"
 #include "sc4/SCProperty.h"
 #include "sc4/SCPropertyHelp.h"
@@ -1402,46 +1406,159 @@ bool cSC4ModelMaker::ApplyStateEffectToModels(cISC4Occupant* occupant, std::uint
     return true;
 }
 
-void cSC4ModelMaker::ApplyLotStateEffect(cISC4Occupant* occupant, std::uint32_t type, std::uint32_t condition) {
-    // PARTIAL: the effect replaces / tints the dynamic texture of every material of every model instance
-    // (0x10030fe50, 2360 bytes). It needs the S3D texture binding factory (service 0x1ac0e11a), the four occupant
-    // interfaces it reads the lot texture ids from, and the material record internals. The port keeps the
-    // dispatch (which condition maps to which dynamic texture slot) and the "already has the texture, nothing to
-    // do" early out.
-    if (!occupant) return;
-    cISC43DPlaceableObject* placeable = Placeable(occupant);
-    if (placeable) placeable->AddRef();
-    static const int kConditionToTexture[7] = {-1, -1, 0, 1, 4, 2, 3};
-    if (condition < 7 && kConditionToTexture[condition] >= 0) {
-        const int slot = kConditionToTexture[condition];
-        SC4_UNWIRED("cSC4ModelMaker::ApplyLotStateEffect: the lot-state dynamic texture is not applied to the occupant's model materials");
-        if (!dynamicTexture_[slot] && occupantManager_) {
-            RebuildDynamicTexture(slot);
-            if (dynamicTexture_[slot]) ChangeModels(occupant, kModelOccupantTypeBuilding, 2);
+// Every material record of every model instance of `models` (cS3DMeshAndMaterial, iid 0x26a68448), copied out, changed
+// by `edit` and written back when it reports a change. The draw reads the records every frame, so the change shows at once.
+namespace {
+constexpr std::uint32_t kNetworkFlagLit = 0x20000000;   // sc4/NetworkOccupant.h
+template <class Edit> bool EditMaterials(cISC43DPlaceableObject* models, Edit edit) {
+    PlaceableModels list(models);
+    if (!list.Fill()) return false;
+    bool changed = false;
+    for (std::uint32_t i = 0; i < list.count(); ++i) {
+        s3d::cIS3DModelInstance* instance = list.data()[i];
+        void* raw = nullptr;
+        if (!instance || !instance->QueryInterface(s3d::kGZIID_cIS3DMeshAndMaterial, &raw) || !raw) continue;
+        auto* meshes = static_cast<s3d::cS3DMeshAndMaterial*>(raw);
+        for (s3d::MaterialRecord& record : meshes->Materials()) {
+            s3d::cS3DMaterial material;
+            std::memcpy(&material, record.data(), sizeof material);
+            if (edit(material)) {
+                std::memcpy(record.data(), &material, sizeof material);
+                changed = true;
+            }
         }
+        meshes->Release();
     }
-    if (placeable) placeable->Release();
-    (void)type;
+    return changed;
+}
+// The second texture layer a swap fills (the original's material bytes +0x20..+0x30 on i386).
+void SetSwapLayer(s3d::cS3DMaterial& m, std::uint32_t textureId, std::uint64_t binding, bool lit, float scale) {
+    s3d::S3DMaterialLayer& layer = m.layers[1];
+    m.layerCount = 2;
+    layer.textureId = textureId;
+    layer.texture = binding;
+    layer.used = 2;                                // texture environment: decal
+    if (lit) {
+        layer.pad15 = 0;                           // the base layer's coordinates
+        layer.pad16 = 0;
+        layer.sampler[0] = 2; layer.sampler[1] = 2; layer.sampler[2] = 0; layer.sampler[3] = 0;
+    } else {
+        layer.pad16 = 1;                           // with the inverse-scale texture transform
+        layer.sampler[0] = 3; layer.sampler[1] = 3; layer.sampler[2] = 1; layer.sampler[3] = 1;
+    }
+    layer.scale = scale;
+}
+}  // namespace
+
+// i386 0x0048F380 (model-maker.md 12.4): a material showing a swapped layer goes back to its static one.
+bool cSC4ModelMaker::RestoreStaticTextures(cISC43DPlaceableObject* models) {
+    return EditMaterials(models, [](s3d::cS3DMaterial& m) {
+        if (m.layerCount <= 1) return false;
+        m.layerCount = 1;
+        m.layers[1].texture = 0;
+        return true;
+    });
 }
 
+// i386 0x004906B0 as the state effect calls it (a = 2, b = 0): every material shows `binding` on its second layer.
+void cSC4ModelMaker::ApplyTextureToModels(cISC43DPlaceableObject* models, std::uint64_t binding, float scale) {
+    EditMaterials(models, [&](s3d::cS3DMaterial& m) {
+        SetSwapLayer(m, 0, binding, false, scale);
+        return true;
+    });
+}
+
+// i386 0x00490820 (delta 0x8000, a = 2, b = 1): a textured material shows the texture `delta` instances on (the lit windows)
+// over its own; one that has none stays static. True when one load succeeded.
+bool cSC4ModelMaker::SwapTexturesByOffset(cISC43DPlaceableObject* models, std::uint32_t delta) {
+    if (!g_host) return false;
+    bool loaded = false;
+    EditMaterials(models, [&](s3d::cS3DMaterial& m) {
+        if (m.layerCount == 0 || m.layers[0].texture == 0) return false;
+        m.layerCount = 1;
+        m.layers[1].texture = 0;
+        const std::uint64_t swapped = g_host->SwappedTexture(m.layers[0].texture, delta);
+        if (swapped) {
+            SetSwapLayer(m, m.layers[0].textureId + delta, swapped, true, 1.0f);
+            loaded = true;
+        }
+        return true;
+    });
+    return loaded;
+}
+
+// model-maker.md 9.1, x = 0: a building answers itself; a network piece its lit flag; a prop with the night-light property
+// (0x4a9f188b) the lit flag of the building on the lot at its cells' centre.
+bool cSC4ModelMaker::IsOccupantLit(cISC4Occupant* occupant) {
+    void* raw = nullptr;
+    if (occupant->QueryInterface(kGZIID_cISC4BuildingOccupant, &raw) && raw) {   // 0x87dda3a9 slot 0x40
+        auto* building = static_cast<cISC4BuildingOccupant*>(raw);
+        const bool lit = building->IsLit();
+        building->Release();
+        return lit;
+    }
+    std::uint32_t flags = 0;   // a network piece (0xa821ef94) answers its lit flag (slot 0xf0, flag 0x20000000)
+    if (g_host && g_host->NetworkPieceFlags(occupant, kNetworkFlagLit, flags)) return (flags & kNetworkFlagLit) != 0;
+    if (occupant->QueryInterface(kGZIID_cISC4PropOccupant, &raw) && raw) {        // 0xe9793a65
+        static_cast<cIGZUnknown*>(raw)->Release();
+        std::vector<std::uint8_t> nightLight;
+        cISCPropertyHolder* holder = occupant->AsPropertyHolder();
+        if (!holder || !cSCPropertyHelp::GetPropertyValue(holder, 0x4a9f188b, nightLight) || nightLight.empty() || nightLight[0] == 0)
+            return false;
+        SC4CellRect cells{};
+        occupant->GetBoundingCityCells(cells);
+        cSC4Lot* lot = lotManager_ ? lotManager_->GetLot((cells.x0 + cells.x1) >> 1, (cells.z0 + cells.z1) >> 1, false) : nullptr;
+        cIGZUnknown* building = lot ? lot->GetBuilding() : nullptr;                 // lot slot 0xc0
+        if (!building || !building->QueryInterface(kGZIID_cISC4BuildingOccupant, &raw) || !raw) return false;
+        auto* lotBuilding = static_cast<cISC4BuildingOccupant*>(raw);
+        const bool lit = lotBuilding->IsLit();
+        lotBuilding->Release();
+        return lit;
+    }
+    return false;
+}
+
+// i386 0x0024a2bc (model-maker.md 9.1): the state an occupant's models show. x = 0 lit (the night textures when lit), 2..6
+// the five dynamic textures (abandoned, run down, burnt...), anything else (or a missing texture) the static textures.
+// Occupants whose exemplar sets 0x09f00e59 keep their models as they are.
+void cSC4ModelMaker::ApplyLotStateEffect(cISC4Occupant* occupant, std::uint32_t type, std::uint32_t condition) {
+    (void)type;
+    if (!occupant) return;
+    bool keep = false;
+    if (cISCPropertyHolder* holder = occupant->AsPropertyHolder()) cSCPropertyHelp::GetPropertyValue(holder, 0x09f00e59, keep);
+    if (keep) return;
+    cISC43DPlaceableObject* models = Placeable(occupant);
+    if (!models) return;
+    if (condition == 0) {
+        // lit and a night texture loaded: done; otherwise (not lit, or no texture had a +0x8000 twin) the static textures
+        if (IsOccupantLit(occupant) && SwapTexturesByOffset(models, 0x8000)) {
+            ChangeModels(occupant, kModelOccupantTypeBuilding, 2);
+            return;
+        }
+    } else if (condition >= 2 && condition <= 6) {
+        static const int kConditionToSlot[7] = {-1, -1, 0, 1, 4, 2, 3};
+        const int slot = kConditionToSlot[condition];
+        if (!dynamicBinding_[slot]) RebuildDynamicTexture(slot);
+        if (const std::uint64_t binding = dynamicBinding_[slot]) {
+            ApplyTextureToModels(models, binding, g_host ? g_host->DynamicTextureScale() : 1.0f);
+            ChangeModels(occupant, kModelOccupantTypeBuilding, 2);
+            return;
+        }
+    }
+    if (RestoreStaticTextures(models)) ChangeModels(occupant, kModelOccupantTypeBuilding, 2);
+}
+
+// i386 0x002471e4 (model-maker.md 11.2): dynamic texture `slot` is the texture 0x294ecdd0 (slots 0..3) or 0x894fd650 (slot 4)
+// at the view's zoom, tinted by the light colour (each channel round(256 f), 256 giving 255).
 void cSC4ModelMaker::RebuildDynamicTexture(int slot) {
-    // PARTIAL: 0x1003116d8 reads the tinted texture resource (key {0x7ab50e44, 0x1ab50c3f}), walks its mip chain
-    // with nRZSimGL::TintTexture_* (all recovered) and creates or updates the binding through the texture binding
-    // factory (service 0x1ac0e11a, not recovered). The port keeps the slot -> texture id offset table and the
-    // tint colour packing; the resource walk and the factory call are left to the factory seam.
-    static const std::uint32_t sTextureIDs[5] = {0x0, 0x1, 0x40, 0x80, 0x100};
-    static_assert(sizeof(sTextureIDs) == 20, "five dynamic texture ids");
-    (void)sTextureIDs;
-    if (slot < 0 || slot > 4) return;
-    // the tint colour from the three lighting values (see 0x100311a8x): 0xAARRGGBB with the alpha of tint.
+    if (slot < 0 || slot > 4 || !g_host) return;
     const auto channel = [](float value) -> std::uint32_t {
         const std::uint32_t raw = static_cast<std::uint32_t>(static_cast<int>(value + 49152.0f) - 49152);
         return (raw - (raw >> 8)) & 0xff;
     };
-    const std::uint32_t tint = 0xff000000u | (channel(lighting_[0]) << 16) | (channel(lighting_[1]) << 8) |
-                               channel(lighting_[2]);
-    (void)tint;
-    SC4_UNWIRED("cSC4ModelMaker::RebuildDynamicTexture: the tinted texture resource walk and the texture binding factory call are not ported");
+    const std::uint32_t tint = 0xff000000u | (channel(lighting_[0]) << 16) | (channel(lighting_[1]) << 8) | channel(lighting_[2]);
+    const std::uint32_t instance = (slot < 4 ? 0x294ecdd0u : 0x894fd650u) + static_cast<std::uint32_t>(g_host->ViewZoom());
+    if (const std::uint64_t binding = g_host->DynamicTexture(instance, tint)) dynamicBinding_[slot] = binding;
 }
 
 // i386 0x00246820: the occupant's cells, cut to the city; the flags of those cells are worked out again, and the terrain is
