@@ -743,6 +743,7 @@ bool Boot() {
     gz::SetCursorPlatform(&gCursorPlatform);
     gz::SetWinStyleManager(&gStyleManager);
     native::InstallButtonSounds();   // the window buttons' host: caption fonts (and sounds, once there is audio output)
+    native::InstallOccupantFilterWorld();   // the occupant filters' world (view levels, network flags), before any city loads
 
     const bool ok = native::RunBoot(true, true, gDriver.get(), [&](cGZFramework& framework, cSC4App& app) {
         SL::SetFramework(&framework);             // the locator's RZGetFramework(): without it every SL:: service stays null

@@ -15,3 +15,4 @@ void SetCityView3DWin(sc4::cSC4View3DWin* view);   // the view being attached (b
 // Its view level (1 above ground, 2 underground; 1 before a city view exists).
 int CityViewLevel();
 }
+namespace native { void InstallOccupantFilterWorld(); }   // app/NativeCitySystems.cpp: sc4::SetOccupantFilterWorld

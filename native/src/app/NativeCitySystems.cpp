@@ -7,6 +7,9 @@
 #include "sc4/View3DWin.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSC4SimGrid.h"
+#include "sc4/NetworkOccupant.h"
+#include "sc4/OccupantFilters2.h"
+#include "sc4/SCPropertyHelp.h"
 
 namespace native {
 namespace {
@@ -159,5 +162,58 @@ void NativeMoveCameraTo(float x, float y, float z) {
 int NativeCurrentViewLevel() {
     sc4::cSC4View3DWin* view = CityView3DWin();
     return view ? static_cast<int>(view->GetCurrentViewLevel()) : 1;
+}
+}  // namespace native
+
+namespace native {
+namespace {
+// The world the occupant filters of sc4/OccupantFilters2 ask (cSC4ViewLevelOccupantFilter, cSC4NetworkOccupantFilter, ...).
+class OccupantFilterWorld final : public sc4::IOccupantFilterWorld {
+public:
+    // QueryInterface(0xa821ef94) then vslot 0x60 (the network flags); cSC4NetworkOccupant does not answer that QI natively, its
+    // class stands for the interface.
+    bool NetworkFlags(sc4::cISC4Occupant* occupant, std::uint32_t& flags) override {
+        auto* piece = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);
+        if (!piece) return false;
+        flags = piece->GetNetworkFlag();
+        return true;
+    }
+    bool NetworkIsPlaced(sc4::cISC4Occupant* occupant) override {
+        auto* piece = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);
+        return piece && piece->IsPlaced();
+    }
+    // SC4GetOccupantViewLevel (PC 0x005E9CA0, spec occupant-manager.md 13.2.4): 1 the surface, 2 the subway layer, 3 the pipe layer.
+    int OccupantViewLevel(sc4::cISC4Occupant* occupant) override {
+        if (!occupant) return 1;
+        auto answers = [occupant](std::uint32_t iid) {
+            void* raw = nullptr;
+            if (!occupant->QueryInterface(iid, &raw) || !raw) return false;
+            static_cast<cIGZUnknown*>(raw)->Release();
+            return true;
+        };
+        const sc4::cISCPropertyHolder* holder = occupant->AsPropertyHolder();
+        int level = 1;
+        if (answers(0x49c05b9f) || answers(0xea0a5acf)) level = 3;          // a pipe, a pipe connection
+        if (holder && holder->HasProperty(0x49512a09)) level = 3;
+        if (answers(0xca16374f) || answers(0xca15ed6b)) level = 2;          // a subway, a subway connection
+        if (occupant->IsOccupantGroup(0x4217) || occupant->IsOccupantGroup(0x4208) || occupant->IsOccupantGroup(0x421d)) level = 2;
+        if (holder && holder->HasProperty(0x8a15f1bd)) return 2;           // final
+        if (level == 1 && holder) {
+            bool p72 = false, p71 = false, p70 = false;
+            sc4::cSCPropertyHelp::GetPropertyValue(holder, 0xcaa45672, p72);
+            sc4::cSCPropertyHelp::GetPropertyValue(holder, 0xcaa45671, p71);
+            sc4::cSCPropertyHelp::GetPropertyValue(holder, 0xcaa45670, p70);
+            if (p72) level = 3;
+            if (p71) level = 2;
+            if (!p70) level = 1;
+        }
+        return level;
+    }
+};
+}  // namespace
+
+void InstallOccupantFilterWorld() {
+    static OccupantFilterWorld world;
+    sc4::SetOccupantFilterWorld(&world);
 }
 }  // namespace native
