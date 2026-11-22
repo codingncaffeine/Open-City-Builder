@@ -353,7 +353,6 @@ bool LoadCityFile(cSC4App& app, const std::string& path, cRZAutoRefCount<cISC4Re
         InstallMiniMapHost();               // the corner minimap's terrain, zones, networks and camera
     }
     ForgetLotSerializables();
-    ListenForSavedView();
     const bool loaded = app.LoadCity(cRZString(path.c_str()), holder);
     // the weather simulator's catch-up ran on the city's "init done" message (0x26d31ec1) during the load: report it
     if (loaded) WeatherPostCityInit();

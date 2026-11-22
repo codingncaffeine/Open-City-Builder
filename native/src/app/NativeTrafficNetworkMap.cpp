@@ -9,6 +9,9 @@
 #include <vector>
 
 #include "app/NativeCity.h"
+#include "app/NativeCityView.h"
+#include "sc4/Render3D.h"
+#include "sc4/ViewUtilities.h"
 #include "app/NativeZoneDeveloperHost.h"
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/BuildingOccupant.h"
@@ -216,11 +219,20 @@ public:
         SC4_UNWIRED("cSC4TrafficNetworkMap: the building development simulator's active edges (vslot 0xf0) are not asked (every edge)");
         return 0xf;
     }
-    void GetViewPosition(float& x, float& y, float& z) override {   // PARTIAL: view utilities' camera
-        SC4_UNWIRED("cSC4TrafficNetworkMap: the view utilities' camera position is not answered (origin)");
-        x = y = z = 0.0f;
+    // The view utilities' visible terrain rectangle (i386 +0x3ec..+0x3f8, kept by cSC43DRender::UpdateVisibleTerrainMetrics):
+    // its min corner and its max corner (y unused).
+    void GetViewPosition(float& x, float& y, float& z) override {
+        const SC4ViewUtilities* v = native::CityRenderer() ? native::CityRenderer()->GetViewUtilities() : nullptr;
+        x = v ? v->VisibleTerrainRect()[0] : 0.0f;
+        z = v ? v->VisibleTerrainRect()[1] : 0.0f;
+        y = 0.0f;
     }
-    void GetViewTarget(float& x, float& y, float& z) override { x = y = z = 0.0f; }
+    void GetViewTarget(float& x, float& y, float& z) override {
+        const SC4ViewUtilities* v = native::CityRenderer() ? native::CityRenderer()->GetViewUtilities() : nullptr;
+        x = v ? v->VisibleTerrainRect()[2] : 0.0f;
+        z = v ? v->VisibleTerrainRect()[3] : 0.0f;
+        y = 0.0f;
+    }
     void SubscribeMessage(std::uint32_t message) override { if (SL::spMS2 && map_) SL::spMS2->AddNotification(map_, message); }
     void UnsubscribeMessage(std::uint32_t message) override { if (SL::spMS2 && map_) SL::spMS2->RemoveNotification(map_, message); }
     void MakeTunnelPaths(ITrafficNetworkMapPathInfo* pathInfo, ITrafficNetworkMapOccupant* from, ITrafficNetworkMapOccupant* to) override {

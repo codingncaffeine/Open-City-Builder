@@ -699,14 +699,17 @@ public:
     // --- DoMessage(cIGZMessage2*)'s unrecovered helpers (each one the view's member of the same name runs)
     virtual void PreCityInit() {}                                       // DoPreCityInit (the camera, the renderer: the native view builds them)
     virtual void PostCityInit() {}                                      // DoPostCityInit
-    // DoLoad: reads the view record (0xa9c8647c, 0xe9c8647e, 1); true when it was there with a version below 5.
-    virtual bool LoadViewState(cIGZPersistDBSegment* segment, cIGZVariant* version) { (void)segment; (void)version; 
-        SC4_UNWIRED("IView3DWinHost::LoadViewState: the view record (0xa9c8647c) is not read (DoLoad 0x100787092)");
-        return false;
+    // DoLoad / DoSave: the view's camera control, 3D render, model maker and simulator (+0xfc / +0x100 / +0x104 / +0x16c in the
+    // original, which reads the saved references straight into those pointers). Loaded: each as its QueryInterface answered
+    // its id (0xc9c628ec / 0xe9c622d8 / 0xa9c741b3 / 0x8695664e) or null; the host owns the references. To save: the live
+    // objects as serializables (borrowed); false when the view has none yet.
+    virtual void ViewObjectsLoaded(void* camera, void* render, void* modelMaker, void* simulator) {
+        (void)camera; (void)render; (void)modelMaker; (void)simulator;
     }
-    virtual void SaveViewState(cIGZPersistDBSegment* segment) {   // DoSave
-        (void)segment;
-        SC4_UNWIRED("IView3DWinHost::SaveViewState: the view record is not written (DoSave 0x1007871e4)");
+    virtual bool ViewObjectsToSave(cIGZSerializable*& camera, cIGZSerializable*& render, cIGZSerializable*& modelMaker,
+                                   cIGZSerializable*& simulator) {
+        camera = render = modelMaker = simulator = nullptr;
+        return false;
     }
     virtual void BudgetFailure() { SC4_UNWIRED("IView3DWinHost::BudgetFailure: the budget failure dialog is not shown (DoBudgetFailure 0x100788d0e)"); }                                     // DoBudgetFailure: the scripted dialog 0xa5cf71d / 0x2a5cfb2c
     virtual void ClockChanged(std::uint32_t hour, std::uint32_t minute) {

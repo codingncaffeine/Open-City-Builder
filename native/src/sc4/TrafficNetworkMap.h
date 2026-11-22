@@ -221,7 +221,7 @@ public:
     virtual ITrafficNetworkMapBuilding* LotBuilding(ITrafficNetworkMapLot* lot) = 0;
     // building development simulator slot 0xf0(purpose, wealth): active edge mask of the building type
     virtual int ActiveEdgesForBuilding(std::uint32_t purpose, std::uint8_t wealth) = 0;
-    // view utilities: camera position (+0x3f4) and look-at (+0x3fc)
+    // view utilities: the visible terrain rectangle's min corner (+0x3f4) and max corner (+0x3fc)
     virtual void GetViewPosition(float& x, float& y, float& z) = 0;
     virtual void GetViewTarget(float& x, float& y, float& z) = 0;
     // message bus (SL::spMS2 slots 0x28 / 0x30)

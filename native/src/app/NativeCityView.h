@@ -13,6 +13,7 @@ class cISC4City;
 class cIGZBuffer;
 struct cRZRect;
 
+class cIGZSerializable;
 namespace native {
 
 // The city view's renderer (null before the city view exists).
@@ -22,7 +23,9 @@ void AnnounceCameraZoomRotation();
 // The renderer's ChangeModel(model, change) (vslot 0xf8); false without a city view.
 bool CityRendererChangeModel(s3d::cIS3DModelInstance* model, int change);
 // Listen for the next city load's saved camera (the view state record) and open the city there; call before LoadCity.
-void ListenForSavedView();
+// cSC4View3DWin::DoLoad / DoSave's host: the loaded view objects (references the call takes over) and the live ones to save.
+void ViewObjectsLoaded(void* camera, void* render, void* modelMaker, void* simulator);
+bool ViewObjectsToSave(cIGZSerializable*& camera, cIGZSerializable*& render, cIGZSerializable*& modelMaker, cIGZSerializable*& simulator);
 // Its view utilities' eye position (+0x44, three floats; zeros without a view) and zoom (+0x14): NativeCityViewQueries.cpp.
 const float* CityViewEye();
 int CityViewZoom();

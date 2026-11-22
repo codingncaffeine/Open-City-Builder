@@ -320,6 +320,12 @@ private:
 struct StubView3DWin final : IView3DWinHost {
     View3DNotifications notifications_;
     cIGZMessageServer2* MessageServer2() override { return SL::spMS2; }   // SL::spMS2: erosion, view filter / level and tool changes
+    void ViewObjectsLoaded(void* camera, void* render, void* modelMaker, void* simulator) override {
+        native::ViewObjectsLoaded(camera, render, modelMaker, simulator);
+    }
+    bool ViewObjectsToSave(cIGZSerializable*& camera, cIGZSerializable*& render, cIGZSerializable*& modelMaker, cIGZSerializable*& simulator) override {
+        return native::ViewObjectsToSave(camera, render, modelMaker, simulator);
+    }
     // SL::spPreferences: the application's preferences blob (0x1734 bytes, SimCity 4.cfg; edge scrolling +0xf09 on by default).
     // A zeroed stand-in turned edge scrolling off, and with it off every mouse move stopped a right-drag scroll (the edge pass
     // recomputes the scroll velocity, finds no direction and stops), so panning ran a frame and halted, over and over.

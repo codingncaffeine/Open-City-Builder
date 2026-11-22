@@ -12,6 +12,10 @@
 
 #include "gz/CommandParameterSet.h"
 #include "gz/cIGZVariant.h"
+#include "rz/cRZAutoRefCount.h"
+#include "rz/cRZVariant.h"
+#include "sc4/AutoHelpers.h"
+#include "sc4/DBSegment.h"
 #include "gz/WinBtn.h"
 #include "gz/WinGen.h"
 #include "gz/WinUtils.h"
@@ -3574,10 +3578,62 @@ void cSC4View3DWin::DoPostCityInit() {
     UpdateProgressMessage();
     DeleteProgressScreen();
 }
-void cSC4View3DWin::DoLoad(cIGZPersistDBSegment* segment, cIGZVariant* version) {   // 0x100787092
-    if (host_ && host_->LoadViewState(segment, version)) viewStateUnread_ = false;
+// 0x100787092 (i386 0x0052272c): record (0xa9c8647c, 0xe9c8647e, 1), versions below 5: the camera control, the 3D render, the
+// model maker and the simulator as references, then the global effect trigger counts (count, then id / count pairs).
+void cSC4View3DWin::DoLoad(cIGZPersistDBSegment* segment, cIGZVariant* version) {
+    cSC4AutoLoadStream load(segment, 0xa9c8647c, 0xe9c8647e, 1);
+    if (!load.IsOpen() || load.GetVersion() >= 5) return;
+    cISC4DBSegmentIStream* stream = load.GetStream();
+    // The save's version (narrow object ids before the wide format), as a counted copy: the stream releases its user data, and
+    // the message's variant lives on LoadCity's stack.
+    cRZAutoRefCount<cRZVariant> versionValue(new cRZVariant(version ? version->AsUint32() : 0u));
+    stream->SetUserData(versionValue.get());
+    void* camera = nullptr;
+    void* render = nullptr;
+    void* modelMaker = nullptr;
+    void* simulator = nullptr;
+    SC4ReadGZSerializable(*stream, 0xc9c628ec, &camera, false);
+    SC4ReadGZSerializable(*stream, 0xe9c622d8, &render, false);
+    SC4ReadGZSerializable(*stream, 0xa9c741b3, &modelMaker, false);
+    SC4ReadGZSerializable(*stream, 0x8695664e, &simulator, false);
+    std::uint32_t count = 0;
+    stream->GetUint32(count);
+    for (std::uint32_t i = 0; i < count && !stream->GetError(); ++i) {
+        std::uint32_t id = 0, triggers = 0;
+        stream->GetUint32(id);
+        stream->GetUint32(triggers);
+        globalEffects_[id] = triggers;
+    }
+    viewStateUnread_ = false;
+    static const bool trace = std::getenv("SC4_DEBUG") != nullptr;
+    if (trace)
+        std::fprintf(stderr, "view state: read camera %d render %d model maker %d simulator %d, %u global effect triggers\n", camera != nullptr,
+                     render != nullptr, modelMaker != nullptr, simulator != nullptr, count);
+    if (host_) host_->ViewObjectsLoaded(camera, render, modelMaker, simulator);
 }
-void cSC4View3DWin::DoSave(cIGZPersistDBSegment* segment) { if (host_) host_->SaveViewState(segment); }   // 0x1007871e4
+
+// 0x1007871e4 (i386 0x00520f5a): the same record, version 4.
+void cSC4View3DWin::DoSave(cIGZPersistDBSegment* segment) {
+    cIGZSerializable* camera = nullptr;
+    cIGZSerializable* render = nullptr;
+    cIGZSerializable* modelMaker = nullptr;
+    cIGZSerializable* simulator = nullptr;
+    if (!host_ || !host_->ViewObjectsToSave(camera, render, modelMaker, simulator)) return;
+    cSC4AutoSaveStream save(segment, 0xa9c8647c, 0xe9c8647e, 1, 4);
+    cISC4DBSegmentOStream* stream = save.IsOpen() ? save.GetStream() : nullptr;
+    if (!stream) return;
+    SC4WriteGZSerializable(stream, camera);
+    SC4WriteGZSerializable(stream, render);
+    SC4WriteGZSerializable(stream, modelMaker);
+    SC4WriteGZSerializable(stream, simulator);
+    static const bool trace = std::getenv("SC4_DEBUG") != nullptr;
+    if (trace) std::fprintf(stderr, "view state: saved with %zu global effect triggers\n", globalEffects_.size());
+    stream->SetUint32(static_cast<std::uint32_t>(globalEffects_.size()));
+    for (const auto& entry : globalEffects_) {
+        stream->SetUint32(entry.first);
+        stream->SetUint32(entry.second);
+    }
+}
 void cSC4View3DWin::DoBudgetFailure() { if (host_) host_->BudgetFailure(); }                               // 0x100788d0e
 void cSC4View3DWin::Update24HourClock(std::uint32_t hour, std::uint32_t minute) { if (host_) host_->ClockChanged(hour, minute); }   // 0x100788912
 void cSC4View3DWin::UpdateAmbientLightLevel() { if (host_) host_->AmbientLightChanged(); }                 // 0x100788bfc
