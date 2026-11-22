@@ -751,9 +751,11 @@ void testConnections() {
     CHECK(city.ConnectionChangesForTest()[0].z == 206);
     CHECK(city.ConnectionChangesForTest()[0].flag == true);
 
-    // MarkConnectionsForRemoval queues the inner cell of every connection whose other side is established.
-    fake->innerX = 1;
-    fake->innerZ = 2;
+    // MarkConnectionsForRemoval queues the cell of every connection whose other side is established (not its inner cell).
+    fake->cellX = 1;
+    fake->cellZ = 2;
+    fake->innerX = 9;
+    fake->innerZ = 9;
     host.findCityResult = &city;              // any non-null regional city
     host.regionalEstablished = true;
     host.currentRegionalCity = &city;
@@ -761,11 +763,13 @@ void testConnections() {
     changed.SetType(kRegionalCityMessageCityChanged);
     changed.SetData3(1);                      // data3 != 0 takes the first branch
     host.pass.clear();
+    host.toolOk = true;
+    host.links.insert({7, 1, 2});
     CHECK(city.DoMessage(&changed));
-    // The handler clears the pending list first, then MarkConnectionsForRemoval queues one entry (type 7 at 1,2, a removal), which
-    // CreateSymmetricConnections applies at once: it asks for the light rail tool (network 8) and, with none, skips the entry.
+    // The handler clears the pending list first, then MarkConnectionsForRemoval queues one entry (type 7 at the connection's cell
+    // 1,2, a removal), which CreateSymmetricConnections applies at once with the light rail tool (network 8).
     CHECK(city.ConnectionChangesForTest().empty());
-    CHECK(host.pass.size() == 1 && host.pass[0] == "tool 8");
+    CHECK(host.pass.size() >= 2 && host.pass[0] == "tool 8" && host.pass[1] == "delete 7 1,2");
 
     // TreatAllIncomingConnectionsAsNew records the connections of adjacent cities whose other side is this one.
     auto* adjacency = new FakeRegionalCity();
@@ -774,16 +778,24 @@ void testConnections() {
     auto* incoming = new FakeConnection();
     incoming->type = 3;
     incoming->otherCity = &city;
-    incoming->otherX = 130;
-    incoming->otherZ = 240;
+    incoming->cellX = 130;   // the neighbor's connection cell is what gets converted (not its region cell on the other side)
+    incoming->cellZ = 240;
+    incoming->otherX = 7;
+    incoming->otherZ = 7;
     NeighborConnectionList incomingList;
     incomingList.push_back(cRZAutoRefCount<sc4::cISC4NeighborConnection>(incoming));
     host.regionalConnections = incomingList;
     host.pass.clear();
+    host.links.insert({7, 1, 2});
     CHECK(city.DoMessage(&changed));
-    // ...and the incoming highway (type 3 at 30,40, an add) after it, along the edge: the highway tool (network 2) is asked next.
+    // ...and the incoming highway (type 3, the neighbor's connection cell 130,240 converted to 30,40, an add) after it: the first
+    // half of a wide pair only makes its connection.
     CHECK(city.ConnectionChangesForTest().empty());
-    CHECK(host.pass.size() == 2 && host.pass[0] == "tool 8" && host.pass[1] == "tool 2");
+    bool highway = false;
+    for (auto& line : host.pass) if (line.rfind("create 3 30,40", 0) == 0) highway = true;
+    CHECK(highway);
+    host.toolOk = false;
+    host.links.clear();
     host.regionalConnections.clear();
 
     // Not established, or no city: MarkConnectionsForRemoval queues nothing.

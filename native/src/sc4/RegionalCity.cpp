@@ -411,7 +411,7 @@ void cSC4RegionalCity::MarkConnectionsForRemoval() {
     for (cRZAutoRefCount<sc4::cISC4NeighborConnection>& ref : all) {
         sc4::cISC4NeighborConnection* connection = ref.get();
         int cellX = 0, cellZ = 0;
-        connection->GetConnectionInnerCell(cellX, cellZ);
+        connection->GetConnectionCell(cellX, cellZ);   // i386 slot 0x18 (spec regional-city-records.md 3.2: the connection's own cell)
         cISC4RegionalCity* otherCity = host_ ? host_->FindCityOnOtherSideOfConnection(cellX, cellZ) : nullptr;
         if (!otherCity || !host_->RegionalCityEstablished(otherCity)) continue;
         ConnectionChange change;
@@ -436,7 +436,7 @@ void cSC4RegionalCity::TreatAllIncomingConnectionsAsNew() {
             sc4::cISC4NeighborConnection* connection = ref.get();
             if (connection->GetCityOnOtherSideOfConnection() != this) continue;
             int neighborX = 0, neighborZ = 0;
-            connection->GetRegionCellOnOtherSideOfConnection(neighborX, neighborZ);
+            connection->GetConnectionCell(neighborX, neighborZ);   // i386 slot 0x18: the neighbor's connection cell, converted below
             int connectionX = 0, connectionZ = 0;
             host_->ConvertNeighborCellToConnectionCell(city, neighborX, neighborZ, connectionX, connectionZ);
             ConnectionChange change;
