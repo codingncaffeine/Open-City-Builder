@@ -360,16 +360,25 @@ public:
     void PushNumber(double) override { stack.push_back(Value::Number(0)); }
     void GetGlobal(const char*) override {}
     void RawGetTable(int) override {}
-    void RawSetTable(int) override {}
+    void RawSetTable(int) override {   // lua_settable: pops the key and the value
+        ++rawSets;
+        stack.resize(stack.size() < 2 ? 0 : stack.size() - 2);
+    }
+    int rawSets = 0;
+    cIGZUnknown* node = nullptr;
+    int nodeIndex = 0;
+    cIGZUnknown* ToDataRegistryNode(sc4::cISC4GameDataRegistry*, int index) override { nodeIndex = index; return node; }
     void GetRef(int ref) override { stack.push_back(ref == functionRef ? Value::Function() : Value::Number(0)); }
-    void NewTable() override {}
+    void NewTable() override { stack.push_back(Value::Number(0)); }
     int Ref(bool) override {
         if (!stack.empty()) stack.pop_back();   // Ref pops the value into the registry
         return newRef;
     }
-    void CallProtected(int argCount, int resultCount) override {
+    void CallProtected(int argCount, int resultCount) override {   // lua_pcall: pops the function and its arguments, pushes the results
         calls.push_back({argCount, resultCount});
-        Pop(argCount + resultCount);
+        const std::size_t drop = static_cast<std::size_t>(argCount + 1);
+        stack.resize(stack.size() < drop ? 0 : stack.size() - drop);
+        for (int i = 0; i < resultCount; ++i) stack.push_back(Value::Number(0));
     }
     void Unref(int) override {}
     bool IsFunction(int index) override { return !stack.empty() && At(index).function; }
@@ -1189,6 +1198,71 @@ int main() {
         manager->Release();
         advice->Release();
         occupant->Release();
+    }
+
+    // --- the script's find/create target (CallTargetScriptFunction) -----------------------------------------------------------
+    {
+        struct Node final : cIGZUnknown {
+            ISituationOccupant* occupant = nullptr;
+            bool QueryInterface(std::uint32_t iid, void** out) override {
+                if (iid != 0x26bb767e || !occupant) return false;
+                occupant->AddRef();
+                *out = static_cast<cIGZUnknown*>(occupant);
+                return true;
+            }
+            std::uint32_t AddRef() override { return 1; }
+            std::uint32_t Release() override { return 1; }
+        } node;
+        FakeHost host;
+        FakeApp app;
+        FakeLua lua;
+        FakeCity city;
+        FakeAutomataManager vehicles;
+        FakeAutomaton automaton;
+        auto* occupant = new FakeOccupant();
+        auto* scripted = new FakeOccupant();
+        automaton.occupant = occupant;
+        occupant->automaton = &automaton;
+        vehicles.instances = {&automaton};
+        node.occupant = scripted;
+        lua.node = &node;
+        lua.functionRef = 7;
+        host.lua = &lua;
+        host.app = &app;
+        host.city = &city;
+        host.managers = {&vehicles};
+        auto* advice = new FakeAdvice();
+        advice->successCondition = 2;
+        advice->flags = kSituationFlagTraining;
+        advice->adviceId = 0x99;
+        host.situationByGuid = advice;
+        host.situationGuid = 0x99;
+        SetCitySituationManagerHost(&host);
+        auto* manager = new cSC4CitySituationManager();
+        manager->AddRef();
+        CHECK(manager->Init());
+        cRZMessage2Standard* initiate = MakeMessage(kSituationMsgActivateAdvice);
+        initiate->SetData1(0x99);
+        initiate->SetData2(1);
+        initiate->SetData3(0);
+        CHECK(manager->DoMessage(initiate));
+        initiate->Release();
+        const std::size_t callsBefore = lua.calls.size();
+        const int top = lua.GetTop();
+        // no groups: the script runs with (table, groups) and its node is the target
+        CHECK(manager->CallTargetScriptFunction(7, {}) == scripted);
+        CHECK(lua.calls.size() == callsBefore + 1 && lua.calls.back().first == 2 && lua.calls.back().second == 1);
+        CHECK(lua.nodeIndex == -1 && lua.rawSets == 0 && lua.GetTop() == top);
+        // two groups: one push and one SetTable each (the original's table building)
+        manager->CallTargetScriptFunction(7, {0x10, 0x20});
+        CHECK(lua.rawSets == 2 && lua.GetTop() == top);
+        // a reference that is no function: nothing is called
+        CHECK(manager->CallTargetScriptFunction(8, {}) == nullptr && lua.calls.size() == callsBefore + 2);
+        manager->Shutdown();
+        manager->Release();
+        advice->Release();
+        occupant->Release();
+        scripted->Release();
     }
 
     // --- coverage (condition 5) ------------------------------------------------------------------------------------------

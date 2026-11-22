@@ -273,9 +273,9 @@ struct FakeLua final : cISCLua {
     bool IsTable(int index) override { return At(index).kind == LVal::TableK; }
     bool IsUserData(int index) override { return At(index).kind == LVal::UserData; }
     bool IsNil(int index) override { return At(index).kind == LVal::Nil; }
-    bool ToDataRegistryEntryID(::cISC4GameDataRegistry*, int) override { return false; }
-    bool ToDataRegistryNode(::cISC4GameDataRegistry*, int) override { return false; }
-    bool ToDataRegistryValue(::cISC4GameDataRegistry*, int) override { return false; }
+    std::uintptr_t ToDataRegistryEntryID(::cISC4GameDataRegistry*, int) override { return 0; }
+    cIGZUnknown* ToDataRegistryNode(::cISC4GameDataRegistry*, int) override { return nullptr; }
+    void* ToDataRegistryValue(::cISC4GameDataRegistry*, int) override { return nullptr; }
 };
 
 // ---- small table builders -------------------------------------------------------------------------------------------

@@ -5,6 +5,7 @@
 #include <cstdint>
 
 class cISC4GameDataRegistry;
+class cIGZUnknown;
 struct lua_State;
 
 class cISCLua {
@@ -86,9 +87,9 @@ public:
     virtual bool IsTable(int index) = 0;                              // 0x240
     virtual bool IsUserData(int index) = 0;                           // 0x248
     virtual bool IsNil(int index) = 0;                                // 0x250
-    virtual bool ToDataRegistryEntryID(cISC4GameDataRegistry* registry, int index) = 0;   // 0x258
-    virtual bool ToDataRegistryNode(cISC4GameDataRegistry* registry, int index) = 0;      // 0x260
-    virtual bool ToDataRegistryValue(cISC4GameDataRegistry* registry, int index) = 0;     // 0x268
+    virtual std::uintptr_t ToDataRegistryEntryID(cISC4GameDataRegistry* registry, int index) = 0;   // 0x258 the entry id of a node table (0: none)
+    virtual cIGZUnknown* ToDataRegistryNode(cISC4GameDataRegistry* registry, int index) = 0;      // 0x260 its node object (borrowed)
+    virtual void* ToDataRegistryValue(cISC4GameDataRegistry* registry, int index) = 0;     // 0x268 its value handle
 
 protected:
     ~cISCLua() = default;

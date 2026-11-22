@@ -158,9 +158,9 @@ struct FakeLua final : cISCLua {
     bool IsTable(int index) override { return At(index).kind == Value::TableK; }
     bool IsUserData(int) override { return false; }
     bool IsNil(int index) override { return At(index).kind == Value::Nil; }
-    bool ToDataRegistryEntryID(cISC4GameDataRegistry*, int) override { return false; }
-    bool ToDataRegistryNode(cISC4GameDataRegistry*, int) override { return false; }
-    bool ToDataRegistryValue(cISC4GameDataRegistry*, int) override { return false; }
+    std::uintptr_t ToDataRegistryEntryID(cISC4GameDataRegistry*, int) override { return 0; }
+    cIGZUnknown* ToDataRegistryNode(cISC4GameDataRegistry*, int) override { return nullptr; }
+    void* ToDataRegistryValue(cISC4GameDataRegistry*, int) override { return nullptr; }
 };
 
 // ---------------------------------------------------------------------------------------------------------------

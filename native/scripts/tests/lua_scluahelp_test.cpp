@@ -139,9 +139,9 @@ struct FakeLua : cISCLua {
     int CloneTag(int tag) override { return {}; }
     bool IsFunction(int index) override { return {}; }
     bool IsUserData(int index) override { return {}; }
-    bool ToDataRegistryEntryID(cISC4GameDataRegistry* registry, int index) override { return {}; }
-    bool ToDataRegistryNode(cISC4GameDataRegistry* registry, int index) override { return {}; }
-    bool ToDataRegistryValue(cISC4GameDataRegistry* registry, int index) override { return {}; }
+    std::uintptr_t ToDataRegistryEntryID(cISC4GameDataRegistry* registry, int index) override { return 0; }
+    cIGZUnknown* ToDataRegistryNode(cISC4GameDataRegistry* registry, int index) override { return nullptr; }
+    void* ToDataRegistryValue(cISC4GameDataRegistry* registry, int index) override { return nullptr; }
 };
 
 int main() {

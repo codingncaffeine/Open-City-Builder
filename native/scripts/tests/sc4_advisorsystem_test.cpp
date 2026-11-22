@@ -234,9 +234,9 @@ public:
     bool IsTable(int index) override { return At(index).kind == LValue::TableK; }
     bool IsUserData(int index) override { return At(index).kind == LValue::UserDataK; }
     bool IsNil(int index) override { return At(index).kind == LValue::Nil; }
-    bool ToDataRegistryEntryID(cISC4GameDataRegistry*, int) override { return false; }
-    bool ToDataRegistryNode(cISC4GameDataRegistry*, int) override { return false; }
-    bool ToDataRegistryValue(cISC4GameDataRegistry*, int) override { return false; }
+    std::uintptr_t ToDataRegistryEntryID(cISC4GameDataRegistry*, int) override { return 0; }
+    cIGZUnknown* ToDataRegistryNode(cISC4GameDataRegistry*, int) override { return nullptr; }
+    void* ToDataRegistryValue(cISC4GameDataRegistry*, int) override { return nullptr; }
 
     LValue* FindGlobal(const char* name) {
         auto it = globals->named.find(name);

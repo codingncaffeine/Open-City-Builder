@@ -198,9 +198,9 @@ struct FakeLua final : cISCLua {
     void* NewUserData(int) override { return nullptr; }
     void Register(CFunction, const char*) override {}
     int CloneTag(int) override { return 0; }
-    bool ToDataRegistryEntryID(cISC4GameDataRegistry*, int) override { return false; }
-    bool ToDataRegistryNode(cISC4GameDataRegistry*, int) override { return false; }
-    bool ToDataRegistryValue(cISC4GameDataRegistry*, int) override { return false; }
+    std::uintptr_t ToDataRegistryEntryID(cISC4GameDataRegistry*, int) override { return 0; }
+    cIGZUnknown* ToDataRegistryNode(cISC4GameDataRegistry*, int) override { return nullptr; }
+    void* ToDataRegistryValue(cISC4GameDataRegistry*, int) override { return nullptr; }
 };
 
 // IScriptLua view of the same stack, for the advisor base's cTablePropertyReader.

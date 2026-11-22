@@ -39,6 +39,9 @@ public:
     void Unref(int ref) override { lua_->Unref(ref); }
     bool IsFunction(int index) override { return lua_->IsFunction(index); }
     bool IsTable(int index) override { return lua_->IsTable(index); }
+    cIGZUnknown* ToDataRegistryNode(sc4::cISC4GameDataRegistry* registry, int index) override {
+        return lua_->ToDataRegistryNode(reinterpret_cast<::cISC4GameDataRegistry*>(registry), index);   // ISCLua.h's global-namespace name
+    }
     bool GetGlobalTable(const char* name) override { return SCLuaHelp::GetGlobal(lua_, name); }
     bool GetField(const char* name, int tableIndex) override { return SCLuaHelp::GetField(lua_, name, tableIndex); }
     void ReadFieldU32(const char* name, std::uint32_t& value, int tableIndex) override {

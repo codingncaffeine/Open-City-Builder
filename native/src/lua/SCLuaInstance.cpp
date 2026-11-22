@@ -388,9 +388,34 @@ public:
     bool IsTable(int index) override { return lua_->IsTable(index); }
     bool IsUserData(int index) override { return lua_->IsUserData(index); }
     bool IsNil(int index) override { return lua_->IsNil(index); }
-    bool ToDataRegistryEntryID(::cISC4GameDataRegistry*, int) override { return false; }
-    bool ToDataRegistryNode(::cISC4GameDataRegistry*, int) override { return false; }
-    bool ToDataRegistryValue(::cISC4GameDataRegistry*, int) override { return false; }
+    // 0x0040b3fa: a node table keeps its registry entry under kGameDataEntryLink; 0 for anything else or an entry the registry no
+    // longer has. (The index is made absolute first so the pushed key does not shift a relative one.)
+    std::uintptr_t ToDataRegistryEntryID(::cISC4GameDataRegistry* registry, int index) override {
+        auto* gdr = reinterpret_cast<GDRegistry*>(registry);   // ISCLua.h names the registry in the global namespace
+        if (!IsTable(index)) return 0;
+        const int top = GetTop();
+        const int table = index < 0 ? top + index + 1 : index;
+        PushString(kGameDataEntryLink);
+        RawGet(table);
+        auto entry = reinterpret_cast<std::uintptr_t>(ToUserData(-1));
+        if (entry == 0 || !gdr || !gdr->IsValidEntry(entry)) entry = 0;
+        SetTop(top);
+        return entry;
+    }
+    // 0x0040b492: the node object of that entry (borrowed), when it is a node.
+    cIGZUnknown* ToDataRegistryNode(::cISC4GameDataRegistry* registry, int index) override {
+        auto* gdr = reinterpret_cast<GDRegistry*>(registry);
+        const std::uintptr_t entry = ToDataRegistryEntryID(registry, index);
+        if (!gdr || !gdr->IsValidEntry(entry) || !gdr->IsNodeEntry(entry)) return nullptr;
+        return gdr->GetNode(entry);
+    }
+    // 0x0040b4f8: the value handle of that entry.
+    void* ToDataRegistryValue(::cISC4GameDataRegistry* registry, int index) override {
+        auto* gdr = reinterpret_cast<GDRegistry*>(registry);
+        const std::uintptr_t entry = ToDataRegistryEntryID(registry, index);
+        if (!gdr || !gdr->IsValidEntry(entry)) return nullptr;
+        return gdr->GetValue(entry);
+    }
 
 private:
     ~Instance() {

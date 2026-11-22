@@ -204,9 +204,9 @@ struct FakeLua final : cISCLua {
     bool IsTable(int) override { return false; }
     bool IsUserData(int i) override { return At(i).kind == User; }
     bool IsNil(int i) override { return At(i).kind == Nil; }
-    bool ToDataRegistryEntryID(::cISC4GameDataRegistry*, int) override { return false; }
-    bool ToDataRegistryNode(::cISC4GameDataRegistry*, int) override { return false; }
-    bool ToDataRegistryValue(::cISC4GameDataRegistry*, int) override { return false; }
+    std::uintptr_t ToDataRegistryEntryID(::cISC4GameDataRegistry*, int) override { return 0; }
+    cIGZUnknown* ToDataRegistryNode(::cISC4GameDataRegistry*, int) override { return nullptr; }
+    void* ToDataRegistryValue(::cISC4GameDataRegistry*, int) override { return nullptr; }
 };
 
 struct FakeSystem final : cISC4AdvisorSystem {

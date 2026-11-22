@@ -250,6 +250,8 @@ public:
     // occupant's vslot 0xc0 occupant view: an escape mission's target (borrowed; null when the automaton is no car or no
     // connection is reachable).
     virtual ISituationOccupant* EscapeConnectionTarget(ISituationAutomaton* automaton) { (void)automaton; return nullptr; }
+    // The view of any engine occupant a script hands back (not counted); the message conversion by default.
+    virtual ISituationOccupant* ViewOfEngineOccupant(void* engineOccupant) { return OccupantOfMessage(engineOccupant); }
     // ActivateSituation of an evade mission: SL::spCity vslot 0x178 (the automata controller manager) -> vslot 0x28
     // (occupant, "pursuit generator" template, 0) makes a controller on the automaton's occupant, then vslot 0x80 hands it
     // the evade groups the vehicle manager can create.
@@ -374,6 +376,7 @@ public:
     std::uint32_t CheckForSuccess(float elapsedMilliseconds);       // @ 0x1006dac36 (i386 0x004a5d68)
     std::uint32_t CheckReachTargetSuccess(float elapsedMilliseconds);   // i386 0x004a5c46
     std::uint32_t CheckEscapeCitySuccess(float elapsedMilliseconds);    // i386 0x004a11d2
+    ISituationOccupant* CallTargetScriptFunction(int ref, const std::vector<std::uint32_t>& groups);   // i386 0x004a372a (borrowed)
     std::uint32_t CheckEvadeListSuccess(float elapsedMilliseconds);     // i386 0x004a319a
     std::uint32_t CheckCellCoverageSuccess(float elapsedMilliseconds);  // i386 0x004a4eae
     // ---- coverage missions (condition 5): the cells to drive over, their highlights and the moving target

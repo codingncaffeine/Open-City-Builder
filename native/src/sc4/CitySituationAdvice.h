@@ -37,6 +37,9 @@
 #include "sc4/SLString.h"
 
 namespace sc4 {
+class cISC4GameDataRegistry;
+}
+namespace sc4 {
 
 constexpr std::uint32_t kGZCLSID_cSC4CitySituationAdvice = 0x8be3753b;
 constexpr std::uint32_t kGZIID_cISC4CitySituationAdvice = 0x6beb1e8a;
@@ -86,6 +89,8 @@ public:
     virtual void Unref(int ref) = 0;                   // 0x1f0
     virtual bool IsFunction(int index) = 0;            // 0x238
     virtual bool IsTable(int index) = 0;               // 0x240
+    // 0x260 ToDataRegistryNode: the game data registry node of the table at `index` (borrowed; null for anything else)
+    virtual cIGZUnknown* ToDataRegistryNode(cISC4GameDataRegistry* registry, int index) { (void)registry; (void)index; return nullptr; }
     // SCLuaHelp
     virtual bool GetGlobalTable(const char* name) = 0;                       // SCLuaHelp::GetGlobal: pushes it, false when nil
     virtual bool GetField(const char* name, int tableIndex) = 0;             // SCLuaHelp::GetField: pushes table[name], false when nil

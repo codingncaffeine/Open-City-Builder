@@ -683,8 +683,7 @@ ISituationOccupant* cSC4CitySituationManager::FindTarget(bool setTarget) {
         if (condition == 2) {
             if (ISituationOccupant* exit = host ? host->EscapeConnectionTarget(activeAutomaton_.get()) : nullptr) found = exit;
         } else if (condition == 4) {
-            // Recovered-partial: CallTargetScriptFunction (the script's find_target answering an occupant) is not ported.
-            SC4_UNWIRED("cSC4CitySituationManager::FindTarget: the script's find_target (CallTargetScriptFunction) is not called");
+            if (scriptRefs_[kRefFindTarget] != -2) found = CallTargetScriptFunction(scriptRefs_[kRefFindTarget], groups);
         } else if (condition == 1 || condition == 3) {
             std::unordered_set<ISituationAutomaton*> instances;
             GetInstancesOfGroup(groups, instances);
@@ -729,9 +728,7 @@ ISituationOccupant* cSC4CitySituationManager::CreateTarget(bool setTarget) {
     cRZAutoRefCount<ISituationOccupant> created;
     std::vector<std::uint32_t> groups;
     GetCurrentTargetGroups(groups);
-    // Recovered-partial: the script's "create_target" (CallTargetScriptFunction) is not ported; the automaton path runs.
-    if (scriptRefs_[kRefCreateTarget] != -2)
-        SC4_UNWIRED("cSC4CitySituationManager::CreateTarget: the script's create_target (CallTargetScriptFunction) is not called");
+    if (scriptRefs_[kRefCreateTarget] != -2) created = CallTargetScriptFunction(scriptRefs_[kRefCreateTarget], groups);
     if (!created) {
         cRZAutoRefCount<ISituationAutomaton> automaton;
         for (auto& manager : automataManagers_) {
@@ -1317,6 +1314,36 @@ std::uint32_t cSC4CitySituationManager::CheckCellCoverageSuccess(float elapsedMi
     }
     HandleStatusChanged(status);
     return status;
+}
+
+// i386 0x004a372a: calls the script function `ref` with the advice's script table and a table of the target groups; its result,
+// a game data registry node, is the target when it is an occupant (borrowed). Quirk kept: the original builds the group table
+// with one push and SetTable per group (lua_settable, which takes a key and a value), so every group pops the new table itself
+// as the key and the call then runs with a broken stack: only an empty group list reaches the script intact.
+ISituationOccupant* cSC4CitySituationManager::CallTargetScriptFunction(int ref, const std::vector<std::uint32_t>& groups) {
+    if (!activeSituation_ || !lua_) return nullptr;
+    ICitySituationManagerHost* host = CitySituationManagerHost();
+    ISituationOccupant* result = nullptr;
+    const int savedTop = lua_->GetTop();
+    lua_->GetRef(ref);
+    if (lua_->IsFunction(-1)) {
+        lua_->GetRef(activeSituation_->GetScriptTableRef());
+        lua_->NewTable();
+        const int table = lua_->GetTop();
+        for (std::uint32_t group : groups) {
+            lua_->PushNumber(static_cast<double>(group));
+            lua_->RawSetTable(table);
+        }
+        lua_->CallProtected(2, 1);
+        cIGZUnknown* node = lua_->ToDataRegistryNode(host ? host->GameDataRegistry() : nullptr, -1);
+        void* raw = nullptr;
+        if (node && node->QueryInterface(0x26bb767e, &raw) && raw) {   // cISC4Occupant
+            result = host ? host->ViewOfEngineOccupant(raw) : nullptr;
+            static_cast<cIGZUnknown*>(raw)->Release();
+        }
+    }
+    lua_->SetTop(savedTop);
+    return result;
 }
 
 // i386 0x004a319a: the evade list's automata that chase the active automaton (behavior 0x34 with it as their state's target)
