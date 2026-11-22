@@ -18,13 +18,19 @@ the original's saved cities, plays them and saves them back. Running natively:
   heard left and right, sirens, the city's ambience, and the audio options.
 - **Growth:** buildings decline, are abandoned and are taken over again; power lines are laid with the original's
   pole tool, and helicopters, planes and the blimp fly.
+- **Building:** roads shape the ground under them; bridges (with the bridge chooser, suspension wires and supports),
+  tunnels, highways with their raised decks, overpasses and on-ramps, one-way roads with their arrows, and the subway
+  tool; construction crews build new roads piece by piece and lots get their workers.
+- **People:** personal sims move in, form their opinions and commute; you can take over a vehicle, drive it
+  and accept the training missions.
 - **Around the city:** the tutorials, the cheat box, snapshots and their album, starting a city over, the loading
-  screen, the compass and the alert border.
+  screen, the compass and the alert border, the game's own fonts and cursors, and every data view.
 
 Still missing:
 
-- **Building:** bridges, tunnels, the subway tool, and demolishing power poles.
-- **Screens:** the personal-sim and driving modes, the subway view, making and importing regions, and a few cheats.
+- **Driving and personal sims:** the mission dialog's text and status panel, chase and coverage missions, the
+  personal-sim balloons and panels.
+- **Screens:** making and importing regions, and a few cheats.
 - **Display:** text is soft at fractional interface scales.
 
 There is no release yet.
