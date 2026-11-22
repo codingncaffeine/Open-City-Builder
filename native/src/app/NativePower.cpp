@@ -158,11 +158,11 @@ public:
         cSC4DepartmentBudget* department = Department();
         if (cSC4LineItem* item = department ? department->GetLineItem(1) : nullptr) item->SetFullExpenses(cost);
     }
+    // spec power.md 6.6 step 4: budget slot 35 GetFunding(department), which the original answers 0 (budget.md: GetFunding always 0),
+    // so the cost-per-unit history 0xaa11f7dc stays 0
     std::int64_t DepartmentExpense() override {
-        cSC4DepartmentBudget* department = Department();
-        cSC4LineItem* item = department ? department->GetLineItem(1) : nullptr;
-        SC4_UNWIRED("cSC4PowerSimulator department expense: only the generation line item is read (budget vslot 0x88 sums the whole department)");
-        return item ? item->GetFullExpenses() : 0;   // PARTIAL: the generation line only (budget vslot 0x88 sums the department)
+        cSC4BudgetSimulator* budget = Budget();
+        return budget ? static_cast<std::int64_t>(budget->GetFunding(kPowerDepartment)) : 0;
     }
     // @ i386 0x00183b7a (DoOccupantInserted's tail): the plant's budget item (0xca58e540) lives on a locally funded line item of its
     // department named by the building type (created with display flag 2 when missing); the plant is one of the department's locally
