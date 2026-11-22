@@ -823,6 +823,7 @@ struct CursorTextInfo {
 class cSC4View3DWin : public cISC4View3DWin, public cIGZMessageTarget2, public cIGZWinMessageFilter, public cGZWin {
 public:
     explicit cSC4View3DWin(cIGZWinMgr* mgr);             // @ 0x10077efc2
+    const std::list<CursorTextInfo>& CursorTextEntries() const { return cursorText_; }   // read-only view for kit reports
     ~cSC4View3DWin() override;                          // @ 0x10077f6f6 (+0x10077fb8e alias, +0x10077fba6 deleting, thunks)
 
     bool QueryInterface(std::uint32_t iid, void** out) override;   // @ 0x10078145a

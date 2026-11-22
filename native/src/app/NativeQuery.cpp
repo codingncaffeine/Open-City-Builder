@@ -44,6 +44,7 @@
 #include "sc4/PollutionSimulator.h"
 #include "sc4/PowerSimulator.h"
 #include "sc4/RegionalCity.h"
+#include "sc4/SLBuffer.h"
 #include "sc4/ResidentialSimulator.h"
 #include "sc4/TrafficSimulator.h"
 #include "sc4/cSTETerrain.h"
@@ -777,6 +778,19 @@ public:
     std::uint32_t BuildingTypeWealth(std::uint32_t type) override {
         IBuildingDevelopmentHost* types = BuildingDevelopment();
         return types ? types->Profile(type).wealth : 0;
+    }
+    std::uint32_t DeveloperTypeOf(std::uint32_t type, std::uint32_t wealth) override {
+        IBuildingDevelopmentHost* types = BuildingDevelopment();
+        if (!types) return 0;
+        return cSC4BuildingDevelopmentSimulator::GetDeveloperType_Static(types->Profile(type).purpose, static_cast<std::int32_t>(wealth));
+    }
+    cIGZBuffer* LoadTipImage(std::uint32_t instance) override {
+        cSLBuffer image(cGZPersistResourceKey{0x856ddbac, 0x46a006b0, instance}, 1, false);
+        cIGZBuffer* buffer = image.GetBuffer();
+        if (buffer) buffer->AddRef();
+        static const bool trace = std::getenv("SC4_TIPDEBUG") != nullptr;
+        if (trace) std::printf("tip image %08x: %s\n", instance, buffer ? "loaded" : "missing");
+        return buffer;
     }
     bool TerrainCellHasWater(int x, int z) override {
         cSC4City* city = HostCity();

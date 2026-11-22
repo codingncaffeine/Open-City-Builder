@@ -91,6 +91,7 @@
 #include "app/NativeJobs.h"
 #include "app/NativeRuntimeWire.h"
 #include "sc4/View3DWin.h"
+#include "sc4/ViewInputControlQuery.h"
 #include "gz/FontServices.h"
 #include "sc4/App.h"
 #include "sc4/RegionalCity.h"
@@ -1659,6 +1660,29 @@ int RunScenario(const std::string& path) {
             const std::uint32_t id = std::uint32_t(std::strtoul(hex.c_str(), nullptr, 16));
             sc4::cSC4View3DWin* view = native::CityView3DWin();
             std::printf("viewcmd %08x -> %s\n", id, view ? (view->ProcessViewCommand(id, flag != 0) ? "handled" : "not handled") : "no city view");
+        } else if (command == "hover") {   // hover X Y: the current query tool's own OnMouseMove at a logical view point, then its tip message (read only, no input event)
+            int hx = 0, hy = 0;
+            words >> hx >> hy;
+            sc4::cSC4View3DWin* view = native::CityView3DWin();
+            auto* query = view ? dynamic_cast<sc4::cSC4ViewInputControlQuery*>(view->GetCurrentViewInputControl()) : nullptr;
+            if (!query) {
+                std::printf("hover %d,%d: no query tool\n", hx, hy);
+            } else {
+                query->OnMouseMove(hx, hy, 0);
+                cRZMessage2Standard tick;
+                tick.SetType(0x0a456d95);
+                query->DoMessage(&tick);
+                sc4::cISC4WinCalloutBox* box = query->CalloutBox();
+                const bool shown = box && box->AsIGZWin() && box->AsIGZWin()->IsVisible();
+                std::string title = box ? box->GetTitle().ToChar() : "", text = box ? box->GetText().ToChar() : "";
+                for (char& c : text) if (c == '\n') c = '|';
+                std::string cursor;
+                for (const auto& entry : view->CursorTextEntries())
+                    if (entry.key == 0x2a456cb1) { cursor = std::string(entry.line1.ToChar()) + " / " + entry.line2.ToChar(); }
+                for (char& c : cursor) if (c == '\n') c = '|';
+                std::printf("hover %d,%d: callout %s image %s title \"%s\" text \"%s\" cursor \"%s\"\n", hx, hy, shown ? "shown" : "hidden",
+                            box && box->GetBackgroundImage() ? "yes" : "no", shown ? title.c_str() : "", shown ? text.c_str() : "", cursor.c_str());
+            }
         } else if (command == "key") {
             // key [ctrl+][shift+][alt+]NAME [FRAMES]: a key press and release as SDL events through the player's key path
             // (NAME as SDL names keys: X, Left, F1, Escape, /, Keypad 8 ...; "Keypad 8" is written Keypad_8), the key held

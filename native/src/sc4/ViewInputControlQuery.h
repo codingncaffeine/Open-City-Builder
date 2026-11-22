@@ -19,7 +19,7 @@
 // Everything the class needs from an unrecovered neighbour goes through the seams below. Slot numbers are the
 // original vtable offsets; where the original reached a global (SL::spPowerSim, ...) the comment names it.
 //
-// PARTIAL (see notes/ledger_pending/cSC4ViewInputControlQuery.txt): the tip text builders GetBuildingOccupantTipInfo,
+// PARTIAL (see notes/ledger_pending/cSC4ViewInputControlQuery.txt): the route query's tip text builders
 // GetBuildingOccupantTrafficInfo and GetNetworkOccupantTrafficInfo, WriteDetailedDebugInfo and the path helpers
 // (GetOccupantPaths, ShowAllRoutesThatIntersectCityRect) are empty stubs, and the row handlers for the simulators that are not recovered yet (the RCI building rows and the air and water pollution volumes) are declared but not
 // implemented. The fire, police/jail, park/occupant-cost and neighbour-connection rows — everything whose simulator
@@ -364,6 +364,10 @@ public:
     virtual IQueryGrowthDeveloper* FindBestDeveloper(IQueryLot* lot) { (void)lot; return nullptr; }
     // SL::spBuildingDevelopmentSim vslot 0x138 GetBuildingProfile(type): the profile's wealth (+4).
     virtual std::uint32_t BuildingTypeWealth(std::uint32_t buildingType) { (void)buildingType; return 0; }
+    // SL::spBuildingDevelopmentSim i386 0x9c GetBuildingProfile(type) -> purpose (+0), then 0x78 GetDeveloperType(purpose, wealth).
+    virtual std::uint32_t DeveloperTypeOf(std::uint32_t buildingType, std::uint32_t wealth) { (void)buildingType; (void)wealth; return 0; }
+    // cSLBuffer(key {0x856ddbac, 0x46a006b0, instance}, 1): a hover tip image (one reference), null when missing.
+    virtual cIGZBuffer* LoadTipImage(std::uint32_t instance) { (void)instance; return nullptr; }
     virtual bool TerrainCellHasWater(int x, int z) { (void)x; (void)z; return false; }   // SL::spCity vslot 0x2a0 (terrain) -> vslot 0x110
     virtual std::uint32_t ZoneTypeAt(int x, int z) { (void)x; (void)z; return 0xff; }     // SL::spZoneManager vslot 0x60
     // SC4LoadExemplarString @ 0x100121132: the localized string the property names; false when it has none.
@@ -675,8 +679,13 @@ public:
     // --- the tip builders (the first three are empty stubs, PARTIAL: see the header comment and the ledger) ---
     void GetBuildingOccupantTrafficInfo(cRZString& text, cRZString& title, std::uint32_t& icon);
     void GetNetworkOccupantTrafficInfo(cRZString& text, cRZString& title);
-    void GetBuildingOccupantTipInfo(cRZString& text, cRZString& title, std::uint32_t& icon, std::uint32_t& meter,
+    // i386 0x0021d276 (PC 0x004D5E30): the building's name, the icon and meter of its occupant group, then its lot's headlines
+    void GetBuildingOccupantTipInfo(cRZString& title, cRZString& text, std::uint32_t& icon, std::uint32_t& meter,
                                     float& meterValue);
+    // i386 0x0021d186 / 0x0021d140: the three most important headlines of the occupant's lot, appended line by line
+    void GetBuildingOccupantHeadlines(cISC4Occupant* occupant, cRZString& text);
+    // PC 0x004C3B10 (inlined on the Mac): a meter for `used` of `capacity`: full up to 80 %, then falling to empty at 100 %
+    static float Ratio(std::uint32_t used, std::uint32_t capacity);
     void GetNetworkOccupantSummaryInfo(cRZString& title, cRZString& text);
     void GetPropOccupantSummaryInfo(cRZString& title);
     void GetFloraOccupantSummaryInfo(cRZString& title);
@@ -710,6 +719,7 @@ public:
     void SetCityCellRect(const SC4CellRect& rect) { cityCellRect_ = rect; }
     void SetHoveredOccupantForTest(cISC4Occupant* occupant) { occupant_ = occupant; }   // no reference is taken
     void SetPickPositionForTest(float x, float y, float z) { pickX_ = x; pickY_ = y; pickZ_ = z; }
+    void SetTipStateForTest(bool enabled, cISC4WinCalloutBox* callout) { tipEnabled_ = enabled; callout_ = callout; }   // no reference
 
 protected:
     // The two windows of the network-mode legend come from this script instance (original: resource group 0x96a006b0,

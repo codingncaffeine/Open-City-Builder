@@ -1,7 +1,10 @@
 #include "sc4/ViewInputControlQuery.h"
 #include "platform/Unwired.h"
 
+#include <algorithm>
 #include <cmath>
+#include <initializer_list>
+#include <utility>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -452,11 +455,17 @@ bool cSC4ViewInputControlQuery::DoMessage(cIGZMessage2* message) {
         HideWindow(callout_ ? callout_->AsIGZWin() : nullptr);
         if (IQueryView* view = host->QueryView()) view->SetTip(kTipOwner, 0, &title, &text, 0);
     } else {
-        // PARTIAL: the original also feeds the icon buffer (cSLBuffer from resource 0x856ddbac / 0x46a006b0) and its
-        // meter into cISC4WinCalloutBox::SetIconMeter; the buffer path is not recovered.
-        SC4_UNWIRED("cSC4ViewInputControlQuery::DoMessage: callout icon buffer and meter (SetIconMeter) not fed");
-        (void)meter;
-        (void)meterValue;
+        // i386 0x0021e8a4: the icon as the callout's picture (12, 10), the meter image with its fill (5, value) or none
+        cIGZBuffer* image = host->LoadTipImage(icon);
+        callout_->SetBackgroundImage(image, 12, 10);
+        if (meter == 0) {
+            callout_->SetIconMeter(nullptr, 0, 0.0f);
+        } else {
+            cIGZBuffer* meterImage = host->LoadTipImage(meter);
+            callout_->SetIconMeter(meterImage, 5, meterValue);
+            if (meterImage) meterImage->Release();
+        }
+        if (image) image->Release();
         SetTip(&title, &text);
         if (IQueryView* view = host->QueryView()) view->ClearTip(kTipOwner);
     }
@@ -2529,12 +2538,172 @@ void cSC4ViewInputControlQuery::GetBuildingOccupantTrafficInfo(cRZString&, cRZSt
 void cSC4ViewInputControlQuery::GetNetworkOccupantTrafficInfo(cRZString&, cRZString&) {
     SC4_UNWIRED("cSC4ViewInputControlQuery::GetNetworkOccupantTrafficInfo: network piece traffic tip text not ported");
 }
-// PARTIAL stub (QUERY-6)
-void cSC4ViewInputControlQuery::GetBuildingOccupantTipInfo(cRZString&, cRZString&, std::uint32_t& icon,
-                                                           std::uint32_t& meter, float&) {
-    SC4_UNWIRED("cSC4ViewInputControlQuery::GetBuildingOccupantTipInfo: building hover tip text not ported");
-    icon = 0;
-    meter = 0;
+// PC 0x004C3B10 (x87, float constants 0.8 and 0.19999999; inlined on the Mac at each use): no capacity reads 0, up to 80 % used
+// reads full, beyond that the meter falls linearly to empty at 100 % (and stays empty above it).
+float cSC4ViewInputControlQuery::Ratio(std::uint32_t used, std::uint32_t capacity) {
+    if (capacity == 0) return 0.0f;
+    const float total = static_cast<float>(capacity);
+    if (static_cast<float>(used) <= total * 0.8f) return 1.0f;
+    float left = 0.0f;
+    if (used < capacity) left = static_cast<float>(static_cast<std::int32_t>(capacity - used));
+    return left / (total * 0.19999999f);
+}
+
+// i386 0x0021d186 (with 0x0021d140 inlined): the lot of the occupant, its headlines, the three most important appended.
+void cSC4ViewInputControlQuery::GetBuildingOccupantHeadlines(cISC4Occupant* occupant, cRZString& text) {
+    IQueryHost* host = QueryHost();
+    IQueryLot* lot = host && host->LotManager() && occupant ? host->LotManager()->GetLotForOccupant(occupant) : nullptr;
+    if (!lot) return;
+    std::multimap<int, cRZString> headlines;
+    GetLotHeadlines(lot, headlines);
+    int appended = 0;
+    for (auto it = headlines.rbegin(); it != headlines.rend() && appended < 3; ++it, ++appended) {
+        if (text.Strlen() != 0) text.AppendString(cRZString("\n"));
+        text.AppendString(it->second);
+    }
+}
+
+// i386 0x0021d276 (PC 0x004D5E30, spec city-tools-input.md 8.11.4). The debug query (shift+control+alt with the debug flag) shows
+// the exemplar name over the developer's descriptions instead; the description writers (DescribeBuilding / DescribePopulation /
+// DescribeDemand / DescribeCell) are debug read-outs not ported, so the debug tip carries the name only.
+void cSC4ViewInputControlQuery::GetBuildingOccupantTipInfo(cRZString& title, cRZString& text, std::uint32_t& icon,
+                                                           std::uint32_t& meter, float& meterValue) {
+    IQueryHost* host = QueryHost();
+    if (!host || !occupant_) return;
+    cISCPropertyHolder* holder = occupant_->AsPropertyHolder();
+    IQueryLot* lot = host->LotManager() ? host->LotManager()->GetLotForOccupant(occupant_) : nullptr;
+    if (IsDebugQueryEnabled()) {
+        icon = 0;
+        if (holder) cSCPropertyHelp::GetPropertyValue(holder, 0x20, title);
+        SC4_UNWIRED("cSC4ViewInputControlQuery::GetBuildingOccupantTipInfo: debug descriptions (DescribeBuilding / Population / Demand / Cell) not ported");
+        return;
+    }
+    cRZString name;
+    GetOccupantName(occupant_, name);
+    title = name;
+    // property 0xaa1dd396 (occupant groups) must be a uint32 array (variant type 0x8006); anything else goes to the headlines
+    cISCProperty* property = holder ? holder->GetProperty(0xaa1dd396) : nullptr;
+    cIGZVariant* value = property ? property->GetPropertyValue() : nullptr;
+    if (value && value->GetType() == 0x8006) {
+        const std::uint32_t count = value->GetCount();
+        const std::uint32_t* groups = value->RefUint32();
+        auto has = [&](std::uint32_t group) {
+            for (std::uint32_t i = 0; i < count; ++i)
+                if (groups[i] == group) return true;
+            return false;
+        };
+        // the R / C / I wealth line: the developer type of the lot's building purpose at the lot's wealth
+        auto wealthLine = [&](std::initializer_list<std::pair<std::uint32_t, std::uint32_t>> lines) {
+            if (!lot) return;
+            const std::uint32_t type = host->DeveloperTypeOf(lot->GetBuildingType(false), GetBuildingWealth(lot));
+            for (const auto& line : lines)
+                if (line.first == type) { host->LoadString(kStringGroup, line.second, text); return; }
+        };
+        if (has(0x1000)) {
+            icon = 0x14416208;
+            wealthLine({{0x1010, 0xca95f27e}, {0x1020, 0x6a95f2b0}, {0x1030, 0xca95f2b8}});
+        } else if (has(0x1001)) {
+            icon = 0x14416202;
+            wealthLine({{0x3110, 0x8a95f2bf}, {0x3120, 0xaa95f2dc}, {0x3130, 0x8a95f2e4}, {0x3320, 0x0a95f39a}, {0x3330, 0x6a95f3b3}});
+        } else if (has(0x1002)) {
+            icon = 0x14416206;
+            wealthLine({{0x4100, 0x4a95f2eb}, {0x4200, 0x2a95f324}, {0x4300, 0x6a95f313}, {0x4400, 0xca95f31c}});
+        } else if (has(0x1003)) {
+            // transport: airport and seaport usage, else the station's riders of its capacity (the transit switch at its cell)
+            if (has(0x1508) || has(0x1509)) {
+                const bool airport = has(0x1508);
+                meter = airport ? 0x14416214 : 0x14416215;
+                IQueryPortDeveloper* port = airport ? host->AirportDeveloper() : host->SeaportDeveloper();
+                std::uint32_t usage = 0, capacity = 0;
+                if (lot && port && port->GetUsageAndCapacity(lot, usage, capacity)) meterValue = Ratio(usage, capacity);
+            } else {
+                float position[3] = {0.0f, 0.0f, 0.0f};
+                occupant_->GetPosition(position);
+                int cellX = 0, cellZ = 0;
+                if (host->City()) host->City()->PositionToCell(position[0], position[2], cellX, cellZ);
+                meterValue = 0.0f;
+                IQueryTrafficSim::TransitData data;
+                IQueryTrafficSim* traffic = host->TrafficSim();
+                if (traffic && traffic->GetTransitSwitchQueryData(cellX, cellZ, data) && data.served != 0) {
+                    const auto served = static_cast<std::uint32_t>(data.served), usage = static_cast<std::uint32_t>(data.usage);
+                    meterValue = usage == 0 ? 1.0f : std::min(1.0f, static_cast<float>(served) / static_cast<float>(usage));
+                }
+                static constexpr std::pair<std::uint32_t, std::uint32_t> kKinds[] = {
+                    {0x1307, 0x1441621c}, {0x1300, 0x1441621b}, {0x1301, 0x1441621a}, {0x1302, 0x1441621c},
+                    {0x1303, 0x1441621c}, {0x1304, 0x14416215}, {0x130b, 0x1441620f}};
+                for (const auto& kind : kKinds)
+                    if (has(kind.first)) { meter = kind.second; break; }
+            }
+            icon = 0x14416209;
+        } else if (has(0x1004)) {
+            icon = 0x1441620a;
+            if (has(0x1400)) {
+                IQueryPowerSim* power = host->PowerSim();
+                meterValue = power ? power->GetCurrentPlantEfficiencyPercent(occupant_) : 0.0f;
+                meter = 0x14416218;
+            } else if (has(0x1401)) {
+                meter = 0x14416219;
+                float efficiency = 0.0f;
+                bool pumpFlag = false;
+                if (IQueryPlumbingSim* plumbing = host->PlumbingSim())
+                    plumbing->GetWaterProducerInfo(occupant_, nullptr, nullptr, &efficiency, &pumpFlag, nullptr);
+                meterValue = efficiency;
+                if (pumpFlag) host->LoadString(kStringGroup, 0x4a5fb66a, text);
+            } else if (has(0x1402)) {
+                meter = 0x14416217;
+                float maximum = 0.0f, current = 0.0f;
+                if (IQueryPollutionSim* pollution = host->PollutionSim()) {
+                    pollution->RecyclingCenterMaxCapacity(occupant_, maximum);
+                    pollution->RecyclingCenterCurrentCapacity(occupant_, current);
+                }
+                // as compiled: the guard tests the current load while the maximum divides (a zero maximum reads full)
+                meterValue = 0.0f;
+                if (current > 0.0f) meterValue = current / maximum;
+                if (meterValue > 1.0f) meterValue = 1.0f;
+            }
+        } else if (has(0x1501)) {
+            icon = 0x14416207;
+            meter = 0x14416212;
+            IQueryPoliceSim* police = host->PoliceSim();
+            if (police) {
+                const float jailed = police->JailEfficiency();
+                const auto capacity = static_cast<std::uint32_t>(police->JailCapacity(occupant_));
+                float inmates = jailed * static_cast<float>(capacity);
+                if (inmates <= 0.0f) inmates = 0.0f;
+                meterValue = Ratio(static_cast<std::uint32_t>(inmates), capacity);
+            } else {
+                meterValue = 0.0f;
+            }
+        } else if (has(0x1500)) {
+            icon = 0x14416207;
+            meter = 0x14416212;
+            IQueryPoliceSim* police = host->PoliceSim();
+            meterValue = police ? police->StationEffectiveness(occupant_) : 0.0f;
+        } else if (has(0x1502)) {
+            icon = 0x14416203;
+            meter = 0x14416211;
+            IQueryFireSim* fire = host->FireSim();
+            meterValue = fire ? fire->StationEffectiveness(occupant_) : 0.0f;
+        } else if (has(0x1503) || has(0x1504) || has(0x1505) || has(0x1506) || has(0x1507)) {
+            // schools (0x1503..0x1506) and hospitals (0x1507): the building's grade
+            const bool hospital = !(has(0x1503) || has(0x1504) || has(0x1505) || has(0x1506));
+            icon = 0x14416201;
+            meter = hospital ? 0x14416216 : 0x14416210;
+            QueryEducationRecord record;
+            IQueryResidentialSim* residential = host->ResidentialSim();
+            if (residential && (hospital ? residential->GetHospitalQueryData(occupant_, record)
+                                         : residential->GetSchoolQueryData(occupant_, record)))
+                meterValue = record.grade;
+        } else if (has(0x150a) || has(0x150b)) {
+            icon = 0x1441620c;
+        } else if (has(0x1006)) {
+            icon = 0x14416204;
+        } else {
+            icon = 0x14416200;
+        }
+        title = name;
+    }
+    GetBuildingOccupantHeadlines(occupant_, text);
 }
 // @ 0x1002c5558 / 0x1002c55ae: the property's name, else the exemplar's localized name, else the plain property 0x20
 void cSC4ViewInputControlQuery::GetPropOccupantSummaryInfo(cRZString& title) {

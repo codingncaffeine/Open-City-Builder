@@ -242,7 +242,10 @@ struct Callout final : cISC4WinCalloutBox {
     std::uint32_t AddRef() override { return ++refs; }
     std::uint32_t Release() override { return --refs; }
     cIGZWin* AsIGZWin() override { return win; }
-    void SetBackgroundImage(cIGZBuffer*, int, int) override {}
+    int images = 0, imageA = -1, imageB = -1, meters = 0;
+    std::uint32_t meterCount = 99;
+    float meterValue = -1.0f;
+    void SetBackgroundImage(cIGZBuffer*, int a, int b) override { ++images; imageA = a; imageB = b; }
     cIGZBuffer* GetBackgroundImage() const override { return nullptr; }
     void SetTitle(const cIGZString& t) override { title = t.ToChar(); }
     const cIGZString& GetTitle() const override { return title_; }
@@ -252,7 +255,7 @@ struct Callout final : cISC4WinCalloutBox {
     void SetTextFontStyle(std::uint32_t style) override { textStyle = style; }
     void SetIcon(cIGZBuffer*) override {}
     cIGZBuffer* GetIcon() const override { return nullptr; }
-    void SetIconMeter(cIGZBuffer*, std::uint32_t, float) override {}
+    void SetIconMeter(cIGZBuffer*, std::uint32_t count, float value) override { ++meters; meterCount = count; meterValue = value; }
     void SetPointOfInterest(const cRZPoint& p) override { point = p; }
     const cRZPoint& GetPointOfInterest() const override { return point; }
     void SetAvoidanceRect(const cRZRect& r) override { avoid = r; }
@@ -678,6 +681,10 @@ struct Host final : IViewInputHost, IQueryHost {
     bool hasDeveloper = true;
     std::uint32_t typeWealth = 0;
     std::uint32_t BuildingTypeWealth(std::uint32_t) override { return typeWealth; }
+    std::uint32_t devType = 0, devTypeBuilding = 0, devTypeWealth = 0;
+    std::uint32_t DeveloperTypeOf(std::uint32_t building, std::uint32_t wealth) override { devTypeBuilding = building; devTypeWealth = wealth; return devType; }
+    std::vector<std::uint32_t> tipImages;
+    cIGZBuffer* LoadTipImage(std::uint32_t instance) override { tipImages.push_back(instance); return nullptr; }
     std::uint16_t pollutionMaps[4] = {};
     float school = 0.0f, hospitalGrade = 0.0f;
     std::uint8_t crime = 0, traffic = 0, tripLength = 0;
@@ -1982,6 +1989,129 @@ int main() {
         host.strings.clear();
         tool->GetTerrainSummaryInfo(terrainTitle, terrainText);
         CHECK(host.strings.size() == 1);   // an unknown zone: only the terrain title
+        tool->Release();
+    }
+
+    // --- M10b: GetBuildingOccupantTipInfo (spec 8.11.4) + Ratio + the callout icon tail -----------------------------
+    {
+        // Ratio: no capacity 0, up to 80 % full, then down to empty at 100 %
+        CHECK(cSC4ViewInputControlQuery::Ratio(5, 0) == 0.0f);
+        CHECK(cSC4ViewInputControlQuery::Ratio(80, 100) == 1.0f);
+        CHECK(std::fabs(cSC4ViewInputControlQuery::Ratio(90, 100) - 0.5f) < 1e-4f);
+        CHECK(cSC4ViewInputControlQuery::Ratio(120, 100) == 0.0f);
+        auto* tool = new cSC4ViewInputControlQuery(cSC4ViewInputControlQuery::kQueryBuilding, 250);
+        TestOccupant occupant;
+        occupant.name = "Corner Diner";
+        Holder holder;
+        holder.id = 0xaa1dd396;
+        occupant.holder = &holder;
+        tool->SetHoveredOccupantForTest(&occupant);
+        Lot lot;
+        lot.buildingType = 0x77;
+        lot.wealth = 2;
+        host.lots.byOccupant = &lot;
+        host.hasDeveloper = false;   // no headlines from the lot in these checks
+        auto tip = [&](std::vector<std::uint32_t> groups, std::uint32_t& icon, std::uint32_t& meter, float& value, cRZString& title, cRZString& text) {
+            holder.values = std::move(groups);
+            icon = 0; meter = 0; value = 0.5f;
+            title = cRZString(); text = cRZString();
+            host.strings.clear();
+            tool->GetBuildingOccupantTipInfo(title, text, icon, meter, value);
+        };
+        std::uint32_t icon = 0, meter = 0;
+        float value = 0.0f;
+        cRZString title, text;
+        // commercial: icon C, the wealth line of the developer type at the lot's wealth (0x3120 -> 0xaa95f2dc)
+        host.typeWealth = 0;
+        host.devType = 0x3120;
+        tip({0x1001, 0x1006}, icon, meter, value, title, text);
+        CHECK(icon == 0x14416202 && meter == 0 && value == 0.5f && std::string(title.ToChar()) == "Corner Diner");
+        CHECK(host.strings.size() == 1 && host.strings[0] == 0xaa95f2dc && host.devTypeBuilding == 0x77);
+        host.devType = 0x9999;   // a type with no line: no text
+        tip({0x1001}, icon, meter, value, title, text);
+        CHECK(icon == 0x14416202 && host.strings.empty());
+        // R is tested before C; a park only when nothing earlier matches; an unknown group gets the plain icon
+        host.devType = 0x1010;
+        tip({0x1006, 0x1000}, icon, meter, value, title, text);
+        CHECK(icon == 0x14416208 && host.strings.size() == 1 && host.strings[0] == 0xca95f27e);
+        tip({0x1006}, icon, meter, value, title, text);
+        CHECK(icon == 0x14416204 && meter == 0);
+        tip({0x4242}, icon, meter, value, title, text);
+        CHECK(icon == 0x14416200);
+        // police: the jail (0x1501) is tested before the station (0x1500) and the fire station (0x1502)
+        host.policeSim.jailEfficiency = 0.9f;
+        host.policeSim.jailCapacity = 100;
+        tip({0x1502, 0x1500, 0x1501}, icon, meter, value, title, text);
+        CHECK(icon == 0x14416207 && meter == 0x14416212 && std::fabs(value - 0.5f) < 1e-3f);
+        host.policeSim.effectiveness = 0.3f;
+        tip({0x1502, 0x1500}, icon, meter, value, title, text);
+        CHECK(icon == 0x14416207 && meter == 0x14416212 && value == 0.3f);
+        host.fireSim.effectiveness = 0.7f;
+        tip({0x1502}, icon, meter, value, title, text);
+        CHECK(icon == 0x14416203 && meter == 0x14416211 && value == 0.7f);
+        // schools and hospitals: the building's grade; a refused query keeps 0.5
+        host.residential.school.grade = 0.8f;
+        host.residential.hospital.grade = 0.4f;
+        tip({0x1505}, icon, meter, value, title, text);
+        CHECK(icon == 0x14416201 && meter == 0x14416210 && value == 0.8f);
+        tip({0x1507}, icon, meter, value, title, text);
+        CHECK(icon == 0x14416201 && meter == 0x14416216 && value == 0.4f);
+        host.residential.hospitalAnswers = false;
+        tip({0x1507}, icon, meter, value, title, text);
+        CHECK(value == 0.5f);
+        host.residential.hospitalAnswers = true;
+        // transport: the airport's usage of its capacity; a bus stop's riders of its usage, meter by kind
+        host.airport.usage = 90; host.airport.capacity = 100; host.airport.answers = true;
+        tip({0x1003, 0x1508}, icon, meter, value, title, text);
+        CHECK(icon == 0x14416209 && meter == 0x14416214 && std::fabs(value - 0.5f) < 1e-3f && host.airport.lastLot == &lot);
+        host.trafficSim.transit.served = 30; host.trafficSim.transit.usage = 60; host.trafficSim.transitOk = true;
+        tip({0x1003, 0x1300}, icon, meter, value, title, text);
+        CHECK(icon == 0x14416209 && meter == 0x1441621b && value == 0.5f);
+        host.trafficSim.transit.served = 0;
+        tip({0x1003, 0x130b}, icon, meter, value, title, text);
+        CHECK(meter == 0x1441620f && value == 0.0f);   // nobody served: the meter reads empty
+        // utilities: power plant efficiency; a recycling center's current of its maximum load
+        host.power.efficiency = 0.65f;
+        tip({0x1004, 0x1400}, icon, meter, value, title, text);
+        CHECK(icon == 0x1441620a && meter == 0x14416218 && value == 0.65f);
+        host.pollution.maxCapacity = 200.0f; host.pollution.currentCapacity = 50.0f;
+        tip({0x1004, 0x1402}, icon, meter, value, title, text);
+        CHECK(meter == 0x14416217 && value == 0.25f);
+        tip({0x1004}, icon, meter, value, title, text);
+        CHECK(icon == 0x1441620a && meter == 0 && value == 0.5f);
+        // a single uint32 (not an array) is not read: no icon, name only
+        holder.values.clear();
+        holder.value = true;
+        icon = 0; meter = 0; value = 0.5f; title = cRZString(); text = cRZString();
+        tool->GetBuildingOccupantTipInfo(title, text, icon, meter, value);
+        CHECK(icon == 0 && std::string(title.ToChar()) == "Corner Diner");
+        // the headlines of the lot end every tip: an abandoned lot adds its line
+        host.hasDeveloper = true;
+        lot.state = 4;
+        tip({0x1006}, icon, meter, value, title, text);
+        bool abandoned = false;
+        for (auto v : host.strings) if (v == 0x0a5fbdf2) abandoned = true;
+        CHECK(abandoned && text.Strlen() != 0);
+        lot.state = 0;
+        // the tail: an icon goes to the callout (12, 10) with the meter image (5, value); no meter clears it
+        Callout box;
+        box.win = calloutWin;
+        tool->SetTipStateForTest(true, &box);
+        holder.values = {0x1502};
+        host.tipImages.clear();
+        cRZMessage2Standard tickMsg;
+        tickMsg.SetType(0xa456d95);
+        tool->DoMessage(&tickMsg);
+        CHECK(box.images == 1 && box.imageA == 12 && box.imageB == 10 && box.meters == 1 && box.meterCount == 5 && box.meterValue == 0.7f);
+        CHECK(host.tipImages.size() == 2 && host.tipImages[0] == 0x14416203 && host.tipImages[1] == 0x14416211);
+        holder.values = {0x1006};
+        tool->DoMessage(&tickMsg);
+        CHECK(box.images == 2 && box.meters == 2 && box.meterCount == 0 && box.meterValue == 0.0f);
+        tool->SetTip(nullptr, nullptr);   // hides the shared callout window again
+        tool->SetTipStateForTest(false, nullptr);
+        tool->SetHoveredOccupantForTest(nullptr);
+        host.lots.byOccupant = nullptr;
+        host.hasDeveloper = true;
         tool->Release();
     }
 
