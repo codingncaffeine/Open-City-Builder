@@ -20,6 +20,9 @@ bool HasNamedEffect(const char* name);
 sc4::cSC4VisualEffect* CreateNamedEffect(const char* name);
 // The effect bound to a (group, type) key (cSC4EffectsManager::CreateVisualEffect(uint, uint)); one reference, null when unbound.
 sc4::cSC4VisualEffect* CreateKeyedEffect(std::uint32_t group, std::uint32_t type);
+// Kit verb "pollutionfx" (NativeSimHosts.cpp): the pollution simulator's per-block effect slots (count, started, first N with
+// their positions) and its worst air / water / garbage tracts.
+void NativePollutionEffectReport(int limit);
 
 // The effects manager's Snow cheat with its command line ("Snow [low] [high] [bias]"), as the cheat box runs it; prints
 // the snowline state after it. False without an effects manager.

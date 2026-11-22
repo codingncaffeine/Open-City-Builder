@@ -1748,6 +1748,10 @@ int RunScenario(const std::string& path) {
             }
             const bool launched = screen && found && screen->LaunchRegionalCity(found);
             std::printf("open-city %s: %s\n", want.c_str(), launched ? "launched" : (!screen ? "no region screen" : !found ? "no such city" : "refused"));
+        } else if (command == "pollutionfx") {   // pollutionfx [N]: the pollution effect slots (first N per kind) and the worst tracts
+            int limit = 4;
+            words >> limit;
+            native::NativePollutionEffectReport(limit);
         } else if (command == "snow") {   // snow [low high bias]: the effects manager's Snow cheat (a debug cheat the cheat box only takes in debug mode)
             std::string rest; std::getline(words >> std::ws, rest);
             const std::string text = "Snow " + rest;
