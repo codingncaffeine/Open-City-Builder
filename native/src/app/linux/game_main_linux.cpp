@@ -1664,6 +1664,12 @@ int RunScenario(const std::string& path) {
         } else if (command == "neighbors") {   // neighbors [propose]: the city's deals and regional commodity record (propose: list what ProposeDeals offers, not added)
             std::string what; words >> what;
             native::NativeNeighborsReport(what == "propose");
+        } else if (command == "disasterat") {   // disasterat HEXMANAGER X Z: the disaster manager's AttemptDisasterStart at a cell (what a tool click asks)
+            std::string hex;
+            int dx = 0, dz = 0;
+            words >> hex >> dx >> dz;
+            const std::uint32_t manager = std::uint32_t(std::strtoul(hex.c_str(), nullptr, 16));
+            std::printf("disasterat %08x %d,%d -> %s\n", manager, dx, dz, native::NativeAttemptDisasterStart(manager, dx, dz) ? "started" : "refused");
         } else if (command == "budget") {   // budget: the budget groups, departments and line items (read only)
             native::NativeBudgetReport();
         } else if (command == "hover") {   // hover X Y: the current query tool's own OnMouseMove at a logical view point, then its tip message (read only, no input event)

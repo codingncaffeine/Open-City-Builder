@@ -194,4 +194,25 @@ void InstallPropHosts() {
     sc4::SetBurntBuildingHost(&g_burntBuildingHost);
 }
 
+// The volcano's scorch marks (cSTEVolcanoLava::AddDecal @ 0x004f9986): a terrain decal prop, Init, the texture at the size,
+// SetOpacityFade(fadeIn, keep, 0, 1), into the occupant manager, SetPosition; the caller keeps the one reference.
+void* NativeCreateFadingDecal(const cGZPersistResourceKey& key, float size, float fadeIn, const float position[3]) {
+    auto* decal = new sc4::cSC4PropOccupantTerrainDecal();
+    decal->AddRef();
+    sc4::cISC4Occupant* occupant = decal;
+    occupant->Init();
+    decal->SetDecalTexture(key, size);
+    decal->SetOpacityFade(fadeIn, sc4::cISC4PropOccupantTerrainDecal::kKeepDecal, 0.0f, 1.0f);
+    decal->PlaceInOccupantManager(true);
+    occupant->SetPosition(position);
+    return decal;
+}
+// TickDecals @ 0x004f9b7a: SetOpacityFade(fadeOut, action, 1, 0), then Release.
+void NativeRetireFadingDecal(void* handle, float fadeOut, int completionAction) {
+    auto* decal = static_cast<sc4::cSC4PropOccupantTerrainDecal*>(handle);
+    if (!decal) return;
+    decal->SetOpacityFade(fadeOut, static_cast<sc4::cISC4PropOccupantTerrainDecal::tCompletionAction>(completionAction), 1.0f, 0.0f);
+    decal->Release();
+}
+
 }  // namespace native

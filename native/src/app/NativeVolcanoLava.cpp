@@ -6,9 +6,8 @@
 // triangles with the animated surface texture of the zoom, self-lit; at the city's edge the side quads (format 10) with the
 // side texture.
 //
-// The scorch mark under settling lava is the original's cSC4PropOccupantTerrainDecal (i386 0x00102b44..0x00106208), which
-// the port has not recovered as an occupant. What it does on screen is kept here: a terrain decal in the land overlay
-// manager whose opacity runs from one value to another at a rate per second, and which is removed when a fade-out ends.
+// The scorch mark under settling lava is a cSC4PropOccupantTerrainDecal (sc4/PropOccupantTerrainDecal), made and retired the
+// original's way.
 #include "app/NativeVolcanoLava.h"
 
 #include <cmath>
@@ -36,6 +35,7 @@
 #include "sc4/Exemplar.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/VolcanoLava.h"
+#include "app/NativeProps.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSC4FlammabilitySimulator.h"
 #include "sc4/cSTETerrain.h"
@@ -51,8 +51,6 @@ constexpr std::uint32_t kSideTextureInstance = 0x699ca236;
 constexpr std::uint32_t kGradientInstance = 0xc9909fb8;
 constexpr std::uint32_t kScorchTextureInstance = 0x0999d1b7;
 constexpr cGZPersistResourceKey kTuningKey{0x6534284a, 0x88cd66e9, 5};
-constexpr float kFadeRateForStaticManager = 0.1f;               // 0x00a70da8 (a double there)
-constexpr float kSecondsPerMillisecond = 0.001f;                // 0x00a70798
 
 sc4::cSC43DRender* g_render = nullptr;
 
@@ -99,58 +97,6 @@ const std::vector<std::uint32_t>& Gradient() {
     }
     if (Debug()) std::fprintf(stderr, "lava: gradient image %d x %d\n", width, height);
     return column;
-}
-
-// ------------------------------------------------------------------------------------------------- the scorch marks
-struct ScorchDecal {
-    sc4::cSTEOverlayManager* manager = nullptr;   // +0x9c
-    std::uint32_t id = 0;                         // +0x6c
-    float opacity = 1.0f;                         // +0x88
-    float current = 1.0f, target = 0.0f;          // +0x8c, +0x90
-    float rate = 1.0f;                            // +0x94, per second
-    int action = 0;                               // +0x98
-    bool retired = false;                         // the lava let go of it: it goes when its fade ends
-};
-std::list<ScorchDecal> g_decals;
-
-struct DecalTicker final : cIGZMessageTarget2 {
-    bool registered = false;
-    bool QueryInterface(std::uint32_t iid, void** out) override {
-        if (iid != 0x452294aa && iid != 1) return false;
-        *out = static_cast<cIGZMessageTarget2*>(this);
-        return true;
-    }
-    std::uint32_t AddRef() override { return 1; }
-    std::uint32_t Release() override { return 1; }
-    // cSC4PropOccupantTerrainDecal::DoMessage @ 0x00104b8e, for every decal: the tick's third word is its milliseconds as a float.
-    bool DoMessage(cIGZMessage2* message) override {
-        if (!message || message->GetType() != sc4::kLavaMessageAnimationTick) return false;
-        const std::uint32_t bits = MessageData(message, 3);
-        float milliseconds = 0.0f;
-        std::memcpy(&milliseconds, &bits, sizeof milliseconds);
-        for (auto it = g_decals.begin(); it != g_decals.end();) {
-            ScorchDecal& decal = *it;
-            if (decal.rate == 0.0f) { ++it; continue; }
-            decal.current = decal.rate * kSecondsPerMillisecond * milliseconds + decal.current;
-            if ((decal.current - decal.target) * decal.rate < 0.0f) {
-                decal.opacity = decal.current;
-                decal.manager->SetOverlayAlpha(decal.id, decal.current);
-            } else if (decal.action == sc4::kLavaDecalFadedOut || decal.action == sc4::kLavaDecalRemoved) {
-                decal.manager->RemoveOverlay(decal.id);
-                it = g_decals.erase(it);
-                continue;
-            } else {
-                decal.manager->SetOverlayAlpha(decal.id, decal.opacity);
-            }
-            ++it;
-        }
-        return true;
-    }
-} g_decalTicker;
-
-void StartDecalTicks() {
-    if (g_decalTicker.registered) return;
-    if (sc4::cSC4AnimationTickManager* atm = AnimationTickManager()) g_decalTicker.registered = atm->AddTickableObject(&g_decalTicker, 0xc0);
 }
 
 // ------------------------------------------------------------------------------------------------- one lava
@@ -289,35 +235,16 @@ public:
     void StopSteam(void* steam, bool hard) override { NativeEndEffectHandle(steam, hard ? 1 : 0); }
     void ReleaseSteam(void* steam) override { NativeEndEffectHandle(steam, -1); }
 
-    // ---- ILavaHost: scorch marks (SetDecalTexture, SetOpacityFade(fadeIn, none, 0, 1), into the occupant manager, SetPosition)
+    // ---- ILavaHost: scorch marks (AddDecal @ 0x004f9986): a cSC4PropOccupantTerrainDecal, Init, the scorch texture at the size,
+    // SetOpacityFade(fadeIn, keep, 0, 1), into the occupant manager, SetPosition; the lava keeps one reference.
     void* AddScorchDecal(const float xyz[3], float size, float fadeIn) override {
-        const float rate = (1.0f - 0.0f) / fadeIn;
-        sc4::cSTEOverlayManager* manager = DecalOverlayManager(std::fabs(rate) >= kFadeRateForStaticManager ? 2 : 0);
-        if (!manager || !(0.0f < size)) return nullptr;
-        ScorchDecal decal;
-        decal.manager = manager;
-        decal.current = 0.0f;
-        decal.target = 1.0f;
-        decal.rate = rate;
-        decal.id = manager->AddDecal(cGZPersistResourceKey{0x7ab50e44, kTextureGroup, kScorchTextureInstance}, cS3DVector2{xyz[0], xyz[2]}, size, 0.0f);
-        manager->SetOverlayAlpha(decal.id, decal.opacity);
-        g_decals.push_back(decal);
-        StartDecalTicks();
+        void* decal = NativeCreateFadingDecal(cGZPersistResourceKey{0x7ab50e44, kTextureGroup, kScorchTextureInstance}, size, fadeIn, xyz);
         ++decalsMade_;
-        if (Debug() && decalsMade_ <= 3) std::fprintf(stderr, "lava: scorch decal %u at (%.0f, %.0f) size %.0f\n", decal.id, xyz[0], xyz[2], size);
-        return &g_decals.back();
+        if (Debug() && decalsMade_ <= 3) std::fprintf(stderr, "lava: scorch decal at (%.0f, %.0f) size %.0f\n", xyz[0], xyz[2], size);
+        return decal;
     }
-    void RetireScorchDecal(void* handle, float fadeOut, int completionAction) override {
-        for (ScorchDecal& decal : g_decals) {
-            if (&decal != handle) continue;
-            decal.current = 1.0f;
-            decal.target = 0.0f;
-            decal.rate = (0.0f - 1.0f) / fadeOut;
-            decal.action = completionAction;
-            decal.retired = true;
-            return;
-        }
-    }
+    // TickDecals @ 0x004f9b7a: the expired decal fades out (1 to 0) with the completion action, and the lava lets go of it.
+    void RetireScorchDecal(void* handle, float fadeOut, int completionAction) override { NativeRetireFadingDecal(handle, fadeOut, completionAction); }
 
     // ---- ILavaHost: fire
     bool IsCellFlammable(std::int32_t x, std::int32_t z) override {
@@ -476,11 +403,6 @@ void AttachVolcanoLava(sc4::cSC43DRender& render) { g_render = &render; }
 void DetachVolcanoLava() {
     for (NativeLava* lava : g_lavas) lava->Detach();
     g_lavas.clear();
-    g_decals.clear();   // their overlays go with the overlay managers
-    if (g_decalTicker.registered) {
-        if (sc4::cSC4AnimationTickManager* atm = AnimationTickManager()) atm->RemoveTickableObject(&g_decalTicker, 0xc0);
-        g_decalTicker.registered = false;
-    }
     g_render = nullptr;
 }
 
