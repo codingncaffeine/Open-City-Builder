@@ -1,3 +1,4 @@
+#include <algorithm>
 // cSC4PowerSimulator (Mac i386 port): wiring from occupants, the grid flood from a plant, the powered cells and supply values, the
 // plant's share of the output, removal, the five-state pass and the version 6 stream.
 #include <cstdio>
@@ -94,6 +95,29 @@ public:
         }
     }
     bool WireCell(cISC4Occupant*, int&, int&) override { return false; }
+    // DoTerrainHeightsChanged: a Building listed in `poles` is a pole at its first cell; in `lines` a line joining the two poles
+    std::vector<cISC4Occupant*> poles, broken;
+    std::map<cISC4Occupant*, std::pair<Building*, Building*>> lines;
+    std::vector<std::pair<cIGZUnknown*, cIGZUnknown*>> disconnected;
+    PowerRect lastRect{};
+    bool PoleCell(cISC4Occupant* o, int& x, int& z) override {
+        if (std::find(poles.begin(), poles.end(), o) == poles.end()) return false;
+        auto* b = static_cast<Building*>(o);
+        x = b->cells.x0;
+        z = b->cells.z0;
+        return true;
+    }
+    void BreakPoleAndRemove(cISC4Occupant* pole) override { broken.push_back(pole); }
+    bool LinePoles(cISC4Occupant* o, cIGZUnknown*& a, cIGZUnknown*& b) override {
+        auto it = lines.find(o);
+        if (it == lines.end()) return false;
+        a = it->second.first;
+        b = it->second.second;
+        if (a) a->AddRef();
+        if (b) b->AddRef();
+        return true;
+    }
+    void DisconnectPoles(cIGZUnknown* a, cIGZUnknown* b) override { disconnected.emplace_back(a, b); }
     bool IsZoned(int, int) override { return false; }
     void SetSupplyValue(int x, int z, std::uint8_t value) override { supply[{x, z}] = value; }
     float OrdinancePowerFactor() override { return 1.0f; }
@@ -215,6 +239,28 @@ int main() {
         CHECK(gone.refs == 1);   // released when it left
         for (cISC4Occupant* p : poles) p->Release();
         poles.clear();
+    }
+    {   // 0x278e6003 (spec 5 / 5.4): the rect (d1 >> 16) - 1 .. d1 & 0xffff (x), the same of d2 (z), clamped; poles inside break and go,
+        // lines are disconnected once per pole pair; data4 4 or 5 is ignored
+        Building inside(5, 5, 5, 5), outside(30, 30, 30, 30), lineA(6, 6, 6, 6), lineB(6, 7, 6, 7);
+        host.poles = {&inside, &outside};
+        host.lines = {{&lineA, {&inside, &outside}}, {&lineB, {&inside, &outside}}};   // the same pair twice
+        host.occupants = {&inside, &outside, &lineA, &lineB};
+        auto* message = new cRZMessage2Standard();
+        message->AddRef();
+        message->SetType(0x278e6003);
+        message->SetData1((5u << 16) | 9u);   // x 4..9
+        message->SetData2((0u << 16) | 9u);   // z -1 -> 0 ..9
+        message->SetData4(4);
+        power->DoMessage(message);
+        CHECK(host.broken.empty() && host.disconnected.empty());   // data4 4: ignored
+        message->SetData4(0);
+        power->DoMessage(message);
+        message->Release();
+        CHECK(host.broken.size() == 1 && host.broken[0] == &inside);
+        CHECK(host.disconnected.size() == 1 && host.disconnected[0].first == &inside && host.disconnected[0].second == &outside);
+        host.poles.clear();
+        host.lines.clear();
     }
     CHECK(power->Shutdown());
     power->Release();

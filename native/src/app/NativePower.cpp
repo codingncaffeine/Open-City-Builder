@@ -88,6 +88,35 @@ public:
         if (occupants->GetOccupantsByStandardCityCells(held_, a, b, static_cast<cISC4OccupantFilter*>(nullptr), 0xffffffffu))
             for (cISC4Occupant* occupant : held_) out.push_back(occupant);   // borrowed until the next query
     }
+    // DoTerrainHeightsChanged's pole and line calls (sc4/PowerSimulator.cpp)
+    bool PoleCell(cISC4Occupant* occupant, int& x, int& z) override {
+        auto* pole = dynamic_cast<cSC4PowerPoleOccupant*>(occupant);
+        if (!pole) return false;
+        pole->GetCell(x, z);
+        return true;
+    }
+    void BreakPoleAndRemove(cISC4Occupant* occupant) override {
+        auto* pole = dynamic_cast<cSC4PowerPoleOccupant*>(occupant);
+        if (!pole) return;
+        pole->BreakAllConnectionsAtDestination(true);
+        if (cISC4OccupantManager* occupants = CityOccupants()) occupants->RemoveOccupant(occupant, true, 0);
+    }
+    bool LinePoles(cISC4Occupant* occupant, cIGZUnknown*& first, cIGZUnknown*& second) override {
+        first = second = nullptr;
+        auto* line = dynamic_cast<cSC4PowerLineOccupant*>(occupant);
+        if (!line) return false;
+        cISC4PowerPoleOccupant *a = nullptr, *b = nullptr;
+        bool connected = false;
+        line->GetConnectedPoles(a, b, connected);
+        first = a;
+        second = b;
+        return true;
+    }
+    void DisconnectPoles(cIGZUnknown* first, cIGZUnknown* second) override {
+        auto* a = dynamic_cast<cSC4PowerPoleOccupant*>(first);
+        auto* b = dynamic_cast<cSC4PowerPoleOccupant*>(second);
+        if (a && b) a->RemoveConnection(b, false);
+    }
     bool WireCell(cISC4Occupant* occupant, int& x, int& z) override {
         switch (occupant->GetType()) {
         case kPowerOccupantPole: {

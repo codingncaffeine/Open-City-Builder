@@ -85,6 +85,13 @@ public:
     // The cell a pole (iid 0xa8c86142 vslot 0x20, not while its vslot 0x34 holds), a network piece (iid 0xc98f3b24 vslot 0x14,
     // not while its vslot 0x18 holds) or a pylon (iid 0xa821ef94 vslot 0xec, flagged 0x40000 and not 0x80000000) wires.
     virtual bool WireCell(cISC4Occupant* occupant, int& x, int& z) = 0;
+    // DoTerrainHeightsChanged (spec 5.4): a pole's cell (QI 0xa8c86142 slot 8; false when not a pole), its BreakAllConnections(true)
+    // (slot 6) and the occupant manager's RemoveOccupant(o, true, 0) (slot 21); a line's two poles (QI 0xc98f3b24 slot 3, one
+    // reference each, null when missing) and the first pole's RemoveConnection(second, false) (pole class, non-virtual).
+    virtual bool PoleCell(cISC4Occupant* occupant, int& x, int& z) { (void)occupant; (void)x; (void)z; return false; }
+    virtual void BreakPoleAndRemove(cISC4Occupant* pole) { (void)pole; }
+    virtual bool LinePoles(cISC4Occupant* occupant, cIGZUnknown*& first, cIGZUnknown*& second) { (void)occupant; first = second = nullptr; return false; }
+    virtual void DisconnectPoles(cIGZUnknown* first, cIGZUnknown* second) { (void)first; (void)second; }
     virtual bool IsZoned(int x, int z) = 0;                               // zone manager vslot 0x30 GetZoneType != 0 (zones conduct)
     virtual void SetSupplyValue(int x, int z, std::uint8_t value) = 0;    // supply grid (+0x80)
     virtual float OrdinancePowerFactor() = 0;                             // ordinance 0x0911e117 (+0x2b0)
@@ -213,6 +220,7 @@ public:
     // ---- poles and funding ----
     std::vector<cISC4Occupant*>& Poles() { return poles_; }
     bool RecomputeInfrastructureCosts();
+    void DoTerrainHeightsChanged(const PowerRect& rect);   // i386 0x00181868 (spec 5.4)
     void ApplyPoleFunding(const SC4Percentage& funding);             // i386 0x00184118
     std::uint32_t GetPowerPoleCount() const { return std::uint32_t(poles_.size()); }
 

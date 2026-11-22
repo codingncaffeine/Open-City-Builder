@@ -124,9 +124,43 @@ bool cSC4PowerSimulator::RecomputeInfrastructureCosts() {
     return changed;
 }
 
+// i386 0x00181868 (spec 5.4): over every occupant of the changed rect, the poles inside it lose all connections and leave the
+// city; then each line still joining two poles (distinct by pole pair, in order) has its first pole drop the connection to the
+// second. The removals come back as occupant-removed messages.
+void cSC4PowerSimulator::DoTerrainHeightsChanged(const PowerRect& rect) {
+    std::vector<cISC4Occupant*> found;
+    host_->OccupantsInRect(rect, found);
+    for (cISC4Occupant* occupant : found) {
+        int x = 0, z = 0;
+        if (!occupant || !host_->PoleCell(occupant, x, z)) continue;
+        if (x < rect.left || rect.right < x || z < rect.top || rect.bottom < z) continue;
+        host_->BreakPoleAndRemove(occupant);
+    }
+    std::vector<std::pair<cIGZUnknown*, cIGZUnknown*>> pairs;
+    std::vector<cISC4Occupant*> lines;
+    for (cISC4Occupant* occupant : found) {
+        cIGZUnknown *first = nullptr, *second = nullptr;
+        if (!occupant || !host_->LinePoles(occupant, first, second)) continue;
+        const bool both = first && second;
+        const bool seen = both && std::find(pairs.begin(), pairs.end(), std::make_pair(first, second)) != pairs.end();
+        if (both && !seen) {
+            pairs.emplace_back(first, second);
+            lines.push_back(occupant);
+        }
+        if (first) first->Release();
+        if (second) second->Release();
+    }
+    for (cISC4Occupant* line : lines) {
+        cIGZUnknown *first = nullptr, *second = nullptr;
+        host_->LinePoles(line, first, second);
+        host_->DisconnectPoles(first, second);
+        if (first) first->Release();
+        if (second) second->Release();
+    }
+}
+
 // ---- messages ---------------------------------------------------------------------------------------------
-// PARTIAL: the terrain message (0x278e6003, power line geometry follows the ground), the network manager's half of 0x07699455
-// and the meltdown cheat (0xc2c09554) are not ported.
+// PARTIAL: the network manager's half of 0x07699455 and the meltdown cheat (0xc2c09554) are not ported.
 bool cSC4PowerSimulator::DoMessage(cIGZMessage2* message) {
     if (!message) return true;
     auto* standard = static_cast<cIGZMessage2Standard*>(message);
@@ -138,9 +172,20 @@ bool cSC4PowerSimulator::DoMessage(cIGZMessage2* message) {
     case kMsgPowerTick:
     case kMsgPowerTickFast: DoIdle(); break;
     case kMsgPowerTunablesChanged: ReadSimulatorTunableValues(host_->SimulatorExemplar()); break;
-    case kMsgPowerTerrain:
-        SC4_UNWIRED("cSC4PowerSimulator::DoMessage: terrain message 0x278e6003 (power line geometry follows the ground) not ported");
+    case kMsgPowerTerrain: {
+        // spec 5 (0x278e6003): data4 4 or 5 is ignored; else the rect (data1 >> 16) - 1 .. data1 & 0xffff on x, the same of data2
+        // on z, the low ends kept at 0 or more and the high ends inside the city
+        const std::uint64_t kind = standard->GetData4();
+        if (kind == 4 || kind == 5) break;
+        const auto d1 = static_cast<std::uint32_t>(standard->GetData1()), d2 = static_cast<std::uint32_t>(standard->GetData2());
+        PowerRect rect;
+        rect.left = std::max(0, static_cast<int>(d1 >> 16) - 1);
+        rect.top = std::max(0, static_cast<int>(d2 >> 16) - 1);
+        rect.right = std::min(static_cast<int>(d1 & 0xffff), host_->CityCellsX() - 1);
+        rect.bottom = std::min(static_cast<int>(d2 & 0xffff), host_->CityCellsZ() - 1);
+        DoTerrainHeightsChanged(rect);
         break;
+    }
     case kMsgPowerPoleCosts: {
         // PostCityInit (spec power.md 5.6, i386 0x001863f4): a pole no longer in the occupant manager (its occupant's flag 1
         // clear) leaves the list; then RecomputeInfrastructureCosts, whose change asks for a recompute pass.
