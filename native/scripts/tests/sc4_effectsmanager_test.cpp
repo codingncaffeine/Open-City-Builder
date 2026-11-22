@@ -1267,6 +1267,49 @@ void TestMessageTriggerEffect() {
     manager.Shutdown();
 }
 
+// A plain (not model-based) particle system whose description carries a non-zero +0x278 value still gets its description
+// (i386 0x00406246 calls SetDescription on every system it makes): the pollution haze stayed empty without it.
+void TestPlainParticlesGetDescription() {
+    FakeHost host;
+    SetEffectsManagerHost(&host);
+    FakeParticlesTerrain terrain;
+    SetParticlesTerrain(&terrain);          // cSC4ParticlesEffect::Init dereferences the terrain host
+    cSC4EffectsManager manager;
+    manager.SetHost(&host);
+    CHECK(manager.Init());
+    manager.BeginCollection();
+    cSC4ParticlesDescription haze;
+    haze.flag10 = 0x10;                  // bit 0 clear: not model based
+    haze.values278[0] = 0.3f;
+    haze.rateCurve.assign(1, 1.0f);
+    manager.Collection().AddParticleDescription("haze", haze);
+    cSC4EffectDescription smog;
+    smog.version = 3;
+    cSC4EffectDescription::cDescriptionRec record;
+    record.kind = 0;
+    record.intValue = 0;
+    record.shortA = 1;
+    record.flagA = 0;
+    record.flagB = 100;
+    record.name = "haze";
+    smog.records.push_back(record);
+    manager.Collection().AddEffectDescription("smog", smog);
+    manager.EndCollection();
+    manager.SetLodLevel(1);   // as the first zoom message sets it (the level starts at -1)
+    cSC4VisualEffect* effect = nullptr;
+    CHECK(manager.CreateVisualEffect("smog", &effect) && effect);
+    if (effect) {
+        CHECK(effect->Components().size() == 1);
+        const cSC4ParticlesEffect* system = effect->Components().empty() || !effect->Components()[0].component
+                                                ? nullptr : effect->Components()[0].component->ParticleSystem();
+        CHECK(system != nullptr);
+        CHECK(system && system->Description() != nullptr);
+        effect->Release();
+    }
+    manager.Shutdown();
+    SetParticlesTerrain(nullptr);
+}
+
 int main() {
     TestCom();
     TestRegistry();
@@ -1281,6 +1324,7 @@ int main() {
     TestCreateEffectCommand();
     TestRegionGlobalEffectPipeline();
     TestMessageTriggerEffect();
+    TestPlainParticlesGetDescription();
     SetEffectsManagerHost(nullptr);
     if (failures == 0) {
         std::printf("all effects manager tests passed\n");

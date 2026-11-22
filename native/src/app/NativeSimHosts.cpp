@@ -771,7 +771,8 @@ void NativePollutionEffectReport(int limit) {
             if (effect->IsStarted()) ++started;
             for (const auto& record : effect->Components()) {
                 ++components;
-                if (auto* particles = dynamic_cast<const cSC4ParticlesEffect*>(record.component)) spawned += static_cast<std::uint64_t>(particles->LiveParticleCount());
+                if (const cSC4ParticlesEffect* particles = record.component ? record.component->ParticleSystem() : nullptr)
+                    spawned += static_cast<std::uint64_t>(particles->LiveParticleCount());
             }
             if (shown++ >= limit) continue;
             const cS3DTransform& t = effect->SourceTransform();

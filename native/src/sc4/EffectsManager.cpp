@@ -989,6 +989,7 @@ public:
     void ApplyEffect(float elapsed) override { effect_->ApplyEffect(elapsed); }
     bool SetFloatParams(int type, const float* values, int count) override { return effect_->SetFloatParams(type, values, count); }
     bool SetVoidParams(int type, void** values, int count) override { return effect_->SetVoidParams(type, values, count); }
+    const cSC4ParticlesEffect* ParticleSystem() const override { return effect_; }
 
 private:
     cSC4ParticlesEffect* effect_;
@@ -1036,18 +1037,21 @@ void cSC4EffectsManager::CreateComponentFromDescription(const cSC4EffectDescript
         for (int i = 0; i < static_cast<int>(record.shortA); ++i) {
             cSC4ParticlesEffect* effect = nullptr;
             cSC4ModelBasedParticlesEffect* modelBased = nullptr;
+            bool geometrySourced = false;
             if (!ModelBased(*description)) {
                 effect = NewParticlesEffect();
             } else if (description->values278[0] != 0.0f) {
                 cSC4GeometrySourcedParticlesEffect* geometry = NewGeometrySourcedParticlesEffect();
                 if (geometry) geometry->SetDescription(description);
                 effect = geometry;
+                geometrySourced = true;
             } else {
                 effect = modelBased = NewModelBasedParticlesEffect();
             }
             if (!effect) return;
+            // Every system gets the description (i386 vslot 0x30 on each path); the geometry system already took its own.
             if (modelBased) modelBased->SetDescription(description);
-            else if (description->values278[0] == 0.0f) effect->SetDescription(description);   // the geometry system took its own above
+            else if (!geometrySourced) effect->SetDescription(description);
             if (i > 0) {
                 const float delay = static_cast<float>(static_cast<std::uint32_t>(record.shortB) * static_cast<std::uint32_t>(i));
                 effect->SetFloatParams(0x101, &delay, 1);

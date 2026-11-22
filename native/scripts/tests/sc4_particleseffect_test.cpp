@@ -556,6 +556,37 @@ void TestEmissionModes() {
     }
 }
 
+// Billboard mode 1 with a direction that has no horizontal part lays the quad flat on the ground plane (i386 0x00415b48):
+// basis A (0, 0, 1), basis B (1, 0, 0) — the pollution haze; a zero basis B made every such particle zero-wide.
+void TestFlatBillboard() {
+    Hosts hosts;
+    cSC4ParticlesDescription description = MakeDescription();
+    description.rateCurve.assign(1, 1.0f);
+    description.colorCurve.assign(1, cS3DVector3{1.0f, 1.0f, 1.0f});
+    description.billboardMode = 1;
+    description.velocityMin[0] = 0.0f;
+    description.velocityMin[1] = 1.0f;
+    description.velocityMin[2] = 0.0f;
+    sc4::cSC4ParticlesEffect effect;
+    effect.SetDescription(&description);
+    effect.Init();
+    FakeDrawContext context;
+    effect.PrepareForRendering(&context);
+    cSCParticle* base = effect.CreateParticle();
+    cSC4EffectsParticle* particle = AsParticle(base);
+    particle->position = cS3DVector3{10.0f, 20.0f, 30.0f};
+    cS3DVector3 corner{}, right{}, up{};
+    cS3DColorARGB8 colour8{};
+    effect.ProcessParticle(particle, 0, corner, right, up, colour8);
+    CHECK_NEAR(right.x, 1.0, 1e-6);
+    CHECK_NEAR(right.y, 0.0, 1e-6);
+    CHECK_NEAR(right.z, 0.0, 1e-6);
+    CHECK_NEAR(up.x, 0.0, 1e-6);
+    CHECK_NEAR(up.z, 1.0, 1e-6);
+    CHECK_NEAR(corner.y, 20.0, 1e-6);   // flat: the quad stays at the particle's height
+    effect.DestroyParticle(base);
+}
+
 void TestProcessParticle() {
     Hosts hosts;
     cSC4ParticlesDescription description = MakeDescription();
@@ -1128,6 +1159,7 @@ int main() {
     TestParticleCreationAndPhysics();
     TestActiveParticlesBox();
     TestEmissionModes();
+    TestFlatBillboard();
     TestProcessParticle();
     TestFloatAndVoidParams();
     TestTransforms();

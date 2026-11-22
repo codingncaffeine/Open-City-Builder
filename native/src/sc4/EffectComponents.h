@@ -40,6 +40,8 @@ public:
     virtual void ApplyEffect(float elapsed) = 0;
     virtual bool SetFloatParams(int type, const float* values, int count) = 0;
     virtual bool SetVoidParams(int type, void** values, int count) = 0;
+    // The particle system behind a particles component (the port wraps the systems as components); null for the others.
+    virtual const class cSC4ParticlesEffect* ParticleSystem() const { return nullptr; }
     void AddRef() { ++refs_; }
     void Release() { if (refs_ <= 1) delete this; else --refs_; }
 protected:

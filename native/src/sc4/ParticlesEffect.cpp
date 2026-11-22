@@ -965,8 +965,10 @@ void cSC4ParticlesEffect::PrepareForRendering(IParticlesDrawContext* context) {
         const float z = description_->velocityMin[2];
         const float length = Sqrt(z * z + x * x);
         if (!(std::fabs(length) >= 0.0001f)) {
+            // A direction with no horizontal part lays the quad flat (i386 0x00415b48: +0x74 = (0, 0, 1), +0x80 = (1, 0, 0)),
+            // as the pollution haze over a city block is drawn.
             basisA_ = cS3DVector3{0.0f, 0.0f, 1.0f};
-            basisB_ = cS3DVector3{0.0f, 0.0f, 0.0f};
+            basisB_ = cS3DVector3{1.0f, 0.0f, 0.0f};
         } else {
             const float inv = 1.0f / length;
             basisA_ = cS3DVector3{-z * inv, 0.0f, x * inv};
