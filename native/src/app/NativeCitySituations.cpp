@@ -43,6 +43,9 @@
 #include "sc4/ServiceLocator.h"
 #include "sc4/View3DWin.h"
 #include "sc4/cSC4City.h"
+#include "app/NativeDemolition.h"   // CityNeighborsSimulator
+#include "sc4/NeighborConnection.h"
+#include "sc4/NeighborsSimulator.h"
 
 namespace native {
 sc4::ISituationLua* NativeSituationLua();   // NativeCitySituationAdvice.cpp
@@ -238,6 +241,19 @@ public:
         return situation;
     }
     std::uint32_t SourceBuildingGroup(std::uint32_t group) override { return SituationSourceBuildingGroup(group); }
+    bool NeighborConnectionCells(std::vector<std::pair<int, int>>& out) override {
+        sc4::cSC4NeighborsSimulator* neighbors = CityNeighborsSimulator();
+        if (!neighbors) return false;
+        sc4::ConnectionList connections;
+        neighbors->GetAllConnections(connections);
+        for (const auto& connection : connections) {
+            if (!connection) continue;
+            int x = 0, z = 0;
+            connection->GetConnectionCell(x, z);
+            out.emplace_back(x, z);
+        }
+        return true;
+    }
     bool ViewFrustumBox(float boxMin[3], float boxMax[3]) override {
         SC4ViewUtilities* view = SL::spViewUtilities ? static_cast<SC4ViewUtilities*>(SL::spViewUtilities) : nullptr;
         if (!view) return false;

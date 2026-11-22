@@ -22,7 +22,8 @@
 //   +0xae8 cRZAutoRefCount<cISC4Occupant> currentTarget  +0xaf0 cRZAutoRefCount<cISC4Occupant> (last target)
 //   +0xaf8 cRZAutoRefCount<cISC4Lot> landfill lot        +0xb00 u32 numTargets   +0xb04 u32 currentTargetIndex
 //   +0xb08 bool (target sequence reset)                  +0xb10 unordered_set<cRZAutoRefCount<cISC4Occupant>>
-//   +0xb38 u32/u32 (unused, 0)  +0xb40 f32 pursuit timer  +0xb44 f32 status speed factor  +0xb48 f32 situation time
+//   +0xb38 u32/u32 (unused, 0)  i386 +0xa84 f32 evade timer, +0xa88 f32 pursuit alert timer, +0xa8c result delay, then the
+//   situation time (the 64-bit offsets of these floats were read one slot off before; the i386 uses are the reference)
 //   +0xb4c f32 countdown seconds  +0xb50 f32 time limit seconds  +0xb54 bool countdown finished  +0xb55 bool sound played
 //   +0xb58 cRZAutoRefCount<cISC4MissionActor> mission actor  +0xb60 cRZAutoRefCount<cISC4VisualEffect> countdown effect
 //   +0xb68 cRZAutoRefCount<cIGZUnknown> (unused)
@@ -45,6 +46,7 @@
 #include <list>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "gz/cIGZIStream.h"
@@ -238,6 +240,9 @@ public:
     virtual std::uint32_t SourceBuildingGroup(std::uint32_t automataGroup) { (void)automataGroup; return 0; }
     // SC4ViewUtilities::GetViewFrustumBoundingBox (SL::spViewUtilities).
     virtual bool ViewFrustumBox(float boxMin[3], float boxMax[3]) { (void)boxMin; (void)boxMax; return false; }
+    // SL::spNeighborsSim vslot 0x40 GetAllConnections, each connection's vslot 0x18 GetConnectionCell: the off-map cells of
+    // every neighbor connection. False when there is no neighbors simulator.
+    virtual bool NeighborConnectionCells(std::vector<std::pair<int, int>>& out) { (void)out; return false; }
     // ActivateSituation of an evade mission: SL::spCity vslot 0x178 (the automata controller manager) -> vslot 0x28
     // (occupant, "pursuit generator" template, 0) makes a controller on the automaton's occupant, then vslot 0x80 hands it
     // the evade groups the vehicle manager can create.
@@ -361,6 +366,8 @@ public:
     void DoAnimationTick(float elapsedMilliseconds);                // @ 0x1006d988c (i386 0x004a83b0)
     std::uint32_t CheckForSuccess(float elapsedMilliseconds);       // @ 0x1006dac36 (i386 0x004a5d68)
     std::uint32_t CheckReachTargetSuccess(float elapsedMilliseconds);   // i386 0x004a5c46
+    std::uint32_t CheckEscapeCitySuccess(float elapsedMilliseconds);    // i386 0x004a11d2
+    std::uint32_t CheckEvadeListSuccess(float elapsedMilliseconds);     // i386 0x004a319a
     void HandleSituationTriggered(cISC4CitySituationAdvice* situation);      // @ 0x1006d9318
     void HandleSituationUntriggered(cISC4CitySituationAdvice* situation);    // @ 0x1006d96c4
     void HandleSituationSuccess(cISC4CitySituationAdvice* situation);        // @ 0x1006da64e (i386 0x004a7e4a)
@@ -426,7 +433,8 @@ private:
     bool targetSequenceReset_ = false;                           // +0xb08
     std::unordered_set<cRZAutoRefCount<ISituationOccupant>, SituationOccupantRefHash> targetOccupants_;   // +0xb10
     float reachTimer_ = 0.0f;                                    // +0xb38 (milliseconds inside the success distance)
-    float pursuitTimer_ = 0.0f;                                  // +0xb40
+    float evadeTimer_ = 0.0f;                                    // i386 +0xa84: a chaser within the evade distance (CheckEvadeListSuccess)
+    float pursuitTimer_ = 0.0f;                                  // i386 +0xa88: the 5 s pursuit alert (UpdatePursuit)
     float resultDelay_ = 0.0f;                                   // +0xb44 (seconds before the result handlers run)
     float situationTime_ = 0.0f;                                 // +0xb48
     float countdown_ = 0.0f;                                     // +0xb4c

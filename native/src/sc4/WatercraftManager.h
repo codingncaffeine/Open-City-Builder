@@ -33,11 +33,10 @@
 //   the ten kMarinaBuildingProperties marina/seaport buildings (occupant -> boat registry),
 //   0x029244db "no automata" (the automaton DoMessage filter).
 //
-// The parent: the recovered cSC4AutomataManager cannot be inherited here because its header and the recovered
-// cSC4Watercraft / cSC4Automaton headers are mutually incompatible in the port (both define sc4::IAutomatonGroupTemplate
-// and several iids). The inherited calls therefore go through IWatercraftManagerBase, one method per original call;
-// the object that owns the manager supplies it (hook-up item). The port also keeps its own boat list (see Boats())
-// because the recovered cSC4Watercraft does not implement IAutomataAutomaton, which the base registry stores.
+// The parent: the inherited cSC4AutomataManager half is reached through IWatercraftManagerBase, one method per original
+// call. In the game that base is a real cSC4AutomataManager (app/NativeWatercraft.cpp: the city component is the automata
+// manager and runs this class on it), so the boats live in the base's list; a base that keeps no list (the unit test's)
+// leaves the boats in this class's own list (Boats()), which then stands in for the base list.
 //
 // Quirks kept (each asserted by the test, with the original address):
 //  * RequestPermissionToDock/Wait return true with a null boat without recording anything (they only fail when the

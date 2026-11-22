@@ -888,26 +888,96 @@ std::uint32_t cSC4CitySituationManager::CheckReachTargetSuccess(float elapsedMil
     return status;
 }
 
+// i386 0x004a11d2: the active automaton escapes the city when it stands within two cells of the border, heads out (32 ahead
+// along its heading is off the map) and either ignores paths (flag 0x2000) or is within two cells (squared cell distance
+// below 5) of a neighbor connection's off-map cell. Otherwise the status stays as it is. The original also flashes the
+// target indicator of the dispatch view, which is not recovered.
+std::uint32_t cSC4CitySituationManager::CheckEscapeCitySuccess(float elapsedMilliseconds) {
+    (void)elapsedMilliseconds;
+    std::uint32_t status = status_;
+    float position[3] = {0.0f, 0.0f, 0.0f};
+    ICitySituationManagerHost* host = CitySituationManagerHost();
+    ISituationCity* city = host ? host->City() : nullptr;
+    std::vector<std::pair<int, int>> connections;
+    const bool haveNeighbors = host && host->NeighborConnectionCells(connections);
+    if (GetActivePosition(position) && city && haveNeighbors && activeAutomaton_) {
+        const int sizeX = city->CellsX();
+        const int sizeZ = city->CellsZ();
+        int cellX = 0, cellZ = 0;
+        city->WorldToCell(position[0], position[2], cellX, cellZ);
+        if (cellX < 2 || cellZ < 2 || sizeX - 2 <= cellX || sizeZ - 2 <= cellZ) {
+            float heading[3] = {0.0f, 0.0f, 0.0f};
+            activeAutomaton_->GetOrientation(heading);
+            const float aheadZ = heading[2] * 32.0f + position[2];
+            const float aheadX = 32.0f * heading[0] + position[0];
+            if (aheadX < 0.0f || aheadZ < 0.0f || static_cast<float>(sizeX << 4) < aheadX || static_cast<float>(sizeZ << 4) < aheadZ) {
+                if (!activeAutomaton_->CheckFlag(0x2000)) {
+                    for (const auto& cell : connections) {
+                        const int dx = cell.first - cellX, dz = cell.second - cellZ;
+                        if (static_cast<unsigned>(dx * dx + dz * dz) < 5u) status = kSituationSuccess;
+                    }
+                } else {
+                    status = kSituationSuccess;
+                }
+            }
+        }
+    }
+    HandleStatusChanged(status);
+    return status;
+}
+
+// i386 0x004a319a: the evade list's automata that chase the active automaton (behavior 0x34 with it as their state's target)
+// count while one of them is within the evade distance (measured level with the active automaton): the pursuit timer adds the
+// frame, and once it reaches the evade timeout the mission fails. No chaser within range resets the timer. The status is the
+// current one otherwise.
+std::uint32_t cSC4CitySituationManager::CheckEvadeListSuccess(float elapsedMilliseconds) {
+    std::uint32_t status = status_;
+    if (activeSituation_ && activeAutomaton_) {
+        float position[3] = {0.0f, 0.0f, 0.0f};
+        activeAutomaton_->Position(position);
+        std::unordered_set<ISituationAutomaton*> chasers;
+        GetInstancesOfGroup(activeSituation_->GetEvadeList(), chasers);
+        const float distance = activeSituation_->GetEvadeDistance();
+        bool caught = false;
+        for (ISituationAutomaton* chaser : chasers) {
+            if (!chaser || chaser->GetBehavior() != 0x34 || chaser->StateTarget() != activeAutomaton_.get()) continue;
+            float at[3] = {0.0f, 0.0f, 0.0f};
+            chaser->Position(at);
+            at[1] = position[1];
+            const float dx = at[0] - position[0], dy = at[1] - position[1], dz = at[2] - position[2];
+            if (dx * dx + dy * dy + dz * dz > distance * distance) continue;
+            evadeTimer_ += elapsedMilliseconds;
+            status = evadeTimer_ * 0.001f < activeSituation_->GetEvadeTimeout() ? status_ : kSituationFailure;   // kfMinTravelDistance
+            caught = true;
+            break;
+        }
+        if (!caught) evadeTimer_ = 0.0f;
+        ICitySituationManagerHost* host = CitySituationManagerHost();
+        if (ISituationAutomataManager* vehicles = host ? host->VehicleManager() : nullptr) vehicles->ReleaseInstances(chasers);
+    }
+    HandleStatusChanged(status);
+    return status;
+}
+
 // i386 0x004a5d68: the evade check, then the condition's own check (unless the script has "check_success", which then
 // decides), then the time limit while the situation still runs.
 std::uint32_t cSC4CitySituationManager::CheckForSuccess(float elapsedMilliseconds) {
     std::uint32_t status = kSituationNone;
     if (activeSituation_ && activeAutomaton_) {
         status = status_;
-        // Recovered-partial: an evade mission (flag 2) first asks CheckEvadeListSuccess, which is not ported; its status
-        // stays as it is here. The condition's check only runs while the situation runs.
-        if (activeSituation_->CheckSituationFlag(kSituationFlagEvade))
-            SC4_UNWIRED("cSC4CitySituationManager::CheckForSuccess: CheckEvadeListSuccess (evade missions) is not ported");
+        // An evade mission (flag 2) first asks CheckEvadeListSuccess; the condition's check only runs while the situation runs.
+        if (activeSituation_->CheckSituationFlag(kSituationFlagEvade)) status = CheckEvadeListSuccess(elapsedMilliseconds);
         if (status == kSituationRunning && scriptRefs_[kRefCheckSuccess] == -2) {
             const std::uint32_t condition = activeSituation_->GetSuccessCondition();
-            if (condition == 1 && currentTarget_) {
+            if (condition == 2) {
+                status = CheckEscapeCitySuccess(elapsedMilliseconds);
+            } else if (condition == 5) {
+                // Recovered-partial: CheckCellCoverageSuccess (5) is not ported.
+                SC4_UNWIRED("cSC4CitySituationManager::CheckForSuccess: CheckCellCoverageSuccess (coverage missions) is not ported");
+                status = kSituationRunning;
+            } else if (condition == 1 && currentTarget_) {
                 status = CheckReachTargetSuccess(elapsedMilliseconds);
             } else {
-                // Recovered-partial: CheckEscapeCitySuccess (2) and CheckCellCoverageSuccess (5) are not ported.
-                if (condition == 2)
-                    SC4_UNWIRED("cSC4CitySituationManager::CheckForSuccess: CheckEscapeCitySuccess (escape missions) is not ported");
-                else if (condition == 5)
-                    SC4_UNWIRED("cSC4CitySituationManager::CheckForSuccess: CheckCellCoverageSuccess (coverage missions) is not ported");
                 status = kSituationRunning;
             }
         }

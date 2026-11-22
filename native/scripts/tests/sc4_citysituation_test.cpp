@@ -2,6 +2,7 @@
 // successes, visibility, maximum CSI, target counters), the serialization round trip with its version gate, the
 // tutorial reset over the preferences, the situation track list (trigger/untrigger), automaton tracking through the
 // dispatch view, the occupant routing and the Init/Shutdown subscriptions.
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -267,8 +268,9 @@ public:
     bool HasTargetSequence() const override { return (flags & kSituationFlagTargetSequence) != 0; }
     const std::vector<std::uint32_t>& GetEvadeList() const override { return evadeList; }
     bool HasEvadeList() const override { return !evadeList.empty(); }
-    float GetEvadeDistance() const override { return 0; }
-    float GetEvadeTimeout() const override { return 0; }
+    float GetEvadeDistance() const override { return evadeDistance; }
+    float GetEvadeTimeout() const override { return evadeTimeout; }
+    float evadeDistance = 0.0f, evadeTimeout = 0.0f;
     const cRZString& GetSuccessText() const override { return text; }
     const cRZString& GetFailureText() const override { return text; }
     const cRZString& GetProgressText(std::uint16_t) const override { return text; }
@@ -410,7 +412,14 @@ public:
     ISituationCheatCodes* CheatCodes() override { return cheats; }
     ISituationView3D* View3D() override { return nullptr; }
     ISituationDispatchView* DispatchView() override { return dispatch; }
-    ISituationCity* City() override { return nullptr; }
+    ISituationCity* City() override { return city; }
+    ISituationCity* city = nullptr;
+    std::vector<std::pair<int, int>> connectionCells;
+    bool neighbors = false;
+    bool NeighborConnectionCells(std::vector<std::pair<int, int>>& out) override {
+        out = connectionCells;
+        return neighbors;
+    }
     ISituationLotManager* LotManager() override { return nullptr; }
     ISituationEffectsManager* EffectsManager() override { return nullptr; }
     int AutomataManagerCount() override { return static_cast<int>(managers.size()); }
@@ -457,6 +466,23 @@ public:
     std::vector<ISituationAutomataManager*> managers;
     std::vector<cISC4CitySituationAdvice*> advisorSituations;
     std::vector<cISC4CitySituationAdvice*> retired;
+};
+
+// A 64 x 64 city of 16 m cells.
+class FakeCity final : public ISituationCity {
+public:
+    int CellsX() override { return 64; }
+    int CellsZ() override { return 64; }
+    float CellSizeXMeters() override { return 16.0f; }
+    void WorldToCell(float x, float z, int& cellX, int& cellZ) override {
+        cellX = static_cast<int>(std::floor(x / 16.0f));
+        cellZ = static_cast<int>(std::floor(z / 16.0f));
+    }
+    void CellToWorld(int cellX, int cellZ, float xyz[3]) override {
+        xyz[0] = cellX * 16.0f + 8.0f;
+        xyz[1] = 0.0f;
+        xyz[2] = cellZ * 16.0f + 8.0f;
+    }
 };
 
 cRZMessage2Standard* MakeMessage(std::uint32_t type) {
@@ -1018,6 +1044,86 @@ int main() {
         advice->Release();
         occupant->Release();
         targetOccupant->Release();
+    }
+
+    // --- escape (condition 2) and evade (flag 2) ------------------------------------------------------------------------------
+    // 0 heads out at the east edge next to a connection: success. 1 the same with no connection near: running. 2 inside the
+    // city: running. 3 the escape run with a chaser of the evade list within range: the timer fails it after the timeout; a
+    // chaser out of range resets the timer.
+    for (int mode = 0; mode < 4; ++mode) {
+        FakeHost host;
+        FakeApp app;
+        FakeCity city;
+        FakeAutomataManager vehicles;
+        FakeAutomaton automaton, chaser;
+        auto* occupant = new FakeOccupant();
+        automaton.occupant = occupant;
+        occupant->automaton = &automaton;
+        automaton.position[0] = mode == 2 ? 500.0f : 63.0f * 16.0f + 8.0f;   // cell 63 of 64: within two cells of the edge
+        automaton.position[2] = 8.0f;                                       // cell 0
+        vehicles.instances = {&automaton};
+        host.app = &app;
+        host.city = &city;
+        host.neighbors = true;
+        host.connectionCells = {mode == 1 ? std::make_pair(64, 40) : std::make_pair(64, 1)};
+        host.managers = {&vehicles};
+        auto* advice = new FakeAdvice();
+        advice->successCondition = 2;
+        advice->flags = kSituationFlagTraining;
+        if (mode == 3) {
+            advice->flags |= kSituationFlagEvade;
+            advice->evadeList = {1};
+            advice->evadeDistance = 50.0f;
+            advice->evadeTimeout = 10.0f;
+            chaser.behavior = 0x34;
+            chaser.pursuitTarget = &automaton;
+            chaser.position[0] = automaton.position[0] - 30.0f;
+            chaser.position[1] = 400.0f;   // measured level with the active automaton
+            chaser.position[2] = automaton.position[2];
+            host.connectionCells = {std::make_pair(64, 40)};   // the escape itself does not succeed
+        }
+        advice->adviceId = 0x1234;
+        host.situationByGuid = advice;
+        host.situationGuid = 0x1234;
+        SetCitySituationManagerHost(&host);
+        auto* manager = new cSC4CitySituationManager();
+        manager->AddRef();
+        CHECK(manager->Init());
+        cRZMessage2Standard* initiate = MakeMessage(kSituationMsgActivateAdvice);
+        initiate->SetData1(0x1234);
+        initiate->SetData2(1);
+        initiate->SetData3(0);
+        CHECK(manager->DoMessage(initiate));
+        initiate->Release();
+        CHECK(manager->GetActiveAuto() == &automaton);
+        cGZMessage accept;
+        accept.type = 3;
+        accept.param1 = kSituationButtonSender;
+        accept.param2 = kSituationButtonAccept;
+        CHECK(manager->DoWinProcMessage(nullptr, accept));
+        manager->DoAnimationTick(16.0f);
+        if (mode == 3) vehicles.instances = {&automaton, &chaser};
+        manager->DoAnimationTick(4000.0f);   // the countdown ends; the first check runs
+        if (mode == 0) {
+            CHECK(manager->GetCurrentStatus() == kSituationSuccess);
+        } else if (mode != 3) {
+            CHECK(manager->GetCurrentStatus() == kSituationRunning);
+        } else {
+            CHECK(manager->GetCurrentStatus() == kSituationRunning);   // 4 s of chase, below the 10 s timeout
+            chaser.position[0] = automaton.position[0] - 80.0f;          // out of range: the timer resets
+            manager->DoAnimationTick(500.0f);
+            CHECK(manager->GetCurrentStatus() == kSituationRunning);
+            chaser.position[0] = automaton.position[0] - 30.0f;
+            manager->DoAnimationTick(9500.0f);
+            CHECK(manager->GetCurrentStatus() == kSituationRunning);   // 9.5 s since the reset
+            manager->DoAnimationTick(600.0f);
+            CHECK(manager->GetCurrentStatus() == kSituationFailure);   // 10.1 s
+            CHECK(vehicles.instancesReleased > 0);
+        }
+        manager->Shutdown();
+        manager->Release();
+        advice->Release();
+        occupant->Release();
     }
 
     SetCitySituationManagerHost(nullptr);

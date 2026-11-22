@@ -83,12 +83,11 @@ cSC4AutomataScriptSystem* ScriptSystem() {
 }
 cSC4AutomataManager* VehicleManager() { return Concrete<cSC4AutomataManager>(CityComponent::VehicleManager); }
 
-// The four managers the tool pauses (+0x8c vehicle, +0x90 pedestrian, +0x94 aircraft, +0x98 watercraft). PARTIAL: the native
-// watercraft manager is a class of its own and is not paused.
+// The four managers the tool pauses (+0x8c vehicle, +0x90 pedestrian, +0x94 aircraft, +0x98 watercraft).
 cSC4AutomataManager* ManagerAt(int index) {
-    if (index == 3) SC4_UNWIRED("cSC4ViewInputControlPlayerDrive: the watercraft manager (+0x98) is not paused or asked (a class of its own natively)");
-    static constexpr CityComponent kManagers[3] = {CityComponent::VehicleManager, CityComponent::PedestrianManager, CityComponent::AircraftManager};
-    return index >= 0 && index < 3 ? Concrete<cSC4AutomataManager>(kManagers[index]) : nullptr;
+    static constexpr CityComponent kManagers[4] = {CityComponent::VehicleManager, CityComponent::PedestrianManager, CityComponent::AircraftManager,
+                                                   CityComponent::WatercraftManager};
+    return index >= 0 && index < 4 ? Concrete<cSC4AutomataManager>(kManagers[index]) : nullptr;
 }
 
 const cSC4OccupantGroupTemplate* TemplateOf(cSC4Automaton* automaton) {
