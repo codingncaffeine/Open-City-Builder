@@ -8,8 +8,7 @@
 // It is a cIGZWinProc on the dialog window (DoWinMsg: init 0xa2bf8ad0, shutdown 0xa2bf8ad1, key 5, command 3).
 // The neighbor deal dialog (purpose 2) lists every deal the neighbors simulator proposes or runs, sales as income and
 // purchases as expenses, each with a combo box of amounts (none / cancel first); OK keeps the deals, Cancel restores them.
-//   PARTIAL (see the notes): the individual building (+0x24) dialogs, the department path's row scrolling, the ordinance
-//   info popups (500+n) and the department buttons' individual budget windows are not ported yet.
+//   PARTIAL (see the notes): the department path's row scrolling and the ordinance info popups (500+n) are not ported yet.
 #pragma once
 #include <cstdint>
 #include <string>

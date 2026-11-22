@@ -1,4 +1,5 @@
 #include "sc4/ViewInputControlQuery.h"
+#include "platform/Unwired.h"
 
 #include <cmath>
 #include <cstdio>
@@ -452,6 +453,7 @@ bool cSC4ViewInputControlQuery::DoMessage(cIGZMessage2* message) {
     } else {
         // PARTIAL: the original also feeds the icon buffer (cSLBuffer from resource 0x856ddbac / 0x46a006b0) and its
         // meter into cISC4WinCalloutBox::SetIconMeter; the buffer path is not recovered.
+        SC4_UNWIRED("cSC4ViewInputControlQuery::DoMessage: callout icon buffer and meter (SetIconMeter) not fed");
         (void)meter;
         (void)meterValue;
         SetTip(&title, &text);
@@ -1912,9 +1914,10 @@ bool cSC4ViewInputControlQuery::SetOrGetResidentialBuildingCommute(cIGZWin* win,
 // @ 0x1002daf96
 // PARTIAL: the original is a switch over the cell-based control ids (0x1011..0x1015 airport/seaport traffic, 0x1026 /
 // 0x1027 landfill, 0x1028 the landfill developer's monthly cost, 0x104b..0x104e the neighbour-connection rows and
-// 0x1066..0x107e the neighbour deals / airport / seaport rows). Only the four neighbour-connection rows this port
-// implements are dispatched; every other arm belongs to a row handler that needs an unrecovered developer/simulator
-// (see notes/ledger_pending/cSC4ViewInputControlQuery.txt). The dispatcher always answers false, like the original.
+// 0x1066..0x107e the neighbour deals / airport / seaport rows). The airport, seaport, landfill and neighbour-connection rows
+// below are dispatched; 0x1012, 0x104e and 0x1066..0x107a are not (their row handlers need an unrecovered
+// developer/simulator, see notes/ledger_pending/cSC4ViewInputControlQuery.txt). The dispatcher always answers false, like
+// the original.
 bool cSC4ViewInputControlQuery::SetOrGetControlValue(cIGZWin* win, std::uint32_t id, bool set, tCellInfo* info) {
     if (!info) return false;
     const std::uint32_t rowId = static_cast<std::uint32_t>(info->idOffset);
@@ -1947,6 +1950,8 @@ bool cSC4ViewInputControlQuery::SetOrGetControlValue(cIGZWin* win, std::uint32_t
         SetOrGetNeighborConnectionCongestion(win, rowId + 0x104d, set, info->x, info->z);
         return false;
     default:
+        if (id == 0x1012 || id == 0x104e || (id >= 0x1066 && id <= 0x107a))
+            SC4_UNWIRED("cSC4ViewInputControlQuery::SetOrGetControlValue: cell query row (neighbor deals / airport / seaport) not ported");
         return false;
     }
 }
@@ -2021,7 +2026,7 @@ bool cSC4ViewInputControlQuery::SetOrGetOccupantIsWatered(cIGZWin* win, std::uin
 
 // @ 0x1002daed6
 // PARTIAL: the original reads/writes the toggle state of a button control through nsGZWinUtils::GetButtonToggleState
-// (0x1006a21eb) / SetButtonToggleState (0x1006a215d), which are not recovered; only the lot lookup is ported.
+// (0x1006a21eb) / SetButtonToggleState (0x1006a215d); both exist now (gz/WinUtils) but only the lot lookup is ported here.
 bool cSC4ViewInputControlQuery::SetOrGetOccupantIsHistorical(cIGZWin*, std::uint32_t, bool, cISC4Occupant* occupant) {
     IQueryHost* host = QueryHost();
     if (!host || !host->LotManager()) return false;
@@ -2029,6 +2034,7 @@ bool cSC4ViewInputControlQuery::SetOrGetOccupantIsHistorical(cIGZWin*, std::uint
     if (!lot) return false;
     lot->AddRef();
     lot->Release();
+    SC4_UNWIRED("cSC4ViewInputControlQuery::SetOrGetOccupantIsHistorical: the historical toggle is neither shown nor applied to the lot");
     return true;
 }
 
@@ -2515,13 +2521,17 @@ bool cSC4ViewInputControlQuery::SetOrGetNeighborConnectionCongestion(cIGZWin* wi
 // They are declared so the message plumbing compiles and leave their strings empty.
 // PARTIAL stub (QUERY-6)
 void cSC4ViewInputControlQuery::GetBuildingOccupantTrafficInfo(cRZString&, cRZString&, std::uint32_t& icon) {
+    SC4_UNWIRED("cSC4ViewInputControlQuery::GetBuildingOccupantTrafficInfo: building traffic tip text not ported");
     icon = 0;
 }
 // PARTIAL stub (QUERY-6)
-void cSC4ViewInputControlQuery::GetNetworkOccupantTrafficInfo(cRZString&, cRZString&) {}
+void cSC4ViewInputControlQuery::GetNetworkOccupantTrafficInfo(cRZString&, cRZString&) {
+    SC4_UNWIRED("cSC4ViewInputControlQuery::GetNetworkOccupantTrafficInfo: network piece traffic tip text not ported");
+}
 // PARTIAL stub (QUERY-6)
 void cSC4ViewInputControlQuery::GetBuildingOccupantTipInfo(cRZString&, cRZString&, std::uint32_t& icon,
                                                            std::uint32_t& meter, float&) {
+    SC4_UNWIRED("cSC4ViewInputControlQuery::GetBuildingOccupantTipInfo: building hover tip text not ported");
     icon = 0;
     meter = 0;
 }
@@ -2659,7 +2669,6 @@ void cSC4ViewInputControlQuery::GetTerrainSummaryInfo(cRZString& title, cRZStrin
         text.AppendString(it->second);
     }
 }
-// PARTIAL stub (QUERY-6)
 // @ 0x1002ccd38 (i386 0x00219cde): the click of the building query. The picked occupant (or the occupant of the lot under
 // the cursor) is replaced by its lot's building; its query sound plays and its dialog opens: a network piece at the city
 // edge opens the neighbor connection dialog, an occupant with a query UI (property 0x2a499f85) its script dialog, and a
@@ -2719,6 +2728,7 @@ void cSC4ViewInputControlQuery::DescribePick(int x, int y, cRZString& line1, cRZ
         cISCPropertyHolder* holder = occupant->AsPropertyHolder();
         if (holder && cSCPropertyHelp::GetPropertyValue(holder, kPropQueryUi, queryUi)) {
             DoQueryDialog(occupant);
+            SC4_UNWIRED("cSC4ViewInputControlQuery::DescribePick: coverage rings of the queried building not drawn while its dialog is open");
         } else {
             float position[3] = {0.0f, 0.0f, 0.0f};
             occupant->GetPosition(position);
@@ -2984,9 +2994,13 @@ bool cSC4QueryDialogWinProc::DoWinMsg(cIGZWin* window, std::uint32_t type, std::
     return false;
 }
 // PARTIAL stub (QUERY-6)
-void cSC4ViewInputControlQuery::GetOccupantPaths() {}
+void cSC4ViewInputControlQuery::GetOccupantPaths() {
+    SC4_UNWIRED("cSC4ViewInputControlQuery::GetOccupantPaths: routes through the clicked network piece not ported");
+}
 // PARTIAL stub (QUERY-6)
-void cSC4ViewInputControlQuery::ShowAllRoutesThatIntersectCityRect(const SC4CellRect&) {}
+void cSC4ViewInputControlQuery::ShowAllRoutesThatIntersectCityRect(const SC4CellRect&) {
+    SC4_UNWIRED("cSC4ViewInputControlQuery::ShowAllRoutesThatIntersectCityRect: route display of the route query not ported");
+}
 // PARTIAL stub (QUERY-6)
 void cSC4ViewInputControlQuery::WriteDetailedDebugInfo(int, int) {}
 

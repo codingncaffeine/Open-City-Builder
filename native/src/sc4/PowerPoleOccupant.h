@@ -10,8 +10,7 @@
 // curve set B}, the direction mask, four ints (the zoom and rotation of the loaded model and the cell), the four connection
 // points, the three vertex vectors, a float, a flag, the two draw-attribute flag bytes, the draw shade and a flag.
 //
-// PARTIAL: the "powerpolezap" visual effect of a distressed pole (SetDistressed) and Pick are not recovered, and a version-4
-// record (legacy transform) is refused.
+// PARTIAL: a version-3 or version-4 record (legacy transform) is refused.
 #pragma once
 #include <array>
 #include <list>

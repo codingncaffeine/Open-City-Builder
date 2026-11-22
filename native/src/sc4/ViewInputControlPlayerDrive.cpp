@@ -1,4 +1,5 @@
 #include "sc4/ViewInputControlPlayerDrive.h"
+#include "platform/Unwired.h"
 
 #include <algorithm>
 #include <cmath>
@@ -83,6 +84,7 @@ bool cSC4ViewInputControlPlayerDrive::InputBlocked() { return g_host && g_host->
 // OnMouseDownL / OnMouseMove) are not recovered; the debug strings had no reader.
 bool cSC4ViewInputControlPlayerDrive::Init() {
     if (initialized_) return true;
+    SC4_UNWIRED("cSC4ViewInputControlPlayerDrive::Init: the two pick filters and SC4TrainJunctionView not ported");
     cSC4ViewInputControl::Init();
     if (!g_host) return true;
     auto* target = static_cast<cIGZMessageTarget2*>(this);
@@ -299,6 +301,7 @@ void cSC4ViewInputControlPlayerDrive::EnterDrivingMode(cSC4Automaton* automaton,
 void cSC4ViewInputControlPlayerDrive::ShowUI(std::uint32_t id) {
     std::uint32_t missionPanel = 0;
     if (!dashboard_ && g_host) dashboard_ = g_host->ShowDashboard(id, missionPanel);
+    if (!dashboard_) SC4_UNWIRED("cSC4ViewInputControlPlayerDrive::ShowUI: the dashboard window (exemplar 0x2be8e61b and its dials) was not created");
     if (missionPanel != 0 && g_host) g_host->ShowMissionStatusPanel(missionPanel);
 }
 
@@ -453,6 +456,7 @@ bool cSC4ViewInputControlPlayerDrive::OnKeyUp(std::uint32_t key, std::uint32_t m
 // and the junction view, with sound 0x8be8d9ac) needs SC4TrainJunctionView.
 bool cSC4ViewInputControlPlayerDrive::OnMouseDownL(int x, int y, std::uint32_t modifiers) {
     (void)modifiers;
+    SC4_UNWIRED("cSC4ViewInputControlPlayerDrive::OnMouseDownL: rail junction toggle (SC4TrainJunctionView, sound 0x8be8d9ac) not ported");
     if (!IsDriveAutoValid()) {
         if (!automaton_ && g_host) {
             if (cSC4Automaton* picked = g_host->PickAutomaton(x, y)) {
@@ -496,6 +500,7 @@ bool cSC4ViewInputControlPlayerDrive::OnMouseUpR(int x, int y, std::uint32_t mod
 // state (+0x214 / +0x218, the tank's turret aim). PARTIAL: the junction view's hovered cell needs SC4TrainJunctionView.
 bool cSC4ViewInputControlPlayerDrive::OnMouseMove(int x, int y, std::uint32_t modifiers) {
     (void)modifiers;
+    SC4_UNWIRED("cSC4ViewInputControlPlayerDrive::OnMouseMove: hovered rail junction cell (SC4TrainJunctionView) not ported");
     if (!IsDriveAutoValid()) {
         cSC4Automaton* picked = g_host ? g_host->PickAutomaton(x, y) : nullptr;
         if (!picked) {
@@ -533,6 +538,7 @@ bool cSC4ViewInputControlPlayerDrive::DoWinProcMessage(std::uint32_t buttonId) {
 void cSC4ViewInputControlPlayerDrive::Update() {
     if (IsDriveAutoValid()) {
         if (tAutomataStatePlayerDrive* state = DriveState(automaton_)) {
+            SC4_UNWIRED("cSC4ViewInputControlPlayerDrive::Update: dashboard gauges and the drive-state cursor (+0x114) not ported");
             if (dashboard_ && g_host) g_host->UpdateMissionStatusPanel();
             float velocity = 0.0f;
             if (speedReference_ > 0.0f) velocity = static_cast<float>(std::fabs(automaton_->GetCurrentSpeed()) / speedReference_);

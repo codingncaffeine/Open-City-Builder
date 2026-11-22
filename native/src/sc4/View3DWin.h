@@ -96,6 +96,7 @@
 // Compile without FMA contraction: the results follow the original single-precision operation order.
 #pragma once
 #include "sc4/CommonIIDs.h"
+#include "platform/Unwired.h"
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -699,14 +700,28 @@ public:
     virtual void PreCityInit() {}                                       // DoPreCityInit (the camera, the renderer: the native view builds them)
     virtual void PostCityInit() {}                                      // DoPostCityInit
     // DoLoad: reads the view record (0xa9c8647c, 0xe9c8647e, 1); true when it was there with a version below 5.
-    virtual bool LoadViewState(cIGZPersistDBSegment* segment, cIGZVariant* version) { (void)segment; (void)version; return false; }
-    virtual void SaveViewState(cIGZPersistDBSegment* segment) { (void)segment; }   // DoSave
-    virtual void BudgetFailure() {}                                     // DoBudgetFailure: the scripted dialog 0xa5cf71d / 0x2a5cfb2c
-    virtual void ClockChanged(std::uint32_t hour, std::uint32_t minute) { (void)hour; (void)minute; }   // Update24HourClock
-    virtual void AmbientLightChanged() {}                               // UpdateAmbientLightLevel
+    virtual bool LoadViewState(cIGZPersistDBSegment* segment, cIGZVariant* version) { (void)segment; (void)version; 
+        SC4_UNWIRED("IView3DWinHost::LoadViewState: the view record (0xa9c8647c) is not read (DoLoad 0x100787092)");
+        return false;
+    }
+    virtual void SaveViewState(cIGZPersistDBSegment* segment) {   // DoSave
+        (void)segment;
+        SC4_UNWIRED("IView3DWinHost::SaveViewState: the view record is not written (DoSave 0x1007871e4)");
+    }
+    virtual void BudgetFailure() { SC4_UNWIRED("IView3DWinHost::BudgetFailure: the budget failure dialog is not shown (DoBudgetFailure 0x100788d0e)"); }                                     // DoBudgetFailure: the scripted dialog 0xa5cf71d / 0x2a5cfb2c
+    virtual void ClockChanged(std::uint32_t hour, std::uint32_t minute) {
+        (void)hour;
+        (void)minute;
+        SC4_UNWIRED("IView3DWinHost::ClockChanged: the view's 24-hour clock update is not wired (Update24HourClock 0x100788912)");
+    }   // Update24HourClock
+    virtual void AmbientLightChanged() { SC4_UNWIRED("IView3DWinHost::AmbientLightChanged: ambient light level update not wired (UpdateAmbientLightLevel 0x100788bfc)"); }                               // UpdateAmbientLightLevel
     virtual void MayorRatingChanged() {}                                // UpdateMayorRatingBar
-    virtual void MissionProgress(cIGZUnknown* mission, std::uint32_t state) { (void)mission; (void)state; }   // UpdateMissionProgress
-    virtual void AddBackgroundImage() {}                                // AddBackgroundImageToRenderer
+    virtual void MissionProgress(cIGZUnknown* mission, std::uint32_t state) {
+        (void)mission;
+        (void)state;
+        SC4_UNWIRED("IView3DWinHost::MissionProgress: the mission progress panel update is not wired (UpdateMissionProgress 0x100787b66)");
+    }   // UpdateMissionProgress
+    virtual void AddBackgroundImage() { SC4_UNWIRED("IView3DWinHost::AddBackgroundImage: the background image is not added to the renderer (0x100787334)"); }                                // AddBackgroundImageToRenderer
     // --- HandleButtonActivated's services
     virtual void PlayUISound(std::uint32_t sound) { (void)sound; }      // SL::spSS vslot 0x50(1, sound, 0, 0, 0) (AddRef / Release around it)
     virtual bool SignsAndLabelsVisible() { return true; }               // SL::spPropDeveloper vslot 0x50 AreSignsAndLabelsVisible
@@ -714,11 +729,15 @@ public:
     virtual void TutorialCatalogOpened(cISC4WinCatalogView* catalog) { (void)catalog; }
     // SL::spVehicleManager / spAircraftManager / spWatercraftManager (0 / 1 / 2): the earned-vehicle catalogs' source
     virtual cIGZUnknown* VehicleCatalogManager(int which) { (void)which; return nullptr; }
-    // AddBuildingsToItemList (0x100791d86) / AddAutomataToItemList (0x100790e52): PARTIAL until those two are recovered.
+    // AddBuildingsToItemList (0x100791d86, the native host builds it) / AddAutomataToItemList (0x100790e52, PARTIAL: not built).
     virtual void AddBuildingsToItemList(std::uint32_t menuId, const std::set<std::uint32_t>& include, const std::set<std::uint32_t>& exclude,
                                         std::multimap<int, cISC4CatalogItem*>& items) { (void)menuId; (void)include; (void)exclude; (void)items; }
-    virtual void AddAutomataToItemList(cIGZUnknown* manager, std::multimap<int, cISC4CatalogItem*>& items) { (void)manager; (void)items; }
-    // cSC4View3DWin::DoEstablishCityDialog @ 0x10078ff30 (PARTIAL: builds the modal city dialog).
+    virtual void AddAutomataToItemList(cIGZUnknown* manager, std::multimap<int, cISC4CatalogItem*>& items) {
+        (void)manager;
+        (void)items;
+        SC4_UNWIRED("IView3DWinHost::AddAutomataToItemList: earned-vehicle catalog items not built (0x100790e52)");
+    }
+    // cSC4View3DWin::DoEstablishCityDialog @ 0x10078ff30: the modal city dialog (the native host builds it).
     virtual bool ShowEstablishCityDialog() = 0;
     // SL::spCity vslot 0x240 (cSC4City::GetDisasterLayer) -> the disaster layer's vslot 0x50 (IsADisasterOngoing).
     virtual bool DisasterAlertActive() = 0;
@@ -811,15 +830,15 @@ public:
     std::uint32_t Release() override { return cGZWin::Release(); } // @ 0x10078150a
 
     bool DoMessage(cGZMessage& message) override;                  // @ 0x100784ca4
-    bool DoMessage(cIGZWin* window, cGZMessage& message) override; // @ 0x10078af10 (PARTIAL)
+    bool DoMessage(cIGZWin* window, cGZMessage& message) override; // @ 0x10078af10
     bool DoMessage(cIGZMessage2* message) override;                // @ 0x100785a5e (PARTIAL)
     bool Init() override;                                          // @ 0x10077fbe2
     bool Shutdown() override;                                      // @ 0x100780992
     bool GZPaint() override;                                       // @ 0x100781590
 
-    // DoPreCityInit / DoPostCityInit (0x10078616c / 0x1007867d8) are not recovered; the host builds the camera, camera control and
-    // renderer the first one creates and attaches them here, then enables painting (the last step of the second).
-    void AttachRenderStack(IRenderer3D* renderer, cIGZUnknown* camera, cSC4CameraControl* control);   // PARTIAL
+    // DoPreCityInit / DoPostCityInit (0x10078616c / 0x1007867d8) leave the camera, camera control and renderer to the host, which
+    // builds them and attaches them here, then enables painting (the last step of the second).
+    void AttachRenderStack(IRenderer3D* renderer, cIGZUnknown* camera, cSC4CameraControl* control);   // host-built render stack
     void EnablePainting(bool enable) { paintEnabled_ = enable; }
 
     // --- cISC4View3DWin (group +0)
@@ -837,8 +856,8 @@ public:
     bool RotateLeft() override;                                    // @ 0x100781f6e
     bool RotateRight() override;                                   // @ 0x100781f9e
     bool SetZoomAndRotation(int zoom, int rotation) override;      // @ 0x10078205a
-    // PARTIAL (0x10078e2e0): the camera commands of ProcessCommand - keyboard scrolling (start / stop), the one-step
-    // scrolls, zoom in / out / to a level and rotation. The tool, panel and game-speed commands are not ported.
+    // ProcessCommand (0x10078e2e0): the camera commands (keyboard scrolling, the one-step scrolls, zoom, rotation), the
+    // tool commands and the game speed; see ProcessViewCommand.
     bool ProcessCommand(std::uint32_t command, cIGZCommandParameterSet& in, cIGZCommandParameterSet& out) override;
     // ProcessCommand without parameter sets (the buttons' commands): the bool parameters read false, the item parameter 0.
     bool ProcessViewCommand(std::uint32_t command, bool param0 = false, bool param1 = false, std::uint32_t item = 0);

@@ -1,4 +1,5 @@
 #include "sc4/PollutionSimulator.h"
+#include "platform/Unwired.h"
 #include "sc4/SimStreamOps.h"
 
 #include <algorithm>
@@ -71,7 +72,8 @@ std::uint32_t cSC4PollutionSimulator::Release() {
     return --refCount_;
 }
 
-// 0x1000961d0. PARTIAL: the original writes version 4 then, in order, the four value grids (+0x78),
+// 0x1000961d0. A city-file stream gets the original's record (WriteCityRecord, below). Any other stream (the unit
+// tests) gets the port's reduced record: the original writes version 4 then, in order, the four value grids (+0x78),
 // the four source grids (+0x98), two s32 (+0xb8/+0xbc), the four occupant ilists (+0xc0/+0xd8/+0xf0/+0x108),
 // then the scalars the port keeps, then two u64 (+0x2d0/+0x2d8), two u64 (+0x250/+0x258), one double
 // (+0x268), one s32 (+0x2e4), a RandomIterator (+0x2e8) and the prop-request curve (+0x1c0). The occupant
@@ -128,8 +130,7 @@ bool cSC4PollutionSimulator::Write(cIGZOStream& stream) const {
     return !stream.GetError();
 }
 
-// 0x100096588. PARTIAL: mirrors Write; the version gate and the occupant-list / RandomIterator / curve
-// reads belong to the unrecovered state and are left out (see Write's field list).
+// Read mirrors Write: a city-file stream reads the original's record (ReadCityRecord), any other stream the reduced one.
 // 0x100096588: the record of a city file. The eight grids are kept; the four building lists are object references (consumed: the port
 // finds the buildings through the occupant manager); the counters, totals and flags are kept under their original offsets. A stream that is
 // not a city-file segment stream (the unit tests) carries the port's own reduced record, read below.
@@ -1132,6 +1133,7 @@ bool cSC4PollutionSimulator::Init() {
         effectWalk_.SetModular(true);
         effectWalk_.SetRect(0, 0, blocksX - 1, blocksZ - 1);
         host_->CreateHistory(kHistoryTotal, 2);
+        SC4_UNWIRED("cSC4PollutionSimulator::Init: sanitation department budget line items 10 / 20 / 30 not set up");
     }
     return true;
 }
@@ -1438,7 +1440,8 @@ void cSC4PollutionSimulator::DoMonthlySimulation() {
     ComputeWasteToEnergyListCurrentCapacity();
     ResetOccupantListCapacityUsedProperty(wasteToEnergy_, kPollutionOccWasteToEnergyUsed, 0x28fcdbb0);
     UpdatePollutionVisualEffect();
-    // PARTIAL: spNeighborsSim vslot 0x7c (the neighbour deals' monthly settlement) is the neighbours simulator's own pass.
+    // The original ends the month with spNeighborsSim vslot 0x7c (MarkDealsDirty, so the garbage deals are recomputed).
+    SC4_UNWIRED("cSC4PollutionSimulator::DoMonthlySimulation: neighbors simulator MarkDealsDirty (i386 vslot 0x7c) not called");
 }
 
 // @ 0x0006ad02. A building's pollution enters (or leaves) the source grids: its garbage on every cell it covers, then each type's
@@ -1477,6 +1480,7 @@ void cSC4PollutionSimulator::DoOccupantChanged(void* occupant, bool added) {
     }
     IPollutionOccupant* plant = footprint.occupant;
     if (!plant) return;
+    SC4_UNWIRED("cSC4PollutionSimulator::DoOccupantChanged: sanitation building maintenance line item (spBudgetSim vslots 0xcc / 0xdc / 0xe0) not booked");
     const auto startEmpty = [&](std::uint32_t usedProperty, std::uint32_t savedProperty) {
         cSCPropertyHelp::SetPropertyValue(holder, usedProperty, std::uint32_t{0});
         cSCPropertyHelp::SetPropertyValue(holder, savedProperty, std::uint32_t{0});

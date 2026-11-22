@@ -1,4 +1,5 @@
 #include "sc4/PylonOccupant.h"
+#include "platform/Unwired.h"
 
 #include <cmath>
 #include <cstddef>
@@ -453,7 +454,10 @@ void cSC4PylonOccupant::BuildCallNumberTexture(float topY) {
     if (!host) return;
 
     IPylonFont* font = host->CallNumberFont();
-    if (!font) return;
+    if (!font) {
+        SC4_UNWIRED("cSC4PylonOccupant::BuildCallNumberTexture: call number font / texture upload not wired (no digits on the dispatch pylon)");
+        return;
+    }
     font->AddRef();
     const int previousSize = font->GetFontSize();
     font->SetFontSize(kPylonCallNumberFontSize);
@@ -516,7 +520,8 @@ bool cSC4PylonOccupant::BuildMySimTexture() {
 
     cIGZBuffer* source = nullptr;
     if (bitmapId_ == 0) {
-        host->LoadBitmapFromFile(bitmapName_, &source);
+        if (!host->LoadBitmapFromFile(bitmapName_, &source))
+            SC4_UNWIRED("cSC4PylonOccupant::BuildMySimTexture: MySim picture from file (image decoder) not wired");
     } else {
         cSLBuffer bitmap(kPylonBitmapType, kPylonBitmapGroup, static_cast<std::uint32_t>(bitmapId_),
                          kPylonBitmapColorType, false);

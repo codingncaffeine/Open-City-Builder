@@ -1,4 +1,5 @@
 #include "sc4/WinRegionView.h"
+#include "platform/Unwired.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -393,7 +394,7 @@ const cSC4WinRegionView::PreparedCity& cSC4WinRegionView::Prepare(const cSC4Regi
     return p;
 }
 
-void cSC4WinRegionView::RenderTile(cIGZBuffer* buffer, int x, int y) {   // @ 0x10075bb66 (Mac i386 0x005002da; labels / icons not drawn)
+void cSC4WinRegionView::RenderTile(cIGZBuffer* buffer, int x, int y) {   // @ 0x10075bb66 (Mac i386 0x005002da; selected-city grid / icons not drawn)
     if (!buffer) return;
     if (backdrop_) {
         const cRZRect* source = backdrop_->GetBufferArea();
@@ -447,6 +448,7 @@ void cSC4WinRegionView::RenderTile(cIGZBuffer* buffer, int x, int y) {   // @ 0x
         buffer->Unlock(cIGZBuffer::kLockWrite);
         DrawCityLabel(buffer, *city, p, left, top);
     }
+    SC4_UNWIRED("cSC4WinRegionView::RenderTile: the selected-city grid and the icons are not drawn");
 }
 
 // RenderTile's label (Mac i386 0x005002da, the block after the city's picture): the city name and, below it, the mayor

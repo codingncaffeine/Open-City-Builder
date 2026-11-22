@@ -228,8 +228,8 @@ public:
     const float* PickBox(int index) const { return pickBoxes_[index]; }   // min xyz, max xyz
 
 protected:
-    // cSC4PropOccupant::DoMessage (0x10015ebb2, owned by the prop class) is not ported; the original tail-calls it
-    // from the sign's DoMessage. Defaults to "not handled", like the prop's own body.
+    // The original tail-calls cSC4PropOccupant::DoMessage (0x10015ebb2) from the sign's DoMessage. The prop's body is
+    // ported (PropOccupant.cpp) but not chained here yet: this hook still answers "not handled".
     virtual bool DoPropMessage(cIGZMessage2*) { return true; }
 
 private:

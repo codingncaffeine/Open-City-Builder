@@ -228,7 +228,7 @@ public:
     // --- original virtual slots the base port does not declare (see the header comment) ---
     void ClearCellPreviews();                                         // [16] 0x1002ed0c6
     int GetCostOfSolution();                                          // [20] 0x1002ed348
-    bool DoNetworkSpecificPlacement(bool first, bool checkNeighbors);  // [55] 0x1002ecde4 (PARTIAL)
+    bool DoNetworkSpecificPlacement(bool first, bool checkNeighbors);  // [55] 0x1002ecde4
     void CheckForReservedTiles(int& step);                            // [83] 0x1002ecaec
     void SetTerrainHilight(int step);                                 // [84] 0x1002ecc80
 

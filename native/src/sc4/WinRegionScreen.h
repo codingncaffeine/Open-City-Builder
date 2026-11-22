@@ -410,7 +410,7 @@ public:
     void PostRegionScreenMessage(std::uint32_t type);              // @ 0x1002388d2
     void InitApplicationServices();                                // @ 0x100238972 (PARTIAL)
     void ReadTunableValues();                                      // @ 0x10023904e
-    void LoadGUI();                                                // @ 0x10023927a (PARTIAL)
+    void LoadGUI();                                                // @ 0x10023927a
     void ShutdownApplicationServices();                            // @ 0x100239dac
     bool ProcessCommand(std::uint32_t command, cIGZCommandParameterSet* input,
                         cIGZCommandParameterSet* output);          // @ 0x10023a1fc

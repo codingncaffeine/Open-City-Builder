@@ -1,4 +1,5 @@
 #include <vector>
+#include "platform/Unwired.h"
 #include "sc4/PoliceSimulator.h"
 
 #include <algorithm>
@@ -73,6 +74,7 @@ bool cSC4PoliceSimulator::Init() {
     host_->RegisterDispatchSource(true);
     if (!helicopterSource_) helicopterSource_ = new cSC4PoliceHelicopterDispatchSource();
     if (helicopterSource_) helicopterSource_->Init();
+    SC4_UNWIRED("cSC4PoliceSimulator::Init: police department budget lines and the crime simulator reference not set up");
     return true;
 }
 
@@ -113,6 +115,9 @@ bool cSC4PoliceSimulator::DoMessage(cIGZMessage2* message) {
     case 0xc53d10aa:
         if (static_cast<std::uint32_t>(standard->GetData1()) == 0xe7e2c2db && static_cast<std::uint32_t>(standard->GetData3()) == kPoliceTuningInstance)
             ReadSimulatorTunableValues(host_->SimulatorExemplar());
+        break;
+    case 0x0a159d95:
+        SC4_UNWIRED("cSC4PoliceSimulator::DoMessage: jail message 0x0a159d95 not routed (no jails natively)");
         break;
     default: break;
     }

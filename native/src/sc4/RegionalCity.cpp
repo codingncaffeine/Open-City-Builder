@@ -1,4 +1,5 @@
 #include "sc4/RegionalCity.h"
+#include "platform/Unwired.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -670,6 +671,7 @@ bool cSC4RegionalCity::DoMessage(cIGZMessage2* message) {
     }
     // CreateSymmetricConnections (i386 0x002cc2d0): PARTIAL, the connections are not made (the changes stay queued); its last step is
     // ported, the 0x6ac284f3 it sends once the city's connections stand (the power, plumbing and neighbours simulators start on it).
+    SC4_UNWIRED("cSC4RegionalCity::DoMessage: CreateSymmetricConnections (0x1003b0ae0) not ported, neighbor connections are not made");
     if (host_) host_->SendMessage(0x6ac284f3);
     return true;
 }

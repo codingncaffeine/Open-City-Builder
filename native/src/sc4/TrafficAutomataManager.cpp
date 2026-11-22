@@ -2,6 +2,7 @@
 // Every function follows the decompilation at the address in its comment; the ones that still depend on an unrecovered
 // neighbour are listed under PARTIAL in notes/ledger_pending/cSC4TrafficAutomataManager.txt.
 #include "sc4/TrafficAutomataManager.h"
+#include "platform/Unwired.h"
 #include "sc4/PathFinder.h"
 
 #include <chrono>
@@ -609,8 +610,7 @@ void cSC4TrafficAutomataManager::AdvanceLayer() {
 }
 
 void cSC4TrafficAutomataManager::PopulateVisibleArea(float deltaMilliseconds) {
-    // 0x100112f76 PARTIAL: the layer rotation, the visible-rect sweep, the clock gate and the per-layer dispatch are
-    // ported; the population entry points it calls are the PARTIAL density/spawn paths below.
+    // 0x100112f76: the layer rotation, the visible-rect sweep, the clock gate and the per-layer dispatch.
     ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
     ITrafficNetworkManagerApi* network = host ? host->TrafficNetworkManager() : nullptr;
     if (!network || layerUpdates_.empty()) return;
@@ -729,9 +729,7 @@ void TrainTraceReason(PopulateLayer layer, int reason) {
 void cSC4TrafficAutomataManager::PopulateNetworkOccupant(ITrafficNetworkMapOccupant* occupant, TrafficTileInfo* tile,
                                                          PopulateLayer layer, int cellX, int cellZ,
                                                          float clockMultiplier, double densityMultiplier) {
-    // 0x100113eae PARTIAL: the edge-density refresh and the maybe-spawn sweep are ported; MaybeSpawnAutomaton (the
-    // actual spawn) is PARTIAL because it needs the network manager's spawn accumulators (vslots 0x98/0xb8) and the
-    // traffic automaton's trip API.
+    // 0x100113eae: the edge-density refresh and the maybe-spawn sweep; MaybeSpawnAutomaton spawns through SpawnOnEdge.
     if (!occupant || !tile) return;
     ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
     ITrafficNetworkManagerApi* network = host ? host->TrafficNetworkManager() : nullptr;
@@ -834,6 +832,8 @@ void cSC4TrafficAutomataManager::PopulateNetworkOccupant(ITrafficNetworkMapOccup
             if (update.layer == 8) continue;
             const auto layer = static_cast<PopulateLayer>(update.layer);
             if (static_cast<std::uint32_t>(GetPathTypeForLayer(layer)) != pathType) continue;
+            if (static_cast<int>(layer) == 2)
+                SC4_UNWIRED("cSC4TrafficAutomataManager::PopulateNetworkOccupant: layer-2 clock factor (tuning +0x178) and the player-drive path (vslot 0x34, tuning +0x170) not ported");
             LayerWeights entry{layer, {}, 0.0f};
             GetEdgeDensity(occupant, tile, layer, GetClockMultiplier(layer), entry.weights);
             for (auto& row : entry.weights)
@@ -1228,6 +1228,7 @@ void cSC4TrafficAutomataManager::CreateAccident(cISC4Occupant* occupant, int typ
 // ---- misc traffic slot -------------------------------------------------------------------------------------------------
 bool cSC4TrafficAutomataManager::GetDispatchDestinationPoint(ITrafficAutomataAutomaton* automaton, cS3DVector3& out) {
     // 0x100115ea6 PARTIAL: needs the automaton's route deque (+0x388/+0x390/+0x370) and cISC4PathInfo slot 0xa8.
+    SC4_UNWIRED("cSC4TrafficAutomataManager::GetDispatchDestinationPoint (0x100115ea6): destination point from the route not ported");
     (void)automaton;
     (void)out;
     return false;
@@ -1338,12 +1339,14 @@ bool cSC4TrafficAutomataManager::AttachAccidentController(cISC4Occupant* occupan
     (void)position;
     // PARTIAL: the traffic-accident controller service (city vslot 0x178, group "kTrafficAccidentControllerGroupName")
     // is unrecovered; no seam carries it yet.
+    SC4_UNWIRED("cSC4TrafficAutomataManager::AttachAccidentController: traffic-accident controller service (city vslot 0x178) not ported");
     return false;
 }
 
 void cSC4TrafficAutomataManager::DetachController(cISC4Occupant* occupant) {
     (void)occupant;
     // PARTIAL: same service as AttachAccidentController.
+    SC4_UNWIRED("cSC4TrafficAutomataManager::DetachController: traffic-accident controller service not ported");
 }
 
 }  // namespace sc4

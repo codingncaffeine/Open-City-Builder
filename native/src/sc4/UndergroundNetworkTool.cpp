@@ -1,6 +1,7 @@
 // cSC4UndergroundNetworkTool — see UndergroundNetworkTool.h for the object layout, the two pure virtuals that
 // make the class abstract (the pipe/subway tools fill them) and the quirks kept with their addresses.
 #include "sc4/UndergroundNetworkTool.h"
+#include "platform/Unwired.h"
 
 #include <algorithm>
 #include <cmath>
@@ -670,7 +671,7 @@ void cSC4UndergroundNetworkTool::SetQuadTrianglesToDraw(cSC4NetworkOccupant* occ
 }
 
 // 0x1001a85e2 — PARTIAL. See the header: this function is 2788 bytes and its body is mostly
-//   * cSC4NetworkTool::SmoothenNetwork @ 0x1001b14a0 (the base class's vertical solver pass, not recovered),
+//   * cSC4NetworkTool::SmoothenNetwork @ 0x1001b14a0 (the base class's vertical solver pass, ported in the base since),
 //   * SL::NetworkManager() (0x100041188) slot +0x30 and SL::spOccupantManager slot +0x180 (batch move/remove of
 //     cISC4NetworkOccupant lists; neither object has a seam yet),
 //   * an inlined libc++ __hash_table rehash for the solved-cell dedupe (the port uses the base's
@@ -687,6 +688,7 @@ void cSC4UndergroundNetworkTool::UpdateUndergroundOccupantTerrainHeights(std::ve
     if (worldCache_ != nullptr) worldCache_->Clear();   // cSC4NetworkWorldCache::Clear 0x10079d868
     unknown128_.clear();
     solvedCellList_.clear();
+    SC4_UNWIRED("cSC4UndergroundNetworkTool::UpdateUndergroundOccupantTerrainHeights (0x1001a85e2): terrain re-read, smoothing and update / destroy of underground pieces not ported");
 }
 
 }  // namespace sc4

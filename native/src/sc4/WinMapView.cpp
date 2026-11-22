@@ -1,4 +1,5 @@
 #include "sc4/WinMapView.h"
+#include "platform/Unwired.h"
 
 #include <algorithm>
 #include <cmath>
@@ -447,7 +448,7 @@ bool cSC4WinMapView::MergeNewHighlights() {
 // ---------------------------------------------------------------------------------------------------------------
 // Update (0x10034a848; i386 0x0027db2e): draw the current data view's simulator grid into a new map buffer and hand
 // it to the panel's minimap (child 0x4203, cISC4WinMiniMap) as its overlay; data view 0 clears the overlay.
-//   PARTIAL: views 0x1d (weather) and 0x4c (traffic routes) draw nothing; crime incident icons are not drawn; the custom view (vslot 0x14) is not created.
+//   PARTIAL: views 0x1d (weather) and 0x4c (traffic routes) draw nothing; crime incident icons are not drawn; the custom view is not asked to draw (vslot 0x14, unsure).
 // ---------------------------------------------------------------------------------------------------------------
 namespace {
 void DrawShadedRect(cIGZBuffer* buffer, const cRZRect& rect, std::uint32_t color);
@@ -472,6 +473,7 @@ void cSC4WinMapView::Update() {
             type.bitsPerPixel = 0x20;
             buffer->Init(static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height), type);
             buffer->Fill(0, nullptr);
+            if (customView_) SC4_UNWIRED("cSC4WinMapView::Update: the custom view is not asked to draw (vslot 0x14)");
             WinMapGrid grid;
             auto u8 = [&](int source, int argument = 0) {
                 if (g_host->SimulatorGrid(source, argument, grid) && grid.u8 && !grid.u8->empty())
@@ -488,7 +490,9 @@ void cSC4WinMapView::Update() {
                     break;
                 case 2: u8(kGridLandValue); break;
                 case 3: u8(kGridPolice); break;
-                case 4: u8(kGridCrime); break;   // PARTIAL: the incident icons
+                case 4: u8(kGridCrime);    // PARTIAL: the incident icons
+                    SC4_UNWIRED("cSC4WinMapView::Update: crime incident icons not drawn on the crime map");
+                    break;
                 case 5: u8(kGridFireProtection); break;
                 case 6: u8(kGridFlammability); break;
                 case 7: u8(kGridPower); break;
@@ -516,6 +520,8 @@ void cSC4WinMapView::Update() {
                     // The growth developer views: developer type by view, then the grid the layer style asks for.
                     static constexpr std::uint32_t kDeveloperTypes[12] = {0x1010, 0x1020, 0x1030, 0x3110, 0x3120, 0x3130,
                                                                           0x3320, 0x3330, 0x4100, 0x4200, 0x4300, 0x4400};
+                    if (dataView_ == 0x1d || dataView_ == 0x4c)
+                        SC4_UNWIRED("cSC4WinMapView::Update: weather (0x1d) / traffic route (0x4c) map views draw nothing");
                     const cISC4GrowthDeveloper* developer =
                         dataView_ >= 0x40 && dataView_ <= 0x4b ? g_host->GrowthDeveloper(kDeveloperTypes[dataView_ - 0x40]) : nullptr;
                     if (!developer) {
@@ -1366,6 +1372,7 @@ bool cSC4WinMapView::SetDataView(std::uint32_t view) {
         customView_ = CreateCustomView(exemplar.customView);
         if (customView_) customView_->InitCustomView();
     }
+    SC4_UNWIRED("cSC4WinMapView::SetDataView: zone manager display (0x4a0b47e6) and building development view (0x4a0b47f0) not applied");
     UpdateHighlights();
     Update();
     if (IWinMapViewColorSink* map = g_host->ViewColorSink(parentWin())) {

@@ -3,6 +3,7 @@
 #pragma STDC FP_CONTRACT OFF
 
 #include "sc4/ParticlesEffect.h"
+#include "platform/Unwired.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1628,8 +1629,8 @@ void cSC4ParticlesEffect::ApplyTractorForce(cSC4EffectsParticle* particle, float
 }
 
 // 0x1005f83da
-// PARTIAL: see the ledger. The two collision branches read the unrecovered effect-maps / terrain services; the water
-// kill switch and the velocity reflection are recovered, the vertical-plane bounce of flag 0x400 is left out.
+// PARTIAL: the water kill switch and both terrain branches (follow the ground, bounce with drag) are recovered; the
+// vertical-plane bounce of flag 0x400 reads the effect maps, which the port does not hand out, and is left out.
 bool cSC4ParticlesEffect::ApplyTerrainForces(cSC4EffectsParticle* particle, const cS3DVector3& position,
                                              float) {
     const cSC4ParticlesDescription* desc = description_;
@@ -1732,11 +1733,14 @@ bool cSC4ParticlesEffect::ApplyTerrainForces(cSC4EffectsParticle* particle, cons
                 }
             }
         }
-    } else if (maps) {
+    } else {
         // PARTIAL: the vertical bounce plane of description flag 0x400 needs the effect map's height field; the
         // recovered part only keeps the particle alive (see the ledger).
-        const float height = maps->Height(position.x, position.z);
-        (void)height;
+        SC4_UNWIRED("cSC4ParticlesEffect::ApplyTerrainForces: flag 0x400 vertical bounce plane on the effect map height field not ported");
+        if (maps) {
+            const float height = maps->Height(position.x, position.z);
+            (void)height;
+        }
     }
     if (maps) maps->Release();
     return alive;
@@ -1746,7 +1750,10 @@ bool cSC4ParticlesEffect::ApplyTerrainForces(cSC4EffectsParticle* particle, cons
 // PARTIAL: the occupant enumeration itself lives in the unrecovered occupant manager (seam). The box the original
 // builds is the particle position +-1 in x / y / z; a building occupant in it kills the particle.
 void cSC4ParticlesEffect::TestBuildingCollision(cSC4EffectsParticle* particle) {
-    if (!ParticlesOccupants()) return;
+    if (!ParticlesOccupants()) {
+        SC4_UNWIRED("cSC4ParticlesEffect::TestBuildingCollision: occupant manager box query not wired (particles pass through buildings)");
+        return;
+    }
     const cS3DVector3 boxMin{particle->position.x - 1.0f, particle->position.y - 1.0f, particle->position.z - 1.0f};
     const cS3DVector3 boxMax{particle->position.x + 1.0f, particle->position.y + 1.0f, particle->position.z + 1.0f};
     if (ParticlesOccupants()->BuildingInBox(boxMin, boxMax)) particle->alive = 0;

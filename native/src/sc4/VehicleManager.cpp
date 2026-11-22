@@ -2,6 +2,7 @@
 // a hand port of the exported decompile; the part that still depends on an unrecovered neighbor (the funds sweep) is listed
 // under PARTIAL in notes/ledger_pending/cPedestrian-vehicle.txt.
 #include "sc4/VehicleManager.h"
+#include "platform/Unwired.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -162,6 +163,7 @@ bool cSC4VehicleManager::DoMessage(cIGZMessage2* message) {
 // 0x1000da428 PARTIAL: the building-occupant sweep through the city's two occupant lists and the script system's
 // name-based group lookup is unrecovered; the port delegates to the host seam.
 void cSC4VehicleManager::HandleFundsChanged() {
+    SC4_UNWIRED("cSC4VehicleManager::HandleFundsChanged (0x1000da428): building-occupant sweep with the script group lookup not ported (native host sweep is empty)");
     if (IVehicleManagerHost* host = VehicleHostOrGlobal()) host->HandleFundsChangedSweep();
 }
 

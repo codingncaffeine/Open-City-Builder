@@ -5,6 +5,7 @@
 // The driving state record (state 0x10) is the shared tAutomataStatePlayerDrive; the port keeps its traffic run-time
 // pointers on the automaton, because cSC4Watercraft adds its own fields to the same record (see the header note).
 #include "sc4/TrafficAutomaton.h"
+#include "platform/Unwired.h"
 
 #include <algorithm>
 #include <cfloat>
@@ -1584,6 +1585,7 @@ const char* cSC4TrafficAutomaton::GetDebugExtraText() const {
 ITrafficAutomatonOccupant* cSC4TrafficAutomaton::FindBestNeighborConnection() {
     // PARTIAL (see the traffic automaton to-do row): the connection list and the path finder's FindPath are not
     // recovered, so this stays a null answer behind the host seam.
+    SC4_UNWIRED("cSC4TrafficAutomaton::FindBestNeighborConnection (0x10011af24): neighbor connection search with FindPath not ported");
     return nullptr;
 }
 

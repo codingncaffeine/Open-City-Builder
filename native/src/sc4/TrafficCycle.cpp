@@ -2,10 +2,10 @@
 // cycle (trips -> path searches -> routes -> maps), the monthly pass and the lot activation bookkeeping. Written to the OpenSC4
 // behaviour specs traffic-simulator.md, traffic-network.md and pathfinder.md (Windows 1.1.641 addresses in the comments).
 //
-// Not modelled yet (each PARTIAL): transit switches (stations, toll booths), tunnels, ferries and water routes, neighbour
-// connections as traffic sources (their trips), the subnetwork flood fill (states 12 / 13), accidents, and the save record (Read
-// keeps the city file's record and Write replays it, so a save carries the traffic data it was loaded with).
+// Not modelled yet (PARTIAL): ferries and water routes (cycle state 19). The save record of a city file is replayed as it was read
+// (TrafficSimulator.cpp), a new city writes the original's fresh record.
 #include "sc4/TrafficSimulator.h"
+#include "platform/Unwired.h"
 
 #include <algorithm>
 #include <cfloat>
@@ -1128,7 +1128,10 @@ bool cSC4TrafficSimulator::WorkOnSimCycle() {
         case 8: FinalCalculations(); break;
         case 12: UpdateSubnetworks(); break;
         case 13: UpdateSubnetworkInfo(); break;
-        default: break;   // 19 (ferries): PARTIAL, nothing to do natively yet
+        case 19:   // ferries: PARTIAL, nothing to do natively yet
+            SC4_UNWIRED("cSC4TrafficSimulator::WorkOnSimCycle: cycle state 19 (ferry routes) not ported");
+            break;
+        default: break;
     }
     if (!finished) return false;
     std::uint32_t next = kNext[cycleState_ % 20];

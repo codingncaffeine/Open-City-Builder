@@ -19,10 +19,9 @@
 // Everything the class needs from an unrecovered neighbour goes through the seams below. Slot numbers are the
 // original vtable offsets; where the original reached a global (SL::spPowerSim, ...) the comment names it.
 //
-// PARTIAL (see notes/ledger_pending/cSC4ViewInputControlQuery.txt): the tip/describe text builders
-// (Get*SummaryInfo, GetBuildingOccupantTipInfo, GetBuildingOccupantTrafficInfo, GetNetworkOccupantTrafficInfo,
-// DescribePick/DescribeCell/DescribeBuilding/DescribeDemand/DescribePopulation, WriteDetailedDebugInfo and the
-// headline/trip-volume/path helpers) and the row handlers for the simulators that are not recovered yet (the RCI building rows and the air and water pollution volumes) are declared but not
+// PARTIAL (see notes/ledger_pending/cSC4ViewInputControlQuery.txt): the tip text builders GetBuildingOccupantTipInfo,
+// GetBuildingOccupantTrafficInfo and GetNetworkOccupantTrafficInfo, WriteDetailedDebugInfo and the path helpers
+// (GetOccupantPaths, ShowAllRoutesThatIntersectCityRect) are empty stubs, and the row handlers for the simulators that are not recovered yet (the RCI building rows and the air and water pollution volumes) are declared but not
 // implemented. The fire, police/jail, park/occupant-cost and neighbour-connection rows — everything whose simulator
 // (cSC4FireProtectionSimulator, cSC4PoliceSimulator, cSC4BudgetSimulator, cSC4NeighborsSimulator) is recovered — are
 // ported, as are the school, hospital, library, landfill, incinerator, recycling, waste-to-energy, power plant, water building, landmark and transit station rows, the airport and seaport rows (usage, capacity, traffic meter, maintenance), the dialog enumeration callbacks (EnumFunc*) and the recovered control-id -> row handler table.
@@ -672,7 +671,7 @@ public:
     static bool EnumFuncNeighborDialogSetValue(cIGZWin* win, std::uint32_t id, void* cellInfo, void* occupant);   // @ 0x1002db70e
     static bool EnumFuncNeighborDialogGetValue(cIGZWin* win, std::uint32_t id, void* cellInfo, void* occupant);   // @ 0x1002db748
 
-    // --- PARTIAL: declared, not implemented (see the header comment and the ledger) ---
+    // --- the tip builders (the first three are empty stubs, PARTIAL: see the header comment and the ledger) ---
     void GetBuildingOccupantTrafficInfo(cRZString& text, cRZString& title, std::uint32_t& icon);
     void GetNetworkOccupantTrafficInfo(cRZString& text, cRZString& title);
     void GetBuildingOccupantTipInfo(cRZString& text, cRZString& title, std::uint32_t& icon, std::uint32_t& meter,

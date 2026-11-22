@@ -12,7 +12,8 @@
 // Occupant flag bit 2 means "shown": it is only kept while the occupant is in the 3D view and the prop developer allows it.
 // Quirks kept: Read re-reads the position after the width (same values); records older than 3 carry an unused u32;
 // version 1 stored the height as an integer; the turn table is indexed with the unchecked orientation.
-// Not ported here: cSC4PropOccupant::DoMessage (0x10015ebb2, owned by the prop class) is reached through DoPropMessage.
+// The original tail-calls cSC4PropOccupant::DoMessage (0x10015ebb2) through DoPropMessage; the prop's body is ported
+// (PropOccupant.cpp) but DoPropMessage does not chain to it yet.
 #pragma once
 #include <cstdint>
 
@@ -136,7 +137,7 @@ public:
     ITextTexture* Texture() const { return texture_; }
 
 protected:
-    // cSC4PropOccupant::DoMessage (0x10015ebb2) is not part of the recovered prop class; override to chain to it.
+    // The original chains to cSC4PropOccupant::DoMessage (0x10015ebb2), which is ported but not called from here yet.
     virtual bool DoPropMessage(cIGZMessage2*) { return true; }
 
 private:

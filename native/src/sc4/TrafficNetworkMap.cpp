@@ -1,6 +1,7 @@
 // cSC4TrafficNetworkMap — hand-written from the x86_64 decompilation (see the layout notes in
 // TrafficNetworkMap.h). Addresses in the comments are the original functions.
 #include "sc4/TrafficNetworkMap.h"
+#include "platform/Unwired.h"
 #include "gz/StreamOps.h"
 #include "sc4/DBSegment.h"
 #include <cmath>
@@ -1250,6 +1251,7 @@ void cSC4TrafficNetworkMap::TickIntersections(float milliseconds) {
 // durations (it builds a std::set of intersections to visit and rewrites their approach timings).
 void cSC4TrafficNetworkMap::UpdateIntersectionTiming(ITrafficNetworkMapOccupant*, TrafficIntersectionArray&) {
     // Not recovered yet; see TRAFFICNETWORKMAP-2.
+    SC4_UNWIRED("cSC4TrafficNetworkMap::UpdateIntersectionTiming (0x10029baaa): neighboring intersections' green-duration rebalance not ported");
 }
 
 // 0x10029cb16
@@ -1679,6 +1681,9 @@ bool cSC4TrafficNetworkMap::DoMessage2(std::uint32_t messageId, std::uint32_t da
             return true;
         case 0xa6b79602:   // the camera moved (zoom, rotation): the visible cells are worked out again
             HandleViewChanged();
+            return true;
+        case kTrafficMessageAnimationTick:
+            SC4_UNWIRED("cSC4TrafficNetworkMap::DoMessage: animation tick 0x86ad10ee (vslot 0xe4) not ported");
             return true;
         default:
             return true;

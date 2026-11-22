@@ -13,6 +13,7 @@
 // The angle for a purely vertical offset is DAT_100a1c500[dy < 0], taken as {pi / 2, 3 pi / 2} (screen y grows down).
 #pragma once
 #include "sc4/ViewInputControl.h"
+#include "platform/Unwired.h"
 
 namespace sc4 {
 
@@ -37,7 +38,11 @@ public:
     bool OnMouseUpR(int, int, std::uint32_t) override { EndInput(); return true; }   // @ 0x1002c15b6
     bool OnMouseMove(int x, int y, std::uint32_t modifiers) override;       // @ 0x1002c15c8
     bool IsSelfScrollingView() override { return true; }                    // @ 0x1002c1b6c
-    void SetMouseScroll(int x, int y) { pressX_ = x; pressY_ = y; }         // @ 0x1002c1930 (overlay not ported)
+    void SetMouseScroll(int x, int y) {                                     // @ 0x1002c1930 (overlay not ported)
+        pressX_ = x;
+        pressY_ = y;
+        SC4_UNWIRED("cSC4ViewInputControlCityScroll::SetMouseScroll: the press-point overlay window is not created");
+    }
 
 private:
     void ReadTunableValues();                                               // @ 0x1002c143a

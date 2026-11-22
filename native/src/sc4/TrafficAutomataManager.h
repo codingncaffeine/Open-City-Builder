@@ -292,7 +292,7 @@ public:
                                 std::uint8_t entry, std::uint8_t exit, float elapsedMilliseconds);   // 0x2b0 @ i386 0x000d0b70
     virtual void RecallAutomatonFromNetwork(TrafficTileInfo* tile, std::uint32_t pathType);   // 0x2b8 @ 0x100114c6e
     virtual bool IsOffscreenEntryEdge(TrafficTileInfo* tile, int cellX, int cellZ, std::uint8_t entry);   // 0x2c0
-    virtual bool PopulateCrimeLayer(float clockMultiplier);                            // 0x2c8 @ 0x1001154ba (PARTIAL)
+    virtual bool PopulateCrimeLayer(float clockMultiplier);                            // 0x2c8 @ 0x1001154ba
     virtual bool UpdateResponseList(float deltaMilliseconds);                          // 0x2d0 @ 0x10011220c
     virtual cSC4ResponseCurve& GetEdgeDensityCurve(PopulateLayer layer);               // 0x2d8 @ 0x100115462
     virtual float GetMaxAutosPerSecond(PopulateLayer layer);                           // 0x2e0 @ 0x10011548c
