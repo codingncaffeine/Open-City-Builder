@@ -10,6 +10,7 @@
 
 #include "gz/WinGen.h"
 #include "gz/WinProc.h"
+#include "platform/Unwired.h"
 #include "rz/cRZCmdLine.h"
 #include "rz/cRZMessage2Standard.h"
 #include "rz/cRZVariant.h"
@@ -277,6 +278,8 @@ bool cSC4CitySituationManager::InitiateSituation(cISC4CitySituationAdvice* situa
     missionSoundPlayed_ = false;
     // Recovered-partial: a MySim mission (flag 0x20) binds the sim the occupant manager's vslot 0x30 hands out; the
     // port has no MySim source for the situations (mySim_ stays null).
+    if (activeSituation_->CheckSituationFlag(kSituationFlagMySimMission))
+        SC4_UNWIRED("cSC4CitySituationManager::InitiateSituation: a MySim mission's sim (occupant manager vslot 0x30) is not bound");
     SetActiveAutomaton(automaton);
     bool result = false;
     bool setUp = false;
@@ -288,6 +291,7 @@ bool cSC4CitySituationManager::InitiateSituation(cISC4CitySituationAdvice* situa
         } else if (condition == 5) {
             // Recovered-partial: InitCoverageCells (the zone / network / lot coverage cells) is not recovered; a coverage
             // mission is reported as not available.
+            SC4_UNWIRED("cSC4CitySituationManager::InitiateSituation: InitCoverageCells (cell-coverage missions) is not ported; the mission is unavailable");
             result = setUp = false;
         } else {
             numTargets_ = 1;
@@ -689,8 +693,10 @@ ISituationOccupant* cSC4CitySituationManager::FindTarget(bool setTarget) {
             // Recovered-partial: cSC4TrafficAutomaton::FindBestNeighborConnection (QueryInterface 0x8b99ee7c) is not
             // reachable through the situation seam; an escape mission finds no target occupant (its distance is the
             // city edge, GetDistanceToTarget).
+            SC4_UNWIRED("cSC4CitySituationManager::FindTarget: FindBestNeighborConnection for an escape mission is not ported (no target occupant)");
         } else if (condition == 4) {
             // Recovered-partial: CallTargetScriptFunction (the script's find_target answering an occupant) is not ported.
+            SC4_UNWIRED("cSC4CitySituationManager::FindTarget: the script's find_target (CallTargetScriptFunction) is not called");
         } else if (condition == 1 || condition == 3) {
             std::unordered_set<ISituationAutomaton*> instances;
             GetInstancesOfGroup(groups, instances);
@@ -736,6 +742,8 @@ ISituationOccupant* cSC4CitySituationManager::CreateTarget(bool setTarget) {
     std::vector<std::uint32_t> groups;
     GetCurrentTargetGroups(groups);
     // Recovered-partial: the script's "create_target" (CallTargetScriptFunction) is not ported; the automaton path runs.
+    if (scriptRefs_[kRefCreateTarget] != -2)
+        SC4_UNWIRED("cSC4CitySituationManager::CreateTarget: the script's create_target (CallTargetScriptFunction) is not called");
     if (!created) {
         cRZAutoRefCount<ISituationAutomaton> automaton;
         for (auto& manager : automataManagers_) {
@@ -867,6 +875,7 @@ std::uint32_t cSC4CitySituationManager::CheckReachTargetSuccess(float elapsedMil
     const float distance = GetDistanceToTarget(false) - activeSituation_->GetActiveRadius();
     // Recovered-partial: GetFlashPeriod (the indicator's flash rate by distance) is not recovered; the dispatch view that
     // would flash is not either.
+    SC4_UNWIRED("cSC4CitySituationManager::CheckReachTargetSuccess: the target indicator's flash period by distance (GetFlashPeriod) is not set");
     bool next = false;
     if (activeSituation_->GetSuccessDistance() > distance) {
         reachTimer_ += elapsedMilliseconds;
@@ -887,12 +896,18 @@ std::uint32_t cSC4CitySituationManager::CheckForSuccess(float elapsedMillisecond
         status = status_;
         // Recovered-partial: an evade mission (flag 2) first asks CheckEvadeListSuccess, which is not ported; its status
         // stays as it is here. The condition's check only runs while the situation runs.
+        if (activeSituation_->CheckSituationFlag(kSituationFlagEvade))
+            SC4_UNWIRED("cSC4CitySituationManager::CheckForSuccess: CheckEvadeListSuccess (evade missions) is not ported");
         if (status == kSituationRunning && scriptRefs_[kRefCheckSuccess] == -2) {
             const std::uint32_t condition = activeSituation_->GetSuccessCondition();
             if (condition == 1 && currentTarget_) {
                 status = CheckReachTargetSuccess(elapsedMilliseconds);
             } else {
                 // Recovered-partial: CheckEscapeCitySuccess (2) and CheckCellCoverageSuccess (5) are not ported.
+                if (condition == 2)
+                    SC4_UNWIRED("cSC4CitySituationManager::CheckForSuccess: CheckEscapeCitySuccess (escape missions) is not ported");
+                else if (condition == 5)
+                    SC4_UNWIRED("cSC4CitySituationManager::CheckForSuccess: CheckCellCoverageSuccess (coverage missions) is not ported");
                 status = kSituationRunning;
             }
         }
@@ -1211,6 +1226,7 @@ void cSC4CitySituationManager::ShowSituationPopup(cISC4CitySituationAdvice* situ
 // buttons read (the advice, the joyride automaton) are set here.
 void cSC4CitySituationManager::SetupDialog(cIGZWin* dialog, cISC4CitySituationAdvice* situation, ISituationAutomaton* automaton) {
     if (!dialog) return;
+    SC4_UNWIRED("cSC4CitySituationManager::SetupDialog: the mission dialog's HTML page (title, text, time/money/aura and reward lines) and image proc are not built");
     if (!situation) status_ = kSituationUnavailable;
     if (situation) dialog->SetParam(kSituationParamAdvice, new cRZVariant(static_cast<cIGZUnknown*>(situation)));
     if (automaton) dialog->SetParam(kSituationParamAutomaton, new cRZVariant(static_cast<cIGZUnknown*>(automaton)));

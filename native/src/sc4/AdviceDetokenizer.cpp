@@ -4,6 +4,7 @@
 #include <string>
 
 #include "gz/RZServices.h"
+#include "platform/Unwired.h"
 #include "lua/ISCLua.h"
 #include "rz/LanguageManager.h"
 #include "rz/cRZDate.h"
@@ -186,6 +187,7 @@ bool AdviceDetokenizerFunction(const cIGZString& tokenIn, cIGZString& out, void*
         if (advisor) {
             // PARTIAL: the original first fits the name into 200 pixels of the window font 0x68963c4c (RZ::WCM() vslot
             // 0x14, font vslot 0xc8 with style 0x5377be31); there is no control manager natively, so it is used whole.
+            SC4_UNWIRED("cSC4AdviceDetokenizer: the advisor name is not fitted into 200 pixels of window font 0x68963c4c");
             out.Copy(advisor->GetPersonalName());
             return true;
         }

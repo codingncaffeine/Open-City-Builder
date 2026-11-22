@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <utility>
 
+#include "platform/Unwired.h"
+
 namespace gz {
 
 static IDrawContextHost* g_host = nullptr;
@@ -280,7 +282,9 @@ void cGZDrawContext::DrawNoTransform(eDrawingOp op, const float* points, int cou
 
 void cGZDrawContext::DirectDraw(eDrawingOp op, const float* points, int count) {
     const eEngineDrawResult how = engine_->Draw(op, points, count);
-    (void)how;   // Tesselate* / Rasterize* fallbacks are not recovered
+    // Tesselate* / Rasterize* fallbacks are not recovered
+    if (how != eEngineDrawResult::Done)
+        SC4_UNWIRED("cGZDrawContext::DirectDraw: the software Tesselate*/Rasterize* fallback for a primitive the engine refused is not ported");
 }
 
 }  // namespace gz

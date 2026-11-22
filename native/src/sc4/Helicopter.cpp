@@ -6,6 +6,7 @@
 #include <cstring>
 #include <vector>
 
+#include "platform/Unwired.h"
 #include "sc4/AutomataStates.h"
 
 namespace sc4 {
@@ -1416,6 +1417,7 @@ void cSC4Helicopter::AI_AimSpotlight(const cS3DVector3& target, float delta) {
 // +/-100 limits and derive the attitude from the type limits.
 void cSC4Helicopter::AI_ControlMoveXZ(const cS3DVector3& direction, float maxControl, float delta) {
     if (!engine_ || !physics_ || !physics_->type) return;
+    SC4_UNWIRED("cSC4Helicopter::AI_ControlMoveXZ: the original's force-distribution cascade is not transcribed (approximate steering stand-in)");
     const float lengthXZ = std::sqrt(direction.x * direction.x + direction.z * direction.z);
     const float step = delta * 100.0f;
     float targetCollective = 0.0f;
@@ -1501,6 +1503,7 @@ void cSC4Helicopter::RespondToCrimeScene() {
     cS3DVector3 crime;
     if (host->CrimeAt(position_, 20.0f, crime)) {
         // The original drives the crime's dispatch state through the crime simulator; no recovered neighbour for it.
+        SC4_UNWIRED("cSC4Helicopter::RespondToCrimeScene: the crime simulator Reset / dispatch calls (slots 0x48/0x50, crime 0x108/0x1a0) are not made");
     }
 }
 
@@ -1524,6 +1527,7 @@ void cSC4Helicopter::AI_PursueGoal(float delta) {
     if (behavior == kHeliBehaviorPursue) {
         // PARTIAL: the pursuit record's target automaton (+0x38 of the state) is the unrecovered pursuit record type
         // (the port only has tAutomataStateChase, whose +0x38 object is not an automaton interface in this port).
+        SC4_UNWIRED("cSC4Helicopter::AI_PursueGoal: the pursuit behavior (follow the pursuit record's target automaton) is not ported");
         PopState();
         return;
     }
@@ -1580,6 +1584,7 @@ void cSC4Helicopter::AI_PursueGoal(float delta) {
         // PARTIAL: the traffic simulator's random cell iterator (spTrafficSim slots 0x50/0x70/0x78/0xa8/0xb0) is
         // unrecovered; the original searches a random rectangle for a cell with traffic and either claims it or falls
         // back to the idle behaviour.
+        SC4_UNWIRED("cSC4Helicopter::AI_PursueGoal: the traffic behavior (find a random cell with traffic via the traffic simulator) is not ported");
         ResetClaimIfValid(destination_);
         PushState(kHeliBehaviorIdle, nullptr, 0.0f, false, 0, 0, nullptr);
         return;
@@ -1669,6 +1674,7 @@ void cSC4Helicopter::UpdateSpotlight() {
     if (!heliHost || !effectSearchlight_ || !effectSpotlight_ || !physics_) return;
     IAircraftHost* host = HostFor(*this);
     const bool active = host && host->ViewZoom() == 1 && spotOn_ && physics_->state != 0;
+    if (active) SC4_UNWIRED("cSC4Helicopter::UpdateSpotlight: the renderer's spotlight cone test (SL::spRenderer slot 0x1e0) is not ported");
     if (active) {
         if (!effectSearchlight_->IsPlaying()) effectSearchlight_->Start(0);
         if (!effectSpotlight_->IsPlaying()) effectSpotlight_->Start(0);
@@ -1834,6 +1840,7 @@ void cSC4Helicopter::DetectCollisions() {
 // IHelicopterHost; the control translation is reproduced.
 bool cSC4Helicopter::TranslatePlayerDriveCommands(tAutomataStatePlayerDrive* state, float milliseconds) {
     if (!state || !physics_) return false;
+    SC4_UNWIRED("cSC4Helicopter::TranslatePlayerDriveCommands: the spotlight cone (SL::spRenderer slot 0x1e8) and the AEMS group-0x4308 event are not ported");
     cSC4Automaton::TranslatePlayerDriveCommands(state, milliseconds);
     if (state->effectTimerC4 >= 0.0f && rotorStill_) {
         rotorStill_->Update();

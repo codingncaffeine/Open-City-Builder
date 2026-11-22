@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "gz/MiscFunctions.h"   // stricmp @ 0x1006421d8
+#include "platform/Unwired.h"
 #include "rz/URL.h"
 #include "rz/cRZFile.h"
 #include "rz/cRZIniFile.h"
@@ -407,6 +408,7 @@ bool cRZCookieManager::ParseCookieText(CookieData& cookie, const cRZString* url)
             ToRZString(value, timeText);
             std::int32_t seconds = 0;
             if (ICookieHTTPHost* host = CookieHTTPHost()) seconds = host->TimeStringToSeconds(timeText);
+            else SC4_UNWIRED("cRZCookieManager::ParseCookieText: the Expires date (cRZHTTPClient::TimeStringToSeconds) is not converted");
             if (seconds == 0) seconds = now + kDefaultExpiryDelta;
             fields.expiry = static_cast<std::uint32_t>(seconds);
         } else if (stricmp(name.c_str(), "Max-Age") == 0) {

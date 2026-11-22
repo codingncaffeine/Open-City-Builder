@@ -53,8 +53,8 @@ constexpr std::uint32_t kFireTuningInstance = 0x68f5524a;
 
 // @ 0x00237e72. ProtectionInit: the coverage grids (fire's instance ids), the sweep, the daily and monthly agents, the notifications.
 // The simulator registers as the fire engines' dispatch source through the host, then makes its fire plane dispatch source
-// (unless a city file named one) and initializes it. PARTIAL: the fire department's budget line and the flammability simulator
-// reference are not set up.
+// (unless a city file named one) and initializes it. The fire department's budget line and the flammability simulator are
+// reached through the host when needed (DepartmentBudgetFraction) rather than held by the simulator.
 bool cSC4FireProtectionSimulator::Init() {
     if (running_) return true;
     running_ = true;

@@ -7,6 +7,7 @@
 #include <cstring>
 #include <string>
 
+#include "platform/Unwired.h"
 #include "s3d/ModelInstance.h"
 #include "s3d/S3DMath.h"
 #include "sc4/VisualEffect.h"
@@ -167,6 +168,8 @@ void cSC4ModelBasedParticlesEffect::SetDescription(cSC4ParticlesDescription* des
         }
         // Self-lit models (32-bit flag 0) get draw attribute 4; descriptions with the 11-bit flags 8 or 2 also run the
         // model processor (lighting / deforming the mesh), which is not ported.
+        if (((word >> 2) & 1u) != 0 || ((word >> 8) & 1u) != 0)
+            SC4_UNWIRED("cSC4ModelBasedParticlesEffect::SetDescription: the effects model processor (lighting / deforming the mesh) is not ported");
         if (model_ && (description->flags & 1) != 0) {
             s3d::SC4DrawAttributes attributes;
             attributes.flags = 4;
@@ -440,6 +443,7 @@ void cSC4ModelBasedParticlesEffect::DrawParticle(cSC4MBParticle* particle, SC4Dr
     const float fraction = particle->age / particle->lifetime;
     const float size = static_cast<float>(static_cast<double>(particle->size) * kSizeUnit * Curve(description_->sizeCurve, fraction));
     // (11-bit flag 1, ApplyFakePerspective, is not ported: those particles draw here unchanged.)
+    if (Flag11(1)) SC4_UNWIRED("cSC4ModelBasedParticlesEffect::DrawParticle: ApplyFakePerspective (pull away from the camera, camera_collision effect) is not ported");
     cS3DTransform transform;
     ProcessModelParticle(particle, fraction, size, position, transform);
     const cS3DVector3 colour = Curve(description_->colorCurve, fraction);

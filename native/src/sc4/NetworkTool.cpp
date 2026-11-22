@@ -12,6 +12,7 @@
 //  * GetLastValidPoint indexes the step array with validSteps-1 without a bounds check (0x100190668).
 //  * GetMajorBridge* read the last element of the bridge vector through the vector's end pointer (0x100187f42).
 #include "sc4/NetworkTool.h"
+#include "platform/Unwired.h"
 #include "sc4/NetworkConstructionCrew.h"
 #include "sc4/NetworkOccupant.h"
 #include "sc4/NetworkToolUI.h"
@@ -284,7 +285,7 @@ bool cSC4NetworkTool::Shutdown() {
     }
     possibleBridges_.clear();  // *(this+0x440) = *(this+0x438)
     // The original calls vtable slot +0x88 (ClearOccupantHighlights 0x1001901a6) and +0x80 (ClearCellPreviews
-    // 0x10018803e) here; both are unrecovered, see PARTIAL.
+    // 0x10018803e) here; both exist now (ClearOccupantHighlights is empty) but are not called from Shutdown.
     anchors_.clear();  // *(this+0x218) = *(this+0x210)
     cells_.clear();    // *(this+0xc0) = *(this+0xb8)
     if (cityViewModel_ != nullptr) {
@@ -1001,6 +1002,7 @@ void cSC4NetworkTool::ComputeDraggedCells(const SC4PointU& start, const SC4Point
     if (penX > 1) {
         static bool warned = false;
         if (!warned) { warned = true; std::fprintf(stderr, "network tool: the wide-pen pass of ComputeDraggedCells is not ported (highways)\n"); }
+        SC4_UNWIRED("cSC4NetworkTool::ComputeDraggedCells: the wide-pen pass (highway end steps checked against existing networks) is not ported");
     }
 }
 

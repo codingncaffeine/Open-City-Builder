@@ -22,6 +22,7 @@
 #include "gz/WinSpinner.h"
 #include "gz/WinText.h"
 #include "gz/WinTextEdit.h"
+#include "platform/Unwired.h"
 #include "rz/cRZVariant.h"
 #include "sc4/WinProcs.h"
 
@@ -1059,6 +1060,12 @@ void cGZLegacyControl::InterpretPropertiesGZWinCommon(cIGZWin* window, tScriptPr
 
     // PARTIAL (see LEGACY-1): the comment strings at 0x108..0x10f go into a cRZStringArray (variant vtbl
     // 0x100b0ecb8) stored at 0xbaca6879; that container type is still to be recovered.
+    for (const tScriptProperty& property : parameters) {
+        if (property.id >= kPropComments && property.id <= kPropComments + 7) {
+            SC4_UNWIRED("cGZLegacyControl::InterpretPropertiesGZWinCommon: the comment strings (0x108..0x10f) are not stored on the window");
+            break;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -1837,6 +1844,7 @@ void cGZLegacyControl::InterpretPropertiesGZWinFolders(cIGZWin* window, tScriptP
     void cGZLegacyControl::InterpretProperties##Name(cIGZWin* window, tScriptPropertyArray& parameters, \
                                                     bool init) {                                 \
         (void)window; (void)parameters; (void)init;                                              \
+        SC4_UNWIRED("cGZLegacyControl::InterpretProperties" #Name ": the control-specific script properties are not applied"); \
     }
 
 

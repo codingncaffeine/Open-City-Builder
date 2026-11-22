@@ -13,6 +13,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "platform/Unwired.h"
 #include "rz/cRZMessage2Standard.h"
 #include "s3d/S3DMath.h"
 #include "sc4/AutomataGenerator.h"   // AutomataFloorIdiom
@@ -1015,6 +1016,8 @@ void cSC4Automaton::StartAllEffects() {
     std::vector<AutomatonKeyEffect> keys;
     if (IAutomatonGroupTemplate* group = GetAutomataGroup()) group->KeyEffects(keys);
     std::vector<std::pair<std::string, bool>> keyed;
+    if (!keys.empty() && FindState(kStatePlayerDrive))
+        SC4_UNWIRED("cSC4Automaton::StartAllEffects: a player-driven automaton's held keys are not read (every key effect starts as not held)");
     for (const AutomatonKeyEffect& key : keys) keyed.emplace_back(key.effect, false);
     effects->StartAllEffectsByKeys(keyed);
 }
@@ -1057,6 +1060,8 @@ void cSC4Automaton::StopKeyEffects() {
     if (!effects_) return;
     std::vector<AutomatonKeyEffect> keys;
     if (IAutomatonGroupTemplate* group = GetAutomataGroup()) group->KeyEffects(keys);
+    if (!keys.empty() && FindState(kStatePlayerDrive))
+        SC4_UNWIRED("cSC4Automaton::StopKeyEffects: the effects of held player-drive keys are not kept running (no key counts as held)");
     for (const AutomatonKeyEffect& key : keys) effects_->StopNamed(cRZString(key.effect.c_str()), 1);
 }
 
@@ -1670,6 +1675,7 @@ bool cSC4Automaton::PlayAnimByName(const cRZString& name) {
 // templates are a seam and their animation tables are not recovered, so no offset is produced (PARTIAL).
 std::uint32_t cSC4Automaton::GetAnimOffsetByName(const cRZString& name) const {
     (void)name;
+    SC4_UNWIRED("cSC4Automaton::GetAnimOffsetByName: the group templates' animation tables are not read (no named animation plays)");
     return 0;
 }
 
@@ -1899,6 +1905,7 @@ bool cSC4Automaton::DoPlayerDriveTick(float milliseconds) {
         value = next;
     }
     TranslatePlayerDriveCommands(state, milliseconds);
+    SC4_UNWIRED("cSC4Automaton::DoPlayerDriveTick: the occupant-manager vehicle query after the command translation (slot 0x88) is not ported");
     return true;
 }
 
@@ -1979,6 +1986,7 @@ bool cSC4Automaton::TranslatePlayerDriveCommands(tAutomataStatePlayerDrive* stat
     // PARTIAL: the player-drive record's 0x2a0 bytes hold seven 13-entry command tables (offsets +0xdc, +0x120,
     // +0x154, +0x188, +0x1bc, +0x1f0 and the two byte tables at +0x224/+0x231); the port's tAutomataStatePlayerDrive
     // only models the history table at +0xa8, so the translation cannot run yet.
+    SC4_UNWIRED("cSC4Automaton::TranslatePlayerDriveCommands: the player-drive command tables are not translated into steering/throttle");
     return true;
 }
 
@@ -2093,6 +2101,7 @@ bool cSC4Automaton::AddToCollisionSystem(tAutomataStateCollide* state) {
     (void)state;
     // PARTIAL: creates the collision effect (cSC4EffectsManager slot 0x30 with the vehicle/train collide effect) and
     // hands it the model instance and a velocity. Neither the effects manager nor the model layer is recovered.
+    SC4_UNWIRED("cSC4Automaton::AddToCollisionSystem: the vehicle/train collide effect (cSC4EffectsManager slot 0x30) is not created");
     return false;
 }
 
@@ -2103,7 +2112,10 @@ const char* cSC4Automaton::GetDebugExtraText() const { return ""; }
 
 // ---- ghost model (the faint copy shown while an automaton is being moved) --------------------------------------------
 // PARTIAL: the ghost model is created through the renderer's model layer (cS3DModelProcessor at +0x1d8).
-bool cSC4Automaton::InitGhostModel() { return false; }
+bool cSC4Automaton::InitGhostModel() {
+    SC4_UNWIRED("cSC4Automaton::InitGhostModel: the ghost model (cS3DModelProcessor at +0x1d8) is not created");
+    return false;
+}
 bool cSC4Automaton::ShutdownGhostModel() { return false; }
 bool cSC4Automaton::UpdateGhostModel() { return false; }
 

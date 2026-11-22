@@ -1,6 +1,7 @@
 #include "sc4/CityDetailManager.h"
 
 #include "gz/cIGZIStream.h"
+#include "platform/Unwired.h"
 #include "gz/cIGZOStream.h"
 
 namespace sc4 {
@@ -39,6 +40,7 @@ bool cSC4CityDetailManager::Read(cIGZIStream& stream) {
 
 bool cSC4CityDetailManager::Init() {
     const std::uint8_t preference = g_host ? g_host->DetailPreference() : 0;
+    if (!g_host) SC4_UNWIRED("cSC4CityDetailManager::Init: no host: the city detail preference is not compared and Reduce/IncreaseCityDetail never run");
     if (detailLevel_ != 0xffffffff && g_host) {
         if (preference < detailLevel_) g_host->ReduceCityDetail();
         else if (detailLevel_ < preference) g_host->IncreaseCityDetail();

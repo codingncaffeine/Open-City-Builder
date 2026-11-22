@@ -9,9 +9,9 @@
 // placement-parameter copies, the bridge & neighbour-connection queries, the network-type flag helpers, the
 // padded-rect helper, the terrain highlight of the valid part of the drag and the straight/diagonal splitter
 // (`BreakIntoStraightAndDiagSegments`).  The solving pipeline (SolveNetwork, ApplyNetworkRules, bridges, tunnels,
-// highway intersections), the occupant insertion and the preview/occupant drawing are still unrecovered — every
-// such function is `recovered-partial` in notes/ledger.csv (applied from notes/ledger_applied/cSC4NetworkTool.txt)
-// and named in the vtable-order comment blocks below so the gaps are visible.
+// highway intersections) and the occupant insertion are ported in NetworkToolSolve.cpp, NetworkToolIntersections.cpp
+// and NetworkToolTunnels.cpp; the functions still `recovered-partial` in notes/ledger.csv (applied from
+// notes/ledger_applied/cSC4NetworkTool.txt) are named in the vtable-order comment blocks below so the gaps are visible.
 //
 // Object layout (0x638 bytes through the last stored pointer; offsets are the original ones):
 //   +0x000 vtable cISC4NetworkTool        +0x008 vtable cIGZMessageTarget2
@@ -855,7 +855,7 @@ public:
     static bool StaticInit();                                             // 0x100186d04
     static bool StaticShutdown(void* user);                               // 0x100186d3e
     static void ReloadCheck();                                            // 0x10018774c (empty)
-    static void ReloadRules();                                            // 0x100186d56 — partial: the multitype rules
+    static void ReloadRules();                                            // 0x100186d56 — partial: the tile-conflict overrides
     static int GetNetworkTypeFromFlag(std::uint32_t flag);                // 0x10018f58a
     static int GetFirstNetworkTypeFromFlags(std::uint32_t flags);         // 0x100190386
     // 0x1001c2c10: fill waterBridgeTypes/landBridgeTypes from a bridge-type list (both are cleared first).

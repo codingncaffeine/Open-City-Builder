@@ -1,5 +1,6 @@
 #include "sc4/NetworkOccupantModel.h"
 
+#include "platform/Unwired.h"
 #include "sc4/DrawContext.h"
 #include "sc4/PackedRenderState.h"
 
@@ -66,6 +67,7 @@ std::uint32_t cSC4NetworkOccupantModel::GetTexture(std::uint32_t id, std::uint32
 }
 
 int cSC4NetworkOccupantModel::Draw(SC4DrawContext* context, bool highlight) {
+    if (highlight) SC4_UNWIRED("cSC4NetworkOccupantModel::Draw: the highlight pass (SetSelfLitShade + highlight state, one-way arrow) is not ported");
     if (!context || highlight) return 1;
     const int zoom = context->Zoom();
     // Pieces with a support pylon and an opaque first corner, and every piece with flag 0x80000, choose their state

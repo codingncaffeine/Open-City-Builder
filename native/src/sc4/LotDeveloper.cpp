@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "gz/StreamOps.h"
+#include "platform/Unwired.h"
 #include "rz/cRZRandom.h"
 #include "sc4/DBSegment.h"
 #include "sc4/BuildingOccupant.h"
@@ -1117,11 +1118,13 @@ cISC4Occupant* cSC4LotDeveloper::GetFirstBuilding(cSC4Lot* lot) {
 }
 
 // i386 0x000ec5f6: the lot takes `state`, then every building on it goes (its props, optionally its foundation, then the
-// occupant itself with `flags`). PARTIAL: building foundations (slot 60) and the zot props (RemoveBuildingZotProp) are not
-// ported, as in StartConstruction.
+// occupant itself with `flags`). PARTIAL: the building foundation removal (slot 60) and the zot props are not done here
+// (RemoveBuildingZotProp now exists but is not called), as in StartConstruction.
 bool cSC4LotDeveloper::ClearLotBuildings(cSC4Lot* lot, std::uint32_t state, bool removeFoundation, std::uint32_t flags) {
     if (!lot || !g_construction) return false;
-    (void)removeFoundation;
+    SC4_UNWIRED("cSC4LotDeveloper::ClearLotBuildings: the lot's zot props are not removed (RemoveBuildingZotProp)");
+    if (removeFoundation && GetFirstBuilding(lot))
+        SC4_UNWIRED("cSC4LotDeveloper::ClearLotBuildings: the buildings' foundations are not removed (slot 60)");
     cISC4Occupant* building = GetFirstBuilding(lot);
     lot->SetState(state, 0, 0);                                                     // lot vslot 0x88
     for (int guard = 0; building && guard < 64; ++guard) {
@@ -1141,12 +1144,14 @@ bool cSC4LotDeveloper::StartDemolishLot(cSC4Lot* lot) {
     if (!lot || !g_construction) return false;
     if (lot->GetFlags() & 1) g_construction->RemoveLotFlora(lot);                   // lot vslot 0x30
     g_construction->RemoveLotProps(lot);
+    SC4_UNWIRED("cSC4LotDeveloper::StartDemolishLot: RemoveNetworkConnectionNodes (the lot's 0x200000 network pieces) is not ported");
     return ClearLotBuildings(lot, 5, true, 0);
 }
 
 // i386 0x000f385c: the lot goes back to an empty lot of its zone. PARTIAL: the retaining walls and the lot / surrounding
-// foundations (no foundation occupants yet).
+// foundations are not removed here (RemoveLotFoundation now exists but is not called).
 void cSC4LotDeveloper::ClearLot(cSC4Lot* lot) {
+    SC4_UNWIRED("cSC4LotDeveloper::ClearLot: the lot's retaining walls and lot / surrounding foundations are not removed");
     lot->SetVerticesAreLocked(false);                                               // lot vslot 0x114
     lot->SetState(1, 0, 0);                                                         // 0x88
     lot->SetBuildingType(0);                                                        // 0xbc
@@ -1176,6 +1181,8 @@ void cSC4LotDeveloper::ExplodeLot(cSC4Lot* lot, bool burnt) {
     ClearLotBuildings(lot, 6, false, 4);
     if (g_construction) g_construction->RemoveLotProps(lot);
     if (hadBuilding) AddLotRubbleProps(lot, boxMin, boxMax, burnt);
+    if (burnt && hadBuilding)
+        SC4_UNWIRED("cSC4LotDeveloper::ExplodeLot: the burnt-building prop (cSC4PropOccupantBurntBuilding) and its terrain decal are not placed");
     if (burnt) lot->SetCondition(6);
     lot->SetBuildingType(0);
 }
@@ -1252,7 +1259,7 @@ bool cSC4LotDeveloper::ConstructDefaultLot(cSC4Lot* lot, cSC4LotConfiguration* c
 // the blocking flora is demolished and the building is placed through the building development simulator. With `construct` a
 // construction occupant takes the lot through its stages, else the lot is built at once (state 3). Returns false when the
 // building could not be placed.
-//   PARTIAL: RemoveBuildingZotProp (the lot's zot props are not ported).
+//   PARTIAL: RemoveBuildingZotProp (it exists now but is not called here).
 bool cSC4LotDeveloper::StartConstruction(cSC4Lot* lot, cSC4LotConfiguration* configuration, std::uint32_t buildingType,
                                          bool construct) {
     if (!lot || !g_construction) return false;
@@ -1264,7 +1271,8 @@ bool cSC4LotDeveloper::StartConstruction(cSC4Lot* lot, cSC4LotConfiguration* con
     PickUnitToJoin(lot);
     lot->SetFlags(lot->GetFlags() & ~7);                                            // 0x30 / 0x34
     lot->SetVerticesAreLocked(true);                                                // 0x114
-    // PARTIAL: RemoveBuildingZotProp(lot, 6) (i386 0x000f0684): the lot's zot props are not ported.
+    // PARTIAL: RemoveBuildingZotProp(lot, 6) (i386 0x000f0684) exists now but is not called here.
+    SC4_UNWIRED("cSC4LotDeveloper::StartConstruction: the lot's zot props are not removed (RemoveBuildingZotProp(lot, 6))");
     bool result = true;
     if (buildingType != 0) {
         const std::int32_t purpose = g_construction->BuildingPurpose(buildingType);   // +0x18 vslot 0x9c
@@ -1343,6 +1351,7 @@ void cSC4LotDeveloper::DoLotStateChanged(const cSC4Lot& snapshot, std::uint32_t 
     snapshot.GetSize(snapshotX, snapshotZ);
     if (sizeX != snapshotX || sizeZ != snapshotZ) return;
     if (built) SetNormalLotBaseTexture(lot, configuration);                         // vslot 0xb0 (lot, configuration, 1)
+    if (built) SC4_UNWIRED("cSC4LotDeveloper::DoLotStateChanged: AddNetworkConnectionNodes (0x000f14ee) is not ported");
     if (finished) {
         AddLotProps(lot, configuration);
         AddLotFlora(lot, configuration);
@@ -1563,6 +1572,8 @@ void cSC4LotDeveloper::UpdateLotObjectAltitudes(cSC4Lot* lot) {
         position[1] = target[1];
         occupant->SetPosition(position);                                           // occupant vslot 0x24
         g_construction->MoveOccupant(occupant, true);                              // +0x28 vslot 0x60
+        if (type == 0x278128a0u)
+            SC4_UNWIRED("cSC4LotDeveloper::UpdateLotObjectAltitudes: a moved building is not checked for a foundation of its own (GetFoundationByOccupant / ByPosition)");
     }
 }
 
@@ -1836,7 +1847,9 @@ void cSC4LotDeveloper::GetPositionForLotConfigurationObject(cSC4Lot* lot, cSC4Lo
     if ((lot->GetFlags() & 1) != 0) {                                               // lot vslot 0x30
         position[1] = lot->GetAltitude();                                           // lot vslot 0x40
     } else {
-        // PARTIAL: GetLotFoundation(lot) (vslot 0xcc) and the foundation top: no foundation occupants yet.
+        // PARTIAL: GetLotFoundation(lot) (vslot 0xcc) exists now, but the foundation top is not used for the objects.
+        if (GetLotFoundation(lot))
+            SC4_UNWIRED("cSC4LotDeveloper::GetPositionForLotConfigurationObject: an object on a lot foundation is not placed on the foundation top");
         const bool water = configuration && configuration->IsCompatibleWithWater();
         if (object->type > 4 || ((1u << object->type) & 0x16u) == 0)
             position[1] = GetLowestOrHighestAreaAltitude(area, false, water);      // vslot 0x44
