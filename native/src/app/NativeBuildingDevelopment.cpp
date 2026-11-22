@@ -567,4 +567,10 @@ void InstallBuildingDevelopmentHost() {
     });
 }
 
+float NativeStagePopulationMultiplier(int difficulty) {
+    sc4::cSC4BuildingDevelopmentSimulator* bds = NativeBuildingDevelopmentSimulator();
+    if (!bds || difficulty < 0 || difficulty >= bds->StagePopulationMultiplierCount()) return 1.0f;
+    return bds->GetStagePopulationMultiplier(difficulty);
+}
+
 }  // namespace native

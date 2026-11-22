@@ -422,6 +422,7 @@ public:
     bool ClaimConstructionResources(std::uint16_t amount);
     void ReleaseConstructionResources(std::uint16_t amount);
     float GetStagePopulationMultiplier(int stage) const { return stageMultipliers_[stage]; }
+    int StagePopulationMultiplierCount() const { return static_cast<int>(stageMultipliers_.size()); }
     void SetStagePopulationMultipliers(const std::vector<float>& values) { stageMultipliers_ = values; }
     std::int32_t GetDayOfLastSuccessfulBuild(std::int32_t developerType) const;
     void NoteSuccessfulBuild(std::int32_t developerType, std::int32_t day) { lastBuildDay_[developerType] = day; }

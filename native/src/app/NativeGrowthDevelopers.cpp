@@ -216,9 +216,10 @@ struct BuildingDevelopmentApi final : IGrowthBuildingDevelopmentApi {
     float GetMaxCapacity(int zoneType, int purpose, int wealth) override {
         return NativeMaxCapacity(zoneType, static_cast<std::uint32_t>(purpose), static_cast<std::uint32_t>(wealth));
     }
-    float GetStagePopulationMultiplier() override {   // PARTIAL: the simulator's +0x178 is not modelled
-        SC4_UNWIRED("cSC4BuildingDevelopmentSimulator::GetStagePopulationMultiplier: stageMultiplier[difficulty] is not read (always 1)");
-        return 1.0f;
+    // i386 0x000f7380: the tuned table 0x47e2c383 (BDS +0x118) at the city's difficulty (city vslot 0x60)
+    float GetStagePopulationMultiplier() override {
+        cSC4City* city = HostCity();
+        return city ? NativeStagePopulationMultiplier(static_cast<int>(city->GetDifficultyLevel())) : 1.0f;
     }
     void UpdateTractPopulation(cISC4GrowthDeveloper* developer, int tractX, int tractZ) override {   // vslot 0x118
         NativeTractUpdatePopulation(static_cast<cSC4GrowthDeveloper*>(developer), tractX, tractZ);
