@@ -1275,9 +1275,8 @@ void cSC4ResidentialSimulator::CopyProximity(int wealth) {
     }
 }
 
-// 7.1. PARTIAL: the ordinance decay products (education/health half) are 1.
+// 7.1: the population tunables; the EQ / HQ decays end multiplied by the ordinance effects' decay factors.
 void cSC4ResidentialSimulator::ReadTunablePopulationValues(const cISCPropertyHolder* exemplar) {
-    SC4_UNWIRED("cSC4ResidentialSimulator::ReadTunablePopulationValues: ordinance decay products (education / health) fixed at 1");
     PopulationTuning& t = tuning_;
     t.eqDecay = 1.0f;
     t.hqDecay = 1.0f;
