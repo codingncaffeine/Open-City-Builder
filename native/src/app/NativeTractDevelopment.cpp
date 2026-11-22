@@ -511,6 +511,16 @@ void NativeDeclineReport() {
     for (int reason = 0; reason < 8; ++reason)
         if (abandonedByReason[reason]) std::printf(" %d:%d", reason, abandonedByReason[reason]);
     std::printf("), reserved %d, demolishable %d\n", states[5], states[6]);
+    if (zones) {   // where the first abandoned lots are (cells), for kits that look at them
+        int shown = 0;
+        for (cSC4Lot* lot : zones->Lots()) {
+            if (!lot || lot->GetState() != kLotStateAbandoned || shown >= 5) continue;
+            int x = 0, z = 0;
+            lot->GetLocation(x, z);
+            std::printf("decline: abandoned lot at %d,%d condition %u\n", x, z, lot->GetCondition());
+            ++shown;
+        }
+    }
     std::printf("decline: livable lots by developer (type:lots/past 59 days)");
     for (const auto& [type, count] : livable) std::printf(" %x:%d/%d", type, count.first, count.second);
     std::printf("\n");

@@ -686,7 +686,14 @@ public:
         manager->Release();   // the model maker takes its own reference
         return manager;
     }
-    sc4::cISC4LotManager* LotManager() override { return nullptr; }
+    sc4::cISC4LotManager* LotManager() override {   // SL::spLotManager: the zone developer's lot-manager view (iid 0x681905bd)
+        cIGZUnknown* developer = CurrentCity() ? CurrentCity()->GetComponent(sc4::CityComponent::ZoneDeveloper) : nullptr;
+        void* raw = nullptr;
+        if (!developer || !developer->QueryInterface(0x681905bd, &raw) || !raw) return nullptr;
+        auto* lots = static_cast<sc4::cISC4LotManager*>(raw);
+        lots->Release();   // the city keeps it; the model maker takes its own reference
+        return lots;
+    }
     cIGZUnknown* BuildingDevelopmentSim() override { return CurrentCity() ? CurrentCity()->GetComponent(sc4::CityComponent::BuildingDevelopmentSimulator) : nullptr; }
     cIGZUnknown* Terrain() override { return CurrentCity() ? CurrentCity()->GetComponent(sc4::CityComponent::Terrain) : nullptr; }
     int ShadowRenderQuality() override { const char* q = std::getenv("SC4_SHADOWQ"); return q ? std::atoi(q) : 5; }

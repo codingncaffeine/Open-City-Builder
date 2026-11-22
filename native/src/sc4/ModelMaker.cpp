@@ -1201,9 +1201,13 @@ bool cSC4ModelMaker::GetOccupantLotCondition(cISC4Occupant* occupant, std::uint3
     int cz = 0;
     if (g_host) g_host->PositionToCityCell(position[0], position[2], cx, cz);
     if (cx < cityRect_.x0 || cx > cityRect_.x1 || cz < cityRect_.z0 || cz > cityRect_.z1) return false;
+    static const bool traceManager = std::getenv("SC4_STATEDEBUG") != nullptr;
+    if (traceManager && !lotManager_) std::fprintf(stderr, "model maker: lot condition asked before the lot manager is set\n");
     cSC4Lot* lot = lotManager_ ? lotManager_->GetLot(cx, cz, false) : nullptr;
     if (!lot) return false;
     condition = lot->GetCondition();
+    static const bool trace = std::getenv("SC4_STATEDEBUG") != nullptr;
+    if (trace && condition >= 2) std::fprintf(stderr, "model maker: occupant %08x at cell %d,%d on a lot of condition %u\n", occupant->GetType(), cx, cz, condition);
     return true;
 }
 
@@ -1539,6 +1543,9 @@ void cSC4ModelMaker::ApplyLotStateEffect(cISC4Occupant* occupant, std::uint32_t 
         static const int kConditionToSlot[7] = {-1, -1, 0, 1, 4, 2, 3};
         const int slot = kConditionToSlot[condition];
         if (!dynamicBinding_[slot]) RebuildDynamicTexture(slot);
+        static const bool trace = std::getenv("SC4_STATEDEBUG") != nullptr;
+        if (trace) std::fprintf(stderr, "model maker: state %u on occupant %08x: dynamic texture %d binding %llx\n", condition,
+                                occupant->GetType(), slot, static_cast<unsigned long long>(dynamicBinding_[slot]));
         if (const std::uint64_t binding = dynamicBinding_[slot]) {
             ApplyTextureToModels(models, binding, g_host ? g_host->DynamicTextureScale() : 1.0f);
             ChangeModels(occupant, kModelOccupantTypeBuilding, 2);
