@@ -6,6 +6,7 @@
 // traffic station utilizations and connection congestion, the port counts by size and stage, the neighbour-deal
 // "can buy / sell" proposals, the power-plant / water-building locals and the regional commodity imports / exports.
 #include <cstring>
+#include "platform/Unwired.h"
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -160,6 +161,7 @@ void CityPlanning() {
 
 // ---- HQ occupant variables (7.5)
 void HQ() {
+    SC4_UNWIRED("UpdateSimulatorStatistics HQ (advisors.md 7.5): the occupant minimum-funding / grade locals and the tract extremes are not published");
     auto* res = Comp<cSC4ResidentialSimulator>(CityComponent::ResidentialSimulator);
     if (!res) return;
     auto count = [&](bool school, std::initializer_list<std::uint32_t> groups) {
@@ -232,6 +234,7 @@ void Safety() {
         G("g_police_coverage_p", X100(police->GetPercentCoverage()));
         G("g_jail_capacity", police->GetJailCapacity());
     }
+    SC4_UNWIRED("UpdateSimulatorStatistics Safety (advisors.md 7.6): g_school_strike_chance / g_health_strike_chance publish 0 (residential +0x28 / +0x2c not read)");
     G("g_school_strike_chance", 0.0);   // PARTIAL: residential +0x28 / +0x2c
     G("g_health_strike_chance", 0.0);
     G("g_fire_funding_p", X100(DepartmentFunding(0x28f55a9f)));
@@ -249,6 +252,7 @@ void Safety() {
 
 // ---- Traffic (7.7)
 void Traffic() {
+    SC4_UNWIRED("UpdateSimulatorStatistics Traffic (advisors.md 7.7): g_road_funding_p / g_masstransit_funding_p, station utilizations, connection congestion and port counts by size and stage are not published");
     auto* traffic = Comp<cSC4TrafficSimulator>(CityComponent::TrafficSimulator);
     if (traffic) {
         const auto& rows = traffic->PublishedStats();
@@ -282,6 +286,7 @@ void Traffic() {
 
 // ---- Utility (7.8)
 void Utility() {
+    SC4_UNWIRED("UpdateSimulatorStatistics Utility (advisors.md 7.8): g_power_funding_p, the neighbor-deal can buy / sell proposals, power-plant / water-building locals and regional commodity imports / exports are not published");
     if (auto* power = Comp<cSC4PowerSimulator>(CityComponent::PowerSimulator)) {
         G("g_power_production_capacity", power->GetMonthlyProduction());
         G("g_power_consumed", power->GetMonthlyConsumption());

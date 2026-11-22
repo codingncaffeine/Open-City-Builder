@@ -631,6 +631,8 @@ struct StubView3DWin final : IView3DWinHost {
     // Only the reward cheat so far (it sets the view's +0x456 byte, ProcessCheatCode 0x10078526a); the other cheats are not ported.
     void ProcessCheatCode(std::uint32_t id, const char* cmdLine) override {
         if (id == 0x4a82253eu) rewardsUnlocked_ = true;   // "You don't deserve it"
+        else if (id == 0xca7bc5b5u || id == 0xaa7a2746u || id == 0x6a7a276eu || id == 0x6976afa0u || id == 0x4a972f37u || id == 0x4ac096cau)
+            SC4_UNWIRED("cSC4View3DWin::ProcessCheatCode: the MagnifyView / ToggleZots / ToggleZones / AnimationRecorder / EnableAnimationStepping / BuildingPlop cheats are not ported");
     }
     void AddBuildingsToItemList(std::uint32_t menuId, const std::set<std::uint32_t>& include, const std::set<std::uint32_t>& exclude,
                                 std::multimap<int, cISC4CatalogItem*>& items) override {
@@ -784,7 +786,7 @@ void RunGraphicOptionsDialog(std::function<std::uint8_t*()> preferences) {
 
 // #City# #Mayor# #Year# #Population# for the string detokenizer (cSCStringDetokenizerDefault): the loaded city, its simulator
 // date and its residential population, numbers grouped as the English locale does. PARTIAL: #Region# (the region's name is
-// not reachable from the city natively) answers "unknown".
+// not asked) answers "unknown".
 class DetokenizerHost final : public sc4::IDetokenizerHost {
 public:
     bool CityName(cIGZString& out) override {
@@ -813,12 +815,14 @@ public:
         return true;
     }
     void FormatNumber(long value, cIGZString& out) override { out.AssignFromCString(GroupDigits(value).c_str()); }
-    bool GetRegionName(cIGZString&) override { return false; }
+    bool GetRegionName(cIGZString&) override {
+        SC4_UNWIRED("cSCStringDetokenizerDefault #Region#: the region's name is not asked (the token reads unknown)");
+        return false;
+    }
 };
 
 // The advisor popups (cSC4AdvisorPopupTracker): an activated advice of high enough priority opens the advisor's modal
-// page while the game pauses, with the advisor's animated head. PARTIAL: the tutorial and the window-location saver are
-// not up natively.
+// page while the game pauses, with the advisor's animated head.
 class AdvisorPopupHost final : public sc4::IAdvisorPopupTrackerHost {
     static bool Debug() { static const bool on = std::getenv("SC4_POPUPDEBUG") != nullptr; return on; }
 public:

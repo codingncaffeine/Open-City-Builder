@@ -1,4 +1,5 @@
 #include "app/NativeWaterRipple.h"
+#include "platform/Unwired.h"
 #include "app/NativeVolcanoLava.h"
 #include "app/NativeDemolishTool.h"
 #include "app/NativeNetworkTool.h"
@@ -335,6 +336,7 @@ public:
         if (!sc4::SC4ReadGZSerializable(*load.GetStream(), sc4::kGZCLSID_cSC4CameraControl, &object, true) || !object) return true;
         auto* saved = static_cast<sc4::cSC4CameraControl*>(static_cast<cIGZSerializable*>(object));
         g_savedView = SavedView{true, saved->ViewTarget(), saved->Zoom(), saved->Rotation()};
+        SC4_UNWIRED("cSC4View3DWin::DoLoad: the saved 3D render, model maker and simulator state and the view filter map are not read");
         static_cast<cIGZSerializable*>(object)->Release();
         ApplySavedView();
         return true;

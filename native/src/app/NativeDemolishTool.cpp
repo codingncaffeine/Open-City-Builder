@@ -2,6 +2,7 @@
 // occupant picks of the city view, the lot map, the demolition utility (NativeDemolition.cpp), the budget, and the marked
 // cells drawn through the zone overlay's highlight cells in the draw context's highlight colours 9 (can go) and 10 (cannot).
 #include "app/NativeDemolishTool.h"
+#include "platform/Unwired.h"
 
 #include "sc4/DrawContext.h"
 #include "sc4/PackedRenderState.h"
@@ -70,6 +71,7 @@ public:
     }
     // PARTIAL: the pick runs without cSC4DemolishableOccupantFilter (any occupant with a model).
     sc4::cISC4Occupant* PickOccupant(int x, int y, bool& signpost) override {
+        SC4_UNWIRED("cSC4ViewInputControlDemolish pick: cSC4DemolishableOccupantFilter is not applied (the nearest model is picked)");
         signpost = false;
         s3d::cIS3DModelInstance* model = nullptr;
         sc4::cSC43DRender* render = CityRenderer();

@@ -2,6 +2,7 @@
 // manager, saved network occupant references) and the car's view of its automata manager (ITrafficAutomataManager over
 // cSC4TrafficAutomataManager). In the original the car calls its manager directly.
 #include <algorithm>
+#include "platform/Unwired.h"
 #include <map>
 #include <memory>
 
@@ -96,11 +97,19 @@ public:
         if (!face) face = std::make_unique<ManagerFace>(manager);
         return face.get();
     }
-    cISC4PathFinder* PathFinder() override { return nullptr; }   // PARTIAL: MySim dispatch routes (the vehicles use the manager's)
-    void NeighborConnectionCells(std::vector<std::int32_t>&) override {}   // PARTIAL: neighbor connections as exits
+    cISC4PathFinder* PathFinder() override {   // PARTIAL: the traffic simulator's path finder (FindBestNeighborConnection)
+        SC4_UNWIRED("cSC4TrafficAutomaton: the traffic simulator's path finder (FindBestNeighborConnection) is not handed over");
+        return nullptr;
+    }
+    void NeighborConnectionCells(std::vector<std::int32_t>&) override {   // PARTIAL: neighbor connections as exits
+        SC4_UNWIRED("cSC4TrafficAutomaton: the neighbors simulator's connection cells are not offered as exits");
+    }
     void StartAudioEvent(std::uint32_t) override {}
     void StopAudioEvent(std::uint32_t) override {}
-    ITrafficParticleSystem* CreateParticleSystem() override { return nullptr; }   // PARTIAL: exhaust / dust particles
+    ITrafficParticleSystem* CreateParticleSystem() override {   // PARTIAL: exhaust / dust particles
+        SC4_UNWIRED("cSC4TrafficAutomaton: the dynamic particle system (exhaust / dust) is not created");
+        return nullptr;
+    }
     // A saved car's network occupant reference, as the map's view of the piece (one reference).
     ITrafficAutomatonOccupant* ReadNetworkOccupant(cIGZIStream& stream) override {
         void* raw = nullptr;
@@ -311,8 +320,12 @@ public:
     // The pedestrians of a box come from their manager (the native automata are not in the occupant manager); the references
     // go to the caller. Other types: PARTIAL (the player-drive collision check asks for vehicles).
     void OccupantsInBox(const float* lo, const float* hi, std::uint32_t type, int count, std::vector<cISC4Occupant*>& out) override {
-        if (type == kPedestrianOccupantType) PedestriansInBox(lo, hi, count, out);
-        else stub()->OccupantsInBox(lo, hi, type, count, out);
+        if (type == kPedestrianOccupantType) {
+            PedestriansInBox(lo, hi, count, out);
+        } else {
+            SC4_UNWIRED("cSC4Vehicle OccupantsInBox: occupant types other than pedestrians answer none (the player-drive collision check asks for vehicles)");
+            stub()->OccupantsInBox(lo, hi, type, count, out);
+        }
     }
     bool DisasterOngoing() override { return NativeDisasterOngoing(); }
     bool CheckRailAccident(int cellX, int cellZ) override {
@@ -348,7 +361,10 @@ public:
         }
         PedestriansInBox(lo, hi, count, out);
     }
-    void IgniteOccupant(cISC4Occupant*) override {}   // PARTIAL: the fire disaster manager (arsonists)
+    // PARTIAL: the fire disaster manager runs natively (NativeDisasters.cpp ignites arson crimes) but is not asked here.
+    void IgniteOccupant(cISC4Occupant*) override {
+        SC4_UNWIRED("cSC4Pedestrian arsonist: the fire disaster manager's IgniteOccupant is not called (the arsonist starts no fire)");
+    }
     ITrafficNetworkMapLot* LotAt(int cellX, int cellZ) override { return NativeTrafficLotAt(cellX, cellZ); }
     const PedestrianTuning* PedestrianTuningTable() override {
         const AutomataTuningGlobals& t = AutomataTuning();

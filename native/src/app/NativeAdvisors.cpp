@@ -5,10 +5,10 @@
 //
 // The advisor window (cSC4AdvisorUIAdvisorWinProc) is created here too, over the city view, with its own host.
 //
-// PARTIAL: loose advisor scripts from the plugin folders
-// (UpdateResourcesFromDirectory), the tutorial registry's Lua, the MySim functions, is_tutorial, and the building words of
-// a reward subject.
+// PARTIAL: loose advisor scripts from the plugin folders (UpdateResourcesFromDirectory) and the building words of a
+// reward subject.
 #include <algorithm>
+#include "platform/Unwired.h"
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
@@ -544,6 +544,7 @@ int L_window_map(lua_State* L) { WindowOpen(L, 0x6a5bdfcd); return 0; }
 int L_window_graph(lua_State* L) { WindowOpen(L, 0x6a720993); return 0; }
 int L_window_query(lua_State*) {   // PARTIAL: the query dialog (cSC4ViewInputControlQuery::DoQueryDialog) is not wired from here
     if (cSC4AdvisorSystem* system = System()) system->GetContextAdvice();
+    SC4_UNWIRED("nsAdviceAPI window_query: the original opens the query dialog for the advice's subject");
     return 0;
 }
 
@@ -716,7 +717,9 @@ public:
         count = sizeof(kExtensions) / sizeof(kExtensions[0]);
         return kExtensions;
     }
-    void UpdateResourcesFromDirectory(std::uint32_t, const char*) override {}   // PARTIAL: loose advisor scripts
+    void UpdateResourcesFromDirectory(std::uint32_t, const char*) override {   // PARTIAL: loose advisor scripts
+        SC4_UNWIRED("cSC4AdvisorSystem::UpdateResourcesFromDirectory: loose advisor scripts from the plugin folders are not loaded");
+    }
     void LoadPackageScripts(cISCLua* lua, std::uint32_t package, int flags) override {
         const int failed = SCLuaHelp::LoadPackageScripts(lua, package, static_cast<std::uint32_t>(flags));
         if (kTrace) std::fprintf(stderr, "advisors: package scripts of 0x%08x loaded, %d did not run\n", package, failed);
@@ -815,7 +818,11 @@ public:
         record.text = text;
         civic->UpdateConditionalBuildingStatus(guid, &record);
     }
-    bool GetBuildingWords(std::uint32_t, std::uint32_t& word0, std::uint32_t& word1) override { word0 = word1 = 0; return false; }   // PARTIAL
+    bool GetBuildingWords(std::uint32_t, std::uint32_t& word0, std::uint32_t& word1) override {   // PARTIAL
+        SC4_UNWIRED("cSC4RewardAdvice::GetTrigger: the reward building's subject words are not looked up (subject data stays 0)");
+        word0 = word1 = 0;
+        return false;
+    }
     cISC4AdviceSubject* CreateSubject() override { return NewSubject(); }
 };
 

@@ -273,6 +273,7 @@ public:
     }
     // PARTIAL: terrain vslot 0x44(rect, 0, 1); the highest terrain point of the footprint's corners and centre stands in.
     float SurfaceHeightForFootprint(const float rect[4]) override {
+        SC4_UNWIRED("cSC4BuildingDevelopmentSimulator footprint height: terrain vslot 0x44(rect, 0, 1) is not recovered; the highest corner / center stands in");
         sc4::cSTETerrain* terrain = Terrain();
         if (!terrain) return 0.0f;
         float best = terrain->GetAltitude((rect[0] + rect[2]) * 0.5f, (rect[1] + rect[3]) * 0.5f);

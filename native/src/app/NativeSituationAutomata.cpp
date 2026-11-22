@@ -7,6 +7,7 @@
 //   - the vehicle, aircraft and pedestrian managers and the occupant manager get one view each.
 // A translation unit of its own because the automata headers do not combine with the situation manager's.
 #include <cmath>
+#include "platform/Unwired.h"
 #include <cstdint>
 #include <map>
 #include <unordered_set>
@@ -67,7 +68,10 @@ public:
     void SetGroup(std::uint32_t group) override { o_.AddOccupantGroup(group); }         // 0xb8
     ISituationAutomaton* AsAutomaton() override;                                        // QueryInterface(0xa9b40f05)
     // Recovered-partial: the network occupant queries feed the coverage missions, which are not recovered.
-    bool IsNetworkOccupant() override { return false; }
+    bool IsNetworkOccupant() override {
+        SC4_UNWIRED("cSC4CitySituation occupant: the network occupant queries (coverage missions) are not recovered (never a network piece)");
+        return false;
+    }
     bool NetworkFlagsMatch(std::uint32_t) override { return false; }
     void NetworkCell(int& x, int& z) override { x = z = 0; }
 
@@ -95,7 +99,10 @@ public:
     void AddListener(cIGZMessageTarget2* target) override { a_.AddCallback(target); }            // 0x138
     void RemoveListener(cIGZMessageTarget2* target) override { a_.RemoveCallback(target); }      // 0x140
     // 0x1c0: the pursuit state's target. PARTIAL: the recovered automaton states keep no chase target natively.
-    ISituationAutomaton* StateTarget() override { return nullptr; }
+    ISituationAutomaton* StateTarget() override {
+        SC4_UNWIRED("cSC4CitySituation automaton: the pursuit state's chase target (vslot 0x1c0) is not kept natively");
+        return nullptr;
+    }
     std::uint32_t GetBehavior() override { return a_.GetBehavior(); }                            // 0x1d8
     void StartSFX(std::uint32_t sfx) override { a_.StartSFX(sfx); }                              // 0x1e8
     // 0x218 -> cSC4OccupantGroupTemplate::GetSituationIndicatorImageId: "csi_image" of the group or of its parents.
@@ -300,6 +307,7 @@ public:
         return out;
     }
     std::vector<ISituationOccupant*> NetworkOccupantsInBox(const float*, const float*, std::uint32_t, const float*, float) override {
+        SC4_UNWIRED("cSC4CitySituation: the network occupants in a box (coverage missions) are not answered");
         return {};   // Recovered-partial: only the coverage missions ask for network occupants.
     }
     void ReleaseOccupants(std::vector<ISituationOccupant*>& list) override {   // vslot 0x180

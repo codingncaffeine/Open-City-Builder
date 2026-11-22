@@ -2,6 +2,7 @@
 // the fire instance's services (IFireInstanceHost), the flame effects of cSC4FireOccupant and the flammability simulator's
 // host (the simulator that starts the random fires). Installed after the stub hosts (NativeCityHosts.cpp).
 #include <cstdio>
+#include "platform/Unwired.h"
 #include <cstdlib>
 #include <map>
 #include <memory>
@@ -150,6 +151,7 @@ public:
     void MoveCamera(float x, float y, float z, int zoomLevel) override {
         NativeMoveCameraTo(x, y, z);
         (void)zoomLevel;   // PARTIAL: the jump keeps the player's zoom
+        SC4_UNWIRED("cSC4DisasterManager camera jump: the zoom level of the jump is not applied (the player's zoom stays)");
     }
     bool AutoJumpToDisasters() override { return SL::spPreferences && SL::spPreferences[0xf08] != 0; }
     cISC4DisasterManager* CreateManager(std::uint32_t classId) override {

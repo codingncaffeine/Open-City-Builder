@@ -5,6 +5,7 @@
 //   PARTIAL: the dashboard windows, the automaton pick of the choosing mode, the key effects' controllers and the dispatch
 //   vehicle view answer neutrally; the AEMS calls reach SL::AEMS() only when an audio event system is registered.
 #include <cmath>
+#include "platform/Unwired.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -85,6 +86,7 @@ cSC4AutomataManager* VehicleManager() { return Concrete<cSC4AutomataManager>(Cit
 // The four managers the tool pauses (+0x8c vehicle, +0x90 pedestrian, +0x94 aircraft, +0x98 watercraft). PARTIAL: the native
 // watercraft manager is a class of its own and is not paused.
 cSC4AutomataManager* ManagerAt(int index) {
+    if (index == 3) SC4_UNWIRED("cSC4ViewInputControlPlayerDrive: the watercraft manager (+0x98) is not paused or asked (a class of its own natively)");
     static constexpr CityComponent kManagers[3] = {CityComponent::VehicleManager, CityComponent::PedestrianManager, CityComponent::AircraftManager};
     return index >= 0 && index < 3 ? Concrete<cSC4AutomataManager>(kManagers[index]) : nullptr;
 }
@@ -205,14 +207,26 @@ public:
     bool HasScriptSystem() override { return ScriptSystem() != nullptr; }
     bool CountdownInProgress() override { return NativeSituationCountdownInProgress(); }
     bool CSIVisible() override { return NativeSituationCSIVisible(); }
-    void SetKeyController(cSC4Automaton*, const cRZString&, bool, int) override {}
-    cSC4Automaton* PickAutomaton(int, int) override { return nullptr; }
-    bool HasDispatchView() override { return false; }
+    void SetKeyController(cSC4Automaton*, const cRZString&, bool, int) override {
+        SC4_UNWIRED("cSC4ViewInputControlPlayerDrive: the key effects' automata controllers are not created");
+    }
+    cSC4Automaton* PickAutomaton(int, int) override {
+        SC4_UNWIRED("cSC4ViewInputControlPlayerDrive choosing mode: the automaton pick under the pointer is not wired");
+        return nullptr;
+    }
+    bool HasDispatchView() override {
+        SC4_UNWIRED("cSC4ViewInputControlPlayerDrive: the dispatch vehicle view (indicators, tracking) is not recovered");
+        return false;
+    }
     std::uint32_t TrackOccupant(cSC4Automaton*) override { return 0; }
     void UntrackOccupant(std::uint32_t) override {}
     void ShowAllIndicators(bool) override {}
     void UseAlternateModel(std::uint32_t, bool) override {}
-    bool ShowDashboard(std::uint32_t, std::uint32_t& missionPanel) override { missionPanel = 0; return false; }
+    bool ShowDashboard(std::uint32_t, std::uint32_t& missionPanel) override {
+        SC4_UNWIRED("cSC4ViewInputControlPlayerDrive: the dashboard windows are not created");
+        missionPanel = 0;
+        return false;
+    }
     void HideDashboard() override {}
     void SetDashboardButton(std::uint32_t, bool) override {}
     cISC4AEMSEvents* AEMS() override {

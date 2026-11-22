@@ -194,8 +194,8 @@ struct NativeTerrainHost final : ITerrainHost {
     double RandomDoubleRangeUniform(double lo, double hi) override { return std::uniform_real_distribution<double>(lo, hi)(rng_); }
     double RandomDoubleRangeGaussian(double mean, double sigma) override { return std::normal_distribution<double>(mean, sigma)(rng_); }
     void ApplyTerrainLightingRow(std::int32_t z, std::int32_t x, std::int32_t endX, float* normals, std::int32_t normalStride, void* colours, std::int32_t colourStride) override {
-        // PARTIAL: one fixed sun and an ambient term; the original asks the lighting manager (SL::spLightingManager vslot 0xe0,
-        // GetVertexColors) for the time-of-day colours of the vertex.
+        // The lighting manager (SL::spLightingManager vslot 0xe0, GetVertexColors) gives the time-of-day colours of the vertex;
+        // before it exists, one fixed sun and an ambient term stand in.
         if (std::getenv("SC4_DEBUG")) { static int rows = 0; if (rows++ < 3 || rows % 64 == 0) std::fprintf(stderr, "terrain lighting row %d x %d..%d (%d rows so far)\n", z, x, endX, rows); }
         if (sc4::cSC4LightingManager* lighting = LightingManager()) {
             // the third argument of cSTETerrain::DoLighting is the vertex count of the row

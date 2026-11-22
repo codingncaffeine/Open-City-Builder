@@ -4,6 +4,7 @@
 // hands out views. The views are stateless pass-throughs kept per object address for the process: a new object at a recycled
 // address simply gets the same pass-through.
 #include <map>
+#include "platform/Unwired.h"
 #include <memory>
 #include <vector>
 
@@ -174,7 +175,10 @@ public:
         cellX = int(x / 16.0f);
         cellZ = int(z / 16.0f);
     }
-    bool SimulationActive() override { return HostCity() != nullptr; }   // PARTIAL: the vehicle / pedestrian managers' IsActive
+    bool SimulationActive() override {   // PARTIAL: the vehicle / pedestrian managers' IsActive
+        SC4_UNWIRED("cSC4TrafficNetworkMap: the vehicle / pedestrian managers' IsActive is not asked (a loaded city stands in)");
+        return HostCity() != nullptr;
+    }
     ITrafficNetworkMapLot* LotAtCell(int x, int z) override { return LotViewOf(NativeLotAtCell(x, z, false)); }
     ITrafficNetworkMapLot* LotOf(cISC4Occupant* occupant) override {
         if (!occupant) return nullptr;
@@ -191,7 +195,10 @@ public:
         return out;
     }
     void ReleaseOccupants(const std::vector<cISC4Occupant*>& occupants) override { for (cISC4Occupant* o : occupants) if (o) o->Release(); }
-    std::vector<ITrafficNetworkMapProp*> PropsAtCell(int, int) override { return {}; }   // PARTIAL: no stoplight props natively
+    std::vector<ITrafficNetworkMapProp*> PropsAtCell(int, int) override {   // PARTIAL: no stoplight props natively
+        SC4_UNWIRED("cSC4TrafficNetworkMap: the stoplight props of a cell are not answered (none)");
+        return {};
+    }
     bool HasTerrain() override { return Terrain() != nullptr; }
     float TerrainHeightAt(float x, float z) override { cSTETerrain* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
     ITrafficNetworkMapBuilding* LotBuilding(ITrafficNetworkMapLot* lot) override {
@@ -205,8 +212,14 @@ public:
         if (!slot) slot = std::make_unique<BuildingView>(building);
         return slot.get();
     }
-    int ActiveEdgesForBuilding(std::uint32_t, std::uint8_t) override { return 0xf; }   // PARTIAL: BDS vslot 0xf0 (every edge)
-    void GetViewPosition(float& x, float& y, float& z) override { x = y = z = 0.0f; }   // PARTIAL: view utilities' camera
+    int ActiveEdgesForBuilding(std::uint32_t, std::uint8_t) override {   // PARTIAL: BDS vslot 0xf0 (every edge)
+        SC4_UNWIRED("cSC4TrafficNetworkMap: the building development simulator's active edges (vslot 0xf0) are not asked (every edge)");
+        return 0xf;
+    }
+    void GetViewPosition(float& x, float& y, float& z) override {   // PARTIAL: view utilities' camera
+        SC4_UNWIRED("cSC4TrafficNetworkMap: the view utilities' camera position is not answered (origin)");
+        x = y = z = 0.0f;
+    }
     void GetViewTarget(float& x, float& y, float& z) override { x = y = z = 0.0f; }
     void SubscribeMessage(std::uint32_t message) override { if (SL::spMS2 && map_) SL::spMS2->AddNotification(map_, message); }
     void UnsubscribeMessage(std::uint32_t message) override { if (SL::spMS2 && map_) SL::spMS2->RemoveNotification(map_, message); }

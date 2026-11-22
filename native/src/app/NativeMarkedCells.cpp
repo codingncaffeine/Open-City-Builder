@@ -5,6 +5,7 @@
 //   cSC4NetworkOccupantFilter(0x1f4f), its altitude at each corner + 15.5 for flags 0x304) keeps the terrain altitude; the
 //   depth-inverted second pass (SetCellColorDepthInvert) has no caller natively.
 #include <cmath>
+#include "platform/Unwired.h"
 #include <cstdint>
 #include <vector>
 
@@ -101,6 +102,7 @@ private:
     // 0x0051a50c: four corners per cell on the terrain (16 m cells take the vertex grid directly and follow the cell's
     // triangulation), culled when neither the first nor the third corner is in the frustum, drawn 0x400 vertices at a time.
     void DrawCells(SC4DrawContext& context, const std::uint32_t* single) {
+        if (useNetwork_) SC4_UNWIRED("SC4MarkedCellView network-altitude mode: the network occupant's corner altitudes are not used (terrain altitude stands in)");
         cSTETerrain* terrain = CityTerrain();
         if (!terrain) return;
         const std::uint32_t cellsX = terrain->CellCountX(), cellsZ = terrain->CellCountZ();

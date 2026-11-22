@@ -1,10 +1,11 @@
 // The data-view map window's services on the native application (sc4::IWinMapViewHost). The generated stub this replaces
 // answered every call neutrally: no message server (so cSC4WinMapView::Init failed) and FilterUICommand false (so every
 // button of the Data Views panel was vetoed before the view saw it).
-//   PARTIAL: CollectHighlights views 6 and 9 (see there) and the pothole decal answer
-//   "nothing"; the tutorial
-//   command filter always passes (no tutorial runs natively).
+//   PARTIAL: CollectHighlights views 6 and 9 (see there) and the pothole decal answer "nothing"; the tutorial command
+//   filter always passes (tutorials run natively, app/NativeTutorial.cpp, but their filter is not asked here).
 #include <chrono>
+#include "platform/Unwired.h"
+#include "app/NativeTutorial.h"
 #include <set>
 #include <cstdio>
 #include <cstdlib>
@@ -242,6 +243,12 @@ public:
                     }
                 }
                 break;
+            case 6:
+                SC4_UNWIRED("cSC4WinMapView::UpdateHighlights view 6: garbage buildings and landfill-zone occupants are not collected");
+                break;
+            case 9:
+                SC4_UNWIRED("cSC4WinMapView::UpdateHighlights view 9: the traffic simulator's transit switches are not collected");
+                break;
             default: break;
         }
         if (Trace() && !out.empty()) std::fprintf(stderr, "map view: highlight view %u: %zu highlights\n", view, out.size());
@@ -294,7 +301,10 @@ public:
     }
     int CitySizeXInCells() override { cSC4City* city = HostCity(); return city ? static_cast<int>(city->CellCountX()) : 0; }
     int CitySizeZInCells() override { cSC4City* city = HostCity(); return city ? static_cast<int>(city->CellCountZ()) : 0; }
-    cIGZBuffer* CreatePotholeDecal() override { return nullptr; }
+    cIGZBuffer* CreatePotholeDecal() override {
+        SC4_UNWIRED("cSC4WinMapView: the pothole decal is not created");
+        return nullptr;
+    }
     int MapRotation() override {
         cSC43DRender* renderer = CityRenderer();
         cSC4CameraControl* camera = renderer ? renderer->GetCameraControl() : nullptr;
@@ -304,7 +314,10 @@ public:
     void SendCommand(std::uint32_t command, std::uint32_t, std::uint32_t) override {
         if (cSC4View3DWin* view = CityView3DWin()) view->ProcessViewCommand(command);
     }
-    bool FilterUICommand(const cGZMessage&) override { return true; }
+    bool FilterUICommand(const cGZMessage&) override {
+        if (NativeTutorialRunning()) SC4_UNWIRED("cSC4WinMapView::FilterUICommand: a running tutorial's command filter is not asked (every data view button passes)");
+        return true;
+    }
 
     bool LoadDataViewExemplar(std::uint32_t key, WinMapViewExemplar& out) override {
         void* resource = nullptr;

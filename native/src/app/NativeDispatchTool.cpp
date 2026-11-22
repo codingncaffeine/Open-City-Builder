@@ -2,6 +2,7 @@
 // boxes' (cSC4PylonOccupant's IPylonOccupantHost): the city view's picks and cursor text, the renderer, the view utilities and the
 // pylon textures. The dispatch manager side is app/NativeDispatch.cpp.
 #include <algorithm>
+#include "platform/Unwired.h"
 #include <cstdio>
 #include <cstdlib>
 
@@ -52,6 +53,7 @@ public:
         auto* pylon = static_cast<cISC4PylonOccupant*>(raw);
         const bool shown = pylon->GetUIState() != 0;
         pylon->Release();
+        if (shown) SC4_UNWIRED("cPylonFilter::IsOccupantIncluded: the slot 0x40 test and the MySim call box owner test (0x0a1da42f) are not ported");
         return shown;
     }
 } g_pylonFilter;
@@ -101,7 +103,10 @@ public:
         z = v ? v->ViewDirection().z : 1.0f;
     }
     bool OccupantDrawSuppressed() override { return false; }
-    bool CreateBuffer(cIGZBuffer**) override { return false; }
+    bool CreateBuffer(cIGZBuffer**) override {
+        SC4_UNWIRED("cSC4PylonOccupant call number: the digit buffer, font and texture upload are not native (the call box shows no number)");
+        return false;
+    }
     IPylonFont* CallNumberFont() override { return nullptr; }
     bool UploadTexture(cIGZBuffer*, std::uint32_t&) override { return false; }
     void ReleaseTexture(std::uint32_t) override {}
@@ -122,6 +127,7 @@ public:
     // manager holds are tested in screen space instead: the projection of each one's world box, nearest the camera last drawn
     // first (the original's pick takes the frontmost model).
     IPylonOccupant* PickPylon(int x, int y) override {
+        SC4_UNWIRED("cSC4ViewInputControlDispatch pick: cSC43DRender::Pick with cPylonFilter is not recovered; a screen-space box test stands in");
         auto* manager = dynamic_cast<cSC4DispatchManager*>(NativeDispatchManager());
         if (!manager) return nullptr;
         IPylonOccupant* best = nullptr;

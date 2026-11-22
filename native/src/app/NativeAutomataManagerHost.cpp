@@ -3,10 +3,10 @@
 // (app/hosts/StubAutomataManager.cpp) for the native game: the framework (messages, the animation ticks), the city (script
 // groups, the 24 hour clock, cells, terrain), resources (tuning, exemplars), creation of automata by class id and the
 // managers' views of loaded automata.
-//   PARTIAL: cheats, the debug view, path views, the dispatch view, the group
-//   budget, the network manager's cell masks, the traffic simulator's edge counts and the response occupants answer
-//   neutrally; the population pass therefore spawns nothing yet.
+//   PARTIAL: the debug view, path views, the dispatch view, the group budget, the network manager and its cell masks, the
+//   traffic simulator's edge counts and the response occupants answer neutrally. The cheats reach the game's cheat manager.
 #include <cstdio>
+#include "platform/Unwired.h"
 #include <cstdlib>
 #include <list>
 #include <vector>
@@ -201,6 +201,7 @@ public:
             out[1] = blockMin[2];
             out[2] = blockMax[0];
             out[3] = blockMax[2];
+            SC4_UNWIRED("cSC43DRender::UpdateVisibleTerrainMetrics: with no terrain under the view the original walks the city boundary; the ground plane rectangle stands in");
             return;
         }
         const float x = sum[0] / static_cast<float>(hits), z = sum[2] / static_cast<float>(hits);
@@ -261,11 +262,17 @@ public:
     void RemoveCheatListener(cIGZMessageTarget* target) override { native::RemoveGameCheatListener(target, 0); }
     void PostMessage(cIGZMessage2* message, bool front) override { if (SL::spMS2 && message) SL::spMS2->MessagePost(message, front); }
     // ---- city
-    IAutomataNetworkManager* NetworkManager() override { return nullptr; }
+    IAutomataNetworkManager* NetworkManager() override {
+        SC4_UNWIRED("IAutomataManagerHost::NetworkManager: the city's network manager is not handed to the automata managers");
+        return nullptr;
+    }
     IAutomataScriptGroups* ScriptGroups() override { return &g_scriptGroups; }
     IAutomataClock* CityClock() override { return &g_clock; }
     IAutomataKindManager* KindManager(int) override { return nullptr; }
-    IAutomataGroupBudget* GroupBudget() override { return nullptr; }
+    IAutomataGroupBudget* GroupBudget() override {
+        SC4_UNWIRED("IAutomataManagerHost::GroupBudget: the automata group budget is not wired");
+        return nullptr;
+    }
     bool CellToWorld(int cellX, int cellZ, float& x, float& z) override { x = float(cellX) * 16.0f; z = float(cellZ) * 16.0f; return true; }
     bool WorldToCell(float x, float z, int& cellX, int& cellZ) override { cellX = int(x / 16.0f); cellZ = int(z / 16.0f); return true; }
     float CellSize() override { return 16.0f; }
@@ -275,7 +282,11 @@ public:
         occupant->GetBoundingCityCells(rect);
         return true;
     }
-    bool LotCellMasks(int, int, std::uint32_t masks[3]) override { masks[0] = masks[1] = masks[2] = 0; return false; }
+    bool LotCellMasks(int, int, std::uint32_t masks[3]) override {
+        SC4_UNWIRED("IAutomataManagerHost::LotCellMasks: the network manager's cell masks answer none");
+        masks[0] = masks[1] = masks[2] = 0;
+        return false;
+    }
     // ---- occupants
     cIGZUnknown* CreateOccupantGroupFilter(const std::vector<std::uint32_t>&) override { return nullptr; }
     bool EnumerateOccupants(cIGZUnknown*, std::list<IAutomataOccupant*>&) override { return false; }
@@ -301,7 +312,10 @@ public:
     IAutomataPathView* CreatePathView() override { return nullptr; }
     void AddRendererLayer(IAutomataPathView*) override {}
     void RemoveRendererLayer(IAutomataPathView*) override {}
-    IAutomataDispatchView* DispatchView() override { return nullptr; }
+    IAutomataDispatchView* DispatchView() override {
+        SC4_UNWIRED("IAutomataManagerHost::DispatchView: cSC4DispatchVehicleView (the on-screen vehicle labels) is not recovered");
+        return nullptr;
+    }
     void ReleaseObject(cIGZUnknown* object) override { if (object) object->Release(); }
     // ---- simulator / misc
     IAutomataSimulator* Simulator() override {
@@ -434,12 +448,14 @@ sc4::cSC4AutomataManager* NativeAutomataManagerForGroup(std::uint32_t group) {
         cSC4AutomataManager* manager = Concrete<cSC4AutomataManager>(component);
         if (manager && manager->CanCreateGroup(group)) return manager;
     }
+    SC4_UNWIRED("cSC4AutomataManager::GetAutomataManagerForGroup: the watercraft manager (city vslot 0x170) is not asked for the group");
     return nullptr;
 }
 // SL::spVehicleManager / spPedestrianManager / spAircraftManager / spWatercraftManager by index (the automata scripts' source
 // managers). PARTIAL: the watercraft manager (3) is a class of its own natively and answers null.
 sc4::cSC4AutomataManager* NativeAutomataManagerAt(int index) {
     static constexpr CityComponent kManagers[3] = {CityComponent::VehicleManager, CityComponent::PedestrianManager, CityComponent::AircraftManager};
+    if (index == 3) SC4_UNWIRED("SL::spWatercraftManager as an automata script source manager: the native watercraft manager is a class of its own (null)");
     return index >= 0 && index < 3 ? Concrete<cSC4AutomataManager>(kManagers[index]) : nullptr;
 }
 // cSC4TrafficAutomataManager::IsLayerVisible (i386 0x000ca21a) on the vehicle manager: the view level shows that layer.

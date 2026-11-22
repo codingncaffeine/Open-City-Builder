@@ -2,6 +2,7 @@
 // forwarding each IAutomataAutomaton / ITrafficAutomataAutomaton slot to the automaton's method at the same original vtable
 // offset (the offsets are the interface's comments in sc4/AutomataManager.h and TrafficAutomataManager.h).
 #include "app/NativeAutomataViews.h"
+#include "platform/Unwired.h"
 
 #include <map>
 #include <memory>
@@ -190,7 +191,9 @@ public:
     }
     // The pursuit state's target (state record +0x38): PARTIAL, no pursuit natively yet.
     IAutomataAutomaton* StateTarget() override { return nullptr; }
-    void SetStateTarget(IAutomataAutomaton*) override {}
+    void SetStateTarget(IAutomataAutomaton*) override {
+        SC4_UNWIRED("cSC4Automaton pursuit state: the chase target (state record +0x38) is not kept natively");
+    }
     void SetPropertyVariant(std::uint32_t id, cRZVariant& value, bool replace) override {
         if (sc4::cISCPropertyHolder* holder = a_.AsPropertyHolder()) holder->AddProperty(id, &value, replace);
     }

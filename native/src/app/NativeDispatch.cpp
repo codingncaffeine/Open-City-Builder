@@ -4,6 +4,7 @@
 // (IEmergencyVehicleHost, IFireTruckHost, IPatrolCarHost). Spec: OpenSC4 dispatch.md; the route itself is
 // cSC4TrafficAutomataManager::Dispatch (i386 0x000ce2f6).
 #include <cstdio>
+#include "platform/Unwired.h"
 #include <cstdlib>
 #include <list>
 #include <map>
@@ -247,9 +248,12 @@ public:
         WriteMask(station, mask | bit);
     }
     // Slot 11: fire ground 0x4202; police 0x4207 during a disaster, else 0x4228; key (0,0,0), flags 0x11882.
+    // PARTIAL: the disaster layer's query exists natively (NativeDisasterOngoing) but is not asked here yet.
     bool GetDispatchAutomataProperties(cISC4Occupant*, std::uint32_t& group, cGZPersistResourceKey& key, std::uint32_t& flags,
                                        const float*) override {
-        group = type_ == kDispatchTypeFire ? 0x4202u : 0x4228u;   // PARTIAL: no disaster layer natively (police 0x4207 then)
+        group = type_ == kDispatchTypeFire ? 0x4202u : 0x4228u;
+        if (type_ != kDispatchTypeFire && NativeDisasterOngoing())
+            SC4_UNWIRED("cSC4PoliceSimulator::GetDispatchAutomataProperties: during a disaster the original dispatches police group 0x4207, the port 0x4228");
         key = cGZPersistResourceKey{};
         flags = 0x11882;
         return true;
@@ -380,7 +384,10 @@ public:
     cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
     IDispatchCity* City() override { return HostCity() ? &g_city : nullptr; }
     // PARTIAL: cSC4DispatchVehicleView (the on-screen vehicle labels) is not recovered natively.
-    IDispatchVehicleView* CreateDispatchVehicleView() override { return nullptr; }
+    IDispatchVehicleView* CreateDispatchVehicleView() override {
+        SC4_UNWIRED("cSC4DispatchManager::CreateDispatchVehicleView: cSC4DispatchVehicleView (the on-screen vehicle labels) is not recovered");
+        return nullptr;
+    }
     IPylonOccupant* CreatePylonOccupant() override {
         auto* pylon = new cSC4PylonOccupant();
         pylon->AddRef();
@@ -434,6 +441,8 @@ public:
     // vehicle (the cars around it pull over) and the flashing light model its exemplar names; lights off drops both.
     // PARTIAL: the player-drive audio event (AEMS event 0xb) is not posted.
     void SetEmergencyLights(cSC4EmergencyVehicle& vehicle, bool on) override {
+        if (vehicle.GetBehavior() == kStatePlayerDrive)
+            SC4_UNWIRED("cSC4EmergencyVehicle::ShowEmergencyLights: the player-drive AEMS event 0xb (siren start / stop) is not posted");
         if (cIGZUnknown* old = vehicle.LightController()) {
             NativeRemoveController(old);
             vehicle.SetLightController(nullptr);
@@ -551,14 +560,20 @@ public:
     bool OccupantsInBox(const float* min, const float* max, cIGZUnknown* filter, int& count) override {
         return NativeCountOccupantsInBox(min, max, filter, count);
     }
-    int SpillTotal() override { return 0; }
+    int SpillTotal() override {
+        SC4_UNWIRED("cSC4FireTruck: the toxic spill counts (spill manager) are not wired (always 0)");
+        return 0;
+    }
     int SpillsInRect(const int*) override { return 0; }
     cIGZUnknown* NewFireCrew(cSC4FireTruck& truck) override { return NativeNewFireCrew(truck); }
     void SetFireCrewCompetence(cIGZUnknown* crew, float competence) override { NativeSetFireCrewCompetence(crew, competence); }
     void RegisterFireCrew(cIGZUnknown* crew) override { NativeRegisterFireCrew(crew); }
     void SetupFireCrew(cIGZUnknown* crew) override { NativeSetupFireCrew(crew); }
     void RemoveFireCrew(cIGZUnknown* crew) override { NativeRemoveFireCrew(crew); }
-    bool PickGroundPoint(float, float, cS3DVector3&) override { return false; }
+    bool PickGroundPoint(float, float, cS3DVector3&) override {
+        SC4_UNWIRED("cSC4FireTruck player drive: the hose aim's ground pick is not wired");
+        return false;
+    }
     bool CityCells(int& width, int& height) override { return CityCellCount(width, height); }
     float MaxStreamDistance() override { return AutomataTuning().f21a18; }
 } g_fireTruck;

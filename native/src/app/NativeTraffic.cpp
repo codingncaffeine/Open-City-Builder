@@ -2,9 +2,10 @@
 // the network model, the roads / mass transit departments, history and the simulator agents. Also what the lots ask of the
 // traffic simulator (travel strategy shares, freight scaling, their job capacities).
 //
-// PARTIAL (each a to-do): the neighbour connections (no regional commuters or exits: every neighbour seam answers "none"), the
-// mass transit department's missing line item 3 is not created, transit switches / tunnels / ferries (the simulator models none).
+// PARTIAL: a missing department line item (the mass transit department's line item 3) is not created, and the simulator models
+// no ferries (sc4/TrafficSimulator.cpp DoLotActivated). The neighbour connections, transit switches and tunnels are answered.
 #include "app/NativeTraffic.h"
+#include "platform/Unwired.h"
 
 #include <cmath>
 #include <cstdio>
@@ -312,7 +313,9 @@ private:
     void SetExpense(std::uint32_t departmentId, int line, int amount) {
         cSC4BudgetSimulator* budget = Budget();
         cSC4DepartmentBudget* department = budget ? budget->GetDepartmentBudget(departmentId) : nullptr;
-        if (cSC4LineItem* item = department ? department->GetLineItem(std::uint32_t(line)) : nullptr) item->SetFullExpenses(amount);
+        cSC4LineItem* item = department ? department->GetLineItem(std::uint32_t(line)) : nullptr;
+        if (item) item->SetFullExpenses(amount);
+        else if (department) SC4_UNWIRED("cSC4TrafficSimulator budget: a missing roads / mass transit line item is not created, its expense is dropped");
     }
     float Funding(std::uint32_t departmentId) {
         cSC4BudgetSimulator* budget = Budget();

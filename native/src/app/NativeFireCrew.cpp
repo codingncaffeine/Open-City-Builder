@@ -1,6 +1,7 @@
 // The fire crews in a native city: the services of cSC4SimFireCrew (ISimFireCrewHost) and what the fire engines' host
 // (app/NativeDispatch.cpp) needs to put a crew down and take it back.
 #include <cfloat>
+#include "platform/Unwired.h"
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -102,7 +103,10 @@ public:
     float HoseRadius() override { return AutomataTuning().f21a18; }
     void MoveModelInRenderer(IAutomatonModel*) override {}   // the automata host places a model when its transform is set
     // PARTIAL: the hose registration point of the crew model (the stream leaves from the model's origin).
-    bool RegPointTranslations(IAutomatonModel*, const char*, std::vector<cS3DVector3>&) override { return false; }
+    bool RegPointTranslations(IAutomatonModel*, const char*, std::vector<cS3DVector3>&) override {
+        SC4_UNWIRED("cSC4SimFireCrew hose: the crew model's hose registration point is not read (the stream leaves the model origin)");
+        return false;
+    }
 private:
     cRZRandom random_{0x5f1cu};
 } g_crewHost;

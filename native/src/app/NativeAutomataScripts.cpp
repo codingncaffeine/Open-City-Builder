@@ -4,7 +4,7 @@
 // controller templates and no group classes: every automaton was created as a plain vehicle.
 // The seven "automata" registry commands reach the city's controller manager (SL::spCity vslot 0x178) and the automata manager
 // that takes the group (cSC4AutomataManager::StaticCreateAutomaton); a scripted automaton then registers its own node.
-//   PARTIAL: the watercraft manager is not asked for a group.
+//   PARTIAL: the watercraft manager is not asked for a group (NativeAutomataManagerForGroup / NativeAutomataManagerAt).
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
