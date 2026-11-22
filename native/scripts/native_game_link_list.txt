@@ -491,7 +491,7 @@ src/app/NativePowerLineTool.cpp
 src/sc4/PowerLineGeometry.cpp
 src/app/NativePreBuiltModel.cpp
 src/app/hosts/StubProp.cpp
-src/app/hosts/StubPropController.cpp
+src/app/NativePropController.cpp
 src/app/hosts/StubPropDeveloper.cpp
 src/app/hosts/StubPropManager.cpp
 src/app/hosts/StubPropertyView.cpp

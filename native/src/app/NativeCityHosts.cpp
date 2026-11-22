@@ -85,7 +85,7 @@ void InstallPowerLineToolHost();   // NativePowerLineTool.cpp
 void InstallPropDeveloperStub();
 void InstallPropManagerStub();
 void InstallPropStub();
-void InstallPropControllerStub();
+void InstallNativePropController();
 void InstallPropertyViewStub();
 void InstallPylonOccupantStub();
 void InstallRender3DStub();
@@ -199,7 +199,7 @@ void InstallStubHosts() {
     InstallPropDeveloperHost();   // the prop developer's real host replaces the stub
     InstallPropManagerStub();
     InstallPropStub();
-    InstallPropControllerStub();
+    InstallNativePropController();
     InstallPropertyViewStub();
     InstallPylonOccupantStub();
     InstallRender3DStub();
