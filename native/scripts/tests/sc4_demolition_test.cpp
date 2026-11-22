@@ -97,8 +97,9 @@ struct Host final : IDemolitionHost {
     void NotifyNeighborsNetworkChange(IDemolishable* n) override { neighborCalls.push_back(n); }
     float TerrainHeight(int, int) override { return 0.0f; }
     bool TerrainCellSkipped(int, int) override { return false; }
-    void TerrainLevelCell(int, int) override { ++levelCells; }
-    void TerrainLevelRect(const DemolitionCellRect&, std::uint32_t) override { ++levelRects; }
+    float levelHeight = 0.0f;
+    void TerrainLevelCell(int, int, float h) override { ++levelCells; levelHeight = h; }
+    void TerrainLevelRect(const DemolitionCellRect&, float h, std::uint32_t) override { ++levelRects; levelHeight = h; }
     void TerrainUpdateRect(const DemolitionCellRect&, std::uint32_t) override { ++updates; }
     float TerrainHeightAtMetres(float, float) override { return 0.0f; }
     bool PropManagerAvailable() override { return propOk; }
@@ -184,12 +185,16 @@ int main() {
     CHECK(host.prepared.size() == 1 && host.prepared[0] == &a && host.batches == 2);
     for (auto [x, z] : host.visited) CHECK(x >= 2 && x <= 3 && z >= 3 && z <= 4);
 
-    // terrain: lowering a free 3x3 area levels it as one rectangle; raising skips every vertex whose 32 m window
-    // (x*16-16+1.5 .. x*16+16-1.5) wholly contains an occupant: the rock at 20..30 m sits in the windows of 1 and 2
-    CHECK(d.ModifyTerrainHeight(true, false, 1, 1, 3, 3, 1.0f, nullptr, 0) == 9 && host.levelRects == 1);
+    // terrain: the area mode levels a free 3x3 area as one rectangle at the height; the per-vertex mode skips every vertex
+    // whose square (x*16-14.5 .. x*16+14.5) an immovable occupant's box overlaps: the rock at 20..30 m touches 1 and 2
+    CHECK(d.ModifyTerrainHeight(true, false, 1, 1, 3, 3, 1.0f, nullptr, 0) == 9 && host.levelRects == 1 && host.levelHeight == 1.0f);
     Occ rock; rock.box[0] = 20; rock.box[2] = 20; rock.box[3] = 30; rock.box[5] = 30;
     host.terrainOccupants = {&rock};
-    CHECK(d.ModifyTerrainHeight(true, true, 1, 1, 3, 3, 1.0f, nullptr, 0) == 5 && host.levelCells == 5);
+    CHECK(d.ModifyTerrainHeight(true, true, 1, 1, 3, 3, 1.0f, nullptr, 0) == 5 && host.levelCells == 5 && host.levelHeight == 1.0f);
+    // a box over 28..36 m overlaps the squares of 1, 2 and 3 on both axes (wholly inside only vertex 2's): nothing is levelled
+    rock.box[0] = 28; rock.box[2] = 28; rock.box[3] = 36; rock.box[5] = 36;
+    host.levelCells = 0;
+    CHECK(d.ModifyTerrainHeight(true, true, 1, 1, 3, 3, 1.0f, nullptr, 0) == 0 && host.levelCells == 0);
 
     // effects: a 10 m building with effect byte 3 is large (0x312) and plays only that effect, not the smaller ones too
     Occ fx; fx.type = kDemolishTypeBuilding;

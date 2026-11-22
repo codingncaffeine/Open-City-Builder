@@ -14,6 +14,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "app/NativeDemolition.h"
 #include "app/NativeBuildingDevelopment.h"
 #include "app/NativeCity.h"
 #include "app/NativeConstruction.h"
@@ -160,17 +161,16 @@ public:
         const float depth = t->GetWaterDepthAtVertex(vx, vz);
         return depth > 0.0f ? t->GetAltitudeAtVertex(vx, vz) + depth : -FLT_MAX;
     }
-    bool VertexIsLevelled(int, int) override {                                        // PARTIAL: vslot 0x128 (the levelled flag)
-        SC4_UNWIRED("cSC4LotDeveloper: terrain vslot 0x128 (vertex levelled flag) is not wired (never levelled)");
-        return false;
+    bool VertexIsLevelled(int x, int z) override {                                    // terrain vslot 0x128 IsWaterVertex(x, z)
+        cSTETerrain* t = Terrain();
+        return t && t->IsWaterVertex(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z));
     }
     int VerticesPerRow() override { cSTETerrain* t = Terrain(); return t ? static_cast<int>(t->CellCountX()) + 1 : 0; }
     float CityWidthMetres() override { cSTETerrain* t = Terrain(); return t ? static_cast<float>(t->CellCountX()) * 16.0f : 0.0f; }
     float CityDepthMetres() override { cSTETerrain* t = Terrain(); return t ? static_cast<float>(t->CellCountZ()) * 16.0f : 0.0f; }
-    // PARTIAL: the terrain leveller (vslot 0x48) is not ported; no vertex changes, so the slope tests see the land as it is.
-    int LevelVertices(float, bool, bool, int, int, int, int, void*, int, int) override {
-        SC4_UNWIRED("cSC4LotDeveloper: the terrain leveller (vslot 0x48) is not ported; a lot keeps the slope under it");
-        return 0;
+    // +0x20 SL::spDemolition i386 vslot 0x24 ModifyTerrainHeight(apply, perVertex, x0, z0, x1, z1, height, lot, reason, null)
+    int LevelVertices(float height, bool apply, bool perVertex, int x0, int z0, int x1, int z1, void* lot, int reason, int) override {
+        return NativeModifyTerrainHeight(apply, perVertex, x0, z0, x1, z1, height, static_cast<cSC4Lot*>(lot), static_cast<std::uint32_t>(reason));
     }
     void CellOfPosition(float x, float z, int& cellX, int& cellZ) override {         // city vslot 0x2f8
         if (cSC4City* city = HostCity()) city->PositionToCell(x, z, cellX, cellZ);

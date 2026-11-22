@@ -32,5 +32,8 @@ void NativeConstructionCrewReport(int x0, int z0, int x1, int z1);   // kit verb
 void NativeTrafficTunnelReport();                           // kit verb `tunnels`, the traffic simulator's half (NativeTraffic.cpp)
 bool DemolishLots(bool commit, sc4::cSC4Lot* const* lots, int count, int privilege, std::uint32_t flags, bool dezone,
                   std::int64_t* cost);
+// SL::spDemolition slot 9 ModifyTerrainHeight(apply, perVertex, vertex rect, height, exempt lot, reason, null): the vertices changed.
+int NativeModifyTerrainHeight(bool apply, bool perVertex, int x0, int z0, int x1, int z1, float height, sc4::cSC4Lot* exempt,
+                              std::uint32_t reason);
 
 }  // namespace native

@@ -155,8 +155,9 @@ public:
     // terrain
     virtual float TerrainHeight(int x, int z) = 0;                     // vslot 0x70
     virtual bool TerrainCellSkipped(int x, int z) = 0;                 // vslot 0x128
-    virtual void TerrainLevelCell(int x, int z) = 0;                   // vslot 0x190
-    virtual void TerrainLevelRect(const DemolitionCellRect& cells, std::uint32_t reason) = 0;   // vslot 0x198
+    virtual void TerrainLevelCell(int x, int z, float height) = 0;     // vslot 0x190 SetAltitudeAtVertex(x, z, height)
+    // vslot 0x198 SetAltitude(rect, height, false, reason)
+    virtual void TerrainLevelRect(const DemolitionCellRect& cells, float height, std::uint32_t reason) = 0;
     virtual void TerrainUpdateRect(const DemolitionCellRect& cells, std::uint32_t reason) = 0;  // vslot 0x228 (1, 1, rect)
     virtual float TerrainHeightAtMetres(float x, float z) = 0;         // vslot 0x60
     // per-type services

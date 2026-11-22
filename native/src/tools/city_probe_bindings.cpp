@@ -189,8 +189,8 @@ public:
     void NotifyNeighborsNetworkChange(IDemolishable* network) override { Seam("IDemolitionHost::NotifyNeighborsNetworkChange");}
     float TerrainHeight(int x, int z) override { Seam("IDemolitionHost::TerrainHeight"); return 0; }
     bool TerrainCellSkipped(int x, int z) override { Seam("IDemolitionHost::TerrainCellSkipped"); return false; }
-    void TerrainLevelCell(int x, int z) override { Seam("IDemolitionHost::TerrainLevelCell");}
-    void TerrainLevelRect(const DemolitionCellRect& cells, std::uint32_t reason) override { Seam("IDemolitionHost::TerrainLevelRect");}
+    void TerrainLevelCell(int x, int z, float) override { Seam("IDemolitionHost::TerrainLevelCell");}
+    void TerrainLevelRect(const DemolitionCellRect& cells, float, std::uint32_t reason) override { Seam("IDemolitionHost::TerrainLevelRect");}
     void TerrainUpdateRect(const DemolitionCellRect& cells, std::uint32_t reason) override { Seam("IDemolitionHost::TerrainUpdateRect");}
     float TerrainHeightAtMetres(float x, float z) override { Seam("IDemolitionHost::TerrainHeightAtMetres"); return 0; }
     bool PropManagerAvailable() override { Seam("IDemolitionHost::PropManagerAvailable"); return false; }

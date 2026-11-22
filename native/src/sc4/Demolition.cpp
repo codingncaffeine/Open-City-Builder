@@ -281,9 +281,9 @@ bool cSC4Demolition::DemolishRegion(bool commit, const DemolitionRegion& region,
 
 // ---- terrain ---------------------------------------------------------------------------------------------------------
 
-// Counts the cells whose height differs from `height`. Lowering (raise == false) refuses when any occupant stands on
-// the area; raising checks every cell: lots that block terrain changes and occupants whose footprint sits wholly
-// inside the cell veto it. The count is returned even when a lot blocks the change (nothing is applied then).
+// Counts the vertices whose height differs from `height`. The area mode (raise == false) refuses when any immovable occupant
+// stands on the area; the per-vertex mode checks every vertex: water vertices, lots that block terrain changes and immovable
+// occupants whose box overlaps the vertex's square skip it (demolition.md 4.7). The count is returned even when a lot blocks the change (nothing is applied then).
 int cSC4Demolition::ModifyTerrainHeight(bool apply, bool raise, int x0, int z0, int x1, int z1, float height,
                                         IDemolishableLot* ignoredLot, std::uint32_t reason) {
     DemolitionCellRect search{std::max(x0 - 1, 0), std::max(z0 - 1, 0), std::min(x1, cellsX_ - 1), std::min(z1, cellsZ_ - 1)};
@@ -301,7 +301,7 @@ int cSC4Demolition::ModifyTerrainHeight(bool apply, bool raise, int x0, int z0, 
                     if (std::fabs(host_->TerrainHeight(x, z) - height) > 0.05f) ++changed;
             if (changed != 0 && lotsAllow({std::max(x0 - 1, 0), std::max(z0 - 1, 0), x1, z1}) && apply) {
                 DemolitionCellRect r{std::max(x0, 0), std::max(z0, 0), std::min(x1, cellsX_), std::min(z1, cellsZ_)};
-                host_->TerrainLevelRect(r, reason);
+                host_->TerrainLevelRect(r, height, reason);
                 host_->TerrainUpdateRect(r, reason);
             }
         }
@@ -316,11 +316,12 @@ int cSC4Demolition::ModifyTerrainHeight(bool apply, bool raise, int x0, int z0, 
                 for (IDemolishable* o : occupants) {
                     float box[6];
                     o->BoundingBox(box);
-                    if (zLo <= box[2] && box[5] <= zHi && box[3] <= xHi && xLo <= box[0]) { contained = true; break; }
+                    // Mac i386 0x000ada30: the occupant's box overlaps the vertex's square (both axes closed)
+                    if (box[0] <= xHi && xLo <= box[3] && box[2] <= zHi && zLo <= box[5]) { contained = true; break; }
                 }
                 if (contained) continue;
                 ++changed;
-                if (apply) host_->TerrainLevelCell(x, z);
+                if (apply) host_->TerrainLevelCell(x, z, height);
             }
         }
         if (changed != 0) host_->TerrainUpdateRect({search.x0, search.z0, search.x1 + 1, search.z1 + 1}, reason);

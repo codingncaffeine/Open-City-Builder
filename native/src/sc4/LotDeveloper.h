@@ -127,11 +127,12 @@ public:
     virtual float VertexWaterHeight(int vertexIndex) = 0;              // vslot 0xf0
     virtual float HeightAt(float x, float z) = 0;                      // vslot 0x60
     virtual float WaterHeightAt(float x, float z) = 0;                 // vslot 0xf8
-    virtual bool VertexIsLevelled(int vx, int vz) = 0;                 // vslot 0x128
+    virtual bool VertexIsLevelled(int vx, int vz) = 0;                 // terrain vslot 0x128 IsWaterVertex(x, z) (the original's name)
     virtual int VerticesPerRow() = 0;                                  // +0x78
     virtual float CityWidthMetres() = 0;                               // +0x7c
     virtual float CityDepthMetres() = 0;                               // +0x80
-    // terrain leveller (this+0x38) vslot 0x48; returns the number of vertices changed
+    // SL::spDemolition (+0x20) i386 vslot 0x24 ModifyTerrainHeight(apply = a, perVertex = b, vertex rect, height, lot, reason = mode,
+    // cost); returns the number of vertices changed (demolition.md 4.7)
     virtual int LevelVertices(float height, bool a, bool b, int x0, int z0, int x1, int z1, void* lot, int mode,
                               int extra) = 0;
     // city / cell converter (this+0x30) vslot 0x2f8: metres -> cell coordinates

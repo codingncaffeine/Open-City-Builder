@@ -38,6 +38,7 @@
 #include "sc4/ZoneDeveloper.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSC4ZoneManager.h"
+#include "sc4/OccupantFilters.h"
 #include "sc4/cSTETerrain.h"
 
 namespace native {
@@ -315,10 +316,20 @@ public:
         occupants->ReleaseOccupantList(found);
         return out;
     }
-    std::vector<IDemolishable*> OccupantsForTerrain(const DemolitionCellRect& cells, int) override {
-        DemolitionFilterState none;
-        SC4_UNWIRED("cSC4Demolition::ModifyTerrainHeight: the terrain occupant filter is not ported (the plain rect scan stands in)");
-        return OccupantsInRect(cells, none);   // PARTIAL: the terrain filter (ModifyTerrainHeight has no native caller yet)
+    // occupant manager i386 vslot 0xa4 GetOccupantsByStandardCityCells(list, a, b, cSC4OccupantImmovabilityFilter, mode): at most
+    // one occupant in the area mode (1), all of them in the per-vertex mode (-1).
+    std::vector<IDemolishable*> OccupantsForTerrain(const DemolitionCellRect& cells, int mode) override {
+        std::vector<IDemolishable*> out;
+        cISC4OccupantManager* occupants = Occupants();
+        if (!occupants) return out;
+        const int a[2] = {cells.x0, cells.z0}, b[2] = {cells.x1, cells.z1};
+        sc4::cSC4OccupantImmovabilityFilter filter;
+        filter.AddRef();
+        OccupantList found;
+        if (occupants->GetOccupantsByStandardCityCells(found, a, b, &filter, static_cast<std::uint32_t>(mode)))
+            for (cISC4Occupant* occupant : found) out.push_back(g_arena.Of(occupant));
+        occupants->ReleaseOccupantList(found);
+        return out;
     }
     bool RemoveOccupant(IDemolishable* occupant, bool shutdown, bool) override {
         cISC4OccupantManager* occupants = Occupants();
@@ -368,11 +379,19 @@ public:
     }
     void NotifyNeighborsNetworkChange(IDemolishable* network) override { if (cSC4NeighborsSimulator* n = Neighbors()) n->DeleteOccupantConnection(Raw(network)); }
     float TerrainHeight(int x, int z) override { cSTETerrain* t = Terrain(); return t ? t->GetAltitudeAtVertex(x, z) : 0.0f; }
-    bool TerrainCellSkipped(int, int) override { return false; }
-    // PARTIAL: the terrain levelling of ModifyTerrainHeight (no native caller yet).
-    void TerrainLevelCell(int, int) override { SC4_UNWIRED("cSC4Demolition::ModifyTerrainHeight: terrain vslot 0x190 (level a cell) is not wired"); }
-    void TerrainLevelRect(const DemolitionCellRect&, std::uint32_t) override { SC4_UNWIRED("cSC4Demolition::ModifyTerrainHeight: terrain vslot 0x198 (level a rect) is not wired"); }
-    void TerrainUpdateRect(const DemolitionCellRect&, std::uint32_t) override {}
+    bool TerrainCellSkipped(int x, int z) override {   // terrain vslot 0x128 IsWaterVertex(x, z)
+        cSTETerrain* t = Terrain();
+        return t && t->IsWaterVertex(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z));
+    }
+    void TerrainLevelCell(int x, int z, float height) override {   // terrain vslot 0x190 SetAltitudeAtVertex(x, z, height)
+        if (cSTETerrain* t = Terrain()) t->SetAltitudeAtVertex(x, z, height);
+    }
+    void TerrainLevelRect(const DemolitionCellRect& cells, float height, std::uint32_t reason) override {   // vslot 0x198
+        if (cSTETerrain* t = Terrain()) t->SetAltitude(sc4::TerrainRect{cells.x0, cells.z0, cells.x1, cells.z1}, height, false, reason);
+    }
+    void TerrainUpdateRect(const DemolitionCellRect& cells, std::uint32_t reason) override {   // vslot 0x228 RedisplayTerrain(1, 1, rect, reason)
+        if (cSTETerrain* t = Terrain()) t->RedisplayTerrain(true, true, sc4::TerrainRect{cells.x0, cells.z0, cells.x1, cells.z1}, reason);
+    }
     float TerrainHeightAtMetres(float x, float z) override { cSTETerrain* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
     bool PropManagerAvailable() override { return Props() != nullptr; }
     bool PropManagerRemove(IDemolishable* prop) override { cSC4PropManager* p = Props(); return p && p->RemovePropA(Raw(prop)); }
@@ -517,6 +536,18 @@ bool DemolishLots(bool commit, cSC4Lot* const* lots, int count, int privilege, s
     for (int i = 0; i < count; ++i)
         if (lots[i]) list.push_back(g_arena.Of(lots[i]));
     return demolition->DemolishLots(commit, list, privilege, flags, dezone, nullptr, cost, nullptr);
+}
+
+int NativeModifyTerrainHeight(bool apply, bool perVertex, int x0, int z0, int x1, int z1, float height, cSC4Lot* exempt,
+                              std::uint32_t reason) {
+    cSC4Demolition* demolition = Service();
+    if (!demolition) return 0;
+    Scope scope;
+    const int changed = demolition->ModifyTerrainHeight(apply, perVertex, x0, z0, x1, z1, height, exempt ? g_arena.Of(exempt) : nullptr, reason);
+    if (std::getenv("SC4_LEVELDEBUG"))
+        std::fprintf(stderr, "demolition: ModifyTerrainHeight apply %d per-vertex %d vertices %d,%d..%d,%d height %.2f reason %u -> %d\n", apply,
+                     perVertex, x0, z0, x1, z1, height, reason, changed);
+    return changed;
 }
 
 }  // namespace native
