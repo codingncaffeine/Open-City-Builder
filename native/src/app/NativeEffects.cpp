@@ -660,6 +660,10 @@ bool CityComponentInit_cSC4EffectsManager(cIGZUnknown* object, bool init) {
         for (const auto& trigger : manager->Collection().MessageTriggers())   // the effects a posted message starts
             if (trigger.name.find(part) != std::string::npos) std::fprintf(stderr, "fxtrigger: message %08x -> %s\n", trigger.message, trigger.name.c_str());
     }
+    if (std::getenv("SC4_EFFECTBINDINGS")) {   // every (group, type) key the data binds to an effect name
+        for (const auto& binding : manager->Collection().EffectBindings())
+            std::fprintf(stderr, "fxbinding: %08x %08x %s\n", binding.second.id, binding.second.value, binding.first.c_str());
+    }
     if (const char* names = std::getenv("SC4_EFFECTDUMP")) {
         std::set<std::string> seen;
         std::string list = names;
