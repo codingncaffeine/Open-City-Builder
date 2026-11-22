@@ -3,7 +3,7 @@
 Every recovered class reaches the engine through a `Set*Host` seam. `native` means a hand-written adapter in `src/app`, `stub` means only the
 generated neutral host (`src/app/hosts`) installs it (the class runs without its neighbours), `none` means nothing installs it.
 
-- native: 169   stub only: 15   none: 23
+- native: 183   stub only: 8   none: 23
 
 | seam | declared in | status | installed by |
 |---|---|---|---|
@@ -56,8 +56,6 @@ generated neutral host (`src/app/hosts`) installs it (the class runs without its
 | SetCameraControlHost | src/sc4/CameraControl.h | native | src/app/NativeCityView.cpp |
 | SetCellTextureModelHost | src/sc4/CellTextureModel.h | native | src/app/NativeModelMaker.cpp |
 | SetCityDetailHost | src/sc4/CityDetailManager.h | none |  |
-| SetCitySituationAdviceHost | src/sc4/CitySituationAdvice.h | stub | src/app/hosts/StubCitySituationAdvice.cpp |
-| SetCitySituationManagerHost | src/sc4/CitySituationManager.h | none |  |
 | SetCivicBuildingHost | src/sc4/CivicBuildingSimulator.h | native | src/app/NativeCivic.cpp |
 | SetConstructionOccupantHost | src/sc4/ConstructionOccupant.h | native | src/app/NativeConstruction.cpp |
 | SetDemandSimulatorHost | src/sc4/DemandSimulator.h | native | src/app/NativeDemandHost.cpp |
@@ -74,16 +72,11 @@ generated neutral host (`src/app/hosts`) installs it (the class runs without its
 | SetLotBaseTextureHost | src/sc4/LotBaseTextureOccupant.h | native | src/app/NativeModelMaker.cpp |
 | SetLotConfigurationHost | src/sc4/LotConfiguration.h | native | src/app/NativeLotConfigHost.cpp |
 | SetLotConfigurationManagerHost | src/sc4/LotConfigurationManager.h | native | src/app/NativeLotConfigHost.cpp |
-| SetMySimHost | src/sc4/MySim.h | stub | src/app/hosts/StubMySim.cpp |
-| SetMySimAdviceHost | src/sc4/MySimAdvice.h | stub | src/app/hosts/StubMySimAdvice.cpp |
-| SetMySimDispatchHost | src/sc4/MySimDispatch.h | stub | src/app/hosts/StubMySimDispatch.cpp |
-| SetMySimFilterHost | src/sc4/MySimFilters.h | stub | src/app/hosts/StubMySimFilter.cpp |
+| SetMySimAdviceHost | src/sc4/MySimAdvice.h | native | src/app/NativeMySim.cpp |
 | SetMySimWinProcHost | src/sc4/MySimWinProc.h | native | src/app/NativeCityUi.cpp |
 | SetNationHost | src/sc4/Nation.h | native | src/app/NativeRegion.cpp |
 | SetNeighborConnectionHost | src/sc4/NeighborConnection.h | native | src/app/NativeRegion.cpp |
 | SetNeighborsHost | src/sc4/NeighborsSimulator.h | native | src/app/NativeRegion.cpp |
-| SetNetworkModelHost | src/sc4/NetworkOccupantModel.h | native | src/app/NativeModelMaker.cpp |
-| SetPreBuiltModelOccupantHost | src/sc4/NetworkOccupantWithPreBuiltModel.h | stub | src/app/hosts/StubPreBuiltModelOccupant.cpp |
 | SetOccupantGroupHost | src/sc4/OccupantGroupTemplate.h | native | src/app/NativeAutomataGroups.cpp |
 | SetOrdinanceHost | src/sc4/Ordinance.h | native | src/app/NativeOrdinance.cpp |
 | SetOrdinanceSimHost | src/sc4/OrdinanceTypes.h | native | src/app/NativeOrdinance.cpp |
@@ -105,10 +98,7 @@ generated neutral host (`src/app/hosts`) installs it (the class runs without its
 | SetGetawayVanHost | src/sc4/SpecialVehicles.h | native | src/app/NativeDispatch.cpp |
 | SetDetokenizerHost | src/sc4/StringDetokenizer.h | native | src/app/NativeView3DWinHost.cpp |
 | SetToxicHost | src/sc4/ToxicOccupant.h | native | src/app/NativeToxic.cpp |
-| SetDefaultTrafficNetworkMapHost | src/sc4/TrafficNetworkMap.h | native | src/app/NativeTrafficNetworkMap.cpp |
-| SetUndergroundNetworkToolHost | src/sc4/UndergroundNetworkTool.h | native | src/app/NativeUnderground.cpp |
 | SetVehicleHost | src/sc4/Vehicle.h | none |  |
-| SetVertexHtConstraintHost | src/sc4/VertexHtConstraintSatisfier.h | stub | src/app/hosts/StubVertexHtConstraint.cpp |
 | SetViewInputHost | src/sc4/ViewInputControl.h | native | src/app/NativeCityView.cpp |
 | SetCityScrollHost | src/sc4/ViewInputControlCityScroll.h | native | src/app/NativeCityView.cpp |
 | SetEffectToolHost | src/sc4/ViewInputControlEffect.h | native | src/app/NativeDisasterTools.cpp |
@@ -133,28 +123,20 @@ generated neutral host (`src/app/hosts`) installs it (the class runs without its
 | SetTrendBarHost | src/sc4/WinTrendBar.h | native | src/app/NativeCityPanel.cpp |
 | SetPlacementHost | src/sc4/cSC4ZoneManager.h | native | src/app/NativeZoneTool.cpp |
 | SetTerrainHost | src/sc4/cSTETerrain.h | native | src/app/NativeTerrainHost.cpp |
-| SetNetworkToolUIHost | src/sc4/NetworkToolUI.h | native | src/app/NativeNetworkTool.cpp |
-| SetNetworkInputToolHost | src/sc4/ViewInputControlNetworkTool.h | native | src/app/NativeNetworkTool.cpp |
 | SetNetworkPreviewHost | src/sc4/NetworkPreview.h | native | src/app/NativeNetworkTool.cpp |
 | SetFloraToolHost | src/sc4/ViewInputControlFlora.h | native | src/app/NativeFlora.cpp |
 | SetModelParticlesHost | src/sc4/ModelBasedParticlesEffect.h | native | src/app/NativeEffects.cpp |
-| SetNetworkToolHost | src/sc4/NetworkTool.h | native | src/app/NativeNetworkTool.cpp |
 | SetDecalEffectHost | src/sc4/DecalEffect.h | native | src/app/NativeDecalOverlay.cpp |
 | SetEffectsManagerHost | src/sc4/EffectsManager.h | native | src/app/NativeEffects.cpp |
-| SetPlaceLotHost | src/sc4/ViewInputControlPlaceLot.h | native | src/app/NativePlaceLot.cpp |
 | SetTerrainScrubberHost | src/sc4/ViewInputControlTerrainScrubber.h | native | src/app/NativeTerrainTool.cpp |
 | SetDemolishToolHost | src/sc4/ViewInputControlDemolish.h | native | src/app/NativeDemolishTool.cpp |
-| SetNetworkOccupantHost | src/sc4/NetworkOccupant.h | native | src/app/NativeNetworkLots.cpp |
-| SetNetworkOccupantPathHost | src/sc4/NetworkOccupant.h | native | src/app/NativeNetworkManager.cpp |
 | SetGrowthDeveloperHost | src/sc4/GrowthDeveloper.h | native | src/app/NativeGrowthDevelopers.cpp |
 | SetPropManagerHost | src/sc4/PropManager.h | native | src/app/NativeProps.cpp |
 | SetControllerManagerHost | src/sc4/AutomataControllerManager.h | native | src/app/NativeControllerManagerHost.cpp |
-| SetAutomataManagerHost | src/sc4/AutomataManager.h | native | src/app/NativeAutomataManagerHost.cpp |
 | SetPedestrianHost | src/sc4/PedestrianManager.h | none |  |
 | SetDispatchHost | src/sc4/DispatchManager.h | native | src/app/NativeDispatch.cpp |
 | SetDispatchToolHost | src/sc4/ViewInputControlDispatch.h | native | src/app/NativeDispatchTool.cpp |
 | SetPropHost | src/sc4/PropOccupant.h | native | src/app/NativeProps.cpp |
-| SetModelMakerHost | src/sc4/ModelMaker.h | native | src/app/NativeModelMaker.cpp |
 | SetTextDecalHost | src/sc4/TextDecalOccupant.h | native | src/app/NativeSignLabel.cpp |
 | SetRewardAdviceHost | src/sc4/RewardAdvice.h | native | src/app/NativeAdvisors.cpp |
 | SetAdvisorConcreteHost | src/sc4/AdvisorConcrete.h | native | src/app/NativeAdvisors.cpp |
@@ -168,7 +150,6 @@ generated neutral host (`src/app/hosts`) installs it (the class runs without its
 | SetRiotInstanceHost | src/sc4/DisasterInstanceRiot.h | native | src/app/NativeRiot.cpp |
 | SetRiotPoliceHost | src/sc4/RiotPolice.h | native | src/app/NativeRiotPolice.cpp |
 | SetRegEffectsHost | src/sc4/ModelRegEffects.h | native | src/app/NativeModelRegEffects.cpp |
-| SetAutomatonHost | src/sc4/Automaton.h | native | src/app/NativeAutomata.cpp |
 | SetDisasterToolHost | src/sc4/ViewInputControlDisaster.h | native | src/app/NativeDisasterTools.cpp |
 | SetEarthquakeHost | src/sc4/DisasterInstanceEarthquake.h | native | src/app/NativeDisasters.cpp |
 | SetAttractorHost | src/sc4/AttractorEffect.h | native | src/app/NativeEffectComponents.cpp |
@@ -177,7 +158,6 @@ generated neutral host (`src/app/hosts`) installs it (the class runs without its
 | SetVolcanoHost | src/sc4/DisasterInstanceVolcano.h | native | src/app/NativeDisasters.cpp |
 | SetPropDeveloperHost | src/sc4/PropDeveloper.h | native | src/app/NativePropDeveloper.cpp |
 | SetPipeBurstHost | src/sc4/PipeBurstInstance.h | native | src/app/NativeDisasters.cpp |
-| SetUndergroundCustomViewHost | src/sc4/UndergroundCustomView.h | native | src/app/NativeUnderground.cpp |
 | SetLotRetainingWallModelHost | src/sc4/LotRetainingWallModel.h | native | src/app/NativeLotWalls.cpp |
 | SetLotRetainingWallHost | src/sc4/LotRetainingWallOccupant.h | native | src/app/NativeLotWalls.cpp |
 | SetFoundationModelHost | src/sc4/FoundationModel.h | native | src/app/NativeLotWalls.cpp |
@@ -196,7 +176,6 @@ generated neutral host (`src/app/hosts`) installs it (the class runs without its
 | SetFloraSimulatorHost | src/sc4/FloraSimulator.h | native | src/app/NativeFlora.cpp |
 | SetNeighborDealHost | src/sc4/NeighborDeal.h | native | src/app/NativeRegion.cpp |
 | SetComplexViewFilterHost | src/sc4/ComplexViewOccupantFilter.h | native | src/app/NativeUnderground.cpp |
-| SetNetworkManagerHost | src/sc4/NetworkManager.h | native | src/app/NativeNetworkManager.cpp |
 | SetBuildingDevelopmentSimHost | src/sc4/BuildingDevelopmentSimulator.h | native | src/app/NativeBuildingDevelopment.cpp |
 | SetTerrainChangedHost | src/sc4/BuildingDevelopmentSimulator.h | native | src/app/NativeTerrainChangedLots.cpp |
 | SetSuitabilityHost | src/sc4/BuildingDevelopmentSimulator.h | none |  |
@@ -207,8 +186,36 @@ generated neutral host (`src/app/hosts`) installs it (the class runs without its
 | SetPowerLineToolHost | src/sc4/PowerLineTool.h | native | src/app/NativePowerLineTool.cpp |
 | SetPowerPoleOccupantHost | src/sc4/PowerPoleOccupant.h | native | src/app/NativePowerLineTool.cpp |
 | SetAircraftDispatchSourceHost | src/sc4/AircraftDispatchSource.h | native | src/app/NativeDispatch.cpp |
-| SetView3DWinHost | src/sc4/View3DWin.h | native | src/app/NativeView3DWinHost.cpp |
 | SetZoneDeveloperHost | src/sc4/ZoneDeveloper.h | native | src/app/NativeZoneDeveloperHost.cpp |
+| SetBridgeEffectsHost | src/sc4/NetworkBridgeOccupant.h | none |  |
+| SetVertexHtConstraintHost | src/sc4/VertexHtConstraintSatisfier.h | native | src/app/NativeNetworkTool.cpp |
+| SetUndergroundCustomViewHost | src/sc4/UndergroundCustomView.h | native | src/app/NativeUnderground.cpp |
+| SetUndergroundNetworkToolHost | src/sc4/UndergroundNetworkTool.h | native | src/app/NativeUnderground.cpp |
+| SetPlaceLotHost | src/sc4/ViewInputControlPlaceLot.h | native | src/app/NativePlaceLot.cpp |
+| SetNetworkModelHost | src/sc4/NetworkOccupantModel.h | native | src/app/NativeModelMaker.cpp |
+| SetMySimFilterHost | src/sc4/MySimFilters.h | native | src/app/NativeMySim.cpp |
+| SetAutomatonHost | src/sc4/Automaton.h | native | src/app/NativeAutomata.cpp |
+| SetNetworkConstructionCrewHost | src/sc4/NetworkConstructionCrew.h | native | src/app/NativeNetworkConstructionCrew.cpp |
+| SetNetworkManagerHost | src/sc4/NetworkManager.h | native | src/app/NativeNetworkManager.cpp |
+| SetModelMakerHost | src/sc4/ModelMaker.h | native | src/app/NativeModelMaker.cpp |
+| SetNetworkOccupantHost | src/sc4/NetworkOccupant.h | native | src/app/NativeNetworkLots.cpp |
+| SetNetworkOccupantPathHost | src/sc4/NetworkOccupant.h | native | src/app/NativeNetworkManager.cpp |
+| SetUndergroundConnectionViewHost | src/sc4/UndergroundConnectionOccupant.h | native | src/app/NativeUnderground.cpp |
+| SetUndergroundConnectionHost | src/sc4/UndergroundConnectionOccupant.h | native | src/app/NativeUnderground.cpp |
+| SetNetworkIntxToolHost | src/sc4/ViewInputControlNetworkIntxTool.h | native | src/app/NativeNetworkTool.cpp |
+| SetPreBuiltModelOccupantHost | src/sc4/NetworkOccupantWithPreBuiltModel.h | native | src/app/NativePreBuiltModel.cpp |
+| SetNetworkToolUIHost | src/sc4/NetworkToolUI.h | native | src/app/NativeNetworkTool.cpp |
+| SetPlayerDriveHost | src/sc4/ViewInputControlPlayerDrive.h | native | src/app/NativePlayerDrive.cpp |
+| SetNetworkInputToolHost | src/sc4/ViewInputControlNetworkTool.h | native | src/app/NativeNetworkTool.cpp |
+| SetCitySituationAdviceHost | src/sc4/CitySituationAdvice.h | native | src/app/NativeCitySituationAdvice.cpp |
+| SetDefaultTrafficNetworkMapHost | src/sc4/TrafficNetworkMap.h | native | src/app/NativeTrafficNetworkMap.cpp |
+| SetMySimDispatchHost | src/sc4/MySimDispatch.h | native | src/app/NativeMySim.cpp |
+| SetAutomataManagerHost | src/sc4/AutomataManager.h | native | src/app/NativeAutomataManagerHost.cpp |
+| SetNetworkToolHost | src/sc4/NetworkTool.h | native | src/app/NativeNetworkTool.cpp |
+| SetCitySituationManagerHost | src/sc4/CitySituationManager.h | native | src/app/NativeCitySituations.cpp |
+| SetMySimHost | src/sc4/MySim.h | native | src/app/NativeMySim.cpp |
+| SetMySimBalloonHost | src/sc4/MySimBalloonWinProc.h | native | src/app/NativeMySim.cpp |
+| SetView3DWinHost | src/sc4/View3DWin.h | native | src/app/NativeView3DWinHost.cpp |
 | SetAmbienceLayerHost | src/sc4audio/AmbienceLayer.h | native | src/app/NativeAudioAmbience.cpp |
 | SetAemsEngineHost | src/sc4audio/AudioAEMSEventSystem.h | none |  |
 | SetAmbienceManagerHost | src/sc4audio/AudioAmbienceManager.h | native | src/app/NativeAudioAmbience.cpp |
