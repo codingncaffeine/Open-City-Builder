@@ -887,10 +887,12 @@ std::uint8_t cSC4MySimDispatch::basicDispatchOnNewPathLeg(IMySimDispatchAutomato
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// updateNeighborLocation (0x1006b06ec) — PARTIAL: the recovered body is a Ghidra stub that always returns 0; only the
-// neighbour-connection lookup is visible (spSC4 0x118 -> 0x58 -> spNeighborsSim 0x60). The connection -> cell mapping
-// the decompiler dropped at 0x1006b0740 is still missing, so the function keeps the original's "no neighbour location"
-// result.
+// updateNeighborLocation (i386 0x0047ddc8): for a cell-only location (no occupant) the original asks spSC4 0x8c -> 0x2c
+// (lot cell x, z) for the neighbour object there, then walks a local list of cISC4NeighborConnection: each connection
+// whose type (0x14) is in kValidNeighborConnectionTypeArray counts down `attempt`, and the one that reaches 0 gives the
+// location its cell (connection 0x18(&cellX, &cellZ), clamped to the city, the position = cell * 16) and returns 1.
+// The instruction listing shows the list is only constructed (0x0047de21) and nothing fills it before the loop, so the
+// loop never runs and the function returns 0 in every case; the port keeps that result.
 // ---------------------------------------------------------------------------------------------------------------
 bool cSC4MySimDispatch::updateNeighborLocation(int attempt, cLocation& location) {
     (void)attempt;
@@ -899,7 +901,7 @@ bool cSC4MySimDispatch::updateNeighborLocation(int attempt, cLocation& location)
     if (location.hasOccupant) return false;
     int cellX = 0, cellZ = 0;
     if (!host->NeighborConnection(location.lotCellX, location.lotCellZ, cellX, cellZ)) return false;
-    return false;   // see PARTIAL above: the original's success path was dropped by the decompiler
+    return false;   // the connection list the original walks is empty (see above)
 }
 
 // ---------------------------------------------------------------------------------------------------------------
