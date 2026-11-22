@@ -58,7 +58,7 @@ inline void Scale3(float* v, float s) {
 const float kSC4YViewAngle[5] = {-0.3926991f, -0.3926991f, -0.3926991f, -0.3926991f, -0.3926991f};   // 0x100a19640
 const float kSC4PitchViewAngle[5] = {0.5235988f, 0.61086524f, 0.6981317f, 0.7853982f, 0.7853982f};  // 0x100a2a2a0
 
-SC4ViewUtilities::SC4ViewUtilities() {   // 0x100173480: all fields zero, except unk3fc_ = 1, 1
+SC4ViewUtilities::SC4ViewUtilities() {   // 0x100173480: all fields zero, except the visible terrain rectangle's max = 1, 1
     // Layout of the original object (asserted here because offsetof needs a member context).
     static_assert(offsetof(SC4ViewUtilities, host_) == 0x08, "layout");
     static_assert(offsetof(SC4ViewUtilities, eye_) == 0x44, "layout");
@@ -67,6 +67,8 @@ SC4ViewUtilities::SC4ViewUtilities() {   // 0x100173480: all fields zero, except
     static_assert(offsetof(SC4ViewUtilities, viewEdges_) == 0x210, "layout");
     static_assert(offsetof(SC4ViewUtilities, draw_) == 0x244, "layout");
     static_assert(offsetof(SC4ViewUtilities, drawPlanes_) == 0x31c, "layout");
+    static_assert(offsetof(SC4ViewUtilities, terrainCenter_) == 0x3e4, "layout");
+    static_assert(offsetof(SC4ViewUtilities, visibleTerrainRect_) == 0x3f4, "layout");
     static_assert(offsetof(SC4ViewUtilities, visibleAreaBlockMin_) == 0x434, "layout");
     static_assert(offsetof(SC4ViewUtilities, sinYaw_) == 0x450, "layout");
     static_assert(sizeof(SC4ViewUtilities) == 0x478, "layout");

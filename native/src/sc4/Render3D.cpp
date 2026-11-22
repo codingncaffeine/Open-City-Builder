@@ -2,14 +2,14 @@
 // (0x10075f3a8..0x100760dbc), the render-property read (0x100760546), the view-object lists (0x10075f3e6..0x10075f4ce,
 // 0x1007693d0..0x100769508), the camera / clip / driver / backing-store wiring, the screen-shake list, the two
 // stats strings, the per-frame draw pass (0x100763ac6..0x1007663a8) and — since RENDER3D-2 — the model change queue
-// and the quad-grid rebuild (0x10076113a..0x1007657c6). What is left in the class is the camera / city message
-// handling (DoMessage 0x100762b36, UpdateVisibleTerrainMetrics 0x1007630ca) and picking; the pending ledger file
-// says why.
+// and the quad-grid rebuild (0x10076113a..0x1007657c6). DoMessage (0x100762b36) is ported but for the backing-store
+// switch and the lighting-manager swap; UpdateVisibleTerrainMetrics (0x1007630ca) and picking are ported too.
 #include "sc4/Render3D.h"
 #include "platform/Unwired.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <cstdlib>
 #include <vector>
@@ -29,6 +29,7 @@
 #include "sc4/DBSegment.h"
 #include "sc4/QuadGrid.h"
 #include "sc4/RenderProperties.h"
+#include "sc4/SimStreamOps.h"
 
 namespace sc4 {
 
@@ -65,6 +66,11 @@ public:
     float ViewportUnitsPerWorld() const override {
         const float worldPerUnit = utilities_ ? utilities_->ViewportUnitsToWorldUnits(1.0f) : 0.0f;
         return worldPerUnit != 0.0f ? 1.0f / worldPerUnit : 0.0f;
+    }
+    float WorldUnitsPerViewportUnit() const override { return utilities_ ? utilities_->ViewportUnitsToWorldUnits(1.0f) : 0.0f; }
+    void GetViewportTerrainCenter(float* out) const override {
+        if (utilities_) utilities_->GetViewportTerrainCenter(out);
+        else out[0] = out[1] = out[2] = 0.0f;
     }
 
 private:
@@ -336,6 +342,7 @@ bool cSC43DRender::Init() {
     drawContext_->SetDriver(mpGDriver);
     drawContext_->SetRenderProperties(renderProperties_);
     drawContext_->SetCameraControl(cameraControl_);
+    drawContext_->SetRenderer(this);
     drawContext_->SetLightingManager(lightingManager_);
     drawContext_->SetViewportSize(viewportWidth_, viewportHeight_);
     viewUtilitiesSeam_ = std::make_unique<ViewUtilitiesSeam>(viewUtilities_);
@@ -2965,7 +2972,9 @@ void cSC43DRender::SetShakeOffsetsAt(float now) {
     shakeX_ = 0;
     shakeY_ = 0;
     if (shakes_.empty()) return;
-    const float centreX = 0.0f, centreZ = 0.0f;   // the view's terrain centre: zeroed by its constructor, never written
+    float centre[3] = {0.0f, 0.0f, 0.0f};   // the view's terrain centre (UpdateVisibleTerrainMetrics)
+    if (viewUtilities_) viewUtilities_->GetViewportTerrainCenter(centre);
+    const float centreX = centre[0], centreZ = centre[2];
     const float radius = (cameraControl_ ? cameraControl_->WorldPerPixel() : 1.0f) * 640.0f;
     const float inverse = 1.0f / (radius * radius);
     int steps = 4 - (drawContext_ ? drawContext_->Zoom() : 0);
@@ -3216,11 +3225,90 @@ bool cSC43DRender::Pick(int x, int y, const float* origin, const float* directio
     return picked;
 }
 
+// i386 0x00504d28. The view's centre on the terrain: the mean of the terrain picks at the viewport's centre and 100 pixels to
+// each side of it that land above height 1 (a missed pick leaves 0); its reach is the larger of the x / z distances from
+// there to the pick under the viewport's bottom-right corner. When no pick lands, the city's border is walked in steps of
+// four cells and the border vertex whose projection is inside the viewport and closest to its centre is the centre, with a
+// reach of half a zoom-scaled block ((16 << zoom) / 2), or 1 when the border is not on screen either. The visible terrain
+// rectangle is the square of the reach around the (unclipped) centre, at least 1 wide, then the centre is clipped into the
+// city and the rectangle into [0, city size].
+void cSC43DRender::UpdateVisibleTerrainMetrics() {
+    IRender3DHost* host = Render3DHost();
+    SC4ViewUtilities* view = viewUtilities_;
+    if (!view) return;
+    constexpr float kMinHeight = 1.0f;   // FLOAT_00a706d8
+    const int centreX = viewportWidth_ / 2, centreY = viewportHeight_ / 2;
+    static constexpr int kOffsets[5][2] = {{0, 0}, {100, 0}, {0, 100}, {-100, 0}, {0, -100}};
+    float sum[3] = {0.0f, 0.0f, 0.0f};
+    int hits = 0;
+    for (const auto& offset : kOffsets) {
+        float point[3] = {0.0f, 0.0f, 0.0f};
+        PickTerrain(centreX + offset[0], centreY + offset[1], point, true, false);   // the answer is not checked
+        if (kMinHeight < point[1]) {
+            ++hits;
+            for (int i = 0; i < 3; ++i) sum[i] += point[i];
+        }
+    }
+    float* centre = view->MutableTerrainCenter();
+    if (hits == 0) {
+        const float viewCentreX = static_cast<float>(viewportWidth_ / 2), viewCentreY = static_cast<float>(viewportHeight_ / 2);
+        int cellsX = 0, cellsZ = 0;
+        if (host) host->CityCellCounts(cellsX, cellsZ);
+        BoundaryIterator border;
+        border.SetClipRect(0, 0, cellsX / 4, cellsZ / 4);
+        bool found = false;
+        float best = 3.4028235e+38f;   // FLOAT_00a70730
+        float bestX = 0.0f, bestY = 0.0f, bestZ = 0.0f;
+        std::int32_t bx = 0, bz = 0;
+        while (border.GetNext(bx, bz)) {
+            const float altitude = host ? host->TerrainAltitudeAtVertex(bx * 4, bz * 4) : 0.0f;
+            float p[3] = {static_cast<float>(bx << 6), altitude, static_cast<float>(bz << 6)};
+            view->ProjectPointToViewportCoordinates(p);
+            if (0.0f < p[0] && p[0] < static_cast<float>(viewportWidth_) && 0.0f < p[1] && p[1] < static_cast<float>(viewportHeight_)) {
+                const float d = (p[0] - viewCentreX) * (p[0] - viewCentreX) + (p[1] - viewCentreY) * (p[1] - viewCentreY);
+                if (d < best) {
+                    best = d;
+                    bestX = static_cast<float>(bx << 6);
+                    bestY = altitude;
+                    bestZ = static_cast<float>(bz << 6);
+                }
+                found = true;
+            }
+        }
+        centre[0] = bestX; centre[1] = bestY; centre[2] = bestZ;
+        view->SetTerrainReach(found ? static_cast<float>((16 << (view->Zoom() & 0x1f)) / 2) : 1.0f);
+    } else {
+        for (int i = 0; i < 3; ++i) centre[i] = sum[i] / static_cast<float>(hits);
+        float corner[3] = {0.0f, 0.0f, 0.0f};
+        PickTerrain(viewportWidth_, viewportHeight_, corner, true, false);
+        const float dz = std::fabs(corner[2] - centre[2]), dx = std::fabs(corner[0] - centre[0]);
+        view->SetTerrainReach(dz <= dx ? dx : dz);
+    }
+    const float reach = view->TerrainReach();
+    float* rect = view->MutableVisibleTerrainRect();
+    rect[0] = centre[0] - reach;
+    rect[2] = centre[0] + reach;
+    rect[1] = centre[2] - reach;
+    rect[3] = centre[2] + reach;
+    if (rect[2] <= rect[0]) rect[2] = rect[0] + 1.0f;
+    if (rect[3] <= rect[1]) rect[3] = rect[1] + 1.0f;
+    view->ClipWorldPositionToCityPosition(centre);
+    if (rect[0] < 0.0f) rect[0] = 0.0f;
+    if (rect[1] < 0.0f) rect[1] = 0.0f;
+    if (citySizeX_ <= rect[2]) rect[2] = citySizeX_;
+    if (citySizeZ_ <= rect[3]) rect[3] = citySizeZ_;
+    static const bool trace = std::getenv("SC4_VIEWDEBUG") != nullptr;
+    if (trace)
+        std::fprintf(stderr, "terrain metrics: picks %d centre %.1f,%.1f,%.1f reach %.1f rect %.1f,%.1f..%.1f,%.1f city %.0fx%.0f\n", hits, centre[0],
+                     centre[1], centre[2], reach, rect[0], rect[1], rect[2], rect[3], citySizeX_, citySizeZ_);
+}
+
 bool cSC43DRender::DoMessage(cIGZMessage2* message) {
     // 0x100762b36 (i386 0x0050be0e). PARTIAL: the camera zoom / rotation, the view translation, the terrain dirty
-    // rectangles, the full redraws and the property reload are ported; the backing-store switch (0xc9f775bb), the
-    // lighting-manager swap (0x8acaa95f) and the city / terrain set-up (0x26d31ec1 / 0x4a9f2ffe) are not (the native
-    // application sets the store per zoom and sizes the city through its own host).
+    // rectangles, the full redraws, the property reload, the city size and the visible terrain metrics (0x26d31ec1 /
+    // 0x4a9f2ffe) are ported; the backing-store switch (0xc9f775bb) and the lighting-manager swap (0x8acaa95f) are not
+    // (the native application sets the store per zoom). The terrain / terrain-view pointers 0x26d31ec1 also hands the draw
+    // context are not kept: the native terrain view draws through its own host.
     if (!message) return true;
     auto* standard = static_cast<cIGZMessage2Standard*>(message);
     const std::uint32_t type = standard->GetType();
@@ -3252,6 +3340,18 @@ bool cSC43DRender::DoMessage(cIGZMessage2* message) {
         const float boxMax[3] = {static_cast<float>(d1 & 0xffff) * kCell, static_cast<float>(d3 & 0xffff), static_cast<float>(d2 & 0xffff) * kCell};
         const int extra = (static_cast<std::uint32_t>(change - 1) < 2 || change == 3) ? 8 : 0;
         if (viewUtilities_) QueueDirtyRectangleForBox(3, boxMin, boxMax, nullptr, extra);
+    } else if (type == 0x26d31ec1) {   // the city is set up: its size, then the view's terrain metrics
+        IRender3DHost* host = Render3DHost();
+        float sizeX = 0.0f, sizeZ = 0.0f;
+        if (host && host->CitySize(sizeX, sizeZ)) {
+            citySizeX_ = sizeX;
+            citySizeZ_ = sizeZ;
+            if (viewUtilities_) viewUtilities_->SetCitySize(sizeX, sizeZ);
+        }
+        UpdateVisibleTerrainMetrics();
+    } else if (type == 0x4a9f2ffe) {   // the camera changed (zoom or target), once there is a terrain
+        IRender3DHost* host = Render3DHost();
+        if (host && host->HasTerrain()) UpdateVisibleTerrainMetrics();
     } else if (type == 0xc53d10aa) {
         ReadProperties();
     } else if (type == 0x8acaa95f) {

@@ -14,12 +14,40 @@
 
 namespace sc4 { class cISC4Occupant; }
 
-// Walks the cells on the border of a rectangle. Layout: +0 / +1 state bytes, +4 / +8 / +0xc counters, +0x10 the rectangle.
+// Walks the cells on the border of a rectangle (inclusive edges): the whole first row, the two end cells of each middle row,
+// the whole last row. Layout: +0 state (0 fresh, 1 walking, 2 done), +1 direction (0 = rows; the only one the walk uses),
+// +4 x, +8 z, +0xc the x step, +0x10 the rectangle. A fresh iterator starts at x = z = 0 with step 1.
 struct BoundaryIterator {
     std::int8_t state = 0;
     std::int8_t direction = 0;
-    std::int32_t side = 0, step = 0, length = 0;
-    cRZRect rect;
+    std::int32_t side = 0, step = 0, length = 1;   // x, z, the x step
+    cRZRect rect{static_cast<std::int32_t>(0x80000000u), static_cast<std::int32_t>(0x80000000u), 0x7fffffff, 0x7fffffff};
+
+    // i386 0x0060cfe4: the right / bottom edges never fall below the left / top ones.
+    void SetClipRect(std::int32_t left, std::int32_t top, std::int32_t right, std::int32_t bottom) {
+        rect.bottom = bottom; rect.right = right; rect.top = top; rect.left = left;
+        if (rect.right < left) rect.right = left;
+        if (rect.bottom < rect.top) rect.bottom = rect.top;
+    }
+    // i386 0x006087f6
+    bool GetNext(std::int32_t& x, std::int32_t& z) {
+        if (state == 2) return false;
+        if (state == 0) {
+            state = 1;
+        } else if (direction == 0) {
+            side += length;
+            if (side > rect.right) {
+                if (rect.bottom <= step) { state = 2; return false; }
+                side = rect.left;
+                ++step;
+                if (rect.bottom <= step) length = 1;
+                else length = rect.right - side < 1 ? 1 : rect.right - side;
+            }
+        }
+        x = side;
+        z = step;
+        return true;
+    }
 };
 
 // Walks every cell of a rectangle in rows. Layout: +0 state, +4 / +8 position, +0xc count, +0x10 the rectangle.

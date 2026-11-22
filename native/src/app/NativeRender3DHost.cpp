@@ -10,6 +10,7 @@
 #include "sc4/RenderProperties.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/cSC4City.h"
+#include "sc4/cSTETerrain.h"
 #include "sc4/cSTETerrainView3D.h"
 
 namespace native {
@@ -35,6 +36,28 @@ struct StubRender3D final : IRender3DHost {
         x = city->CellCountX();
         z = city->CellCountZ();
         return true;
+    }
+    bool CitySize(float& x, float& z) override {
+        sc4::cSC4City* city = HostCity();
+        if (!city) return false;
+        x = city->SizeX();
+        z = city->SizeZ();
+        return true;
+    }
+    // The city's terrain (SL::spTerrain is the city's terrain component, class cSTETerrain behind iid 0xab953253).
+    static sc4::cSTETerrain* Terrain() {
+        sc4::cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::Terrain) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(0xab953253, &raw) || !raw) return nullptr;
+        auto* serializable = static_cast<cIGZSerializable*>(raw);
+        serializable->Release();
+        return static_cast<sc4::cSTETerrain*>(serializable);
+    }
+    bool HasTerrain() override { return Terrain() != nullptr; }
+    float TerrainAltitudeAtVertex(int x, int z) override {
+        sc4::cSTETerrain* t = Terrain();
+        return t ? t->GetAltitudeAtVertex(x, z) : 0.0f;
     }
 };
 }  // namespace

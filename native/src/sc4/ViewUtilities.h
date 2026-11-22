@@ -239,8 +239,16 @@ public:
     const FrustumBounds& ViewFrustum() const { return view_; }              // +0x80
     const FrustumBounds& DrawFrustum() const { return draw_; }              // +0x244
     const std::int32_t* DrawFrustumViewportRect() const { return viewportRect_; }   // +0x234
-    // +0x3e4: the fixed-view camera position the screen-shake falloff measures against (0x1007663a8).
-    const float* FixedViewCameraPosition() const { return unk3e4_; }
+    // +0x3e4..+0x403 (i386 +0x3dc..+0x3f8): the view's centre on the terrain, its reach and the visible terrain rectangle
+    // (min x, min z, max x, max z), kept by cSC43DRender::UpdateVisibleTerrainMetrics (i386 0x00504d28). The screen flashes,
+    // the screen-shake falloff and the automata managers read them.
+    void GetViewportTerrainCenter(float* out) const { out[0] = terrainCenter_[0]; out[1] = terrainCenter_[1]; out[2] = terrainCenter_[2]; }   // i386 0x006d7e9e
+    const float* ViewportTerrainCenter() const { return terrainCenter_; }
+    float TerrainReach() const { return terrainReach_; }
+    const float* VisibleTerrainRect() const { return visibleTerrainRect_; }
+    float* MutableTerrainCenter() { return terrainCenter_; }
+    void SetTerrainReach(float reach) { terrainReach_ = reach; }
+    float* MutableVisibleTerrainRect() { return visibleTerrainRect_; }
     void GetViewportLimitsGroundPlanePositions(float* bottomLeft, float* bottomRight, float* topLeft,
                                                float* topRight);                        // 0x10017611c
     void CalculateViewportGroundPlanePositions(float* p0, float* p1, float* p2, float* p3, const int* rectMin,
@@ -307,8 +315,9 @@ private:
     FrustumBounds draw_;                          // +0x244..+0x31b
     ViewPlaneBlock drawPlanes_;                   // +0x31c..+0x3c3
     ViewEdgeBlock drawEdges_;                     // +0x3c4..+0x3e3
-    [[maybe_unused]] float unk3e4_[6] = {};                        // +0x3e4..+0x3fb (initialised only; no method here touches it)
-    [[maybe_unused]] float unk3fc_[2] = {1.0f, 1.0f};              // +0x3fc / +0x400 (constructor default)
+    float terrainCenter_[3] = {};                 // +0x3e4..+0x3ef (i386 +0x3dc), written by the renderer
+    float terrainReach_ = 0;                      // +0x3f0 (i386 +0x3e8)
+    float visibleTerrainRect_[4] = {0.0f, 0.0f, 1.0f, 1.0f};   // +0x3f4..+0x403 (i386 +0x3ec..+0x3f8; constructor 0, 0, 1, 1)
     [[maybe_unused]] float unk404_[6] = {};                        // +0x404..+0x41b
     float visibleAreaMidMin_[3] = {};             // +0x41c / +0x420 / +0x424
     float visibleAreaMidMax_[3] = {};             // +0x428 / +0x42c / +0x430

@@ -709,6 +709,15 @@ bool CityComponentInit_cSC4EffectsManager(cIGZUnknown* object, bool init) {
         for (const auto& trigger : manager->Collection().MessageTriggers())   // the effects a posted message starts
             if (trigger.name.find(part) != std::string::npos) std::fprintf(stderr, "fxtrigger: message %08x -> %s\n", trigger.message, trigger.name.c_str());
     }
+    if (std::getenv("SC4_EFFECTFLASHES")) {   // every effect with a screen flash (event type 4) or lighting tint (8) event
+        for (const auto& entry : manager->Collection().EffectNames()) {
+            if (entry.second < 0 || static_cast<std::size_t>(entry.second) >= manager->Collection().Effects().size()) continue;
+            for (const auto& event : manager->Collection().Effects()[static_cast<std::size_t>(entry.second)].events)
+                if ((event.type & 1) == 0 && (event.type & 0xc) != 0)
+                    std::fprintf(stderr, "fxflash: %s [%d] %s light %u%s\n", entry.first.c_str(), entry.second, (event.type & 4) ? "flash" : "tint",
+                                 static_cast<unsigned>(event.flags), (event.type & 2) ? " at-point" : "");
+        }
+    }
     if (std::getenv("SC4_EFFECTBINDINGS")) {   // every (group, type) key the data binds to an effect name
         for (const auto& binding : manager->Collection().EffectBindings())
             std::fprintf(stderr, "fxbinding: %08x %08x %s\n", binding.second.id, binding.second.value, binding.first.c_str());

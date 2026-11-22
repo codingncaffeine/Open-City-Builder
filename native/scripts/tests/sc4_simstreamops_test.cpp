@@ -1,3 +1,5 @@
+#include <vector>
+#include <utility>
 #include <cstdio>
 
 #include "rz/PortMemoryStreams.h"
@@ -7,6 +9,20 @@ static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
 
 int main() {
+    {   // BoundaryIterator (i386 0x0060cfe4 / 0x006087f6): a fresh one walks the border of (0,0)-(3,2) inclusive, row by row
+        BoundaryIterator bi;
+        bi.SetClipRect(0, 0, 3, 2);
+        std::vector<std::pair<int, int>> cells;
+        std::int32_t x = 0, z = 0;
+        while (bi.GetNext(x, z) && cells.size() < 50) cells.emplace_back(x, z);
+        const std::vector<std::pair<int, int>> want = {{0, 0}, {1, 0}, {2, 0}, {3, 0}, {0, 1}, {3, 1}, {0, 2}, {1, 2}, {2, 2}, {3, 2}};
+        CHECK(cells == want);
+        CHECK(!bi.GetNext(x, z) && bi.state == 2);
+        BoundaryIterator flat;                       // right / bottom below left / top are raised to them
+        flat.SetClipRect(0, 0, -5, -5);
+        CHECK(flat.rect.right == 0 && flat.rect.bottom == 0);
+        CHECK(flat.GetNext(x, z) && x == 0 && z == 0 && !flat.GetNext(x, z));
+    }
     {   // random generator state round trip
         cRZRandom a(1234);
         a.RandomUint32Uniform(10); a.RandomDoubleGaussian();

@@ -139,77 +139,12 @@ public:
         SC4ViewUtilities* v = View();
         for (int i = 0; i < 3; ++i) out[i] = v ? (&v->EyePosition().x)[i] : 0.0f;
     }
-    // +0x3f4: the visible terrain area, x / z. cSC43DRender::UpdateVisibleTerrainMetrics (i386 0x00504d28) keeps it in the view
-    // utilities: the view's centre on the terrain is the mean of the terrain picks at the viewport's centre and 100 pixels to
-    // each side of it (the picks that found terrain above 0), its reach is the larger of the x and z distances from there to
-    // the terrain under the viewport's bottom right corner, and the area is the square of that reach around the centre. The
-    // automata managers keep an automaton while it stands in this area (+48), so it has to cover the whole window: the
-    // midpoint rectangle used here before covered a strip down the middle, and on a wide window every automaton made
-    // toward the sides left at once.
-    //   PARTIAL: when no pick finds terrain (the view is off the map) the original walks the city's boundary; here the
-    //   ground plane's block rectangle answers.
-    //   The picks are the same until the camera moves, while the traffic population asks once per road tile (hundreds of times
-    //   a tick): the answer is kept for the camera's screen offset, zoom, rotation and the viewport size.
+    // +0x3f4: the visible terrain area (min x, min z, max x, max z) that cSC43DRender::UpdateVisibleTerrainMetrics (i386
+    // 0x00504d28) keeps in the view utilities on every camera change. The automata managers keep an automaton while it stands
+    // in this area (+48).
     void ViewRect(float out[4]) override {
-        out[0] = out[1] = out[2] = out[3] = 0.0f;
-        cSC43DRender* render = CityRenderer();
         SC4ViewUtilities* v = View();
-        if (!render || !v) return;
-        std::uint32_t width = 0, height = 0;
-        render->GetViewportSize(width, height);
-        struct Key {
-            cS3DTransform view;
-            int zoom = -1;
-            std::uint32_t width = 0, height = 0;
-            const void* render = nullptr;
-        } key;
-        s3d::cS3DCamera* camera = render->GetCamera();
-        if (camera) key.view = camera->ViewXform();
-        key.zoom = NativeViewZoom();
-        key.width = width;
-        key.height = height;
-        key.render = render;
-        static Key cachedKey;
-        static bool cachedValid = false;
-        static float cached[4] = {};
-        if (camera && cachedValid && std::memcmp(&key.view, &cachedKey.view, sizeof key.view) == 0 && key.zoom == cachedKey.zoom &&
-            key.width == cachedKey.width && key.height == cachedKey.height && key.render == cachedKey.render) {
-            for (int i = 0; i < 4; ++i) out[i] = cached[i];
-            return;
-        }
-        ComputeViewRect(render, v, width, height, out);
-        cachedKey = key;
-        cachedValid = true;
-        for (int i = 0; i < 4; ++i) cached[i] = out[i];
-    }
-    static void ComputeViewRect(cSC43DRender* render, SC4ViewUtilities* v, std::uint32_t width, std::uint32_t height, float out[4]) {
-        const int centreX = static_cast<int>(width) / 2, centreY = static_cast<int>(height) / 2;
-        static constexpr int kOffsets[5][2] = {{0, 0}, {100, 0}, {0, 100}, {-100, 0}, {0, -100}};
-        float sum[3] = {0.0f, 0.0f, 0.0f};
-        int hits = 0;
-        for (const auto& offset : kOffsets) {
-            float point[3] = {0.0f, 0.0f, 0.0f};
-            if (!render->PickTerrain(centreX + offset[0], centreY + offset[1], point, true, false) || !(point[1] > 0.0f)) continue;
-            for (int i = 0; i < 3; ++i) sum[i] += point[i];
-            ++hits;
-        }
-        float corner[3] = {0.0f, 0.0f, 0.0f};
-        if (hits == 0 || !render->PickTerrain(static_cast<int>(width), static_cast<int>(height), corner, true, false)) {
-            float midMin[3] = {}, midMax[3] = {}, blockMin[3] = {}, blockMax[3] = {};
-            v->GetGroundPlaneVisibleAreaRectangle(midMin, midMax, blockMin, blockMax);
-            out[0] = blockMin[0];
-            out[1] = blockMin[2];
-            out[2] = blockMax[0];
-            out[3] = blockMax[2];
-            SC4_UNWIRED("cSC43DRender::UpdateVisibleTerrainMetrics: with no terrain under the view the original walks the city boundary; the ground plane rectangle stands in");
-            return;
-        }
-        const float x = sum[0] / static_cast<float>(hits), z = sum[2] / static_cast<float>(hits);
-        const float reach = std::max(std::fabs(corner[2] - z), std::fabs(corner[0] - x));
-        out[0] = x - reach;
-        out[1] = z - reach;
-        out[2] = x + reach;
-        out[3] = z + reach;
+        for (int i = 0; i < 4; ++i) out[i] = v ? v->VisibleTerrainRect()[i] : 0.0f;
     }
     bool IsPointInViewFrustum(const float point[3]) override { SC4ViewUtilities* v = View(); return v && v->IsPointInViewFrustum(point); }
     void ProjectPointToViewCoordinates(float point[3]) override { if (SC4ViewUtilities* v = View()) v->ProjectPointToViewCoordinates(point); }

@@ -14,6 +14,8 @@
 #include "rz/RZStringUtils.h"
 #include "s3d/S3DMath.h"
 #include "sc4/EffectsResource.h"
+#include "sc4/Render3D.h"
+#include "sc4/DrawContext.h"
 #include "gz/CommandParameterSet.h"
 #include "sc4/GameDataRegistry.h"
 
@@ -860,6 +862,8 @@ void cSC4EffectsManager::StartScreenFlash(const cSC4LightDescription& light, cS3
     flashDuration_ = light.range;
     flashInverseDuration_ = 1.0f / flashDuration_;
     flashTime_ = 0.0f;
+    static const bool trace = std::getenv("SC4_FXDEBUG") != nullptr;
+    if (trace) std::fprintf(stderr, "flash start: %zu colours %zu intensities duration %.2f at-point %d\n", flashColours_.size(), flashIntensities_.size(), flashDuration_, screenPosition ? 1 : 0);
     if (!screenPosition) {
         flashAtPoint_ = false;
         return;
@@ -945,14 +949,82 @@ void cSC4EffectsManager::UpdateLightingTint(float elapsed) {
     if (host_) host_->SetLightingTint(intensity, colour);
 }
 
-// @ 0x1005dfb64 (PARTIAL: the renderer quad and the two packed states are ported, the colour/intensity curve lookup and
-// the draw call are not because they need the draw context's driver). The elapsed-time bookkeeping is recovered.
+// @ 0x1005dfb64 (i386 0x00404924). The flash's colour and intensity curves at its time; a flash at a point fades with the
+// squared distance from the view's terrain centre (out of reach = nothing drawn) and by 0.6 per zoom level below 4. The
+// whole viewport is covered by one rectangle: a negative intensity darkens ((colour - white) x intensity, alpha -intensity,
+// the dark state), a positive one adds the colour (alpha up to 1, the lit state).
 void cSC4EffectsManager::DrawScreenFlashes(SC4DrawContext* context, float elapsed) {
-    (void)context;
-    SC4_UNWIRED("cSC4EffectsManager::DrawScreenFlashes: the screen flash quad (color/intensity curves + draw call) is not drawn");
     const float t = elapsed * flashInverseDuration_ + flashTime_;
     flashTime_ = t;
-    if (t > 1.0f) flashInverseDuration_ = 0.0f;
+    if (t > 1.0f) {
+        flashInverseDuration_ = 0.0f;
+        return;
+    }
+    cS3DVector3 colour{0, 0, 0};
+    const std::size_t count = flashColours_.size();
+    if (count == 1) {
+        colour = flashColours_[0];
+    } else if (count > 1) {
+        const float scaled = t * static_cast<float>(count - 1);
+        int index = static_cast<int>(std::floor(scaled));
+        if (index < 0) index = 0;
+        if (static_cast<std::size_t>(index) >= count - 1) index = static_cast<int>(count) - 2;
+        const float fraction = scaled - static_cast<float>(index);
+        const cS3DVector3& a = flashColours_[static_cast<std::size_t>(index)];
+        const cS3DVector3& b = flashColours_[static_cast<std::size_t>(index) + 1];
+        colour.x = b.x * fraction + a.x * (1.0f - fraction);
+        colour.y = b.y * fraction + a.y * (1.0f - fraction);
+        colour.z = b.z * fraction + a.z * (1.0f - fraction);
+    }
+    float intensity = 0.0f;
+    const std::size_t intensityCount = flashIntensities_.size();
+    if (intensityCount == 1) {
+        intensity = flashIntensities_[0];
+    } else if (intensityCount > 1) {
+        const float scaled = t * static_cast<float>(intensityCount - 1);
+        int index = static_cast<int>(std::floor(scaled));
+        if (index < 0) index = 0;
+        if (static_cast<std::size_t>(index) >= intensityCount - 1) index = static_cast<int>(intensityCount) - 2;
+        const float fraction = scaled - static_cast<float>(index);
+        intensity = flashIntensities_[static_cast<std::size_t>(index)];
+        if (fraction > 0.0f) intensity += fraction * (flashIntensities_[static_cast<std::size_t>(index) + 1] - intensity);
+    }
+    if (!context) return;
+    IS4ViewUtilities* view = context->ViewUtilities();
+    if (flashAtPoint_) {
+        float centre[3] = {0.0f, 0.0f, 0.0f};
+        if (view) view->GetViewportTerrainCenter(centre);
+        const float radius = flashPointScale_ * (view ? view->WorldUnitsPerViewportUnit() : 0.0f);
+        const float dx = flashPoint_.x - centre[0], dz = flashPoint_.y - centre[2];
+        float falloff = 1.0f - (dx * dx + dz * dz) / (radius * radius);
+        if (falloff < 0.0f) return;
+        for (int level = 4; zoom_ < level; --level) falloff *= 0.6f;   // FLOAT_00a707a8
+        intensity *= falloff;
+    }
+    cISC43DRender* renderer = context->Renderer();
+    if (!renderer) return;
+    std::uint32_t width = 0, height = 0;
+    renderer->GetViewportSize(width, height);
+    const cRZRect rect{0, 0, static_cast<std::int32_t>(width), static_cast<std::int32_t>(height)};
+    float rgba[4];
+    const cSC4PackedRenderState* state = nullptr;
+    if (intensity < 0.0f) {
+        rgba[0] = intensity * (colour.x - 1.0f);   // kColorWhite
+        rgba[1] = (colour.y - 1.0f) * intensity;
+        rgba[2] = (colour.z - 1.0f) * intensity;
+        rgba[3] = -intensity;
+        state = &flashStateDark_;
+    } else {
+        rgba[0] = colour.x;
+        rgba[1] = colour.y;
+        rgba[2] = colour.z;
+        rgba[3] = 1.0f <= intensity ? 1.0f : intensity;
+        state = &flashStateLit_;
+    }
+    context->SetRenderState(*state);
+    renderer->DrawViewportRectangle(rect, rgba, false, true);
+    static const bool trace = std::getenv("SC4_FXDEBUG") != nullptr;
+    if (trace) std::fprintf(stderr, "flash: t %.3f rgba %.3f %.3f %.3f %.3f %s\n", t, rgba[0], rgba[1], rgba[2], rgba[3], intensity < 0.0f ? "dark" : "lit");
 }
 
 // @ 0x1005e2a74: allocate or recycle a cSC4ParticlesEffect, Init it, hand it the manager's global parameters and the

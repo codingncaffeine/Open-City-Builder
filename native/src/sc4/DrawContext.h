@@ -115,6 +115,8 @@ struct SC4Mesh {
 // Seams
 // ---------------------------------------------------------------------------------------------
 
+class cISC43DRender;   // sc4/Render3D.h
+
 // SC4ViewUtilities (draw context +0x28, cSC43DRender +0x170). A recovery of the class is in progress
 // (src/sc4/ViewUtilities.* was being written when this class was ported); the draw context only needs the one
 // field, so it goes through this seam until that class is ready.
@@ -123,6 +125,10 @@ public:
     virtual ~IS4ViewUtilities() = default;
     // +0x15c: viewport units per world unit, written by UpdateCameraPosition from cSC4CameraControl +0x140.
     virtual float ViewportUnitsPerWorld() const = 0;
+    // +0x158: world units per viewport unit (the screen flash's falloff radius scale).
+    virtual float WorldUnitsPerViewportUnit() const { return 0.0f; }
+    // +0x3e4: the view's centre on the terrain (cSC43DRender::UpdateVisibleTerrainMetrics).
+    virtual void GetViewportTerrainCenter(float* out) const { out[0] = out[1] = out[2] = 0.0f; }
 };
 
 // cSC4LightingManager (unrecovered; draw context +0x68, cSC43DRender +0x178, 0x240 bytes).
@@ -249,6 +255,9 @@ public:
     void SetViewUtilities(IS4ViewUtilities* utilities) { viewUtilities_ = utilities; }   // +0x28
     void SetLightingManager(IS4LightingManager* lighting) { lightingManager_ = lighting; }   // +0x68
     void SetCameraControl(sc4::cSC4CameraControl* control) { cameraControl_ = control; } // +0x60
+    void SetRenderer(cISC43DRender* renderer) { renderer_ = renderer; }                 // +0x48
+    cISC43DRender* Renderer() const { return renderer_; }
+    IS4ViewUtilities* ViewUtilities() const { return viewUtilities_; }
     void SetViewportSize(std::int32_t width, std::int32_t height) { viewportWidth_ = width; viewportHeight_ = height; }
     // +0x04: the pass the renderer is drawing. cSC4UndergroundOccupant::Draw reads it (0 = trench and walls,
     // 1 = the piece model); the original sets it from cSC43DRender before each pass.
@@ -293,7 +302,7 @@ private:
     [[maybe_unused]] void* rendererObject30_ = nullptr;     // +0x30 (cSC43DRender +0x20; unused here)
     [[maybe_unused]] void* rendererObject38_ = nullptr;     // +0x38 (cSC43DRender +0x28; unused here)
     gd::cIGZGDriver* driver_ = nullptr;    // +0x40
-    [[maybe_unused]] void* renderer_ = nullptr;             // +0x48 cSC43DRender* (unused here)
+    cISC43DRender* renderer_ = nullptr;      // +0x48 cSC43DRender* (the screen flash draws through it)
     sc4::cSC4RenderProperties* renderProperties_ = nullptr;   // +0x50
     s3d::cS3DCamera* camera_ = nullptr;    // +0x58
     sc4::cSC4CameraControl* cameraControl_ = nullptr;   // +0x60 (unused here)

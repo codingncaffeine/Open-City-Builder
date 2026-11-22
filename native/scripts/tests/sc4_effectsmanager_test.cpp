@@ -15,6 +15,9 @@
 #include "rz/cRZMessage2Standard.h"
 #include "gz/CommandParameterSet.h"
 #include "sc4/EffectsManager.h"
+#include "sc4/DrawContext.h"
+#include "FakeRender3D.h"
+#include "fake_gdriver.h"
 #include "sc4/GameDataRegistry.h"
 
 using namespace sc4;
@@ -1310,11 +1313,83 @@ void TestPlainParticlesGetDescription() {
     SetParticlesTerrain(nullptr);
 }
 
+// DrawScreenFlashes (i386 0x00404924): one viewport rectangle per frame through the draw context's renderer, the colour /
+// intensity curves at the flash time, the lit state for a positive intensity (alpha up to 1), the dark state for a negative
+// one ((colour - white) x intensity, alpha -intensity); a flash at a point fades with the squared distance from the view's
+// terrain centre over (scale x world units per pixel)^2, nothing when out of reach, and by 0.6 per zoom level below 4.
+void TestScreenFlashDraw() {
+    struct View final : IS4ViewUtilities {
+        float ViewportUnitsPerWorld() const override { return 0.5f; }
+        float WorldUnitsPerViewportUnit() const override { return 2.0f; }
+        void GetViewportTerrainCenter(float* out) const override { out[0] = 100.0f; out[1] = 50.0f; out[2] = 200.0f; }
+    } view;
+    FakeRender3D renderer;
+    renderer.width = 800;
+    renderer.height = 600;
+    sc4test::FakeGDriver driver;
+    SC4DrawContext context;
+    context.SetDriver(&driver);
+    context.Init();
+    context.SetRenderer(&renderer);
+    context.SetViewUtilities(&view);
+    FakeHost host;
+    SetEffectsManagerHost(&host);
+    cSC4EffectsManager manager;
+    manager.SetHost(&host);
+    manager.DoZoomChanged(4);
+
+    cSC4LightDescription light;
+    light.colors.push_back(cS3DVector3{0.5f, 0.25f, 1.0f});
+    light.intensities.push_back(2.0f);   // above 1: alpha is capped
+    light.range = 1.0f;
+    manager.StartScreenFlash(light, nullptr, 0.0f);
+    manager.DrawScreenFlashes(&context, 0.5f);
+    CHECK(renderer.rectangles.size() == 1);
+    if (!renderer.rectangles.empty()) {
+        const auto& r = renderer.rectangles.back();
+        CHECK(r.rect.left == 0 && r.rect.top == 0 && r.rect.right == 800 && r.rect.bottom == 600);
+        CHECK(r.color[0] == 0.5f && r.color[1] == 0.25f && r.color[2] == 1.0f && r.color[3] == 1.0f);
+        CHECK(!r.depthMask && r.colorMask);
+    }
+    manager.DrawScreenFlashes(&context, 0.6f);   // t = 1.1: over, nothing drawn
+    CHECK(renderer.rectangles.size() == 1);
+    CHECK(manager.ScreenFlashInverseDuration() == 0.0f);
+
+    light.intensities[0] = -0.5f;                // darkening
+    manager.StartScreenFlash(light, nullptr, 0.0f);
+    manager.DrawScreenFlashes(&context, 0.1f);
+    CHECK(renderer.rectangles.size() == 2);
+    if (renderer.rectangles.size() == 2) {
+        const auto& r = renderer.rectangles.back();
+        CHECK(std::fabs(r.color[0] - 0.25f) < 1e-6f && std::fabs(r.color[1] - 0.375f) < 1e-6f && r.color[2] == 0.0f);
+        CHECK(r.color[3] == 0.5f);
+    }
+
+    // At a point 30 m east and 40 m south of the centre (d^2 = 2500), scale 50 at 2 m per pixel (R^2 = 10000): 0.75, at zoom 4.
+    light.intensities[0] = 0.8f;
+    cS3DVector2 point{130.0f, 240.0f};
+    manager.StartScreenFlash(light, &point, 50.0f);
+    manager.DrawScreenFlashes(&context, 0.1f);
+    CHECK(renderer.rectangles.size() == 3);
+    if (renderer.rectangles.size() == 3) CHECK(std::fabs(renderer.rectangles.back().color[3] - 0.6f) < 1e-6f);
+    manager.DoZoomChanged(2);                    // two levels below 4: x 0.36
+    manager.StartScreenFlash(light, &point, 50.0f);
+    manager.DrawScreenFlashes(&context, 0.1f);
+    CHECK(renderer.rectangles.size() == 4);
+    if (renderer.rectangles.size() == 4) CHECK(std::fabs(renderer.rectangles.back().color[3] - 0.216f) < 1e-5f);
+    cS3DVector2 far{100.0f, 400.0f};             // 200 m away, beyond 100: nothing
+    manager.StartScreenFlash(light, &far, 50.0f);
+    manager.DrawScreenFlashes(&context, 0.1f);
+    CHECK(renderer.rectangles.size() == 4);
+    SetEffectsManagerHost(nullptr);
+}
+
 int main() {
     TestCom();
     TestRegistry();
     TestPoolAndRecycle();
     TestAncilliaryAndLights();
+    TestScreenFlashDraw();
     TestSnowline();
     TestInitShutdownAndTick();
     TestParticlePool();

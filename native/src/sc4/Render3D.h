@@ -51,8 +51,8 @@
 // What is in this file: the object's lifecycle, its driver / property / camera / view-object plumbing, the small
 // services the window layer, the camera control and the terrain view call every frame, the per-frame draw pass
 // (Draw / Draw*View / the partial / translated updates) and — since RENDER3D-2 — the model change queue
-// (InsertModel / RemoveModel / MoveModel / ChangeModel / ProcessModelChangeQueue) and the quad-grid rebuild. Still
-// missing: the camera / city messages (DoMessage) and picking; see notes/ledger_pending/cSC43DRender.txt.
+// (InsertModel / RemoveModel / MoveModel / ChangeModel / ProcessModelChangeQueue) and the quad-grid rebuild. DoMessage
+// is ported but for the backing-store switch and the lighting-manager swap; picking and the visible terrain metrics are ported.
 //
 // The model change queue in one paragraph, because it is what feeds DrawStaticView: InsertModel builds an
 // SC43DGridElement, stores it as the model's custom data (cIS3DModelInstance vslot 0x28), inserts it into the quad grid
@@ -212,6 +212,12 @@ public:
     }
     // The city's cell counts (i386 +0x19c vslots 0x1c / 0x20, PickTerrainAlways's clip box). False without a city.
     virtual bool CityCellCounts(int& x, int& z) { (void)x; (void)z; return false; }
+    // SL::spCity vslots 0x164 / 0x168 (the city's size in metres; DoMessage 0x26d31ec1). False without a city.
+    virtual bool CitySize(float& x, float& z) { (void)x; (void)z; return false; }
+    // The renderer's terrain (i386 +0x19c, SL::spTerrain taken at 0x26d31ec1): whether there is one, and its vslot 0x38
+    // GetAltitudeAtVertex(x, z) (UpdateVisibleTerrainMetrics' boundary walk).
+    virtual bool HasTerrain() { return false; }
+    virtual float TerrainAltitudeAtVertex(int x, int z) { (void)x; (void)z; return 0.0f; }
 };
 namespace sc4 {
 IRender3DHost* Render3DHost();
@@ -534,6 +540,8 @@ public:
     void TurnOnLighting(bool enable);                               // @ 0x100764062
     void AddDirtyRectangle(int kind, const cRZRect& rect, s3d::cIS3DModelInstance* model, int extra);   // @ 0x100769c44
     void DoViewTranslationChange3();                                // @ i386 0x00504c0c
+    // The view's centre on the terrain, its reach and the visible terrain rectangle, kept in the view utilities.
+    void UpdateVisibleTerrainMetrics();                             // @ i386 0x00504d28
     void AddDirtyRectangleInternal(int kind, const cRZRect& rect, s3d::cIS3DModelInstance* model, int extra);   // @ 0x100769cca
     bool AttemptTranslatedViewUpdate(int dx, int dy);               // @ 0x1007658be
     void SetClipRect(const cRZRect& rect);                          // @ 0x10076160e
@@ -673,8 +681,8 @@ private:
     float fogEnd_ = 15000.0f;                    // +0x160 (0x466a6000)
     bool inDraw_ = false;                        // +0x164 (Draw is re-entrant only through the host)
     bool captureDirtyRectangles_ = false;        // +0x165 (suppresses AddDirtyRectangle when set)
-    [[maybe_unused]] float citySizeX_ = 4096.0f;                  // +0x168
-    [[maybe_unused]] float citySizeZ_ = 4096.0f;                  // +0x16c
+    float citySizeX_ = 4096.0f;                   // +0x168 (the city's size, set at 0x26d31ec1)
+    float citySizeZ_ = 4096.0f;                   // +0x16c
 
     // +0x170..+0x227 owned subsystems
     SC4ViewUtilities* viewUtilities_ = nullptr;   // +0x170
