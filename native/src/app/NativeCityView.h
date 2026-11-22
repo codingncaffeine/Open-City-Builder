@@ -82,6 +82,7 @@ void NativeCarReport(int samples);  // the vehicle manager's traffic automata: p
 void NativeMySimReport();                  // kit command `mysims`: the MySims of the city and their state (app/NativeMySim.cpp)
 void NativeMySimMoveIn(const char* name, bool male, unsigned zodiac);   // kit command `mysimmovein NAME`: a MySim moves in through the original's add code
 void NativePlayerDriveCommand(const std::string& line);   // kit command `udi` (app/NativePlayerDrive.cpp)
+void NativeWatercraftReport();       // the watercraft manager's terminals, routes, marinas and boats (app/NativeWatercraft.cpp)
 void NativeAircraftReport();          // the aircraft manager's airports, runway markers and aircraft (app/NativeAircraft.cpp)
 void NativeTrainReport(int limit);    // track cells, trains and buses, the first engines with their cars (app/NativeTrafficAutomata.cpp)
 // The city view's render stack, built as the original's view does: SetCityRenderTarget when the city screen is made,

@@ -56,7 +56,7 @@ public:
     cSC4Lot* LotAtCell(int, int) override { return nullptr; }
     float TerrainHeight(float, float) override { return 0.0f; }
     IWatercraftBodyOfWater* BodyOfWater() override { return nullptr; }
-    bool IsWaterCell(int, int) override { return false; }
+    bool IsWaterCell(int, int, int) override { return false; }
     bool PropOccupantFacing(cISC4Occupant*, int&) override { return false; }
     void VisibleCellRect(int rect[4]) override { rect[0] = rect[1] = rect[2] = rect[3] = 0; }
     cISCResExemplar* GetAutomataTuningExemplar() override { return nullptr; }
@@ -75,6 +75,10 @@ public:
     }
     cSC4Watercraft* CreateWatercraft(std::uint32_t, const cS3DVector3&, std::uint32_t, const cGZPersistResourceKey&, cIGZMessageTarget2*, std::uint8_t,
                                      const cS3DVector3*) override { return nullptr; }
+    void FerryRoutesInUse(std::list<FerryRouteInfo>&) override {}
+    bool GetWaterRoute(int, int, int, int, std::vector<std::uint8_t>&) override { return false; }
+    float SeaLevel() override { return 0.0f; }
+    void NeighborConnectionCells(std::uint32_t, std::vector<std::pair<int, int>>&) override {}
 };
 
 }  // namespace

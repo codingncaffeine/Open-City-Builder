@@ -335,8 +335,8 @@ sc4::ISituationAutomaton* SituationAutomatonOf(void* engineAutomaton) {
     return ViewOfAutomaton(automaton);
 }
 int SituationAutomataManagerCount() { return 4; }
-// The original's order (Init): vehicle, aircraft, pedestrian, watercraft. A manager that is not a cSC4AutomataManager (the
-// native watercraft manager is a class of its own) answers through its view as an empty one.
+// The original's order (Init): vehicle, aircraft, pedestrian, watercraft. A manager that is not a cSC4AutomataManager answers
+// through its view as an empty one.
 sc4::ISituationAutomataManager* SituationAutomataManager(int index) {
     switch (index) {
         case 0: return &g_vehicles;

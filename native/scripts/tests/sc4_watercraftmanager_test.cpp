@@ -2,7 +2,9 @@
 // permission state machine, the position/collision queries, the ambient spawner, the random creation point and the
 // version-6 stream round trip. The fakes stand in for the parent manager (IWatercraftManagerBase) and the engine
 // globals (IWatercraftManagerHost); the assertions mark the quirks kept from the binary with "quirk".
+#include <array>
 #include <bit>
+#include <list>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -242,8 +244,10 @@ struct FakeHost final : IWatercraftManagerHost {
     }
     bool PointInCity(float x, float z) override {
         lastPointInCity = {x, z};
-        return x >= 0.0f && z >= 0.0f && x < static_cast<float>(kCitySize) && z < static_cast<float>(kCitySize);
+        const float size = pointInCityWorld ? static_cast<float>(kCitySize) * kCellSize : static_cast<float>(kCitySize);
+        return x >= 0.0f && z >= 0.0f && x < size && z < size;
     }
+    bool pointInCityWorld = false;   // the GetRandomCreationPoint checks pass cell indices; a world-placed boat needs world units
     void CityCellCount(int& sizeX, int& sizeZ) override { sizeX = kCitySize; sizeZ = kCitySize; }
     float CellSize() override { return kCellSize; }
     cSC4Lot* LotAtPosition(const float* xyz) override {
@@ -262,7 +266,9 @@ struct FakeHost final : IWatercraftManagerHost {
     }
     float TerrainHeight(float, float) override { return 7.0f; }
     IWatercraftBodyOfWater* BodyOfWater() override { return &body; }
-    bool IsWaterCell(int cellX, int cellZ) override {
+    int lastWaterRadius = -1;
+    bool IsWaterCell(int cellX, int cellZ, int radius) override {
+        lastWaterRadius = radius;
         auto it = waterCells.find({cellX, cellZ});
         return it != waterCells.end() && it->second;
     }
@@ -337,6 +343,22 @@ struct FakeHost final : IWatercraftManagerHost {
         return boat;
     }
     cS3DVector3 lastPointInCity;
+    // the traffic simulator, the terrain's sea level and the neighbor connections
+    std::list<FerryRouteInfo> inUse;
+    std::vector<std::pair<int, int>> connections;
+    std::vector<std::uint8_t> waterRoute;
+    std::vector<std::array<int, 4>> waterRouteAsks;
+    void FerryRoutesInUse(std::list<FerryRouteInfo>& out) override { out = inUse; }
+    bool GetWaterRoute(int x0, int z0, int x1, int z1, std::vector<std::uint8_t>& route) override {
+        waterRouteAsks.push_back({x0, z0, x1, z1});
+        if (waterRoute.empty() || x1 != connections.back().first) return false;
+        route = waterRoute;
+        return true;
+    }
+    float SeaLevel() override { return 250.0f; }
+    void NeighborConnectionCells(std::uint32_t type, std::vector<std::pair<int, int>>& out) override {
+        if (type == 9) out = connections;
+    }
 };
 
 // cSC4Lot helpers -----------------------------------------------------------------------------------------------------
@@ -1001,40 +1023,299 @@ int main() {
     }
 
     // ---------------------------------------------------------------------------------------------------------------
-    // the PARTIAL entries still behave sanely
+    // ferries: CreateFerryStruct, CreateFerry, and DoAnimationTick's route rebuild, launch sweep and docking cleanup
     // ---------------------------------------------------------------------------------------------------------------
     {
         FakeBase base;
         FakeHost host;
         host.base = &base;
         cSC4WatercraftManager manager;
+        host.manager = &manager;
         manager.SetBase(&base);
         manager.SetHost(&host);
         manager.Init();
-        // A far-away terminal occupant passes the border check but the creation path is not recovered yet.
         FakePropertyHolder holder;
         holder.ids = {kPropertyWatercraftFerryTerminal};
-        FakeOccupant terminal;
-        terminal.holder = &holder;
-        terminal.position[0] = 50.0f;
-        terminal.position[2] = 50.0f;
-        cSC4Lot* lot = MakeLot(3, 3, 1, 1);
-        host.lotsByCell[{3, 3}] = lot;
-        host.facings[&terminal] = 0;
-        manager.HandleOccupantInserted(&terminal);
-        CHECK(manager.TerminalCount() == 1);
-        FerryTerminalInformation& info = manager.Terminals().begin()->second;
-        CHECK(manager.CreateFerry(&info, &info, nullptr) == nullptr);
-        FerryStationInformation stationA;
-        FerryStationInformation stationB;
-        manager.CreateFerryStruct(&info, nullptr, stationA, stationB);   // no-op for now
-        CHECK(!manager.CreateMarinaBoat(&terminal, 0x4416));
-        // The pause path only ticks the parent.
-        base.simulatePaused = true;
+        FakeOccupant terminalA, terminalB;
+        terminalA.holder = &holder;
+        terminalB.holder = &holder;
+        terminalA.position[0] = terminalA.position[2] = 3.5f * kCellSize;   // cell (3,3): the first cell clear of the border
+        terminalB.position[0] = terminalB.position[2] = 4.5f * kCellSize;
+        cSC4Lot* lotA = MakeLot(3, 3, 1, 1);
+        cSC4Lot* lotB = MakeLot(4, 4, 1, 1);
+        host.lotsByCell[{3, 3}] = lotA;
+        host.lotsByCell[{4, 4}] = lotB;
+        host.facings[&terminalA] = 0;
+        host.facings[&terminalB] = 0;
+        manager.HandleOccupantInserted(&terminalA);
+        manager.HandleOccupantInserted(&terminalB);
+        CHECK(manager.TerminalCount() == 2);
+        FerryTerminalInformation* infoA = &manager.Terminals().find(cRZAutoRefCount<cSC4Lot>(lotA))->second;
+        FerryTerminalInformation* infoB = &manager.Terminals().find(cRZAutoRefCount<cSC4Lot>(lotB))->second;
+        cS3DVector3 dockA{}, dirA{}, dockB{}, dirB{};
+        CHECK(manager.GetPropPositionAndOrientation(&terminalA, dockA, dirA, false));
+        CHECK(manager.GetPropPositionAndOrientation(&terminalB, dockB, dirB, false));
+
+        // A line between the two terminals, no boat yet: both docks pushed out by kfMaxStoplightDistance (1.0).
+        FerryRouteInformation route;
+        route.route.fromLot = lotA;
+        route.route.toLot = lotB;
+        route.route.route = {0x00, 3, 3, 0x40, 2, 0x0e};
+        route.route.route2 = {0x00, 4, 4, 0x40, 2, 0x05};
+        FerryStationInformation stationA, stationB;
+        stationB.flags = 0x00ab;
+        manager.CreateFerryStruct(infoA, &route, stationA, stationB);
+        CHECK(stationA.lot.get() == lotA);
+        CHECK(stationA.route == route.route.route);
+        CHECK(stationA.flags == 0x0100);
+        CHECK(stationA.routeIndex == 0);
+        CHECK(std::fabs(stationA.position.z - (dockA.z + dirA.z)) < 1e-4f && std::fabs(stationA.position.x - dockA.x) < 1e-4f);
+        CHECK(stationA.dockDirection.z == dirA.z);
+        CHECK(stationB.lot.get() == lotB);
+        CHECK(stationB.route == route.route.route2);
+        CHECK(stationB.flags == 0x0100);
+        CHECK(std::fabs(stationB.position.z - (dockB.z + dirB.z)) < 1e-4f);
+        // A far terminal the manager does not know: station B is a copy of station A.
+        cSC4Lot* stray = MakeLot(6, 6, 1, 1);
+        FerryRouteInformation strayRoute = route;
+        strayRoute.route.toLot = stray;
+        FerryStationInformation strayA, strayB;
+        manager.CreateFerryStruct(infoA, &strayRoute, strayA, strayB);
+        CHECK(strayB.lot.get() == lotA);
+        CHECK(strayB.route == route.route.route);
+        // A neighbor line: station B = the first cell of the return route a boat can launch from, at sea level, facing the next
+        // cell; route index = that cell's index + 2. Return route: (2,4) then three steps +x; (2,4) is land, (3,4) is water.
+        FerryRouteInformation neighbor = route;
+        neighbor.route.f1c = 1;
+        neighbor.route.route2 = {0x00, 2, 4, 0x40, 3, 0x2a};
+        host.waterCells[{3, 4}] = true;
+        FerryStationInformation nA, nB;
+        manager.CreateFerryStruct(infoA, &neighbor, nA, nB);
+        CHECK(nB.lot.get() == nullptr);
+        CHECK(nB.routeIndex == 3);
+        CHECK(nB.flags == 0x0100);
+        CHECK(nB.position.x == 3.5f * kCellSize && nB.position.z == 4.5f * kCellSize && nB.position.y == 250.0f);
+        CHECK(nB.dockDirection.x == kCellSize && nB.dockDirection.y == 0.0f && nB.dockDirection.z == 0.0f);
+        CHECK(host.lastWaterRadius == 2);   // a ferry needs water two cells wide
+        // No launchable cell on the return route: station B keeps everything but its flags' high byte.
+        host.waterCells.clear();
+        FerryStationInformation dryA, dryB;
+        dryB.routeIndex = 77;
+        dryB.flags = 0x01cd;
+        manager.CreateFerryStruct(infoA, &neighbor, dryA, dryB);
+        CHECK(dryB.routeIndex == 77 && dryB.flags == 0x00cd);
+
+        // CreateFerry: passenger line (type 0) -> group 0x4402, starts docked at station B (flag clear), B's slot holds it.
+        host.createCalls = 0;
+        CHECK(manager.CreateFerry(infoA, infoB, &route));
+        CHECK(host.createCalls == 1 && host.lastCreateGroup == kWatercraftManagerGroupFerryB);
+        CHECK(host.lastCreatePosition.x == 1.0f && host.lastCreatePosition.y == 1.0f && host.lastCreatePosition.z == 1.0f);
+        CHECK(route.boat);
+        CHECK(route.atStation);
+        CHECK(infoB->dockBoat.get() == route.boat.get());
+        CHECK(!infoA->dockBoat);
+        float at[3] = {0.0f, 0.0f, 0.0f};
+        route.boat->GetPosition(at);
+        CHECK(std::fabs(at[2] - (dockB.z + dirB.z * route.boat->GetRadius())) < 1e-3f);
+        CHECK(route.boat->StationA().lot.get() == lotB);   // the boat's first station is the end it starts at
+        CHECK(route.boat->DockingActive());
+        // Car ferry (type 1) -> 0x4400; the flag now set: it starts at station A, A's slot holds it.
+        FerryRouteInformation carRoute = route;
+        carRoute.boat = nullptr;
+        carRoute.route.state = 1;
+        CHECK(manager.CreateFerry(infoA, infoB, &carRoute));
+        CHECK(host.lastCreateGroup == kWatercraftManagerGroupFerryA);
+        CHECK(!carRoute.atStation);
+        CHECK(infoA->dockBoat.get() == carRoute.boat.get());
+        CHECK(carRoute.boat->StationA().lot.get() == lotA);
+        // A terminal within three cells of the border launches nothing.
+        FakeOccupant edgeTerminal;
+        edgeTerminal.holder = &holder;
+        edgeTerminal.position[0] = edgeTerminal.position[2] = 2.5f * kCellSize;
+        FerryTerminalInformation edgeInfo;
+        edgeInfo.occupant = &edgeTerminal;
+        FerryRouteInformation edgeRoute = route;
+        edgeRoute.boat = nullptr;
+        const int before = host.createCalls;
+        CHECK(!manager.CreateFerry(&edgeInfo, infoB, &edgeRoute));
+        CHECK(host.createCalls == before && !edgeRoute.boat);
+        edgeInfo.occupant = nullptr;
+        infoA->dockBoat = nullptr;
+        infoB->dockBoat = nullptr;
+
+        // DoAnimationTick: message 0x2c06ba82 makes the traffic simulator's lines the routes.
+        auto* changed = new cRZMessage2Standard();
+        changed->AddRef();
+        changed->SetType(kMessageWatercraftRoutesChanged);
+        FerryRouteInfo line;
+        line.fromLot = lotA;
+        line.toLot = lotB;
+        line.route = route.route.route;
+        line.route2 = route.route.route2;
+        host.inUse = {line};
+        manager.DoMessage(changed);
+        CHECK(manager.RoutesChanged());
         manager.DoAnimationTick(0, 16.0f);
-        CHECK(base.tickCalls == 1);
+        CHECK(!manager.RoutesChanged());
+        CHECK(infoA->routes.size() == 1 && !infoA->routes[0].boat && !infoA->routes[0].atStation);
+        CHECK(infoB->routes.empty());
+        // The launch sweep runs once 35 s have gone by (the timer adds while below, then fires on the next tick).
+        host.createCalls = 0;
+        manager.DoAnimationTick(0, 34000.0f);   // 34,016 ms: below 35 s
+        manager.DoAnimationTick(0, 16.0f);
+        CHECK(host.createCalls == 0);
+        manager.DoAnimationTick(0, 1000.0f);    // 35,032 ms
+        CHECK(host.createCalls == 0);
+        manager.DoAnimationTick(0, 16.0f);
+        CHECK(host.createCalls == 1);
+        CHECK(infoA->routes[0].boat);
+        cSC4Watercraft* ferry = infoA->routes[0].boat.get();
+        CHECK(infoB->dockBoat.get() == ferry);
+        // A terminal whose lot is not in good condition launches nothing.
+        lotA->SetCondition(2);
+        infoA->routes[0].boat = nullptr;
+        infoB->dockBoat = nullptr;
+        manager.DoAnimationTick(0, 35000.0f);
+        manager.DoAnimationTick(0, 16.0f);
+        CHECK(host.createCalls == 1);
+        lotA->SetCondition(0);
+        infoA->routes[0].boat = ferry;
+        infoB->dockBoat = ferry;
+        // The same line again keeps the route (and its boat) and hands the boat fresh stations without re-initialising the route.
+        manager.DoMessage(changed);
+        manager.DoAnimationTick(0, 16.0f);
+        CHECK(infoA->routes.size() == 1 && infoA->routes[0].boat.get() == ferry);
+        CHECK(ferry->StationA().lot.get() == lotA && ferry->StationB().lot.get() == lotB);
+        // The line gone: the route is erased and its ferry fades out (state 0x49).
+        host.inUse.clear();
+        manager.DoMessage(changed);
+        manager.DoAnimationTick(0, 16.0f);
+        CHECK(infoA->routes.empty());
+        CHECK(ferry->GetBehavior() == kWatercraftStateRemoveFade);
+        // Docking cleanup: B's slot still names the ferry that runs no route any more; freed on the first tick after 60 s.
+        CHECK(infoB->dockBoat.get() == ferry);
+        manager.DoAnimationTick(0, 60000.0f);
+        manager.DoAnimationTick(0, 16.0f);
+        CHECK(!infoB->dockBoat);
+        // Paused: only the parent ticks.
+        const int ticks = base.tickCalls;
+        base.simulatePaused = true;
+        host.inUse = {line};
+        manager.DoMessage(changed);
+        manager.DoAnimationTick(0, 16.0f);
+        CHECK(base.tickCalls == ticks + 1);
+        CHECK(manager.RoutesChanged());
+        base.simulatePaused = false;
+        changed->Release();
         manager.Shutdown();
-        lot->Release();
+        lotA->Release();
+        lotB->Release();
+        stray->Release();
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // lookahead conflicts: the lower-priority boat gives way
+    // ---------------------------------------------------------------------------------------------------------------
+    {
+        FakeBase base;
+        FakeHost host;
+        host.base = &base;
+        cSC4WatercraftManager manager;
+        host.manager = &manager;
+        manager.SetBase(&base);
+        manager.SetHost(&host);
+        manager.Init();
+        auto* first = new cSC4Watercraft();
+        auto* second = new cSC4Watercraft();
+        first->AddRef();
+        second->AddRef();
+        manager.AddAutomaton(first);
+        manager.AddAutomaton(second);
+        auto point = [](int x, int z) { WatercraftTravelPoint p; p.x = x; p.z = z; return p; };
+        first->Lookahead() = {point(1, 1), point(2, 1), point(3, 1), point(4, 1)};
+        second->Lookahead() = {point(5, 5), point(2, 1), point(2, 2), point(2, 3)};
+        // Both priority 3 (no ferry, no size group): not both 0, and the other is not lower, so the boat met second in the list
+        // walk gives way at its shared cell (index 1; its lookahead is cut after that cell).
+        const std::vector<cSC4Watercraft*> order = manager.CurrentBoats();
+        CHECK(order.size() == 2);
+        cSC4Watercraft* outer = order[0];
+        cSC4Watercraft* inner = order[1];
+        manager.DoAnimationTick(0, 16.0f);
+        CHECK(inner->Lookahead().size() == 2);
+        CHECK(outer->Lookahead().size() == 4);
+        // In driving mode nothing is settled.
+        first->Lookahead() = {point(1, 1), point(2, 1), point(3, 1), point(4, 1)};
+        second->Lookahead() = {point(5, 5), point(2, 1), point(2, 2), point(2, 3)};
+        base.drivingMode = true;
+        manager.DoAnimationTick(0, 16.0f);
+        CHECK(first->Lookahead().size() == 4 && second->Lookahead().size() == 4);
+        base.drivingMode = false;
+        manager.Shutdown();
+        first->Release();
+        second->Release();
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // marina boats: CreateMarinaBoat
+    // ---------------------------------------------------------------------------------------------------------------
+    {
+        FakeBase base;
+        FakeHost host;
+        host.base = &base;
+        cSC4WatercraftManager manager;
+        host.manager = &manager;
+        manager.SetBase(&base);
+        manager.SetHost(&host);
+        manager.Init();
+        FakePropertyHolder holder;
+        holder.ids = {kMarinaBuildingProperties[0]};
+        FakeOccupant marina;
+        marina.holder = &holder;
+        marina.position[0] = marina.position[2] = 4.5f * kCellSize;
+        for (int i = 0; i < 3; ++i) marina.minXyz[i] = marina.maxXyz[i] = 0.0f;   // the dock point stays on the building
+        host.facings[&marina] = 0;
+        host.pointInCityWorld = true;
+        manager.HandleOccupantInserted(&marina);
+        CHECK(manager.MarinaOccupantCount() == 1);
+        cS3DVector3 dock{}, dir{};
+        CHECK(manager.GetPropPositionAndOrientation(&marina, dock, dir, false));
+        // The moored kind (0x4416): created half a step out, moved 1.5 radii further, waiting with a 60 s threshold.
+        CHECK(manager.CreateMarinaBoat(&marina, kWatercraftManagerGroupMarinaBoat));
+        CHECK(host.lastCreateGroup == kWatercraftManagerGroupMarinaBoat);
+        CHECK(std::fabs(host.lastCreatePosition.z - (dock.z + 0.5f * dir.z)) < 1e-4f && host.lastCreatePosition.x == dock.x);
+        cSC4Watercraft* moored = manager.MarinaOccupants().begin()->second.get();
+        CHECK(moored != nullptr);
+        if (!moored) return 1;
+        float at[3] = {0.0f, 0.0f, 0.0f};
+        moored->GetPosition(at);
+        CHECK(std::fabs(at[2] - (dock.z + 0.5f * dir.z + moored->GetRadius() * dir.z * 1.5f)) < 1e-4f);
+        CHECK(moored->GetBehavior() == kWatercraftStateWaiting);
+        CHECK(moored->TowWaitThreshold() == kWatercraftMarinaWaitThreshold);
+        // Another kind: created 32 to the side (-cross_y of the dock direction = (dir.z, 0, -dir.x) = +x for facing 0) and
+        // moored one radius to that side.
+        CHECK(manager.CreateMarinaBoat(&marina, 0x4419));
+        CHECK(std::fabs(host.lastCreatePosition.x - (dock.x + 32.0f)) < 1e-4f);
+        cSC4Watercraft* side = manager.MarinaOccupants().begin()->second.get();
+        side->GetPosition(at);
+        CHECK(std::fabs(at[0] - (dock.x + side->GetRadius())) < 1e-4f);
+        // Too close to the border: nothing is created.
+        FakeOccupant edge;
+        edge.holder = &holder;
+        edge.position[0] = edge.position[2] = 1.5f * kCellSize;
+        for (int i = 0; i < 3; ++i) edge.minXyz[i] = edge.maxXyz[i] = 0.0f;
+        host.facings[&edge] = 0;
+        const int before = host.createCalls;
+        CHECK(!manager.CreateMarinaBoat(&edge, kWatercraftManagerGroupMarinaBoat));
+        CHECK(host.createCalls == before);
+        // The tick gives a marina building without its boat a new one (the old boats removed first: a boat within two radii
+        // of the launch point refuses the creation).
+        manager.RemoveAutomaton(moored, true);
+        manager.RemoveAutomaton(side, true);
+        manager.MarinaOccupants().begin()->second = nullptr;
+        manager.DoAnimationTick(0, 16.0f);
+        CHECK(manager.MarinaOccupants().begin()->second);
+        CHECK(host.lastCreateGroup == kWatercraftManagerGroupMarinaBoat);
+        manager.Shutdown();
     }
 
     if (failures == 0) std::printf("sc4_watercraftmanager_test: all checks passed\n");

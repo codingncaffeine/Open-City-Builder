@@ -209,7 +209,7 @@ public:
     virtual bool RequestPermissionToWait(cSC4Lot* lot, cSC4Watercraft* boat) = 0;   // @ 0x1004f472e
     virtual void DoneDocking(cSC4Lot* lot, cSC4Watercraft* boat) = 0;               // @ 0x1004f47cc
     virtual void DoneQueueing(cSC4Lot* lot, cSC4Watercraft* boat) = 0;              // @ 0x1004f4864
-    virtual bool CanDockNow(cSC4Watercraft* boat) = 0;                              // manager vslot 0x178
+    virtual bool CanDockNow(cSC4Watercraft* boat) = 0;                              // manager vslot 0x178 = cSC4AutomataManager::IsAutomatonOnscreen
     virtual void FleetCounts(std::int32_t& docks, std::int32_t& queues) = 0;        // manager +0xb28 / +0xb78
     // ---- message server notifications (SL::spMS2 vslots 0x28 / 0x30)
     virtual bool AddNotification(cIGZMessageTarget2* target, std::uint32_t messageType) = 0;

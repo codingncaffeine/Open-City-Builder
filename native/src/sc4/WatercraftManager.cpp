@@ -8,6 +8,10 @@
 #include <cstdint>
 #include <utility>
 
+#include <algorithm>
+#include <list>
+
+#include "sc4/CompressedRouteReader.h"
 #include "sc4/SCPropertyHelp.h"
 #include "sc4/SpiralIterator.h"
 
@@ -45,6 +49,46 @@ bool HasMarinaBuildingProperty(cISCPropertyHolder* holder) {
     for (std::uint32_t id : kMarinaBuildingProperties)
         if (holder->HasProperty(id)) return true;
     return false;
+}
+
+// DoAnimationTick's two intervals (function statics, i386 0x00abace8 / 0x00abace4).
+constexpr float kDockingRightsCleanupTweenTime = 60000.0f;
+constexpr float kFerryInstantiationTweenTime = 35000.0f;
+// CreateFerry / CreateMarinaBoat::siUnallowableProximityToEdge (i386 0x00abacc4 / 0x00abace0): the cells a terminal keeps from the
+// city border.
+constexpr int kUnallowableProximityToEdge = 3;
+// cSC4TrafficAutomaton::kfMaxStoplightDistance (0x00a706d8): the dock offset of a ferry station without a boat yet.
+constexpr float kMaxStoplightDistance = 1.0f;
+// CreateMarinaBoat: the half-step forward, the side step of a launched boat, the length step of a moored one, the wait.
+constexpr float kMarinaForwardStep = 0.5f;     // FLOAT_00a706b4
+constexpr float kMarinaSideStep = 32.0f;       // FLOAT_00a70844
+constexpr float kMarinaMooringScale = 1.5f;    // FLOAT_00a707b0
+constexpr float kNeighborBoatWait = 30000.0f;  // FLOAT_00a70a38
+// The groups DoAnimationTick gives a marina building's boat (by the building's property).
+constexpr std::uint32_t kMarinaPropertyTravelBoat = 0x6c36283c;   // -> 0x4411
+constexpr std::uint32_t kMarinaPropertyGroup4419 = 0xcc3a1723;    // -> 0x4419
+constexpr std::uint32_t kWatercraftManagerGroup4419 = 0x4419;
+// The neighbor connection type the neighbor travel boats leave by (GetConnectionsOfType(9)).
+constexpr std::uint32_t kNeighborConnectionTypeWater = 9;
+
+// cross_y (i386 0x0062d010): v x (0, 1, 0) = (-z, 0, x). The marina code uses its negation, normalised.
+cS3DVector3 NegatedCrossYNormalized(const cS3DVector3& v) {
+    cS3DVector3 side{v.z, 0.0f, -v.x};
+    const float length = VectorLength(side);
+    if (length > 0.0f) {
+        const float inverse = 1.0f / length;
+        side.x *= inverse;
+        side.y *= inverse;
+        side.z *= inverse;
+    }
+    return side;
+}
+
+// The ferry line match of DoAnimationTick (i386 0x0038bf9c / 0x0038c290): a neighbor line (the listed line's flag) by its lot
+// and off-map cell, a line between terminals by both lots.
+bool SameFerryLine(const FerryRouteInfo& kept, const FerryRouteInfo& listed) {
+    if (!listed.f1c) return kept.fromLot.get() == listed.fromLot.get() && kept.toLot.get() == listed.toLot.get();
+    return kept.fromLot.get() == listed.fromLot.get() && kept.f1e == listed.f1e && kept.f20 == listed.f20;
 }
 
 template <class T>
@@ -163,21 +207,149 @@ bool cSC4WatercraftManager::HandleTuningParametersChanged() {
     return true;
 }
 
-// @ 0x1004f29a2. PARTIAL: only the paused shortcut, the ambient spawner call and the parent tick are recovered here.
-// The rest of the original is the 60 s docking-rights sweep, the marina-boat sweep (CreateMarinaBoat over the +0xb60
-// registry), and the ferry rebuild when message 0x2c06ba82 arrived (SL::spCity vslot 0x228 -> vslot 0xf8 returns the
-// traffic simulator's ferry routes -> CreateFerry); those need cISC4TrafficSimulator::GetFerryRoutesInUse, which is
-// unrecovered.
+// @ 0x1004f29a2 (i386 0x0038bb84). While the simulation runs, in this order:
+//  1. every 60 s the docking slots are cleaned: a slot whose boat runs no ferry route of any terminal is freed;
+//  2. outside driving mode, two boats whose lookaheads share a cell settle it by priority: the lower-priority boat drops
+//     that lookahead cell (InvalidateLookaheadCell), and two ferries (both priority 0) remove the first one;
+//  3. the ambient spawner (PopulateVisibleArea);
+//  4. when message 0x2c06ba82 arrived, the traffic simulator's ferry lines in use replace the routes: a kept route takes the
+//     new line (its ferry gets fresh stations), a new line gets a route without a boat, and a route whose line is gone is
+//     erased (its ferry removed);
+//  5. every 35 s, outside driving mode, every terminal in good condition without a docked boat launches a ferry on each of
+//     its routes without one, unless the far terminal is in bad condition;
+//  6. every marina building without its boat gets one (group 0x4411 / 0x4419 / 0x4416 by the building's property).
+// The parent ticks last, paused or not.
 void cSC4WatercraftManager::DoAnimationTick(std::uint32_t data, float milliseconds) {
     if (!base_) return;
     base_->CalculateSimSpeedModifier();
-    if (base_->SimSpeedPaused()) {
-        base_->DoAnimationTick(data, milliseconds);
-        return;
+    if (!base_->SimSpeedPaused()) {
+        if (kDockingRightsCleanupTweenTime <= dockingCleanupElapsed_) {
+            dockingCleanupElapsed_ = 0.0f;
+            for (auto& terminal : terminals_) {
+                FerryTerminalInformation& info = terminal.second;
+                if (!info.dockBoat && !info.waitBoat) continue;
+                bool dockRuns = false, waitRuns = false;
+                for (auto& other : terminals_) {
+                    for (const FerryRouteInformation& route : other.second.routes) {
+                        if (info.dockBoat.get() == route.boat.get()) dockRuns = true;
+                        if (info.waitBoat.get() == route.boat.get()) waitRuns = true;
+                    }
+                }
+                if (!dockRuns && info.dockBoat) info.dockBoat = nullptr;
+                if (!waitRuns && info.waitBoat) info.waitBoat = nullptr;
+            }
+        } else {
+            dockingCleanupElapsed_ += milliseconds;
+        }
+
+        if (!base_->IsDrivingMode()) {
+            const std::vector<cSC4Watercraft*> boats = CurrentBoats();
+            for (cSC4Watercraft* boat : boats) {
+                if (!boat || boat->Lookahead().empty()) continue;
+                const int priority = BoatPriority(boat);
+                for (cSC4Watercraft* other : boats) {
+                    if (!other || other == boat || other->Lookahead().empty()) continue;
+                    // The original reads both sizes once per pair; the port also stops at the current size.
+                    const int count = static_cast<int>(boat->Lookahead().size());
+                    const int otherCount = static_cast<int>(other->Lookahead().size());
+                    const int otherPriority = BoatPriority(other);
+                    bool settled = false;
+                    for (int i = 0; i < count - 1 && !settled; ++i) {
+                        for (int j = 0; j < otherCount - 1; ++j) {
+                            if (i >= static_cast<int>(boat->Lookahead().size()) || j >= static_cast<int>(other->Lookahead().size())) break;
+                            const WatercraftTravelPoint& mine = boat->Lookahead()[static_cast<std::size_t>(i)];
+                            const WatercraftTravelPoint& theirs = other->Lookahead()[static_cast<std::size_t>(j)];
+                            if (mine.x != theirs.x || mine.z != theirs.z) continue;
+                            if (priority != 0 || otherPriority != 0) {
+                                if (otherPriority < priority) boat->InvalidateLookaheadCell(i);
+                                else other->InvalidateLookaheadCell(j);
+                                settled = true;
+                                break;
+                            }
+                            boat->SetStateInternal(cSC4Watercraft::kChangeRemove);   // two ferries: the loop goes on
+                        }
+                    }
+                }
+            }
+        }
+
+        PopulateVisibleArea(milliseconds);
+
+        if (routesChanged_) {
+            routesChanged_ = false;
+            std::list<FerryRouteInfo> inUse;
+            if (host_) host_->FerryRoutesInUse(inUse);
+            for (const FerryRouteInfo& line : inUse) {
+                auto terminal = terminals_.find(line.fromLot);
+                if (terminal == terminals_.end()) continue;
+                std::vector<FerryRouteInformation>& routes = terminal->second.routes;
+                auto kept = std::find_if(routes.begin(), routes.end(),
+                                         [&](const FerryRouteInformation& route) { return SameFerryLine(route.route, line); });
+                if (kept != routes.end()) {
+                    kept->route = line;
+                    if (kept->boat) {
+                        FerryStationInformation stationA, stationB;
+                        CreateFerryStruct(&terminal->second, &*kept, stationA, stationB);
+                        kept->boat->Ferry_SetStationInformation(stationA, stationB, false);
+                    }
+                } else {
+                    FerryRouteInformation fresh;
+                    fresh.boat = nullptr;
+                    fresh.route = line;
+                    fresh.atStation = false;
+                    routes.push_back(std::move(fresh));
+                }
+            }
+            for (auto& terminal : terminals_) {
+                std::vector<FerryRouteInformation>& routes = terminal.second.routes;
+                for (auto route = routes.begin(); route != routes.end();) {
+                    const bool listed = std::any_of(inUse.begin(), inUse.end(),
+                                                    [&](const FerryRouteInfo& line) { return SameFerryLine(route->route, line); });
+                    if (listed) {
+                        ++route;
+                        continue;
+                    }
+                    if (route->boat) route->boat->SetStateInternal(cSC4Watercraft::kChangeRemove);
+                    route = routes.erase(route);
+                }
+            }
+        }
+
+        if (ferryInstantiationElapsed_ < kFerryInstantiationTweenTime) {
+            ferryInstantiationElapsed_ += milliseconds;
+        } else {
+            ferryInstantiationElapsed_ = 0.0f;
+            if (!base_->IsDrivingMode()) {
+                for (auto& terminal : terminals_) {
+                    if (terminal.second.dockBoat || !terminal.first || terminal.first->GetCondition() != 0) continue;
+                    for (FerryRouteInformation& route : terminal.second.routes) {
+                        if (route.boat) continue;
+                        auto far = terminals_.find(route.route.toLot);
+                        if (far != terminals_.end() && far->first && far->first->GetCondition() != 0) continue;
+                        CreateFerry(&terminal.second, far != terminals_.end() ? &far->second : nullptr, &route);
+                    }
+                }
+            }
+        }
+
+        for (auto& marina : marinaOccupants_) {
+            if (!marina.first || marina.second) continue;
+            cISCPropertyHolder* holder = marina.first->AsPropertyHolder();
+            std::uint32_t group = kWatercraftManagerGroupMarinaBoat;
+            if (holder && holder->HasProperty(kMarinaPropertyTravelBoat)) group = kWatercraftGroupTravelBoat3;
+            else if (holder && holder->HasProperty(kMarinaPropertyGroup4419)) group = kWatercraftManagerGroup4419;
+            CreateMarinaBoat(marina.first.get(), group);
+        }
     }
-    PopulateVisibleArea(milliseconds);
-    SC4_UNWIRED("cSC4WatercraftManager::DoAnimationTick: docking-rights sweep, marina-boat sweep and ferry rebuild (message 0x2c06ba82) not ported");
     base_->DoAnimationTick(data, milliseconds);
+}
+
+// The boats of the base list (the original walks the base's +0x44 list); the port's own list when the base keeps none.
+std::vector<cSC4Watercraft*> cSC4WatercraftManager::CurrentBoats() {
+    std::vector<cSC4Watercraft*> out;
+    if (base_ && base_->BaseBoats(out)) return out;
+    for (const auto& boat : boats_) out.push_back(boat.get());
+    return out;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -189,6 +361,7 @@ void cSC4WatercraftManager::DoAnimationTick(std::uint32_t data, float millisecon
 bool cSC4WatercraftManager::AddAutomaton(cSC4Watercraft* automaton) {
     if (!automaton) automaton = new cSC4Watercraft();
     if (!automaton) return false;
+    if (base_ && base_->AddToBase(automaton)) return true;   // the real base: its registry, Init and placement
     // The base's AddAutomaton adds the reference before Init: Init posts messages that hold (and release) a reference
     // to the occupant, so the automaton must be alive while it runs.
     automaton->AddRef();
@@ -254,6 +427,10 @@ bool cSC4WatercraftManager::RemoveAutomaton(cSC4Watercraft* automaton, bool forc
             }
         }
     }
+    if (base_ && base_->RemoveFromBase(automaton, force)) {   // the real base removes or retires it
+        automaton->Release();
+        return true;
+    }
     // The base RemoveAutomaton: force removes (event 3, marker, shutdown, release); otherwise it retires the automaton
     // (event 2, marker, opacity 0, effects cleared). cSC4Automaton has no StopEffectsAndClearModel in the port, so the
     // retire path hides the boat instead (hook-up item).
@@ -295,8 +472,7 @@ cSC4Watercraft* cSC4WatercraftManager::CreateAutomaton(std::uint32_t group, cons
 
 // @ 0x1004ef14e. The first boat within twice its radius of the position (excluding the caller's boat).
 cSC4Watercraft* cSC4WatercraftManager::LookForBoatsAtPosition(const cS3DVector3& position, cSC4Watercraft* exclude) {
-    for (const cRZAutoRefCount<cSC4Watercraft>& ref : boats_) {
-        cSC4Watercraft* boat = ref.get();
+    for (cSC4Watercraft* boat : CurrentBoats()) {
         if (!boat || boat == exclude) continue;
         float xyz[3] = {0.0f, 0.0f, 0.0f};
         boat->GetPosition(xyz);
@@ -309,17 +485,14 @@ cSC4Watercraft* cSC4WatercraftManager::LookForBoatsAtPosition(const cS3DVector3&
     return nullptr;
 }
 
-// @ 0x1004f1f2e. True when the cell is water and no boat overlaps its centre. The original also converts the cell to
-// world space and samples the terrain height before the conversion (the arguments of that height query are implicit);
-// the port samples the height at the cell centre, which is what the comparison needs.
-bool cSC4WatercraftManager::ClearToLaunchBoat(int cellX, int cellZ, int unknown) {
-    (void)unknown;
-    if (!host_ || !host_->IsWaterCell(cellX, cellZ)) return false;
+// @ 0x1004f1f2e. True when the cell is navigable for a boat of `radius` cells (surface water IsNavigable) and no boat of the
+// base list overlaps the cell centre at sea level.
+bool cSC4WatercraftManager::ClearToLaunchBoat(int cellX, int cellZ, int radius) {
+    if (!host_ || !host_->IsWaterCell(cellX, cellZ, radius)) return false;
     float worldX = 0.0f, worldZ = 0.0f;
     host_->CellToWorld(cellX, cellZ, worldX, worldZ);
     const float worldY = host_->TerrainHeight(worldX, worldZ);
-    for (const cRZAutoRefCount<cSC4Watercraft>& ref : boats_) {
-        cSC4Watercraft* boat = ref.get();
+    for (cSC4Watercraft* boat : CurrentBoats()) {
         if (!boat) continue;
         float xyz[3] = {0.0f, 0.0f, 0.0f};
         boat->GetPosition(xyz);
@@ -406,8 +579,7 @@ cSC4Watercraft* cSC4WatercraftManager::CollisionDetection(cSC4Watercraft* self, 
                                                           float scale) {
     if (!self) return nullptr;
     AutomataOBB selfBox(*self, position, scale);
-    for (const cRZAutoRefCount<cSC4Watercraft>& ref : boats_) {
-        cSC4Watercraft* other = ref.get();
+    for (cSC4Watercraft* other : CurrentBoats()) {
         if (!other || other == self) continue;
         const cS3DVector3& selfPosition = self->SimulatedPosition();
         const cS3DVector3& otherPosition = other->SimulatedPosition();
@@ -847,47 +1019,122 @@ bool cSC4WatercraftManager::Read(cIGZIStream& stream) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Ferry / marina creation (PARTIAL: the traffic simulator's ferry routes and neighbour connections are unrecovered)
+// Ferry / marina creation
 // ---------------------------------------------------------------------------------------------------------------------
 
-// @ 0x1004f1144. PARTIAL: the recovered prefix is the "station A's terminal occupant must sit at least three cells away
-// from the city border" check (the original returns 0 outside it); the boat creation group selection (0x4400 / 0x4402
-// from the route state) and the station wiring that follow need the cSC4CompressedRouteReader conversions that
-// CreateFerryStruct performs, which are unrecovered.
-FerryRouteInformation* cSC4WatercraftManager::CreateFerry(FerryTerminalInformation* stationA,
-                                                          FerryTerminalInformation* stationB,
-                                                          FerryRouteInformation* route) {
-    (void)stationB;
-    (void)route;
-    if (!stationA || !stationA->occupant || !host_) return nullptr;
-    float xyz[3] = {0.0f, 0.0f, 0.0f};
-    stationA->occupant->GetPosition(xyz);
-    int cellX = 0, cellZ = 0;
-    host_->WorldToCell(xyz[0], xyz[2], cellX, cellZ);
-    int sizeX = 0, sizeZ = 0;
-    host_->CityCellCount(sizeX, sizeZ);
-    if (cellX < 3 || sizeX - 3 < cellX || cellZ < 3 || sizeZ - 3 < cellZ) return nullptr;
-    SC4_UNWIRED("cSC4WatercraftManager::CreateFerry: ferry boat creation and station wiring not ported");
-    return nullptr;
+// @ 0x1004f1144 (i386 0x00388228). Launches the ferry of `route` from terminal A: refused (false) when A's terminal occupant
+// stands within three cells of the city border. The boat is a 0x4400 (car ferry, line type 1) or 0x4402 created at
+// (1, 1, 1) through the manager's own CreateAutomaton; a boat that comes with a behavior gets state 0 pushed. The route
+// keeps the boat, CreateFerryStruct builds both stations, and the boat starts docked at the end the route's "at station"
+// flag names (clear: station B, set: station A); that terminal's docking slot holds the boat. The flag flips on every call,
+// so the next ferry of the route starts at the other end. True once the boat creation was tried.
+bool cSC4WatercraftManager::CreateFerry(FerryTerminalInformation* stationA, FerryTerminalInformation* stationB,
+                                        FerryRouteInformation* route) {
+    if (!stationA || !route || !host_) return false;
+    const std::int32_t type = route->route.state;
+    if (stationA->occupant) {
+        float xyz[3] = {0.0f, 0.0f, 0.0f};
+        stationA->occupant->GetPosition(xyz);
+        int cellX = 0, cellZ = 0;
+        host_->WorldToCell(xyz[0], xyz[2], cellX, cellZ);
+        int sizeX = 0, sizeZ = 0;
+        host_->CityCellCount(sizeX, sizeZ);
+        if (cellX < kUnallowableProximityToEdge || sizeX - kUnallowableProximityToEdge < cellX) return false;
+        if (cellZ < kUnallowableProximityToEdge || sizeZ - kUnallowableProximityToEdge < cellZ) return false;
+    }
+    const cS3DVector3 position{1.0f, 1.0f, 1.0f};
+    const cGZPersistResourceKey key{};
+    cSC4Watercraft* boat = CreateAutomaton(type != 1 ? kWatercraftManagerGroupFerryB : kWatercraftManagerGroupFerryA, position,
+                                           kWatercraftCreateFlags, key, nullptr, 0, nullptr);
+    if (!boat) return false;
+    if (boat->GetBehavior() != 0) boat->PushState(0, nullptr, -1.0f, false, 0, 0, nullptr);
+    route->boat = boat;
+    FerryStationInformation first, second;
+    CreateFerryStruct(stationA, route, first, second);
+    if (route->boat) {
+        FerryTerminalInformation* docked = stationB;
+        if (!route->atStation) {
+            boat->MoveTo(&second.position.x, &second.dockDirection.x);
+            boat->Ferry_SetStationInformation(second, first, true);
+        } else {
+            boat->MoveTo(&first.position.x, &first.dockDirection.x);
+            boat->Ferry_SetStationInformation(first, second, true);
+            docked = stationA;
+        }
+        if (docked) docked->dockBoat = boat;
+    }
+    route->atStation = !route->atStation;
+    return true;
 }
 
-// @ 0x1004f180e. PARTIAL: builds the two FerryStationInformation records for a new ferry from a terminal's occupant
-// (position, dock direction, lot and compressed route). The route half runs the cSC4CompressedRouteReader
-// (SetData/GetNext) and the ClearToLaunchBoat scan, which is where the recovery stops.
+// @ 0x1004f180e (i386 0x00387db6). The two stations of a ferry route, from terminal `station` (the route's first lot):
+//  * station A: the terminal occupant's dock point pushed out along the dock direction by the boat's radius (1.0 without a
+//    boat), the first lot, the outbound route, flags 0x100, route index 0;
+//  * station B of a line between terminals: the far terminal's dock point the same way, the second lot and the return route;
+//    a far terminal the manager does not know gives a copy of station A;
+//  * station B of a neighbor line: the first cell of the return route a boat can launch from (ClearToLaunchBoat, size 2),
+//    at sea level, facing the next cell of the route (the vector between the two cell centres, not normalised), no lot, the
+//    return route, route index = that cell's index + 2. A return route with no such cell leaves station B as it was apart
+//    from its flags' high byte.
 void cSC4WatercraftManager::CreateFerryStruct(FerryTerminalInformation* station, FerryRouteInformation* route,
                                               FerryStationInformation& stationA, FerryStationInformation& stationB) {
-    (void)station;
-    (void)route;
-    (void)stationA;
-    (void)stationB;
-    SC4_UNWIRED("cSC4WatercraftManager::CreateFerryStruct: ferry station records from the compressed route not ported");
+    if (!station || !route) return;
+    const float distance = route->boat ? route->boat->GetRadius() : kMaxStoplightDistance;
+    const auto dockStation = [&](cISC4Occupant* occupant, FerryStationInformation& out, const cRZAutoRefCount<cSC4Lot>& lot,
+                                 const std::vector<std::uint8_t>& path) {
+        cS3DVector3 direction{}, position{};
+        GetPropPositionAndOrientation(occupant, position, direction, false);
+        position.x = distance * direction.x + position.x;
+        position.y = distance * direction.y + position.y;
+        position.z = distance * direction.z + position.z;
+        out.lot = lot;
+        out.route = path;
+        out.dockDirection = direction;
+        out.position = position;
+        out.dockRequested = 0;
+        out.routeIndex = 0;
+        out.flags = 0x0100;
+    };
+    dockStation(station->occupant.get(), stationA, route->route.fromLot, route->route.route);
+    stationB.flags = static_cast<std::uint16_t>(stationB.flags & 0x00ff);
+    if (!route->route.f1c) {
+        auto far = terminals_.find(route->route.toLot);
+        if (far == terminals_.end()) stationB = stationA;
+        else dockStation(far->second.occupant.get(), stationB, route->route.toLot, route->route.route2);
+        return;
+    }
+    cSC4CompressedRouteReader reader;
+    reader.SetData(&route->route.route2);
+    CompressedRouteCell cell;
+    int index = 0;
+    for (;; ++index) {
+        if (!reader.GetNext(cell)) return;
+        if (ClearToLaunchBoat(cell.x, cell.z, 2)) break;
+    }
+    CompressedRouteCell next;
+    if (!reader.GetNext(next) || !host_) return;
+    cS3DVector3 here{}, there{};
+    host_->CellToWorld(cell.x, cell.z, here.x, here.z);
+    host_->CellToWorld(next.x, next.z, there.x, there.z);
+    const cS3DVector3 direction{there.x - here.x, there.y - here.y, there.z - here.z};
+    here.y = host_->SeaLevel();
+    stationB.flags = 0x0100;
+    stationB.lot = nullptr;
+    stationB.route = route->route.route2;
+    stationB.dockDirection = direction;
+    stationB.position = here;
+    stationB.dockRequested = 0;
+    stationB.routeIndex = index + 2;
 }
 
-// @ 0x1004f212e. PARTIAL: creates the boat a marina/seaport occupant owns. The recovered prefix is the occupant
-// position query and the "three cells from the border" test; the rest walks cISC4NeighborConnection routes
-// (IsNeighborTravelBoat / SetNbrRouteData) and the neighbour-city travel data, which are unrecovered.
+// @ 0x1004f212e (i386 0x0038b3fe). The boat of a marina / seaport building (false when the building is no prop with a facing or
+// stands within three cells of the border). The boat is created half a step out from the dock point, 32 to the side for every
+// group but the moored 0x4416; then it is moved to its berth (0x4416: 1.5 of its radius further out; the others: its radius to
+// the side) facing the dock direction, and the building's registry entry takes it. A neighbor travel boat undocks, waits
+// 30..60 s and takes the water route from the berth to the first of the city's water connections (type 9) a route exists to
+// (the off-map cell pulled one cell back into the city); otherwise, or when no route exists, the boat waits (state 0x4c) with a
+// 60 s tow-wait threshold and its previous position and orientation reset to the current ones.
 bool cSC4WatercraftManager::CreateMarinaBoat(cISC4Occupant* occupant, std::uint32_t group) {
-    (void)group;
     if (!occupant || !host_) return false;
     cS3DVector3 position{};
     cS3DVector3 direction{};
@@ -896,9 +1143,71 @@ bool cSC4WatercraftManager::CreateMarinaBoat(cISC4Occupant* occupant, std::uint3
     host_->WorldToCell(position.x, position.z, cellX, cellZ);
     int sizeX = 0, sizeZ = 0;
     host_->CityCellCount(sizeX, sizeZ);
-    if (cellX <= 2 || sizeX - 3 < cellX || cellZ <= 2 || sizeZ - 3 < cellZ) return false;
-    SC4_UNWIRED("cSC4WatercraftManager::CreateMarinaBoat: marina / seaport boat creation (neighbor travel routes) not ported");
-    return false;
+    if (cellX < kUnallowableProximityToEdge || sizeX - kUnallowableProximityToEdge < cellX) return false;
+    if (cellZ < kUnallowableProximityToEdge || sizeZ - kUnallowableProximityToEdge < cellZ) return false;
+    position.x = kMarinaForwardStep * direction.x + position.x;
+    position.y = direction.y * kMarinaForwardStep + position.y;
+    position.z = direction.z * kMarinaForwardStep + position.z;
+    cS3DVector3 launch = position;
+    if (group != kWatercraftManagerGroupMarinaBoat) {
+        const cS3DVector3 side = NegatedCrossYNormalized(direction);
+        launch.x = kMarinaSideStep * side.x + launch.x;
+        launch.y = side.y * kMarinaSideStep + launch.y;
+        launch.z = side.z * kMarinaSideStep + launch.z;
+    }
+    const cGZPersistResourceKey key{};
+    cSC4Watercraft* boat = CreateAutomaton(group, launch, kWatercraftCreateFlags, key, nullptr, 0, nullptr);
+    if (!boat) return false;
+    const float radius = boat->GetRadius();
+    if (group == kWatercraftManagerGroupMarinaBoat) {
+        position.z = radius * direction.z * kMarinaMooringScale + position.z;
+        position.y = radius * direction.y * kMarinaMooringScale + position.y;
+        position.x = radius * direction.x * kMarinaMooringScale + position.x;
+    } else {
+        const cS3DVector3 side = NegatedCrossYNormalized(direction);
+        position.x = radius * side.x + position.x;
+        position.y = radius * side.y + position.y;
+        position.z = radius * side.z + position.z;
+    }
+    boat->MoveTo(&position.x, &direction.x);
+    // The original writes the registry entry it was handed; the port finds the building's entry (a building outside the
+    // registry keeps its boat in a local reference).
+    cRZAutoRefCount<cSC4Watercraft> local;
+    auto entry = marinaOccupants_.find(cRZAutoRefCount<cISC4Occupant>(occupant));
+    cRZAutoRefCount<cSC4Watercraft>& slot = entry != marinaOccupants_.end() ? entry->second : local;
+    slot = boat;
+    if (slot && slot->IsNeighborTravelBoat()) {
+        if (boat->GetBehavior() != 0) boat->PushState(0, nullptr, -1.0f, false, 0, 0, nullptr);
+        boat->PushState(kWatercraftStateUndocking, nullptr, -1.0f, false, 0, 0, nullptr);
+        const float wait = base_ ? static_cast<float>(base_->Random().RandomDoubleUniform()) * kNeighborBoatWait + kNeighborBoatWait
+                                 : kNeighborBoatWait;
+        boat->PushState(kWatercraftStateWaiting, nullptr, wait, false, 0, 0, nullptr);
+        int berthX = 0, berthZ = 0;
+        host_->WorldToCell(position.x, position.z, berthX, berthZ);
+        std::vector<std::pair<int, int>> connections;
+        host_->NeighborConnectionCells(kNeighborConnectionTypeWater, connections);
+        for (std::pair<int, int> cell : connections) {
+            if (cell.first < 0) cell.first += 1;
+            if (sizeX == cell.first) cell.first = sizeX - 1;
+            if (cell.second < 0) cell.second += 1;
+            if (sizeZ == cell.second) cell.second = sizeZ - 1;
+            std::vector<std::uint8_t> path;
+            if (slot && host_->GetWaterRoute(berthX, berthZ, cell.first, cell.second, path)) {
+                slot->SetNbrRouteData(path, occupant);
+                return true;
+            }
+        }
+    }
+    if (boat->GetBehavior() != kWatercraftStateWaiting) {
+        boat->PushState(kWatercraftStateWaiting, nullptr, -1.0f, false, 0, 0, nullptr);
+        if (slot) {
+            slot->SetTowWaitThreshold(kWatercraftMarinaWaitThreshold);
+            slot->SetTowWaitElapsed(0.0f);
+            slot->SetPreviousPosition(slot->SimulatedPosition());
+            slot->SetPreviousOrientation(slot->SimulatedOrientation());
+        }
+    }
+    return true;
 }
 
 }  // namespace sc4

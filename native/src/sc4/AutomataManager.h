@@ -121,8 +121,6 @@ constexpr std::uint32_t kMsgCameraMoved = 0xa6b79602, kMsgCameraTargetDone = 0xa
                         kMsgQueuePointsInvalid = 0x89d3e9f3;
 constexpr int kAutomataTickChannel = 0xff;
 
-// Occupant property that excludes an occupant from the automata system (HandleInsert/RemoveOccupant).
-constexpr std::uint32_t kPropertyNoAutomata = 0x029244db;
 // Automaton property: the group ids it belongs to (cRZVariant of u32s).
 #ifndef SC4_kPropertyOccupantGroups_DEFINED
 #define SC4_kPropertyOccupantGroups_DEFINED

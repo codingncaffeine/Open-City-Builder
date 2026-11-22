@@ -14,4 +14,7 @@ constexpr std::uint32_t kGZIID_cISC4NetworkOccupant = 0xa821ef94;
 // (borrowed, valid while the adapter lives).
 constexpr std::uint32_t kGZIID_PlainObject = 0x506c6e31;
 
+// Occupant property that excludes an occupant from the automata system (the automata managers' occupant handlers).
+constexpr std::uint32_t kPropertyNoAutomata = 0x029244db;
+
 }  // namespace sc4

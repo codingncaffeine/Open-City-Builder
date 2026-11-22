@@ -1441,6 +1441,8 @@ int RunScenario(const std::string& path) {
             native::NativeTrafficTunnelReport();
         } else if (command == "ferries") {   // ferries: the ferry terminals, their links, riders and counters (read-only)
             native::NativeFerryReport();
+        } else if (command == "watercraft") {   // watercraft: the watercraft manager's terminals, routes, marina buildings and boats
+            native::NativeWatercraftReport();
         } else if (command == "accidentcheck") {   // accidentcheck N: up to N traffic accident checks, until one makes an accident
             int tries = 1;
             words >> tries;

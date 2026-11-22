@@ -79,6 +79,7 @@
 #include "gz/cIGZOStream.h"
 #include "rz/cRZAutoRefCount.h"
 #include "rz/cRZRandomSuper.h"
+#include "sc4/CommonIIDs.h"   // kPropertyNoAutomata
 #include "sc4/Exemplar.h"
 #include "sc4/Lot.h"
 #include "sc4/Occupant.h"
@@ -96,7 +97,6 @@ constexpr std::uint32_t kMessageWatercraftRoutesChanged = 0x2c06ba82;   // regis
 // Occupant properties (cISCPropertyHolder::HasProperty).
 constexpr std::uint32_t kPropertyWatercraftFerryTerminal = 0xec39dd14;
 constexpr std::uint32_t kPropertyWatercraftMarinaLot = 0x8c392d39;
-constexpr std::uint32_t kPropertyNoAutomata = 0x029244db;               // the automaton manager's filter
 // The marina/seaport buildings whose occupant gets a boat (the ten properties HandleOccupantInserted probes in order).
 constexpr std::uint32_t kMarinaBuildingProperties[10] = {
     0x4c18336d, 0xac183320, 0x6c183ffb, 0x8c184040, 0xac18330c,
@@ -202,6 +202,12 @@ public:
     virtual cRZRandomSuper& Random() = 0;                                  // base +0x78 (SL::mpRandom)
     virtual float TuningMaxCountField() const = 0;                         // sTuningParams+0x28 (read as raw 32 bits)
     virtual float RetireOpacityDuration() const = 0;                       // sTuningParams.f219b4
+    // The base registry: cSC4AutomataManager::AddAutomaton @ 0x100101848 / RemoveAutomaton @ 0x100101c2c and its automaton
+    // list (i386 +0x44). A base that answers false keeps the boats in the manager's own list (the port's stand-in for the
+    // base list, which the unit test's base uses); the game's base is the real cSC4AutomataManager and answers true.
+    virtual bool AddToBase(cSC4Watercraft* automaton) { (void)automaton; return false; }
+    virtual bool RemoveFromBase(cSC4Watercraft* automaton, bool force) { (void)automaton; (void)force; return false; }
+    virtual bool BaseBoats(std::vector<cSC4Watercraft*>& out) { (void)out; return false; }
 };
 
 // Everything the watercraft manager reached through an engine global. Each method names the original call.
@@ -220,11 +226,12 @@ public:
     virtual float CellSize() = 0;                                                // vslot 0x2d8
     virtual cSC4Lot* LotAtPosition(const float* xyz) = 0;                        // 0x108 -> vslot 0x30 (counted)
     virtual cSC4Lot* LotAtCell(int cellX, int cellZ) = 0;                        // 0x108 -> vslot 0x28 (counted)
-    // ---- terrain (SL::spTerrain vslot 0xe8: the height at a world position)
+    // ---- terrain (SL::spTerrain vslot 0xe8 = i386 0x74 GetSeaLevel: the original passes no position; every boat height is the
+    //      sea level)
     virtual float TerrainHeight(float x, float z) = 0;
     // ---- surface water (SL::spSurfaceWater)
     virtual IWatercraftBodyOfWater* BodyOfWater() = 0;                           // vslot 0x48 (borrowed)
-    virtual bool IsWaterCell(int cellX, int cellZ) = 0;                          // vslot 0x38 (ClearToLaunchBoat)
+    virtual bool IsWaterCell(int cellX, int cellZ, int radius) = 0;              // vslot 0x38 IsNavigable(x, z, radius, null)
     // ---- the prop view of an occupant (QueryInterface 0xe9793a65, then vslot 0x48 = the facing index).
     //      Returns false when the occupant is not a prop occupant (the original's QI failure).
     virtual bool PropOccupantFacing(cISC4Occupant* occupant, int& facing) = 0;
@@ -246,6 +253,16 @@ public:
     virtual cSC4Watercraft* CreateWatercraft(std::uint32_t group, const cS3DVector3& position, std::uint32_t flags,
                                              const cGZPersistResourceKey& key, cIGZMessageTarget2* listener,
                                              std::uint8_t argument, const cS3DVector3* velocity) = 0;
+    // ---- the traffic simulator (SL::spCity vslot 0x114): vslot 0x7c GetFerryRoutesInUse (the lines riders used last
+    //      month, with their lots) and vslot 0x84 GetWaterRoute (a compressed water route between two cells, false when
+    //      none).
+    virtual void FerryRoutesInUse(std::list<FerryRouteInfo>& out) = 0;
+    virtual bool GetWaterRoute(int x0, int z0, int x1, int z1, std::vector<std::uint8_t>& route) = 0;
+    // ---- terrain vslot 0x74 GetSeaLevel
+    virtual float SeaLevel() = 0;
+    // ---- the neighbors simulator (SL::spNeighborsSim vslot 0x44 GetConnectionsOfType) and each connection's vslot 0x18
+    //      GetConnectionCell: the off-map cells of the city's connections of `type`.
+    virtual void NeighborConnectionCells(std::uint32_t type, std::vector<std::pair<int, int>>& out) = 0;
 };
 
 class cSC4WatercraftManager : public cIGZMessageTarget2 {
@@ -264,7 +281,7 @@ public:
     bool Shutdown();                                         // @ 0x1004ede32
     bool DoMessage(cIGZMessage2* message) override;           // @ 0x1004edee6 (thunk 0x1004ef140)
     bool HandleTuningParametersChanged();                    // @ 0x1004ef4c2
-    void DoAnimationTick(std::uint32_t data, float milliseconds);   // @ 0x1004f29a2 (PARTIAL)
+    void DoAnimationTick(std::uint32_t data, float milliseconds);   // @ 0x1004f29a2 (i386 0x0038bb84)
 
     // ---- the per-kind manager entry points
     bool AddAutomaton(cSC4Watercraft* automaton);            // @ 0x1004ef220
@@ -283,11 +300,12 @@ public:
     // ---- queries the boats call
     cSC4Watercraft* LookForBoatsAtPosition(const cS3DVector3& position, cSC4Watercraft* exclude);   // @ 0x1004ef14e
     cSC4Watercraft* CollisionDetection(cSC4Watercraft* self, const cS3DVector3& position, float scale);   // @ 0x1004f4908
-    bool ClearToLaunchBoat(int cellX, int cellZ, int unknown);   // @ 0x1004f1f2e
+    bool ClearToLaunchBoat(int cellX, int cellZ, int radius);   // @ 0x1004f1f2e (i386 0x00387330)
     bool GetPropPositionAndOrientation(cISC4Occupant* occupant, cS3DVector3& position, cS3DVector3& direction,
                                        bool offsetVariant);   // @ 0x1004f0e16
     std::int16_t GetLotBodyOfWater(cSC4Lot* lot);            // @ 0x1004f3f88
     int BoatPriority(cSC4Watercraft* boat);                  // @ 0x1004f3802
+    std::vector<cSC4Watercraft*> CurrentBoats();             // the base list (i386 +0x44), or the port's own list
 
     // ---- the docking state machine
     bool RequestPermissionToDock(cSC4Lot* lot, cSC4Watercraft* boat);   // @ 0x1004f4690
@@ -303,12 +321,16 @@ public:
     bool Write(cIGZOStream& stream) const;                   // @ 0x1004ef61a (thunk 0x1004ef7f4)
     bool Read(cIGZIStream& stream);                          // @ 0x1004ef802 (thunk 0x1004f0e08)
 
-    // ---- ferry / marina creation (PARTIAL: the traffic simulator's ferry routes / neighbour connections)
-    FerryRouteInformation* CreateFerry(FerryTerminalInformation* stationA, FerryTerminalInformation* stationB,
-                                       FerryRouteInformation* route);   // @ 0x1004f1144 (PARTIAL)
+    // ---- ferry / marina creation
+    bool CreateFerry(FerryTerminalInformation* stationA, FerryTerminalInformation* stationB,
+                     FerryRouteInformation* route);   // @ 0x1004f1144 (i386 0x00388228)
     void CreateFerryStruct(FerryTerminalInformation* station, FerryRouteInformation* route,
-                           FerryStationInformation& stationA, FerryStationInformation& stationB);   // @ 0x1004f180e (PARTIAL)
-    bool CreateMarinaBoat(cISC4Occupant* occupant, std::uint32_t group);   // @ 0x1004f212e (PARTIAL)
+                           FerryStationInformation& stationA, FerryStationInformation& stationB);   // @ 0x1004f180e (i386 0x00387db6)
+    bool CreateMarinaBoat(cISC4Occupant* occupant, std::uint32_t group);   // @ 0x1004f212e (i386 0x0038b3fe)
+    // The two timers of DoAnimationTick (function statics in the original; members here so a test or a second city starts
+    // from zero).
+    float DockingCleanupElapsed() const { return dockingCleanupElapsed_; }
+    float FerryInstantiationElapsed() const { return ferryInstantiationElapsed_; }
 
     // ---- the seams
     IWatercraftManagerHost* Host() const { return host_; }
@@ -349,6 +371,8 @@ protected:
     std::uint32_t refCount_ = 0;               // +0x48
 
     bool routesChanged_ = false;               // +0xb08
+    float dockingCleanupElapsed_ = 0.0f;       // DoAnimationTick::fDockingRightsCleanupLastCheck
+    float ferryInstantiationElapsed_ = 0.0f;   // DoAnimationTick::fFerryInstantiationLastCheck
 
     // The four registries (the original's four containers at +0xb10 / +0xb38 / +0xb60 / +0xb88).
     TerminalMap terminals_;                    // +0xb10 lot -> terminal information

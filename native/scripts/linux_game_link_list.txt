@@ -627,6 +627,7 @@ src/sc4/CitySituationManager.cpp
 src/sc4/CitySituationMissions.cpp
 src/sc4/WatercraftManager.cpp
 src/sc4/Watercraft.cpp
+src/sc4/CompressedRouteReader.cpp
 src/gz/gzcom_creators/cSC4PipeOccupant.cpp
 src/gz/gzcom_creators/cSC4PowerPoleOccupant.cpp
 src/gz/gzcom_creators/cSC4CityDetailManager.cpp
@@ -641,6 +642,7 @@ src/sc4/MyStreetSim.cpp
 src/sc4/AdvisorCitySituations.cpp
 src/sc4/AircraftManager.cpp
 src/app/NativeAircraft.cpp
+src/app/NativeWatercraft.cpp
 src/gz/gzcom_creators/cSC4PipeConnectionOccupant.cpp
 src/sc4/UndergroundConnectionOccupant.cpp
 src/sc4/PipeConnectionOccupant.cpp

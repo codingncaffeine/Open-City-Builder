@@ -384,22 +384,21 @@ sc4::IAutomatonGroupTemplate* NativeFindAutomatonGroup(std::uint32_t id) {
 }
 
 // cSC4AutomataManager::GetAutomataManagerForGroup (0x100104c7e): the first of the city's automata managers (vehicles,
-// pedestrians, aircraft; city vslots 0x158 / 0x160 / 0x168) whose vslot 0xf0 takes the group.
-//   PARTIAL: the watercraft manager (0x170) is a class of its own here and is not asked.
+// pedestrians, aircraft, watercraft; city vslots 0x158 / 0x160 / 0x168 / 0x170) whose vslot 0xf0 takes the group.
 sc4::cSC4AutomataManager* NativeAutomataManagerForGroup(std::uint32_t group) {
-    for (CityComponent component : {CityComponent::VehicleManager, CityComponent::PedestrianManager, CityComponent::AircraftManager}) {
+    for (CityComponent component : {CityComponent::VehicleManager, CityComponent::PedestrianManager, CityComponent::AircraftManager,
+                                    CityComponent::WatercraftManager}) {
         cSC4AutomataManager* manager = Concrete<cSC4AutomataManager>(component);
         if (manager && manager->CanCreateGroup(group)) return manager;
     }
-    SC4_UNWIRED("cSC4AutomataManager::GetAutomataManagerForGroup: the watercraft manager (city vslot 0x170) is not asked for the group");
     return nullptr;
 }
 // SL::spVehicleManager / spPedestrianManager / spAircraftManager / spWatercraftManager by index (the automata scripts' source
-// managers). PARTIAL: the watercraft manager (3) is a class of its own natively and answers null.
+// managers).
 sc4::cSC4AutomataManager* NativeAutomataManagerAt(int index) {
-    static constexpr CityComponent kManagers[3] = {CityComponent::VehicleManager, CityComponent::PedestrianManager, CityComponent::AircraftManager};
-    if (index == 3) SC4_UNWIRED("SL::spWatercraftManager as an automata script source manager: the native watercraft manager is a class of its own (null)");
-    return index >= 0 && index < 3 ? Concrete<cSC4AutomataManager>(kManagers[index]) : nullptr;
+    static constexpr CityComponent kManagers[4] = {CityComponent::VehicleManager, CityComponent::PedestrianManager, CityComponent::AircraftManager,
+                                                   CityComponent::WatercraftManager};
+    return index >= 0 && index < 4 ? Concrete<cSC4AutomataManager>(kManagers[index]) : nullptr;
 }
 // cSC4TrafficAutomataManager::IsLayerVisible (i386 0x000ca21a) on the vehicle manager: the view level shows that layer.
 bool NativeAutomataLayerVisible(std::uint32_t layer) {
