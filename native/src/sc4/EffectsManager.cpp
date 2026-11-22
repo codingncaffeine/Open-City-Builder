@@ -1206,6 +1206,8 @@ void cSC4EffectsManager::UpdateSnowline() {
 // description update on every active effect, then take the weather wind into the global parameters and, on December
 // 19th, turn the snowline on.
 void cSC4EffectsManager::DoEffectsTick() {
+    static int traced = 0;
+    if (traced < 3 && std::getenv("SC4_FXDEBUG")) std::fprintf(stderr, "effects: tick %d\n", ++traced);
     if (effectsResource_ && host_ && host_->EffectsResourceChanged()) {
         BeginCollection();
         host_->LoadEffectsFiles();
@@ -1323,8 +1325,9 @@ bool cSC4EffectsManager::DoMessage(cIGZMessage2* message) {
         case 0x697d01ed: DoEffectsTick(); break;
         case 0xab96b05f: effectsActive_ = true; UpdateActiveVisualEffects(); break;
         case 0x26d31ec2: suppressOccupantEffects_ = true; break;
-        case 0x26d31ec1:
-            SC4_UNWIRED("cSC4EffectsManager::DoMessage: PostCityInit does not start the 1-second effects tick timer nor seed the building effect maps (DoOccupantInserted)");
+        case 0x26d31ec1:   // PostCityInit (i386 0x0040a90a): the 1000 ms effects tick starts, holding the manager while it runs
+            tickTimer_.StartPeriodic(1000, this);
+            SC4_UNWIRED("cSC4EffectsManager::DoMessage: PostCityInit does not seed the building effect maps (occupant manager iteration -> DoOccupantInserted)");
             break;
         case 0x99ef1142:
             SC4_UNWIRED("cSC4EffectsManager::DoOccupantInserted: the static building's heights are not written into the effect maps");
