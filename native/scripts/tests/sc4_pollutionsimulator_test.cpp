@@ -316,17 +316,15 @@ int main() {
         sim.AgeOccupantList(aging, 0, 0);
         CHECK(services.lot.state == 4);
 
-        // radiation: adds an area effect to the radiation grid, announces it and runs the visual update hook
-        int visual = 0;
-        sim.SetVisualEffectUpdate([&] { ++visual; });
+        // radiation: adds an area effect to the radiation grid and announces it (the effect refresh after it is in
+        // sc4_pollutioneffects)
         host.messages.clear();
         const float where[3] = {64, 0, 64};
         sim.AddRadiationToCity(where, 0.0f, 20.0f);
-        CHECK(visual == 0 && host.messages.empty());                             // a zero amount does nothing
+        CHECK(host.messages.empty());                             // a zero amount does nothing
         sim.AddRadiationToCity(where, 100.0f, 0.0f);
-        CHECK(visual == 0);
         sim.AddRadiationToCity(where, 100.0f, 20.0f);
-        CHECK(visual == 1 && host.messages.size() == 1 && host.messages[0].first == 0xda6dd35d);
+        CHECK(host.messages.size() == 1 && host.messages[0].first == 0xda6dd35d);
         CHECK(sim.IsRadioactive(8, 8));
         sim.SetServices(nullptr);
     }

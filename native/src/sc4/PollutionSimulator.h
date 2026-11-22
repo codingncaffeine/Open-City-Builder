@@ -2,8 +2,8 @@
 // (117 functions, 0x10009469e..0x10009afde, class id 0x8990c065, interfaces 0x452294aa message target,
 // 0x89c498be, 0xe4fda3d4 serializable). This port covers the value grids and their accessors, the tunables
 // loaded from the simulator exemplar, the per-building capacity helpers, the garbage disposal priority chain
-// (eatGarbage), the recycling-centre effect and the end-of-month roll-over. The daily diffusion, monthly
-// budget and visual-effect passes need the traffic / building / effects simulators and stay unrecovered.
+// (eatGarbage), the recycling-centre effect and the end-of-month roll-over. The per-block visual effects and the
+// worst tracts (UpdatePollutionVisualEffect) reach the effects manager and the terrain through the host.
 //
 // Original layout used here: +0x78 four per-type value grids (tract size 2), +0x98 four per-type "source" grids
 // (tract size 2, garbage 1), +0x90 is the value grid of type 3 (radiation), lists +0xc0 water treatment,
@@ -21,6 +21,7 @@
 #include "gz/cIGZMessage2.h"
 #include "gz/cIGZIStream.h"
 #include "gz/cIGZOStream.h"
+#include "gz/StreamOps.h"
 #include "sc4/PropRequesterInterface.h"
 #include "sc4/RetainedReference.h"
 #include "sc4/RandomIterator.h"
@@ -120,6 +121,19 @@ public:
     virtual void SetBudgetLineItem(cISCPropertyHolder* holder, std::int32_t id, std::int64_t cost) = 0;               // spBudgetSim vslot 0x1a8
 };
 
+// A visual effect as the effects manager hands it out (cISC4VisualEffect); the simulator keeps one per 8x8-cell block and
+// pollution kind and holds the reference CreateVisualEffect gave it.
+class IPollutionVisualEffect {
+public:
+    virtual ~IPollutionVisualEffect() = default;
+    virtual void Start(int transition) = 0;                            // vslot 0x0c
+    virtual void Stop(int transition) = 0;                             // vslot 0x10
+    virtual bool IsStarted() = 0;                                      // vslot 0x14
+    virtual void SetSourceTransform(const cS3DTransform& transform) = 0;   // vslot 0x20
+    virtual void SetFloatParams(std::uint32_t type, const float* values, int count) = 0;   // vslot 0x30
+    virtual void Release() = 0;                                        // vslot 0x08
+};
+
 // A garbage deal with a neighbour (cISC4NeighborDeal): its monthly amount and how much of it was used so far.
 class IPollutionDeal {
 public:
@@ -167,6 +181,10 @@ public:
     virtual float RecyclingCapacitySlots() = 0;                        // this+0x50 vslot 0x80
     // A new city: the simulator joins the prop developer's requesters (spPropDeveloper vslot 0x14, this + 8).
     virtual void AddPropRequester(cISC4PropRequester* /*requester*/) {}
+    // UpdatePollutionVisualEffect: the effects manager the simulator keeps at +0x38 (vslot 0x1c CreateVisualEffect(group, type), one
+    // reference; null for an unbound key) and the terrain altitude (SL::spTerrain vslot 0x30).
+    virtual IPollutionVisualEffect* CreateVisualEffect(std::uint32_t /*group*/, std::uint32_t /*type*/) { return nullptr; }
+    virtual float TerrainAltitude(float /*x*/, float /*z*/) { return 0.0f; }
 };
 
 class cSC4PollutionSimulator final : public cIGZSerializable, public cIGZMessageTarget2, public cISC4PropRequester {
@@ -263,16 +281,23 @@ public:
     }
     int GetRequestedShare(int x0, int z0, int x1, int z1) const;
 
-    // worst tracts (x, z, value)
+    // worst tracts (x, z, value): the cell at the centre of the 8x8-cell block with the highest average, refreshed by
+    // UpdatePollutionVisualEffect (i386 +0x220 air, +0x228 water, +0x230 garbage)
     struct WorstTract { std::uint16_t x = 0, z = 0; std::int32_t value = 0; };
     WorstTract worstAir, worstWater, worstGarbage;
     void GetWorstAirTract(int& x, int& z, int& value) const { x = worstAir.x; z = worstAir.z; value = worstAir.value; }               // @ 0x10009ae46
     void GetWorstWaterTract(int& x, int& z, int& value) const { x = worstWater.x; z = worstWater.z; value = worstWater.value; }      // @ 0x10009ae66
     void GetWorstGarbageTract(int& x, int& z, int& value) const { x = worstGarbage.x; z = worstGarbage.z; value = worstGarbage.value; }   // @ 0x10009ae86
     void SetServices(IPollutionServices* services) { services_ = services; }
-    // The pollution visual effect spawner (0x1000986d8, particle systems per 8x8 block) is not recovered; AddRadiationToCity
-    // calls this hook where the original calls it.
-    void SetVisualEffectUpdate(std::function<void()> hook) { visualEffectUpdate_ = std::move(hook); }
+    // @ 0x0006d690 (i386): one pass over the 8x8-cell blocks in the effect iterator's order: the worst tracts and the water,
+    // air, radiation and garbage effects of each block (created, updated or stopped by the block's average).
+    void UpdatePollutionVisualEffect();
+    enum EffectKind : int { kEffectWater = 0, kEffectAir = 1, kEffectRadiation = 2, kEffectGarbage = 3 };
+    static constexpr std::uint32_t kPollutionEffectGroup = 0x0a78747a;   // the effect key; type = kind + 1
+    const std::vector<IPollutionVisualEffect*>& EffectSlots(EffectKind kind) const { return effects_[kind]; }
+    int EffectBlocksX() const { return effectBlocksX_; }
+    bool EffectsVisible() const { return effectsShown_; }
+    cSC4ResponseCurve& EffectStrengthCurve(EffectKind kind) { return effectCurves_[kind]; }
     void AgeOccupantList(std::list<IPollutionOccupant*>& list, std::uint32_t usedProperty, std::uint32_t capacityProperty);   // @ 0x100099c88
     void SetOccupantListUsedCapacity(std::list<IPollutionOccupant*>& list, std::uint32_t capacityProperty,
                                      std::uint32_t usedProperty, std::uint32_t total, std::uint32_t& remaining,
@@ -351,7 +376,7 @@ private:
     bool fromCityFile_ = false;
     bool loaded_ = false;                             // this[0x11]: Read filled the state, Init keeps it
     bool running_ = false;                            // this[0x10]: agents and notifications registered
-    bool effectsShown_ = false;                       // +0x32c (this[0x21c]): the pollution view layer is on
+    bool effectsShown_ = true;                        // this[0x21c]: the surface view is shown (PreViewLevelChange level 1)
     std::uint32_t cellX_ = 0, cellZ_ = 0, cellsPerDay_ = 0;
     std::int64_t file2d0_ = 0, sanitationCost_ = 0, producedThisMonth_ = 0, importedThisMonth_ = 0;
     RandomIterator walk_;
@@ -372,7 +397,14 @@ private:
     std::int64_t producedPrev_ = 0, importedPrev_ = 0, exportedPrev_ = 0;   // +0x288..+0x298
     double recyclingShare268_ = 0;                                      // +0x268 (read from the city record)
     IPollutionServices* services_ = nullptr;
-    std::function<void()> visualEffectUpdate_;
+    // UpdatePollutionVisualEffect's state: the strength curves 0x0a10c772..5 (water, air, radiation, garbage), one effect
+    // slot per 8x8-cell block and kind (i386 +0xb8 / +0xc4 / +0xd0 / +0xdc, index bz * blocksX + bx) and the block
+    // iterator (+0x88, prime-step mode).
+    cSC4ResponseCurve effectCurves_[4];
+    std::vector<IPollutionVisualEffect*> effects_[4];
+    int effectBlocksX_ = 0;
+    RandomIterator effectWalk_;
+    void ReleaseEffects(int transition);
     double recycledPrev_ = 0;                                           // +0x2a0
     std::int64_t incineratedPrev_ = 0, convertedPrev_ = 0, landfilledPrev_ = 0;   // +0x2a8..+0x2b8
 };

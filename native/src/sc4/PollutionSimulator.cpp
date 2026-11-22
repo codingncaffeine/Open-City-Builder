@@ -3,7 +3,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <ctime>
 
+#include "rz/cRZRandomSuper.h"
 #include "rz/cRZString.h"
 #include "sc4/DBSegment.h"
 #include "sc4/ProtectionSimulator.h"
@@ -366,6 +368,7 @@ void cSC4PollutionSimulator::ReadSimulatorTunableValues(const cISCPropertyHolder
     const std::vector<SC4Point> zero{{0.0f, 0.0f}};
     propRequestCurve_.SetResponseCurveData(zero);
     garbageTransportCapacity_.SetResponseCurveData(zero);
+    for (cSC4ResponseCurve& curve : effectCurves_) curve.SetResponseCurveData(zero);
     const std::vector<SC4Point> identity{{0.0f, 1.0f}, {1.0f, 1.0f}};
     ageCurve_.SetResponseCurveData(identity);
     efficiencyCurve_.SetResponseCurveData(identity);
@@ -397,6 +400,7 @@ void cSC4PollutionSimulator::ReadSimulatorTunableValues(const cISCPropertyHolder
     loadCurve(ageCurve_, 0x0911e2e8);
     loadCurve(efficiencyCurve_, 0x0911e2e9);
     loadCurve(fundingEfficiencyCurve_, kPollutionPropFundingEfficiencyCurve);
+    for (int kind = 0; kind < 4; ++kind) loadCurve(effectCurves_[kind], 0x0a10c772 + static_cast<std::uint32_t>(kind));
 }
 
 void cSC4PollutionSimulator::CreateGrids() {
@@ -954,17 +958,131 @@ void cSC4PollutionSimulator::AddRadiationToCity(const float position[3], float a
         std::int32_t tractX = 0, tractZ = 0;
         grid->PositionToTract(position[0], position[2], tractX, tractZ);
         AddRadiusEffect(grid->GetGridData(), grid->GetTractCountX(), grid->GetTractCountZ(), tractX, tractZ, radius, amount, 0.0f);
-        if (visualEffectUpdate_) visualEffectUpdate_();
+        UpdatePollutionVisualEffect();
         host_->PostMessage(0xda6dd35d, 0);
+    }
+}
+
+// The effects' own generator: a file-local cRZRandomSuper seeded once per process with the local wall-clock seconds XOR
+// 0x4c09c4d3 (i386 0x00b49bd0); only the water effects' positions draw from it.
+static cRZRandomSuper& EffectRandom() {
+    static cRZRandomSuper random([] {
+        const std::time_t now = std::time(nullptr);
+        std::tm local{};
+        localtime_r(&now, &local);
+        return static_cast<std::uint32_t>(static_cast<std::int64_t>(now) + local.tm_gmtoff) ^ 0x4c09c4d3u;
+    }());
+    return random;
+}
+
+void cSC4PollutionSimulator::ReleaseEffects(int transition) {
+    for (auto& slots : effects_) {
+        for (IPollutionVisualEffect*& effect : slots) {
+            if (!effect) continue;
+            if (effect->IsStarted()) effect->Stop(transition);
+            effect->Release();
+            effect = nullptr;
+        }
+    }
+}
+
+// @ 0x0006d690 (i386). Runs monthly, on PostCityInit, when the surface view is entered or left and after AddRadiationToCity.
+// The block iterator's reset is one rand() call (the C library stream every iterator shares). Each 8x8-cell block averages
+// its 64 cells (sum, then an unsigned shift by 6): air, water, radiation (the grid AddRadiationToCity writes) and garbage
+// (bits 0-14). A strictly higher air / water / garbage average than the worst so far stores the block centre cell and the
+// average. Each average x 1/32767 goes through its strength curve; above 0.05 the block's effect of that kind is shown
+// (air, radiation and garbage only in the surface view): an empty slot creates effect (0x0a78747a, kind) at its position,
+// sets the strength parameter and starts it, a full slot only takes the new strength. Otherwise a present effect is
+// stopped (when started) and released. Water sits at height 0 on the block's corner jittered by up to two cells (two
+// draws, x then z); air and garbage at the block centre on the terrain, radiation 3 m above it.
+void cSC4PollutionSimulator::UpdatePollutionVisualEffect() {
+    if (effects_[0].empty()) return;   // the slots and the iterator exist from Init on
+    const ISimGridCity* city = SimGridCity();
+    const float cellWidth = city ? city->CellSizeXMeters() : 16.0f, cellDepth = city ? city->CellSizeZMeters() : 16.0f;
+    const int blockWidth = static_cast<int>(static_cast<std::uint32_t>(cellWidth * 8.0f));
+    const int blockDepth = static_cast<int>(static_cast<std::uint32_t>(cellDepth * 8.0f));
+    const float halfWidth = static_cast<float>(blockWidth / 2), halfDepth = static_cast<float>(blockDepth / 2);
+    const int jitterX = blockWidth >> 2, jitterZ = blockDepth >> 2;
+    effectWalk_.Reset(true);
+    worstAir.value = worstWater.value = worstGarbage.value = 0;
+    constexpr float kStrengthScale = 1.0f / 32767.0f;
+    constexpr std::uint32_t kStrengthParameter[4] = {3, 2, 2, 2};
+    const cSC4SimGrid<std::int16_t>& air = *sourceGrids_[kPollutionAir];
+    const cSC4SimGrid<std::int16_t>& water = *sourceGrids_[kPollutionWater];
+    const cSC4SimGrid<std::int16_t>& garbage = *sourceGrids_[kPollutionGarbage];
+    const cSC4SimGrid<std::int16_t>& radiation = *valueGrids_[kPollutionRadiation];
+    int bx = 0, bz = 0;
+    while (effectWalk_.Next(bx, bz)) {
+        const int x0 = bx * 8, z0 = bz * 8;
+        std::uint32_t airSumBlock = 0, waterSumBlock = 0, radiationSumBlock = 0, garbageSumBlock = 0;
+        for (int x = x0; x <= x0 + 7; ++x) {
+            for (int z = z0; z <= z0 + 7; ++z) {
+                waterSumBlock += static_cast<std::uint32_t>(static_cast<std::int32_t>(water.GetCellValue(x, z)));
+                airSumBlock += static_cast<std::uint32_t>(static_cast<std::int32_t>(air.GetCellValue(x, z)));
+                radiationSumBlock += static_cast<std::uint32_t>(static_cast<std::int32_t>(radiation.GetCellValue(x, z)));
+                garbageSumBlock += static_cast<std::uint32_t>(static_cast<std::int32_t>(garbage.GetCellValue(x, z))) & 0x7fffu;
+            }
+        }
+        const std::uint32_t average[4] = {waterSumBlock >> 6, airSumBlock >> 6, radiationSumBlock >> 6, garbageSumBlock >> 6};
+        auto worst = [&](WorstTract& tract, std::uint32_t value) {
+            if (static_cast<std::uint32_t>(tract.value) < value) {
+                tract.value = static_cast<std::int32_t>(value);
+                tract.x = static_cast<std::uint16_t>(x0 + 4);
+                tract.z = static_cast<std::uint16_t>(z0 + 4);
+            }
+        };
+        worst(worstAir, average[kEffectAir]);
+        worst(worstWater, average[kEffectWater]);
+        worst(worstGarbage, average[kEffectGarbage]);
+        const std::size_t index = static_cast<std::size_t>(effectBlocksX_ * bz + bx);
+        for (int kind = 0; kind < 4; ++kind) {
+            const float strength = effectCurves_[kind].GetOutputValue(static_cast<float>(average[kind]) * kStrengthScale);
+            IPollutionVisualEffect*& slot = effects_[kind][index];
+            const bool shown = static_cast<double>(strength) > 0.05 && (kind == kEffectWater || effectsShown_);
+            if (!shown) {
+                if (slot) {
+                    if (slot->IsStarted()) slot->Stop(0);
+                    slot->Release();
+                    slot = nullptr;
+                }
+                continue;
+            }
+            if (slot) {
+                slot->SetFloatParams(kStrengthParameter[kind], &strength, 1);
+                continue;
+            }
+            cS3DTransform transform;
+            if (kind == kEffectWater) {
+                const double jx = static_cast<double>(jitterX), jz = static_cast<double>(jitterZ);
+                const float dx = static_cast<float>(EffectRandom().RandomDoubleRangeUniform(-jx, jx));
+                transform.translation[0] = static_cast<float>(x0) * cellWidth + dx;
+                const float dz = static_cast<float>(EffectRandom().RandomDoubleRangeUniform(-jz, jz));
+                transform.translation[2] = static_cast<float>(z0) * cellDepth + dz;
+                transform.translation[1] = 0.0f;
+            } else {
+                transform.translation[0] = static_cast<float>(x0) * cellWidth + halfWidth;
+                transform.translation[2] = static_cast<float>(z0) * cellDepth + halfDepth;
+                const float altitude = host_->TerrainAltitude(transform.translation[0], transform.translation[2]);
+                transform.translation[1] = kind == kEffectRadiation ? altitude + 3.0f : altitude;
+            }
+            transform.flags |= 1;
+            transform.changeCounter = static_cast<std::uint8_t>(transform.changeCounter + 1);
+            slot = host_->CreateVisualEffect(kPollutionEffectGroup, static_cast<std::uint32_t>(kind + 1));
+            if (slot) {
+                slot->SetSourceTransform(transform);
+                slot->SetFloatParams(kStrengthParameter[kind], &strength, 1);
+                slot->Start(0);
+            }
+        }
     }
 }
 
 // ---------------------------------------------------------------------------- simulation
 
 // @ 0x0006f836. StaticInit's curves are members here and the update period a constant. A loaded city (Read set this[0x11]) keeps its
-// grids, sweep position and counters; a new one starts them. Every time: the tunables, the daily and monthly agents, the notifications
-// and the total-pollution history length. PARTIAL: the per-8x8-block visual-effect slots (UpdatePollutionVisualEffect) and the
-// sanitation department's line items 10 / 20 / 30 are not set up (no native counterparts).
+// grids, sweep position and counters; a new one starts them. Every time: the tunables, the daily and monthly agents, the
+// notifications, the per-8x8-block effect slots, the block iterator and the total-pollution history length.
+// PARTIAL: the sanitation department's line items 10 / 20 / 30 are not set up (no native counterparts).
 bool cSC4PollutionSimulator::Init() {
     if (!loaded_) {
         loaded_ = true;
@@ -1006,6 +1124,13 @@ bool cSC4PollutionSimulator::Init() {
         host_->AddAgent(this, 6, kName, 2);
         host_->AddAgent(this, 4, kName, 2);
         for (std::uint32_t message : kNotifications) host_->AddNotification(this, message);
+        // one effect slot per 8x8-cell block and kind, all empty, and the block iterator in prime-step mode
+        const ISimGridCity* city = SimGridCity();
+        const int blocksX = city ? city->CitySizeXInCells() / 8 : 0, blocksZ = city ? city->CitySizeZInCells() / 8 : 0;
+        effectBlocksX_ = blocksX;
+        for (auto& slots : effects_) slots.assign(static_cast<std::size_t>(blocksX > 0 && blocksZ > 0 ? blocksX * blocksZ : 0), nullptr);
+        effectWalk_.SetModular(true);
+        effectWalk_.SetRect(0, 0, blocksX - 1, blocksZ - 1);
         host_->CreateHistory(kHistoryTotal, 2);
     }
     return true;
@@ -1016,6 +1141,7 @@ bool cSC4PollutionSimulator::Shutdown() {
         running_ = false;
         host_->RemoveAgent(this);
         for (std::uint32_t message : kNotifications) host_->RemoveNotification(this, message);
+        ReleaseEffects(1);
     }
     return true;
 }
@@ -1042,7 +1168,7 @@ bool cSC4PollutionSimulator::DoMessage(cIGZMessage2* message) {
     case kMessageCityStarted: break;
     default: return true;
     }
-    if (visualEffectUpdate_) visualEffectUpdate_();   // UpdatePollutionVisualEffect
+    UpdatePollutionVisualEffect();
     return true;
 }
 
@@ -1311,7 +1437,7 @@ void cSC4PollutionSimulator::DoMonthlySimulation() {
     ResetOccupantListCapacityUsedProperty(incinerators_, kPollutionOccIncineratorUsed, 0xa8fcdba8);
     ComputeWasteToEnergyListCurrentCapacity();
     ResetOccupantListCapacityUsedProperty(wasteToEnergy_, kPollutionOccWasteToEnergyUsed, 0x28fcdbb0);
-    if (visualEffectUpdate_) visualEffectUpdate_();   // UpdatePollutionVisualEffect
+    UpdatePollutionVisualEffect();
     // PARTIAL: spNeighborsSim vslot 0x7c (the neighbour deals' monthly settlement) is the neighbours simulator's own pass.
 }
 

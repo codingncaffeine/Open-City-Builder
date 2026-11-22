@@ -71,6 +71,8 @@ namespace native { sc4::IFlammabilityHost* NativeFlammabilityHost(); void Instal
 #include "sc4/cSC4City.h"
 #include "sc4/cSC4ZoneManager.h"
 #include "sc4/cSTETerrain.h"
+#include "sc4/VisualEffect.h"
+#include "sc4/ParticlesEffect.h"
 
 namespace native {
 namespace {
@@ -211,8 +213,32 @@ private:
     cISC4Occupant* occupant_;
 };
 
+// A per-block pollution effect: the effects manager's visual effect, holding the reference it was created with.
+class PollutionVisualEffect final : public IPollutionVisualEffect {
+public:
+    explicit PollutionVisualEffect(cSC4VisualEffect* effect) : effect_(effect) {}
+    void Start(int transition) override { effect_->Start(transition); }
+    void Stop(int transition) override { effect_->Stop(transition); }
+    bool IsStarted() override { return effect_->IsStarted(); }
+    void SetSourceTransform(const cS3DTransform& transform) override { effect_->SetSourceTransform(transform); }
+    void SetFloatParams(std::uint32_t type, const float* values, int count) override { effect_->SetFloatParams(type, values, count); }
+    void Release() override {
+        effect_->Release();
+        delete this;
+    }
+    const cSC4VisualEffect* Effect() const { return effect_; }
+private:
+    cSC4VisualEffect* effect_;
+};
+
 class PollutionHost final : public IPollutionHost {
 public:
+    // The city's effects manager (cSC4EffectsManager::CreateVisualEffect(group, type)) and the terrain.
+    IPollutionVisualEffect* CreateVisualEffect(std::uint32_t group, std::uint32_t type) override {
+        cSC4VisualEffect* effect = CreateKeyedEffect(group, type);
+        return effect ? new PollutionVisualEffect(effect) : nullptr;
+    }
+    float TerrainAltitude(float x, float z) override { cSTETerrain* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
     bool OccupantPowered(IPollutionOccupant* occupant) override {
         return occupant && NativeIsOccupantPowered(static_cast<PollutionOccupant*>(occupant)->Occupant());
     }
@@ -707,5 +733,43 @@ int NativeWaterPollutionAt(int x, int z) {
 sc4::cISC4Occupant* NativePollutionOccupant(sc4::IPollutionOccupant* polluter) {
     auto* adapter = dynamic_cast<PollutionOccupant*>(polluter);
     return adapter ? adapter->Occupant() : nullptr;
+}
+}  // namespace native
+
+namespace native {
+void NativePollutionEffectReport(int limit) {
+    auto* p = Component<sc4::cSC4PollutionSimulator>(sc4::CityComponent::PollutionSimulator, sc4::kGZCLSID_cSC4PollutionSimulator);
+    if (!p) { std::printf("pollutionfx: no pollution simulator\n"); return; }
+    int x = 0, z = 0, v = 0;
+    p->GetWorstAirTract(x, z, v);     std::printf("pollutionfx: worst air cell (%d,%d) value %d\n", x, z, v);
+    p->GetWorstWaterTract(x, z, v);   std::printf("pollutionfx: worst water cell (%d,%d) value %d\n", x, z, v);
+    p->GetWorstGarbageTract(x, z, v); std::printf("pollutionfx: worst garbage cell (%d,%d) value %d\n", x, z, v);
+    static const char* const kKinds[4] = {"water", "air", "radiation", "garbage"};
+    const int blocksX = p->EffectBlocksX();
+    std::printf("pollutionfx: surface view %d, blocks %d x %zu\n", p->EffectsVisible() ? 1 : 0, blocksX,
+                blocksX > 0 ? p->EffectSlots(sc4::cSC4PollutionSimulator::kEffectWater).size() / std::size_t(blocksX) : std::size_t(0));
+    for (int kind = 0; kind < 4; ++kind) {
+        const auto& slots = p->EffectSlots(static_cast<sc4::cSC4PollutionSimulator::EffectKind>(kind));
+        int present = 0, started = 0, shown = 0, components = 0;
+        std::uint64_t spawned = 0;
+        for (std::size_t i = 0; i < slots.size(); ++i) {
+            auto* slot = static_cast<PollutionVisualEffect*>(slots[i]);
+            if (!slot) continue;
+            ++present;
+            const cSC4VisualEffect* effect = slot->Effect();
+            if (effect->IsStarted()) ++started;
+            for (const auto& record : effect->Components()) {
+                ++components;
+                if (auto* particles = dynamic_cast<const cSC4ParticlesEffect*>(record.component)) spawned += static_cast<std::uint64_t>(particles->LiveParticleCount());
+            }
+            if (shown++ >= limit) continue;
+            const cS3DTransform& t = effect->SourceTransform();
+            std::printf("pollutionfx:   %s block (%d,%d) effect %08x/%u slot %d started %d at (%.1f, %.1f, %.1f)\n", kKinds[kind],
+                        int(i % std::size_t(blocksX)), int(i / std::size_t(blocksX)), effect->Group(), effect->Type(), effect->Slot(),
+                        effect->IsStarted() ? 1 : 0, t.translation[0], t.translation[1], t.translation[2]);
+        }
+        std::printf("pollutionfx: %s effects %d (started %d), components %d, live particles %llu\n", kKinds[kind], present, started,
+                    components, static_cast<unsigned long long>(spawned));
+    }
 }
 }  // namespace native
