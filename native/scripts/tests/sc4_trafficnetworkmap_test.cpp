@@ -1,3 +1,4 @@
+#include <array>
 #include <bit>
 // cSC4TrafficNetworkMap: tile storage, the per-cell volume/congestion accumulation, intersections,
 // train junctions, surrounding-road and geometry queries, view tracking and shutdown.
@@ -222,6 +223,8 @@ struct Host : ITrafficNetworkMapHost {
     void SubscribeMessage(std::uint32_t) override { ++subscribed; }
     void UnsubscribeMessage(std::uint32_t) override { ++unsubscribed; }
     std::vector<std::uint32_t> tickables;
+    std::array<std::uint16_t, 16> density{};
+    bool TrafficEdgeDensity(int, int, std::uint16_t out[16]) override { for (int i = 0; i < 16; ++i) out[i] = density[std::size_t(i)]; return true; }
     void AddTickable(std::uint32_t priority) override { tickables.push_back(priority); }
     void RemoveTickable(std::uint32_t priority) override { tickables.push_back(0x80000000u | priority); }
     void MakeTunnelPaths(ITrafficNetworkMapPathInfo*, ITrafficNetworkMapOccupant*, ITrafficNetworkMapOccupant*) override {}
@@ -373,6 +376,34 @@ int main() {
     CHECK(first->green == 0);
     CHECK(first->timeLeft == first->otherDuration);
     CHECK(intersection.dirty == 0);
+
+    // ---- UpdateIntersectionTiming (i386 0x001ed25c): a lone stoplight intersection; densities 30 on axis A (entries 0..3 and
+    // 8..11) and 90 on axis B: ratio 3 clamps to 2, the base period 10 splits 20 / 3 for even approaches and the rest for odd
+    // ones; every stoplight approach takes the first one's time left and phase (even approaches the flipped phase)
+    {
+        auto& lights = const_cast<TrafficIntersectionArray&>(intersection);
+        host.density.fill(0);
+        host.density[0] = 10; host.density[9] = 20;    // axis A 30
+        host.density[4] = 50; host.density[15] = 40;   // axis B 90
+        int firstLight = -1;
+        for (int i = 0; i < 4; ++i) if (lights.approaches[i].type == 2 && firstLight < 0) firstLight = i;
+        CHECK(firstLight >= 0);
+        if (firstLight >= 0) {
+            const float time = lights.approaches[firstLight].timeLeft;
+            std::uint8_t phase = lights.approaches[firstLight].green;
+            if (firstLight == 0 || firstLight == 2) phase ^= 1;
+            map.UpdateIntersectionTiming(&street, lights);
+            for (int i = 0; i < 4; ++i) {
+                const TrafficIntersectionInfo& a = lights.approaches[i];
+                if (a.type != 2) continue;
+                const bool even = (i & 1) == 0;
+                CHECK(std::fabs(a.stateDuration - (even ? 20.0f / 3.0f : 40.0f / 3.0f)) < 1e-4f);
+                CHECK(std::fabs(a.otherDuration - (even ? 40.0f / 3.0f : 20.0f / 3.0f)) < 1e-4f);
+                CHECK(a.timeLeft == time);
+                CHECK(a.green == (even ? std::uint8_t(phase ^ 1) : phase));
+            }
+        }
+    }
 
     // ---- train junctions ----
     FakeOccupant train;

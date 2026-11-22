@@ -27,6 +27,7 @@
 #include "sc4/ServiceLocator.h"
 #include "sc4/TrafficAutomaton.h"
 #include "sc4/TrafficNetworkMap.h"
+#include "sc4/TrafficSimulator.h"
 #include "sc4/UndergroundOccupant.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
@@ -291,6 +292,14 @@ public:
     }
     void SubscribeMessage(std::uint32_t message) override { if (SL::spMS2 && map_) SL::spMS2->AddNotification(map_, message); }
     void UnsubscribeMessage(std::uint32_t message) override { if (SL::spMS2 && map_) SL::spMS2->RemoveNotification(map_, message); }
+    bool TrafficEdgeDensity(int x, int z, std::uint16_t out[16]) override {
+        cSC4City* city = HostCity();
+        auto* traffic = city ? dynamic_cast<cSC4TrafficSimulator*>(city->GetComponent(CityComponent::TrafficSimulator)) : nullptr;
+        if (!traffic) return false;
+        const struct TrafficEdgeDensity& density = traffic->GetTrafficEdgeDensity(x & 0xff, z & 0xff, 1, false);
+        for (int i = 0; i < 16; ++i) out[i] = density.last[std::size_t(i)];
+        return true;
+    }
     void AddTickable(std::uint32_t priority) override {
         if (sc4::cSC4AnimationTickManager* ticks = AnimationTickManager(); ticks && map_) ticks->AddTickableObject(map_, priority);
     }

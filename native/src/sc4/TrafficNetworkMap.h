@@ -227,6 +227,9 @@ public:
     // message bus (SL::spMS2 slots 0x28 / 0x30)
     virtual void SubscribeMessage(std::uint32_t message) = 0;
     virtual void UnsubscribeMessage(std::uint32_t message) = 0;
+    // SL::spTrafficSim vslot 0x30 GetTrafficEdgeDensity(x & 0xff, z & 0xff, 1, false): the cell's last 16 edge densities.
+    // False without a traffic simulator.
+    virtual bool TrafficEdgeDensity(int x, int z, std::uint16_t out[16]) { (void)x; (void)z; (void)out; return false; }
     // SL::ATM() vslot 0x14 AddTickableObject(the map, priority) / RemoveTickableObject: the animation ticks (0x86ad10ee).
     virtual void AddTickable(std::uint32_t priority) { (void)priority; }
     virtual void RemoveTickable(std::uint32_t priority) { (void)priority; }
@@ -392,7 +395,7 @@ public:
     void UpdateIntersectionMap();   // 0x10029b9e0
     void TickIntersections(float milliseconds);   // 0x10029b7dc
     void TickSingleIntersection(ITrafficNetworkMapOccupant* occupant, TrafficIntersectionArray& intersections, float seconds);   // 0x10029ba20
-    void UpdateIntersectionTiming(ITrafficNetworkMapOccupant* occupant, TrafficIntersectionArray& intersections);   // 0x10029baaa (partial)
+    void UpdateIntersectionTiming(ITrafficNetworkMapOccupant* occupant, TrafficIntersectionArray& intersections);   // 0x10029baaa
     void SwitchStoplightStates(ITrafficNetworkMapProp* prop);   // 0x10029cb16
     void MarkTrainInCell(ITrafficNetworkMapAutomaton* automaton, int cellX, int cellZ);   // 0x10029c786
     void UnmarkTrainInCell(ITrafficNetworkMapAutomaton* automaton, int cellX, int cellZ);   // 0x10029c8e2

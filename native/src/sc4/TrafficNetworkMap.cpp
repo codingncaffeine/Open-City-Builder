@@ -7,6 +7,7 @@
 #include <cmath>
 #include <bit>
 #include <cstdio>
+#include <set>
 #include <cstdlib>
 
 #include <algorithm>
@@ -1263,11 +1264,95 @@ void cSC4TrafficNetworkMap::TickIntersections(float milliseconds) {
     } while (guard < 0x3f && visited < 4);
 }
 
-// 0x10029baaa — PARTIAL: the 1.9 KB graph pass that rebalances the neighbouring intersections' green
-// durations (it builds a std::set of intersections to visit and rewrites their approach timings).
-void cSC4TrafficNetworkMap::UpdateIntersectionTiming(ITrafficNetworkMapOccupant*, TrafficIntersectionArray&) {
-    // Not recovered yet; see TRAFFICNETWORKMAP-2.
-    SC4_UNWIRED("cSC4TrafficNetworkMap::UpdateIntersectionTiming (0x10029baaa): neighboring intersections' green-duration rebalance not ported");
+// 0x10029baaa (i386 0x001ed25c). The stoplight intersections joined to this one (a walk over the four neighbour edges, through
+// intersections that have a stoplight approach; the others stop it) share one timing: the summed edge densities of their cells
+// split into the two axes give a ratio (axis B over axis A, 0.5..2; 1 with no traffic), the green period (the tuning's base, or
+// its road (network 0) / avenue (network 6) value, of the start intersection) splits as 2P / (1 + ratio) for the even approaches
+// and the rest for the odd ones, and every intersection takes the phase of the first one met (its first stoplight approach,
+// flipped when that is an even approach), its props updated when a light changed.
+void cSC4TrafficNetworkMap::UpdateIntersectionTiming(ITrafficNetworkMapOccupant* start, TrafficIntersectionArray&) {
+    constexpr float kMinStoplightRatio = 0.5f, kMaxStoplightRatio = 2.0f;   // kfMinStoplightRatio / kfMaxStoplightRatio
+    auto hasStoplight = [](const TrafficIntersectionArray& array) {
+        for (const TrafficIntersectionInfo& approach : array.approaches)
+            if (approach.type == 2) return true;
+        return false;
+    };
+    std::set<ITrafficNetworkMapOccupant*> toVisit{start}, lit, unlit;
+    while (!toVisit.empty()) {
+        ITrafficNetworkMapOccupant* occupant = *toVisit.begin();
+        TrafficIntersectionArray* array = FindIntersection(occupant);
+        if (!array || !hasStoplight(*array)) {
+            unlit.insert(occupant);
+        } else {
+            lit.insert(occupant);
+            for (std::uint8_t edge = 0; edge < 4; ++edge) {
+                TrafficTileInfo* tile = GetTileInfoAtNeighborEdge(occupant, edge, true, 1);
+                if (!tile) continue;
+                ITrafficNetworkMapOccupant* neighbor = tile->occupant;
+                if (FindIntersection(neighbor) && !lit.count(neighbor) && !unlit.count(neighbor)) toVisit.insert(neighbor);
+            }
+        }
+        toVisit.erase(occupant);
+    }
+    if (lit.empty()) return;
+    int axisA = 0, axisB = 0;
+    for (ITrafficNetworkMapOccupant* occupant : lit) {
+        std::uint32_t x = 0, z = 0;
+        occupant->GetOccupiedCell(x, z);
+        std::uint16_t density[16] = {};
+        host_->TrafficEdgeDensity(int(x & 0xff), int(z & 0xff), density);
+        for (int i = 0; i < 4; ++i) {
+            axisA += density[i] + density[i + 8];
+            axisB += density[i + 4] + density[i + 12];
+        }
+    }
+    float ratio = 1.0f;
+    if (axisA < 1) ratio = axisB < 1 ? 1.0f : kMaxStoplightRatio;
+    else if (axisB < 1) ratio = kMinStoplightRatio;
+    else ratio = std::max(kMinStoplightRatio, std::min(float(axisB) / float(axisA), kMaxStoplightRatio));
+    float period = tuning_->junctionTimeLeft;                       // sTuningParams +0xb0 (0x4998c913)
+    if (start->IsOfType(0)) period = tuning_->stoplightPeriodA;      // +0xb4 (0x4998c914)
+    else if (start->IsOfType(6)) period = tuning_->stoplightPeriodB; // +0xb8 (0x4998c915)
+    const float even = (period + period) / (1.0f + ratio);
+    const float odd = (period + period) - even;
+    static const bool trace = std::getenv("SC4_TRAFFICMAPDEBUG") != nullptr;
+    static int traced = 0;
+    if (trace && traced < 12 && (axisA > 0 || axisB > 0)) {
+        ++traced;
+        std::fprintf(stderr, "traffic map: timing group of %zu lights (%zu stops), densities %d / %d, ratio %.2f, period %.1f -> %.2f / %.2f s\n",
+                     lit.size(), unlit.size(), axisA, axisB, double(ratio), double(period), double(even), double(odd));
+    }
+    bool haveReference = false;
+    float referenceTime = 0.0f;
+    std::uint8_t referenceGreen = 0;
+    for (ITrafficNetworkMapOccupant* occupant : lit) {
+        TrafficIntersectionArray* array = FindIntersection(occupant);
+        if (!array) continue;
+        if (!haveReference) {
+            haveReference = true;
+            int i = 0;
+            for (; i < 4 && array->approaches[i].type != 2; ++i) {}
+            if (i == 4) return;   // the original leaves the pass when the first intersection has no stoplight approach
+            referenceTime = array->approaches[i].timeLeft;
+            referenceGreen = array->approaches[i].green;
+            if (i == 0 || i == 2) referenceGreen ^= 1;
+        }
+        bool changed = false;
+        for (int i = 0; i < 4; ++i) {
+            TrafficIntersectionInfo& approach = array->approaches[i];
+            if (approach.type != 2) continue;
+            const bool evenApproach = (i & 1) == 0;
+            approach.stateDuration = evenApproach ? even : odd;
+            approach.otherDuration = evenApproach ? odd : even;
+            approach.timeLeft = referenceTime;
+            const std::uint8_t green = evenApproach ? std::uint8_t(referenceGreen ^ 1) : referenceGreen;
+            if (approach.green != green) {
+                approach.green = green;
+                changed = true;
+            }
+        }
+        if (changed) UpdateIntersectionProps(occupant, *array, false);
+    }
 }
 
 // 0x10029cb16
