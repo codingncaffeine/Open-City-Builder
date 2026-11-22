@@ -726,6 +726,7 @@ public:
     IMySimDispatch* Dispatch() const { return dispatch_.get(); }        // +0x328
     IMySimCallout* Callout() const { return callout_.get(); }           // +0x218
     IMySimPylon* Pylon() const { return pylon_.get(); }                 // +0x3b8
+    IMySimBalloonWinProc* BalloonWinProc() const { return balloonWinProc_.get(); }   // +0x3a0
     cRZRandom& Random() { return random_; }                             // +0x290
     void SetStateForTest(std::int32_t state) { state_ = state; }
     void SetLastSoundTimeForTest(std::int32_t value) { lastSoundTime_ = value; }

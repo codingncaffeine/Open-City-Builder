@@ -3,7 +3,7 @@
 // component the original reaches through its SL:: global; the slot comments name the original call (Mac i386 decompile).
 //
 // Not native yet (the methods report SC4_UNWIRED with the missing class): the MySim UI neighbours (cSC4WinCalloutBox over the
-// residence, cSC4MySimBalloonWinProc, the four MySim input controls, the portrait bitmaps), the ghost
+// residence, the four MySim input controls, the portrait bitmaps), the ghost
 // effect and the U-Drive-It view. A MySim without them still lives: it is stored and read back with its city, keeps its
 // residence, job and commute state, ages, rides its trips and runs its advices.
 #include <cstdio>
@@ -15,6 +15,11 @@
 #include "app/NativeAnimationTicks.h"
 #include "app/NativeAutomataViews.h"
 #include "app/NativeBuildingDevelopment.h"
+#include "app/NativeCitySystems.h"
+#include "audio/AudioServices.h"
+#include "audio/interfaces/cIGZSndSys.h"
+#include "gz/GZCOMDirector.h"
+#include "gz/WinGen.h"
 #include "app/NativeCity.h"
 #include "app/NativeGameData.h"
 #include "app/NativeGrowthDevelopers.h"
@@ -55,6 +60,7 @@
 #include "sc4/MySim.h"
 #include "sc4/MySimAdvice.h"
 #include "sc4/MySimAgentSimulator.h"
+#include "sc4/MySimBalloonWinProc.h"
 #include "sc4/MySimDispatch.h"
 #include "sc4/MySimFilters.h"
 #include "sc4/NeighborsSimulator.h"
@@ -74,6 +80,7 @@
 #include "sc4/cSTETerrain.h"
 
 namespace native {
+cIGZWin* NativeCityView3DWindow();                                                // app/NativeCityUi.cpp
 const sc4::cISCPropertyHolder* NativeSimulatorExemplar(std::uint32_t instance);   // app/NativeSimHosts.cpp
 bool NativeProjectToViewport(const float* xyz, float out[3]);                     // app/NativeAutomataManagerHost.cpp
 sc4::cSC4CrimeSimulator* NativeCrimeSimulator();                                  // app/NativeCrime.cpp
@@ -683,7 +690,11 @@ public:
         dispatch->AddRef();
         return dispatch;
     }
-    IMySimBalloonWinProc* CreateBalloonWinProc(cISC4MySim*) override { SC4_UNWIRED("IMySimHost::CreateBalloonWinProc (cSC4MySimBalloonWinProc)"); return nullptr; }
+    IMySimBalloonWinProc* CreateBalloonWinProc(cISC4MySim* owner) override {   // cSC4MySimBalloonWinProc (i386 0x0047ceb8)
+        auto* proc = new cSC4MySimBalloonWinProc(owner);
+        proc->AddRef();
+        return proc;
+    }
     IMySimPylon* CreatePylon() override { SC4_UNWIRED("IMySimHost::CreatePylon (MySim dispatch tool call box)"); return nullptr; }
     // --- view input controls (the MySim tools are not native) ---
     cIGZUnknown* CurrentViewInputControl() override { return nullptr; }
@@ -1022,9 +1033,46 @@ const char* StateName(int state) {
     }
 }
 
+// The balloon's services (IMySimBalloonHost): the generic window it draws into, the city view it lives in, the message
+// server that ticks it, the advisor system's random generator for the sound chance and the sound system.
+class BalloonHost final : public IMySimBalloonHost {
+public:
+    gz::cIGZWinGen* CreateWinGen() override {   // GZCOM()->CreateInstance(0x4386d516, 0x5386d516)
+        void* raw = nullptr;
+        return GZCOM() && GZCOM()->CreateInstance(gz::kGZCLSID_cGZWinGen, gz::kGZIID_cIGZWinGen, &raw) && raw
+                   ? static_cast<gz::cIGZWinGen*>(raw) : nullptr;
+    }
+    cIGZWin* View3DWin() override {   // SL::spView3DWin as its window
+        return native::NativeCityView3DWindow();
+    }
+    cIGZMessageServer2* Messages() override { return SL::spMS2; }
+    double RandomPercent() override {   // spCity GetAdvisorSystem (0x144) -> GetRandom (0x24)
+        cSC4AdvisorSystem* system = cSC4AdvisorSystem::Instance();
+        cRZRandom* random = system ? system->GetRandom() : nullptr;
+        return random ? random->RandomDoubleRangeUniform(0.0, 100.0) : 100.0;
+    }
+    // The sound system events take the sim as their object (the 32-bit original passes the pointer in an integer
+    // field of the same event).
+    bool SoundSystemPresent() override { return Audio::SoundSystem() != nullptr; }
+    void StartBalloonSound(std::uint32_t soundId, cISC4MySim* sim) override {
+        if (cIGZSndSys* system = Audio::SoundSystem()) system->PostEventUnknown(1, sim, soundId, 0, 0, 0);
+    }
+    void PlaceBalloonSound(cISC4MySim* sim, int x, int y, int z) override {
+        if (cIGZSndSys* system = Audio::SoundSystem()) {
+            system->PostEventUnknown(0xca45190f, sim, static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(y),
+                                     static_cast<std::uint32_t>(z), 0);
+        }
+    }
+    void StopBalloonSound(cISC4MySim* sim, bool immediate) override {
+        if (cIGZSndSys* system = Audio::SoundSystem()) system->PostEventUnknown(2, sim, immediate ? 1 : 0, 0, 0, 0);
+    }
+};
+BalloonHost g_balloonHost;
+
 }  // namespace
 
 void InstallMySimHosts() {
+    sc4::SetMySimBalloonHost(&g_balloonHost);
     static MySimHost sim;
     static DispatchHost dispatch;
     static FilterHost filter;
@@ -1138,6 +1186,17 @@ void NativeMySimReport() {
                     xyz[0], xyz[1], xyz[2], sim->Retired() ? 1 : 0, dispatch ? "yes" : "no", dispatch ? dispatch->GetState() : 0,
                     dispatch ? static_cast<cSC4MySimDispatch*>(dispatch)->Flags() : 0u);
         if (sim->IsActive()) PrintOpinionFields(*sim, i);
+        if (sim->IsActive()) {   // the speech balloon: its state, advice, icons and window
+            auto* balloon = dynamic_cast<cSC4MySimBalloonWinProc*>(sim->BalloonWinProc());
+            cIGZWin* window = balloon && balloon->Window() ? balloon->Window()->AsIGZWin() : nullptr;
+            int sx = 0, sy = 0;
+            const bool onScreen = sim->GetCurrentScreenLocationXY(&sx, &sy);
+            std::printf("mysims: slot %d balloon %s state %d advice %s icons %zu window %s visible %d at %d,%d size %dx%d (sim on screen %d at %d,%d)\n",
+                        i, balloon ? "yes" : "no", balloon ? balloon->State() : -1,
+                        balloon && balloon->CurrentAdvice() ? "yes" : "no", balloon ? balloon->IconCount() : 0u,
+                        window ? "yes" : "no", window && window->IsVisible() ? 1 : 0, window ? window->GetL() : 0,
+                        window ? window->GetT() : 0, window ? window->GetW() : 0, window ? window->GetH() : 0, onScreen ? 1 : 0, sx, sy);
+        }
         if (sim->IsActive() && dispatch) {   // the automaton the sim rides, if any
             auto* trip = static_cast<cSC4MySimDispatch*>(dispatch);
             cISC4Occupant* rider = trip->AutomataOccupant();

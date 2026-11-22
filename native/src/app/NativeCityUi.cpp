@@ -1,5 +1,6 @@
 #include "app/NativeCityUi.h"
 
+#include "app/NativeCitySystems.h"
 #include "app/NativeGameData.h"
 #include "app/NativeUi.h"
 #include "gz/WinInterfaces.h"
@@ -11,6 +12,11 @@
 
 namespace native {
 sc4::cSC4MySimAgentSimulator* NativeMySimAgentSimulator();   // app/NativeMySim.cpp
+// The city view as its window (SL::spView3DWin; null without a city view).
+cIGZWin* NativeCityView3DWindow() {
+    sc4::cSC4View3DWin* view = CityView3DWin();
+    return view ? view->AsIGZWin() : nullptr;
+}
 namespace {
 
 // The MySim panel's view of the city's cSC4MySimAgentSimulator (the original hands the panel the simulator itself; its
