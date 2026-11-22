@@ -1109,6 +1109,9 @@ static void PrintOpinionFields(cSC4MySim& sim, int slot) {
     std::printf("mysims: slot %d trip fields (%d nil):%s\n", slot, tripMissing, trip.c_str());
 }
 
+// The city's MySim agent simulator (borrowed; null without a city).
+sc4::cSC4MySimAgentSimulator* NativeMySimAgentSimulator() { return Agent(); }
+
 // Kit command `mysims`: the agent simulator's sims and their state (read only).
 void NativeMySimReport() {
     cSC4MySimAgentSimulator* agent = Agent();

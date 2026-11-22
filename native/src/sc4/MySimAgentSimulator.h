@@ -84,6 +84,8 @@ public:
     void HideLocation();                                                      // @ 0x1007ad2ce
     cISC4MySim* MySimLivesHere(cISC4BuildingOccupant* building);              // @ 0x1007ad324
     void CancelMoveIn() {}                                                    // @ 0x1007ad37a (returns at once)
+    // i386 0x0054defa: the active sims of the five ordinary slots (one reference each); true when there is one.
+    bool GetActiveMySims(std::vector<cRZAutoRefCount<cISC4MySim>>& out) const;
 
     cISC4MySim* Sim(int slot) const { return sims_[slot]; }
     int ActivePanelIndex() const { return activePanel_; }

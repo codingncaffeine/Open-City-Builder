@@ -994,6 +994,7 @@ public:
     // --- the panel commands (PARTIAL: the menu builders behind HandleButtonActivated / DoPanelCommandGUI)
     void HandleButtonActivated(cIGZWin* window, cGZMessage& message);   // @ 0x10078afde (PARTIAL)
     void DoPanelCommandGUI(std::uint32_t command);                 // @ 0x10078c2dc (PARTIAL)
+    cIGZWin* PanelWindow() const { return panelWindow_; }        // the toolbar panel (+0x280) holding the panel toggles
     void ShowPanel(std::uint32_t panel);                           // @ 0x10078ac02
     void HidePanel(std::uint32_t panel);                           // @ 0x10078aade
     void ShowMayorSubPanel(std::uint32_t panel);                   // @ 0x10078ad68
