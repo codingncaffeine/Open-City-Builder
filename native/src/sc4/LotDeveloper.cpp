@@ -1148,10 +1148,15 @@ bool cSC4LotDeveloper::StartDemolishLot(cSC4Lot* lot) {
     return ClearLotBuildings(lot, 5, true, 0);
 }
 
-// i386 0x000f385c: the lot goes back to an empty lot of its zone. PARTIAL: the retaining walls and the lot / surrounding
-// foundations are not removed here (RemoveLotFoundation now exists but is not called).
+// i386 0x000f385c: the lot goes back to an empty lot of its zone: its retaining wall occupant and its foundation go, the
+// neighboring foundations and retaining walls follow the change, then the lot is unlocked, emptied and given the empty base texture.
 void cSC4LotDeveloper::ClearLot(cSC4Lot* lot) {
-    SC4_UNWIRED("cSC4LotDeveloper::ClearLot: the lot's retaining walls and lot / surrounding foundations are not removed");
+    int x = 0, z = 0;
+    lot->GetLocation(x, z);                                                         // lot vslot 0x54
+    if (g_construction) g_construction->AddRetainingWallOccupant(lot, false);       // cSC4LotRetainingWallOccupant 0x005E3070(lot, 0)
+    RemoveLotFoundation(x, z);                                                      // vslot 0xd4
+    UpdateSurroundingLotFoundations(lot);
+    if (g_construction) g_construction->UpdateSurroundingRetainingWalls(lot);
     lot->SetVerticesAreLocked(false);                                               // lot vslot 0x114
     lot->SetState(1, 0, 0);                                                         // 0x88
     lot->SetBuildingType(0);                                                        // 0xbc
@@ -1644,7 +1649,7 @@ bool cSC4LotDeveloper::AddLotFoundation(cSC4Lot* lot, std::uint32_t type, bool f
     lot->SetAltitude(altitude);                                                     // lot vslot 0x44
     lot->SetFlags(static_cast<std::uint8_t>((lot->GetFlags() & ~4u) | 3u));        // lot vslots 0x30 / 0x34
     if (walls && altitude < highest) {
-        g_construction->AddRetainingWallOccupant(lot);
+        g_construction->AddRetainingWallOccupant(lot, true);
         UpdateSurroundingLotFoundations(lot);
         g_construction->UpdateSurroundingRetainingWalls(lot);
     }

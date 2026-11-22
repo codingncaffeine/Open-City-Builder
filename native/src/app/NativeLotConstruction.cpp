@@ -58,7 +58,7 @@
 #include "rz/cRZAutoRefCount.h"
 
 namespace native {
-void NativeAddRetainingWallOccupant(sc4::cSC4Lot* lot);           // app/NativeLotWalls.cpp
+void NativeAddRetainingWallOccupant(sc4::cSC4Lot* lot, bool create);           // app/NativeLotWalls.cpp
 void NativeUpdateSurroundingRetainingWalls(sc4::cSC4Lot* lot);
 bool NativeAddNewFoundationOccupant(std::uint32_t type, int usage, float position[3], float width, float depth, int rotation, float bottom);
 }  // namespace native
@@ -354,7 +354,7 @@ public:
         if (cSC4City* city = HostCity()) city->CellCenterToPosition(cellX, cellZ, x, z);
         else { x = float(cellX) * 16.0f + 8.0f; z = float(cellZ) * 16.0f + 8.0f; }
     }
-    void AddRetainingWallOccupant(cSC4Lot* lot) override { NativeAddRetainingWallOccupant(lot); }   // app/NativeLotWalls.cpp
+    void AddRetainingWallOccupant(cSC4Lot* lot, bool create) override { NativeAddRetainingWallOccupant(lot, create); }   // app/NativeLotWalls.cpp
     void UpdateSurroundingRetainingWalls(cSC4Lot* lot) override { NativeUpdateSurroundingRetainingWalls(lot); }
     void MoveOccupant(cISC4Occupant* occupant, bool post) override {
         if (cISC4OccupantManager* occupants = Occupants()) occupants->MoveOccupant(occupant, post);

@@ -231,8 +231,9 @@ public:
         x = static_cast<float>(cellX) * 16.0f + 8.0f;
         z = static_cast<float>(cellZ) * 16.0f + 8.0f;
     }
-    // cSC4LotRetainingWallOccupant::AddRetainingWallOccupant(lot, true) / UpdateSurroundingRetainingWalls(lot)
-    virtual void AddRetainingWallOccupant(cSC4Lot* lot) { (void)lot; }
+    // cSC4LotRetainingWallOccupant::AddRetainingWallOccupant(lot, create) (create false removes the lot's wall occupant and clears
+    // lot flag 4) / UpdateSurroundingRetainingWalls(lot)
+    virtual void AddRetainingWallOccupant(cSC4Lot* lot, bool create) { (void)lot; (void)create; }
     virtual void UpdateSurroundingRetainingWalls(cSC4Lot* lot) { (void)lot; }
 };
 

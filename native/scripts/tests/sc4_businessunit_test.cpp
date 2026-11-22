@@ -99,7 +99,7 @@ public:
         foundationTop = position[1];
         return true;
     }
-    void AddRetainingWallOccupant(cSC4Lot*) override { ++wallCalls; }
+    void AddRetainingWallOccupant(cSC4Lot*, bool) override { ++wallCalls; }
 };
 
 // An occupant of a given type standing at a position (the refit test).
