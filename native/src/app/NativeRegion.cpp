@@ -29,6 +29,10 @@
 #include "sc4/Simulator.h"
 #include "sc4/Region.h"
 #include "sc4/RegionalCity.h"
+#include "sc4/HistoryWarehouse.h"
+#include "sc4/cSTETerrain.h"
+#include "sc4/PropOccupant.h"
+#include "sc4/PropManager.h"
 #include "app/NativeDemolition.h"
 #include "sc4/ZoneDeveloper.h"
 #include "sc4/cSC4ZoneManager.h"
@@ -469,9 +473,25 @@ public:
     int CityCellCountZ() override { return CurrentCellsZ(); }
     void CityCellCenterToPosition(int x, int z, float& outX, float& outZ) override { outX = (float(x) + 0.5f) * 16.0f; outZ = (float(z) + 0.5f) * 16.0f; }
     void CityPositionToCell(float x, float z, int& outX, int& outZ) override { outX = int(std::floor(x / 16.0f)); outZ = int(std::floor(z / 16.0f)); }
-    float TerrainAltitudeAtCell(int, int) override { return 0.0f; }
-    float TerrainAltitudeAtPosition(float, float) override { return 0.0f; }
-    void RecordHistory(std::uint32_t, int) override {}
+    // SL::spTerrain: GetMaxSurfaceLevel(cell) (the marker's height after a terrain change), GetAltitude(x, z) (at creation)
+    static sc4::cSTETerrain* Terrain() {
+        sc4::cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::Terrain) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(0xab953253, &raw) || !raw) return nullptr;
+        auto* serializable = static_cast<cIGZSerializable*>(raw);
+        serializable->Release();
+        return static_cast<sc4::cSTETerrain*>(serializable);
+    }
+    float TerrainAltitudeAtCell(int x, int z) override {
+        sc4::cSTETerrain* t = Terrain();
+        return t && x >= 0 && z >= 0 ? t->GetMaxSurfaceLevel(std::uint32_t(x), std::uint32_t(z)) : 0.0f;
+    }
+    float TerrainAltitudeAtPosition(float x, float z) override { sc4::cSTETerrain* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
+    // city 0x100 -> the history warehouse's RecordHistoryData
+    void RecordHistory(std::uint32_t series, int value) override {
+        if (auto* history = Part<sc4::cSC4HistoryWarehouse>(sc4::CityComponent::HistoryWarehouse)) history->RecordHistoryData(series, value);
+    }
     // The budget simulator (i386 0x20 GetTotalFunds, 0x48 GetTotalMonthlyIncome; a department's 0x44 GetTotalExpenses; its line
     // item's 0x30 GetFullExpenses): false when the department (line item) does not exist.
     double BudgetTotal() override { auto* b = Part<sc4::cSC4BudgetSimulator>(sc4::CityComponent::BudgetSimulator); return b ? double(b->GetTotalFunds()) : 0.0; }
@@ -511,27 +531,85 @@ public:
             default: return 0;
         }
     }
-    void OccupantsInRect(int, int, int, int, std::vector<sc4::cISC4Occupant*>&) override {}
-    void DeleteProp(sc4::cISC4Occupant*) override {}
-    bool CreateProp(std::uint32_t, void** out) override {
-        SC4_UNWIRED("cSC4NeighborsSimulator: the neighbor connection occupants (border props) are not created");
+    // The connection markers (spec neighbors.md 6.3 / 6.4; i386 0x00051e3c): the prop manager's CreateProp (i386 0x44), the
+    // occupant's SetPosition, the prop's SetOrientation, bool properties, AddCityProp (0x58); GetCityProps (0x4c) and RemovePropA
+    // (0x7c) find and remove them; the occupant manager's MoveOccupant (0x68) re-files a moved one.
+    static sc4::cSC4PropManager* Props() {
+        sc4::cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::PropManager) : nullptr;
+        void* raw = nullptr;
+        return object && object->QueryInterface(sc4::kGZIID_PlainObject, &raw) ? static_cast<sc4::cSC4PropManager*>(raw) : nullptr;
+    }
+    void OccupantsInRect(int x0, int z0, int x1, int z1, std::vector<sc4::cISC4Occupant*>& out) override {
+        out.clear();
+        sc4::cSC4PropManager* props = Props();
+        if (!props) return;
+        sc4::OccupantList list;
+        const int rect[4] = {x0, z0, x1, z1};
+        props->GetCityProps(list, rect);
+        out.assign(list.begin(), list.end());   // each holds the reference GetCityProps took
+    }
+    void DeleteProp(sc4::cISC4Occupant* occupant) override { if (sc4::cSC4PropManager* props = Props(); props && occupant) props->RemovePropA(occupant); }
+    bool CreateProp(std::uint32_t type, void** out) override {
         if (out) *out = nullptr;
-        return false;
+        sc4::cSC4PropManager* props = Props();
+        sc4::cSC4PropOccupant* prop = nullptr;
+        if (!out || !props || !props->CreateProp(type, prop) || !prop) return false;
+        *out = prop;
+        return true;
     }
-    void FinishProp(void*) override {}
-    void SetPropPosition(void*, const float[3]) override {}
-    void SetPropEdgeFlags(void*, std::uint32_t) override {}
-    void AddPropConnectionProperties(void*, std::uint32_t) override {}
-    void ReleaseProp(void*) override {}
-    void ReleaseOccupantList(std::vector<sc4::cISC4Occupant*>&) override {}
-    void DeactivateOccupant(sc4::cISC4Occupant*) override {}
-    const sc4::cISCPropertyHolder* OccupantProperties(sc4::cISC4Occupant*) override { return nullptr; }
-    void OccupantPosition(sc4::cISC4Occupant*, float& x, float& z) override { x = z = 0.0f; }
-    void SetOccupantPosition(sc4::cISC4Occupant*, const float[3]) override {
-        SC4_UNWIRED("cSC4NeighborsSimulator: the neighbor connection occupants are not moved");
+    void FinishProp(void* prop) override {
+        sc4::cSC4PropManager* props = Props();
+        if (!props || !prop) return;
+        auto* marker = static_cast<sc4::cSC4PropOccupant*>(prop);
+        const bool added = props->AddCityProp(marker);
+        static const bool trace = std::getenv("SC4_NEIGHBORDEBUG") != nullptr;
+        if (trace) {
+            float p[3] = {0.0f, 0.0f, 0.0f};
+            marker->GetPosition(p);
+            std::fprintf(stderr, "neighbors: marker prop %08x at %.1f,%.1f,%.1f orientation %d %s\n", marker->GetType(), p[0], p[1], p[2],
+                         marker->GetOrientation(), added ? "added" : "NOT ADDED");
+        }
     }
-    std::uint32_t OccupantType(sc4::cISC4Occupant*) override { return 0; }
-    bool OccupantHasNetworkType(sc4::cISC4Occupant*, std::uint32_t) override { return false; }
+    void SetPropPosition(void* prop, const float xyz[3]) override { static_cast<sc4::cSC4PropOccupant*>(prop)->SetPosition(xyz); }
+    void SetPropEdgeFlags(void* prop, std::uint32_t flags) override { static_cast<sc4::cSC4PropOccupant*>(prop)->SetOrientation(static_cast<std::int32_t>(flags)); }
+    // holder slot 0x30 AddProperty(id, uint32 1, false): 0xcaa46595 on every marker; pipes add 0xcaa45670 / 0xcaa45672, subways 0xcaa45670 / 0xcaa45671
+    void AddPropConnectionProperties(void* prop, std::uint32_t type) override {
+        sc4::cISCPropertyHolder* holder = static_cast<sc4::cSC4PropOccupant*>(prop)->AsPropertyHolder();
+        if (!holder) return;
+        holder->AddProperty(0xcaa46595, std::uint32_t{1}, false);
+        if (type == 5 || type == 6) {
+            holder->AddProperty(0xcaa45670, std::uint32_t{1}, false);
+            holder->AddProperty(type == 5 ? 0xcaa45672 : 0xcaa45671, std::uint32_t{1}, false);
+        }
+    }
+    void ReleaseProp(void* prop) override { if (prop) static_cast<sc4::cSC4PropOccupant*>(prop)->Release(); }
+    void ReleaseOccupantList(std::vector<sc4::cISC4Occupant*>& list) override {
+        for (sc4::cISC4Occupant* o : list) if (o) o->Release();
+        list.clear();
+    }
+    void DeactivateOccupant(sc4::cISC4Occupant* occupant) override {
+        sc4::cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::OccupantManager) : nullptr;
+        void* raw = nullptr;
+        if (!occupant || !object || !object->QueryInterface(sc4::kGZIID_cISC4OccupantManager, &raw) || !raw) return;
+        auto* manager = static_cast<sc4::cISC4OccupantManager*>(raw);
+        manager->MoveOccupant(occupant, true);
+        manager->Release();
+    }
+    const sc4::cISCPropertyHolder* OccupantProperties(sc4::cISC4Occupant* occupant) override { return occupant ? occupant->AsPropertyHolder() : nullptr; }
+    void OccupantPosition(sc4::cISC4Occupant* occupant, float& x, float& z) override {
+        float p[3] = {0.0f, 0.0f, 0.0f};
+        if (occupant) occupant->GetPosition(p);
+        x = p[0];
+        z = p[2];
+    }
+    void SetOccupantPosition(sc4::cISC4Occupant* occupant, const float xyz[3]) override { if (occupant) occupant->SetPosition(xyz); }
+    std::uint32_t OccupantType(sc4::cISC4Occupant* occupant) override { return occupant ? occupant->GetType() : 0; }
+    bool OccupantHasNetworkType(sc4::cISC4Occupant* occupant, std::uint32_t network) override {
+        auto* piece = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);
+        return piece && piece->IsOfType(network);
+    }
     bool OccupantRetained(sc4::cISC4Occupant*) override { return true; }
     void CityPosition(const cISC4RegionalCity* city, int& x, int& z) override { Concrete(city)->GetPosition(x, z); }
     void CitySize(const cISC4RegionalCity* city, int& w, int& h) override { Concrete(city)->GetCitySize(w, h); }
