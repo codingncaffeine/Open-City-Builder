@@ -2095,7 +2095,8 @@ int main() {
         lot.state = 0;
         // the tail: an icon goes to the callout (12, 10) with the meter image (5, value); no meter clears it
         Callout box;
-        box.win = calloutWin;
+        auto* boxWin = new cGZWin(&host.mgr);   // its own window (the main tool's callout window is gone by now)
+        box.win = boxWin;
         tool->SetTipStateForTest(true, &box);
         holder.values = {0x1502};
         host.tipImages.clear();
@@ -2107,8 +2108,8 @@ int main() {
         holder.values = {0x1006};
         tool->DoMessage(&tickMsg);
         CHECK(box.images == 2 && box.meters == 2 && box.meterCount == 0 && box.meterValue == 0.0f);
-        tool->SetTip(nullptr, nullptr);   // hides the shared callout window again
         tool->SetTipStateForTest(false, nullptr);
+        delete boxWin;
         tool->SetHoveredOccupantForTest(nullptr);
         host.lots.byOccupant = nullptr;
         host.hasDeveloper = true;
