@@ -5,6 +5,7 @@
 #include "gz/StreamOps.h"
 #include "sc4/DBSegment.h"
 #include <cmath>
+#include <bit>
 #include <cstdio>
 #include <cstdlib>
 
@@ -97,7 +98,7 @@ bool cSC4TrafficNetworkMap::Init() {
                                   kTrafficMessageScrollInactive}) {
         host_->SubscribeMessage(message);
     }
-    host_->SubscribeMessage(0xc0);
+    host_->AddTickable(0xc0);   // i386 Init: SL::ATM() AddTickableObject(this, 0xc0)
     if (tunnelPaths_) InitializeTunnelPaths();
     return true;
 }
@@ -128,7 +129,7 @@ bool cSC4TrafficNetworkMap::Shutdown() {
     ClearIntersectionMap();
     ClearTrainJunctionMap();
     ClearUnusableRoadsMap();
-    host_->UnsubscribeMessage(0xc0);
+    host_->RemoveTickable(0xc0);
     for (std::uint32_t message : {kTrafficMessageScrollStart, kTrafficMessageScrollEnd,
                                   kTrafficMessageOccupantInserted, kTrafficMessageNetworkUsableChanged,
                                   kTrafficMessageOccupantRemoved, kTrafficMessageTileOccupancyDirty,
@@ -198,7 +199,7 @@ bool cSC4TrafficNetworkMap::DoMessage(::cGZMessage&) {
 // @ i386 0x001ecbd6. Network pieces inserted / removed reach the tiles (a subway or tunnel piece as usable-changed), the
 // city's post-init builds the intersections, 0x69247dc7 marks the tile occupancy dirty and the camera's move refreshes the
 // intersections in view.
-//   PARTIAL: 0x86ad10ee (vslot 0xe4), a removed train leaving the
+//   PARTIAL: a removed train leaving the
 //   intersections' train lists and the stoplight props' update on a prop insert are not ported; the scroll granularity test
 //   is reduced to "not while scrolling".
 bool cSC4TrafficNetworkMap::DoMessage(cIGZMessage2* message) {
@@ -246,6 +247,8 @@ bool cSC4TrafficNetworkMap::DoMessage(cIGZMessage2* message) {
     case kTrafficMessageScrollEnd:
         if (!scrollActive_) HandleViewChanged();
         break;
+    case kTrafficMessageAnimationTick:   // i386: the frame (data 2) and the milliseconds (data 3, float bits)
+        return DoMessage2(type, static_cast<std::uint32_t>(standard->GetData2()), std::bit_cast<float>(static_cast<std::uint32_t>(standard->GetData3())));
     default: return DoMessage2(type, 0, 0.0f);
     }
     return true;
@@ -1217,14 +1220,27 @@ void cSC4TrafficNetworkMap::TickIntersections(float milliseconds) {
         UpdateIntersectionMap();
         intersectionsDirty_ = false;
     }
+    static const bool trace = std::getenv("SC4_TRAFFICMAPDEBUG") != nullptr;
+    static float traceClock = 0.0f;
+    int ticked = 0, approaches[4] = {0, 0, 0, 0};
     for (int z = visible_.z0; z <= visible_.z1; ++z) {
         for (int x = visible_.x0; x <= visible_.x1; ++x) {
             for (TrafficTileInfo* tile = SafeGetTileInfoAtCell(x, z); tile != nullptr; tile = tile->next) {
                 if (!tile->occupant) continue;
                 TrafficIntersectionArray* intersections = FindIntersection(tile->occupant);
+                if (intersections && trace) {
+                    ++ticked;
+                    for (const TrafficIntersectionInfo& a : intersections->approaches) ++approaches[std::min<int>(a.type, 3)];
+                }
                 if (intersections) TickSingleIntersection(tile->occupant, *intersections, seconds);
             }
         }
+    }
+    traceClock += seconds;
+    if (trace && traceClock > 10.0f) {
+        traceClock = 0.0f;
+        std::fprintf(stderr, "traffic map: tick %d intersections in view, approaches by type %d/%d/%d/%d, %zu intersections in all\n", ticked,
+                     approaches[0], approaches[1], approaches[2], approaches[3], intersections_.size());
     }
     int visited = 0;
     std::uint32_t guard = 0;
@@ -1602,6 +1618,8 @@ bool cSC4TrafficNetworkMap::HandleViewChanged() {
     visible_.x1 = std::min(std::max(targetCellX + 5, 0), cellsX_ - 1);
     visible_.z0 = std::min(std::max(cellZ - 5, 0), cellsZ_ - 1);
     visible_.z1 = std::min(std::max(targetCellZ + 5, 0), cellsZ_ - 1);
+    if (std::getenv("SC4_TRAFFICMAPDEBUG"))
+        std::fprintf(stderr, "traffic map: view cells %d,%d..%d,%d\n", visible_.x0, visible_.z0, visible_.x1, visible_.z1);
     for (int z = visible_.z0; z <= visible_.z1; ++z) {
         for (int x = visible_.x0; x <= visible_.x1; ++x) {
             const bool insideOld = oldX0 <= x && oldZ0 <= z && x <= oldX1 && z <= oldZ1;
@@ -1663,8 +1681,6 @@ bool cSC4TrafficNetworkMap::HandlePostCityInit() {
 // 0x100299322 — PARTIAL: the ten message ids are known (see Init), but the cIGZMessage2 accessors
 // themselves are not recovered; the three state-only ids are handled here.
 bool cSC4TrafficNetworkMap::DoMessage2(std::uint32_t messageId, std::uint32_t dataA, float dataB) {
-    (void)dataA;
-    (void)dataB;
     switch (messageId) {
         case kTrafficMessageIntersectionsChanged:
             HandlePostCityInit();
@@ -1682,8 +1698,8 @@ bool cSC4TrafficNetworkMap::DoMessage2(std::uint32_t messageId, std::uint32_t da
         case 0xa6b79602:   // the camera moved (zoom, rotation): the visible cells are worked out again
             HandleViewChanged();
             return true;
-        case kTrafficMessageAnimationTick:
-            SC4_UNWIRED("cSC4TrafficNetworkMap::DoMessage: animation tick 0x86ad10ee (vslot 0xe4) not ported");
+        case kTrafficMessageAnimationTick:   // DoAnimationTick (vslot 0xe4) with the frame and the milliseconds
+            DoAnimationTick(dataA, dataB);
             return true;
         default:
             return true;

@@ -227,6 +227,9 @@ public:
     // message bus (SL::spMS2 slots 0x28 / 0x30)
     virtual void SubscribeMessage(std::uint32_t message) = 0;
     virtual void UnsubscribeMessage(std::uint32_t message) = 0;
+    // SL::ATM() vslot 0x14 AddTickableObject(the map, priority) / RemoveTickableObject: the animation ticks (0x86ad10ee).
+    virtual void AddTickable(std::uint32_t priority) { (void)priority; }
+    virtual void RemoveTickable(std::uint32_t priority) { (void)priority; }
     // cISC4PathInfo::MakeTunnelPaths (slot 0x100)
     virtual void MakeTunnelPaths(ITrafficNetworkMapPathInfo* pathInfo, ITrafficNetworkMapOccupant* from,
                                  ITrafficNetworkMapOccupant* to) = 0;

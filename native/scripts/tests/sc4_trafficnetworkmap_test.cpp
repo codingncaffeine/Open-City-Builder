@@ -1,3 +1,4 @@
+#include <bit>
 // cSC4TrafficNetworkMap: tile storage, the per-cell volume/congestion accumulation, intersections,
 // train junctions, surrounding-road and geometry queries, view tracking and shutdown.
 #include <algorithm>
@@ -220,6 +221,9 @@ struct Host : ITrafficNetworkMapHost {
     void GetViewTarget(float& x, float& y, float& z) override { x = viewTarget[0]; y = viewTarget[1]; z = viewTarget[2]; }
     void SubscribeMessage(std::uint32_t) override { ++subscribed; }
     void UnsubscribeMessage(std::uint32_t) override { ++unsubscribed; }
+    std::vector<std::uint32_t> tickables;
+    void AddTickable(std::uint32_t priority) override { tickables.push_back(priority); }
+    void RemoveTickable(std::uint32_t priority) override { tickables.push_back(0x80000000u | priority); }
     void MakeTunnelPaths(ITrafficNetworkMapPathInfo*, ITrafficNetworkMapOccupant*, ITrafficNetworkMapOccupant*) override {}
     // every cISC4Occupant of this test is a FakeBase; a piece read back from a file is found by its tag
     std::vector<FakeOccupant*> pieces;
@@ -300,7 +304,8 @@ int main() {
     CHECK(map.Initialized());
     CHECK(map.CellsX() == 8 && map.CellsZ() == 4);
     CHECK(map.TileCount() == 0);
-    CHECK(host.subscribed == 10);   // nine message ids plus the animation tick id
+    CHECK(host.subscribed == 9);   // nine message ids; the animation ticks come from the tick manager (priority 0xc0)
+    CHECK(host.tickables.size() == 1 && host.tickables[0] == 0xc0);
     CHECK(map.SafeGetTileInfoAtCell(-1, 0) == nullptr);
     CHECK(map.SafeGetTileInfoAtCell(8, 0) == nullptr);
 
@@ -764,7 +769,23 @@ int main() {
     }
 
     // ---- shutdown ----
+    {   // the tick message (0x86ad10ee: frame in data 2, milliseconds as float bits in data 3) runs DoAnimationTick
+        const float before = map.StoplightPhaseA();
+        const bool active = host.active;
+        host.active = true;
+        auto* tick = new cRZMessage2Standard();
+        tick->AddRef();
+        tick->SetType(0x86ad10ee);
+        tick->SetData2(7);
+        tick->SetData3(std::bit_cast<std::uint32_t>(250.0f));
+        map.DoMessage(tick);
+        tick->Release();
+        host.active = active;
+        CHECK(map.StoplightPhaseA() == before + 0.25f || map.StoplightPhaseA() == 0.0f);
+        CHECK(map.StoplightPhaseA() != before);
+    }
     CHECK(map.Shutdown());
+    CHECK(!host.tickables.empty() && host.tickables.back() == (0x80000000u | 0xc0));   // Shutdown leaves the ticks
     CHECK(!map.Initialized());
     CHECK(map.TileCount() == 0);
     CHECK(map.GetIntersectionMap().empty());

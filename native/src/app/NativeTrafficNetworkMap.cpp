@@ -8,6 +8,8 @@
 #include <memory>
 #include <vector>
 
+#include "app/NativeAnimationTicks.h"
+#include "sc4/AnimationTickManager.h"
 #include "app/NativeCity.h"
 #include "app/NativeCityView.h"
 #include "sc4/Render3D.h"
@@ -20,6 +22,8 @@
 #include "sc4/NetworkTunnelOccupant.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/PathInfo.h"
+#include "sc4/OccupantFilters.h"
+#include "sc4/PropOccupant.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/TrafficAutomaton.h"
 #include "sc4/TrafficNetworkMap.h"
@@ -30,6 +34,42 @@
 namespace native {
 namespace {
 using namespace sc4;
+
+// A stoplight prop as the traffic map drives it (cISC4PropOccupant: GetState 0x60 / SetState 0x58 / GetOrientation 0x48, the
+// occupant's group, position and flags, the holder's properties). Holds one reference on the prop.
+class StoplightPropView final : public ITrafficNetworkMapProp {
+public:
+    explicit StoplightPropView(cSC4PropOccupant* prop) : prop_(prop) { prop_->AddRef(); }
+    ~StoplightPropView() { prop_->Release(); }
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override {
+        if (--refs_ != 0) return refs_;
+        delete this;
+        return 0;
+    }
+    bool IsOccupantGroup(std::uint32_t group) override { return prop_->IsOccupantGroup(group); }
+    bool HasProperty(std::uint32_t id) override { return prop_->AsPropertyHolder() && prop_->AsPropertyHolder()->HasProperty(id); }
+    int GetState() override { return static_cast<int>(prop_->GetState()); }
+    void SetState(int state) override {
+        static const bool trace = std::getenv("SC4_TRAFFICMAPDEBUG") != nullptr;
+        static int traced = 0;
+        if (trace && traced < 40 && prop_->GetState() != std::uint32_t(state)) {
+            ++traced;
+            float p[3] = {};
+            prop_->GetPosition(p);
+            std::fprintf(stderr, "traffic map: stoplight at %.0f,%.0f state %u -> %d\n", p[0], p[2], prop_->GetState(), state);
+        }
+        prop_->SetState(static_cast<std::uint32_t>(state));
+    }
+    void GetPosition(float* xyz) override { prop_->GetPosition(xyz); }
+    int GetOrientation() override { return prop_->GetOrientation(); }
+    bool IsFlagSet(std::uint32_t flag) override { return prop_->IsFlagSet(flag); }
+
+private:
+    cSC4PropOccupant* prop_;
+    std::uint32_t refs_ = 1;
+};
 
 cISC4OccupantManager* Occupants() {
     cSC4City* city = HostCity();
@@ -198,9 +238,25 @@ public:
         return out;
     }
     void ReleaseOccupants(const std::vector<cISC4Occupant*>& occupants) override { for (cISC4Occupant* o : occupants) if (o) o->Release(); }
-    std::vector<ITrafficNetworkMapProp*> PropsAtCell(int, int) override {   // PARTIAL: no stoplight props natively
-        SC4_UNWIRED("cSC4TrafficNetworkMap: the stoplight props of a cell are not answered (none)");
-        return {};
+    // InitIntersectionProps (i386 0x001ea734): the occupant manager's GetOccupantsByStandardCityCells(cell, cell, the stoplight
+    // filter) and each one that answers cISC4PropOccupant (0xe9793a65), one reference each.
+    std::vector<ITrafficNetworkMapProp*> PropsAtCell(int x, int z) override {
+        std::vector<ITrafficNetworkMapProp*> out;
+        cISC4OccupantManager* occupants = Occupants();
+        if (!occupants) return out;
+        static cStoplightPropFilter* filter = [] { auto* f = new cStoplightPropFilter(); f->AddRef(); return f; }();
+        const int cell[2] = {x, z};
+        OccupantList found;
+        if (occupants->GetOccupantsByStandardCityCells(found, cell, cell, filter, 0xffffffffu)) {
+            for (cISC4Occupant* occupant : found) {
+                if (auto* prop = dynamic_cast<cSC4PropOccupant*>(occupant)) out.push_back(new StoplightPropView(prop));
+                occupant->Release();
+            }
+        }
+        static const bool trace = std::getenv("SC4_TRAFFICMAPDEBUG") != nullptr;
+        static int traced = 0;
+        if (trace && !out.empty() && traced++ < 20) std::fprintf(stderr, "traffic map: intersection at %d,%d: %zu stoplight props\n", x, z, out.size());
+        return out;
     }
     bool HasTerrain() override { return Terrain() != nullptr; }
     float TerrainHeightAt(float x, float z) override { cSTETerrain* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
@@ -235,6 +291,12 @@ public:
     }
     void SubscribeMessage(std::uint32_t message) override { if (SL::spMS2 && map_) SL::spMS2->AddNotification(map_, message); }
     void UnsubscribeMessage(std::uint32_t message) override { if (SL::spMS2 && map_) SL::spMS2->RemoveNotification(map_, message); }
+    void AddTickable(std::uint32_t priority) override {
+        if (sc4::cSC4AnimationTickManager* ticks = AnimationTickManager(); ticks && map_) ticks->AddTickableObject(map_, priority);
+    }
+    void RemoveTickable(std::uint32_t priority) override {
+        if (sc4::cSC4AnimationTickManager* ticks = AnimationTickManager(); ticks && map_) ticks->RemoveTickableObject(map_, priority);
+    }
     void MakeTunnelPaths(ITrafficNetworkMapPathInfo* pathInfo, ITrafficNetworkMapOccupant* from, ITrafficNetworkMapOccupant* to) override {
         if (pathInfo) pathInfo->MakeTunnelPaths(from, to);
     }
