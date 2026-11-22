@@ -156,6 +156,9 @@ struct Host : ITrafficHost {
     void PostMessage(std::uint32_t m) override { ++messages[m]; }
     void PostPotholeMessage(int x, int z, bool on) override { potholes.push_back({x, z, on}); }
     void SetRoadBudgetExpense(int line, int amount) override { road[line] = amount; }
+    int departmentCalls = 0;
+    float roadsCap = 0.0f, transitCap = 0.0f;
+    void EnsureDepartments(float roads, float transit) override { ++departmentCalls; roadsCap = roads; transitCap = transit; }
     void SetMassTransitBudgetExpense(int line, int amount) override { transit[line] = amount; }
     float MassTransitFundingFraction() override { return funding; }
     float CityCellSize() override { return 16.0f; }
@@ -1138,7 +1141,10 @@ int main() {
         host.cellsX = host.cellsZ = 8;
         host.simDate = 731;
         cSC4TrafficSimulator fresh(&host, &random);
+        const int departmentsBefore = host.departmentCalls;
         CHECK(fresh.Init());
+        // Init asks for the roads and mass transit departments with the tuned caps (default 1.2 each, TS29)
+        CHECK(host.departmentCalls == departmentsBefore + 1 && host.roadsCap == 1.2f && host.transitCap == 1.2f);
         fresh.GetCongestionMap()->SetTractValue(3, 4, 77);
         const cGZPersistResourceKey key{0x6990c1aa, 0x60606060, 1};
         const std::string path = "/tmp/sc4_traffic_fresh_" + std::to_string(getpid()) + ".sc4";

@@ -11,6 +11,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <tuple>
+#include <initializer_list>
 #include <memory>
 #include <set>
 #include <vector>
@@ -131,6 +133,35 @@ public:
     void PostPotholeMessage3(int x, int z, std::uint32_t data3) override { Post(kTrafficMessagePotholeChanged, std::uint32_t(x), std::uint32_t(z), data3); }
     void PostTrafficMapChanged() override { Post(0x69247dc7); }
     void SetRoadBudgetExpense(int line, int amount) override { SetExpense(kRoadsDepartment, line, amount); }
+    // spec traffic-simulator.md 9.1 TG7 (i386 0x0071f1af / 0x0071f263, then 0x0071f336..0x0071f45e)
+    void EnsureDepartments(float roadsMax, float transitMax) override {
+        cSC4BudgetSimulator* budget = Budget();
+        if (!budget) return;
+        auto line = [](cSC4DepartmentBudget* d, std::uint32_t id, std::uint32_t name, bool income) {
+            if (cSC4LineItem* item = d->CreateLineItem(id, false)) {
+                item->SetName(0x6a3ff01c, name);
+                if (income) item->SetType(1);
+            }
+        };
+        auto make = [&](std::uint32_t id, std::uint32_t name, float maxFunding, std::initializer_list<std::tuple<std::uint32_t, std::uint32_t, bool>> lines) {
+            if (budget->GetDepartmentBudget(id)) return;
+            cSC4DepartmentBudget* d = budget->CreateDepartmentBudget(id, 0xaa369059);
+            if (!d) return;
+            d->SetDepartmentName(0x6a3ff01c, name);
+            d->SetMaxAllowedFundingPercentage(maxFunding);
+            for (const auto& [n, label, income] : lines) line(d, n, label, income);
+        };
+        make(kRoadsDepartment, 0x4a493b73, roadsMax, {{1, 0xea8446be, false}, {2, 0x2a8446da, false}, {3, 0x2a8446df, false}});
+        make(kMassTransitDepartment, 0xea493b83, transitMax, {{1, 0xea5f96e7, false}, {2, 0x8a5f978c, true}, {3, 0x6a8b0cfb, false}});
+        // every Init, loaded departments too, in this order: the lines a department still lacks
+        static constexpr struct { bool transit; std::uint32_t id, name; bool income; } kLater[] = {
+            {true, 4, 0x2ab7ea93, false}, {true, 5, 0x8bce33e0, false}, {false, 4, 0xcbce33d5, false},
+            {true, 6, 0x8bce33e1, false}, {false, 5, 0x0c3bf3c4, true},  {false, 6, 0xea5f96e7, false}};
+        for (const auto& later : kLater) {
+            cSC4DepartmentBudget* d = budget->GetDepartmentBudget(later.transit ? kMassTransitDepartment : kRoadsDepartment);
+            if (d && !d->GetLineItem(later.id)) line(d, later.id, later.name, later.income);
+        }
+    }
     void SetMassTransitBudgetExpense(int line, int amount) override { SetExpense(kMassTransitDepartment, line, amount); }
     float MassTransitFundingFraction() override { return Funding(kMassTransitDepartment); }
     float RoadFundingFraction() override { return Funding(kRoadsDepartment); }
@@ -310,12 +341,12 @@ private:
         if (!view) view = std::make_unique<LotView>(lot);
         return view.get();
     }
+    // spec 4.9.1: GetLineItem(i) then SetFullExpenses; Init made every line (EnsureDepartments), so a missing one is a broken save
     void SetExpense(std::uint32_t departmentId, int line, int amount) {
         cSC4BudgetSimulator* budget = Budget();
         cSC4DepartmentBudget* department = budget ? budget->GetDepartmentBudget(departmentId) : nullptr;
         cSC4LineItem* item = department ? department->GetLineItem(std::uint32_t(line)) : nullptr;
         if (item) item->SetFullExpenses(amount);
-        else if (department) SC4_UNWIRED("cSC4TrafficSimulator budget: a missing roads / mass transit line item is not created, its expense is dropped");
     }
     float Funding(std::uint32_t departmentId) {
         cSC4BudgetSimulator* budget = Budget();

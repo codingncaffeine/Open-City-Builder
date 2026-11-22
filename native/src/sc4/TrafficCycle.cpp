@@ -244,6 +244,7 @@ bool cSC4TrafficSimulator::Init() {
     for (std::uint32_t m : {0x99ef1142u, 0x99ef1143u, 0x26d31ec1u, 0xe8bda2e7u, 0xc53d10aau, 0x8a0d15dau, 0xea0d163eu, 0x08dac3e7u, 0xc2c09554u})
         host_->AddNotification(target, m);
     host_->CityCellCount(cellsX_, cellsZ_);
+    host_->EnsureDepartments(tunables_.value_de0, tunables_.value_de4);   // 0x0071f1af..0x0071f45e
     InitGrid(cellsX_, cellsZ_);
     AdoptSavedGrid(airMap_, 0x89d5c3a2);
     AdoptSavedGrid(peakVolume_, 0x69d5c3ac);

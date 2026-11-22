@@ -179,6 +179,9 @@ public:
     virtual void PostMessage(std::uint32_t message) = 0;
     virtual void PostPotholeMessage(int x, int z, bool potholed) = 0;      // kTrafficMessagePotholeChanged
     virtual void SetRoadBudgetExpense(int line, int amount) = 0;           // road department line item
+    // Init (spec traffic-simulator.md 9.1 TG7): the roads (0xc921ceea) and mass transit (0xc921ceeb) departments, made when the city
+    // has none (group 0xaa369059, named, capped at the tuned maximum funding, lines 1..3), then the later lines added when missing.
+    virtual void EnsureDepartments(float roadsMaxFunding, float massTransitMaxFunding) { (void)roadsMaxFunding; (void)massTransitMaxFunding; }
     // Mass transit department; line 3 is created on first use (ids 0x6a3ff01c / 0x6a8b0cfb) when missing.
     virtual void SetMassTransitBudgetExpense(int line, int amount) = 0;
     virtual float MassTransitFundingFraction() = 0;                        // department +0x50
