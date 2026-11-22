@@ -1377,6 +1377,10 @@ int RunScenario(const std::string& path) {
             int x1 = 0, z1 = 0, x2 = 0, z2 = 0, row = -1;
             words >> type >> x1 >> z1 >> x2 >> z2 >> row;
             native::NativeBridgeChooser(type, x1, z1, x2, z2, row);
+        } else if (command == "zonerect") {   // zonerect TYPE X0 Z0 X1 Z1: the zoning tool places a cell rectangle as its mouse-up does
+            int type = 0, x0 = 0, z0 = 0, x1 = 0, z1 = 0;
+            words >> type >> x0 >> z0 >> x1 >> z1;
+            native::NativeZoneRect(type, x0, z0, x1, z1);
         } else if (command == "netline") {   // netline TYPE X1 Z1 X2 Z2: a network tool lays a line as the drag's release does (neighbor connections too)
             std::uint32_t type = 0;
             int x1 = 0, z1 = 0, x2 = 0, z2 = 0;

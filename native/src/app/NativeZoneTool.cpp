@@ -190,6 +190,22 @@ void InstallZoneTool(sc4::cSC4View3DWin& view, cISC4City* city, sc4::cSC43DRende
     std::printf("city view: zone tool %s\n", zones ? "up" : "no zone manager");
 }
 
+void NativeZoneRect(int type, int x0, int z0, int x1, int z1) {
+    auto* tool = new sc4::cSC4ViewInputControlZone(type);
+    tool->AddRef();
+    sc4::SC4Rect<int> rect;
+    rect.x0 = std::min(x0, x1); rect.z0 = std::min(z0, z1); rect.x1 = std::max(x0, x1); rect.z1 = std::max(z0, z1);
+    sc4::SC4CellRegion<int> region = sc4::SC4CellRegion<int>::Make(rect, true);
+    const bool placed = tool->PlaceZone(type, region, false, false, nullptr, nullptr);
+    int zoned = 0;
+    if (sc4::cSC4ZoneManager* zones = Zones())
+        for (int x = rect.x0; x <= rect.x1; ++x)
+            for (int z = rect.z0; z <= rect.z1; ++z) zoned += zones->GetZoneType(x, z) == type;
+    std::printf("zonerect: type %d (%d,%d)-(%d,%d) %s, %d cells now of that type\n", type, rect.x0, rect.z0, rect.x1, rect.z1,
+                placed ? "placed" : "refused", zoned);
+    tool->Release();
+}
+
 sc4::cSC4ViewInputControl* CreateZoneTool(int type) {
     auto* tool = new sc4::cSC4ViewInputControlZone(type);
     tool->AddRef();

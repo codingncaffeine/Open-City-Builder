@@ -17,5 +17,8 @@ sc4::cSC4ViewInputControl* CreateZoneTool(int type);
 void PumpToolTicks(int elapsedMs);
 void StartToolTick(cIGZMessageTarget2* target, std::uint32_t interval);
 void StopToolTick(cIGZMessageTarget2* target);
+// Kit verb `zonerect TYPE X0 Z0 X1 Z1`: a zoning tool of that type places the inclusive cell rectangle as its mouse-up does
+// (cSC4ViewInputControlZone::PlaceZone on the selected area; no input events, no sound).
+void NativeZoneRect(int type, int x0, int z0, int x1, int z1);
 
 }  // namespace native
