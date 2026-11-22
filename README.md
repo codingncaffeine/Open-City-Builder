@@ -16,8 +16,9 @@ the original's saved cities, plays them and saves them back. Running natively:
   night lights, and every disaster on the menu, including pipe bursts.
 - **Sound:** the game's own sound system: the radio stations and their playlists, effects placed in the city and
   heard left and right, sirens, the city's ambience, and the audio options.
-- **Growth:** buildings decline, are abandoned and are taken over again; power lines are laid with the original's
-  pole tool, and helicopters, planes and the blimp fly.
+- **Growth:** buildings decline, are abandoned and are taken over again; farms grow and plant their fields, small lots
+  merge into larger ones and large lots split, and the ground is levelled for new buildings; power lines are laid with
+  the original's pole tool, and helicopters, planes and the blimp fly.
 - **Building:** roads shape the ground under them; bridges (with the bridge chooser, suspension wires and supports),
   tunnels, highways with their raised decks, overpasses and on-ramps, one-way roads with their arrows, and the subway
   tool; construction crews build new roads piece by piece and lots get their workers.
