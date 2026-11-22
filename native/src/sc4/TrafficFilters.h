@@ -5,12 +5,12 @@
 // interface that QueryInterface(0xa821ef94) hands back (cSC4NetworkOccupant; see TRAFFICFILTER-1).
 #pragma once
 #include <cstdint>
+#include "sc4/CommonIIDs.h"
 
 #include "sc4/OccupantManager.h"
 
 namespace sc4 {
 
-constexpr std::uint32_t kGZIID_cISC4NetworkOccupant = 0xa821ef94;
 constexpr std::uint32_t kTrafficFilterNetworkFlags = 0x1fcf;
 constexpr std::uint32_t kTrafficFilterOccupantNetwork = 0xc772bf98;
 constexpr std::uint32_t kTrafficFilterOccupantBuilding = 0x278128a0;

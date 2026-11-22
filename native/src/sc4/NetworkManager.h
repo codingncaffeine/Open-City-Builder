@@ -51,6 +51,7 @@
 // tools' placement pass and the underground tool's height update, none of which are recovered yet.
 #pragma once
 #include <cstddef>
+#include "sc4/CommonIIDs.h"
 #include <cstdint>
 #include <list>
 #include <unordered_map>
@@ -79,7 +80,6 @@ constexpr std::size_t kNetworkToolCount = 13;
 
 constexpr std::uint32_t kGZIID_cISC4NetworkManager = 0xa9764c8c;
 constexpr std::uint32_t kGZCLSID_cSC4NetworkManager = 0xc990bd46;
-constexpr std::uint32_t kGZIID_cISC4NetworkOccupant = 0xa821ef94;
 constexpr std::uint32_t kGZIID_cSC4NetworkOccupantWithPreBuiltModel = 0x49c1a034;
 
 // The ini resource the remap tables come from (SC4GetResourceAsFile @ 0x10003a3d2; the call site is

@@ -5,6 +5,7 @@
 // 0xa8) or the view goes through IOccupantFilterWorld.
 #pragma once
 #include <cstdint>
+#include "sc4/CommonIIDs.h"
 #include <unordered_set>
 #include <vector>
 
@@ -14,7 +15,6 @@ namespace sc4 {
 
 constexpr std::uint32_t kGZCLSID_cSC4OccupantTypesFilter = 0xe9c75ee8, kGZCLSID_cSC4ViewLevelOccupantFilter = 0xaac3c01d,
                         kGZCLSID_cSC4NetworkOccupantFilter = 0xeac3a3d2;
-constexpr std::uint32_t kGZIID_cISC4NetworkOccupant = 0xa821ef94;
 
 class IOccupantFilterWorld {
 public:

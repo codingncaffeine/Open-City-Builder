@@ -67,6 +67,7 @@
 // real classes are hooked up in docs/SEAMS.md; the test supplies small fakes.
 #pragma once
 #include <cstdint>
+#include "sc4/CommonIIDs.h"
 #include <list>
 #include <map>
 #include <set>
@@ -97,7 +98,6 @@ constexpr std::uint32_t kGZIID_cISC4Automaton = 0xa9b40f05;
 #define SC4_GZIID_CISC4BuildingOccupant_DEFINED
 constexpr std::uint32_t kGZIID_cISC4BuildingOccupant = 0x87dda3a9;
 #endif
-constexpr std::uint32_t kGZIID_cISC4NetworkOccupant = 0xa821ef94;
 constexpr std::uint32_t kGZIID_cIGZSerializableView = 0xe4fda3d4;
 constexpr std::uint32_t kGZIID_cIGZMessageTarget2View = 0x452294aa;
 

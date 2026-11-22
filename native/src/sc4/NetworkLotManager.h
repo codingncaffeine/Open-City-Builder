@@ -84,6 +84,7 @@
 // host seam implementations listed by docs/SEAMS.md.
 #pragma once
 #include <cstddef>
+#include "sc4/CommonIIDs.h"
 #include <cstdint>
 #include <set>
 #include <unordered_map>
@@ -107,7 +108,6 @@ constexpr std::int32_t kInt32Min = static_cast<std::int32_t>(0x80000000u);
 
 constexpr std::uint32_t kGZIID_cISC4NetworkLotManager = 0x89a5ba3f;
 constexpr std::uint32_t kGZCLSID_cSC4NetworkLotManager = 0xe9a6cd3b;
-constexpr std::uint32_t kGZIID_cISC4NetworkOccupant = 0xa821ef94;
 constexpr std::uint32_t kGZIID_cISC4LotNetworkLot = 0xe818fced;   // cISC4Lot (sc4/Lot.h)
 constexpr std::uint32_t kGZIID_cIGZMessageTarget2NetworkLot = 0x452294aa;
 constexpr std::uint32_t kGZIID_cIGZSerializableNetworkLot = 0xe4fda3d4;

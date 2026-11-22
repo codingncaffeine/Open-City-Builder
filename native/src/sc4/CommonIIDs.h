@@ -8,6 +8,7 @@ namespace sc4 {
 
 constexpr std::uint32_t kGZIID_cIGZMessageTarget2 = 0x452294aa;
 constexpr std::uint32_t kGZIID_cIGZSerializable = 0xe4fda3d4;
+constexpr std::uint32_t kGZIID_cISC4NetworkOccupant = 0xa821ef94;
 
 // Port-only: QueryInterface id on the adapters that wrap a plain (non-COM) recovered object; hands out the wrapped object
 // (borrowed, valid while the adapter lives).
