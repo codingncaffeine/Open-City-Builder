@@ -91,8 +91,7 @@ public:
             frame_->AddRef();
             frame_->Init(static_cast<std::uint32_t>(movie_.Width()), static_cast<std::uint32_t>(movie_.Height()), cGZBufferColorType{kBufferColorARGB8888, 32});
         }
-        startMs_ = -1.0;   // the clock starts with the first paint
-        if (AudioRunning()) sound_.Open(EffectsGain());
+        startMs_ = -1.0;   // the clock and the sound start with the first paint
         if (Debug()) std::fprintf(stderr, "intro: clip %u %dx%d stoppable %d\n", instance, movie_.Width(), movie_.Height(), int(stoppable_));
         InvalidateSelf();
         return true;
@@ -118,7 +117,13 @@ public:
     bool GZPaint() override {
         if (!movie_.IsOpen()) return true;
         const double now = NowMs();
-        if (startMs_ < 0) startMs_ = now;
+        if (startMs_ < 0) {
+            startMs_ = now;
+            // The copyright clip is queued while the application window is made, before the sound services start (they come up
+            // after the boot); by the first paint they run, so the sound opens here, not when the clip is queued.
+            if (AudioRunning()) sound_.Open(EffectsGain());
+            if (Debug()) std::fprintf(stderr, "intro: first paint, sound %s\n", AudioRunning() ? "on" : "off (no sound services)");
+        }
         if (movie_.AdvanceTo((now - startMs_) / 1000.0)) CopyFrame();
         std::vector<std::int16_t> samples;
         movie_.TakeAudio(samples);
