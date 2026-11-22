@@ -194,6 +194,7 @@ public:
 
     // cISC4LotBaseTextureOccupant
     cISC4Occupant* AsOccupant() override;   // @ 0x1000b5ec6
+    const std::vector<LotBaseTextureSpecification>& Specifications() const { return specs_; }   // the port's read-back
     int GetUsage() const override;          // @ 0x1000b5ed0
     void SetUsage(int usage) override;      // @ 0x1000b5ede
     std::size_t GetCellCoverage(std::vector<SC4PointInt>& cells, std::vector<bool>* covered) const override;  // 0x1000b401a

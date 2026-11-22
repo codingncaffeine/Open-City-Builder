@@ -919,7 +919,8 @@ bool cSC4LotDeveloper::GetLotBaseTextureOccupant(cSC4Lot* lot, cISC4LotBaseTextu
 // @ 0x100146066. An empty zoned lot's base texture: one specification per cell, the zone's drag colour (RGB) with the zone
 // display alpha and combine mode 3, and the edge texture the boundary rules pick from which sides of the cell face the lot's
 // own cells (0), its front (2, the side it faces) or anything else (1). Zone types 0, 11, 12 and 15 carry no texture.
-// Landfill / airport / seaport zones (7..9) whose lot reports the (1, 1) pair (lot vslot 0xb0) take plain cells.
+// Industrial and agricultural zones (7..9) whose lot is 1 x 1 cells (lot vslot 0xb0 GetSize, PC slot 22) take plain cells: no
+// outline and no facing arrow (lot-developer.md 17.7, slot 43).
 void cSC4LotDeveloper::SetEmptyLotBaseTexture(cSC4Lot* lot) {
     ILotBaseTextureServices* services = g_textureServices;
     if (!lot || !services) return;
@@ -934,8 +935,9 @@ void cSC4LotDeveloper::SetEmptyLotBaseTexture(cSC4Lot* lot) {
     const int cellsX = services->CityCellsX(), cellsZ = services->CityCellsZ();
     std::int32_t rect[4] = {};
     lot->GetBoundingRect(rect);                                               // lot vslot 0x70: x0, z0, x1, z1
-    // PARTIAL: lot vslot 0xb0 (the landfill / port pair) is not modelled by the port's cSC4Lot, so zones 7..9 take edges too.
-    const bool edges = true;
+    std::uint8_t sizeX = 0, sizeZ = 0;
+    lot->GetSize(sizeX, sizeZ);                                               // lot vslot 0xb0
+    const bool edges = !(zoneType >= 7 && zoneType <= 9 && sizeX == 1 && sizeZ == 1);
     const std::uint8_t facing = lot->GetFacing();                             // lot vslot 0xb8
     std::vector<LotBaseTextureSpecification> specs;
     for (int x = rect[0]; x <= rect[2]; ++x) {

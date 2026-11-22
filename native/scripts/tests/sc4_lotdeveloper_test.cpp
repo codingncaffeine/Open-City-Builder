@@ -3,7 +3,9 @@
 #include <vector>
 
 #include "sc4/Lot.h"
+#include "sc4/LotBaseTextureOccupant.h"
 #include "sc4/LotDeveloper.h"
+#include "sc4/OccupantManager.h"
 #include "sc4/SCPropertyHelp.h"
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
@@ -40,7 +42,8 @@ struct FakeLotHost final : ILotHost {
     LotBuildingProfile profile;
     int day = 100;
     std::vector<std::uint32_t> messages;
-    std::uint8_t ZoneTypeAt(int, int) override { return 2; }
+    std::uint8_t zone = 2;
+    std::uint8_t ZoneTypeAt(int, int) override { return zone; }
     std::int32_t SimulatorDay() override { return day; }
     float TerrainAltitude(float, float) override { return 0.0f; }
     const LotBuildingProfile* BuildingProfile(std::uint32_t type) override { return type ? &profile : nullptr; }
@@ -235,6 +238,78 @@ int main() {
         CHECK(lot.GetPopulation(0x1020) == 8);
         CHECK(lot.GetPopulation(0x1010) == 0);
         dev.SetGateServices(nullptr);
+        SetLotHost(nullptr);
+    }
+    {   // SetEmptyLotBaseTexture (lot-developer.md 17.7, slot 43): an industrial or agricultural 1 x 1 lot is a plain cell, any
+        // other lot takes the boundary textures (outline, and the arrow on the side it faces)
+        FakeLotHost lotHost;
+        SetLotHost(&lotHost);
+        auto* occupants = new cSC4OccupantManager();
+        occupants->AddRef();
+        occupants->SetCitySize(1024.0f, 1024.0f);
+        occupants->Init();
+        struct Textures final : ILotBaseTextureServices {
+            cSC4OccupantManager* occupants = nullptr;
+            std::vector<cSC4Lot*> lots;
+            cSC4Lot* LotAtCell(int x, int z) override {
+                for (cSC4Lot* lot : lots) {
+                    std::int32_t r[4];
+                    lot->GetBoundingRect(r);
+                    if (r[0] <= x && x <= r[2] && r[1] <= z && z <= r[3]) return lot;
+                }
+                return nullptr;
+            }
+            cISC4OccupantManager* OccupantManager() override { return occupants; }
+            std::uint32_t ZoneDragColor(int) override { return 0xd0c00080; }
+            std::uint8_t ZoneDisplayAlpha() override { return 0x80; }
+            int CityCellsX() override { return 64; }
+            int CityCellsZ() override { return 64; }
+            std::vector<cSC4LotBaseTextureOccupant*> made;   // the test's own references
+            cISC4LotBaseTextureOccupant* CreateBaseTextureOccupant() override {
+                auto* occupant = new cSC4LotBaseTextureOccupant();
+                occupant->AddRef();                          // the caller's
+                occupant->AddRef();                          // the test's
+                made.push_back(occupant);
+                return occupant;
+            }
+        } textures;
+        textures.occupants = occupants;
+        cSC4LotDeveloper::SetBaseTextureServices(&textures);
+        dev.InitBoundaryRules();
+        // the specifications the lot's new base texture occupant holds after SetEmptyLotBaseTexture
+        auto zoned = [&](cSC4Lot& lot, std::uint8_t zone) {
+            lotHost.zone = zone;
+            lot.UpdateZoneType();
+            textures.lots = {&lot};
+            const std::size_t before = textures.made.size();
+            dev.SetEmptyLotBaseTexture(&lot);
+            textures.lots.clear();
+            std::vector<LotBaseTextureSpecification> out;
+            if (textures.made.size() == before + 1) out = textures.made.back()->Specifications();
+            return out;
+        };
+        for (std::uint8_t zone : {7, 8, 9}) {   // agriculture, medium and heavy industry, 1 x 1: the plain fill, facing ignored
+            cSC4Lot lot(10 + zone * 3, 10, 1, 1, 1);
+            const auto specs = zoned(lot, zone);
+            CHECK(lot.GetZoneType() == zone);
+            CHECK(specs.size() == 1 && specs[0].textureId == 0x3000 && specs[0].rotation == 0 && specs[0].flip == 0);
+            CHECK(specs.size() == 1 && specs[0].red == 0xd0 && specs[0].green == 0xc0 && specs[0].blue == 0x00 && specs[0].alpha == 0x80);
+        }
+        {   // industry on a larger lot keeps its boundaries: (40,10)..(41,10) facing 0, the west cell has sides 2,0,1,1
+            cSC4Lot lot(40, 10, 2, 1, 0);
+            const auto specs = zoned(lot, 8);
+            CHECK(specs.size() == 2 && specs[0].cellX == 40 && specs[0].textureId == 0x2700 && specs[0].rotation == 0 && specs[0].flip == 0);
+        }
+        {   // residential 1 x 1 facing 0: sides 2,1,1,1 (key 0x2111) = texture 0x2300 rotation 0
+            cSC4Lot lot(50, 10, 1, 1, 0);
+            const auto specs = zoned(lot, 1);
+            CHECK(specs.size() == 1 && specs[0].textureId == 0x2300 && specs[0].rotation == 0);
+        }
+        cSC4LotDeveloper::SetBaseTextureServices(nullptr);
+        occupants->RemoveOccupants(static_cast<int>(0x497f6d9d), true, 0);
+        for (cSC4LotBaseTextureOccupant* occupant : textures.made) occupant->Release();
+        occupants->Shutdown();
+        occupants->Release();
         SetLotHost(nullptr);
     }
     std::printf(failures ? "FAILED\n" : "sc4_lotdeveloper: all passed\n");
