@@ -1197,20 +1197,28 @@ void cSC4LotDeveloper::EndDemolishLot(cSC4Lot* lot) {
     if ((zone == 0 || zone == 15 || zone == 11 || zone == 12) && g_construction) g_construction->DeleteLot(lot);
 }
 
-// Slot 14 (lot-developer.md §7.2, Mac i386 0x000f189a): a destroyed lot keeps rubble where its building stood. PARTIAL: the
-// burnt-building prop (cSC4PropOccupantBurntBuilding, the charred floor) and the terrain decal under it are not ported; the
-// buildings, props, rubble and the building type go as in the original.
+// Slot 14 (lot-developer.md §7.2, Mac i386 0x000f189a): a destroyed lot keeps the building's charred floor (the burnt-building
+// prop, made before the building goes), a scorch or rubble decal twice the floor's size under it (alpha 0.7), the rubble
+// piles, then the floor goes onto the lot.
 void cSC4LotDeveloper::ExplodeLot(cSC4Lot* lot, bool burnt) {
     if (!lot || lot->GetState() == 5 || lot->GetState() == 6) return;
-    float boxMin[3] = {}, boxMax[3] = {};
+    float boxMin[3] = {}, boxMax[3] = {}, position[3] = {};
     cISC4Occupant* building = GetFirstBuilding(lot);
-    if (building) building->GetBoundingBox(boxMin, boxMax);
+    void* floor = nullptr;
+    float extent = 0.0f;
+    if (building) {
+        building->GetBoundingBox(boxMin, boxMax);
+        building->GetPosition(position);   // occupant slot 8, read here: the building leaves the city below
+        if (g_construction) floor = g_construction->CreateBurntBuilding(building, extent);
+    }
     const bool hadBuilding = building != nullptr;
     ClearLotBuildings(lot, 6, false, 4);
     if (g_construction) g_construction->RemoveLotProps(lot);
-    if (hadBuilding) AddLotRubbleProps(lot, boxMin, boxMax, burnt);
-    if (burnt && hadBuilding)
-        SC4_UNWIRED("cSC4LotDeveloper::ExplodeLot: the burnt-building prop (cSC4PropOccupantBurntBuilding) and its terrain decal are not placed");
+    if (hadBuilding && g_construction) {
+        g_construction->AddLotDecal(lot, burnt ? 0x49c80ec7 : 0x2a2ef55d, extent * 2.0f, 0.7f, position);
+        AddLotRubbleProps(lot, boxMin, boxMax, burnt);
+        g_construction->AddBurntBuilding(lot, floor);
+    }
     if (burnt) lot->SetCondition(6);
     lot->SetBuildingType(0);
 }

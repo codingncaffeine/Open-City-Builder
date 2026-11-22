@@ -208,6 +208,15 @@ public:
     virtual double RandomGaussianRange(double lo, double hi) { return (lo + hi) * 0.5; }
     virtual void AddRubbleProp(cSC4Lot* lot, std::uint32_t type, std::uint32_t rotation, const float position[3], const float* boxMin,
                                const float* boxMax) { (void)lot; (void)type; (void)rotation; (void)position; (void)boxMin; (void)boxMax; }
+    // ExplodeLot's burnt floor (lot-developer.md 7.2, LD14): a cSC4PropOccupantBurntBuilding from the building (SetBoundsFromOccupant,
+    // flag 0x40, Init; one reference, null when none is made) and the larger of its box's x / z extents; later AddLotProp(lot, it)
+    // through prop manager slot 25 and released. The decal: a cSC4PropOccupantTerrainDecal (Init, texture {0x7ab50e44, 0x1abe787d,
+    // instance} at `size`, opacity `alpha`, the position, flag 0x40) added to the lot the same way.
+    virtual void* CreateBurntBuilding(cISC4Occupant* building, float& extent) { (void)building; extent = 0.0f; return nullptr; }
+    virtual void AddBurntBuilding(cSC4Lot* lot, void* burnt) { (void)lot; (void)burnt; }
+    virtual void AddLotDecal(cSC4Lot* lot, std::uint32_t instance, float size, float alpha, const float position[3]) {
+        (void)lot; (void)instance; (void)size; (void)alpha; (void)position;
+    }
     virtual void RemoveLotFlora(cSC4Lot* lot) { (void)lot; }                                   // flora slot 20 DemolishFloraInCellArea(rect, 0)
     virtual void RemoveOccupant(cISC4Occupant* occupant, std::uint32_t flags) { (void)occupant; (void)flags; }   // +0x28 slot 21 (o, 1, flags)
     virtual void DeleteLot(cSC4Lot* lot) { (void)lot; }                                        // +0x24 lot manager slot 24

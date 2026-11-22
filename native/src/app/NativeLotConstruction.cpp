@@ -50,6 +50,8 @@
 #include "sc4/OccupantFilters.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/PropManager.h"
+#include "sc4/PropOccupantBurntBuilding.h"
+#include "sc4/PropOccupantTerrainDecal.h"
 #include "sc4/PropOccupant.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/cSC4City.h"
@@ -297,6 +299,45 @@ public:
             props->AddLotProp(lot, occupant);
         }
         prop->Release();
+    }
+    void* CreateBurntBuilding(cISC4Occupant* building, float& extent) override {
+        extent = 0.0f;
+        if (!building) return nullptr;
+        auto* floor = new cSC4PropOccupantBurntBuilding();
+        floor->AddRef();
+        floor->SetBoundsFromOccupant(building);
+        cISC4Occupant* occupant = floor;
+        occupant->SetFlag(0x40);
+        occupant->Init();
+        float lo[3] = {}, hi[3] = {};
+        occupant->GetBoundingBox(lo, hi);
+        extent = std::max(hi[0] - lo[0], hi[2] - lo[2]);
+        return floor;
+    }
+    void AddBurntBuilding(cSC4Lot* lot, void* burnt) override {
+        auto* floor = static_cast<cSC4PropOccupantBurntBuilding*>(burnt);
+        if (!floor) return;
+        const bool added = Props() && Props()->AddLotProp(lot, static_cast<cISC4Occupant*>(floor));
+        if (std::getenv("SC4_DEMOLISHDEBUG")) {
+            float lo[3] = {}, hi[3] = {};
+            floor->GetBoundingBox(lo, hi);
+            std::fprintf(stderr, "explode: burnt floor %.0f,%.0f..%.0f,%.0f texture %d %s\n", lo[0], lo[2], hi[0], hi[2], floor->Texture(0), added ? "added" : "NOT ADDED");
+        }
+        floor->Release();
+    }
+    void AddLotDecal(cSC4Lot* lot, std::uint32_t instance, float size, float alpha, const float position[3]) override {
+        auto* decal = new cSC4PropOccupantTerrainDecal();
+        decal->AddRef();
+        cISC4Occupant* occupant = decal;
+        occupant->Init();
+        decal->SetDecalTexture(cGZPersistResourceKey{0x7ab50e44, 0x1abe787d, instance}, size);
+        decal->SetOpacity(alpha);
+        occupant->SetPosition(position);
+        occupant->SetFlag(0x40);
+        const bool added = Props() && Props()->AddLotProp(lot, occupant);
+        if (std::getenv("SC4_DEMOLISHDEBUG"))
+            std::fprintf(stderr, "explode: decal %08x size %.1f at %.0f,%.0f %s\n", instance, size, position[0], position[2], added ? "added" : "NOT ADDED");
+        decal->Release();
     }
     void RemoveLotFlora(cSC4Lot* lot) override {   // DemolishFloraInCellArea(rect, 0): every flora occupant on the lot's cells
         cISC4OccupantManager* occupants = Occupants();

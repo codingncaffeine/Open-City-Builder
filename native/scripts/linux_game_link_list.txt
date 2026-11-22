@@ -360,6 +360,8 @@ src/gz/gzcom_creators/cSC4PedestrianManager.cpp
 src/gz/gzcom_creators/cSC4PropDeveloper.cpp
 src/gz/gzcom_creators/cSC4PropOccupantAutomataController.cpp
 src/gz/gzcom_creators/cSC4PropOccupantVisualEffect.cpp
+src/gz/gzcom_creators/cSC4PropOccupantTerrainDecal.cpp
+src/gz/gzcom_creators/cSC4PropOccupantBurntBuilding.cpp
 src/gz/gzcom_creators/cSC4PylonOccupant.cpp
 src/gz/gzcom_creators/cSC4RegionalCity.cpp
 src/gz/gzcom_creators/cSC4RewardAdvice.cpp
@@ -397,6 +399,8 @@ src/sc4/ParkManager.cpp
 src/sc4/Pedestrian.cpp
 src/sc4/PedestrianManager.cpp
 src/sc4/PropOccupantVisualEffect.cpp
+src/sc4/PropOccupantTerrainDecal.cpp
+src/sc4/PropOccupantBurntBuilding.cpp
 src/sc4/PylonOccupant.cpp
 src/sc4/SeaportDeveloper.cpp
 src/sc4/SignpostOccupant.cpp

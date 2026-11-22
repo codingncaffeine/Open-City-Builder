@@ -18,6 +18,16 @@
 #include "sc4/PropManager.h"
 #include "sc4/PropOccupant.h"
 #include "sc4/PropOccupantVisualEffect.h"
+#include "sc4/PropOccupantTerrainDecal.h"
+#include "sc4/PropOccupantBurntBuilding.h"
+#include "sc4/DrawContext.h"
+#include "sc4/Render3D.h"
+#include "sc4/ViewUtilities.h"
+#include "app/NativeCityView.h"
+#include "app/NativeModelMaker.h"
+#include "sc4/AnimationTickManager.h"
+#include "app/NativeAnimationTicks.h"
+#include "app/NativeDecalOverlay.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/Simulator.h"
 #include "sc4/cSC424HourClock.h"
@@ -84,9 +94,10 @@ public:
         SC4_UNWIRED("cSC4PropManager: registered prop classes are not created (a plain cSC4PropOccupant stands in)");
         return nullptr;
     }
-    cSC4PropOccupant* CreateTerrainDecalProp() override {   // PARTIAL
-        SC4_UNWIRED("cSC4PropManager: terrain-decal props are not created (a plain cSC4PropOccupant stands in)");
-        return nullptr;
+    cSC4PropOccupant* CreateTerrainDecalProp() override {                                  // prop class 0x2977aa48 (one reference)
+        auto* prop = new cSC4PropOccupantTerrainDecal();
+        prop->AddRef();
+        return prop;
     }
     cSC4PropOccupant* CreateVisualEffectProp() override {                                  // prop class 0x2977aa49 (one reference)
         auto* prop = new cSC4PropOccupantVisualEffect();
@@ -148,11 +159,39 @@ public:
     }
 } g_propHost;
 
+// The terrain decal props' world: the terrain view's overlay managers (app/NativeDecalOverlay) and the animation tick manager.
+struct TerrainDecalHost final : sc4::ITerrainDecalHost {
+    sc4::cSTEOverlayManager* OverlayManager(int index) override { return DecalOverlayManager(index); }
+    bool AddTick(cIGZMessageTarget2* target) override {
+        sc4::cSC4AnimationTickManager* atm = AnimationTickManager();
+        return atm && atm->AddTickableObject(target, 0xc0);
+    }
+    void RemoveTick(cIGZMessageTarget2* target) override {
+        if (sc4::cSC4AnimationTickManager* atm = AnimationTickManager()) atm->RemoveTickableObject(target, 0xc0);
+    }
+} g_terrainDecalHost;
+
+// The burnt buildings' world: the floor texture's id (the FSH of the key), the view projection and the city renderer.
+struct BurntBuildingHost final : sc4::IBurntBuildingHost {
+    std::int32_t TextureId(std::uint32_t, std::uint32_t group, std::uint32_t instance) override {
+        return static_cast<std::int32_t>(FshTextureId(group, instance));
+    }
+    void ProjectToViewCoordinates(float point[3]) override {
+        sc4::cSC43DRender* render = CityRenderer();
+        if (const SC4ViewUtilities* view = render ? render->GetViewUtilities() : nullptr) view->ProjectPointToViewCoordinates(point);
+    }
+    bool IsModelInserted(s3d::cIS3DModelInstance* model) override { sc4::cSC43DRender* r = CityRenderer(); return r && r->IsModelInserted(model); }
+    bool InsertModel(s3d::cIS3DModelInstance* model) override { sc4::cSC43DRender* r = CityRenderer(); return r && r->InsertModel(model); }
+    bool RemoveModel(s3d::cIS3DModelInstance* model) override { sc4::cSC43DRender* r = CityRenderer(); return r && r->RemoveModel(model); }
+} g_burntBuildingHost;
+
 }  // namespace
 
 void InstallPropHosts() {
     sc4::SetPropManagerHost(&g_managerHost);
     sc4::SetPropHost(&g_propHost);
+    sc4::SetTerrainDecalHost(&g_terrainDecalHost);
+    sc4::SetBurntBuildingHost(&g_burntBuildingHost);
 }
 
 }  // namespace native

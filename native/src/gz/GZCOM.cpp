@@ -303,12 +303,12 @@ __attribute__((weak)) void* GZCOM_CreatecSC4LotRetainingWallOccupant() { SC4_UNW
 void* GZCOM_CreatecSC4PropPlacementPropertiesFactory() { SC4_UNWIRED("GZCOM_CreatecSC4PropPlacementPropertiesFactory"); return nullptr; }
 // weak fallback: GZCOMCreators*.cpp provide the real constructor-backed creator when linked
 __attribute__((weak)) void* GZCOM_CreatecSC4PropOccupant() { SC4_UNWIRED("GZCOM_CreatecSC4PropOccupant"); return nullptr; }
-// original allocates 0x0 bytes; the class is not recovered yet
-void* GZCOM_CreatecSC4PropOccupantTerrainDecal() { SC4_UNWIRED("GZCOM_CreatecSC4PropOccupantTerrainDecal"); return nullptr; }
+// weak fallback: gzcom_creators/cSC4PropOccupantTerrainDecal.cpp provides the real constructor-backed creator when linked
+__attribute__((weak)) void* GZCOM_CreatecSC4PropOccupantTerrainDecal() { SC4_UNWIRED("GZCOM_CreatecSC4PropOccupantTerrainDecal"); return nullptr; }
 // weak fallback: gzcom_creators/cSC4PropOccupantVisualEffect.cpp provides the real constructor-backed creator when linked
 __attribute__((weak)) void* GZCOM_CreatecSC4PropOccupantVisualEffect() { SC4_UNWIRED("GZCOM_CreatecSC4PropOccupantVisualEffect"); return nullptr; }
-// original allocates 0x0 bytes; the class is not recovered yet
-void* GZCOM_CreatecSC4PropOccupantBurntBuilding() { SC4_UNWIRED("GZCOM_CreatecSC4PropOccupantBurntBuilding"); return nullptr; }
+// weak fallback: gzcom_creators/cSC4PropOccupantBurntBuilding.cpp provides the real constructor-backed creator when linked
+__attribute__((weak)) void* GZCOM_CreatecSC4PropOccupantBurntBuilding() { SC4_UNWIRED("GZCOM_CreatecSC4PropOccupantBurntBuilding"); return nullptr; }
 // weak fallback: gzcom_creators/cSC4PropOccupantAutomataController.cpp provides the real constructor-backed creator when linked
 __attribute__((weak)) void* GZCOM_CreatecSC4PropOccupantAutomataController() { SC4_UNWIRED("GZCOM_CreatecSC4PropOccupantAutomataController"); return nullptr; }
 // weak fallback: GZCOMCreators*.cpp provide the real constructor-backed creator when linked
