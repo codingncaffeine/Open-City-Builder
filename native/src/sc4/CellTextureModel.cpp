@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "platform/Unwired.h"
 #include "sc4/DrawContext.h"
 #include "sc4/PackedRenderState.h"
 
@@ -112,6 +113,7 @@ void cSC4CellTextureModel::SetupVertices(bool updateVertices, bool, void*, void*
     float corners[4] = {0, 0, 0, 0};
     onLockedLot_ = g_host && g_host->LockedLotAltitude(cellX, cellZ, altitude);
     if (onLockedLot_) {
+        SC4_UNWIRED("cSC4CellTextureModel::SetupVertices: the lighting manager's coloring of the locked-lot quad is not ported (terrain shade used)");
         std::fill(corners, corners + 4, altitude);
     } else if (g_host) {
         g_host->CellCornerAltitudes(cellX, cellZ, corners);
@@ -179,6 +181,7 @@ int cSC4CellTextureModel::Draw(SC4DrawContext* context, bool highlight) {
     } else {
         // The lot texture combiner: the spec colour (times the light, white here) and alpha through the texture factor,
         // combined with the texture in the spec's combine mode (mLotTextureCombiner, byte 0 = the mode).
+        SC4_UNWIRED("cSC4CellTextureModel::Draw: the combine color is not multiplied by the draw context's lighting (+0x68 vslot 0x50)");
         context->SetRenderState(States().combine);
         context->SetTexWrapModes(2, 2, 0);
         context->SetTexFiltering(1, 1, 0);

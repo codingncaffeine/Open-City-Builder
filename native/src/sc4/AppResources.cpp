@@ -10,6 +10,7 @@
 
 #include "gz/GZCOMDirector.h"
 #include "gz/RZServices.h"
+#include "platform/Unwired.h"
 #include "gz/cGZCOM.h"
 #include "gz/cGZDBSegmentPackedFile.h"
 #include "gz/cGZPersistDBSegmentMultiPackedFiles.h"
@@ -311,6 +312,7 @@ void cSC4App::RegisterDBSegmentCallback(const cRZString& key, const cRZString& v
     (void)key;
     (void)value;
     (void)context;   // the creation is the registry's (cGZRegistry, unrecovered): see SC4APP-REGISTRY
+    SC4_UNWIRED("cSC4App::RegisterDBSegmentCallback: the Resources.ini [DBSegments] segment is not created (cGZRegistry vslot 0x30 + 0x18)");
 }
 
 // [DBSegmentDirectories]: the original asks the registry to create the segment the entry describes (vslot 0x30) and then
@@ -319,6 +321,7 @@ void cSC4App::RegisterDBSegmentDirectoryFilesCallback(const cRZString& key, cons
     (void)key;
     (void)value;
     (void)context;
+    SC4_UNWIRED("cSC4App::RegisterDBSegmentDirectoryFilesCallback: the Resources.ini [DBSegmentDirectories] segment is not created (cGZRegistry)");
 }
 
 // ---- fonts ---------------------------------------------------------------------------------------------------------
@@ -403,4 +406,5 @@ void cSC4App::SetupFontSet() {
     directory.AppendChars("Fonts", 5);
     directory.AppendChars("/", 1);
     fonts->AddAllFontsFromDirectory(directory);
+    SC4_UNWIRED("cSC4App::SetupFontSet: the per-language font name filter (RemoveFontByName over the five language tables) is not applied");
 }

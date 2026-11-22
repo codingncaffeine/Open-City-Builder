@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "gz/RZServices.h"
+#include "platform/Unwired.h"
 #include "gz/WinInterfaces.h"
 #include "rz/cRZFile.h"
 #include "rz/cRZIniFile.h"
@@ -545,9 +546,10 @@ constexpr std::uint32_t kSaveStartedMessage = 0x26c63343, kSaveDataWrittenMessag
 
 // Writes the city file. The canonical path is rebuilt from the city name and serial number; the file is written to a
 // temporary segment, then the old file is renamed aside, the temporary file takes its place and the backup is dropped.
-// PARTIAL: the canonical path comes from SC4CreateSavePathForCity (0x1001e98a4, unrecovered) through a host hook, and the
-// neighbour sweep that rewrites the connected regional cities goes through two more hooks (SL::spNeighborsSim vslot 0xa0
-// and SC4WriteRegionalCity(path, city) @ 0x1001e9799).
+// The canonical path comes from SC4CreateSavePathForCity (0x1001e98a4) through the createSavePathForCity hook (set by
+// app/NativeCity.cpp). PARTIAL: the neighbor sweep that rewrites the connected regional cities goes through two more hooks
+// (connectedCities = SL::spNeighborsSim vslot 0xa0, writeRegionalCityFile = SC4WriteRegionalCity(path, city) @ 0x1001e9799)
+// that nothing sets yet.
 bool cSC4App::SaveCity(const cRZString& path, bool alternate) {
     sc4::cSC4AutoGamePause pause(false, true, true, true);
     sc4::cSC4AutoFlushInputMessageQueue flush(1000);
@@ -654,6 +656,7 @@ bool cSC4App::SaveCity(const cRZString& path, bool alternate) {
     if (success) {
         std::vector<cISC4RegionalCity*> neighbours;
         if (cityHooks_.connectedCities) cityHooks_.connectedCities(neighbours);
+        else SC4_UNWIRED("cSC4App::SaveCity: the connected neighbor cities' regional records are not rewritten (SL::spNeighborsSim 0xa0 + SC4WriteRegionalCity)");
         for (cISC4RegionalCity* neighbour : neighbours) {
             if (!neighbour) continue;
             cRZString neighbourPath;

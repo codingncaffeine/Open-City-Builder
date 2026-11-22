@@ -8,6 +8,7 @@
 
 #include <map>
 #include "platform/PerfLog.h"
+#include "platform/Unwired.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -1413,6 +1414,7 @@ void cSC4ModelMaker::ApplyLotStateEffect(cISC4Occupant* occupant, std::uint32_t 
     static const int kConditionToTexture[7] = {-1, -1, 0, 1, 4, 2, 3};
     if (condition < 7 && kConditionToTexture[condition] >= 0) {
         const int slot = kConditionToTexture[condition];
+        SC4_UNWIRED("cSC4ModelMaker::ApplyLotStateEffect: the lot-state dynamic texture is not applied to the occupant's model materials");
         if (!dynamicTexture_[slot] && occupantManager_) {
             RebuildDynamicTexture(slot);
             if (dynamicTexture_[slot]) ChangeModels(occupant, kModelOccupantTypeBuilding, 2);
@@ -1439,6 +1441,7 @@ void cSC4ModelMaker::RebuildDynamicTexture(int slot) {
     const std::uint32_t tint = 0xff000000u | (channel(lighting_[0]) << 16) | (channel(lighting_[1]) << 8) |
                                channel(lighting_[2]);
     (void)tint;
+    SC4_UNWIRED("cSC4ModelMaker::RebuildDynamicTexture: the tinted texture resource walk and the texture binding factory call are not ported");
 }
 
 // i386 0x00246820: the occupant's cells, cut to the city; the flags of those cells are worked out again, and the terrain is

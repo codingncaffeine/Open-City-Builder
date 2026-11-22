@@ -3,6 +3,7 @@
 
 #include "gz/WinFont.h"
 #include "gz/WinGrid.h"
+#include "platform/Unwired.h"
 #include "rz/cRZString.h"
 
 // InterpretPropertiesGZWinGrid (Mac i386 0x003b6868): the grid's colours, font, alignment, wrapping, gutters, selection
@@ -13,6 +14,12 @@ void cGZLegacyControl::InterpretPropertiesGZWinGrid(cIGZWin* window, tScriptProp
     if (!window) return;
     gz::cIGZWinGrid* grid = nullptr;
     if (!window->QueryInterface(gz::kGZIID_cIGZWinGrid, reinterpret_cast<void**>(&grid)) || !grid) return;
+    for (const tScriptProperty& property : parameters) {
+        if (property.id >= 0x1625 && property.id <= 0x1627) {
+            SC4_UNWIRED("cGZLegacyControl::InterpretPropertiesGZWinGrid: the wingridcell/row/col data lists (window parameter 0x287a7136) are not read");
+            break;
+        }
+    }
     auto native = [](std::uint8_t r, std::uint8_t g, std::uint8_t b) {
         return 0xff000000u | std::uint32_t(r) << 16 | std::uint32_t(g) << 8 | b;
     };

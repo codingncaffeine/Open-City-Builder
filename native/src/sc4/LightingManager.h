@@ -352,7 +352,7 @@ public:
                               float& threshold, float& size, cS3DVector2& offset,
                               cS3DVector3& colour) override;       // @ 0x100778e8a
     bool CalcShadowProjection(int count, const cS3DVector3* points, const cS3DVector2* texCoords,
-                              const cS3DTransform& transform, cS3DMatrix4* out) override;   // @ 0x10077909a (PARTIAL)
+                              const cS3DTransform& transform, cS3DMatrix4* out) override;   // @ 0x10077909a
     bool CalcShadowTerrainRect(int count, const cS3DVector3* points, const cS3DBoundingBox& box,
                                cRZRect* out) override;             // @ 0x1007798dc
     cS3DVector3 GetColor() override;                               // @ 0x100779f6e

@@ -1,5 +1,7 @@
 #include "sc4/MyStreetSim.h"
 
+#include "platform/Unwired.h"
+
 namespace sc4 {
 
 cSC4MyStreetSim::cSC4MyStreetSim() {
@@ -20,6 +22,7 @@ bool cSC4MyStreetSim::QueryInterface(std::uint32_t iid, void** out) {
 bool cSC4MyStreetSim::Init(int advisorType) {
     if (!cSC4MySim::Init(advisorType)) return false;
     if (LuaTableRef() == 0) CreateLuaTable();
+    SC4_UNWIRED("cSC4MyStreetSim: the trip behavior (DoMessage, update_trip_variables, simulate_*, Attach/DetachAutomaton) is not ported");
     return true;
 }
 

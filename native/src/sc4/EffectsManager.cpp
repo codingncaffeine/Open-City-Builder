@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "platform/Unwired.h"
 #include "rz/PortMemoryStreams.h"
 #include "rz/RZStringUtils.h"
 #include "s3d/S3DMath.h"
@@ -901,7 +902,8 @@ void cSC4EffectsManager::StopAncilliary(cSC4VisualEffect* effect) {
     ending->Release();
 }
 
-// @ 0x1005dff0a (PARTIAL: the LightingManager call is a host seam; the curve sampling and timing are recovered).
+// @ 0x1005dff0a: the curve sampling and timing; the LightingManager's SetLightingTint / ClearLightingTint go through the
+// host (app/NativeEffects.cpp).
 void cSC4EffectsManager::UpdateLightingTint(float elapsed) {
     const float t = elapsed * tintInverseDuration_ + tintTime_;
     tintTime_ = t;
@@ -947,6 +949,7 @@ void cSC4EffectsManager::UpdateLightingTint(float elapsed) {
 // the draw call are not because they need the draw context's driver). The elapsed-time bookkeeping is recovered.
 void cSC4EffectsManager::DrawScreenFlashes(SC4DrawContext* context, float elapsed) {
     (void)context;
+    SC4_UNWIRED("cSC4EffectsManager::DrawScreenFlashes: the screen flash quad (color/intensity curves + draw call) is not drawn");
     const float t = elapsed * flashInverseDuration_ + flashTime_;
     flashTime_ = t;
     if (t > 1.0f) flashInverseDuration_ = 0.0f;
@@ -1091,6 +1094,8 @@ void cSC4EffectsManager::CreateComponentFromDescription(const cSC4EffectDescript
         made->AddRef();
         component->component = made;
         component->flags |= 2;
+    } else if (kind == 16) {
+        SC4_UNWIRED("cSC4EffectsManager::CreateComponentFromDescription: dynamic particles (kind 16, factory 0x1005e2c12) are not ported");
     }
     if (record.type & 1) component->flags |= 4;
     else component->flags &= ~std::uint64_t{4};
@@ -1157,6 +1162,7 @@ void cSC4EffectsManager::LoadAllEffects() {
         cSC4EffectsResource library;
         if (library.Read(in)) library.AddToCollection(&collection_);
     }
+    SC4_UNWIRED("cSC4EffectsManager::LoadAllEffects: the plug-in text effect files (main.fx / Effects/config.fx) are not parsed");
     EndCollection();
 }
 
@@ -1317,6 +1323,15 @@ bool cSC4EffectsManager::DoMessage(cIGZMessage2* message) {
         case 0x697d01ed: DoEffectsTick(); break;
         case 0xab96b05f: effectsActive_ = true; UpdateActiveVisualEffects(); break;
         case 0x26d31ec2: suppressOccupantEffects_ = true; break;
+        case 0x26d31ec1:
+            SC4_UNWIRED("cSC4EffectsManager::DoMessage: PostCityInit does not start the 1-second effects tick timer nor seed the building effect maps (DoOccupantInserted)");
+            break;
+        case 0x99ef1142:
+            SC4_UNWIRED("cSC4EffectsManager::DoOccupantInserted: the static building's heights are not written into the effect maps");
+            break;
+        case 0x99ef1143:
+            SC4_UNWIRED("cSC4EffectsManager::DoOccupantRemoved: the removed building's effect-map cells are not cleared");
+            break;
         default: break;
     }
     return true;
@@ -1336,7 +1351,9 @@ bool cSC4EffectsManager::DoSnowCheat(cRZCmdLine& commandLine) {
 
 // @ 0x1005de30a (PARTIAL): needs the render-properties object graph (+0x30 / +0x48 sub-objects), the lighting manager
 // and the atmospheric / water effect lookup; not ported.
-void cSC4EffectsManager::DoRenderPropertiesChanged() {}
+void cSC4EffectsManager::DoRenderPropertiesChanged() {
+    SC4_UNWIRED("cSC4EffectsManager::DoRenderPropertiesChanged: the effects detail priority, atmospheric and water effects are not refreshed");
+}
 
 // @ 0x1005de68c (PARTIAL): needs the terrain effect maps and the occupant's box / flags (plus the free IsStaticBuilding
 // helper at 0x1005e3337); not ported.

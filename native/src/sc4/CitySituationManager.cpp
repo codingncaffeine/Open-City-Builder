@@ -11,6 +11,7 @@
 
 #include "gz/CheatCodeManager.h"
 #include "gz/StreamOps.h"
+#include "platform/Unwired.h"
 #include "rz/cRZCmdLine.h"
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/GameDataRegistry.h"
@@ -473,6 +474,7 @@ bool cSC4CitySituationManager::Init() {
             const auto node = registry->AddChildEntry(static_cast<cIGZUnknown*>(static_cast<cIGZMessageTarget2*>(this)), "sitmgr", registry->GetRootNodeEntry(), 0, nullptr);
             registry->AddChildEntry(&numTargets_, "num_targets", &ExchangeUint32, node, 2, nullptr);
             registry->AddChildEntry(&currentTargetIndex_, "cur_target_index", &ExchangeUint32, node, 2, nullptr);
+            SC4_UNWIRED("cSC4CitySituationManager::Init: the sitmgr script commands (get_success_count, activate_situation, get_current_target, ...) are not registered");
         }
         if (ISituationMySim* mySim = host->MySimActor() ? nullptr : nullptr) mySim_ = mySim;   // (no MySim source yet)
     }

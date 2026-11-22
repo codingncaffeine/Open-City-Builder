@@ -6,6 +6,8 @@
 #include <cstring>
 #include <string>
 
+#include "platform/Unwired.h"
+
 namespace nSGLDX7 {
 namespace {
 
@@ -1714,6 +1716,7 @@ void* cGDriver::CopyColorBuffer(int x, int y, int width, int height, void* desti
         copyColorChecked = true;
     }
     if (!copyColorAvailable) return nullptr;
+    SC4_UNWIRED("cGDriver::CopyColorBuffer: the render surface's pixels are not converted into the destination buffer");
     return destination;
 }
 
@@ -1990,6 +1993,7 @@ void cGDriver::Flush() {
         return;
     }
     deviceLost = false;
+    SC4_UNWIRED("cGDriver::Flush: the device-reset messages (0xaacb92a3 / 0x8acaa95f / 0x6acb92a9) are not sent to the message server");
     SetDefaultD3DDeviceState();
     if (!primitiveManager_.IsStarted()) primitiveManager_.Restart(this, environment_.Device());
     textureManager_.InitDevice(environment_.Device());

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "gz/RZDraw.h"
+#include "platform/Unwired.h"
 #include "gz/WinCtrlFactory.h"
 #include "gz/WinFont.h"
 #include "gz/WinScrollbar.h"
@@ -2661,6 +2662,7 @@ bool cGZWinGrid::PlaySoundA(int which) {   // @ 0x10025c8de (partial: RZ::SS() i
     if (which < 0 || which >= 3 || soundId_[which] == 0) return false;
     // The original asks RZ::SS() for a sound object (vslot 0x70, sound 0x5b523ba4) and plays it (vslot 0x28).
     // The sound system service is outside this class; the seam would be the same one the audio classes use.
+    SC4_UNWIRED("cGZWinGrid::PlaySoundA: the grid's click/select sound (RZ::SS() sound object) is not played");
     return false;
 }
 

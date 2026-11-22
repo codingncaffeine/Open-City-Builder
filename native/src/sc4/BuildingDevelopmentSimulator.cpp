@@ -1,4 +1,5 @@
 #include "sc4/BuildingDevelopmentSimulator.h"
+#include "platform/Unwired.h"
 #include "sc4/BuildingZoneFit.h"
 #include "sc4/DBSegment.h"
 #include "sc4/cSC4SimGrid.h"
@@ -697,6 +698,9 @@ bool cSC4BuildingDevelopmentSimulator::DoMessage(cIGZMessage2* message) {
         case 0x66956810:                                     // the month's two messages
         case 0x66956816:
             DoMonthlySimulation();
+            break;
+        case 0xb99ae81:                                      // the PlaceBuilding command
+            SC4_UNWIRED("cSC4BuildingDevelopmentSimulator::DoMessage: the PlaceBuilding command (AddNewBuildingOccupant from its parameters) is not ported");
             break;
         default:
             break;

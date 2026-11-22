@@ -1,6 +1,7 @@
 #include "sc4/NetworkManager.h"
 
 #include "sc4/NetworkTool.h"   // eNetworkType enumerators, kNetworkTypeCount, kFlagForNetworkType
+#include "platform/Unwired.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -436,7 +437,9 @@ void cSC4NetworkManager::QueueRemovals(bool queue) {
 // the 11th pair past the table) plus the position offsets at 0x100a19574. It then calls AddModel
 // (cSC4NetworkOccupantWithPreBuiltModel 0x1001ba886) with the placement offsets. None of the occupant slots
 // 0x1a0/0xd0/0x238 nor the table's 11th entry is understood yet, so the body is left out.
-void cSC4NetworkManager::Retrofit() {}
+void cSC4NetworkManager::Retrofit() {
+    SC4_UNWIRED("cSC4NetworkManager::Retrofit: old intersection pieces are not rewritten to the new piece ids (kOldIntxPieceToNewIntxPiece)");
+}
 
 // 0x1001700d8. When the view rotation changes, every network occupant in the city is asked to rebuild its
 // rotation-dependent state (occupant manager vslot 0x120 = GetOccupantsByBBox with a null rectangle, type
@@ -649,9 +652,10 @@ bool cRefreshBridgeModels::Go(cISC4Occupant* occupant, void* context) {
 //   0x6ab97795               occupant manager IterateOccupants(Go, ..., type 0xc772bf98).
 //   0xea3b0af1               reset the region rectangle and arm the extend flag (+0x1e).
 // Not implemented (the rest of the original body): 0x278e6003 (city-size change) and 0x6a3b0afd, which
-// rebuild the pipe/subway occupant terrain heights. They need cSC4NetworkORFilter, the occupant manager's
-// +0x148 query, cSC4UndergroundNetworkTool::UpdateUndergroundOccupantTerrainHeights and the pipe/subway tools'
-// height passes — all unrecovered — so the city-size fan-out is left out (the region rectangle is not updated).
+// rebuild the pipe/subway occupant terrain heights. cSC4NetworkORFilter and
+// cSC4UndergroundNetworkTool::UpdateUndergroundOccupantTerrainHeights exist now; the occupant manager's +0x148 query
+// and the pipe/subway tools' height passes are not reached from here, so the fan-out is left out (the region
+// rectangle is not updated).
 bool cSC4NetworkManager::DoMessage(cIGZMessage2* message) {
     if (message == nullptr) return true;
     const std::uint32_t type = message->GetType();
@@ -733,6 +737,10 @@ bool cSC4NetworkManager::DoMessage(cIGZMessage2* message) {
         }
         break;
     }
+    case 0x278e6003:
+    case 0x6a3b0afd:
+        SC4_UNWIRED("cSC4NetworkManager::DoMessage: the pipe/subway occupant terrain heights and the region rectangle are not rebuilt (0x278e6003 / 0x6a3b0afd)");
+        break;
     case 0xea3b0af1: {
         extendRegion_ = true;
         regionMinX_ = 0x7fffffff;
@@ -759,6 +767,7 @@ bool cSC4NetworkManager::RemoveOrReplaceOccupant(INetworkManagerTool* tool, cISC
     (void)tool;
     (void)occupant;
     (void)replaced;
+    SC4_UNWIRED("cSC4NetworkManager::RemoveOrReplaceOccupant: not ported (network cell-info rewrite and occupant removal)");
     return false;
 }
 
@@ -773,6 +782,7 @@ void cSC4NetworkManager::GetAllIntersectionPieces(INetworkManagerOccupant* occup
     (void)out;
     (void)manager;
     (void)root;
+    SC4_UNWIRED("cSC4NetworkManager::GetAllIntersectionPieces: not ported (the intersection's pieces are not collected)");
 }
 
 void cSC4NetworkManager::GetAllIntersectionPieces2(INetworkManagerOccupant* occupant, ilist<cISC4Occupant*>& out,
@@ -784,6 +794,7 @@ void cSC4NetworkManager::GetAllIntersectionPieces2(INetworkManagerOccupant* occu
     (void)manager;
     (void)root;
     (void)filter;
+    SC4_UNWIRED("cSC4NetworkManager::GetAllIntersectionPieces2: not ported (the intersection's pieces are not collected)");
 }
 
 // 0x100171494 — PARTIAL. Builds a connection-node occupant: the network tool's placement pass (slots 0x18
@@ -800,6 +811,7 @@ bool cSC4NetworkManager::CreateConnectionNode(cISC4Occupant*& out, eNetworkType 
     (void)c;
     (void)d;
     out = nullptr;
+    SC4_UNWIRED("cSC4NetworkManager::CreateConnectionNode: not ported (no connection-node occupant is built)");
     return false;
 }
 
@@ -810,6 +822,7 @@ bool cSC4NetworkManager::CreateConnectionNode(cISC4Occupant*& out, eNetworkType 
 void cSC4NetworkManager::AutoconnectLotNodes(cISC4Lot* lot, const ilist<cISC4Occupant*>& occupants) {
     (void)lot;
     (void)occupants;
+    SC4_UNWIRED("cSC4NetworkManager::AutoconnectLotNodes: not ported (the lot's connecting network lines are not placed)");
 }
 
 }  // namespace sc4
