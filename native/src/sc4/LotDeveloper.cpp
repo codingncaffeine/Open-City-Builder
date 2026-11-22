@@ -1261,8 +1261,7 @@ bool cSC4LotDeveloper::ConstructDefaultLot(cSC4Lot* lot, cSC4LotConfiguration* c
 // condition 1 and locked vertices; the footprint is levelled (or given a foundation) when it is steeper than the tunable allows,
 // the blocking flora is demolished and the building is placed through the building development simulator. With `construct` a
 // construction occupant takes the lot through its stages, else the lot is built at once (state 3). Returns false when the
-// building could not be placed.
-//   PARTIAL: RemoveBuildingZotProp (it exists now but is not called here).
+// building could not be placed. The lot's road zot (6) goes before anything is built.
 bool cSC4LotDeveloper::StartConstruction(cSC4Lot* lot, cSC4LotConfiguration* configuration, std::uint32_t buildingType,
                                          bool construct) {
     if (!lot || !g_construction) return false;
@@ -1274,8 +1273,7 @@ bool cSC4LotDeveloper::StartConstruction(cSC4Lot* lot, cSC4LotConfiguration* con
     PickUnitToJoin(lot);
     lot->SetFlags(lot->GetFlags() & ~7);                                            // 0x30 / 0x34
     lot->SetVerticesAreLocked(true);                                                // 0x114
-    // PARTIAL: RemoveBuildingZotProp(lot, 6) (i386 0x000f0684) exists now but is not called here.
-    SC4_UNWIRED("cSC4LotDeveloper::StartConstruction: the lot's zot props are not removed (RemoveBuildingZotProp(lot, 6))");
+    RemoveBuildingZotProp(*lot, 6);                                                 // i386 0x000f0684: the road zot goes
     bool result = true;
     if (buildingType != 0) {
         const std::int32_t purpose = g_construction->BuildingPurpose(buildingType);   // +0x18 vslot 0x9c

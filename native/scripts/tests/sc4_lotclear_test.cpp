@@ -1,6 +1,6 @@
 // The lot developer's clearing paths and what they take with them: ClearLot (Mac i386 0x000f385c) removes the lot's retaining
 // wall occupant and its foundation and updates the neighbors' foundations and walls; ClearLotBuildings (0x000ec5f6) removes the
-// buildings with their foundations and the lot's zot.
+// buildings with their foundations and the lot's zot; StartConstruction (0x000f48d0) takes the road zot down.
 #include <cstdio>
 #include <vector>
 
@@ -227,6 +227,28 @@ int main() {
         foundation->Release();
         building->Release();
         lot->Release();
+    }
+
+    {   // StartConstruction (i386 0x000f48d0) removes the road zot (6) first: the notification (data1 2) goes out when the lot has a
+        // zot property, and only zot 6 is taken down
+        for (std::uint32_t shown : {6u, 4u}) {
+            auto* lot = new cSC4Lot(30, 30, 1, 1, 0);
+            lot->AddRef();
+            lot->Init();
+            lot->SetState(1, 0, 0);
+            cSCPropertyHelp::SetPropertyValue(&lot->Properties(), kLotPropZot, shown);
+            daily.zotsRemoved.clear();
+            daily.notifications.clear();
+            CHECK(dev.StartConstruction(lot, nullptr, 0, false));
+            std::uint32_t zot = 99;
+            cSCPropertyHelp::GetPropertyValue(&lot->Properties(), kLotPropZot, zot);
+            CHECK(daily.notifications.size() == 1 && daily.notifications[0] == 2);
+            if (shown == 6) CHECK(zot == 0 && daily.zotsRemoved.size() == 1 && daily.zotsRemoved[0] == 6);
+            else CHECK(zot == 4 && daily.zotsRemoved.empty());
+            CHECK(lot->GetState() == 3);
+            lot->Shutdown();
+            lot->Release();
+        }
     }
 
     std::printf(failures ? "FAILED\n" : "sc4_lotclear: all passed\n");
