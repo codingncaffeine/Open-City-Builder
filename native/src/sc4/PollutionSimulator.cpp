@@ -1440,8 +1440,8 @@ void cSC4PollutionSimulator::DoMonthlySimulation() {
     ComputeWasteToEnergyListCurrentCapacity();
     ResetOccupantListCapacityUsedProperty(wasteToEnergy_, kPollutionOccWasteToEnergyUsed, 0x28fcdbb0);
     UpdatePollutionVisualEffect();
-    // The original ends the month with spNeighborsSim vslot 0x7c (MarkDealsDirty, so the garbage deals are recomputed).
-    SC4_UNWIRED("cSC4PollutionSimulator::DoMonthlySimulation: neighbors simulator MarkDealsDirty (i386 vslot 0x7c) not called");
+    // The month ends with spNeighborsSim vslot 0x7c (MarkDealsDirty, so the garbage deals are recomputed).
+    host_->RefreshNeighborDeals();
 }
 
 // @ 0x0006ad02. A building's pollution enters (or leaves) the source grids: its garbage on every cell it covers, then each type's

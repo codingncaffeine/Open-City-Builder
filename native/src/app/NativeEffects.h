@@ -23,6 +23,12 @@ sc4::cSC4VisualEffect* CreateKeyedEffect(std::uint32_t group, std::uint32_t type
 // Kit verb "pollutionfx" (NativeSimHosts.cpp): the pollution simulator's per-block effect slots (count, started, first N with
 // their positions) and its worst air / water / garbage tracts.
 void NativePollutionEffectReport(int limit);
+// Kit verb "trafficair" (NativeSimHosts.cpp): the traffic air the pollution host hands the block walk (cells, sum, the busiest
+// cell) and the pollution simulator's average and that cell's air.
+void NativeTrafficAirReport();
+// Kit verb "particlehits [X Z]" (NativeEffects.cpp): the particle systems' building-collision queries and the particles they
+// stopped; with a cell, the host's answer for a particle just above that cell and one high above it.
+void NativeParticleCollisionReport(int cellX = -1, int cellZ = -1);
 
 // The effects manager's Snow cheat with its command line ("Snow [low] [high] [bias]"), as the cheat box runs it; prints
 // the snowline state after it. False without an effects manager.

@@ -38,10 +38,13 @@
 #include "sc4/Occupant.h"
 #include "sc4/Ordinance.h"
 #include "sc4/PollutionSimulator.h"
+#include "sc4/TrafficSimulator.h"
+#include "sc4/cSC4SimGrid.h"
 #include "sc4/FireProtectionSimulator.h"
 #include "app/NativeDemolition.h"
 #include "app/NativePlumbing.h"
 namespace native { void InstallTrafficNetworkMapHost(); }   // app/NativeTrafficNetworkMap.cpp
+namespace native { void NativeMarkNeighborDealsDirty(); }   // app/NativeRegion.cpp
 namespace sc4 { class ITrafficAutomatonHost; extern ITrafficAutomatonHost* g_loadTrafficHost; }   // tools/city_probe_hostglobals.cpp
 namespace sc4 {
 class IVehicleHost;
@@ -277,12 +280,17 @@ public:
         return ordinances ? ordinances->GetCumulativeFactor(property, index) : 1.0f;
     }
     int ZoneTypeAt(int x, int z) override { cSC4ZoneManager* m = Zones(); return m ? m->GetZoneType(x, z) : 0; }
-    // PARTIAL: the traffic simulator runs natively, but its air-polluting traffic map (GetAirPollutingTrafficMap) is not read
-    // here, so traffic adds no air pollution yet.
-    std::uint8_t TrafficAirAt(int, int) override {
-        SC4_UNWIRED("cSC4PollutionSimulator: the traffic simulator's air-polluting traffic map is not read (traffic adds no air pollution)");
-        return 0;
+    // The traffic simulator's air-polluting traffic map (cISC4TrafficSimulator slot 8 GetAirPollutingTrafficMap, a uint8 grid at
+    // cell resolution): GetCellValue(x, z) of the cell the block walk adds to its air.
+    std::uint8_t TrafficAirAt(int x, int z) override {
+        auto* traffic = Component<cSC4TrafficSimulator>(CityComponent::TrafficSimulator, kGZCLSID_cSC4TrafficSimulator);
+        const cSC4SimGrid<std::uint8_t>* map = traffic ? traffic->GetAirPollutingTrafficMap() : nullptr;
+        if (!map) return 0;
+        const int shift = map->GetTractShift();
+        return map->TractIsInBounds(x >> shift, z >> shift) ? map->GetCellValue(x, z) : 0;
     }
+    // SL::spNeighborsSim vslot 0x7c MarkDealsDirty at the month's end, as the power and plumbing hosts do.
+    void RefreshNeighborDeals() override { NativeMarkNeighborDealsDirty(); }
     // PARTIAL: no neighbour deals natively (the region's connections are not modelled).
     void GarbageDeals(std::uint32_t, std::vector<IPollutionDeal*>& out) override {
         SC4_UNWIRED("cSC4PollutionSimulator: the neighbor garbage deals are not read (none)");
@@ -783,5 +791,27 @@ void NativePollutionEffectReport(int limit) {
         std::printf("pollutionfx: %s effects %d (started %d), components %d, live particles %llu\n", kKinds[kind], present, started,
                     components, static_cast<unsigned long long>(spawned));
     }
+}
+}  // namespace native
+
+namespace native {
+void NativeTrafficAirReport() {
+    sc4::cSC4City* city = HostCity();
+    auto* p = Component<sc4::cSC4PollutionSimulator>(sc4::CityComponent::PollutionSimulator, sc4::kGZCLSID_cSC4PollutionSimulator);
+    if (!city || !p) { std::printf("trafficair: no city or pollution simulator\n"); return; }
+    int cells = 0, maxX = -1, maxZ = -1, maxValue = 0;
+    std::uint64_t sum = 0;
+    for (int x = 0; x < city->CellCountX(); ++x)
+        for (int z = 0; z < city->CellCountZ(); ++z) {
+            const int value = g_pollution.TrafficAirAt(x, z);
+            if (!value) continue;
+            ++cells;
+            sum += static_cast<std::uint64_t>(value);
+            if (value > maxValue) { maxValue = value; maxX = x; maxZ = z; }
+        }
+    int air = 0;
+    if (maxX >= 0) p->GetAirValue(unsigned(maxX), unsigned(maxZ), air);
+    std::printf("trafficair: %d cells with traffic air, sum %llu, busiest (%d,%d) = %d (its air %d), city average air %d, traffic air factor %g\n",
+                cells, static_cast<unsigned long long>(sum), maxX, maxZ, maxValue, air, p->GetAverageAirValue(), p->Tunables().trafficAirFactor);
 }
 }  // namespace native

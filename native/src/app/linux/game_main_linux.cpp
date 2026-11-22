@@ -1752,6 +1752,12 @@ int RunScenario(const std::string& path) {
             int limit = 4;
             words >> limit;
             native::NativePollutionEffectReport(limit);
+        } else if (command == "trafficair") {   // trafficair: the traffic simulator's air-polluting traffic as the pollution simulator reads it
+            native::NativeTrafficAirReport();
+        } else if (command == "particlehits") {   // particlehits: the particles' building-collision queries and how many a building stopped
+            int cellX = -1, cellZ = -1;
+            words >> cellX >> cellZ;
+            native::NativeParticleCollisionReport(cellX, cellZ);
         } else if (command == "snow") {   // snow [low high bias]: the effects manager's Snow cheat (a debug cheat the cheat box only takes in debug mode)
             std::string rest; std::getline(words >> std::ws, rest);
             const std::string text = "Snow " + rest;

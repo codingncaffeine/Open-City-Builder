@@ -41,6 +41,7 @@ int NativeZipperPieceType(sc4::ITrafficAutomatonOccupant* occupant);            
 bool NativeLotBuildingInGroup(void* lot, std::uint32_t group);
 void NativePostCityMessage(std::uint32_t type, std::uint32_t data1, std::uint32_t data2);
 bool NativeDisasterOngoing();                                                         // app/NativeRiot.cpp
+void NativeStartArson(sc4::cISC4Occupant* building);                                 // app/NativeDisasters.cpp
 bool NativeProjectToViewport(const float* xyz, float out[3]);                         // app/NativeAutomataManagerHost.cpp
 
 namespace {
@@ -361,10 +362,9 @@ public:
         }
         PedestriansInBox(lo, hi, count, out);
     }
-    // PARTIAL: the fire disaster manager runs natively (NativeDisasters.cpp ignites arson crimes) but is not asked here.
-    void IgniteOccupant(cISC4Occupant*) override {
-        SC4_UNWIRED("cSC4Pedestrian arsonist: the fire disaster manager's IgniteOccupant is not called (the arsonist starts no fire)");
-    }
+    // The arsonist's ignite state (Mac i386 0x000b2670): the city's disaster layer, its fire manager (0x621cda33, interface
+    // 0x49b43f57), IgniteOccupant(the controller's building), then SetCause(2), the same call as an arson crime.
+    void IgniteOccupant(cISC4Occupant* occupant) override { NativeStartArson(occupant); }
     ITrafficNetworkMapLot* LotAt(int cellX, int cellZ) override { return NativeTrafficLotAt(cellX, cellZ); }
     const PedestrianTuning* PedestrianTuningTable() override {
         const AutomataTuningGlobals& t = AutomataTuning();
