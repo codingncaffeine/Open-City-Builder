@@ -1577,16 +1577,55 @@ const char* cSC4TrafficAutomaton::GetDebugExtraText() const {
     return buffer;
 }
 
-// 0x10011af24: PARTIAL. The function searches the neighbours simulator's connection lists (kinds 3, 0xc, 8, 2, 10),
-// sets up the traffic simulator's path finder for each connection rectangle, calls its FindPath (vslot 0xb8, not
-// recovered - the port's cISC4PathFinder has no such method), keeps the connection with the smallest arrived count and
-// answers the network occupant of the best cell. Without cISC4NeighborConnection, FindPath and the connection
-// rectangles the result cannot be produced; the seam is left in the host (NeighborConnectionCells).
+// 0x10011af24 (i386 0x000d01b6): the neighbor connection an escaping car heads for. The connections of kinds 3, 0xc, 8, 2 and 10
+// (the host lists their off-map cells in that order), each clamped into the city, get a road path search (travel type 2, density
+// 0, flag 1, destination filter 3) from the car's cell; the first connection with the shortest route (in route steps) wins, and
+// the answer is the network occupant on its clamped cell (null when no connection is reachable).
 ITrafficAutomatonOccupant* cSC4TrafficAutomaton::FindBestNeighborConnection() {
-    // PARTIAL (see the traffic automaton to-do row): the connection list and the path finder's FindPath are not
-    // recovered, so this stays a null answer behind the host seam.
-    SC4_UNWIRED("cSC4TrafficAutomaton::FindBestNeighborConnection (0x10011af24): neighbor connection search with FindPath not ported");
-    return nullptr;
+    ITrafficAutomatonHost* host = trafficHost_;
+    if (!host) return nullptr;
+    cISC4PathFinder* finder = host->PathFinder();
+    if (!finder) return nullptr;
+    const int sizeX = host->CityCellsX();
+    const int sizeZ = host->CityCellsZ();
+    int cellX = 0, cellZ = 0;
+    host->PositionToCell(position_.x, position_.z, cellX, cellZ);
+    std::vector<std::int32_t> cells;
+    host->NeighborConnectionCells(cells);
+    std::deque<RouteData> route;
+    int best = 0x7fffffff;
+    bool found = false;
+    int bestX = 0, bestZ = 0;
+    for (std::size_t i = 0; i + 1 < cells.size(); i += 2) {
+        int x = cells[i], z = cells[i + 1];
+        if (x < 0) x = 0;
+        else if (sizeX <= x) x = sizeX - 1;
+        if (z < 0) z = 0;
+        else if (sizeZ <= z) z = sizeZ - 1;
+        finder->SetStartRect({cellX, cellZ, cellX, cellZ});
+        finder->SetTravelTypeFlag(2, true);
+        finder->SetTrafficDensity(0);
+        finder->SetFlag(1);
+        finder->SetTripDestinationFilter(3);
+        finder->SetRouteInfo(&route);
+        finder->SetEndRect({x, z, x, z});
+        if (finder->FindPath() == 1) {
+            const int length = static_cast<int>(route.size());
+            if (length < best) {
+                best = length;
+                bestX = x;
+                bestZ = z;
+                found = true;
+            }
+        }
+        finder->Reset();
+        route.clear();
+    }
+    finder->Release();
+    if (!found) return nullptr;
+    cSC4TrafficNetworkMap* map = host->TrafficNetworkMap();
+    TrafficTileInfo* tile = map ? map->GetTileInfoAtCell(bestX, bestZ) : nullptr;
+    return tile && tile->occupant ? AsTrafficOccupant(tile->occupant) : nullptr;
 }
 
 }  // namespace sc4

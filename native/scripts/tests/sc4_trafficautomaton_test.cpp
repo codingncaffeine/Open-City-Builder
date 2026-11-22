@@ -5,6 +5,8 @@
 // The city, the traffic network map, the traffic automata manager, the network occupant, the path info, the effect
 // manager and the dynamic particle system are fakes / recovered classes wired through the seams of TrafficAutomaton.h.
 #include <cmath>
+#include <deque>
+#include <map>
 #include <cstdio>
 #include <cstring>
 #include <list>
@@ -195,6 +197,52 @@ struct FakeManager final : ITrafficAutomataManager {
     cSC4TrafficEffectManager* EffectManager() override { return effects; }
 };
 
+// ---- path finder: records the setup of each search; a route of `routes[end cell]` steps when listed ------------------------
+struct FakePathFinder final : cISC4PathFinder {
+    std::map<std::pair<int, int>, int> routes;
+    std::vector<SC4RectInt32> starts, ends;
+    std::vector<std::uint32_t> flags, filters, densities, travel;
+    int resets = 0, releases = 0;
+    std::deque<RouteData>* route = nullptr;
+    SC4RectInt32 end{};
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return 1; }
+    std::uint32_t Release() override { ++releases; return 0; }
+    bool Init() override { return true; }
+    bool Shutdown() override { return true; }
+    void SetFlag(std::uint32_t flag) override { flags.push_back(flag); }
+    void ClearFlag(std::uint32_t) override {}
+    void ClearAllFlags() override {}
+    void SetRouteInfo(std::deque<RouteData>* r) override { route = r; }
+    void SetTripDestinationFilter(int filter) override { filters.push_back(static_cast<std::uint32_t>(filter)); }
+    void SetDestinationFlag(std::uint8_t) override {}
+    void ClearDestinationFlag(std::uint8_t) override {}
+    void ClearAllDestinationFlags() override {}
+    void SetTravelTypeFlag(std::uint16_t flag, bool alsoStart) override { travel.push_back(flag | (alsoStart ? 0x10000u : 0u)); }
+    void ClearTravelTypeFlag(std::uint16_t) override {}
+    void ClearAllTravelTypeFlags() override {}
+    void SetStartingCostArray(float*) override {}
+    void SetMaxTripLength(float) override {}
+    void SetTrafficDensity(std::uint32_t density) override { densities.push_back(density); }
+    void SetStartRect(SC4RectInt32 rect) override { starts.push_back(rect); }
+    void SetEndRect(SC4RectInt32 rect) override { ends.push_back(rect); end = rect; }
+    void SetMaxWorkTime(std::uint32_t) override {}
+    void Reset() override { ++resets; }
+    std::uint32_t GetTrafficArrived() override { return 0; }
+    float GetTripLength() override { return 0; }
+    float GetTripLengthScaledForDisplay() override { return 0; }
+    void GetEndCell(int& x, int& z) const override { x = end.x0; z = end.z0; }
+    std::uint8_t GetLastTravelType() const override { return 0; }
+    int FindPath() override {
+        auto it = routes.find({end.x0, end.z0});
+        if (it == routes.end()) return 0;
+        if (route) route->resize(static_cast<std::size_t>(it->second));
+        return 1;
+    }
+    bool WasTripReversible() override { return false; }
+    void GetCompressedRoute(std::vector<std::uint8_t>&, std::uint32_t&) override {}
+};
+
 // ---- traffic automaton host -----------------------------------------------------------------------------------------
 struct FakeTrafficHost final : ITrafficAutomatonHost {
     cSC4TrafficNetworkMap* map = nullptr;
@@ -213,8 +261,10 @@ struct FakeTrafficHost final : ITrafficAutomatonHost {
     int CityCellsX() override { return 8; }
     int CityCellsZ() override { return 4; }
     ITrafficAutomataManager* TrafficAutomataManager() override { return manager; }
-    cISC4PathFinder* PathFinder() override { return nullptr; }
-    void NeighborConnectionCells(std::vector<std::int32_t>&) override {}
+    FakePathFinder* finder = nullptr;
+    std::vector<std::int32_t> connectionCells;
+    cISC4PathFinder* PathFinder() override { return finder; }
+    void NeighborConnectionCells(std::vector<std::int32_t>& cells) override { cells = connectionCells; }
     void StartAudioEvent(std::uint32_t) override { ++audioStarts; }
     void StopAudioEvent(std::uint32_t) override { ++audioStops; }
     ITrafficParticleSystem* CreateParticleSystem() override { ++particleRequests; return &particles; }
@@ -345,6 +395,30 @@ void PlaceOnMap(World& world, FakeOccupant& occupant, int cellX, int cellZ) {
 }  // namespace
 
 int main() {
+    // ---- FindBestNeighborConnection: a search per connection, its off-map cell clamped into the 8 x 4 city ------------------
+    {
+        World world;
+        cSC4TrafficAutomaton* automaton = MakeAutomaton(world);
+        FakePathFinder finder;
+        finder.routes[{0, 2}] = 3;
+        finder.routes[{7, 1}] = 5;
+        world.host.finder = &finder;
+        world.host.connectionCells = {10, 1, -1, 2, 3, 9};
+        const float at[3] = {40.0f, 0.0f, 20.0f};   // cell (2, 1)
+        automaton->SetPosition(at);
+        CHECK(automaton->FindBestNeighborConnection() == nullptr);   // the map has no piece on the best cell
+        CHECK(finder.ends.size() == 3);
+        CHECK(finder.ends.size() == 3 && finder.ends[0].x0 == 7 && finder.ends[0].z0 == 1 && finder.ends[1].x0 == 0 && finder.ends[1].z0 == 2 &&
+              finder.ends[2].x0 == 3 && finder.ends[2].z0 == 3);
+        CHECK(!finder.starts.empty() && finder.starts[0].x0 == 2 && finder.starts[0].z0 == 1 && finder.starts[0].x1 == 2 && finder.starts[0].z1 == 1);
+        CHECK(finder.travel.size() == 3 && finder.travel[0] == (2u | 0x10000u));
+        CHECK(finder.densities.size() == 3 && finder.densities[0] == 0);
+        CHECK(finder.flags.size() == 3 && finder.flags[0] == 1);
+        CHECK(finder.filters.size() == 3 && finder.filters[0] == 3);
+        CHECK(finder.resets == 3 && finder.releases == 1);
+        world.host.finder = nullptr;
+        automaton->Release();
+    }
     // ---- construction, QueryInterface, accessors -------------------------------------------------------------------
     {
         World world;

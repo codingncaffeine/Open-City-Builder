@@ -246,6 +246,10 @@ public:
     // operator new + cSC4PropOccupantAutomataController() + vslot 0x38(position): the coverage mission's target, a prop that is
     // never placed in the city. One reference; null when it cannot be made.
     virtual ISituationOccupant* NewCoverageTarget(const float position[3]) { (void)position; return nullptr; }
+    // QueryInterface(0x8b99ee7c) of the active automaton as a traffic automaton, its FindBestNeighborConnection, and that network
+    // occupant's vslot 0xc0 occupant view: an escape mission's target (borrowed; null when the automaton is no car or no
+    // connection is reachable).
+    virtual ISituationOccupant* EscapeConnectionTarget(ISituationAutomaton* automaton) { (void)automaton; return nullptr; }
     // ActivateSituation of an evade mission: SL::spCity vslot 0x178 (the automata controller manager) -> vslot 0x28
     // (occupant, "pursuit generator" template, 0) makes a controller on the automaton's occupant, then vslot 0x80 hands it
     // the evade groups the vehicle manager can create.

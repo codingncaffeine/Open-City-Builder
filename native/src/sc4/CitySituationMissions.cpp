@@ -681,10 +681,7 @@ ISituationOccupant* cSC4CitySituationManager::FindTarget(bool setTarget) {
         }
         const std::uint32_t condition = activeSituation_->GetSuccessCondition();
         if (condition == 2) {
-            // Recovered-partial: cSC4TrafficAutomaton::FindBestNeighborConnection (QueryInterface 0x8b99ee7c) is not
-            // reachable through the situation seam; an escape mission finds no target occupant (its distance is the
-            // city edge, GetDistanceToTarget).
-            SC4_UNWIRED("cSC4CitySituationManager::FindTarget: FindBestNeighborConnection for an escape mission is not ported (no target occupant)");
+            if (ISituationOccupant* exit = host ? host->EscapeConnectionTarget(activeAutomaton_.get()) : nullptr) found = exit;
         } else if (condition == 4) {
             // Recovered-partial: CallTargetScriptFunction (the script's find_target answering an occupant) is not ported.
             SC4_UNWIRED("cSC4CitySituationManager::FindTarget: the script's find_target (CallTargetScriptFunction) is not called");

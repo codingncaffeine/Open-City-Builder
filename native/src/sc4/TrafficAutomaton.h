@@ -59,8 +59,8 @@
 //    automata at (0,0,0), so the guard only fires when someone stores those bits explicitly.
 //  * CheckIntersectionDensity rounds `density * weight * 10` with the float->int magic bias and compares the followed
 //    automaton count against it; a leader chain entry that is not a traffic automaton is skipped.
-//  * FindBestNeighborConnection is left PARTIAL: it needs the neighbours simulator's cISC4NeighborConnection list and
-//    cISC4PathFinder::FindPath (slot 0xb8, not recovered).
+//  * FindBestNeighborConnection runs the traffic simulator's path finder (FindPath, slot 0xb8) to each neighbor connection
+//    the host lists.
 //
 // Seams: the network occupant, the path info, the traffic automata manager, the city / map, the neighbours simulator,
 // the path finder, AEMS and the dynamic particle system are unrecovered neighbours (or recovered through a narrower
@@ -193,9 +193,10 @@ public:
     virtual int CityCellsZ() = 0;                                               // slot 0x2f0
     // the manager (the automaton's vslot 0x5a8); null when the automaton is not in a traffic automata manager
     virtual ITrafficAutomataManager* TrafficAutomataManager() = 0;
-    // SL::spTrafficSim slot 0x30 -> the path finder (FindBestNeighborConnection only)
+    // SL::spTrafficSim slot 0x30 CreatePathFinder (one reference; FindBestNeighborConnection only)
     virtual cISC4PathFinder* PathFinder() = 0;
-    // SL::spNeighborsSim slot 0x88, the five connection lists (kinds 3, 0xc, 8, 2, 10) in the order they are queried
+    // SL::spNeighborsSim slot 0x88, the five connection lists (kinds 3, 0xc, 8, 2, 10) in the order they are queried: the
+    // off-map cell (GetConnectionCell) of each, as x, z pairs
     virtual void NeighborConnectionCells(std::vector<std::int32_t>& cells) = 0;
     // SL::AEMS slot 0x30 (start) / 0x28 (stop), event 0xe in SetPath
     virtual void StartAudioEvent(std::uint32_t event) = 0;
@@ -295,7 +296,7 @@ public:
     std::uint8_t ChooseExitEdge(ITrafficAutomatonOccupant* occupant, TrafficTileInfo* tile, std::uint8_t entry,
                                 std::uint8_t* edges);                      // @ 0x100119256
     bool ShouldKeepAlive() const;                                         // @ 0x10011932e
-    ITrafficAutomatonOccupant* FindBestNeighborConnection();              // @ 0x10011af24 (PARTIAL)
+    ITrafficAutomatonOccupant* FindBestNeighborConnection();              // @ 0x10011af24 (i386 0x000d01b6)
 
     // ---- accessors for the tests and the neighbours ----
     std::uint32_t PopulateLayer() const { return populateLayer_; }

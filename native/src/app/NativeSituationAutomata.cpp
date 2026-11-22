@@ -330,6 +330,8 @@ sc4::ISituationOccupant* SituationOccupantOf(void* engineOccupant) {
     auto it = g_plainOccupants.find(occupant);
     return it != g_plainOccupants.end() ? it->second : nullptr;
 }
+// The view of any engine occupant, made when it has none yet (not counted).
+sc4::ISituationOccupant* SituationViewOfOccupant(void* engineOccupant) { return ViewOfOccupant(static_cast<cISC4Occupant*>(engineOccupant)); }
 sc4::ISituationAutomaton* SituationAutomatonOf(void* engineAutomaton) {
     auto* automaton = static_cast<cSC4Automaton*>(engineAutomaton);
     return ViewOfAutomaton(automaton);

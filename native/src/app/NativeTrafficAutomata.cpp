@@ -8,6 +8,9 @@
 
 #include "app/NativeLighting.h"
 #include "app/NativeAutomataViews.h"
+#include "app/NativeDemolition.h"   // CityNeighborsSimulator
+#include "sc4/NeighborConnection.h"
+#include "sc4/NeighborsSimulator.h"
 #include "app/NativeCity.h"
 #include "sc4/LightingManager.h"
 #include "sc4/AutomataManager.h"
@@ -26,6 +29,10 @@
 #include "sc4/cSC4City.h"
 
 namespace sc4 { IVehicleHost* NewStubIVehicleHost(); }   // app/hosts/IfaceIVehicleHost.cpp
+
+namespace native {
+sc4::ITrafficSimulatorApi* NativeTrafficSimulatorApi();   // below
+}  // namespace native
 
 namespace native {
 const sc4::tAutomataPlayerDriveParams* NativePlayerDriveParams(sc4::cSC4Automaton* automaton);   // app/NativePlayerDrive.cpp
@@ -98,12 +105,25 @@ public:
         if (!face) face = std::make_unique<ManagerFace>(manager);
         return face.get();
     }
-    cISC4PathFinder* PathFinder() override {   // PARTIAL: the traffic simulator's path finder (FindBestNeighborConnection)
-        SC4_UNWIRED("cSC4TrafficAutomaton: the traffic simulator's path finder (FindBestNeighborConnection) is not handed over");
-        return nullptr;
+    cISC4PathFinder* PathFinder() override {   // SL::spTrafficSim CreatePathFinder (one reference)
+        ITrafficSimulatorApi* simulator = NativeTrafficSimulatorApi();
+        return simulator ? simulator->CreatePathFinder() : nullptr;
     }
-    void NeighborConnectionCells(std::vector<std::int32_t>&) override {   // PARTIAL: neighbor connections as exits
-        SC4_UNWIRED("cSC4TrafficAutomaton: the neighbors simulator's connection cells are not offered as exits");
+    void NeighborConnectionCells(std::vector<std::int32_t>& cells) override {
+        cells.clear();
+        sc4::cSC4NeighborsSimulator* neighbors = CityNeighborsSimulator();
+        if (!neighbors) return;
+        for (std::uint32_t kind : {3u, 0xcu, 8u, 2u, 10u}) {
+            sc4::ConnectionList connections;
+            neighbors->GetConnectionsOfType(kind, connections);
+            for (const auto& connection : connections) {
+                if (!connection) continue;
+                int x = 0, z = 0;
+                connection->GetConnectionCell(x, z);
+                cells.push_back(x);
+                cells.push_back(z);
+            }
+        }
     }
     void StartAudioEvent(std::uint32_t) override {}
     void StopAudioEvent(std::uint32_t) override {}
@@ -392,6 +412,25 @@ void NativePedestriansInBox(const float* lo, const float* hi, std::vector<cISC4O
 sc4::ITrafficAutomatonHost* NativeVehicleTrafficHost() { return &g_vehicles; }
 sc4::IVehicleHost* NativeVehicleHost() { return &g_vehicleHost; }
 sc4::ITrafficSimulatorApi* NativeTrafficSimulatorApi() { return &g_simulatorApi; }
+
+}  // namespace native
+namespace sc4 { class ISituationAutomaton; class ISituationOccupant; }
+namespace native {
+sc4::cSC4Automaton* SituationEngineAutomaton(sc4::ISituationAutomaton* automaton);   // NativeSituationAutomata.cpp
+sc4::ISituationOccupant* SituationViewOfOccupant(void* engineOccupant);
+
+// The escape mission's target: the driven car's best neighbor connection (cSC4TrafficAutomaton::FindBestNeighborConnection) and
+// the occupant of that network piece.
+sc4::ISituationOccupant* NativeEscapeConnectionTarget(sc4::ISituationAutomaton* automaton) {
+    auto* car = dynamic_cast<cSC4TrafficAutomaton*>(SituationEngineAutomaton(automaton));
+    ITrafficAutomatonOccupant* piece = car ? car->FindBestNeighborConnection() : nullptr;
+    void* raw = nullptr;
+    if (!piece || !piece->QueryInterface(kGZIID_cISC4Occupant, &raw) || !raw) return nullptr;
+    auto* occupant = static_cast<cISC4Occupant*>(raw);
+    sc4::ISituationOccupant* view = SituationViewOfOccupant(occupant);
+    occupant->Release();
+    return view;
+}
 sc4::ITrafficNetworkManagerApi* NativeTrafficNetworkApi() { return &g_networkApi; }
 void NativeSetTrafficVisibleCells(int x0, int z0, int x1, int z1) { g_networkApi.SetVisibleCells(x0, z0, x1, z1); }
 void NativeClearTrafficNetworkApi() { g_networkApi.Clear(); }
