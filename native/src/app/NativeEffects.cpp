@@ -22,6 +22,7 @@
 #include <set>
 #include <string>
 #include <cctype>
+#include <atomic>
 
 #include "sc4/DrawContext.h"
 #include "sc4/PackedRenderState.h"
@@ -49,6 +50,7 @@
 #include "sc4/ModelBasedParticlesEffect.h"
 #include "sc4/VisualEffect.h"
 #include "sc4/Occupant.h"
+#include "sc4/OccupantManager.h"
 #include "sc4/PropOccupantVisualEffect.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/cSC4City.h"
@@ -439,6 +441,48 @@ private:
 };
 CityHost g_cityCells;
 
+// SL::spOccupantManager as the particle systems ask it (cSC4ParticlesEffect::TestBuildingCollision, Mac i386 0x00414dac): every
+// occupant in the box (vslot 0x94 GetOccupantsByBBox, no filter, no limit); the first building (0x278128a0) or prop (0xa823821e)
+// among them stops the particle; the list goes back through vslot 0xc0 ReleaseOccupantList.
+class ParticleOccupantsHost final : public IParticlesOccupants {
+public:
+    std::atomic<std::uint64_t> queries{0}, hits{0};   // the kit verb particlehits reads them
+    bool BuildingInBox(const cS3DVector3& boxMin, const cS3DVector3& boxMax) override {
+        sc4::cISC4OccupantManager* manager = Manager();
+        if (!manager) return false;
+        const float lo[3] = {boxMin.x, boxMin.y, boxMin.z}, hi[3] = {boxMax.x, boxMax.y, boxMax.z};
+        sc4::OccupantList found;
+        manager->GetOccupantsByBBox(found, lo, hi, static_cast<sc4::cISC4OccupantFilter*>(nullptr), 0xffffffffu);
+        bool hit = false;
+        for (sc4::cISC4Occupant* occupant : found) {
+            const std::uint32_t type = occupant->GetType();
+            if (type == 0x278128a0u || type == 0xa823821eu) { hit = true; break; }
+        }
+        manager->ReleaseOccupantList(found);
+        queries.fetch_add(1, std::memory_order_relaxed);
+        if (hit) hits.fetch_add(1, std::memory_order_relaxed);
+        return hit;
+    }
+    // The attractor's ground point goes through city vslot 0xbc and that object's vslot 0x58 with a dummy automaton occupant
+    // (Mac i386 0x0041583e UpdateAttractor); that path query is not recovered, so the attractor keeps a zero length.
+    bool AttractorGroundPoint(const cS3DVector3&, std::int32_t, cS3DVector3&, float& length) override {
+        SC4_UNWIRED("cSC4ParticlesEffect::UpdateAttractor: the attractor ground point (city vslot 0xbc -> vslot 0x58 with a dummy automaton occupant) is not recovered");
+        length = 0.0f;
+        return false;
+    }
+private:
+    static sc4::cISC4OccupantManager* Manager() {
+        sc4::cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::OccupantManager) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(sc4::kGZIID_cISC4OccupantManager, &raw) || !raw) return nullptr;
+        auto* manager = static_cast<sc4::cISC4OccupantManager*>(raw);
+        manager->Release();   // borrowed: the city keeps it
+        return manager;
+    }
+};
+ParticleOccupantsHost g_particleOccupants;
+
 // ---- model lookups and effect creation for the model-based particle systems ----
 class ModelsHost final : public sc4::IModelParticlesHost {
 public:
@@ -609,6 +653,7 @@ void DumpEffect(const sc4::cSC4EffectsCollection& collection, const std::string&
 void InstallEffectsManagerHost() {
     SetParticlesTerrain(&g_terrain);
     SetParticlesCity(&g_cityCells);
+    SetParticlesOccupants(&g_particleOccupants);
     SetParticlesTextures(&g_textures);
     SetParticlesEffects(&g_particleEffects);
     sc4::SetEffectsHost(&g_componentsHost);
@@ -744,4 +789,23 @@ int StartNamedEffect(const char* name, float x, float y, float z) {
     return 1;
 }
 
+}  // namespace native
+
+namespace native {
+// Kit verb "particlehits [X Z]": how many particles asked the occupant manager for a building in their box and how many it
+// stopped; with a cell, the same question for a particle 2 m above the cell's center and one 500 m above it.
+void NativeParticleCollisionReport(int cellX, int cellZ) {
+    std::printf("particlehits: %llu building-collision queries, %llu particles stopped by a building or prop\n",
+                static_cast<unsigned long long>(g_particleOccupants.queries.load()), static_cast<unsigned long long>(g_particleOccupants.hits.load()));
+    if (cellX >= 0 && cellZ >= 0) {
+        sc4::cSTETerrain* t = CityTerrain();
+        const float x = (static_cast<float>(cellX) + 0.5f) * 16.0f, z = (static_cast<float>(cellZ) + 0.5f) * 16.0f;
+        const float ground = t ? t->GetAltitude(x, z) : 0.0f;
+        for (const float above : {2.0f, 500.0f}) {
+            const cS3DVector3 lo{x - 1.0f, ground + above - 1.0f, z - 1.0f}, hi{x + 1.0f, ground + above + 1.0f, z + 1.0f};
+            std::printf("particlehits: cell %d,%d at %.0f m above the ground: %s\n", cellX, cellZ, above,
+                        g_particleOccupants.BuildingInBox(lo, hi) ? "a building or prop stops it" : "free");
+        }
+    }
+}
 }  // namespace native

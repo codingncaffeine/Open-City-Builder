@@ -1746,14 +1746,10 @@ bool cSC4ParticlesEffect::ApplyTerrainForces(cSC4EffectsParticle* particle, cons
     return alive;
 }
 
-// 0x1005f8d84
-// PARTIAL: the occupant enumeration itself lives in the unrecovered occupant manager (seam). The box the original
-// builds is the particle position +-1 in x / y / z; a building occupant in it kills the particle.
+// 0x1005f8d84: the particle's position inflated by 1 in x / y / z; a building or prop occupant in that box (the occupant
+// manager's box query, through the seam) kills the particle.
 void cSC4ParticlesEffect::TestBuildingCollision(cSC4EffectsParticle* particle) {
-    if (!ParticlesOccupants()) {
-        SC4_UNWIRED("cSC4ParticlesEffect::TestBuildingCollision: occupant manager box query not wired (particles pass through buildings)");
-        return;
-    }
+    if (!ParticlesOccupants()) return;
     const cS3DVector3 boxMin{particle->position.x - 1.0f, particle->position.y - 1.0f, particle->position.z - 1.0f};
     const cS3DVector3 boxMax{particle->position.x + 1.0f, particle->position.y + 1.0f, particle->position.z + 1.0f};
     if (ParticlesOccupants()->BuildingInBox(boxMin, boxMax)) particle->alive = 0;
