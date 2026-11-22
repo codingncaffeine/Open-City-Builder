@@ -367,6 +367,18 @@ bool StationFundingFraction(cISCPropertyHolder* holder, std::uint32_t purpose, f
     return true;
 }
 
+// A protection station or jail joins (leaves) its department's locally funded objects (spec protection.md 4.3 steps 4 and the
+// removal, 9.2): its budget item for the funding purpose, then that item's department, when both exist.
+void RegisterProtectionFunding(cISCPropertyHolder* holder, std::uint32_t purpose, bool add) {
+    auto* budget = Component<cSC4BudgetSimulator>(CityComponent::BudgetSimulator, kGZCLSID_cSC4BudgetSimulator);
+    BudgetItem item;
+    if (!budget || !holder || !budget->GetBudgetItemForPurpose(holder, purpose, item)) return;
+    cSC4DepartmentBudget* department = budget->GetDepartmentBudget(static_cast<std::uint32_t>(item.departmentId));
+    if (!department) return;
+    if (add) department->AddLocallyFundedObject(holder, purpose);
+    else department->RemoveLocallyFundedObject(holder, purpose);
+}
+
 // The protection simulators' Init: a department the city has no record of (a new city) is created in budget group 0x4a357b40,
 // named from table 0x6a3ff01c, capped at the tuned funding, with its line item 1 (locally funded, display flag 1 off).
 void EnsureProtectionDepartment(std::uint32_t id, std::uint32_t nameInstance, float maxFunding) {
@@ -440,7 +452,9 @@ public:
     void* DepartmentBudget() override { return nullptr; }
     void EnsureDepartment(std::uint32_t id, std::uint32_t name, float maxFunding) override { EnsureProtectionDepartment(id, name, maxFunding); }
     void SetStrikerGroup(IFireOccupant*, bool) override {}
-    void RegisterFundedStation(IFireOccupant*, std::uint32_t, bool) override {}
+    void RegisterFundedStation(IFireOccupant* station, std::uint32_t purpose, bool add) override {
+        if (station) RegisterProtectionFunding(station->PropertyHolder(), purpose, add);
+    }
     float PoliceCoverageShare() override {
         auto* police = Component<cSC4PoliceSimulator>(CityComponent::PoliceSimulator, kGZCLSID_cSC4PoliceSimulator);
         return police ? police->GetPercentCoverage() : 0.0f;
@@ -513,7 +527,9 @@ public:
     void EnsureDepartment(std::uint32_t id, std::uint32_t name, float maxFunding) override { EnsureProtectionDepartment(id, name, maxFunding); }
     void SetStrikerGroup(IPoliceOccupant*, bool) override {}
     void SetJailbreakGroup(IPoliceOccupant*, bool) override {}
-    void RegisterFundedStation(IPoliceOccupant*, std::uint32_t, bool) override {}
+    void RegisterFundedStation(IPoliceOccupant* station, std::uint32_t purpose, bool add) override {
+        if (station) RegisterProtectionFunding(station->PropertyHolder(), purpose, add);
+    }
     // The dispatch manager's records of police cars (app/NativeDispatch.cpp).
     int AvailableDispatchCount(std::uint32_t purpose) override { return NativeDispatchCount(purpose); }
     std::vector<std::uint32_t> ActiveDispatches(std::uint32_t purpose) override { return NativeDispatchIds(purpose); }
