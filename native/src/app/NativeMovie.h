@@ -8,6 +8,13 @@
 
 namespace native {
 
+// Readies a MAD chunk stream (chunks: tag, little-endian size including the 8-byte header) for the decoder: drops the end-of-audio
+// chunks (SCEl), after which FFmpeg's demuxer stops although video follows (the intro clips have 42 and 44 frames past it), and
+// returns the first MAD frame's delay (16.16 milliseconds at payload +4) in seconds, which the demuxer rounds down to whole
+// milliseconds (66.667 -> 66 ms runs the video ahead of its sound). A stream that is not a clean run of chunks is left as it is;
+// 0 when no MAD frame was found.
+double PrepareMovieChunks(std::vector<std::uint8_t>& bytes);
+
 class Movie {
 public:
     static bool Available();   // false when the build has no movie decoder

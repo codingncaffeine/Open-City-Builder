@@ -20,10 +20,33 @@ extern "C" {
 
 namespace native {
 
+double PrepareMovieChunks(std::vector<std::uint8_t>& bytes) {
+    double frameSeconds = 0.0;
+    std::vector<std::uint8_t> kept;
+    kept.reserve(bytes.size());
+    std::size_t at = 0;
+    while (at + 8 <= bytes.size()) {
+        std::uint32_t size = 0;
+        std::memcpy(&size, bytes.data() + at + 4, 4);
+        if (size < 8 || size > bytes.size() - at) break;
+        const std::uint8_t* tag = bytes.data() + at;
+        if (frameSeconds == 0.0 && size >= 16 && tag[0] == 'M' && tag[1] == 'A' && tag[2] == 'D') {
+            std::uint32_t delay = 0;
+            std::memcpy(&delay, tag + 12, 4);
+            frameSeconds = static_cast<double>(delay) / 65536.0 / 1000.0;
+        }
+        if (std::memcmp(tag, "SCEl", 4) != 0) kept.insert(kept.end(), tag, tag + size);
+        at += size;
+    }
+    if (at == bytes.size()) bytes.swap(kept);
+    return frameSeconds;
+}
+
 #ifdef OCB_HAVE_FFMPEG
 
 struct Movie::Impl {
     std::vector<std::uint8_t> bytes;
+    double frameSeconds = 0.0;   // the MAD frame delay (16.16 ms at payload +4), 0 = the demuxer's time base
     std::size_t position = 0;
     AVIOContext* io = nullptr;
     AVFormatContext* format = nullptr;
@@ -89,6 +112,7 @@ struct Movie::Impl {
     }
 
     bool Open() {
+        frameSeconds = PrepareMovieChunks(bytes);
         constexpr int kBufferSize = 64 * 1024;
         auto* buffer = static_cast<std::uint8_t*>(av_malloc(kBufferSize));
         io = buffer ? avio_alloc_context(buffer, kBufferSize, 0, this, &Read, nullptr, &Seek) : nullptr;
@@ -137,7 +161,8 @@ struct Movie::Impl {
             if (received == 0) {
                 const AVRational base = format->streams[videoStream]->time_base;
                 const std::int64_t stamp = pending->best_effort_timestamp != AV_NOPTS_VALUE ? pending->best_effort_timestamp : pending->pts;
-                pendingTime = stamp == AV_NOPTS_VALUE ? pendingTime : static_cast<double>(stamp) * av_q2d(base);
+                const double step = frameSeconds > 0.0 ? frameSeconds : av_q2d(base);   // the demuxer stamps frame numbers
+                pendingTime = stamp == AV_NOPTS_VALUE ? pendingTime : static_cast<double>(stamp) * step;
                 pendingValid = true;
                 return;
             }
