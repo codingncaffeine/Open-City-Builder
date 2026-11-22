@@ -2,6 +2,8 @@
 #include "sc4/WaterPathFinder.h"
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 namespace sc4 {
 
@@ -213,6 +215,10 @@ bool cSC4WaterPathFinder::FindPath(int x0, int z0, int x1, int z1, std::int32_t&
     if (dirty_) UpdateDepthMap();
     const std::uint16_t startBody = host_->BodyOfWater(x0, z0);
     const std::uint16_t endBody = host_->BodyOfWater(x1, z1);
+    if (std::getenv("SC4_WATERPATHDEBUG"))
+        std::fprintf(stderr, "water path: %d,%d (body %u depth %u) -> %d,%d (body %u depth %u)\n", x0, z0, unsigned(startBody),
+                     depthMap_ && depthMap_->TractIsInBounds(x0, z0) ? unsigned(depthMap_->GetTractValue(x0, z0)) : 999u, x1, z1,
+                     unsigned(endBody), depthMap_ && depthMap_->TractIsInBounds(x1, z1) ? unsigned(depthMap_->GetTractValue(x1, z1)) : 999u);
     if (startBody == 0 || startBody != endBody) return false;
     if (!depthMap_) return false;
     int sx = 0, sz = 0;

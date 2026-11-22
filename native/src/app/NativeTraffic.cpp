@@ -35,6 +35,10 @@
 #include "sc4/RegionalCity.h"
 #include "sc4/NetworkOccupant.h"
 #include "sc4/OccupantManager.h"
+#include "sc4/PropOccupant.h"
+#include "sc4/SurfaceWater.h"
+#include "sc4/WaterPathFinder.h"
+#include "sc4/cSTETerrain.h"
 #include "sc4/Ordinance.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/Simulator.h"
@@ -99,6 +103,63 @@ void Post(std::uint32_t type, std::uint32_t d1 = 0, std::uint32_t d2 = 0, std::u
     SL::spMS2->MessagePost(message, false);
     message->Release();
 }
+
+cSTETerrain* TrafficTerrain() {
+    cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(CityComponent::Terrain) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(0xab953253, &raw) || !raw) return nullptr;
+    auto* terrain = static_cast<cSTETerrain*>(static_cast<cIGZSerializable*>(raw));
+    static_cast<cIGZSerializable*>(raw)->Release();
+    return terrain;
+}
+
+cSTESurfaceWater* TrafficSurfaceWater() {
+    cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(CityComponent::SurfaceWater) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(kGZIID_cISTESurfaceWater, &raw) || !raw) return nullptr;
+    auto* water = static_cast<cSTESurfaceWater*>(static_cast<cIGZSerializable*>(raw));
+    static_cast<cIGZSerializable*>(raw)->Release();
+    return water;
+}
+
+// What the boats' route finder reads (SL::spSurfaceWater, SL::spTerrain, SL::spCity, the occupant in an occupant message).
+class WaterPathHost final : public IWaterPathFinderHost {
+public:
+    void CityCellCount(int& x, int& z) override {
+        cSC4City* city = HostCity();
+        x = city ? city->CellCountX() : 0;
+        z = city ? city->CellCountZ() : 0;
+    }
+    bool IsNavigable(int x, int z) override { cSTESurfaceWater* w = TrafficSurfaceWater(); return w && w->IsNavigable(x, z, 0, nullptr); }
+    float WaterDepthForCell(int x, int z) override { cSTESurfaceWater* w = TrafficSurfaceWater(); return w ? w->GetWaterDepthForCell(x, z) : 0.0f; }
+    std::uint16_t BodyOfWater(int x, int z) override {
+        cSTESurfaceWater* w = TrafficSurfaceWater();
+        cSC4SimGrid<std::uint16_t>* bodies = w ? w->GetBodyOfWaterMap() : nullptr;
+        if (!bodies || x < 0 || z < 0 || x >= bodies->GetTractCountX() << bodies->GetTractShift() ||
+            z >= bodies->GetTractCountZ() << bodies->GetTractShift())
+            return 0;
+        return bodies->GetCellValue(x, z);
+    }
+    bool CellHasWater(int x, int z) override {
+        cSTETerrain* t = TrafficTerrain();
+        return t && x >= 0 && z >= 0 && t->CellHasWater(std::uint32_t(x), std::uint32_t(z));
+    }
+    bool OccupantCells(void* occupant, int& x0, int& z0, int& x1, int& z1) override {
+        void* raw = nullptr;
+        auto* object = static_cast<cIGZUnknown*>(occupant);
+        if (!object || !object->QueryInterface(kGZIID_cISC4Occupant, &raw) || !raw) return false;
+        auto* o = static_cast<cISC4Occupant*>(raw);
+        SC4CellRect r;
+        o->GetBoundingCityCells(r);
+        o->Release();
+        x0 = r.x0; z0 = r.z0; x1 = r.x1; z1 = r.z1;
+        return true;
+    }
+    void AddNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->AddNotification(target, message); }
+    void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->RemoveNotification(target, message); }
+};
 
 // A lot as the traffic simulator sees it; holds a reference while it lives.
 class LotView final : public ITrafficLot {
@@ -342,9 +403,47 @@ public:
         auto* history = Component<cSC4HistoryWarehouse>(CityComponent::HistoryWarehouse, kGZCLSID_cSC4HistoryWarehouse);
         if (history) history->RecordHistoryData(id, static_cast<int>(value));
     }
+    // ---- ferries ----
+    void PropsInRect(const SC4RectInt32& rect, std::vector<PropCell>& out) override {
+        out.clear();
+        cISC4OccupantManager* occupants = Occupants();
+        if (!occupants) return;
+        const int a[2] = {rect.x0, rect.z0}, b[2] = {rect.x1, rect.z1};
+        OccupantList found;
+        if (occupants->GetOccupantsByStandardCityCells(found, a, b, kOccupantTypeProp, 0xffffffffu))
+            for (cISC4Occupant* occupant : found) {
+                void* raw = nullptr;
+                if (!occupant || !occupant->QueryInterface(0xe9793a65, &raw) || !raw) continue;   // cISC4PropOccupant
+                auto* prop = static_cast<cISC4PropOccupant*>(raw);
+                float p[3] = {};
+                occupant->GetPosition(p);
+                int x = 0, z = 0;
+                PositionToCell(p[0], p[2], x, z);
+                if (std::getenv("SC4_TRAFFICDEBUG")) std::fprintf(stderr, "ferry: prop %08x at %.1f,%.1f,%.1f cell %d,%d\n", prop->GetPropType(), p[0], p[1], p[2], x, z);
+                out.push_back({prop->GetPropType(), x, z});
+                prop->Release();
+            }
+        occupants->ReleaseOccupantList(found);
+    }
+    bool CellHasWater(int x, int z) override { return water_.CellHasWater(x, z); }
+    void NeighborConnectionCellsOfType(int type, std::vector<std::pair<int, int>>& out) override {
+        out.clear();
+        cSC4NeighborsSimulator* n = Neighbors();
+        if (!n) return;
+        ConnectionList list;
+        n->GetConnectionsOfType(std::uint32_t(type), list);
+        for (auto& ref : list) {
+            int x = 0, z = 0;
+            ref->GetConnectionCell(x, z);
+            out.emplace_back(x, z);
+        }
+    }
+    IWaterPathFinderHost* WaterPathFinderHost() override { return &water_; }
+    void PostFerryRoutesDone() override { Post(0x2c06ba82); }
     void EndOfWork() override { views_.clear(); }
 
 private:
+    WaterPathHost water_;
     ITrafficLot* View(cSC4Lot* lot) {
         if (!lot) return nullptr;
         auto& view = views_[lot];
@@ -451,4 +550,29 @@ void NativeAccidentCheck(int tries) {
     std::printf("accidentcheck: no accident in %d checks\n", tries);
 }
 
+// Kit command `ferries`: every ferry terminal (cells, type, riders), its links to other terminals and to neighbour connections
+// (cost, route length, counters), the departure cell's wormhole byte and the ferry routes in use (read-only).
+void NativeFerryReport() {
+    cSC4TrafficSimulator* traffic = Traffic();
+    if (!traffic) { std::printf("ferries: no traffic simulator\n"); return; }
+    std::printf("ferries: %zu terminals (passenger %d, car %d), rider total %u, cycle state %u\n", traffic->FerryTerminals().size(),
+                traffic->GetFerryTerminalCount(0), traffic->GetFerryTerminalCount(1), traffic->FerryRiderTotal(), traffic->CycleState());
+    for (const auto& t : traffic->FerryTerminals()) {
+        std::printf("ferry terminal: lot %d,%d type %u mask %x departure %d,%d (wormhole %u) arrival %d,%d water %d,%d riders %u/%u links %zu neighbor links %zu\n",
+                    t.lotX, t.lotZ, unsigned(t.type), t.travelTypes, t.departureX, t.departureZ,
+                    unsigned(traffic->CellConnections(t.departureX, t.departureZ).wormhole), t.arrivalX, t.arrivalZ, t.waterX, t.waterZ,
+                    unsigned(t.ridersLast), unsigned(t.ridersCurrent), t.links.size(), t.neighborLinks.size());
+        for (const auto& l : t.links)
+            std::printf("ferry link: to %d,%d arrival %d,%d cost %.2f route %zu bytes counters %u %u %u %u\n", l.key >> 8, l.key & 0xff,
+                        l.arrivalX, l.arrivalZ, double(l.cost), l.route.size(), l.lastA, l.currentA, l.lastB, l.currentB);
+        for (const auto& l : t.neighborLinks)
+            std::printf("ferry neighbor link: off-map %d,%d edge %d,%d cost %.2f routes %zu/%zu bytes counters %u %u %u %u\n", l.x, l.z,
+                        l.innerX, l.innerZ, double(l.cost), l.toEdge.size(), l.fromEdge.size(), l.lastA, l.currentA, l.lastB, l.currentB);
+    }
+    std::list<cSC4TrafficSimulator::FerryRouteInfo> inUse;
+    traffic->GetFerryRoutesInUse(inUse);
+    std::printf("ferries: %zu routes in use\n", inUse.size());
+}
+
 }  // namespace native
+

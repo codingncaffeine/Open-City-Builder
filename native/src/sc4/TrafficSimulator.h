@@ -38,6 +38,8 @@
 namespace sc4 {
 
 class cISC4PathFinder;
+class IWaterPathFinderHost;
+class cSC4WaterPathFinder;
 class cSC4PathFinder;
 class cSC4NetworkOccupant;
 struct cSC4TripData;
@@ -264,6 +266,16 @@ public:
     virtual bool CreateAccidentAtCell(int x, int z, int type, std::uint32_t milliseconds) { (void)x; (void)z; (void)type; (void)milliseconds; return false; }
     virtual void PostAccidentMessage(int x, int z) { (void)x; (void)z; }
     virtual void PostPotholeMessage3(int x, int z, std::uint32_t data3) { (void)x; (void)z; (void)data3; }   // 0x69247dc8 with data3
+    // ---- ferries (traffic-network.md §4.9); defaults answer "nothing" ----
+    struct PropCell { std::uint32_t type = 0; int x = 0, z = 0; };
+    // The prop occupants (type 0xa823821e, QI 0xe9793a65) over an inclusive cell rect: prop type (slot 7) and cell (PositionToCell).
+    virtual void PropsInRect(const SC4RectInt32& rect, std::vector<PropCell>& out) { (void)rect; out.clear(); }
+    virtual bool CellHasWater(int x, int z) { (void)x; (void)z; return false; }   // SL::spTerrain i386 +0x88
+    // The cells of the neighbour connections of a type (neighbours simulator slot 17 GetConnectionsOfType, connection slot 6).
+    virtual void NeighborConnectionCellsOfType(int type, std::vector<std::pair<int, int>>& out) { (void)type; out.clear(); }
+    // What the water path finder reads (made in Init when the host gives one).
+    virtual IWaterPathFinderHost* WaterPathFinderHost() { return nullptr; }
+    virtual void PostFerryRoutesDone() {}                                   // 0x2c06ba82: the ferry pass of state 19 finished
     // The end of a day's work: adapters the host handed out (LotAt) may be dropped now.
     virtual void EndOfWork() {}
 };
@@ -526,7 +538,58 @@ public:
     // Row 17 of the record: the count, then per portal its cell key, the other portal's cell, the travel-type mask, the network
     // type and `costs` passage costs (the record's travel-type count).
     void WriteTunnelTable(cIGZOStream& stream, int costs) const;
-    void DoLotActivated(ITrafficLot* lot);                         // 0x00723AF0 (no transit switches or ferries yet)
+    // ---- ferries (traffic-network.md §2.6, §4.9; i386 decompile scratch/s85/ghidra/ts.c) ----
+    struct FerryTerminalLink {               // a route to another terminal of the same type
+        std::uint16_t key = 0;               // +0 the other terminal's departure cell (x << 8 | z)
+        std::int16_t arrivalX = 0, arrivalZ = 0;   // +2 / +4 its arrival cell
+        float cost = 0.0f;                   // +8 cells x 0.01
+        std::vector<std::uint8_t> route;     // +0xc this terminal -> the other (compressed water route)
+        std::uint16_t lastA = 0, currentA = 0, lastB = 0, currentB = 0;   // +0x18: outbound and return crossings
+    };
+    struct FerryNeighborLink {               // a route to a neighbour city's water connection
+        std::int16_t x = 0, z = 0;           // +0 the off-map cell
+        std::int16_t innerX = 0, innerZ = 0; // +4 the in-city edge cell
+        float cost = 0.0f;                   // +8
+        std::vector<std::uint8_t> toEdge, fromEdge;   // +0xc / +0x18
+        std::uint16_t lastA = 0, currentA = 0, lastB = 0, currentB = 0;   // +0x24
+    };
+    struct FerryTerminal {
+        std::uint8_t departureX = 0, departureZ = 0;   // +0 the 0x2c520000 marker's cell (wormhole bit 4)
+        std::uint8_t arrivalX = 0, arrivalZ = 0;       // +2 the 0x2c530000 marker's cell
+        std::uint8_t waterX = 0, waterZ = 0;           // +4 the water cell beside the 0x2c540000 marker, outside the lot
+        std::uint8_t type = 0;                         // +8 building property 0x0bd86fd3: 0 passenger, 1 car ferry
+        std::uint16_t travelTypes = 0;                 // +0xc
+        std::list<FerryTerminalLink> links;            // +0x10
+        std::list<FerryNeighborLink> neighborLinks;    // +0x18
+        std::uint16_t ridersLast = 0, ridersCurrent = 0;   // +0x20 / +0x22
+        std::uint8_t lotX = 0, lotZ = 0;               // +0x24 the lot's cell
+        bool reroute = false;                          // +0x26
+        std::uint16_t DepartureKey() const { return std::uint16_t((departureX << 8) | departureZ); }
+        std::uint16_t ArrivalKey() const { return std::uint16_t((arrivalX << 8) | arrivalZ); }
+    };
+    // cISC4TrafficSimulator::FerryRouteInfo (0x34 bytes): one ferry line in use, for the watercraft manager and the query tool. The
+    // lots are given as their cells (the host resolves them); a neighbour line has no lot B.
+    struct FerryRouteInfo {
+        int lotAX = 0, lotAZ = 0, lotBX = -1, lotBZ = -1;
+        std::uint32_t type = 0;
+        std::uint16_t abLastA = 0, abLastB = 0, baLastA = 0, baLastB = 0;
+        bool neighbor = false;
+        int neighborX = -2, neighborZ = -2;
+        std::vector<std::uint8_t> routeAB, routeBA;
+    };
+    void DoFerryTerminalActivated(ITrafficLot* lot);                 // 0x00723620
+    void RouteAndLinkTerminals(FerryTerminal& a, FerryTerminal& b);  // 0x0071BE50
+    void RouteTerminalToNeighbor(FerryTerminal& terminal, int x, int z);   // 0x0071C0C0
+    bool GetWaterRoute(int x0, int z0, int x1, int z1, std::vector<std::uint8_t>& route);   // i386 0x0005281c
+    const std::vector<std::uint8_t>* GetFerryRouteBetweenTiles(int x1, int z1, int x2, int z2) const;   // slot 29
+    void GetAllFerryRoutes(std::list<std::vector<std::uint8_t>>& out) const;                            // slot 30
+    void GetFerryRoutesInUse(std::list<FerryRouteInfo>& out) const;                                     // slot 31
+    const std::list<FerryTerminal>& FerryTerminals() const { return ferryTerminals_; }
+    const FerryTerminal* FerryTerminalByDeparture(int x, int z) const;
+    const FerryTerminal* FerryTerminalByArrival(int x, int z) const;
+    std::uint32_t FerryRiderTotal() const { return ferryRiderTotal_; }
+    cSC4WaterPathFinder* WaterPathFinder() const { return waterPathFinder_; }
+    void DoLotActivated(ITrafficLot* lot);                         // 0x00723AF0
     void DoLotDeactivated(ITrafficLot* lot);                       // 0x0071E2F0
     void UpdateIntersectionData();                                 // 0x0071B9A0
     bool ConfirmRoute(const std::vector<std::uint8_t>& route) const;   // 0x0070E320
@@ -584,7 +647,8 @@ public:
     float GetTripScale() const { return tunables_.tripScale; }
     float GetTripScaleForDisplay() const { return tunables_.tripScaleForDisplay; }
     float GetFreightScalingFactor() const { return tunables_.freightScalingFactor; }
-    int GetFerryTerminalCount(unsigned ferryType) const { return ferryTerminalCount_[ferryType]; }
+    // §4.9.5: types 0 and 1 have counts; the original reads unrelated members for higher types, the port answers 0
+    int GetFerryTerminalCount(unsigned ferryType) const { return ferryType < 2 ? ferryTerminalCount_[ferryType] : 0; }
     void SetFerryTerminalCount(unsigned ferryType, int n) { ferryTerminalCount_[ferryType] = n; }
     int GetLastMonthlyIncome() const { return lastMonthlyIncome_; }
     void SetLastMonthlyIncome(int v) { lastMonthlyIncome_ = v; }
@@ -638,6 +702,25 @@ private:
 
     std::array<std::uint8_t, 12> travelStrategies_{};
     std::array<int, 3> ferryTerminalCount_{};
+    std::list<FerryTerminal> ferryTerminals_;                                   // +0x110
+    std::unordered_map<std::uint16_t, std::list<FerryTerminal>::iterator> ferryDepartures_, ferryArrivals_;   // +0xe8 / +0xfc
+    cSC4WaterPathFinder* waterPathFinder_ = nullptr;                            // +0x118
+    std::list<FerryTerminal>::iterator ferryPass_, ferryPassOther_;             // +0x11c / +0x120 (WorkOnFerryRoutes)
+    std::vector<std::pair<int, int>> ferryNeighborCells_;                       // +0x124 the type-9 connection cells of this pass
+    std::size_t ferryNeighborNext_ = 0;                                         // +0x130
+    int ferryPassStep_ = 0;                                                     // +0x134: 0 next terminal, 1 terminals, 2 neighbours
+    std::uint32_t ferryRiderTotal_ = 0;                                         // +0x454
+    bool ferryPassValid_ = false;                                               // the pass iterators point into the list
+    FerryTerminal* FerryByDeparture(int x, int z);
+    FerryTerminal* FerryByArrival(int x, int z);
+    void RemoveFerryTerminal(const SC4RectInt32& lotRect);                      // §4.9.4 (in DoLotDeactivated)
+    void FerryConnectionsChanged(const SC4RectInt32& r1);                       // §4.9.2 (DoConnectionsChanged step 6)
+    void EnterFerryState();                                                     // §4.9.3 / §4.12.2: entering cycle state 19
+    void RestartFerryPass();                                                    // DoPostCityInit in a saved state 19
+    bool WorkOnFerryRoutes(int& units);                                         // 0x0071DC90 (true: the pass finished)
+    void WriteFerryTerminals(cIGZOStream& stream, std::uint32_t version) const;   // the record's version decides the fields
+    void InitWaterPathFinder();
+    void ShutdownWaterPathFinder();
     int lastMonthlyIncome_ = 0;
     int insertionMode_ = 0;
     std::uint64_t insertionPoint_ = 0;

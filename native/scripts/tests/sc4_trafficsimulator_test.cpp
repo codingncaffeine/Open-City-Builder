@@ -15,6 +15,8 @@
 #include "sc4/PathFinder.h"
 #include "sc4/SCProperty.h"
 #include "sc4/TrafficSimulator.h"
+#include "sc4/WaterPathFinder.h"
+#include "rz/cRZMessage2Standard.h"
 
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
@@ -224,12 +226,51 @@ struct Host : ITrafficHost {
         std::list<cSC4TripData>* TripList(void* s) override { return lot->TripList(s); }
         void RefreshTrafficSource(void* s) override { lot->RefreshTrafficSource(s); }
     };
+    // ferries: marker props by cell, water cells, the type-9 neighbour connection cells, the water path finder's host
+    std::vector<PropCell> props;
+    std::set<std::pair<int, int>> water;
+    std::vector<std::pair<int, int>> waterConnections;
+    IWaterPathFinderHost* waterHost = nullptr;
+    int ferryDone = 0;
+    void PropsInRect(const SC4RectInt32& r, std::vector<PropCell>& out) override {
+        out.clear();
+        for (const PropCell& p : props) if (r.x0 <= p.x && p.x <= r.x1 && r.z0 <= p.z && p.z <= r.z1) out.push_back(p);
+    }
+    bool CellHasWater(int x, int z) override { return water.count({x, z}) != 0; }
+    void NeighborConnectionCellsOfType(int type, std::vector<std::pair<int, int>>& out) override { out.clear(); if (type == 9) out = waterConnections; }
+    IWaterPathFinderHost* WaterPathFinderHost() override { return waterHost; }
+    void PostFerryRoutesDone() override { ++ferryDone; }
     std::vector<FakeLot*> listed;
     void AllLots(std::vector<std::unique_ptr<ITrafficLot>>& out) override {
         out.clear();
         for (FakeLot* l : listed) out.push_back(std::make_unique<LotView>(l));
     }
 };
+
+// The water of the ferry tests: an 8 x 8 city, land x 0..3, water x 4..7 (one body, 10 m deep).
+struct FerryWater8 final : IWaterPathFinderHost {
+    void CityCellCount(int& x, int& z) override { x = z = 8; }
+    bool IsNavigable(int x, int) override { return x >= 4; }
+    float WaterDepthForCell(int x, int) override { return x >= 4 ? 10.0f : 0.0f; }
+    std::uint16_t BodyOfWater(int x, int) override { return x >= 4 ? 1 : 0; }
+    bool CellHasWater(int x, int) override { return x >= 4; }
+    bool OccupantCells(void*, int&, int&, int&, int&) override { return false; }
+    void AddNotification(cIGZMessageTarget2*, std::uint32_t) override {}
+    void RemoveNotification(cIGZMessageTarget2*, std::uint32_t) override {}
+};
+
+// Two passenger terminals on the lake of FerryWater8 and a neighbour's water connection at (8, 3):
+// A: lot (1,0)-(3,1), departure (1,0), arrival (2,0), water marker (3,0) -> water cell (4,0);
+// B: lot (1,6)-(3,7), departure (1,7), arrival (2,7), water marker (3,7) -> water cell (4,7).
+void SetUpFerries(Host& h, FerryWater8& water, cSC4TrafficSimulator& sim, FakeLot& lotA, FakeLot& lotB) {
+    h.waterHost = &water;
+    for (int x = 4; x < 8; ++x) for (int z = 0; z < 8; ++z) h.water.insert({x, z});
+    h.waterConnections = {{8, 3}};
+    cSCPropertyHelp::SetPropertyValue(&h.lotHolder, 0x0bd86fd3, std::uint8_t(0));
+    h.props = {{0x2c520000, 1, 0}, {0x2c530000, 2, 0}, {0x2c540000, 3, 0}, {0x2c520000, 1, 7}, {0x2c530000, 2, 7}, {0x2c540000, 3, 7}};
+    lotA.rect = {1, 0, 3, 1};
+    lotB.rect = {1, 6, 3, 7};
+}
 
 }  // namespace
 
@@ -1155,10 +1196,23 @@ int main() {
         host.simDate = 731;
         cSC4TrafficSimulator fresh(&host, &random);
         const int departmentsBefore = host.departmentCalls;
+        FerryWater8 recordWater;
+        FakeLot ferryA, ferryB;
+        SetUpFerries(host, recordWater, fresh, ferryA, ferryB);   // before Init: Init makes the water path finder
         CHECK(fresh.Init());
         // Init asks for the roads and mass transit departments with the tuned caps (default 1.2 each, TS29)
         CHECK(host.departmentCalls == departmentsBefore + 1 && host.roadsCap == 1.2f && host.transitCap == 1.2f);
         fresh.GetCongestionMap()->SetTractValue(3, 4, 77);
+        // two linked ferry terminals with counters: the record keeps them (the fresh writer and the replayed record's live part)
+        if (fresh.WaterPathFinder()) {
+            cRZMessage2Standard init;
+            init.SetType(kWaterPathMsgPostCityInit);
+            fresh.WaterPathFinder()->DoMessage(&init);
+        }
+        fresh.DoLotActivated(&ferryA);
+        fresh.DoLotActivated(&ferryB);
+        CHECK(fresh.FerryTerminals().size() == 2);
+        fresh.ApplyRoute(std::vector<std::uint8_t>{0x00, 1, 1, 0x80, 1, 0, 0x80, 2, 7}, 6, SC4RectInt32{1, 2, 1, 2}, 2, 6, 2, 0);
         const cGZPersistResourceKey key{0x6990c1aa, 0x60606060, 1};
         const std::string path = "/tmp/sc4_traffic_fresh_" + std::to_string(getpid()) + ".sc4";
         const std::string again = "/tmp/sc4_traffic_resave_" + std::to_string(getpid()) + ".sc4";
@@ -1190,6 +1244,23 @@ int main() {
         // Init keeps the record's grids: the congestion value is back
         CHECK(back.Init() && back.GetCongestionMap() && back.GetCongestionMap()->GetTractValue(3, 4) == 77);
         CHECK(back.GetStrikeState() == cSC4TrafficSimulator::kStrikeNone);
+        CHECK(back.FerryTerminals().size() == 2 && back.GetFerryTerminalCount(0) == 2);
+        if (back.FerryTerminals().size() == 2 && fresh.FerryTerminals().size() == 2) {
+            const auto& fa = fresh.FerryTerminals().front();
+            const auto& ba = back.FerryTerminals().front();
+            CHECK(ba.DepartureKey() == fa.DepartureKey() && ba.ArrivalKey() == fa.ArrivalKey() && ba.waterX == fa.waterX && ba.waterZ == fa.waterZ);
+            CHECK(ba.type == fa.type && ba.travelTypes == fa.travelTypes && ba.lotX == fa.lotX && ba.lotZ == fa.lotZ);
+            CHECK(ba.ridersCurrent == 12 && ba.links.size() == 1 && ba.neighborLinks.size() == 1);
+            if (ba.links.size() == 1 && !fa.links.empty()) {
+                CHECK(ba.links.front().route == fa.links.front().route && ba.links.front().cost == fa.links.front().cost);
+                CHECK(ba.links.front().currentA == 6 && ba.links.front().key == fa.links.front().key);
+            }
+            if (ba.neighborLinks.size() == 1 && !fa.neighborLinks.empty())
+                CHECK(ba.neighborLinks.front().fromEdge == fa.neighborLinks.front().fromEdge && ba.neighborLinks.front().innerX == 7);
+            CHECK(back.FerryTerminals().back().links.front().currentB == 6);
+            CHECK(back.FerryTerminalByDeparture(1, 7) == &back.FerryTerminals().back());
+            CHECK(back.FerryTerminalByArrival(2, 7) == &back.FerryTerminals().back());
+        }
         if (sc4::cSC4DBSegment* seg = open(again, true)) {
             sc4::cISC4DBSegmentOStream* os = nullptr;
             CHECK(seg->OpenOStream(key, &os, true));
@@ -1270,6 +1341,99 @@ int main() {
         acc.CheckForAccident();
         CHECK(host.accidents.size() == 1 && host.accidents[0] == (std::array<std::uint32_t, 4>{21, 21, 2, 10000}));
         CHECK(host.accidentMessages.size() == 1 && host.accidentMessages[0] == std::make_pair(21, 21));
+    }
+
+    // ==== ferries (traffic-network.md §4.9): two terminals on one lake and a neighbour's water connection ====
+    {
+        // 8 x 8 city: land x 0..3, water x 4..7 (one body, 10 m deep)
+        struct GridCity final : sc4::ISimGridCity {
+            std::int32_t CitySizeXInCells() const override { return 8; }
+            std::int32_t CitySizeZInCells() const override { return 8; }
+            float CellSizeXMeters() const override { return 16.0f; }
+            float CellSizeZMeters() const override { return 16.0f; }
+        } gridCity;
+        sc4::SetSimGridCity(&gridCity);
+        FerryWater8 water;
+        Host fh;
+        fh.cellsX = fh.cellsZ = 8;
+        cSC4TrafficSimulator ferries(&fh, &random);
+        FakeLot lotA, lotB, lotC;
+        SetUpFerries(fh, water, ferries, lotA, lotB);   // the neighbour connection (8, 3) has the inner cell (7, 3)
+        CHECK(ferries.Init());
+        CHECK(ferries.WaterPathFinder() != nullptr);
+        {   // the city's post-init message makes the whole depth map dirty (built at the first search)
+            cRZMessage2Standard init;
+            init.SetType(kWaterPathMsgPostCityInit);
+            if (ferries.WaterPathFinder()) ferries.WaterPathFinder()->DoMessage(&init);
+        }
+        ferries.DoLotActivated(&lotA);
+        CHECK(ferries.FerryTerminals().size() == 1 && ferries.GetFerryTerminalCount(0) == 1);
+        ferries.DoLotActivated(&lotB);
+        CHECK(ferries.FerryTerminals().size() == 2 && ferries.GetFerryTerminalCount(0) == 2 && ferries.GetFerryTerminalCount(1) == 0);
+        const auto* a = ferries.FerryTerminalByDeparture(1, 0);
+        const auto* b = ferries.FerryTerminalByDeparture(1, 7);
+        CHECK(a && b && ferries.FerryTerminalByArrival(2, 7) == b);
+        if (a && b) {
+            CHECK(a->waterX == 4 && a->waterZ == 0 && b->waterX == 4 && b->waterZ == 7);
+            CHECK(a->travelTypes == 1 && a->lotX == 1 && a->lotZ == 0);
+            // linked both ways: 8 cells of water route = cost 0.08, keyed by the other's departure cell, landing on its arrival cell
+            CHECK(a->links.size() == 1 && b->links.size() == 1);
+            if (!a->links.empty() && !b->links.empty()) {
+                const auto& ab = a->links.front();
+                CHECK(ab.key == ((1 << 8) | 7) && ab.arrivalX == 2 && ab.arrivalZ == 7);
+                CHECK(std::fabs(ab.cost - 0.08f) < 1e-6f);
+                CHECK((ab.route == std::vector<std::uint8_t>{0x00, 4, 0, 0x40, 7, 0xff, 0x3f}));   // seven steps of z+1 (3)
+                CHECK(b->links.front().key == ((1 << 8) | 0));
+                CHECK((b->links.front().route == std::vector<std::uint8_t>{0x00, 4, 7, 0x40, 7, 0x55, 0x15}));   // z-1 (1)
+                CHECK(ferries.GetFerryRouteBetweenTiles(1, 0, 2, 7) == &ab.route);
+            }
+            // the neighbour link: off-map (8, 3), edge (7, 3), 7 cells
+            CHECK(a->neighborLinks.size() == 1 && b->neighborLinks.size() == 1);
+            if (!a->neighborLinks.empty()) {
+                const auto& n = a->neighborLinks.front();
+                CHECK(n.x == 8 && n.z == 3 && n.innerX == 7 && n.innerZ == 3 && std::fabs(n.cost - 0.07f) < 1e-6f);
+                CHECK(!n.toEdge.empty() && !n.fromEdge.empty());
+                CHECK(ferries.GetFerryRouteBetweenTiles(1, 0, 8, 3) == &n.toEdge);
+                CHECK(ferries.GetFerryRouteBetweenTiles(8, 3, 2, 0) == &n.fromEdge);
+            }
+            // the rebuild over the lot gave the departure cell the ferry wormhole bit and records for networks 0 and 1
+            CHECK(ferries.CellConnections(1, 0).wormhole & 4);
+            CHECK(ferries.GetNetworkInfo(0, 1, 0) && ferries.GetNetworkInfo(1, 1, 0));
+            CHECK(!(ferries.CellConnections(2, 0).wormhole & 4));
+            // ApplyRoute: walk onto A's departure cell, jump (bit 7) to B's arrival cell: riders and the outbound link counter
+            const std::vector<std::uint8_t> route{0x00, 1, 1, 0x80, 1, 0, 0x80, 2, 7};
+            ferries.ApplyRoute(route, 5, SC4RectInt32{1, 2, 1, 2}, 2, 6, 0, 0);
+            CHECK(a->ridersCurrent == 5);
+            CHECK(a->links.front().currentA == 5 && a->links.front().currentB == 0);
+            ferries.ApplyRoute(route, 3, SC4RectInt32{1, 2, 1, 2}, 2, 6, 2, 0);   // both ways: riders twice, B's link back counts too
+            CHECK(a->ridersCurrent == 11);
+            CHECK(a->links.front().currentA == 8 && b->links.front().currentB == 3);
+            // a trip from the neighbour: off-map start (8, 3), first cell A's arrival cell beside it on one axis only -> no (8,3)
+            // corner on z: (2,0) is not beside x 8; a start rect (3, 0) is beside along x: A's neighbour link counts
+            const std::vector<std::uint8_t> inbound{0x00, 2, 0};
+            ferries.ApplyRoute(inbound, 4, SC4RectInt32{3, 0, 3, 0}, 2, 0, 0, 0);
+            CHECK(a->neighborLinks.front().currentA == 0);   // (3, 0) is neither the off-map cell nor the edge cell of the link
+        }
+        // removal: the lot goes, its terminal and the link back to it go
+        ferries.DoLotDeactivated(&lotA);
+        CHECK(ferries.FerryTerminals().size() == 1 && ferries.GetFerryTerminalCount(0) == 1);
+        CHECK(ferries.FerryTerminalByDeparture(1, 0) == nullptr && ferries.FerryTerminalByArrival(2, 0) == nullptr);
+        if (const auto* left = ferries.FerryTerminalByDeparture(1, 7)) CHECK(left->links.empty() && left->neighborLinks.size() == 1);
+        // a lot without all three markers is no terminal; a car ferry (type 1) carries Walk and Car
+        lotC.rect = {0, 3, 1, 4};
+        fh.props.push_back({0x2c520000, 0, 3});
+        ferries.DoLotActivated(&lotC);
+        CHECK(ferries.FerryTerminals().size() == 1);
+        cSCPropertyHelp::SetPropertyValue(&fh.lotHolder, 0x0bd86fd3, std::uint8_t(2));   // type 2 never activates
+        ferries.DoLotActivated(&lotA);
+        CHECK(ferries.FerryTerminals().size() == 1);
+        cSCPropertyHelp::SetPropertyValue(&fh.lotHolder, 0x0bd86fd3, std::uint8_t(1));
+        ferries.DoLotActivated(&lotA);
+        CHECK(ferries.FerryTerminals().size() == 2 && ferries.GetFerryTerminalCount(1) == 1);
+        if (const auto* car = ferries.FerryTerminalByDeparture(1, 0)) CHECK(car->travelTypes == 3 && car->links.empty());   // other type: no link
+        ferries.Shutdown();
+        CHECK(ferries.WaterPathFinder() == nullptr);
+        sc4::SetSimGridCity(nullptr);
     }
 
     if (failures) return 1;

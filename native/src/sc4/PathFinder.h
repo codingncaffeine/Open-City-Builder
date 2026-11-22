@@ -147,6 +147,16 @@ public:
     virtual float NearestDestinationAttractiveness() { return 0.75f; }
     virtual float CongestionSpeedFactor(float ratio) { (void)ratio; return 1.0f; }   // the congestion -> inverse speed curve
     virtual bool StrikeOn() { return false; }
+    // ---- ferries (traffic-network.md §2.6, pathfinder.md §4.6 / §4.8.3); defaults: no terminals ----
+    // The ferry edges of a departure cell for travel type t, in the simulator's list order: each terminal link (to the target's
+    // arrival cell) and then each neighbour link (to its in-city edge cell E, from its off-map cell O). Empty when the cell's
+    // terminal is missing or does not carry t.
+    struct FerryHop { int x = 0, z = 0; int offX = 0, offZ = 0; float cost = 0.0f; bool exit = false; };
+    virtual void FerryHops(int x, int z, int t, std::vector<FerryHop>& out) { (void)x; (void)z; (void)t; out.clear(); }
+    // Every terminal's neighbour links whose off-map cell is (offX, offZ), in list order: the terminal's arrival cell, travel mask
+    // and the link cost.
+    struct FerryArrival { int x = 0, z = 0; std::uint16_t mask = 0; float cost = 0.0f; };
+    virtual void FerryArrivals(int offX, int offZ, std::vector<FerryArrival>& out) { (void)offX; (void)offZ; out.clear(); }
 };
 
 class cISC4PathFinder : public cIGZUnknown {
@@ -299,6 +309,7 @@ private:
     std::uint8_t reversalDirection_ = 0;           // +0x116
     std::uint32_t expanded_ = 0;                   // nodes expanded by the last FindPath (diagnostics)
     std::vector<int> xDistance_, zDistance_;       // +0x118 / +0x130
+    std::vector<IPathFinderHost::FerryHop> ferryHops_;   // scratch for the ferry edges of a departure cell
     TripNodePriorityQueue queue_;                  // +0x158
     TripNodeHashMap nodes_;                        // +0x178
 };

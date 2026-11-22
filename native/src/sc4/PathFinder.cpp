@@ -428,8 +428,7 @@ bool cSC4PathFinder::FindNearestStandardDest() {
 }
 
 // §4.6: rings 1..MaxDistanceOriginToNetwork around the start rect (clamped to the city, cells diagonal to the rect skipped), one
-// start node per (cell, starting travel type, allowed entry side with exits). The ferry-arrival fallback for an off-map start is
-// not modelled (no ferry terminals natively).
+// start node per (cell, starting travel type, allowed entry side with exits); then the ferry-arrival fallback for an off-map start.
 bool cSC4PathFinder::CreateStartNodes() {
     const float* costs = startingCosts_ ? startingCosts_ : host_->DefaultStartingCosts();
     if (!costs) costs = kZeroCosts;
@@ -490,6 +489,26 @@ bool cSC4PathFinder::CreateStartNodes() {
         }
         if (ring.z1 != ring.z0)
             for (int x = ring.x0; x <= ring.x1; ++x) visit(x, ring.z1);
+    }
+    // the off-map start fallback: a trip from a neighbour may begin at the arrival cell of a terminal whose neighbour link leaves from
+    // the start cell. No check for an existing node: each match overwrites the node's costs and pushes it again (PF5).
+    if (!created && !startInCity) {
+        std::vector<IPathFinderHost::FerryArrival> arrivals;
+        host_->FerryArrivals(x0, z0, arrivals);
+        for (const IPathFinderHost::FerryArrival& a : arrivals)
+            for (int t = 0; t < 9; ++t) {
+                if (!((startMask >> t) & 1) || !((a.mask >> t) & 1)) continue;
+                const std::uint32_t key = (0x10u << 24) | (std::uint32_t(t) << 16) | (std::uint32_t(a.x & 0xff) << 8) | std::uint32_t(a.z & 0xff);
+                TripNode* node = nodes_.GetNode(key);
+                node->cost = costs[t] + a.cost;
+                node->score = Heuristic(a.x, a.z) * heuristicWeight_ + node->cost;
+                node->parent = nullptr;
+                node->closed = 0;
+                node->direction = 0;
+                node->inQueue = 1;
+                queue_.Push(node);
+                created = true;
+            }
     }
     return created;
 }
@@ -669,11 +688,21 @@ int cSC4PathFinder::FindPath() {
                 }
             }
             // §4.8.3 wormholes. A tunnel portal (bit 2) leads to the other portal, entered from the same side, at the tunnel's cost
-            // for the travel type. Ferries are not modelled natively yet; the subway-station bit is never set.
-            if (host_->Wormhole(x, z) & 2) {
+            // for the travel type. The subway-station bit is never set. A ferry departure cell (bit 4; not during a strike, not with
+            // trip flag 16) leads to each linked terminal's arrival cell (side 0) and out of the city along each neighbour link: the
+            // exit node is given the edge cell E, the side EdgeTo(O -> E) and the exit flag, so its cell is O (§4.7).
+            const std::uint8_t wormhole = host_->Wormhole(x, z);
+            if (wormhole & 2) {
                 int ox = 0, oz = 0;
                 float cost = 0.0f;
                 if (host_->Tunnel(x, z, t, ox, oz, cost)) AddTripNode(ox, oz, std::uint8_t(s), std::uint8_t(t), cost, c, costLimit_[t], false);
+            }
+            if ((wormhole & 4) && !strike && !(tripFlags_ & 16)) {
+                host_->FerryHops(x, z, t, ferryHops_);
+                for (const IPathFinderHost::FerryHop& hop : ferryHops_) {
+                    if (hop.exit) AddTripNode(hop.x, hop.z, EdgeTo(hop.offX, hop.offZ, hop.x, hop.z), std::uint8_t(t), hop.cost, c, costLimit_[t], true);
+                    else AddTripNode(hop.x, hop.z, 0, std::uint8_t(t), hop.cost, c, costLimit_[t], false);
+                }
             }
             // §4.8.4 park-and-ride return
             if ((tripFlags_ & 8) && x == reversalX_ && z == reversalZ_) {

@@ -46,6 +46,7 @@
 #include "gz/WinUtils.h"
 #include "app/NativeNetworkManager.h"
 #include "app/NativeNetworkTool.h"
+#include "app/NativePlaceLot.h"
 #include "app/NativeWinControls.h"
 #include "app/NativeNetworkLots.h"
 #include "app/NativeUnderground.h"
@@ -1398,6 +1399,12 @@ int RunScenario(const std::string& path) {
             std::string id;
             words >> id;
             native::NativePuzzleReport(id.empty() ? 0u : static_cast<std::uint32_t>(std::strtoul(id.c_str(), nullptr, 16)));
+        } else if (command == "placelot") {   // placelot ID|b:BUILDING X Z FACING [X1 Z1]: the place-lot tool's own check and placement (hex ids)
+            std::string id;
+            int x = 0, z = 0, facing = 0, x1 = -1, z1 = -1;
+            words >> id >> x >> z >> facing;
+            if (!(words >> x1 >> z1)) x1 = z1 = -1;   // optional: search the rectangle up to (x1, z1); facing -1 = any
+            native::NativePlaceLotAt(id, x, z, facing, x1, z1);
         } else if (command == "puzzle") {   // puzzle ID X Z ROT: the intersection tool's own search, dry run and placement at a cell (hex ID)
             std::string id;
             int x = 0, z = 0, rotation = 0;
@@ -1432,6 +1439,8 @@ int RunScenario(const std::string& path) {
         } else if (command == "tunnels") {   // tunnels: every tunnel portal, its model, its other end and its paths
             native::NativeTunnelReport();
             native::NativeTrafficTunnelReport();
+        } else if (command == "ferries") {   // ferries: the ferry terminals, their links, riders and counters (read-only)
+            native::NativeFerryReport();
         } else if (command == "accidentcheck") {   // accidentcheck N: up to N traffic accident checks, until one makes an accident
             int tries = 1;
             words >> tries;

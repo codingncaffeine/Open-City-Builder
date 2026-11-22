@@ -349,8 +349,7 @@ bool cSC4TrafficSimulator::WriteFreshCityRecord(cIGZOStream& stream) const {
         stream.SetUint32(typeCountsPublished_[std::size_t(i)]);
         stream.SetUint32(typeCountsBuilding_[std::size_t(i)]);
     }
-    stream.SetUint32(0);                                     // ferry total
-    stream.SetUint32(0);                                     // ferry terminals
+    WriteFerryTerminals(stream, 0x29);                       // the ferry total and the ferry terminals
     return !stream.GetError();
 }
 
@@ -555,31 +554,57 @@ bool cSC4TrafficSimulator::Read(cIGZIStream& stream) {
         t.GetUint32(stream, published); t.GetUint32(stream, building);
         if (i < 9) { L.typeCountsPublished[std::size_t(i)] = published; L.typeCountsBuilding[std::size_t(i)] = building; }
     }
-    if (version > 0x26) t.GetUint32(stream, u32);
-    if (version <= 0x1d) return L.valid = !stream.GetError();               // no ferry terminals before version 0x1e
-    t.GetUint32(stream, u32);                                        // ferry terminals
-    many(u32, [&] {
-        if (version < 0x20) t.GetUint16(stream, u16);
-        for (int i = 0; i < 6; ++i) t.GetUint8(stream, u8);
-        t.GetUint8(stream, u8);
-        t.GetUint16(stream, u16); t.GetUint16(stream, u16); t.GetUint16(stream, u16);
-        if (version >= 0x26) { t.GetUint8(stream, u8); t.GetUint8(stream, u8); }
-        std::vector<std::uint8_t> bytes;
-        t.GetUint32(stream, u32);                                    // links to other terminals
+    // the ferry rider total (version > 0x26) and the ferry terminals (version >= 0x1e): read into the live tables, written back from them
+    if (version > 0x26) stream.GetUint32(ferryRiderTotal_);
+    ferryTerminals_.clear();
+    ferryDepartures_.clear();
+    ferryArrivals_.clear();
+    ferryTerminalCount_.fill(0);
+    ferryPassValid_ = false;
+    if (version >= 0x1e) {
+        stream.GetUint32(u32);
         many(u32, [&] {
-            t.GetFloat32(stream, f32); t.GetSint16(stream, s16); t.GetSint16(stream, s16); t.GetUint16(stream, u16);
-            t.GetBytes(stream, bytes, kStreamVectorLimit);
-            if (version >= 0x24) for (int i = 0; i < 4; ++i) t.GetUint16(stream, u16);
+            FerryTerminal ft;
+            if (version < 0x20) stream.GetUint16(u16);
+            stream.GetUint8(ft.departureX); stream.GetUint8(ft.departureZ); stream.GetUint8(ft.arrivalX); stream.GetUint8(ft.arrivalZ);
+            stream.GetUint8(ft.waterX); stream.GetUint8(ft.waterZ);
+            stream.GetUint8(ft.type);
+            stream.GetUint16(ft.travelTypes); stream.GetUint16(ft.ridersLast); stream.GetUint16(ft.ridersCurrent);
+            if (version >= 0x26) { stream.GetUint8(ft.lotX); stream.GetUint8(ft.lotZ); }
+            auto bytes = [&](std::vector<std::uint8_t>& v) {
+                std::uint32_t n = 0;
+                stream.GetUint32(n);
+                v.clear();
+                if (n < kStreamVectorLimit) { v.resize(n); if (n) stream.GetVoid(v.data(), n); }
+            };
+            std::uint32_t links = 0;
+            stream.GetUint32(links);
+            many(links, [&] {
+                FerryTerminalLink l;
+                stream.GetFloat32(l.cost); stream.GetSint16(l.arrivalX); stream.GetSint16(l.arrivalZ); stream.GetUint16(l.key);
+                bytes(l.route);
+                if (version >= 0x24) { stream.GetUint16(l.lastA); stream.GetUint16(l.lastB); stream.GetUint16(l.currentA); stream.GetUint16(l.currentB); }
+                ft.links.push_back(std::move(l));
+            });
+            stream.GetUint32(links);
+            many(links, [&] {
+                FerryNeighborLink l;
+                stream.GetFloat32(l.cost);
+                stream.GetSint16(l.x); stream.GetSint16(l.z); stream.GetSint16(l.innerX); stream.GetSint16(l.innerZ);
+                bytes(l.toEdge);
+                if (version >= 0x1f) bytes(l.fromEdge);
+                if (version >= 0x24) { stream.GetUint16(l.lastA); stream.GetUint16(l.lastB); stream.GetUint16(l.currentA); stream.GetUint16(l.currentB); }
+                ft.neighborLinks.push_back(std::move(l));
+            });
+            if (ft.type < ferryTerminalCount_.size()) ++ferryTerminalCount_[ft.type];
+            ferryTerminals_.push_back(std::move(ft));
+            auto it = std::prev(ferryTerminals_.end());
+            ferryDepartures_[it->DepartureKey()] = it;
+            ferryArrivals_[it->ArrivalKey()] = it;
         });
-        t.GetUint32(stream, u32);                                    // links to neighbour connections
-        many(u32, [&] {
-            t.GetFloat32(stream, f32);
-            for (int i = 0; i < 4; ++i) t.GetSint16(stream, s16);
-            t.GetBytes(stream, bytes, kStreamVectorLimit);
-            if (version >= 0x1f) t.GetBytes(stream, bytes, kStreamVectorLimit);
-            if (version >= 0x24) for (int i = 0; i < 4; ++i) t.GetUint16(stream, u16);
-        });
-    });
+        if (std::getenv("SC4_TRAFFICDEBUG")) std::fprintf(stderr, "traffic: the save holds %zu ferry terminals\n", ferryTerminals_.size());
+    }
+    t.Live([this, version](cIGZOStream& out) { WriteFerryTerminals(out, version); });
     L.valid = !stream.GetError();
     return L.valid;
 }

@@ -16,4 +16,5 @@ sc4::cSC4SimGrid<std::uint8_t>* NativeTrafficCommercialMap();
 std::uint32_t NativeTrafficConnectedDestinationCount(const sc4::cISCPropertyHolder* lot, int kind);
 
 void NativeAccidentCheck(int tries);   // kit command `accidentcheck N`
+void NativeFerryReport();              // kit command `ferries`
 }  // namespace native

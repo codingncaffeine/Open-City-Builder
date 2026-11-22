@@ -157,6 +157,19 @@ public:
         cost = tunnel->cost[std::size_t(t)];
         return true;
     }
+    void FerryHops(int x, int z, int t, std::vector<FerryHop>& out) override {
+        out.clear();
+        const FerryTerminal* terminal = s_.FerryTerminalByDeparture(x, z);
+        if (!terminal || unsigned(t) >= 9 || !((terminal->travelTypes >> t) & 1)) return;
+        for (const FerryTerminalLink& link : terminal->links) out.push_back({link.arrivalX, link.arrivalZ, 0, 0, link.cost, false});
+        for (const FerryNeighborLink& link : terminal->neighborLinks) out.push_back({link.innerX, link.innerZ, link.x, link.z, link.cost, true});
+    }
+    void FerryArrivals(int offX, int offZ, std::vector<FerryArrival>& out) override {
+        out.clear();
+        for (const FerryTerminal& terminal : s_.FerryTerminals())
+            for (const FerryNeighborLink& link : terminal.neighborLinks)
+                if (link.x == offX && link.z == offZ) out.push_back({terminal.arrivalX, terminal.arrivalZ, terminal.travelTypes, link.cost});
+    }
     bool CellNetwork(int n, int x, int z, float& inverse, std::uint8_t& type, float& extra) override {
         const NetworkInfo* info = s_.GetNetworkInfo(n, x, z);
         if (!info) return false;
@@ -245,6 +258,7 @@ bool cSC4TrafficSimulator::Init() {
     for (std::uint32_t m : {0x99ef1142u, 0x99ef1143u, 0x26d31ec1u, 0xe8bda2e7u, 0xc53d10aau, 0x8a0d15dau, 0xea0d163eu, 0x08dac3e7u, 0xc2c09554u})
         host_->AddNotification(target, m);
     host_->CityCellCount(cellsX_, cellsZ_);
+    InitWaterPathFinder();                   // i386 Init: the boats' route finder (+0x118)
     nextAccidentCheck_ = 0;                  // i386 Init: the accident clock counts seconds from here
     accidentTimer_.SetUnits(cRZTimer::kSeconds);
     accidentTimer_.Start();
@@ -313,6 +327,7 @@ bool cSC4TrafficSimulator::Shutdown() {
     if (!initialized_) return true;
     initialized_ = false;
     sources_.clear();
+    ShutdownWaterPathFinder();
     for (cSC4PathFinder** pf : {&pf_, &pf2_})
         if (*pf) { (*pf)->Release(); *pf = nullptr; }
     auto drop = [](auto*& grid) { if (grid) { grid->Release(); grid = nullptr; } };
@@ -485,6 +500,8 @@ void cSC4TrafficSimulator::DoConnectionsChanged(int x1, int z1, int x2, int z2) 
     for (int x = std::max(r.x0 - 1, 0); x <= std::min(r.x1 + 1, cellsX_ - 1); ++x)
         for (int z = std::max(r.z0 - 1, 0); z <= std::min(r.z1 + 1, cellsZ_ - 1); ++z)
             if (TunnelAt(x, z)) CellConnections(x, z).wormhole |= 2;
+    // 6. the ferries (traffic-network.md §4.9.2), over the same rectangle
+    FerryConnectionsChanged(SC4RectInt32{std::max(r.x0 - 1, 0), std::max(r.z0 - 1, 0), std::min(r.x1 + 1, cellsX_ - 1), std::min(r.z1 + 1, cellsZ_ - 1)});
     networkChanged_ = subnetworksStale_ = true;
     continueSearch_ = false;
 }
@@ -869,7 +886,13 @@ void cSC4TrafficSimulator::DoNetworkOccupantChanged(cSC4NetworkOccupant* occupan
 
 void cSC4TrafficSimulator::DoLotActivated(ITrafficLot* lot) {
     if (!lot) return;
-    if (ActivateTransitSwitch(lot)) {   // traffic-network.md §4.7.1: a station's lot, then the rebuild over it
+    // traffic-network.md §4.7.1 / §4.9.1: a station's lot or a ferry terminal's (its building has property 0x0bd86fd3, whether or
+    // not the terminal is accepted), then the rebuild over the lot
+    const bool station = ActivateTransitSwitch(lot);
+    const cISCPropertyHolder* building = host_->LotBuildingProperties(lot);
+    const bool ferry = building && building->HasProperty(0x0bd86fd3);
+    if (ferry) DoFerryTerminalActivated(lot);
+    if (station || ferry) {
         SC4RectInt32 rect;
         lot->OccupiedRect(rect);
         DoConnectionsChanged(rect.x0, rect.z0, rect.x1, rect.z1);
@@ -911,6 +934,7 @@ void cSC4TrafficSimulator::DoLotDeactivated(ITrafficLot* lot) {
     SC4RectInt32 rect;
     lot->OccupiedRect(rect);
     if (DeactivateTransitSwitch(rect)) DoConnectionsChanged(rect.x0 - 1, rect.z0 - 1, rect.x1 + 1, rect.z1 + 1);   // §4.7.5
+    RemoveFerryTerminal(rect);   // §4.9.4
     if (cycleState_ != 10) {
         const std::uint8_t bits = DestinationByte(rect.x0, rect.z0);
         for (int k = 0; k < 4; ++k)
@@ -1064,6 +1088,7 @@ void cSC4TrafficSimulator::ResumeLoadedCycle() {
     if (state == 12 || state == 13) state = 8;
     if (state == 1 || state == 14 || state > 19) state = 0;
     cycleState_ = state;
+    if (state == 19) RestartFerryPass();   // traffic-network.md §4.9.3: re-route every pair after load, no counter rotation
     std::size_t held = 0;
     bool found = false;
     if (state >= 15 && state <= 18) {
@@ -1096,6 +1121,7 @@ void cSC4TrafficSimulator::EnterState(std::uint32_t state) {
             if (state == 18) typeCountsBuilding_.fill(0);
             break;
         case 15: case 1: ResetSources(); break;
+        case 19: EnterFerryState(); break;
         case 2:
             for (auto& row : statsWork_) row = TrafficStatsRow{};
             statsCompare_.fill(-1.0f);
@@ -1133,9 +1159,7 @@ bool cSC4TrafficSimulator::WorkOnSimCycle() {
         case 8: FinalCalculations(); break;
         case 12: UpdateSubnetworks(); break;
         case 13: UpdateSubnetworkInfo(); break;
-        case 19:   // ferries: PARTIAL, nothing to do natively yet
-            SC4_UNWIRED("cSC4TrafficSimulator::WorkOnSimCycle: cycle state 19 (ferry routes) not ported");
-            break;
+        case 19: finished = WorkOnFerryRoutes(units); break;
         default: break;
     }
     if (!finished) return false;
@@ -1989,6 +2013,27 @@ void cSC4TrafficSimulator::ApplyRoute(const std::vector<std::uint8_t>& route, st
     }
     float income = 0;
     float fees = 0;                 // what the switches on the route charge (toll booths)
+    auto inCity = [&](int x, int z) { return unsigned(x) < unsigned(cellsX_) && unsigned(z) < unsigned(cellsZ_); };
+    auto sameCell = [](int linkX, int linkZ, int x, int z) { return std::uint8_t(linkX) == std::uint8_t(x) && std::uint8_t(linkZ) == std::uint8_t(z); };
+    auto countCrossing = [&](std::uint16_t& outbound, std::uint16_t& back, std::uint32_t qi) {   // u16 counters wrap
+        if (mode != 1) outbound = std::uint16_t(outbound + qi);
+        if (mode != 0) back = std::uint16_t(back + qi);
+    };
+    // TS16: a crossing from a neighbour city (the departure cell is not on the route): the first cell is beside the start rect along
+    // exactly one axis, is a terminal's arrival cell, and the terminal has a neighbour link from the rect's corner
+    {
+        const RouteRecord& first = records[0];
+        const bool besideX = first.x == r.x0 - 1 || first.x == r.x1 + 1, besideZ = first.z == r.z0 - 1 || first.z == r.z1 + 1;
+        if (besideX != besideZ && inCity(first.x, first.z) && first.type <= 8)
+            if (FerryTerminal* t = FerryByArrival(first.x, first.z))
+                for (FerryNeighborLink& link : t->neighborLinks)
+                    if (sameCell(link.x, link.z, r.x0, r.z0) || sameCell(link.innerX, link.innerZ, r.x0, r.z0)) {
+                        const float q = first.type == 1 ? nCar : n;
+                        countCrossing(link.currentA, link.currentB, RoundHalfEven(q));
+                        income = q * tunables_.value_f70;   // a store, as the original (income is still 0)
+                        break;
+                    }
+    }
     std::uint32_t lastSwitch = 0;   // traffic-simulator.md §4.5 step 2: a switch counts once each time the route comes onto it
     int lastType = records.back().type;
     for (std::size_t i = 0; i < records.size(); ++i) {
@@ -2038,6 +2083,31 @@ void cSC4TrafficSimulator::ApplyRoute(const std::vector<std::uint8_t>& route, st
             } else if (!last) {
                 return;   // quirk: an undefined side mid-route ends ApplyRoute (income lost)
             }
+            // 4. ferry legs: a departure cell whose next record is a jump (TS16)
+            if (!last && records[i + 1].jumped)
+                if (FerryTerminal* t = FerryByDeparture(rec.x, rec.z)) {
+                    t->ridersCurrent = std::uint16_t(t->ridersCurrent + qi);
+                    if (mode == 2) t->ridersCurrent = std::uint16_t(t->ridersCurrent + qi);
+                    income = income + q * tunables_.value_f70;
+                    const RouteRecord& next = records[i + 1];
+                    if (FerryTerminal* t2 = inCity(next.x, next.z) ? FerryByArrival(next.x, next.z) : nullptr) {
+                        auto findLink = [](FerryTerminal& from, std::uint16_t key) -> FerryTerminalLink* {
+                            for (FerryTerminalLink& l : from.links) if (l.key == key) return &l;
+                            return nullptr;
+                        };
+                        FerryTerminalLink* link = findLink(*t, t2->DepartureKey());
+                        if (link && mode == 1) link->currentB = std::uint16_t(link->currentB + qi);
+                        if (link && mode != 1) link->currentA = std::uint16_t(link->currentA + qi);
+                        if (mode == 2)   // the reverse crossing, looked up even when the outbound link is missing
+                            if (FerryTerminalLink* back = findLink(*t2, t->DepartureKey())) back->currentB = std::uint16_t(back->currentB + qi);
+                    } else {
+                        for (FerryNeighborLink& link : t->neighborLinks)
+                            if (sameCell(link.x, link.z, next.x, next.z) || sameCell(link.innerX, link.innerZ, next.x, next.z)) {
+                                countCrossing(link.currentA, link.currentB, qi);
+                                break;
+                            }
+                    }
+                }
         }
         // 5. income
         income += q * tunables_.values_dfc[std::size_t(t)];

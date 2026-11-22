@@ -673,4 +673,69 @@ void InstallPlaceLotHost(sc4::cSC4View3DWin& view) {
     SetPlaceLotHost(&g_host);
 }
 
+void NativePlaceLotAt(const std::string& id, int x, int z, int facing, int x1, int z1) {
+    std::uint32_t lot = 0;
+    if (id.rfind("b:", 0) == 0) {
+        const std::uint32_t building = static_cast<std::uint32_t>(std::strtoul(id.c_str() + 2, nullptr, 16));
+        std::uint32_t best = 0;
+        for (const auto& [configId, configuration] : cSC4LotConfigurationManager::GetLotConfigurationMap()) {
+            if (!configuration) continue;
+            for (const cSC4LotConfigurationObject& o : configuration->GetLotConfigurationObjectArray())
+                if (o.type == 0 && std::find(o.extra.begin(), o.extra.end(), building) != o.extra.end() && (best == 0 || configId < best))
+                    best = configId;
+        }
+        lot = best;
+    } else {
+        lot = static_cast<std::uint32_t>(std::strtoul(id.c_str(), nullptr, 16));
+    }
+    if (!g_view || lot == 0) {
+        std::printf("placelot %s: %s\n", id.c_str(), g_view ? "no lot configuration" : "no view");
+        return;
+    }
+    auto* tool = new cSC4ViewInputControlPlaceLot(0, lot, 0, false);
+    tool->AddRef();
+    g_view->SetCurrentViewInputControl(tool, 2);
+    cSTETerrain* terrain = TerrainOf();
+    SC4Rect<int> rect{};
+    bool valid = false, can = false;
+    std::int64_t cost = 0;
+    int code = 0;
+    cRZString error;
+    cS3DVector3 position;
+    // one cell and facing, or (x1, z1 given) the first cell of the rectangle, row by row, and facing (all four when facing < 0)
+    const int lastX = x1 < 0 ? x : x1, lastZ = z1 < 0 ? z : z1;
+    if (facing == -2) {   // list only: every cell and facing of the rectangle the tool accepts
+        int listed = 0;
+        for (int cz = z; cz <= lastZ; ++cz)
+            for (int cx = x; cx <= lastX; ++cx)
+                for (int f = 0; f < 4; ++f) {
+                    const float px = static_cast<float>(cx) * 16.0f + 8.0f, pz = static_cast<float>(cz) * 16.0f + 8.0f;
+                    position = cS3DVector3(px, terrain ? terrain->GetAltitude(px, pz) : 0.0f, pz);
+                    if (tool->CanPlaceLot(position, f, rect, valid, cost, code, error)) {
+                        std::printf("placelot %08x fits at %d,%d facing %d rect %d,%d..%d,%d\n", lot, cx, cz, f, rect.x0, rect.z0, rect.x1, rect.z1);
+                        ++listed;
+                    }
+                }
+        std::printf("placelot %08x: %d places\n", lot, listed);
+        if (g_view->GetCurrentViewInputControl() == tool) g_view->RemoveCurrentViewInputControl(false);
+        tool->Release();
+        return;
+    }
+    for (int cz = z; cz <= lastZ && !can; ++cz)
+        for (int cx = x; cx <= lastX && !can; ++cx)
+            for (int f = facing < 0 ? 0 : facing; f <= (facing < 0 ? 3 : facing) && !can; ++f) {
+                const float px = static_cast<float>(cx) * 16.0f + 8.0f, pz = static_cast<float>(cz) * 16.0f + 8.0f;
+                position = cS3DVector3(px, terrain ? terrain->GetAltitude(px, pz) : 0.0f, pz);
+                can = tool->CanPlaceLot(position, f, rect, valid, cost, code, error);
+                if (can) { x = cx; z = cz; facing = f; }
+            }
+    const bool placed = can && tool->PlaceLot(position, facing, false, rect);
+    std::printf("placelot %08x at %d,%d facing %d: can %d valid %d code %d cost %lld placed %d rect %d,%d..%d,%d\n", lot, x, z, facing,
+                int(can), int(valid), code, static_cast<long long>(cost), int(placed), rect.x0, rect.z0, rect.x1,
+                rect.z1);
+    if (g_view->GetCurrentViewInputControl() == tool) g_view->RemoveCurrentViewInputControl(false);
+    tool->Release();
+}
+
 }  // namespace native
+

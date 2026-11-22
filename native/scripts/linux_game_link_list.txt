@@ -307,6 +307,8 @@ src/sc4/PowerSimulator.cpp
 src/sc4/ResidentialSimulator.cpp
 src/sc4/TrafficSimulator.cpp
 src/sc4/TrafficCycle.cpp
+src/sc4/TrafficFerries.cpp
+src/sc4/WaterPathFinder.cpp
 src/sc4/WinAuraAlert.cpp
 src/sc4/ProgressScreen.cpp
 src/sc4/cSC4ZoneManager.cpp
