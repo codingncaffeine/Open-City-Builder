@@ -1616,7 +1616,15 @@ int RunScenario(const std::string& path) {
             while (native::NativeSimDayNumber() - start < static_cast<std::uint32_t>(days) && NowMs() < end) { Frame(); Nap(); }
             const std::uint32_t passed = native::NativeSimDayNumber() - start;
             std::printf("scenario %d: %u days in %.0f ms\n", number, passed, NowMs() - began);
-            if (passed < static_cast<std::uint32_t>(days)) { std::printf("scenario %d: wait-days gave up\n", number); return 5; }
+            if (passed < static_cast<std::uint32_t>(days)) {
+                // why the days did not pass: the simulator's three pause counts (the player's, the hidden one of dialogs, the emergency one)
+                if (sc4::cSC4Simulator* simulator = native::CitySimulatorObject())
+                    std::printf("scenario %d: wait-days gave up (simulator paused %d, hidden pause %d, emergency pause %d)\n", number,
+                                simulator->IsPaused() ? 1 : 0, simulator->IsHiddenPaused() ? 1 : 0, simulator->IsEmergencyPaused() ? 1 : 0);
+                else
+                    std::printf("scenario %d: wait-days gave up (no simulator)\n", number);
+                return 5;
+            }
         } else if (command == "wait-region" || command == "wait-city") {
             int limit = 3000; words >> limit;
             const bool region = command == "wait-region";
