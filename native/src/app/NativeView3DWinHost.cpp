@@ -120,6 +120,12 @@ void NativeViewRemoveAllControls() {
 void NativeViewClearCursorText(std::uint32_t id) {
     if (sc4::cISC4View3DWin* view = CityView3DWin()) view->ClearCursorText(id);
 }
+// spView3DWin vslot 0x38 ChildAdd (i386): a window over the city view (the MySim's callout).
+void NativeViewAddChildWindow(cIGZWin* window) {
+    sc4::cISC4View3DWin* view = CityView3DWin();
+    cIGZWin* win = view ? view->AsIGZWin() : nullptr;
+    if (win && window) win->ChildAdd(window);
+}
 void NativeViewRemoveControl() {
     if (sc4::cISC4View3DWin* view = CityView3DWin()) view->RemoveCurrentViewInputControl(false);
 }

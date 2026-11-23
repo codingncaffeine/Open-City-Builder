@@ -191,8 +191,8 @@ constexpr cGZPersistResourceKey kDefaultPedExemplarKey{0x6534284a, 0xc96e6806, 0
 constexpr std::uint32_t kMySimExemplarIid = 0xa52160f5;              // spRM vslot 0x18 iid for the default exemplars
 constexpr std::uint32_t kPropertyModelResourceKey = 0x09c80416;      // cGZPersistResourceKey property (SetCar/SetPedestrian)
 constexpr std::uint32_t kPropertyBitmapId = 0xebfc5e5e;              // int property: the model button bitmap
-constexpr std::uint32_t kCalloutImageType = 0x46a006b0;              // cSLBuffer image of the residence callout
-constexpr std::uint32_t kCalloutImageGroup = 0x856ddbac;
+constexpr std::uint32_t kCalloutImageType = 0x856ddbac;              // cSLBuffer image of the residence callout
+constexpr std::uint32_t kCalloutImageGroup = 0x46a006b0;
 constexpr std::uint32_t kCalloutImageInstance = 0x14416190;
 
 class cISC4MySim;

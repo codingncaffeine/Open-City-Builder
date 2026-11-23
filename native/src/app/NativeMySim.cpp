@@ -62,6 +62,9 @@
 #include "sc4/MySim.h"
 #include "sc4/MyStreetSim.h"
 #include "sc4/MySimInputControls.h"
+#include "rz/cRZPoint.h"
+#include "app/NativeCatalogUi.h"
+#include "sc4/ISC4WinCalloutBox.h"
 #include "sc4/SLBuffer.h"
 #include "sc4/CitySituationManager.h"
 #include "sc4/RenderProperties.h"
@@ -94,6 +97,7 @@ sc4::cSC4ViewInputControl* NativeViewCurrentControl();                        //
 void NativeViewSetControl(sc4::cSC4ViewInputControl* control, int operation);
 void NativeViewRemoveControl();
 void NativeViewRemoveAllControls();
+void NativeViewAddChildWindow(cIGZWin* window);
 bool NativeCameraLookAt(const float pos[3], bool zoomIfFar);   // app/NativeCitySystems.cpp
 void NativeViewClearCursorText(std::uint32_t id);
 bool CityViewPickTerrain(int x, int y, float out[3], bool flag);   // app/NativeCitySystems.cpp
@@ -244,6 +248,39 @@ cISC4PathFinder* SharedPathFinder() {
     }
     return finder;
 }
+
+// The adapter that shows a cISC4WinCalloutBox through the IMySimCallout seam (cSC4MySim::ShowResidence i386 0x00541cf0 /
+// UpdateResidence): text font style, icon, background image (-1, -1), text, point of interest, and the window's ChildAdd on
+// the city view, ShowWindow, SendToBack and HideWindow.
+class CalloutView final : public IMySimCallout {
+public:
+    explicit CalloutView(cISC4WinCalloutBox* box) : box_(box) {}   // takes the box's reference
+    ~CalloutView() { if (box_) box_->Release(); }
+    bool QueryInterface(std::uint32_t iid, void** out) override { return box_->QueryInterface(iid, out); }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override { const std::uint32_t left = --refs_; if (left == 0) delete this; return left; }
+    void SetStyle(std::uint32_t style) override { box_->SetTextFontStyle(style); }                 // 0x2c
+    void SetOptions(int options) override { (void)options; box_->SetIcon(nullptr); }   // 0x30 SetIcon(0): ShowResidence passes 0
+    void SetImage(const cGZPersistResourceKey& key) override {
+        cSLBuffer image(key, 1, false);
+        if (cIGZBuffer* buffer = image.GetBuffer()) box_->SetBackgroundImage(buffer, -1, -1);   // 0x10
+    }
+    void SetText(const cIGZString& text) override { box_->SetText(text); }                       // 0x20
+    void SetScreenPosition(const float* xy) override {                                           // 0x3c
+        cRZPoint point;
+        point.x = static_cast<std::int32_t>(xy[0]);
+        point.y = static_cast<std::int32_t>(xy[1]);
+        box_->SetPointOfInterest(point);
+    }
+    void AddToView() override { NativeViewAddChildWindow(box_->AsIGZWin()); }
+    void Show() override { if (cIGZWin* w = box_->AsIGZWin()) w->ShowWindow(); }
+    void Activate() override { if (cIGZWin* w = box_->AsIGZWin()) w->SendToBack(); }
+    void Hide() override { if (cIGZWin* w = box_->AsIGZWin()) w->HideWindow(); }
+
+private:
+    cISC4WinCalloutBox* box_;
+    std::uint32_t refs_ = 0;
+};
 
 // The adapter that shows a cISC4PylonOccupant (iid 0xc9b6d7d6) through the IMySimPylon seam, slot for slot.
 class PylonView final : public IMySimPylon {
@@ -665,7 +702,13 @@ public:
         std::fprintf(stderr, "mysim: notification \"%s\": %s\n", title.ToChar(), body.ToChar());
     }
     bool CityName(cIGZString& out) override { cSC4City* c = HostCity(); if (!c) return false; c->GetCityName(out); return true; }
-    IMySimCallout* CreateCallout() override { SC4_UNWIRED("IMySimHost::CreateCallout (cSC4WinCalloutBox over the MySim residence)"); return nullptr; }
+    IMySimCallout* CreateCallout() override {   // operator new cSC4WinCalloutBox; one reference for the caller
+        cISC4WinCalloutBox* box = native::CreateCalloutBox();
+        if (!box) return nullptr;
+        auto* view = new CalloutView(box);
+        view->AddRef();
+        return view;
+    }
     // cSC4MySim::GetBitmapBuffer (i386 0x00543daa): the portrait {0x856ddbac, 0x46a006b0, id}, or without an id the image file
     // the sim names (the image loader 0xa2ffb5d3 at color type 8); one reference for the caller.
     bool LoadMySimBitmap(std::uint32_t bitmapId, const cIGZString* file, cIGZBuffer** out) override {
@@ -684,7 +727,7 @@ public:
         *out = buffer;
         return buffer != nullptr;
     }
-    bool CalloutImageAvailable() override { return false; }   // the callout is not native (CreateCallout)
+    bool CalloutImageAvailable() override { return true; }   // SetImage sets the image only when its cSLBuffer loads
     void ProjectPointToScreen(float xyz[3]) override { float out[3]; if (NativeProjectToViewport(xyz, out)) { xyz[0] = out[0]; xyz[1] = out[1]; xyz[2] = out[2]; } }
     void ReportSimEvent(const cIGZString& text, const float*) override { std::fprintf(stderr, "mysim: event %s\n", text.ToChar()); }
     cIGZMessageServer2* Messages() override { return SL::spMS2; }
