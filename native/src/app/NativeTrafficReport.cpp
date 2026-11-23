@@ -1,6 +1,7 @@
 // The kit runner's `cars`: the vehicle manager's traffic automata (read-only). How many follow a network path, the states,
 // behaviors and populate layers they are in, why a path-less one has none, and a few samples (the same automata on every
 // call) with their network piece, path key, path index and position, so successive calls show them advancing.
+#include <cmath>
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -103,6 +104,36 @@ void NativeCarReport(int samples) {
                     a->PathIndex(), path ? path->size() : 0u);
         if (path && !path->empty())
             std::printf(" path (%.1f, %.1f)->(%.1f, %.1f)", path->front().x, path->front().z, path->back().x, path->back().z);
+        {   // the leader chain: each car this one waits behind, until none, a repeat (a loop) or 12 steps
+            std::vector<const cSC4TrafficAutomaton*> chain{a};
+            const cSC4TrafficAutomaton* at = a;
+            bool loop = false;
+            while (chain.size() < 13) {
+                const cSC4TrafficAutomaton* next = dynamic_cast<const cSC4TrafficAutomaton*>(at->GetLeader());
+                if (!next) break;
+                if (std::find(chain.begin(), chain.end(), next) != chain.end()) { loop = true; break; }
+                chain.push_back(next);
+                at = next;
+            }
+            float gap = -1.0f;
+            if (chain.size() > 1) {
+                float q[3] = {0, 0, 0};
+                const_cast<cSC4TrafficAutomaton*>(chain[1])->GetPosition(q);
+                gap = std::sqrt((q[0] - p[0]) * (q[0] - p[0]) + (q[2] - p[2]) * (q[2] - p[2]));
+            }
+            std::printf(" leader %p gap %.1f safe %.1f radius %.1f chain %zu%s",
+                        chain.size() > 1 ? static_cast<const void*>(chain[1]) : nullptr, gap, a->GetSafeDistance(), a->GetRadius(),
+                        chain.size() - 1, loop ? " LOOP" : "");
+            if (chain.size() > 1) {
+                float q[3] = {0, 0, 0};
+                auto* leader = const_cast<cSC4TrafficAutomaton*>(chain[1]);
+                leader->GetPosition(q);
+                const cS3DVector3& o1 = a->Orientation();
+                const cS3DVector3& o2 = leader->Orientation();
+                std::printf(" leaderAt (%.1f, %.1f) dir (%.2f, %.2f) leaderDir (%.2f, %.2f) leaderPiece %p", q[0], q[2], o1.x, o1.z, o2.x, o2.z,
+                            static_cast<void*>(leader->GetNetworkOccupant()));
+            }
+        }
         const cS3DVector3& d = a->GetDispatchDestination();
         std::printf(" dest (%.1f, %.1f) occupant flags 0x%x saved %d init %d self %d reached %d flags 0x%x\n", d.x, d.z, a->GetFlags(), a->IsSavedFlagSet() ? 1 : 0, a->IsInitialized() ? 1 : 0,
                     a->GetSelfControlling() ? 1 : 0, a->GetReachedDestination() ? 1 : 0, static_cast<unsigned>(a->AutomataFlags()));

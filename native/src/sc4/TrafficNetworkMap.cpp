@@ -1152,6 +1152,8 @@ int cSC4TrafficNetworkMap::CheckIntersection(ITrafficNetworkMapOccupant* occupan
         if (intersections->automata.empty()) return 0;
         return intersections->automata.front() != automaton ? 3 : 0;
     }
+    // i386 0x001ed956: a red approach answers its type (1 stop sign, 2 stoplight), a green one 0; a stoplight also gives
+    // the time into its current phase. (The port answered 2 for a green stoplight too, so cars waited at green lights.)
     int result = 0;
     if (approach.green == 0) result = approach.type;
     if (approach.type != 2) return result;
@@ -1160,7 +1162,7 @@ int cSC4TrafficNetworkMap::CheckIntersection(ITrafficNetworkMapOccupant* occupan
     } else {
         time = approach.stateDuration - approach.timeLeft;
     }
-    return 2;
+    return result;
 }
 
 // 0x10029c256

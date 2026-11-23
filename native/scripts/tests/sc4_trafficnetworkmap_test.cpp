@@ -377,6 +377,37 @@ int main() {
     CHECK(first->timeLeft == first->otherDuration);
     CHECK(intersection.dirty == 0);
 
+    // ---- CheckIntersection (i386 0x001ed956): a piece next to a junction asks for its approach; a red stoplight answers 2,
+    // a green one 0 (the port answered 2 for green too, and cars waited at green lights forever); a stop sign red 1, green 0
+    {
+        map.HandleViewChanged();   // the visible cells around the (zero) view
+        static FakeOccupant approachPiece;   // outlives the map (the map keeps the tile)
+        InitStreet(approachPiece, 3, 3);   // east of the junction cell (edge 0 = west), inside the visible cells
+        CHECK(map.HandleNetworkOccupantUsable(&approachPiece, false));
+        TrafficTileInfo* tile = map.GetTileInfoAtNeighborEdge(&approachPiece, 0, false, 0);
+        CHECK(tile && tile->occupant);
+        auto* junctionPiece = tile ? static_cast<FakeOccupant*>(tile->occupant) : nullptr;
+        if (junctionPiece) {
+            junctionPiece->pathInfo.intersections[kPathTypeCar] = true;
+            map.AddIntersection(junctionPiece);
+            auto& junction = const_cast<TrafficIntersectionArray&>(map.GetIntersectionMap().at(junctionPiece));
+            TrafficIntersectionInfo& approach = junction.approaches[2];   // (edge 0 + 2) & 3
+            FakeAutomaton car;
+            float time = 0.0f;
+            approach.type = 2;
+            approach.green = 0;
+            CHECK(map.CheckIntersection(&approachPiece, &car, 0, time) == 2);
+            approach.green = 1;
+            CHECK(map.CheckIntersection(&approachPiece, &car, 0, time) == 0);
+            approach.type = 1;
+            CHECK(map.CheckIntersection(&approachPiece, &car, 0, time) == 0);
+            approach.green = 0;
+            CHECK(map.CheckIntersection(&approachPiece, &car, 0, time) == 1);
+            if (junctionPiece != &street) map.RemoveIntersection(junctionPiece);
+        }
+        map.HandleRemoveNetworkOccupant(&approachPiece);   // the map as it was for the checks below
+    }
+
     // ---- UpdateIntersectionTiming (i386 0x001ed25c): a lone stoplight intersection; densities 30 on axis A (entries 0..3 and
     // 8..11) and 90 on axis B: ratio 3 clamps to 2, the base period 10 splits 20 / 3 for even approaches and the rest for odd
     // ones; every stoplight approach takes the first one's time left and phase (even approaches the flipped phase)
