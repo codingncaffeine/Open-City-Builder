@@ -1586,7 +1586,7 @@ void cSC4Helicopter::AI_PursueGoal(float delta) {
         IHelicopterHost* host = HeliHostFor(*this);
         cS3DVector3 crime;
         if (!host || !host->CrimeAt(position_, 20.0f, crime)) {
-            PushState(kHeliBehaviorIdle, nullptr, 0.0f, false, 0, 0, nullptr);
+            PushState(kHeliBehaviorIdle, nullptr, -1.0f, false, 0, 0, nullptr);
             return;
         }
         cS3DVector3 target{0.0f, 0.0f, 0.0f};
@@ -1598,13 +1598,13 @@ void cSC4Helicopter::AI_PursueGoal(float delta) {
             return;
         }
         ClaimPosition(destination_);
-        PushState(kHeliBehaviorArrive, nullptr, 0.0f, false, 0, 0, nullptr);
-        PushState(kHeliBehaviorSpawn, nullptr, 0.0f, false, 0, 0, nullptr);
+        PushState(kHeliBehaviorArrive, nullptr, 6000.0f, false, 0, 0, nullptr);
+        PushState(kHeliBehaviorSpawn, nullptr, -1.0f, false, 0, 0, nullptr);
         return;
     }
     if (behavior == kHeliBehaviorTraffic2) {
         ResetClaimIfValid(destination_);
-        PushState(kHeliBehaviorIdle, nullptr, 0.0f, false, 0, 0, nullptr);
+        PushState(kHeliBehaviorIdle, nullptr, -1.0f, false, 0, 0, nullptr);
         IHelicopterHost* host = HeliHostFor(*this);
         cS3DVector3 accident;
         if (!host || !host->TrafficAccidentLocation(accident)) return;
@@ -1613,10 +1613,10 @@ void cSC4Helicopter::AI_PursueGoal(float delta) {
             return;
         }
         ClaimPosition(destination_);
-        PushState(kHeliBehaviorArrive, nullptr, 0.0f, false, 0, 0, nullptr);
+        PushState(kHeliBehaviorArrive, nullptr, 6000.0f, false, 0, 0, nullptr);
         destination_ = accident;
         destination_.y = 0.0f;
-        PushState(kHeliBehaviorSpawn, nullptr, 0.0f, false, 0, 0, nullptr);
+        PushState(kHeliBehaviorSpawn, nullptr, -1.0f, false, 0, 0, nullptr);
         return;
     }
     if (behavior == kHeliBehaviorTraffic) {
