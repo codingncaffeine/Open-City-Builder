@@ -48,6 +48,9 @@
 #include "sc4/ResidentialSimulator.h"
 #include "sc4/TrafficSimulator.h"
 #include "sc4/cSTETerrain.h"
+#include "sc4/ViewUtilities.h"
+#include "sc4/ZoneDeveloper.h"
+#include "gz/WinUtils.h"
 #include "s3d/ModelInstance.h"
 #include "sc4/Lot.h"
 #include "sc4/Render3D.h"
@@ -61,7 +64,11 @@
 #include "sc4/cSC4City.h"
 #include "sc4/cSC4ZoneManager.h"
 
-namespace native { sc4::cSC4CrimeSimulator* NativeCrimeSimulator(); }   // app/NativeCrime.cpp
+namespace native {
+sc4::IQueryPathView* NativeCreatePathView();          // app/NativePathView.cpp
+bool NativeAddPathView(sc4::IQueryPathView* view);
+bool NativeRemovePathView(sc4::IQueryPathView* view);
+ sc4::cSC4CrimeSimulator* NativeCrimeSimulator(); }   // app/NativeCrime.cpp
 
 namespace native {
 // app/NativeSimHosts.cpp: the simulators' own occupant adapters
@@ -199,8 +206,9 @@ struct QueryRenderer final : IQueryRenderer {
         if (Trace()) std::fprintf(stderr, "query: pick %d,%d -> occupant %p type %08x\n", x, y, static_cast<void*>(occupant), occupant->GetType());
         return new PickResult(occupant);
     }
-    void AddLayer(cIGZUnknown*) override {}
-    void RemoveLayer(cIGZUnknown*) override {}
+    // SL::spRenderer vslots 0x80 / 0x84 (i386): AddViewObject(layer, 5, 1000) / RemoveViewObject (the route query's path view).
+    void AddLayer(cIGZUnknown* layer) override { if (auto* view = dynamic_cast<IQueryPathView*>(layer)) NativeAddPathView(view); }
+    void RemoveLayer(cIGZUnknown* layer) override { if (auto* view = dynamic_cast<IQueryPathView*>(layer)) NativeRemovePathView(view); }
 } g_renderer;
 
 struct QueryCity final : IQueryCity {
@@ -651,6 +659,86 @@ template <class T> T* Serializable(CityComponent component, std::uint32_t clsid)
     return out;
 }
 
+// The route query's data (sc4::IQueryRoutes).
+class QueryRoutes final : public IQueryRoutes {
+public:
+    // lot manager vslot 0x3c: every lot, its trips (cISC4TrafficSource vslot 0xc) and cell rect (vslot 0x14). The neighbours
+    // simulator's connections follow in the original; their trip lists are not kept natively (cSC4NeighborConnection's list is a
+    // placeholder), so the route query shows the lots' trips.
+    void Sources(std::vector<QueryRouteSource>& lots, std::vector<QueryRouteSource>& neighbors) override {
+        neighbors.clear();
+        lots.clear();
+        cSC4ZoneDeveloper* developer = Serializable<cSC4ZoneDeveloper>(CityComponent::ZoneDeveloper, cSC4ZoneDeveloper::kZoneDeveloperClassId);
+        if (!developer) return;
+        for (cSC4Lot* lot : developer->Lots()) {
+            if (!lot) continue;
+            QueryRouteSource source;
+            source.trips = &lot->GetTripDataList();
+            lot->GetBoundingRect(source.rect);
+            lots.push_back(source);
+        }
+        SC4_UNWIRED("cSC4ViewInputControlQuery: the neighbor connections' trips are not kept natively (the route query shows the lots' routes)");
+    }
+    void CellCenter(int x, int z, float& worldX, float& worldZ) override {
+        if (cSC4City* city = HostCity()) city->CellCenterToPosition(x, z, worldX, worldZ);
+        else worldX = worldZ = 0.0f;
+    }
+    float Altitude(float x, float z) override {   // SafeGetAltitude: 0 off the terrain
+        cSTETerrain* terrain = Terrain();
+        return terrain && terrain->LocationIsInBounds(x, z) ? terrain->GetAltitude(x, z) : 0.0f;
+    }
+    float SeaLevel() override { cSTETerrain* terrain = Terrain(); return terrain ? terrain->GetSeaLevel() : 0.0f; }
+    int Zoom() override {
+        cSC43DRender* render = CityRenderer();
+        SC4ViewUtilities* view = render ? render->GetViewUtilities() : nullptr;
+        int zoom = 0, rotation = 0;
+        if (view) view->GetZoomAndRotation(zoom, rotation);
+        return zoom;
+    }
+    bool ButtonToggled(cIGZWin* window, std::uint32_t id) override { return window && nsGZWinUtils::GetButtonToggleState(window, id); }
+    const std::vector<std::uint8_t>* FerryRoute(int x1, int z1, int x2, int z2) override {
+        cSC4TrafficSimulator* traffic = Serializable<cSC4TrafficSimulator>(CityComponent::TrafficSimulator, kGZCLSID_cSC4TrafficSimulator);
+        return traffic ? traffic->GetFerryRouteBetweenTiles(x1, z1, x2, z2) : nullptr;
+    }
+    // cISC4Occupant vslot 0x1c GetType: a building (its lot's rect: lot manager vslot 0x38 GetOccupantLot) or a network piece (its
+    // cell and each type's edges).
+    bool Describe(sc4::cISC4Occupant* occupant, QueryRouteOccupant& out) override {
+        out = QueryRouteOccupant{};
+        if (!occupant) return false;
+        if (occupant->GetType() == 0x278128a0u) {
+            cSC4ZoneDeveloper* developer = Serializable<cSC4ZoneDeveloper>(CityComponent::ZoneDeveloper, cSC4ZoneDeveloper::kZoneDeveloperClassId);
+            cSC4Lot* lot = developer ? developer->GetOccupantLot(occupant) : nullptr;
+            if (!lot) return false;
+            out.kind = 1;
+            lot->GetBoundingRect(out.rect);
+            out.bigBuilding = occupant->IsOccupantGroup(0x1003);
+            return true;
+        }
+        auto* network = dynamic_cast<cSC4NetworkOccupant*>(occupant);
+        if (!network) return false;
+        out.kind = 2;
+        std::uint32_t x = 0, z = 0;
+        network->GetOccupiedCell(x, z);
+        out.rect[0] = out.rect[2] = static_cast<std::int32_t>(x);
+        out.rect[1] = out.rect[3] = static_cast<std::int32_t>(z);
+        out.subway = network->IsOfType(7);
+        for (std::uint32_t type = 0; type < 13; ++type)
+            if (network->IsOfType(type)) out.edges[type] = network->GetEdgeTypesFlag(static_cast<std::uint8_t>(type));
+        return true;
+    }
+
+private:
+    static cSTETerrain* Terrain() {
+        cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(CityComponent::Terrain) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(0xab953253, &raw) || !raw) return nullptr;
+        auto* terrain = static_cast<cSTETerrain*>(static_cast<cIGZSerializable*>(raw));
+        static_cast<cIGZSerializable*>(raw)->Release();
+        return terrain;
+    }
+} g_routes;
+
 class Host final : public IQueryHost {
 public:
     IQueryNetworkOccupant* NetworkOccupant(sc4::cISC4Occupant* occupant) override {
@@ -687,6 +775,7 @@ public:
     cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
     IQueryView* QueryView() override { return &g_view; }
     IQueryRenderer* Renderer() override { return &g_renderer; }
+    IQueryRoutes* Routes() override { return &g_routes; }
     IQueryCity* City() override { return &g_city; }
     IQueryLotManager* LotManager() override { return &g_lots; }
     IQueryPowerSim* PowerSim() override { return &g_power; }
@@ -699,10 +788,7 @@ public:
     IQueryBudgetSim* BudgetSim() override { return &g_budget; }
     IQueryNeighborsSim* NeighborsSim() override { return &g_neighbors; }
     IQueryTrafficSim* TrafficSim() override { return &g_traffic; }
-    IQueryPathView* CreatePathView() override {
-        SC4_UNWIRED("cSC4ViewInputControlQuery: the path view (a queried lot's routes) is not created");
-        return nullptr;
-    }
+    IQueryPathView* CreatePathView() override { return NativeCreatePathView(); }   // new cSC4PathView + Init (app/NativePathView.cpp)
     cISC4WinCalloutBox* CreateCalloutBox() override { return native::CreateCalloutBox(); }
     cIGZWin* CreateWindowFromScript(std::uint32_t instance, cIGZWin* parent, std::uint32_t id) override {
         if (!parent) {   // SC4CreateWindowFromScript puts a parentless window on the main window

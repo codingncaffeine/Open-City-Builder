@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include "sc4/Lot.h"
+#include "sc4/CompressedRouteReader.h"
 #include <initializer_list>
 #include <utility>
 #include <cstdio>
@@ -125,7 +127,7 @@ cSC4ViewInputControlQuery::cSC4ViewInputControlQuery(EQueryType type, std::uint3
     tipPeriod_ = tipPeriod;
     tipEnabled_ = true;
     showCoordinates_ = false;
-    unknownD8_ = 3;
+    routeMode_ = 3;
     pathView_ = nullptr;
     occupant_ = nullptr;
     callout_ = nullptr;
@@ -3166,13 +3168,257 @@ bool cSC4QueryDialogWinProc::DoWinMsg(cIGZWin* window, std::uint32_t type, std::
     }
     return false;
 }
-// PARTIAL stub (QUERY-6)
-void cSC4ViewInputControlQuery::GetOccupantPaths() {
-    SC4_UNWIRED("cSC4ViewInputControlQuery::GetOccupantPaths: routes through the clicked network piece not ported");
+// ---------------------------------------------------------------------------------------------------
+// The route query (Mac i386 0x0020c982..0x0020f5be; OpenSC4 city-tools-input.md §8.15)
+// ---------------------------------------------------------------------------------------------------
+
+namespace {
+// Retrofit()::kTravelTypeInfo, i386 0x00ab95e0 (0x14 bytes per travel type): the route colour, the base of its opacity, the height
+// the route floats over the ground (also the path's priority), the network types it uses, and an index.
+struct RouteTravelType {
+    std::uint32_t color;
+    float alphaBase;
+    float height;
+    std::uint32_t networks;
+    std::uint32_t index;
+};
+constexpr RouteTravelType kRouteTravelTypes[9] = {
+    {0xffff00d2u, 0.25f, 0.0f, 0x1c4d, 2}, {0xff0cd21au, 0.25f, 3.0f, 0x1c4d, 1}, {0xff232bd8u, 0.25f, 6.0f, 0x1c4d, 1},
+    {0xfff6821au, 0.25f, 6.0f, 0x0102, 3}, {0xff1ef5f0u, 0.25f, 0.0f, 0x1c4d, 1}, {0xff233366u, 0.25f, 3.0f, 0x0102, 3},
+    {0xffd8cd23u, 0.25f, 6.0f, 0x0080, 4}, {0xffd8cd23u, 0.25f, 6.0f, 0x0300, 6}, {0xff5d82b9u, 0.25f, 6.0f, 0x0300, 7}};
+constexpr int kSubwayTravelType = 6;
+constexpr std::uint32_t kFerryRouteColor = 0x00a800ffu;   // MakeRoutePath's crossing segment
+constexpr float kFerryAboveSea = 0.2f;                     // i386 0x00a70ef0 (double)
+// the route's opacity: 1 - (1 - base)^(trips + 1), scaled to a byte in the colour's top 8 bits
+std::uint32_t RouteColor(std::uint32_t rgb, float alphaBase, std::uint32_t trips) {
+    const double alpha = (1.0 - std::pow(static_cast<double>(1.0f - alphaBase), static_cast<double>(static_cast<float>(trips) + 1.0f))) * 255.0;
+    return (rgb & 0xffffffu) | (static_cast<std::uint32_t>(static_cast<int>(alpha)) << 24);
 }
-// PARTIAL stub (QUERY-6)
-void cSC4ViewInputControlQuery::ShowAllRoutesThatIntersectCityRect(const SC4CellRect&) {
-    SC4_UNWIRED("cSC4ViewInputControlQuery::ShowAllRoutesThatIntersectCityRect: route display of the route query not ported");
+// the four cell edges by side (0 x-1, 1 z-1, 2 x+1, 3 z+1): their midpoints, in cells
+constexpr float kEdgeMid[4][2] = {{0.0f, 0.5f}, {0.5f, 0.0f}, {1.0f, 0.5f}, {0.5f, 1.0f}};
+}  // namespace
+
+// i386 0x0020f5be: the old path view leaves the renderer; a building shows the routes over its lot, a network piece over its cell.
+void cSC4ViewInputControlQuery::GetOccupantPaths() {
+    IQueryHost* host = QueryHost();
+    if (pathView_) {
+        if (host && host->Renderer()) host->Renderer()->RemoveLayer(pathView_);   // renderer vslot 0x84
+        pathView_->ShutdownView();
+        pathView_->Release();
+        pathView_ = nullptr;
+    }
+    IQueryRoutes* routes = host ? host->Routes() : nullptr;
+    QueryRouteOccupant what;
+    const bool described = routes && occupant_ && routes->Describe(occupant_, what);
+    if (std::getenv("SC4_ROUTEDEBUG"))
+        std::fprintf(stderr, "route query: click, occupant %p type %08x -> kind %d\n", static_cast<void*>(occupant_), occupant_ ? occupant_->GetType() : 0u,
+                     described ? what.kind : -1);
+    if (!described) return;
+    if (what.kind == 1) GetBuildingOccupantPaths();
+    else if (what.kind == 2) GetNetworkOccupantPaths();
+}
+
+// i386 0x0020e9a4: the lot's rect (the parent lot's for a lot part); mode 1, or 3 for a building occupant of kind 0x1003.
+bool cSC4ViewInputControlQuery::GetBuildingOccupantPaths() {
+    IQueryRoutes* routes = QueryHost() ? QueryHost()->Routes() : nullptr;
+    QueryRouteOccupant what;
+    if (!routes || !routes->Describe(occupant_, what) || what.kind != 1) return false;
+    cityCellRect_ = SC4CellRect{what.rect[0], what.rect[1], what.rect[2], what.rect[3]};
+    routeMode_ = what.bigBuilding ? 3 : 1;
+    ShowAllRoutesThatIntersectCityRect(cityCellRect_);
+    return true;
+}
+
+// i386 0x0020f3e6: the piece's cell, grown by one cell toward every side any of its network types leaves by (edge value 4: the
+// side another piece of a two-cell-wide network continues on); mode 2 for a subway piece, else 1.
+bool cSC4ViewInputControlQuery::GetNetworkOccupantPaths() {
+    IQueryRoutes* routes = QueryHost() ? QueryHost()->Routes() : nullptr;
+    QueryRouteOccupant what;
+    if (!routes || !routes->Describe(occupant_, what) || what.kind != 2) return false;
+    const int x = what.rect[0], z = what.rect[1];
+    cityCellRect_ = SC4CellRect{x, z, x, z};
+    for (std::uint32_t type = 0; type < 13; ++type) {
+        std::uint32_t edges = what.edges[type];
+        for (int side = 0; side < 4; ++side, edges >>= 8) {
+            if ((edges & 4) == 0) continue;
+            switch (side) {
+                case 0: cityCellRect_ = SC4CellRect{x - 1, z, x, z}; break;
+                case 1: cityCellRect_ = SC4CellRect{x, z - 1, x, z}; break;
+                case 2: cityCellRect_ = SC4CellRect{x, z, x + 1, z}; break;
+                default: cityCellRect_ = SC4CellRect{x, z, x, z + 1}; break;
+            }
+        }
+    }
+    routeMode_ = what.subway ? 2 : 1;
+    ShowAllRoutesThatIntersectCityRect(cityCellRect_);
+    return true;
+}
+
+// i386 0x0020c982: the trip's source cell in the rect, or the first route cell in it (mode 1 skips the subway cells, mode 2 looks at
+// the subway cells only). An unreversed trip that is not one-way (flag 1) is read backward when `reverse`.
+bool cSC4ViewInputControlQuery::DoesRouteCrossCell(const cSC4TripData& trip, const SC4CellRect& rect, bool reverse) {
+    const auto inside = [&](int x, int z) { return rect.x0 <= x && rect.z0 <= z && x <= rect.x1 && z <= rect.z1; };
+    if (inside(trip.sourceX, trip.sourceZ)) return true;
+    cSC4CompressedRouteReader reader;
+    reader.SetData((trip.flags & 1) == 0 && reverse ? &trip.routeReversed : &trip.route);
+    CompressedRouteCell cell;
+    while (reader.GetNext(cell)) {
+        if (routeMode_ == 1 && cell.type == kSubwayTravelType) continue;
+        if (routeMode_ == 2 && cell.type != kSubwayTravelType) continue;
+        if (inside(cell.x, cell.z)) return true;
+    }
+    return false;
+}
+
+// i386 0x0020cac2: a bit per travel type the route uses.
+std::uint32_t cSC4ViewInputControlQuery::GetRouteTravelTypes(const cSC4TripData& trip, bool reverse) {
+    cSC4CompressedRouteReader reader;
+    reader.SetData((trip.flags & 1) == 0 && reverse ? &trip.routeReversed : &trip.route);
+    std::uint32_t types = 0;
+    CompressedRouteCell cell;
+    while (reader.GetNext(cell)) types |= 1u << (cell.type & 31);
+    return types;
+}
+
+// i386 0x0020cb24 (PC 0x004c5e20). One route as paths: a path per stretch of one travel type the legend shows, coloured by that type
+// with the opacity of the trip count, raised by the type's height, the arrowhead at the trip's destination end; a ferry or
+// off-map crossing between two cells is its own path along the ferry route just over the sea. The route starts at the source's
+// centre.
+//   DIVERGENCE (documented): inside a cell the original runs the path between the entry and exit points of the traffic network
+//   map's lane path for that cell (and a corner point between them on a turn); this port uses the cell's edge midpoints and the
+//   same corner rule, so routes follow the right cells and turns, on the road's middle.
+void cSC4ViewInputControlQuery::MakeRoutePath(const cSC4TripData& trip, const float* position, bool reverse, std::uint32_t mask) {
+    IQueryRoutes* routes = QueryHost() ? QueryHost()->Routes() : nullptr;
+    IQueryCity* city = QueryHost() ? QueryHost()->City() : nullptr;
+    if (!routes || !city || !pathView_) return;
+    SC4_UNWIRED("cSC4ViewInputControlQuery::MakeRoutePath: the traffic network map's lane points inside a cell are not used (cell edge midpoints stand in)");
+    const int cellsX = city->CellCountX(), cellsZ = city->CellCountZ();
+    const bool backward = (trip.flags & 1) == 0 && reverse;
+    const std::uint32_t flags = backward ? 1u : 2u;
+    cSC4CompressedRouteReader reader;
+    reader.SetData(backward ? &trip.routeReversed : &trip.route);
+    const auto worldOf = [&](float cellX, float cellZ, float& x, float& z) {
+        float x0 = 0.0f, z0 = 0.0f, x1 = 0.0f, z1 = 0.0f;
+        routes->CellCenter(0, 0, x0, z0);
+        routes->CellCenter(1, 1, x1, z1);
+        const float size = x1 - x0;   // the cell size (the centres of two neighbouring cells)
+        x = x0 - size * 0.5f + cellX * size;
+        z = z0 - size * 0.5f + cellZ * size;
+    };
+    float start[3] = {position[0], routes->Altitude(position[0], position[2]), position[2]};
+    int previousType = 9;              // none yet
+    bool drawing = false;
+    int previousX = trip.sourceX, previousZ = trip.sourceZ;
+    CompressedRouteCell cell;
+    while (reader.GetNext(cell)) {
+        // a ferry or off-map crossing into this cell: its own path along the ferry route, every other cell
+        if (cell.crossing && previousX >= 0) {
+            if (const std::vector<std::uint8_t>* ferry = routes->FerryRoute(previousX, previousZ, cell.x, cell.z)) {
+                pathView_->NewPath(RouteColor(kFerryRouteColor, 0.25f, trip.count), 0.2f, 0);
+                cSC4CompressedRouteReader ferryReader;
+                ferryReader.SetData(ferry);
+                CompressedRouteCell step;
+                bool take = true;
+                float point[3] = {0.0f, routes->SeaLevel() + kFerryAboveSea, 0.0f};
+                while (ferryReader.GetNext(step)) {
+                    if (take) {
+                        routes->CellCenter(step.x, step.z, point[0], point[2]);
+                        pathView_->AddPathVertex(point);
+                    }
+                    take = !take;
+                }
+                if (take) pathView_->AddPathVertex(point);
+                drawing = false;
+                previousType = 10;
+            }
+        }
+        previousX = cell.x;
+        previousZ = cell.z;
+        if (cell.x < 0 || cell.z < 0 || cell.x > cellsX - 1 || cell.z > cellsZ - 1) continue;   // off the map
+        const int type = cell.type < 9 ? cell.type : 0;
+        const RouteTravelType& info = kRouteTravelTypes[type];
+        float center[3] = {};
+        routes->CellCenter(cell.x, cell.z, center[0], center[2]);
+        center[1] = routes->Altitude(center[0], center[2]) + info.height;
+        if ((mask & (1u << type)) == 0) {   // a travel type the legend hides: the route has a gap here
+            drawing = false;
+            previousType = type;
+            continue;
+        }
+        if (type != previousType || !drawing) {
+            pathView_->NewPath(RouteColor(info.color, info.alphaBase, trip.count), info.height, flags);
+            if (previousType == 9) {   // the first stretch leaves the source's centre
+                const float from[3] = {start[0], start[1] + info.height, start[2]};
+                pathView_->AddPathVertex(from);
+            }
+            drawing = true;
+        }
+        // entry side -> exit side: a corner point between the two edge midpoints and the centre on a turn
+        if (cell.entrySide < 4 && cell.exitSide < 4 && cell.exitSide != ((cell.entrySide + 2) & 3)) {
+            float in[3], out[3];
+            worldOf(cell.x + kEdgeMid[cell.entrySide][0], cell.z + kEdgeMid[cell.entrySide][1], in[0], in[2]);
+            worldOf(cell.x + kEdgeMid[cell.exitSide][0], cell.z + kEdgeMid[cell.exitSide][1], out[0], out[2]);
+            const float corner[3] = {center[0] * 0.5f + (in[0] + out[0]) * 0.25f, center[1], center[2] * 0.5f + (in[2] + out[2]) * 0.25f};
+            pathView_->AddPathVertex(corner);
+        } else {
+            pathView_->AddPathVertex(center);
+        }
+        previousType = type;
+    }
+}
+
+// i386 0x0020e00e (PC 0x004ca460). A fresh path view (thickness by zoom), the legend's toggles (reverse trips; a bit per travel type
+// shown), then every trip of every lot and every neighbour connection that is live (flag 8, not a placeholder) and either starts in
+// the rect or crosses it, drawn from its source's centre.
+void cSC4ViewInputControlQuery::ShowAllRoutesThatIntersectCityRect(const SC4CellRect& rect) {
+    IQueryHost* host = QueryHost();
+    IQueryRoutes* routes = host ? host->Routes() : nullptr;
+    if (!routes) return;
+    static constexpr float kThicknessByZoom[6] = {2.0f, 2.0f, 2.0f, 2.0f, 1.4f, 1.2f};
+    if (!pathView_) {
+        pathView_ = host->CreatePathView();
+        if (!pathView_) return;
+        if (host->Renderer()) host->Renderer()->AddLayer(pathView_);             // renderer vslot 0x80 (5, 1000)
+    }
+    const int zoom = routes->Zoom();
+    pathView_->SetThickness(kThicknessByZoom[zoom >= 0 && zoom < 6 ? zoom : 0]);
+    cIGZWin* legend = legendMinimized_;   // i386 +0x48: the legend child 0x0bb0f5e7 (the shown one, holding the toggles)
+    const bool reverse = routes->ButtonToggled(legend, 0xebb0f666);
+    std::uint32_t mask = 0xffffffffu;
+    const std::pair<std::uint32_t, std::uint32_t> kToggles[] = {{0x2bb0f616, 0x1},  {0x4bb0f628, 0x2},  {0xebb0f630, 0x4},
+                                                                {0x4bb91326, 0x8},  {0x6bb91318, 0x10}, {0x2bb9131f, 0x20},
+                                                                {0xabb0f639, 0xc0}, {0x4c081783, 0x100}, {0x00000001, 0x80000000u}};
+    for (const auto& toggle : kToggles) {
+        const bool on = routes->ButtonToggled(legend, toggle.first);
+        if (!on) mask &= ~toggle.second;
+        if (std::getenv("SC4_ROUTEDEBUG")) {
+            cIGZWin* child = legend ? legend->GetChildWindowFromIDRecursive(toggle.first) : nullptr;
+            std::fprintf(stderr, "route query: legend %p toggle %08x %s %s\n", static_cast<void*>(legend), toggle.first, child ? "found" : "MISSING", on ? "on" : "off");
+        }
+    }
+    std::vector<QueryRouteSource> lots, neighbors;
+    routes->Sources(lots, neighbors);
+    int drawn = 0;
+    for (const std::vector<QueryRouteSource>* group : {&lots, &neighbors}) {
+        for (const QueryRouteSource& source : *group) {
+            if (!source.trips) continue;
+            const bool overlaps = source.rect[0] <= rect.x1 && rect.x0 <= source.rect[2] && source.rect[1] <= rect.z1 && rect.z0 <= source.rect[3];
+            float a[2], b[2];
+            routes->CellCenter(source.rect[0], source.rect[1], a[0], a[1]);
+            routes->CellCenter(source.rect[2], source.rect[3], b[0], b[1]);
+            float center[3] = {(a[0] + b[0]) * 0.5f, 0.0f, (a[1] + b[1]) * 0.5f};
+            center[1] = routes->Altitude(center[0], center[2]);
+            for (const cSC4TripData& trip : *source.trips) {
+                if ((trip.flags & 8) == 0 || (trip.flags & 2) != 0) continue;
+                if (!overlaps && !DoesRouteCrossCell(trip, rect, reverse)) continue;
+                MakeRoutePath(trip, center, reverse, mask);
+                ++drawn;
+            }
+        }
+    }
+    if (std::getenv("SC4_ROUTEDEBUG"))
+        std::fprintf(stderr, "route query: rect %d,%d..%d,%d mode %u reverse %d mask %08x: %d routes from %zu lots\n", rect.x0, rect.z0, rect.x1,
+                     rect.z1, routeMode_, reverse ? 1 : 0, mask, drawn, lots.size());
 }
 // PARTIAL stub (QUERY-6)
 void cSC4ViewInputControlQuery::WriteDetailedDebugInfo(int, int) {}

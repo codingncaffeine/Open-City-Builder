@@ -904,6 +904,7 @@ src/sc4/AnimationCoordinator.cpp
 src/s3d/ModelInstanceAnimatedMesh.cpp
 src/app/NativeWinMapView.cpp
 src/app/NativeMarkedCells.cpp
+src/app/NativePathView.cpp
 src/sc4/SubBudgetWindow.cpp
 src/app/NativeOrdinance.cpp
 src/app/NativeQuery.cpp

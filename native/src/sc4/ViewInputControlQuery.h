@@ -27,6 +27,7 @@
 // ported, as are the school, hospital, library, landfill, incinerator, recycling, waste-to-energy, power plant, water building, landmark and transit station rows, the airport and seaport rows (usage, capacity, traffic meter, maintenance), the dialog enumeration callbacks (EnumFunc*) and the recovered control-id -> row handler table.
 #pragma once
 #include <cstdint>
+#include <list>
 #include <map>
 #include <vector>
 
@@ -43,6 +44,7 @@
 namespace gz { class cIGZWinBMP; }
 
 namespace sc4 {
+struct cSC4TripData;   // sc4/Lot.h
 
 constexpr std::uint32_t kGZIID_cSC4ViewInputControlQuery = 0x452294aa;   // cIGZMessageTarget2 sub-object
 
@@ -87,11 +89,15 @@ public:
     virtual void RemoveLayer(cIGZUnknown* layer) = 0;                                     // vslot 0x108
 };
 
-// cSC4PathView (0x10077c6fc Shutdown, 0x10077cf3c ClearPaths).
+// cSC4PathView (app/NativePathView.cpp; Mac i386 0x0051b1f0..0x0051c0ba, OpenSC4 overlay-views.md §1).
 class IQueryPathView : public cIGZUnknown {
 public:
     virtual void ClearPaths() = 0;
     virtual bool ShutdownView() = 0;
+    virtual void SetThickness(float thickness) = 0;
+    // A new path (the packed vertex colour, its priority, flags: 1 arrowhead at the start, 2 at the end), selected for AddPathVertex.
+    virtual void NewPath(std::uint32_t color, float priority, std::uint32_t flags) = 0;
+    virtual void AddPathVertex(const float* xyz) = 0;
 };
 
 // SL::spCity
@@ -335,6 +341,33 @@ public:
 };
 
 // Everything else: one adapter implements this for the game, a fake for the test.
+// The route query's data (ShowAllRoutesThatIntersectCityRect / MakeRoutePath): the trip sources, the city geometry, the legend.
+struct QueryRouteSource {
+    const std::list<cSC4TripData>* trips = nullptr;   // cISC4TrafficSource vslot 0xc
+    std::int32_t rect[4] = {};                       // vslot 0x14: the source's cell rectangle
+};
+struct QueryRouteOccupant {
+    int kind = 0;                                    // 1 a building, 2 a network piece, 0 neither (vslot 0x1c 0x278128a0 / 0xc772bf98)
+    std::int32_t rect[4] = {};                       // the building's lot rect, or the piece's cell
+    bool bigBuilding = false;                        // building: occupant vslot 0x58(0x1003)
+    bool subway = false;                             // network: IsOfType(7)
+    std::uint32_t edges[13] = {};                    // network: vslot 0x98 GetEdgeTypesFlag per type it is of (0 otherwise)
+};
+class IQueryRoutes {
+public:
+    virtual ~IQueryRoutes() = default;
+    // lot manager vslot 0x3c (every lot, its traffic source) then neighbors simulator vslot 0x40 (every connection)
+    virtual void Sources(std::vector<QueryRouteSource>& lots, std::vector<QueryRouteSource>& neighbors) = 0;
+    virtual void CellCenter(int x, int z, float& worldX, float& worldZ) = 0;   // city vslot 0x184
+    virtual float Altitude(float x, float z) = 0;                              // SafeGetAltitude (terrain, 0 outside)
+    virtual float SeaLevel() = 0;                                              // terrain vslot 0x74
+    virtual int Zoom() = 0;                                                    // SC4ViewUtilities::GetZoomAndRotation
+    virtual bool ButtonToggled(cIGZWin* window, std::uint32_t id) = 0;         // nsGZWinUtils::GetButtonToggleState
+    // traffic simulator vslot 0x74 GetFerryRouteBetweenTiles (borrowed, or null)
+    virtual const std::vector<std::uint8_t>* FerryRoute(int x1, int z1, int x2, int z2) = 0;
+    virtual bool Describe(cISC4Occupant* occupant, QueryRouteOccupant& out) = 0;
+};
+
 class IQueryHost {
 public:
     virtual ~IQueryHost() = default;
@@ -398,6 +431,7 @@ public:
     //   RZ::WM() vslot 0x5c DestroyWindow(dialog), then vslot 0x94 SetFocus(the 3D view).
     virtual void CloseDialog(cIGZWin* dialog) { (void)dialog; }
     virtual IQueryPathView* CreatePathView() = 0;             // new cSC4PathView + Init
+    virtual IQueryRoutes* Routes() { return nullptr; }
     virtual cISC4WinCalloutBox* CreateCalloutBox() = 0;       // new cSC4WinCalloutBox (0x1003c5f5c)
     // SC4CreateWindowFromScript(instance, parent, id, iid, out) (@ 0x100039bf7)
     virtual cIGZWin* CreateWindowFromScript(std::uint32_t instance, cIGZWin* parent, std::uint32_t id) = 0;
@@ -699,6 +733,11 @@ public:
     bool DoNeighborConnectionQueryDialog(cISC4Occupant* occupant);                            // i386 0x00219668
     void GetOccupantPaths();
     void ShowAllRoutesThatIntersectCityRect(const SC4CellRect& rect);
+    bool GetBuildingOccupantPaths();                                   // i386 0x0020e9a4
+    bool GetNetworkOccupantPaths();                                    // i386 0x0020f3e6
+    bool DoesRouteCrossCell(const cSC4TripData& trip, const SC4CellRect& rect, bool reverse);   // i386 0x0020c982
+    std::uint32_t GetRouteTravelTypes(const cSC4TripData& trip, bool reverse);                 // i386 0x0020cac2
+    void MakeRoutePath(const cSC4TripData& trip, const float* position, bool reverse, std::uint32_t mask);   // i386 0x0020cb24
     void WriteDetailedDebugInfo(int cellX, int cellZ);
 
     // The static state the original keeps at file scope.
@@ -753,7 +792,7 @@ protected:
     EQueryType queryType_ = kQueryBuilding;   // +0xcc
     std::uint32_t tipPeriod_ = 3;             // +0xd0
     bool showCoordinates_ = false;            // +0xd4
-    std::uint32_t unknownD8_ = 3;             // +0xd8 (written by the ctor, never read)
+    std::uint32_t routeMode_ = 3;             // +0xd8 (i386 +0x94): the route query's mode (1 building, 2 subway piece, 3 big building)
     IQueryPathView* pathView_ = nullptr;      // +0xe0
 
 private:
