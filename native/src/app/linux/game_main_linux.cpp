@@ -1924,6 +1924,14 @@ int RunScenario(const std::string& path) {
             const bool pass = !active || router->ProcessMouse(fx, fy, static_cast<std::uint32_t>(flags));
             std::printf("tutorialfilter %d,%d flags %d: router %s, %s, now %d,%d\n", ox, oy, flags, router ? (active ? "active" : "idle") : "none",
                         pass ? "passes" : "BLOCKED", fx, fy);
+        } else if (command == "hittest") {   // hittest X Y: the window the manager picks at a main-window point, and capture / focus / modal
+            int hx = 0, hy = 0;
+            words >> hx >> hy;
+            auto id = [](cIGZWin* w) { return w ? w->GetID() : 0u; };
+            std::printf("hittest %d,%d: capture %08x focus %08x modal %08x nest %u, chain:", hx, hy, id(gMgr->GZGetCapture()), id(gMgr->GZGetFocus()),
+                        id(gMgr->ModalWindow()), gMgr->GetModalNestCount());
+            for (cIGZWin* w = gMgr->GetMainWindow()->GetChildWindowFromPoint(hx, hy); w; w = w->GetParentWin()) std::printf(" %08x", w->GetID());
+            std::printf("\n");
         } else if (command == "tutorialtask") {   // tutorialtask: the current tutorial task's number, kind, target and text
             native::NativeTutorialTaskReport();
         } else if (command == "tutorialcheat") {   // tutorialcheat TEXT: the tutorial system's cheat ("Tutorial next") without the cheat box
@@ -2162,8 +2170,10 @@ int main(int argc, char** argv) {
         const int length = lengthText ? std::max(1, std::atoi(lengthText)) : 30;
         if (!interactive && ++frame >= length) {
             frame = 0;
-            if (const char* tree = std::getenv("SC4_MODALTREE"))   // debug: the window tree under the dialog's window id (hex)
-                if (cIGZWin* w = gMgr->GetMainWindow()->GetChildWindowFromIDRecursive(std::uint32_t(std::strtoul(tree, nullptr, 16)))) DumpTree(w, 0, 6);
+            if (const char* tree = std::getenv("SC4_MODALTREE")) {   // debug: the window tree under the dialog's window id (hex), or "main"
+                if (std::string(tree) == "main") DumpTree(gMgr->GetMainWindow(), 0, 8);
+                else if (cIGZWin* w = gMgr->GetMainWindow()->GetChildWindowFromIDRecursive(std::uint32_t(std::strtoul(tree, nullptr, 16)))) DumpTree(w, 0, 6);
+            }
             WritePng("work/shots/modal" + std::to_string(dialog++) + ".png");
             gMgr->PostWinMessage(gz::kWinMgrMsgEndModal, 0, 0x80000001u, 0x80000001u);
         }
