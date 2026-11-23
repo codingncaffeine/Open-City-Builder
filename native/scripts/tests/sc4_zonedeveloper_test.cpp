@@ -173,7 +173,7 @@ struct FakeLotDeveloper : IZoneDeveloperLotDeveloperApi {
     std::vector<SC4Rect<int>> levelledAreas;
     std::vector<float> levelledAltitudes;
     bool forceEmptyTextures = false;
-    void RemoveLot(cSC4Lot* lot) override { removed.push_back(lot); }
+    void RemoveBuildingZotProp(cSC4Lot* lot) override { removed.push_back(lot); }
     void ConstructDefaultLot(cSC4Lot* lot, cSC4LotConfiguration* configuration, std::uint32_t objectId,
                              bool) override {
         constructed.push_back({lot, configuration, objectId});

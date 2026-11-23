@@ -229,7 +229,8 @@ public:
 
 class IZoneDeveloperLotDeveloperApi : public IZoneDeveloperService {
 public:
-    virtual void RemoveLot(cSC4Lot* lot) = 0;                // lot developer vslot 0x58
+    // i386 lot developer vslot 0x2c RemoveBuildingZotProp(lot) (0x0065101c): whatever zot prop the lot shows goes.
+    virtual void RemoveBuildingZotProp(cSC4Lot* lot) = 0;
     // vslot 0x38 ConstructDefaultLot(lot, configuration, objectId, arg4); the plop cheat commands use it.
     virtual void ConstructDefaultLot(cSC4Lot* lot, cSC4LotConfiguration* configuration,
                                      std::uint32_t objectId, bool arg4) = 0;

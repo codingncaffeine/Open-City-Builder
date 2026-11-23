@@ -170,9 +170,8 @@ struct OccupantApi final : IZoneDeveloperOccupantManagerApi {
 
 // SL::spLotDeveloper as the zone developer calls it.
 struct LotDeveloperApi final : IZoneDeveloperLotDeveloperApi {
-    void RemoveLot(cSC4Lot* lot) override {   // PARTIAL: vslot 0x58 also drops props / foundations
-        SC4_UNWIRED("cSC4LotDeveloper::RemoveLot (vslot 0x58): only the base texture is removed, the lot's props / foundations are not dropped");
-        if (cSC4LotDeveloper* d = LotDeveloper()) d->RemoveLotBaseTexture(lot);
+    void RemoveBuildingZotProp(cSC4Lot* lot) override {
+        if (cSC4LotDeveloper* d = LotDeveloper(); d && lot) d->RemoveBuildingZotProp(*lot, 0);
     }
     void ConstructDefaultLot(cSC4Lot* lot, cSC4LotConfiguration* configuration, std::uint32_t type, bool construct) override {
         if (cSC4LotDeveloper* d = LotDeveloper()) d->ConstructDefaultLot(lot, configuration, type, construct);

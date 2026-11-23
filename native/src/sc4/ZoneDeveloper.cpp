@@ -1294,7 +1294,7 @@ void cSC4ZoneDeveloper::DeleteLot(cSC4Lot* lot) {
     if (z1 < z0) z1 = z0;
 
     if (lotChangesEnabled_) {
-        if (lotDeveloper_) lotDeveloper_->RemoveLot(lot);   // +0x90 vslot 0x58
+        if (lotDeveloper_) lotDeveloper_->RemoveBuildingZotProp(lot);   // i386 +0x50 vslot 0x2c
         // the lot's base texture leaves the occupant manager: building development vslot 0x120 (the lot developer) -> 0x148
         IZoneDeveloperLotDeveloperApi* developer = buildingDevelopment_ ? buildingDevelopment_->GetLotDeveloper() : nullptr;
         cISC4Occupant* texture = nullptr;
