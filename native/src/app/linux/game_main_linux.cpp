@@ -1945,6 +1945,14 @@ int RunScenario(const std::string& path) {
                 sc4::cSC4ViewInputControl* tool = view->GetCurrentViewInputControl();
                 std::printf("viewdrag: current tool %#x\n", tool ? tool->GetID() : 0u);
             }
+            // A pointer reaches the press point before the button goes down: one hover move through the window manager
+            // (the tools place what their last move previewed).
+            if (cIGZWin* win = view->AsIGZWin()) {
+                int screenX = sx0, screenY = sy0;
+                win->WindowToScreenCoordinates(screenX, screenY);
+                gMgr->GZWinMsgPost_Mouse(kGZMsgMouseMove, screenX, screenY, 0);
+                Frame();
+            }
             const bool pressed = view->GZOnMouseDownL(sx0, sy0, 0);
             std::printf("viewdrag: press %s\n", pressed ? "taken" : "not taken");
             int x = sx0, y = sy0;
