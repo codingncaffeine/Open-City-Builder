@@ -43,6 +43,7 @@
 #include "sc4/cSC424HourClock.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
+#include "sc4/CommonIIDs.h"
 #include "sc4/Render3D.h"
 #include "s3d/Camera.h"
 #include "app/NativeCityView.h"
@@ -293,7 +294,12 @@ struct UIHost final : ITutorialUIHost {
         return true;
     }
     bool LotBoundingRect(cIGZUnknown* lot, SC4TutorialRect& rect) override {
-        auto* concrete = lot ? dynamic_cast<cSC4Lot*>(lot) : nullptr;
+        // The lot state message (0xe8bda2e7) carries the lot as a plain view (NativeZoneDeveloperHost.cpp's LotObject): the
+        // lot itself answers kGZIID_PlainObject. A direct cast only fit a bare lot, so the tutorial's lot tasks (demolish the
+        // water pump) never saw their lot.
+        cSC4Lot* concrete = lot ? dynamic_cast<cSC4Lot*>(lot) : nullptr;
+        void* raw = nullptr;
+        if (!concrete && lot && lot->QueryInterface(kGZIID_PlainObject, &raw) && raw) concrete = static_cast<cSC4Lot*>(raw);
         if (!concrete) return false;
         std::int32_t r[4] = {};
         concrete->GetBoundingRect(r);
