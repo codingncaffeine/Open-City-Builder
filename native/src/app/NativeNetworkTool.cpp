@@ -1156,6 +1156,38 @@ void NativePlacePuzzle(std::uint32_t id, int x, int z, int rotation) {
 // Kit verb `intxpieces` (read-only): every network piece of the city marked as part of a pre-built intersection (0x100000).
 // The line ends of the city: every network piece with exactly one neighbor piece of its own type, with its edge flags for that type
 // (how a dragged line's last cell is encoded). Up to `limit` lines (read-only).
+// Every network piece on a cell rectangle: cell, flags, piece, rotation and the edges of each of its types (read-only).
+void NativeNetworkCellReport(int x0, int z0, int x1, int z1) {
+    sc4::cISC4OccupantManager* occupants = Occupants();
+    if (!occupants) {
+        std::printf("netcells: no city\n");
+        return;
+    }
+    const int a[2] = {x0, z0}, b[2] = {x1, z1};
+    sc4::OccupantList list;
+    int count = 0;
+    if (occupants->GetOccupantsByStandardCityCells(list, a, b, 0xc772bf98u, 0xffffffffu)) {
+        for (sc4::cISC4Occupant* occupant : list) {
+            auto* network = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);
+            if (!network) continue;
+            ++count;
+            std::uint32_t x = 0, z = 0;
+            network->GetOccupiedCell(x, z);
+            std::printf("netcell %u,%u flags %08x piece %08x rot %02x", x, z, network->GetNetworkFlag(), network->PieceId(), network->GetRotationAndFlip());
+            for (std::uint32_t type = 0; type < 13; ++type)
+                if (network->IsOfType(type)) std::printf(" t%u=%08x", type, network->GetEdgeTypesFlag(static_cast<std::uint8_t>(type)));
+            std::uint32_t ea = 0, eb = 0;
+            if (network->GetConnectionNodeEdgeTypes(ea, eb)) std::printf(" node %08x/%08x", ea, eb);
+            float lo[3] = {}, hi[3] = {};
+            occupant->GetBoundingBox(lo, hi);
+            std::printf(" box %.0f,%.0f,%.0f..%.0f,%.0f,%.0f", lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+            std::printf("\n");
+        }
+        occupants->ReleaseOccupantList(list);
+    }
+    std::printf("netcells: %d pieces\n", count);
+}
+
 void NativeNetworkEndReport(int limit) {
     sc4::cISC4OccupantManager* occupants = Occupants();
     sc4::cSTETerrain* terrain = Terrain();

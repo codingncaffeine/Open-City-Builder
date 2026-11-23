@@ -1448,6 +1448,10 @@ int RunScenario(const std::string& path) {
             int x = 0, z = 0, rotation = 0;
             words >> id >> x >> z >> rotation;
             native::NativePlacePuzzle(static_cast<std::uint32_t>(std::strtoul(id.c_str(), nullptr, 16)), x, z, rotation);
+        } else if (command == "netcells") {   // netcells X0 Z0 X1 Z1: every network piece on the cells, flags, piece, edges (read-only)
+            int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
+            words >> x0 >> z0 >> x1 >> z1;
+            native::NativeNetworkCellReport(x0, z0, x1, z1);
         } else if (command == "netends") {   // netends [N]: up to N line ends (a piece with one neighbor of its type) and their edges (read-only)
             int limit = 40;
             words >> limit;
