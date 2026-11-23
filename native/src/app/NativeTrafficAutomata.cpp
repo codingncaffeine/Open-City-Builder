@@ -272,6 +272,23 @@ void PedestriansInBox(const float* lo, const float* hi, int count, std::vector<c
     }
 }
 
+// The vehicles of a box come from the vehicle manager the same way (the occupant manager's box test: bounding boxes overlap,
+// strictly; at most `count`, negative = all); the references go to the caller.
+void VehiclesInBox(const float* lo, const float* hi, int count, std::vector<cISC4Occupant*>& out) {
+    auto* manager = Component<cSC4TrafficAutomataManager>(CityComponent::VehicleManager);
+    if (!manager) return;
+    for (IAutomataAutomaton* view : manager->Automata()) {
+        if (count >= 0 && static_cast<int>(out.size()) >= count) break;
+        auto* vehicle = view ? dynamic_cast<cSC4Vehicle*>(AutomatonOf(view)) : nullptr;
+        if (!vehicle) continue;
+        float a[3] = {0.0f, 0.0f, 0.0f}, b[3] = {0.0f, 0.0f, 0.0f};
+        vehicle->GetBoundingBox(a, b);
+        if (!(a[0] < hi[0] && lo[0] < b[0] && a[1] < hi[1] && lo[1] < b[1] && a[2] < hi[2] && lo[2] < b[2])) continue;
+        vehicle->AddRef();
+        out.push_back(static_cast<cISC4Occupant*>(vehicle));
+    }
+}
+
 // The vehicles' city services (sc4::IVehicleHost). The tuning comes from the automata managers' globals (AutomataTuning(), the
 // original's sTuningParams at 0x100b21880: +0x04/+0x08 speed range, +0x1ac/+0x1b0 path offsets, +0x158 network speeds,
 // +0x138 curve factor, +0x1b4/+0x1b8 turn limits). The services the native game does not have yet (player drive, accidents,
@@ -339,13 +356,14 @@ public:
     bool LotBoundingRectAtCell(int cellX, int cellZ, std::int32_t rect[4]) override { return stub()->LotBoundingRectAtCell(cellX, cellZ, rect); }
     IVehicleEffect* CreateNamedEffect(const char* name) override { return stub()->CreateNamedEffect(name); }
     cIGZUnknown* CreateAccident(cISC4Occupant* o, std::int32_t type, std::uint32_t duration) override { return stub()->CreateAccident(o, type, duration); }
-    // The pedestrians of a box come from their manager (the native automata are not in the occupant manager); the references
-    // go to the caller. Other types: PARTIAL (the player-drive collision check asks for vehicles).
+    // The pedestrians and vehicles of a box come from their managers (the native automata are not in the occupant manager);
+    // the references go to the caller.
     void OccupantsInBox(const float* lo, const float* hi, std::uint32_t type, int count, std::vector<cISC4Occupant*>& out) override {
         if (type == kPedestrianOccupantType) {
             PedestriansInBox(lo, hi, count, out);
+        } else if (type == kVehicleOccupantType) {
+            VehiclesInBox(lo, hi, count, out);
         } else {
-            SC4_UNWIRED("cSC4Vehicle OccupantsInBox: occupant types other than pedestrians answer none (the player-drive collision check asks for vehicles)");
             stub()->OccupantsInBox(lo, hi, type, count, out);
         }
     }

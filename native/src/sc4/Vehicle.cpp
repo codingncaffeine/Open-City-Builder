@@ -1621,6 +1621,7 @@ bool cSC4Vehicle::DoCollisionCheck(cS3DVector3& position, float& amount) {
         ++count;
         other->Release();
     }
+    for (cISC4Occupant* occupant : occupants) if (occupant) occupant->Release();   // the box query's references
     return count != 0;
 }
 
