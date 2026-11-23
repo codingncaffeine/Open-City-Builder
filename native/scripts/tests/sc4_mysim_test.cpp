@@ -20,11 +20,20 @@
 #include "sc4/AdviceSubject.h"
 #include "sc4/Lot.h"
 #include "sc4/MySim.h"
+#include "sc4/MySimDispatch.h"
+#include "sc4/MyStreetSim.h"
+#include "sc4/AdvisorSystem.h"
 #include "sc4/SLString.h"
 
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
 using namespace sc4;
+
+// The street sim reads the advisor system's random generator; AdvisorSystem.cpp is not linked, so no system runs here.
+namespace sc4 {
+cSC4AdvisorSystem* cSC4AdvisorSystem::instance_ = nullptr;
+cRZRandom* cSC4AdvisorSystem::GetRandom() { return nullptr; }
+}
 
 // =====================================================================================================================
 // A small fake cISCLua: values on a stack, globals, tables, registry refs and userdata owners.
@@ -266,7 +275,7 @@ struct FakeOccupant final : cISC4Occupant {
     bool Init() override { return true; }
     bool Shutdown() override { return true; }
     bool IsInitialized() const override { return true; }
-    cISCPropertyHolder* AsPropertyHolder() override { return nullptr; }
+    sc4::cISCPropertyHolder* AsPropertyHolder() override { return nullptr; }
     std::uint32_t GetType() const override { return type; }
     void GetPosition(float* xyz) override { xyz[0] = position[0]; xyz[1] = position[1]; xyz[2] = position[2]; }
     void SetPosition(const float* xyz) override { std::memcpy(position, xyz, sizeof(position)); }
@@ -347,7 +356,7 @@ struct FakeBuilding final : cISC4BuildingOccupant, cISC4Occupant {
     bool Init() override { return true; }
     bool Shutdown() override { return true; }
     bool IsInitialized() const override { return true; }
-    cISCPropertyHolder* AsPropertyHolder() override { return nullptr; }
+    sc4::cISCPropertyHolder* AsPropertyHolder() override { return nullptr; }
     std::uint32_t GetType() const override { return kOccupantTypeBuilding; }
     void GetPosition(float* xyz) override { xyz[0] = position[0]; xyz[1] = position[1]; xyz[2] = position[2]; }
     void SetPosition(const float* xyz) override { std::memcpy(position, xyz, sizeof(position)); }
@@ -735,6 +744,8 @@ struct FakeHost final : IMySimHost {
     float travelRatio = 1.0f;
     int travelRatioType = -1;
     bool TripSimulatorsPresent() override { return tripSimulators; }
+    IMySimDispatchVehicleView* streetView = nullptr;
+    IMySimDispatchVehicleView* DispatchVehicleView() override { return streetView; }
     double TripGridValue(TripGrid grid, float x, float z) override {
         tripPosition[0] = x; tripPosition[1] = z;
         const auto it = tripGrids.find(static_cast<int>(grid));
@@ -1678,6 +1689,109 @@ int main() {
         lua->RawGet(-2);
         CHECK(lua->ToUserTag(-1) == first);
         lua->Pop(2);
+    }
+
+    // ---- cSC4MyStreetSim: attach / detach, the trip kind from the occupant group, the sampling at the automaton ----
+    {
+        struct StreetView final : IMySimDispatchVehicleView {
+            bool QueryInterface(std::uint32_t, void**) override { return false; }
+            std::uint32_t AddRef() override { return 1; }
+            std::uint32_t Release() override { return 1; }
+            int TrackOccupant(cISC4Occupant* occupant, int type, std::uint32_t number, const cRZString*) override {
+                tracked = occupant; trackType = type; trackNumber = number; return 77;
+            }
+            void UntrackOccupant(int id, bool force) override { untracked.push_back(id); untrackForce = force; }
+            cISC4Occupant* tracked = nullptr; int trackType = -1; std::uint32_t trackNumber = 0;
+            std::vector<int> untracked; bool untrackForce = true;
+        };
+        struct StreetAutomaton final : IMySimDispatchAutomaton, IMySimDispatchRoute {
+            bool QueryInterface(std::uint32_t, void**) override { return false; }
+            std::uint32_t AddRef() override { return ++refs; }
+            std::uint32_t Release() override { return --refs; }
+            cISC4Occupant* AsOccupant() override { return occupant; }
+            void Remove(bool) override {}
+            bool PlayAnim(std::uint32_t) override { return true; }
+            void SetAutomataFlag(std::uint32_t flag, bool on) override { flags = on ? (flags | flag) : (flags & ~flag); }
+            bool CheckAutomataFlag(std::uint32_t flag) override { return (flags & flag) != 0; }
+            void AddCallback(cIGZMessageTarget2* target) override { callback = target; }
+            void RemoveCallback(cIGZMessageTarget2* target) override { if (callback == target) callback = nullptr; }
+            int GetStateId() const override { return 0; }
+            std::uint32_t GetBehavior() const override { return behavior; }
+            bool SetState(std::uint32_t, IMySimDispatchAutomaton*, float, bool, std::uint32_t, std::uint32_t, const void*) override { return true; }
+            void SetPriority(std::uint8_t) override {}
+            IMySimDispatchRoute* RouteInterface() override { if (!car) return nullptr; AddRef(); return this; }
+            bool GetRouteInfo(std::deque<RouteData>&) const override { return false; }
+            bool SetRouteInfo(const std::deque<RouteData>&, bool, bool) override { return false; }
+            void SetCellLifespan(std::uint8_t lifespan) override { cellLifespan = lifespan; }
+            int refs = 1; cISC4Occupant* occupant = nullptr; std::uint32_t flags = 0, behavior = 0; bool car = false;
+            cIGZMessageTarget2* callback = nullptr; int cellLifespan = -1;
+        };
+        StreetView view;
+        host.streetView = &view;
+        auto* street = new cSC4MyStreetSim();
+        street->AddRef();
+        CHECK(street->GetBitmapID() == kMyStreetSimBitmapId && street->get_track_handle() == -1);
+        CHECK(street->Init(1));
+        CHECK(street->LuaTableRef() >= 1);
+        auto snum = [&](const char* key) {
+            const LuaTable& t = *host.lua.refs[static_cast<std::size_t>(street->LuaTableRef() - 1)].table;
+            const auto it = t.fields.find(key);
+            return it != t.fields.end() && it->second.kind == LuaValue::Number ? it->second.number : -99999.0;
+        };
+        auto* walker = new FakeOccupant();
+        walker->AddRef();
+        walker->group = 0x4001;
+        walker->position[0] = 160.0f;   // cell 10,10
+        walker->position[2] = 160.0f;
+        StreetAutomaton person;
+        person.occupant = walker;
+        person.behavior = 7;
+        host.tripSimulators = true;
+        host.tripGrids = {{static_cast<int>(IMySimHost::TripGrid::Crime), 300.0}};
+        host.travelRatio = 3.5f;
+        host.tripLots.clear();
+        host.tripDisasters.clear();
+        const int top = host.lua.GetTop();
+        CHECK(street->AttachAutomaton(&person));
+        CHECK(host.lua.GetTop() == top);
+        CHECK(street->Attached() && street->Automaton() == &person && street->State() == 6 && street->TravelType() == 0);
+        CHECK(snum("trip_on_foot") == 1.0 && snum("trip_idle") == 1.0 && snum("trip_in_car") == 0.0 && snum("state") == 6.0);
+        CHECK(snum("wealth") == 2.0 && snum("trip_in_transit") == 1.0);
+        CHECK(snum("trip_crime") == 44.0 && snum("trip_time_ratio") == 3.0 && host.travelRatioType == 0);   // 300 & 0xff
+        CHECK(host.tripPosition[0] == 160.0f && host.tripPosition[1] == 160.0f);
+        CHECK(view.tracked == walker && view.trackType == 3 && view.trackNumber == kMyStreetSimBitmapId && street->get_track_handle() == 77);
+        CHECK(person.callback != nullptr && person.cellLifespan == -1 && person.flags == 0);   // a pedestrian: no car fields
+        // a bus: the car fields are set, travel type 2, state 4 or 5 (the advisor system's random number)
+        walker->group = 0x4200;
+        StreetAutomaton bus;
+        bus.occupant = walker;
+        bus.car = true;
+        CHECK(street->AttachAutomaton(&bus));
+        CHECK(person.callback == nullptr && view.untracked.size() == 1 && view.untracked[0] == 77 && !view.untrackForce);
+        CHECK(bus.cellLifespan == 0xff && (bus.flags & 0x2000000) != 0);
+        CHECK(street->TravelType() == 2 && (street->State() == 4 || street->State() == 5) && snum("trip_on_bus") == 1.0);
+        CHECK(snum("trip_on_foot") == 0.0 && snum("trip_idle") == 0.0);
+        // HideLocation keeps the automaton; ShowLocation attaches again; the removal message detaches for good
+        street->HideLocation();
+        CHECK(!street->Attached() && street->Automaton() == &bus && street->get_track_handle() == -1 && street->State() == 0);
+        street->ShowLocation();
+        CHECK(street->Attached() && view.trackType == 3);
+        auto* removed = new cRZMessage2Standard();
+        removed->AddRef();
+        removed->SetType(kMessageMyStreetSimRemoved);
+        removed->SetData2(4);   // not 2, 3 or 5
+        street->DoMessage(removed);
+        CHECK(street->Attached());
+        removed->SetData2(3);
+        street->DoMessage(removed);
+        CHECK(!street->Attached() && street->Automaton() == nullptr);
+        removed->Release();
+        // no automaton: the day does nothing (the base would advance the sim)
+        street->simulate_day();
+        street->Shutdown();
+        street->Release();
+        walker->Release();
+        host.streetView = nullptr;
     }
 
     SetAdvisorHost(nullptr);

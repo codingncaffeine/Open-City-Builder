@@ -203,6 +203,8 @@ class cISC4OccupantManager;
 class cSC4Lot;
 class cISC4MySimBalloonAdvice;
 class IMySimHomeSound;
+class IMySimDispatchVehicleView;
+class IMySimDispatchAutomaton;
 
 // cSC4MySimDispatch::cLocation (0x30 bytes; ctor @ 0x1006ac5fc). The dispatch neighbour is not recovered yet, so the
 // location it is addressed by is mirrored here and used by both sides of the seam.
@@ -442,6 +444,10 @@ public:
     virtual void PlayCitySound(IMySimHomeSound* sound, const float pos[3]) = 0;   // spCity 0x110 -> vslot 0xa0(sound, 0)
     virtual IMySimEffect* CreateGhostEffect() = 0;                          // spEffectsManager vslot 0x30("MySimGhost")
     virtual bool DispatchIconRect(int trackHandle, int rect[4]) = 0;        // spDispatchManager 0xb0 -> GetLastScreenIconRect
+    // --- cSC4MyStreetSim ------------------------------------------------------------------------------------
+    virtual IMySimDispatchVehicleView* DispatchVehicleView() { return nullptr; }   // spDispatchManager 0xb0 (borrowed)
+    virtual bool SimulatorAnyPaused() { return false; }                      // spSimulator IsAnyPaused (i386 vslot 0x48)
+    virtual std::uint32_t ViewInputControlId() { return 0; }                // spView3D 0x60 (current control) -> vslot 0x14
     // --- objects --------------------------------------------------------------------------------------------
     virtual IMySimDispatch* CreateDispatch(cSC4MySim* owner) = 0;           // cSC4MySimDispatch ctor @ 0x1006acb3c
     virtual IMySimBalloonWinProc* CreateBalloonWinProc(cISC4MySim* owner) = 0;   // cSC4MySimBalloonWinProc @ 0x1006ab464
@@ -479,6 +485,7 @@ void SetMySimHost(IMySimHost* host);
 
 // The free helpers of the original MySim unit (kept as free functions like the originals).
 void MySimSetTableString(cISCLua* lua, const char* key, cIGZString* value);             // @ 0x1007a5ce4
+void MySimSetTableNumber(cISCLua* lua, const char* key, long value);                    // SetTableNumber (i386)
 void MySimSetTableBuilding(cISCLua* lua, const char* key, cISC4BuildingOccupant* value); // @ 0x1007a5be9
 void MySimSetTableOccupantSubject(cISCLua* lua, const char* key, cISC4Occupant* value);  // @ 0x1007a61d0
 int MySimGetCongestion(cISC4TrafficSimulator* traffic, int x, int z);                   // @ 0x1007a60fc
@@ -692,6 +699,7 @@ public:
     void push_balloon_queue(int queueType, int index);             // @ 0x1007a3118
     cISC4MySimBalloonAdvice* get_next_balloon(int queueType);      // @ 0x1007a31b6
     void simulate_balloons(bool force);                            // @ 0x1007a3bd6
+    void SampleTripLocalArea(cISCLua* lua, IMySimHost* host, int x0, int z0, int x1, int z1, cIGZString* noLandmarkName);
     int PickIdleOffset();                                          // @ 0x1007a3d3a
     bool is_pylon_location(const MySimLocation& location);         // @ 0x1007a5690
     void FailCommute();                                            // @ 0x1007a56ee
@@ -734,7 +742,7 @@ public:
     cRZString& BitmapFile() { return bitmapFile_; }                     // +0x1f0
     void SetCallout(IMySimCallout* callout) { callout_ = callout; }     // +0x218
 
-private:
+protected:   // cSC4MyStreetSim reads the state, the script table, the track handle and the timers
     void BuildStrings();                    // the three lazily created strings of Init
     cRZString& NoJobString();               // +0x308
     cRZString& RetiredString();             // +0x310

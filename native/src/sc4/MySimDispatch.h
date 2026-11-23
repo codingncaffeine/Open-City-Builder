@@ -209,6 +209,7 @@ class IMySimDispatchRoute : public cIGZUnknown {
 public:
     virtual bool GetRouteInfo(std::deque<RouteData>& out) const = 0;                    // 0x4b8 @ 0x1000e25e0
     virtual bool SetRouteInfo(const std::deque<RouteData>& route, bool begin, bool onlyStart) = 0;   // 0x4c0 @ 0x100119a46
+    virtual void SetCellLifespan(std::uint8_t lifespan) { (void)lifespan; }               // 0x508 @ 0x10050f560 (i386 0x284)
 };
 
 // cISC4Automaton (iid 0xa9b40f05) as the dispatch uses it. Only the slots it calls are declared, in vtable order.
@@ -222,6 +223,7 @@ public:
     virtual void AddCallback(cIGZMessageTarget2* target) = 0;                   // 0x138
     virtual void RemoveCallback(cIGZMessageTarget2* target) = 0;                // 0x140
     virtual int GetStateId() const = 0;                                         // 0x1c0 -> +8 (tAutomataState::state)
+    virtual std::uint32_t GetBehavior() const { return 0; }                     // 0x1d8 (i386 0xec)
     // 0x198 SetState(state, controller, timer, flag, animOffset, sfx, behavior); the dispatch passes the automaton as
     // its own controller and timer = -1.0f.
     virtual bool SetState(std::uint32_t state, IMySimDispatchAutomaton* controller, float timer, bool flag,

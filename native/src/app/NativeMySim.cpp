@@ -286,6 +286,8 @@ bool GetSimCountCommand(void* handle, cIGZCommandParameterSet*, cIGZCommandParam
 // ---------------------------------------------------------------------------------------------------------------------
 // IMySimHost
 // ---------------------------------------------------------------------------------------------------------------------
+IMySimDispatchVehicleView* NativeMySimVehicleView();   // below: the dispatch manager's view, borrowed
+
 class MySimHost final : public IMySimHost {
 public:
     // --- script state ---
@@ -394,6 +396,8 @@ public:
     }
     int HourOfDay() override { cSC424HourClock* c = Clock24(); return c ? static_cast<int>(c->GetHour()) : 12; }
     bool SimulatorTickEnabled() override { cSC4Simulator* s = Simulator(); return s && !s->IsAnyPaused(); }
+    bool SimulatorAnyPaused() override { cSC4Simulator* s = Simulator(); return s && s->IsAnyPaused(); }
+    IMySimDispatchVehicleView* DispatchVehicleView() override { return NativeMySimVehicleView(); }
     // spCity GetBuildingDevelopmentSimulator -> GetSpecialBuildings: the civic occupants, borrowed.
     void SpecialBuildings(std::vector<cISC4Occupant*>& out) override {
         out.clear();
@@ -793,6 +797,7 @@ public:
     bool SetRouteInfo(const std::deque<RouteData>& route, bool begin, bool onlyStart) override {
         return automaton_->SetRouteInfo(route, begin, onlyStart);
     }
+    void SetCellLifespan(std::uint8_t lifespan) override { automaton_->SetCellLifespan(lifespan); }
 private:
     cSC4TrafficAutomaton* automaton_;
     std::uint32_t refs_ = 0;
@@ -813,6 +818,7 @@ public:
     void AddCallback(cIGZMessageTarget2* target) override { automaton_->AddCallback(target); }
     void RemoveCallback(cIGZMessageTarget2* target) override { automaton_->RemoveCallback(target); }
     // 0x1c0 GetState -> +8: the state's behavior type (an automaton always has its base state; -1 without one)
+    std::uint32_t GetBehavior() const override { return automaton_->GetBehavior(); }
     int GetStateId() const override {
         tAutomataState* state = automaton_->GetState();
         return state ? static_cast<int>(state->stateType) : -1;
@@ -891,6 +897,11 @@ public:
         return manager ? manager->GetDispatchVehicleView() : nullptr;
     }
 };
+
+IMySimDispatchVehicleView* NativeMySimVehicleView() {
+    static VehicleViewForward view;
+    return VehicleViewForward::View() ? &view : nullptr;
+}
 
 // ---------------------------------------------------------------------------------------------------------------------
 // IMySimDispatchHost

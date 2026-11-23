@@ -58,6 +58,7 @@ IMySimHost* MySimHost() { return g_host; }
 void SetMySimHost(IMySimHost* host) { g_host = host; }
 
 void MySimSetTableString(cISCLua* lua, const char* key, cIGZString* value) { SetTableString(lua, key, value); }
+void MySimSetTableNumber(cISCLua* lua, const char* key, long value) { SetTableNumber(lua, key, value); }
 void MySimSetTableBuilding(cISCLua* lua, const char* key, cISC4BuildingOccupant* value) {
     SetTableBuilding(lua, key, value);
 }
@@ -1134,61 +1135,73 @@ void cSC4MySim::UpdateTripVariables(int newState, int oldState, int newFlags, in
     // the local area: at a location, on foot, by car, idling, or forced
     if (force || dispatch_->GetState() == 3 || dispatch_->GetTravelType() == 0 || dispatch_->GetTravelType() == 1 ||
         dispatch_->CheckFlags(1)) {
-        std::vector<IMySimHost::TripLot> lots;
-        host->LotsInCellRect(x0, z0, x1, z1, lots);
-        int buildings = 0;
-        int distress[3] = {0, 0, 0};                                         // condition 2, 3, 4 and up
-        int wealth[3] = {0, 0, 0};                                           // wealth 1, 2, 3 and up
-        cISC4BuildingOccupant* landmark = nullptr;
-        for (auto it = lots.rbegin(); it != lots.rend(); ++it) {             // the original pops from the back
-            if (!it->building) continue;
-            ++buildings;
-            if (it->condition >= 4) ++distress[2];
-            else if (it->condition == 3) ++distress[1];
-            else if (it->condition >= 2) ++distress[0];
-            if (it->wealth >= 3) ++wealth[2];
-            else if (it->wealth == 2) ++wealth[1];
-            else if (it->wealth >= 1) ++wealth[0];
-            if (!landmark && it->building->AsOccupant()->IsOccupantGroup(kOccupantGroupLandmark)) landmark = it->building;
-        }
-        const float share = static_cast<float>(1.0 / (static_cast<double>(buildings) + 1.0e-4));
-        auto percent = [share](int count) { return static_cast<long>(static_cast<float>(count) * share * 100.0f); };
-        SetTableNumber(lua, "trip_distress1_p", percent(distress[0]));
-        SetTableNumber(lua, "trip_distress2_p", percent(distress[1]));
-        SetTableNumber(lua, "trip_distress3_p", percent(distress[2]));
-        SetTableNumber(lua, "trip_wealth_low_p", percent(wealth[0]));
-        SetTableNumber(lua, "trip_wealth_med_p", percent(wealth[1]));
-        SetTableNumber(lua, "trip_wealth_high_p", static_cast<long>(100.0f * static_cast<float>(wealth[2]) * share));
-        SetTableNumber(lua, "trip_landmark_nearby", landmark ? 1 : 0);
-        long funding = 0;
-        if (!landmark) {
-            cRZAutoRefCount<cRZString> name(new cRZString());
-            SetTableString(lua, "trip_landmark_name", name.get());
-        } else {
-            cRZString buildingName;
-            landmark->GetName(buildingName);                                 // building 0x30 GetBuildingName
-            cRZAutoRefCount<cRZString> name(new cRZString(buildingName));
-            SetTableString(lua, "trip_landmark_name", name.get());
-            funding = static_cast<long>(100.0f * host->BuildingLocalFunding(landmark, kBudgetPurposeLandmark));
-        }
-        SetTableNumber(lua, "trip_landmark_funding_p", funding);
-
-        std::vector<IMySimHost::TripDisaster> disasters;
-        host->DisasterLocations(disasters);
-        bool fire = false, riot = false, any = false;
-        for (const IMySimHost::TripDisaster& disaster : disasters) {
-            if (disaster.x < x0 || disaster.z < z0 || x1 < disaster.x || z1 < disaster.z) continue;
-            riot = riot || disaster.id == kDisasterIdRiot;
-            fire = fire || disaster.id == kDisasterIdFire;
-            any = true;
-            if (fire && riot) break;
-        }
-        SetTableNumber(lua, "trip_fire_nearby", fire ? 1 : 0);
-        SetTableNumber(lua, "trip_riot_nearby", riot ? 1 : 0);
-        SetTableNumber(lua, "trip_any_disaster_nearby", any ? 1 : 0);
+        SampleTripLocalArea(lua, host, x0, z0, x1, z1, nullptr);
     }
     lua->SetTop(top);                                                        // 0x1c
     if (postChanged) PostChangedMessage();
+}
+
+// The local area of a trip (UpdateTripVariables, and cSC4MyStreetSim::update_trip_variables i386 0x00488112): over the lots
+// of the cell rect, the distress and wealth shares and the first landmark (its name and local funding), then the fire /
+// riot / any-disaster flags. Without a landmark the name is a new empty string, or `noLandmarkName` (the street sim
+// passes its own string).
+void cSC4MySim::SampleTripLocalArea(cISCLua* lua, IMySimHost* host, int x0, int z0, int x1, int z1, cIGZString* noLandmarkName) {
+    std::vector<IMySimHost::TripLot> lots;
+    host->LotsInCellRect(x0, z0, x1, z1, lots);
+    int buildings = 0;
+    int distress[3] = {0, 0, 0};                                         // condition 2, 3, 4 and up
+    int wealth[3] = {0, 0, 0};                                           // wealth 1, 2, 3 and up
+    cISC4BuildingOccupant* landmark = nullptr;
+    for (auto it = lots.rbegin(); it != lots.rend(); ++it) {             // the original pops from the back
+        if (!it->building) continue;
+        ++buildings;
+        if (it->condition >= 4) ++distress[2];
+        else if (it->condition == 3) ++distress[1];
+        else if (it->condition >= 2) ++distress[0];
+        if (it->wealth >= 3) ++wealth[2];
+        else if (it->wealth == 2) ++wealth[1];
+        else if (it->wealth >= 1) ++wealth[0];
+        if (!landmark && it->building->AsOccupant()->IsOccupantGroup(kOccupantGroupLandmark)) landmark = it->building;
+    }
+    const float share = static_cast<float>(1.0 / (static_cast<double>(buildings) + 1.0e-4));
+    auto percent = [share](int count) { return static_cast<long>(static_cast<float>(count) * share * 100.0f); };
+    SetTableNumber(lua, "trip_distress1_p", percent(distress[0]));
+    SetTableNumber(lua, "trip_distress2_p", percent(distress[1]));
+    SetTableNumber(lua, "trip_distress3_p", percent(distress[2]));
+    SetTableNumber(lua, "trip_wealth_low_p", percent(wealth[0]));
+    SetTableNumber(lua, "trip_wealth_med_p", percent(wealth[1]));
+    SetTableNumber(lua, "trip_wealth_high_p", static_cast<long>(100.0f * static_cast<float>(wealth[2]) * share));
+    SetTableNumber(lua, "trip_landmark_nearby", landmark ? 1 : 0);
+    long funding = 0;
+    if (!landmark) {
+        if (noLandmarkName) {
+            SetTableString(lua, "trip_landmark_name", noLandmarkName);
+        } else {
+            cRZAutoRefCount<cRZString> name(new cRZString());
+            SetTableString(lua, "trip_landmark_name", name.get());
+        }
+    } else {
+        cRZString buildingName;
+        landmark->GetName(buildingName);                                 // building 0x30 GetBuildingName
+        cRZAutoRefCount<cRZString> name(new cRZString(buildingName));
+        SetTableString(lua, "trip_landmark_name", name.get());
+        funding = static_cast<long>(100.0f * host->BuildingLocalFunding(landmark, kBudgetPurposeLandmark));
+    }
+    SetTableNumber(lua, "trip_landmark_funding_p", funding);
+
+    std::vector<IMySimHost::TripDisaster> disasters;
+    host->DisasterLocations(disasters);
+    bool fire = false, riot = false, any = false;
+    for (const IMySimHost::TripDisaster& disaster : disasters) {
+        if (disaster.x < x0 || disaster.z < z0 || x1 < disaster.x || z1 < disaster.z) continue;
+        riot = riot || disaster.id == kDisasterIdRiot;
+        fire = fire || disaster.id == kDisasterIdFire;
+        any = true;
+        if (fire && riot) break;
+    }
+    SetTableNumber(lua, "trip_fire_nearby", fire ? 1 : 0);
+    SetTableNumber(lua, "trip_riot_nearby", riot ? 1 : 0);
+    SetTableNumber(lua, "trip_any_disaster_nearby", any ? 1 : 0);
 }
 
 // 0x1007a5800 UpdateQuickVariables()
