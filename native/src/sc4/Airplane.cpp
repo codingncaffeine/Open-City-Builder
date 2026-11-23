@@ -1509,10 +1509,10 @@ bool cSC4Airplane::TranslatePlayerDriveCommands(tAutomataStatePlayerDrive* state
     if (h[7] >= 0.0f) {
         IAutomatonEffects* effects = Effects();
         if (effects) effects->UpdatePlacement();
-        if (state->fireArmed && effects && effects->StartNamedEffects(cRZString("jetbomb"), 0, false)) {
-            state->effectDelay20c = 0;
-            state->fireArmed = 0;
-            ++state->shotsFired;
+        if (state->ready[tAutomataStatePlayerDrive::kFireCommand] && effects && effects->StartNamedEffects(cRZString("jetbomb"), 0, false)) {
+            state->timer[tAutomataStatePlayerDrive::kFireCommand] = 0.0f;
+            state->ready[tAutomataStatePlayerDrive::kFireCommand] = 0;
+            ++state->used[tAutomataStatePlayerDrive::kFireCommand];
         }
     }
     const float s = milliseconds * 0.001f;
@@ -1650,9 +1650,9 @@ bool cSC4Airplane::HandleEnterState(tAutomataState* state) {
             auto* drive = static_cast<tAutomataStatePlayerDrive*>(state);
             drive->value40 = 0;
             drive->groupSpeed = 1.0f;
-            drive->shells = 0xf;
-            drive->shotsFired = 0;
-            drive->timeout1d8 = 0x44fa0000;   // 2000.0f
+            drive->limit[tAutomataStatePlayerDrive::kFireCommand] = 15;
+            drive->used[tAutomataStatePlayerDrive::kFireCommand] = 0;
+            drive->reload[tAutomataStatePlayerDrive::kFireCommand] = 2000.0f;
             if (state_ != AirplaneState::kFlying) {
                 if (IAircraftHost* host = HostFor(*this)) host->PlayAudioEvent(8);
             }

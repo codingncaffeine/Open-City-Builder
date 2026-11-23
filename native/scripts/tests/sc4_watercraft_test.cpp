@@ -984,7 +984,7 @@ int main() {
         drive->history[0] = 0.5f;   // right trigger
         drive->history[1] = -1.0f;
         drive->steering6c = 0.25f;
-        drive->hint117 = 1;
+        drive->tapped[7] = 1;
         CHECK(boat->TranslatePlayerDriveCommands(drive, 1000.0f));
         CHECK(boat->DriveMode() == 2);
         CHECK_NEAR(drive->value38, 0.5f);
@@ -1013,8 +1013,8 @@ int main() {
         // Idle with the tow hint: the boat starts looking for a tow.
         drive->history[0] = -1.0f;
         drive->history[1] = -1.0f;
-        drive->hint117 = 0;
-        drive->hint119 = 1;
+        drive->tapped[7] = 0;
+        drive->tapped[9] = 1;
         boat->SetSpeed(0.0f);
         CHECK(boat->TranslatePlayerDriveCommands(drive, 1000.0f));
         CHECK(boat->TowSearchActive());

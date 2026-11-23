@@ -399,11 +399,12 @@ int main() {
     CHECK(std::strcmp(moneyText->GetCaption().ToChar(), "\xc2\xa7" "1234567") == 0);
     CHECK(lights->GetBtnFlag(1));
     CHECK(host.missionUpdates == 1);
-    // The vehicle gauges start empty (no vehicle filled them): pitch on -30..30 degrees, ammunition 0, fire off; the
-    // cursor is the tool's default while command 8 is not held.
+    // The vehicle gauges start empty (no vehicle filled them): pitch on -30..30 degrees; entering the drive state leaves the
+    // fire command unlimited (-1 uses, none used) and ready, so the ammunition reads -1 and fire is on; the cursor is the
+    // tool's default while command 8 is not held.
     CHECK(std::fabs(pitchKnob->GetMinValue() + 0.52359879f) < 1e-7f && std::fabs(pitchKnob->GetMaxValue() - 0.52359879f) < 1e-7f);
     CHECK(pitchKnob->GetValue() == 0.0f && compassKnob->GetMaxValue() == 6.2831855f);
-    CHECK(std::strcmp(ammoText->GetCaption().ToChar(), "0") == 0 && !fireButton->IsChecked());
+    CHECK(std::strcmp(ammoText->GetCaption().ToChar(), "-1") == 0 && fireButton->IsChecked());
     CHECK(tool->CursorId() == 0xc16c4e1b);
     state->value3c = 0.75f;                                    // above the maximum: the maximum
     // A tank's record: barrel pitch 0..0.4 on 0.2, turret 0..2 pi on 1, velocity 30..100 on 60, compass on 2; 12 shells,
@@ -413,9 +414,9 @@ int main() {
     state->barrelTurn[0] = 0.0f, state->barrelTurn[1] = 6.2831855f, state->barrelTurn[2] = 1.0f;
     state->barrelVelocity[0] = 30.0f, state->barrelVelocity[1] = 100.0f, state->barrelVelocity[2] = 60.0f;
     state->compassValue = 2.0f;
-    state->shells = 12;
-    state->shotsFired = 3;
-    state->fireArmed = 1;
+    state->limit[7] = 12;
+    state->used[7] = 3;
+    state->ready[7] = 1;
     state->cursor = 0xac0ece77;
     state->history[8] = 1.0f;
     tool->DoMessage(tick);
@@ -428,7 +429,7 @@ int main() {
     CHECK(std::strcmp(ammoText->GetCaption().ToChar(), "9") == 0 && fireButton->IsChecked());
     CHECK(tool->CursorId() == 0xac0ece77);
     state->history[8] = -1.0f;                                 // released: the default cursor
-    state->fireArmed = 0;
+    state->ready[7] = 0;
     tool->DoMessage(tick);
     CHECK(tool->CursorId() == 0xc16c4e1b && !fireButton->IsChecked());
     // The panel toggles: 0xac1f0449 the help panel, 0xcc1f0457 the dashboard, 0xac1f045d flips between them.

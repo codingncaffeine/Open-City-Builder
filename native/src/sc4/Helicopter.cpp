@@ -2006,15 +2006,15 @@ void cSC4Helicopter::DetectCollisions() {
 bool cSC4Helicopter::TranslatePlayerDriveCommands(tAutomataStatePlayerDrive* state, float milliseconds) {
     if (!state || !physics_) return false;
     cSC4Automaton::TranslatePlayerDriveCommands(state, milliseconds);
-    if (state->effectTimerC4 >= 0.0f && rotorStill_) {
+    if (state->history[tAutomataStatePlayerDrive::kFireCommand] >= 0.0f && rotorStill_) {
         rotorStill_->Update();
-        if (state->fireArmed) {
+        if (state->ready[tAutomataStatePlayerDrive::kFireCommand]) {
             bool started = rotorStill_->StartNamed(cRZString("helicoptermissle"), 0, false);
             if (!started) started = rotorStill_->StartNamed(cRZString("ufolaser"), 0, false);
             if (started) {
-                state->effectDelay20c = 0;
-                state->fireArmed = 0;
-                ++state->shotsFired;
+                state->timer[tAutomataStatePlayerDrive::kFireCommand] = 0.0f;
+                state->ready[tAutomataStatePlayerDrive::kFireCommand] = 0;
+                ++state->used[tAutomataStatePlayerDrive::kFireCommand];
             }
         }
     }
@@ -2152,9 +2152,9 @@ bool cSC4Helicopter::HandleEnterState(tAutomataState* state) {
         auto* drive = static_cast<tAutomataStatePlayerDrive*>(state);
         drive->value40 = 0xc2c80000u;    // +0x40 = -100.0f bits
         drive->groupSpeed = -100.0f;     // +0x44 = -100.0f
-        drive->shells = 0xf;
-        drive->shotsFired = 0;
-        drive->timeout1d8 = 0x44fa0000;
+        drive->limit[tAutomataStatePlayerDrive::kFireCommand] = 15;
+        drive->used[tAutomataStatePlayerDrive::kFireCommand] = 0;
+        drive->reload[tAutomataStatePlayerDrive::kFireCommand] = 2000.0f;
     }
     return result;
 }

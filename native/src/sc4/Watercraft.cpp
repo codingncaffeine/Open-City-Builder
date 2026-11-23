@@ -861,9 +861,9 @@ bool cSC4Watercraft::HandleEnterState(tAutomataState* state) {
                     }
                 }
             }
-            drive->shells = 0xf;
-            drive->shotsFired = 0;
-            drive->timeout1d8 = 0x44fa0000;   // 2000.0f
+            drive->limit[tAutomataStatePlayerDrive::kFireCommand] = 15;
+            drive->used[tAutomataStatePlayerDrive::kFireCommand] = 0;
+            drive->reload[tAutomataStatePlayerDrive::kFireCommand] = 2000.0f;
             break;
         }
     }
@@ -1840,17 +1840,17 @@ bool cSC4Watercraft::TranslatePlayerDriveCommands(tAutomataStatePlayerDrive* sta
             speed_ = target;
         }
     }
-    if (0.0f <= state->effectTimerC4) {
+    if (0.0f <= state->history[tAutomataStatePlayerDrive::kFireCommand]) {
         UpdateEffects();
-        if (state->fireArmed) {
+        if (state->ready[tAutomataStatePlayerDrive::kFireCommand]) {
             if (animations_[5]) animations_[5]->Play(false);
-            state->effectDelay20c = 0;
-            state->fireArmed = 0;
-            ++state->shotsFired;
+            state->timer[tAutomataStatePlayerDrive::kFireCommand] = 0.0f;
+            state->ready[tAutomataStatePlayerDrive::kFireCommand] = 0;
+            ++state->used[tAutomataStatePlayerDrive::kFireCommand];
         }
     }
     if (watercraftHost_ && animations_[5]) {
-        if (state->hint117) {
+        if (state->tapped[7]) {
             if (!animations_[5]->IsPlaying()) {
                 if (0.0f < speed_) {
                     cS3DTransform transform;
@@ -1887,7 +1887,7 @@ bool cSC4Watercraft::TranslatePlayerDriveCommands(tAutomataStatePlayerDrive* sta
         state->compassValue = kTwoPi - angle;
     }
     SpeedTween().SetDesired(std::fabs(speed_), 0.0f);
-    if (watercraftHost_ && state->hint119 && speed_ == 0.0f && !towTarget_) {
+    if (watercraftHost_ && state->tapped[9] && speed_ == 0.0f && !towTarget_) {
         towSearchActive_ = true;
         if (animations_[3] && !animations_[3]->IsPlaying()) {
             cS3DTransform transform;

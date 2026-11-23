@@ -1448,7 +1448,19 @@ bool cSC4Automaton::HandleEnterState(tAutomataState* state) {
         case kStatePlayerDrive: {
             auto* drive = static_cast<tAutomataStatePlayerDrive*>(state);
             drive->value38 = 0.0f;
-            for (float& value : drive->history) value = -1.0f;
+            // i386 HandleEnterState: every command released, no uses, unlimited, never reloading, ready.
+            for (int i = 0; i < 13; ++i) {
+                drive->history[i] = -1.0f;
+                drive->tableF4[i] = 0.0f;
+                drive->tapped[i] = 0;
+                drive->limit[i] = -1;
+                drive->used[i] = 0;
+                drive->reload[i] = -1.0f;
+                drive->timer[i] = 0.0f;
+                drive->ready[i] = 1;
+                drive->keyEffectOn205[i] = 0;
+            }
+            drive->history[4] = 0.0f;   // i386 +0x8c
             SetMarkedForRemove(false);
             SetOpacity(1.0f, 0.0f);
             SetAutomataFlag(kAutomataFlagPlayerDrive, true);
@@ -1984,13 +1996,33 @@ bool cSC4Automaton::DoAttachAnimTick(float milliseconds) {
     return attach->flag40;
 }
 
+// i386 0x000bfa8c: the per-command bookkeeping every vehicle's translation starts with. A command released within 250 ms of
+// being held is "tapped". A command whose uses are unlimited or used up readies again after its reload time; one that
+// still has uses is not ready while held, and holding it restarts the AEMS "fire" event 0x14.
 bool cSC4Automaton::TranslatePlayerDriveCommands(tAutomataStatePlayerDrive* state, float milliseconds) {
-    (void)state;
-    (void)milliseconds;
-    // PARTIAL: the player-drive record's 0x2a0 bytes hold seven 13-entry command tables (offsets +0xdc, +0x120,
-    // +0x154, +0x188, +0x1bc, +0x1f0 and the two byte tables at +0x224/+0x231); the port's tAutomataStatePlayerDrive
-    // only models the history table at +0xa8, so the translation cannot run yet.
-    SC4_UNWIRED("cSC4Automaton::TranslatePlayerDriveCommands: the player-drive command tables are not translated into steering/throttle");
+    if (!state) return true;
+    constexpr float kInactive = -1.0f;   // tAutomataStatePlayerDrive::kDriveCommand_INACTIVE
+    for (int i = 0; i < 13; ++i) {
+        const float held = state->previous[i] - state->history[i];
+        state->tapped[i] = (held <= 0.0f || 250.0f <= held) ? 0 : 1;
+    }
+    for (int i = 0; i < 13; ++i) {
+        const float current = state->history[i];
+        state->previous[i] = current;
+        if (static_cast<float>(state->limit[i]) == kInactive || state->used[i] < state->limit[i]) {
+            if (state->ready[i] == 0) {
+                if (state->timer[i] < state->reload[i]) {
+                    state->timer[i] += milliseconds;
+                } else {
+                    state->ready[i] = 1;
+                    state->timer[i] = 0.0f;
+                }
+            }
+        } else {
+            state->ready[i] = 0;
+            if (current != kInactive && Host()) Host()->PostAudioEvent(0x14);
+        }
+    }
     return true;
 }
 

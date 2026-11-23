@@ -687,11 +687,11 @@ void cSC4ViewInputControlPlayerDrive::UpdateDashboard() {
         SetText(dashboard_, kMoneyText, money);
         if (auto* ammo = DashboardChild<gz::cIGZWinText>(dashboard_, kAmmoText, gz::kGZIID_cIGZWinText, true)) {
             cRZString rounds;
-            rounds.Sprintf("%d", static_cast<int>(state->shells) - state->shotsFired);
+            rounds.Sprintf("%d", state->limit[tAutomataStatePlayerDrive::kFireCommand] - state->used[tAutomataStatePlayerDrive::kFireCommand]);
             if (cIGZWin* window = ammo->AsIGZWin()) window->SetCaption(rounds);
             ammo->Release();
             if (auto* fire = DashboardChild<gz::cIGZWinBtn>(dashboard_, kFireButton, gz::kGZIID_cIGZWinBtn, true)) {
-                fire->SetChecked(state->fireArmed != 0);
+                fire->SetChecked(state->ready[tAutomataStatePlayerDrive::kFireCommand] != 0);
                 fire->Release();
             }
         }

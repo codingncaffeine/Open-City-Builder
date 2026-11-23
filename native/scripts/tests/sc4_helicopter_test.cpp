@@ -754,7 +754,7 @@ int main() {
         state->history[0] = 1.0f;    // +0xa8 collective up
         state->history[2] = 1.0f;    // +0xb0 forward
         state->history[5] = 1.0f;    // +0xbc yaw right
-        state->effectTimerC4 = 1.0f; // +0xc4 (no effect restart)
+        state->history[7] = 1.0f; // the fire command (no effect restart)
         CHECK(helicopter->TranslatePlayerDriveCommands(state, 100.0f));
         CHECK(engine->collective == state->steering6c);
         CHECK_NEAR(engine->field04, -state->value38);
@@ -965,9 +965,9 @@ int main() {
         helicopter->HandleEnterState(state);
         CHECK(state->value40 == 0xc2c80000u);
         CHECK_NEAR(state->groupSpeed, -100.0f);
-        CHECK(state->shells == 0xf);
-        CHECK(state->shotsFired == 0);
-        CHECK(state->timeout1d8 == 0x44fa0000u);
+        CHECK(state->limit[7] == 15);
+        CHECK(state->used[7] == 0);
+        CHECK(state->reload[7] == 2000.0f);
         // Exiting the player drive reloads the type mass into the physics block.
         helicopter->Physics()->mass = 1.0f;
         helicopter->Physics()->inertia = 1.0f;

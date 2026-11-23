@@ -108,16 +108,26 @@ public:
     std::uint32_t value40 = 0;             // +0x40
     float groupSpeed = 1.0f;               // +0x44: the automata group's speed (HandleEnterState)
     float steering6c = 0.0f;               // +0x6c: the watercraft's rudder command
-    float history[13];                     // +0xa8: refilled with -1.0f by Read
-    float effectTimerC4 = 0.0f;            // +0xc4
-    std::uint8_t hint117 = 0;              // +0x117
-    std::uint8_t hint119 = 0;              // +0x119
-    // The weapon block the dashboard shows (i386 +0x144 / +0x178 / +0x1ff; the 64-bit build keeps the tail 0x2c higher).
-    std::uint32_t shells = 0;              // +0x170 (i386 +0x144): rounds at the start (15, the tank 12)
-    std::int32_t shotsFired = 0;           // +0x1a4 (i386 +0x178): ammunition text = shells - shotsFired
-    std::uint32_t timeout1d8 = 0;          // +0x1d8 (bits of 2000.0f)
-    std::uint32_t effectDelay20c = 0;      // +0x20c
-    std::uint8_t fireArmed = 0;            // +0x22b (i386 +0x1ff): fire button 0x6c3a0a6f; the next shot clears it
+    // Seven per-command tables, one entry per drive command (13; i386 offsets, the 64-bit build keeps them 0x2c higher):
+    //   history   +0x7c  the command's held time, -1 (kDriveCommand_INACTIVE) when released; refilled with -1 by Read
+    //   previous  +0xb0  history as of the last TranslatePlayerDriveCommands
+    //   tapped    +0xe4  set when the command was released within 250 ms of being held
+    //   tableF4   +0xf4  zeroed on entry
+    //   limit     +0x128 uses allowed (-1 = unlimited; the fire command 7 gets 15 rounds)
+    //   used      +0x15c uses so far (the fire command: shots fired)
+    //   reload    +0x190 the time to ready again (-1 = never; the fire command 2000 ms)
+    //   timer     +0x1c4 the time since the last use
+    //   ready     +0x1f8 1 when the command may fire again (the fire button shows armed)
+    float history[13];
+    float previous[13] = {};
+    std::uint8_t tapped[13] = {};
+    float tableF4[13] = {};
+    std::int32_t limit[13] = {};
+    std::int32_t used[13] = {};
+    float reload[13] = {};
+    float timer[13] = {};
+    std::uint8_t ready[13] = {};   // the constructor leaves the tables zero; HandleEnterState fills them
+    static constexpr int kFireCommand = 7;
     // The helicopter's spotlight effect state (cSC4Helicopter::TranslatePlayerDriveCommands / UpdateSpotlight).
     cS3DVector3 effectPosition248;         // +0x248
     std::uint8_t spotlightStarted255 = 0;  // +0x255

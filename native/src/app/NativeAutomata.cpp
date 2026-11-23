@@ -20,6 +20,7 @@
 #include "sc4/Render3D.h"
 #include "app/NativeCityView.h"
 #include "sc4/ServiceLocator.h"
+#include "sc4audio/AEMSEvents.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
 
@@ -222,7 +223,16 @@ public:
     void MoveSoundLoop(std::uint32_t handle, std::uint32_t x, std::uint32_t y, std::uint32_t z) override { PostSoundSystemEvent(0xca45190f, handle, x, y, z); }
     std::uint32_t ViewZoom() override { return SL::spViewUtilities ? static_cast<std::uint32_t>(SL::spViewUtilities->Zoom()) : 0; }
     bool IsDrivingMode() override { return NativeCurrentInputControlIsPlayerDrive(); }   // SL::spVehicleManager IsDrivingMode: the U-Drive-It tool is the view's
-    void PostAudioEvent(std::uint32_t) override {}
+    // SL::AEMS() EndSound then StartSound (x86_64 slots 0x30 / 0x28): restart the event; nothing without an audio event system.
+    void PostAudioEvent(std::uint32_t event) override {
+        cIGZUnknown* service = SL::AEMS();
+        void* raw = nullptr;
+        if (!service || !service->QueryInterface(kGZIID_cISC4AEMSEvents, &raw) || !raw) return;
+        auto* events = static_cast<cISC4AEMSEvents*>(raw);
+        events->EndSound(static_cast<cISC4AEMSEvents::AEMSEventType>(event));
+        events->StartSound(static_cast<cISC4AEMSEvents::AEMSEventType>(event));
+        events->Release();
+    }
     std::uint32_t RandomBelow(std::uint32_t range) override { return range ? static_cast<std::uint32_t>(rng_() % range) : 0; }
     std::int32_t RandomInt(std::int32_t lo, std::int32_t hi) override { return hi > lo ? lo + static_cast<std::int32_t>(rng_() % static_cast<std::uint32_t>(hi - lo)) : lo; }
     double RandomDouble(double lo, double hi) override { return lo + (hi - lo) * RandomUnit(); }
