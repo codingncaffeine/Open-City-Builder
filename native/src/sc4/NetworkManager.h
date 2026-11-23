@@ -198,6 +198,8 @@ public:
     virtual void PlaceNetworkOccupantById(int x, int z, std::uint32_t pieceId, bool usable, eNetworkType type) { (void)x; (void)z; (void)pieceId; (void)usable; (void)type; }
     virtual bool PlaceNetworkOccupants(int x0, int z0, int x1, int z1, bool place) { (void)x0; (void)z0; (void)x1; (void)z1; (void)place; return false; }
     virtual float GetNetworkHeightForTerrainHeight(float terrainHeight) { return terrainHeight; }
+    // cSC4NetworkManager::RemoveOrReplaceOccupant's work with this tool's cell records (cSC4NetworkTool::RemoveOrReplaceOccupant).
+    virtual bool RemoveOrReplaceOccupant(cISC4Occupant* occupant, bool& replaced) { (void)occupant; (void)replaced; return false; }
 };
 
 // Everything outside the object. One method per original call; the global/slot is in the comment.

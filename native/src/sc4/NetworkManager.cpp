@@ -767,11 +767,9 @@ bool cSC4NetworkManager::DoMessage(cIGZMessage2* message) {
 // the first test — the occupant answers cISC4Occupant::CanRemove(1) — is understood.
 bool cSC4NetworkManager::RemoveOrReplaceOccupant(INetworkManagerTool* tool, cISC4Occupant* occupant,
                                                  bool& replaced) {
-    (void)tool;
-    (void)occupant;
-    (void)replaced;
-    SC4_UNWIRED("cSC4NetworkManager::RemoveOrReplaceOccupant: not ported (network cell-info rewrite and occupant removal)");
-    return false;
+    // i386 0x00111c2e: a city network piece (occupant flag 1) leaves through the occupant manager; one flagged 0x100000 (a
+    // piece of an intersection) gets a plain piece back from the tool's record of its cell. The tool does the work.
+    return tool && occupant && tool->RemoveOrReplaceOccupant(occupant, replaced);
 }
 
 // 0x1001711c2 / 0x1001712aa — PARTIAL. The walk needs cSC4NetworkORFilter (0x1002eee4c) and the network

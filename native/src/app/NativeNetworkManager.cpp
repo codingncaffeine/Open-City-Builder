@@ -128,6 +128,10 @@ public:
     bool PlaceNetworkOccupants(int x0, int z0, int x1, int z1, bool place) override {
         return tool_ && tool_->PlaceNetworkOccupants(x0, z0, x1, z1, 0, nullptr, place, -1);
     }
+    bool RemoveOrReplaceOccupant(sc4::cISC4Occupant* occupant, bool& replaced) override {
+        auto* network = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);
+        return tool_ && network && tool_->RemoveOrReplaceOccupant(network, replaced);
+    }
     float GetNetworkHeightForTerrainHeight(float terrainHeight) override {
         return tool_ ? tool_->GetNetworkHeightForTerrainHeight(terrainHeight) : terrainHeight;
     }
