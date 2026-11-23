@@ -1993,12 +1993,47 @@ void cSC4NetworkTool::InsertOccupantsForSolvedCells(std::vector<tSolvedCell>& ce
         }
         return;
     }
+    // i386 0x001246fc, the placing branch. A cell whose piece is a lot's connection node keeps the node: it takes the cell's new edges and
+    // the solved piece's quad (its own rotation when it carries a path override), the solved piece as its path override when that
+    // piece has a pre-built exemplar, and is inserted again, usable only when its outer mask is the new edges. A one-way piece
+    // (0x400000) on a one-way cell takes the cell's directions. Any other cell gets a new piece.
+    INetworkToolHost* host = GetNetworkToolHost();
     for (const tSolvedCell& solved : cells) {
         cSC4NetworkCellInfo* cell = GetCellInfo(solved.cellKey);
         if (!cell) continue;
-        if (cell->buildable)
-            SC4_UNWIRED("cSC4NetworkTool::InsertOccupantsForSolvedCells: connection-piece / one-way update of an existing occupant not ported (a new occupant is made)");
         cell->hasOccupant = true;
+        cSC4NetworkOccupant* occupant = cell->occupant;
+        if (occupant && occupant->HasNetworkFlag(0x200000)) {
+            bool prebuilt = false;
+            std::uint32_t edges = 0;
+            for (std::uint32_t type = 0; type < kNetworkTypeCount; ++type) {
+                if (!(kFlagForNetworkType[type] & cell->networkFlags)) continue;
+                edges = cell->tileNeighborhoods[type];
+                occupant->SetEdgeTypesFlag(static_cast<std::uint8_t>(type), edges);               // vslot 0x94
+                if (host && host->HasPrebuiltModelExemplar(type, solved.pieceType)) prebuilt = true;   // spRM {0x6534284a, group, piece}
+            }
+            std::uint32_t maskA = 0, maskB = 0;
+            const bool usable = occupant->GetConnectionNodeEdgeTypes(maskA, maskB) && maskB == edges;   // vslot 0x34
+            const bool overridden = occupant->GetConnectionPathIDOverride() != 0;               // vslot 0x3c
+            occupant->SetQuadDraw(solved.pieceType, overridden ? occupant->GetRotationAndFlip() : solved.rotationFlip);   // vslots 0x78 / 0x68
+            occupant->SetNetworkFlag(0x8000000);
+            occupant->ClearNetworkFlag(0x2000000);
+            occupant->ClearNetworkFlag(0x4000000);
+            if (!overridden) occupant->SetPathIDOverride(prebuilt ? solved.pieceType : 0);     // vslot 0xcc
+            if (host) host->RemoveNetworkOccupant(occupant);                                    // occupant manager vslot 0x54
+            occupant->SetUsable(false);
+            if (host) host->InsertNetworkOccupant(occupant, 0);                                // occupant manager vslot 0x50
+            occupant->SetUsable(usable);
+            continue;
+        }
+        if (occupant && occupant->HasNetworkFlag(0x400000)) {
+            if ((cell->networkFlags & kFlagForNetworkType[kNetworkOneWayRoad]) && occupant->GetOneWayDirections() != cell->unknown58) {
+                occupant->SetOneWayDirections(cell->unknown58);                                  // vslots 0x114 / 0x118
+                occupant->SetUsable(false);
+                occupant->SetUsable(true);
+            }
+            continue;
+        }
         InsertNetworkOccupant(*cell, solved, out);                                       // vslot 0x128
     }
 }
