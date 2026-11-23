@@ -6,6 +6,7 @@
 
 #include "app/NativeAudio.h"
 #include "app/NativeDemolition.h"
+#include "app/NativeTutorial.h"
 #include "app/NativeZoneOverlay.h"
 #include "app/NativeZoneDeveloperHost.h"
 #include "gz/cGZPersistResourceKey.h"
@@ -98,6 +99,9 @@ public:
     float CellSize() override { return 16.0f; }
     sc4::IZoneToolTerrainView* TerrainView() override { return &g_terrainView; }
     sc4::cSC4ZoneManager* ZoneManager() override { return Zones(); }
+    bool TutorialAllowsZone(const sc4::SC4CellRegion<int>& region, bool flood) override {
+        return NativeTutorialAllowsZone(region.bounds.x0, region.bounds.z0, region.bounds.x1, region.bounds.z1, flood);
+    }
     sc4::cISC4ZoneDeveloper* ZoneDeveloper() override { return Developer(); }
     int CityCellsX() override { sc4::cSTETerrain* t = Terrain(); return t ? static_cast<int>(t->CellCountX()) : 0; }
     int CityCellsZ() override { sc4::cSTETerrain* t = Terrain(); return t ? static_cast<int>(t->CellCountZ()) : 0; }

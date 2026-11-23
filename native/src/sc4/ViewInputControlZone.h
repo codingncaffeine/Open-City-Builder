@@ -83,7 +83,7 @@ public:
     // The building of a lot on the demolition list: the highlight (mode 5 = demolish, 0 = off) goes to it. Answers 1
     // when the lot has a building, 2 when it is an empty lot that still counts (lot vslot 0x170), else 0.
     virtual int HighlightLot(cSC4Lot* lot, int mode) = 0;            // lot vslot 0x180 -> occupant vslot 0x18 -> 0x88
-    virtual bool TutorialAllowsZone(const SC4CellRegion<int>& region, bool exact) { return true; }   // SL::spTutorialSystem
+    virtual bool TutorialAllowsZone(const SC4CellRegion<int>& region, bool flood) { (void)region; (void)flood; return true; }   // SL::spTutorialSystem (PlaceZone 0x002db59c)
     virtual cIGZMessageServer2* MessageServer() = 0;                 // SL::spMS2
     virtual void StartTick(cIGZMessageTarget2* target, std::uint32_t interval) = 0;   // SL::ATM() vslot 0x28
     virtual void StopTick(cIGZMessageTarget2* target, std::uint32_t interval) = 0;    // SL::ATM() vslot 0x30

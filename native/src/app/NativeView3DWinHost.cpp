@@ -397,7 +397,7 @@ struct StubView3DWin final : IView3DWinHost {
     bool UserDataDirectory(cIGZString& out) override { SL::UserDataDirectory(out); return SL::spSC4 != nullptr; }   // SL::UserDataDirectory
     cIGZWin* CreateWinAnimationRecorder() override { return {}; }
     void RecorderSetAnimationOutputDirectory(cIGZWin* recorder, const cIGZString& directory, bool create) override {}
-    ICityMouseRouter* CityMouseRouter() override { return {}; }
+    ICityMouseRouter* CityMouseRouter() override { return native::NativeTutorialMouseRouter(); }   // SL::spCity vslot 0x290
     bool CanInvokeZoningTool() override {   // SL::spCity vslot 0xb0: GetEstablished
         sc4::cSC4City* city = native::HostCity();
         return city && city->GetEstablished();

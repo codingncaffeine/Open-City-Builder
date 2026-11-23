@@ -36,6 +36,7 @@
 #include "platform/PointerState.h"
 #include "sc4/Simulator.h"
 #include "sc4/RegionDialogs.h"
+#include "app/NativeTutorial.h"
 #include "app/NativeGlyphTextures.h"
 #include "app/NativeCitySystems.h"
 #include "app/NativeSnapshot.h"
@@ -1865,6 +1866,18 @@ int RunScenario(const std::string& path) {
             std::string rest; std::getline(words >> std::ws, rest);
             const std::string text = "Snow " + rest;
             std::printf("snow: %s\n", native::RunSnowCheat(text.c_str()) ? "done" : "no effects manager");
+        } else if (command == "tutorialfilter") {   // tutorialfilter X Y FLAGS: the city view's tutorial mouse filter at a view point (-1 press, 0 move, 1 release)
+            int fx = 0, fy = 0, flags = 0;
+            words >> fx >> fy >> flags;
+            sc4::ICityMouseRouter* router = native::NativeTutorialMouseRouter();
+            const int ox = fx, oy = fy;
+            const bool active = router && router->IsActive();
+            const bool pass = !active || router->ProcessMouse(fx, fy, static_cast<std::uint32_t>(flags));
+            std::printf("tutorialfilter %d,%d flags %d: router %s, %s, now %d,%d\n", ox, oy, flags, router ? (active ? "active" : "idle") : "none",
+                        pass ? "passes" : "BLOCKED", fx, fy);
+        } else if (command == "tutorialcheat") {   // tutorialcheat TEXT: the tutorial system's cheat ("Tutorial next") without the cheat box
+            std::string text; std::getline(words >> std::ws, text);
+            std::printf("tutorialcheat %s -> %s\n", text.c_str(), native::NativeTutorialCheat(text.c_str()) ? "sent" : "no tutorial system");
         } else if (command == "cheat") {   // cheat TEXT: what the cheat box does with its text on Enter (the rest of the line)
             std::string text; std::getline(words >> std::ws, text);
             auto* cheats = dynamic_cast<cGZCheatCodeManager*>(SL::spCCM);

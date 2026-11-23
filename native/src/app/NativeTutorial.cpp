@@ -284,6 +284,48 @@ bool NativeTutorialFilterUiCommand(cGZMessage& message) {
     return sc4::FilterUICommandMessage(message);
 }
 
+// The tutorial system as the city view's mouse router: IsTutorial (vslot 0x20), IsEdgeScrollingAllowed (0x24) and
+// FilterLeftMouseClick (0x40, flags -1 press / 0 move / 1 release), looked up per call (the city changes).
+sc4::ICityMouseRouter* NativeTutorialMouseRouter() {
+    struct Router final : sc4::ICityMouseRouter {
+        bool IsActive() override { cSC4TutorialSystem* t = System(); return t && t->IsTutorial(); }
+        bool AllowsEdgeScroll() override { cSC4TutorialSystem* t = System(); return !t || t->IsEdgeScrollingAllowed(); }
+        bool ProcessMouse(int& x, int& y, std::uint32_t flags) override {
+            cSC4TutorialSystem* t = System();
+            return !t || t->FilterLeftMouseClick(x, y, static_cast<int>(flags));
+        }
+    };
+    static Router router;
+    return System() ? &router : nullptr;
+}
+
+bool NativeTutorialCheat(const char* text) {
+    cSC4TutorialSystem* tutorial = System();
+    if (!tutorial) return false;
+    cRZString typed(text);
+    cGZMessage message;
+    message.type = sc4::kTutorialMessageCheatCode;
+    message.param1 = sc4::kTutorialCheatId;
+    message.param2 = reinterpret_cast<std::uintptr_t>(static_cast<cIGZString*>(&typed));
+    tutorial->DoMessage(message);
+    return true;
+}
+
+bool NativeTutorialAllowsZone(int x0, int z0, int x1, int z1, bool flood) {
+    cSC4TutorialSystem* tutorial = System();
+    if (!tutorial || !tutorial->IsTutorial()) return true;                       // spTutorialSystem vslot 0x20
+    cISC4TutorialTask* task = tutorial->GetCurrentTask();                         // vslot 0x28
+    if (!task) return true;
+    const sc4::SC4TutorialRect& area = task->GetRegion();                         // task vslot 0x14
+    static const bool trace = std::getenv("SC4_ZONEDEBUG") != nullptr;
+    if (trace) std::fprintf(stderr, "tutorial zone gate: task %d kind %d region %d,%d..%d,%d, asked %d,%d..%d,%d flood %d\n", tutorial->GetTutorialTaskNumber(), task->GetWhichFunction(),
+                            area.x0, area.z0, area.x1, area.z1, x0, z0, x1, z1, flood ? 1 : 0);
+    if (area.x0 < 0) return true;
+    if (!flood && area.x0 == x0 && area.z0 == z0 && area.x1 == x1 && area.z1 == z1) return true;
+    tutorial->OnTutorialEvent(static_cast<cISC4TutorialSystem::eTutorialEvent>(1));   // vslot 0x48 (1)
+    return false;
+}
+
 void NativeTutorialCatalogOpened(sc4::cISC4WinCatalogView* catalog) {
     cSC4TutorialSystem* tutorial = System();
     if (tutorial && tutorial->IsTutorial()) tutorial->HandleCatalogMenu(catalog);
