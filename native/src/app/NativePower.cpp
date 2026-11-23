@@ -41,6 +41,14 @@
 
 namespace native {
 sc4::cSC4NetworkTool* NativeManagerNetworkTool(std::uint32_t type);   // app/NativeNetworkManager.cpp
+void NativeFindNeighborDeals(std::uint32_t kind, std::vector<sc4::cISC4NeighborDeal*>& out) {
+    sc4::cSC4NeighborsSimulator* neighbors = CityNeighborsSimulator();
+    if (!neighbors) return;
+    sc4::DealList deals;
+    neighbors->FindDeals(kind, deals);
+    for (auto& deal : deals)
+        if (deal) out.push_back(deal.get());
+}
 namespace {
 using namespace sc4;
 

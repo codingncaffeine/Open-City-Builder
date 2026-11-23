@@ -42,9 +42,12 @@
 #include "sc4/cSC4SimGrid.h"
 #include "sc4/FireProtectionSimulator.h"
 #include "app/NativeDemolition.h"
+#include "sc4/NeighborDeal.h"
 #include "app/NativePlumbing.h"
 namespace native { void InstallTrafficNetworkMapHost(); }   // app/NativeTrafficNetworkMap.cpp
 namespace native { void NativeMarkNeighborDealsDirty(); }   // app/NativeRegion.cpp
+// SL::spNeighborsSim vslot 0x74 FindDeals(kind): borrowed (the neighbours simulator keeps them). app/NativePower.cpp
+namespace native { void NativeFindNeighborDeals(std::uint32_t kind, std::vector<sc4::cISC4NeighborDeal*>& out); }
 namespace sc4 { class ITrafficAutomatonHost; extern ITrafficAutomatonHost* g_loadTrafficHost; }   // tools/city_probe_hostglobals.cpp
 namespace sc4 {
 class IVehicleHost;
@@ -291,10 +294,26 @@ public:
     }
     // SL::spNeighborsSim vslot 0x7c MarkDealsDirty at the month's end, as the power and plumbing hosts do.
     void RefreshNeighborDeals() override { NativeMarkNeighborDealsDirty(); }
-    // PARTIAL: no neighbour deals natively (the region's connections are not modelled).
-    void GarbageDeals(std::uint32_t, std::vector<IPollutionDeal*>& out) override {
-        SC4_UNWIRED("cSC4PollutionSimulator: the neighbor garbage deals are not read (none)");
+    // SL::spNeighborsSim vslot 0x74 FindDeals(kind): the city's garbage deals with its neighbours, as views (the neighbours
+    // simulator keeps the deals; the views live until the next call for the same kind).
+    void GarbageDeals(std::uint32_t kind, std::vector<IPollutionDeal*>& out) override {
+        struct DealView final : IPollutionDeal {
+            cISC4NeighborDeal* deal = nullptr;
+            int Amount() override { return deal->GetAmount(); }            // vslot 0x28
+            int Used() override { return deal->GetAmountUsed(); }          // vslot 0x50
+            void SetUsed(int used) override { deal->SetAmountUsed(used); } // vslot 0x54
+        };
+        static std::map<std::uint32_t, std::vector<DealView>> views;
         out.clear();
+        std::vector<DealView>& mine = views[kind];
+        mine.clear();
+        std::vector<cISC4NeighborDeal*> deals;
+        NativeFindNeighborDeals(kind, deals);
+        for (cISC4NeighborDeal* deal : deals) {
+            mine.emplace_back();
+            mine.back().deal = deal;
+        }
+        for (DealView& view : mine) out.push_back(&view);
     }
     // department 0x6a42a8f5 GetLineItem(item) -> SetFullExpenses(cost) (spec pollution.md 4.9.2)
     void SetSanitationLineItemCost(int item, std::int64_t cost) override {
