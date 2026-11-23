@@ -383,6 +383,7 @@ public:
     bool CanPlayerDrive(ISituationAutomaton* automaton) const;      // @ 0x1006db35c
     void TrackAutomaton(ISituationAutomaton* automaton, std::uint32_t& trackId, bool track);   // @ 0x1006db4ec
     void TreatAutomatonAsGroup(ISituationAutomaton* automaton, std::uint32_t group);   // @ 0x1006db912
+    bool IsSituationAvailable(std::uint32_t group) const;            // vslot 0x50, i386 0x004a3924
     void HandleInsertAutomaton(ISituationAutomaton* automaton);      // @ 0x1006db962
     void HandleRemoveAutomaton(ISituationAutomaton* automaton);      // @ 0x1006dbade
     void HandleInsertOccupant(ISituationOccupant* occupant);         // @ 0x1006d9c1c

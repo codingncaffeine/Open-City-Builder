@@ -372,6 +372,19 @@ bool cSC4CitySituationManager::CanPlayerDrive(ISituationAutomaton* automaton) co
 }
 
 // @ 0x1006db912: puts the automaton's occupant into `group` and tracks the automaton.
+// i386 0x004a3924: whether any of the city-situations advisor's situations (SL::spAdvisorSystem vslot 0x1c(0x1d), its advice
+// map) lists the automata group (advice vslot 0x30 GetAutomataGroups).
+bool cSC4CitySituationManager::IsSituationAvailable(std::uint32_t group) const {
+    ICitySituationManagerHost* host = CitySituationManagerHost();
+    if (!host) return false;
+    for (cISC4CitySituationAdvice* situation : host->AdvisorSituations()) {
+        if (!situation) continue;
+        for (std::uint32_t listed : situation->GetAutomataGroups())
+            if (listed == group) return true;
+    }
+    return false;
+}
+
 void cSC4CitySituationManager::TreatAutomatonAsGroup(ISituationAutomaton* automaton, std::uint32_t group) {
     if (!automaton) return;
     if (ISituationOccupant* occupant = automaton->Occupant()) occupant->SetGroup(group);

@@ -62,6 +62,7 @@
 #include "sc4/MySim.h"
 #include "sc4/MyStreetSim.h"
 #include "sc4/MySimInputControls.h"
+#include "sc4/CitySituationManager.h"
 #include "sc4/RenderProperties.h"
 #include "s3d/ModelInstance.h"
 #include "sc4/Render3D.h"
@@ -96,6 +97,9 @@ bool NativeCameraLookAt(const float pos[3], bool zoomIfFar);   // app/NativeCity
 void NativeViewClearCursorText(std::uint32_t id);
 bool CityViewPickTerrain(int x, int y, float out[3], bool flag);   // app/NativeCitySystems.cpp
 sc4::cSC43DRender* CityRenderer();                                  // app/NativeCityView.cpp
+sc4::ISituationAutomaton* SituationAutomatonOf(void* engineAutomaton);                           // app/NativeSituationAutomata.cpp
+sc4::ISituationOccupant* SituationViewOfOccupant(void* engineOccupant);
+void SituationEnterPlayerDriveView(sc4::ISituationAutomaton* automaton, cIGZMessageTarget2* target);
 
 cIGZWin* NativeCityView3DWindow();                                                // app/NativeCityUi.cpp
 const sc4::cISCPropertyHolder* NativeSimulatorExemplar(std::uint32_t instance);   // app/NativeSimHosts.cpp
@@ -863,6 +867,7 @@ public:
     std::uint32_t AddRef() override { return ++refs_; }
     std::uint32_t Release() override { const std::uint32_t left = --refs_; if (left == 0) delete this; return left; }
     cISC4Occupant* AsOccupant() override { return automaton_->AsOccupant(); }
+    cSC4Automaton* Engine() const { return automaton_; }
     void Remove(bool fade) override { automaton_->Remove(fade); }
     bool PlayAnim(std::uint32_t animId) override { return automaton_->PlayAnim(animId); }
     void SetAutomataFlag(std::uint32_t flag, bool on) override { automaton_->SetAutomataFlag(flag, on); }
@@ -1052,8 +1057,32 @@ public:
         return automaton ? static_cast<cSC4Automaton*>(automaton)->AsOccupant() : nullptr;
     }
     bool UDriveViewAvailable() override { return false; }
-    void EnterUDriveView(IMySimDispatchAutomaton*, cIGZMessageTarget2*) override { SC4_UNWIRED("IMySimDispatchHost::EnterUDriveView (U-Drive-It with a MySim)"); }
-    void ShowUDriveAdvice() override {}
+    // cSC4MySimDispatch::EnterUDriveIt (i386 0x00483512): without a situation manager (city vslot 0xc4) the vehicle manager's
+    // EnterPlayerDriveView; with one, when a situation of the MySim group 0x4209 is available the car counts as that group and
+    // a situation for it may start (InitiateSituationForOccupant(car, none)); otherwise it is a joyride with the countdown.
+    void EnterUDriveView(IMySimDispatchAutomaton* view, cIGZMessageTarget2* target) override {
+        auto* adapter = dynamic_cast<DispatchAutomatonView*>(view);
+        cSC4Automaton* engine = adapter ? adapter->Engine() : nullptr;
+        if (!engine) return;
+        sc4::ISituationAutomaton* automaton = SituationAutomatonOf(engine);
+        cSC4CitySituationManager* situations = HostCitySituations();
+        if (!situations) {
+            SituationEnterPlayerDriveView(automaton, target);
+            return;
+        }
+        constexpr std::uint32_t kMySimGroup = 0x4209;
+        if (situations->IsSituationAvailable(kMySimGroup)) {
+            situations->TreatAutomatonAsGroup(automaton, kMySimGroup);
+            if (situations->InitiateSituationForOccupant(SituationViewOfOccupant(engine->AsOccupant()), nullptr)) return;
+        }
+        situations->StartJoyride(automaton, true, target);
+    }
+    // SL::spAdvisorSystem GetAdvisor(0x1d) -> cSC4AdvisorCitySituations::UpdateMySimAdvices.
+    void ShowUDriveAdvice() override {
+        cSC4AdvisorSystem* system = cSC4AdvisorSystem::Instance();
+        cISC4Advisor* advisor = system ? system->GetAdvisor(0x1d) : nullptr;
+        if (auto* situations = advisor ? dynamic_cast<cSC4AdvisorCitySituations*>(advisor) : nullptr) situations->UpdateMySimAdvices();
+    }
     void ClearVehiclePlayerDrive() override {   // spVehicleManager SetCameraFollow(null)
         if (cSC4AutomataManager* vehicles = NativeAutomataManagerAt(0)) vehicles->SetCameraFollow(nullptr);
     }
