@@ -33,7 +33,10 @@ struct Mgr final : cIGZWinMgr {
     void AddWindowToValidList(cIGZWin*) override {}
     void RemoveWindowFromValidList(cIGZWin*) override {}
     void CleanUpWindowReferences(cIGZWin*) override {}
-    bool DestroyWindow(cIGZWin*) override { return true; }
+    bool DestroyWindow(cIGZWin* w) override {   // a window with a parent leaves it (else ChildDeleteAll never empties its list)
+        if (w && w->GetParentWin()) return w->GetParentWin()->ChildRemove(w);
+        return true;
+    }
     bool IsWindowValid(cIGZWin*) override { return true; }
     cIGZWin* GetWindowFromPoint(int, int) override { return nullptr; }
     void SetCurrentMouseWin(cIGZWin*) override {}
