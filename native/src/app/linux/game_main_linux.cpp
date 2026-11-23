@@ -1960,6 +1960,15 @@ int RunScenario(const std::string& path) {
                 std::printf("viewdrag: move %d at %d,%d over cell %d,%d, tutorial filter %s\n", i, x, y, cx, cz, filterPasses ? "passes" : "BLOCKS");
                 PumpTimers();
             }
+            // The moves above went straight to the view, so the window manager still holds the pointer of the last tap; a
+            // tool's ReleaseCapture re-posts that point (the network tool re-solves its drag to it). A real pointer ends the
+            // drag where it is released: one move through the manager at the release point first.
+            if (cIGZWin* win = view->AsIGZWin()) {
+                int screenX = x, screenY = y;
+                win->WindowToScreenCoordinates(screenX, screenY);
+                gMgr->GZWinMsgPost_Mouse(kGZMsgMouseMove, screenX, screenY, 0x10);
+                Frame();
+            }
             const bool released = view->GZOnMouseUpL(x, y, 0);
             std::printf("viewdrag: released at %d,%d (%s)\n", x, y, released ? "taken" : "not taken");
         } else if (command == "tutorialfilter") {   // tutorialfilter X Y FLAGS: the city view's tutorial mouse filter at a view point (-1 press, 0 move, 1 release)
