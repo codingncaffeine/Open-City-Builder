@@ -41,6 +41,7 @@
 #include "sc4/PoliceSimulator.h"
 #include "sc4/PropOccupantInterface.h"
 #include "sc4/ServiceLocator.h"
+#include "sc4audio/AEMSEvents.h"
 #include "sc4/SCPropertyHelp.h"
 #include "sc4/Simulator.h"
 #include "sc4/TrafficAutomataManager.h"
@@ -305,8 +306,21 @@ public:
     bool SimulatorPaused() override { cSC4Simulator* s = Simulator(); return s && s->IsPaused(); }
     bool SimulatorAdvancing() override { cSC4Simulator* s = Simulator(); return s && s->IsEmergencyPaused(); }   // vslot 0x88
     int ViewZoom() override { return NativeViewZoom(); }
-    void PlayAudioEvent(std::uint32_t) override {}
-    void StopAudioEvent(std::uint32_t) override {}
+    // SL::AEMS() StartSound / EndSound (x86_64 slots 0x28 / 0x30); nothing without an audio event system.
+    void PlayAudioEvent(std::uint32_t event) override {
+        if (cISC4AEMSEvents* events = AemsEvents()) events->StartSound(static_cast<cISC4AEMSEvents::AEMSEventType>(event));
+    }
+    void StopAudioEvent(std::uint32_t event) override {
+        if (cISC4AEMSEvents* events = AemsEvents()) events->EndSound(static_cast<cISC4AEMSEvents::AEMSEventType>(event));
+    }
+    static cISC4AEMSEvents* AemsEvents() {
+        cIGZUnknown* service = SL::AEMS();
+        void* raw = nullptr;
+        if (!service || !service->QueryInterface(kGZIID_cISC4AEMSEvents, &raw) || !raw) return nullptr;
+        auto* events = static_cast<cISC4AEMSEvents*>(raw);
+        events->Release();   // SL::AEMS() keeps the service
+        return events;
+    }
 } g_aircraftHost;
 
 class HelicopterHost final : public IHelicopterHost {
@@ -349,7 +363,7 @@ public:
     bool RendererSpotlightCone(const cS3DVector3& origin, const cS3DVector3& direction, cS3DVector3& target) override {
         cSC43DRender* render = CityRenderer();
         float hit[3] = {0.0f, 0.0f, 0.0f};
-        if (!render || !render->PickTerrain(&origin.x, &direction.x, hit, true, false)) return false;
+        if (!render || !render->PickTerrain(&origin.x, &direction.x, hit, false, true)) return false;
         target = cS3DVector3{hit[0], hit[1], hit[2]};
         return true;
     }
@@ -357,7 +371,7 @@ public:
     bool RendererSpotlightHit(float x, float z, cS3DVector3& target) override {
         cSC43DRender* render = CityRenderer();
         float hit[3] = {0.0f, 0.0f, 0.0f};
-        if (!render || !render->PickTerrain(static_cast<int>(x), static_cast<int>(z), hit, true, false)) return false;
+        if (!render || !render->PickTerrain(static_cast<int>(x), static_cast<int>(z), hit, true, true)) return false;
         target = cS3DVector3{hit[0], hit[1], hit[2]};
         return true;
     }

@@ -1792,40 +1792,81 @@ void cSC4Helicopter::UpdateEffects() {
     (void)heliHost;
 }
 
-// @ 0x1006ec416. PARTIAL: the renderer's spotlight cone test (SL::spRenderer slot 0x1e0) and the player-drive "tracked"
-// position are behind IHelicopterHost; the aim update is reproduced, the cone/visibility half is not.
+// @ 0x1006ec416 (i386 0x004ab708). Both lights run at zoom 1 while the spotlight is on and the helicopter flies. The beam
+// points at the spot target while the player holds the spotlight command (the aim is kept in the rotor frame), otherwise
+// along the kept aim. Pointing down, the beam is cast at the terrain (renderer i386 slot 0xf0, PickTerrain by ray, into the
+// spot target); pointing up or missing stops the ground spot. The drive record gets the target; the searchlight turns from
+// (0, -1, 0) to the beam and the ground spot sits at the target.
 void cSC4Helicopter::UpdateSpotlight() {
     IHelicopterHost* heliHost = HeliHostFor(*this);
     if (!heliHost || !effectSearchlight_ || !effectSpotlight_ || !physics_) return;
     IAircraftHost* host = HostFor(*this);
-    const bool active = host && host->ViewZoom() == 1 && spotOn_ && physics_->state != 0;
-    if (active) SC4_UNWIRED("cSC4Helicopter::UpdateSpotlight: the renderer's spotlight cone test (SL::spRenderer slot 0x1e0) is not ported");
-    if (active) {
+    auto* drive = static_cast<tAutomataStatePlayerDrive*>(FindState(kStatePlayerDrive));   // vslot 0xe4(0x10)
+    if (host && host->ViewZoom() == 1 && spotOn_ && physics_->state != 0) {
         if (!effectSearchlight_->IsPlaying()) effectSearchlight_->Start(0);
         if (!effectSpotlight_->IsPlaying()) effectSpotlight_->Start(0);
     } else {
-        if (effectSearchlight_->IsPlaying()) effectSearchlight_->Stop(false);
-        if (effectSpotlight_->IsPlaying()) effectSpotlight_->Stop(false);
+        if (effectSearchlight_->IsPlaying()) effectSearchlight_->Stop(true);
+        if (effectSpotlight_->IsPlaying()) effectSpotlight_->Stop(true);
     }
     cS3DTransform search;
-    heliHost->GetEffectTransform(effectSearchlight_, search);
+    heliHost->GetEffectTransform(effectSearchlight_, search);   // vslot 0x3c
     const cS3DVector3 origin{search.translation[0], search.translation[1], search.translation[2]};
-    cS3DVector3 aim = spotAim_;
-    tAutomataState* driveState = FindState(kStatePlayerDrive);
-    if (driveState && active) {
-        auto* drive = static_cast<tAutomataStatePlayerDrive*>(driveState);
-        spotTarget_ = drive->effectPosition248;
-        aim = Normalized(cS3DVector3{spotTarget_.x - origin.x, spotTarget_.y - origin.y,
-                                     spotTarget_.z - origin.z});
-        spotAim_ = aim;
+    const float (&rotor)[3][3] = physics_->rotors[1]->body.rotation;
+    cS3DVector3 beam{0.0f, 0.0f, 0.0f};
+    if (!drive || drive->history[8] < 0.0f) {   // i386 +0x9c: the spotlight command
+        // TransformDirection: the kept aim out of the rotor frame.
+        beam = Normalized(cS3DVector3{rotor[0][0] * spotAim_.x + rotor[0][1] * spotAim_.y + rotor[0][2] * spotAim_.z,
+                                      rotor[1][0] * spotAim_.x + rotor[1][1] * spotAim_.y + rotor[1][2] * spotAim_.z,
+                                      rotor[2][0] * spotAim_.x + rotor[2][1] * spotAim_.y + rotor[2][2] * spotAim_.z});
+    } else {
+        beam = Normalized(cS3DVector3{spotTarget_.x - origin.x, spotTarget_.y - origin.y, spotTarget_.z - origin.z});
+        // BackTransformDirection: the aim kept in the rotor frame.
+        spotAim_ = Normalized(cS3DVector3{rotor[0][0] * beam.x + rotor[1][0] * beam.y + rotor[2][0] * beam.z,
+                                          rotor[0][1] * beam.x + rotor[1][1] * beam.y + rotor[2][1] * beam.z,
+                                          rotor[0][2] * beam.x + rotor[1][2] * beam.y + rotor[2][2] * beam.z});
     }
-    cS3DTransform transform;
-    transform.translation[0] = spotTarget_.x;
-    transform.translation[1] = spotTarget_.y;
-    transform.translation[2] = spotTarget_.z;
-    transform.flags |= 1;
-    ++transform.changeCounter;
-    effectSpotlight_->SetTransform(transform);
+    if ((beam.y >= 0.0f || !heliHost->RendererSpotlightCone(origin, beam, spotTarget_)) && effectSpotlight_->IsPlaying()) {
+        effectSpotlight_->Stop(true);
+    }
+    if (drive) drive->effectPosition248 = spotTarget_;   // i386 +0x21c
+    // cS3DQuaternion::From(kDefaultSpotlightAim, beam), then To() into the searchlight's rotation.
+    const cS3DVector3 from = kDefaultSpotlightAim;
+    float qx = 0.0f, qy = 0.0f, qz = 0.0f, qw = 1.0f;
+    const float dot = from.x * beam.x + from.y * beam.y + from.z * beam.z;
+    if (dot < 0.9999f) {
+        if (dot > -0.9999f) {
+            const float cx = from.y * beam.z - from.z * beam.y;
+            const float cy = from.z * beam.x - from.x * beam.z;
+            const float cz = from.x * beam.y - from.y * beam.x;
+            const float length = std::sqrt(cx * cx + cy * cy + cz * cz);
+            const float half = std::sqrt((1.0f - dot) * 0.5f);
+            qx = cx / length * half; qy = cy / length * half; qz = cz / length * half;
+            qw = std::sqrt((dot + 1.0f) * 0.5f);
+        } else {
+            qw = 0.0f; qx = 0.0f; qy = from.x; qz = -from.y;
+            if (qy * qy + qz * qz < 1e-8f) { qx = -from.z; qy = 0.0f; qz = from.x; }
+            const float length = std::sqrt(qx * qx + qy * qy + qz * qz);
+            qx /= length; qy /= length; qz /= length;
+        }
+    }
+    const float x2 = qx + qx, y2 = qy + qy, z2 = qz + qz;
+    const float xx = qx * x2, xy = qx * y2, xz = qx * z2, xw = qx * (qw + qw);
+    const float yy = qy * y2, yz = qy * z2, yw = qy * (qw + qw);
+    const float zz = qz * z2, zw = qz * (qw + qw);
+    search.rotation[0][0] = 1.0f - (yy + zz); search.rotation[0][1] = xy - zw; search.rotation[0][2] = xz + yw;
+    search.rotation[1][0] = xy + zw; search.rotation[1][1] = 1.0f - (xx + zz); search.rotation[1][2] = yz - xw;
+    search.rotation[2][0] = xz - yw; search.rotation[2][1] = yz + xw; search.rotation[2][2] = 1.0f - (xx + yy);
+    search.flags |= 4;
+    effectSearchlight_->SetTransform(search);   // vslot 0x20
+    cS3DTransform spot;
+    heliHost->GetEffectTransform(effectSpotlight_, spot);
+    spot.translation[0] = spotTarget_.x;
+    spot.translation[1] = spotTarget_.y;
+    spot.translation[2] = spotTarget_.z;
+    spot.flags |= 1;
+    ++spot.changeCounter;
+    effectSpotlight_->SetTransform(spot);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -1961,11 +2002,9 @@ void cSC4Helicopter::DetectCollisions() {
 // ---------------------------------------------------------------------------------------------------------------------
 // Player drive
 // ---------------------------------------------------------------------------------------------------------------------
-// @ 0x1006ef960. PARTIAL: the spotlight cone (SL::spRenderer slot 0x1e8) and the AEMS group-0x4308 event are behind
-// IHelicopterHost; the control translation is reproduced.
+// @ 0x1006ef960 (i386 0x004ad3ea).
 bool cSC4Helicopter::TranslatePlayerDriveCommands(tAutomataStatePlayerDrive* state, float milliseconds) {
     if (!state || !physics_) return false;
-    SC4_UNWIRED("cSC4Helicopter::TranslatePlayerDriveCommands: the spotlight cone (SL::spRenderer slot 0x1e8) and the AEMS group-0x4308 event are not ported");
     cSC4Automaton::TranslatePlayerDriveCommands(state, milliseconds);
     if (state->effectTimerC4 >= 0.0f && rotorStill_) {
         rotorStill_->Update();
