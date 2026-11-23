@@ -237,6 +237,7 @@ public:
     void SetLeader(IAutomataAutomaton* leader) override { a_.SetLeader(AutomatonOf(leader)); }
     void HandleDispatched(const cS3DVector3& position, cISC4Occupant* source) override { a_.HandleDispatched(position, source); }   // 0x2b8
     std::deque<RouteData>* RouteDeque() override { return traffic_ ? &traffic_->Route() : nullptr; }                          // +0x368
+    const cS3DVector3* DispatchDestination() const override { return traffic_ ? &traffic_->GetDispatchDestination() : nullptr; }   // 0x4b0
     bool BeginRoute(bool onlyStart) override { return traffic_ && traffic_->BeginRoute(onlyStart); }                         // 0x4a8
     void ReturnToDefaultSpeed() override { if (traffic_) traffic_->ReturnToDefaultSpeed(); }                                  // 0x538
 

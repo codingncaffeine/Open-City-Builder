@@ -108,6 +108,8 @@ public:
     // The dispatch route slots (Dispatch(automaton, ...) i386 0x000ce2f6).
     virtual void HandleDispatched(const cS3DVector3& position, cISC4Occupant* source) = 0;   // 0x2b8 (i386 0x15c)
     virtual std::deque<RouteData>* RouteDeque() = 0;                              // +0x368 (i386 +0x23c)
+    // 0x4b0 (i386 0x258) GetDispatchDestination: where the automaton was dispatched to (null when it has none).
+    virtual const cS3DVector3* DispatchDestination() const { return nullptr; }
     virtual bool BeginRoute(bool onlyStart) = 0;                                  // 0x4a8 (i386 0x254)
     virtual void ReturnToDefaultSpeed() = 0;                                      // 0x538 (i386 0x29c)
     // The loaded automaton's path info and path, looked up again from its saved occupant and key (the field writes of
@@ -159,6 +161,8 @@ class ITrafficNetworkManagerApi {
 public:
     virtual ~ITrafficNetworkManagerApi() = default;
     virtual TrafficTileInfo* GetTileInfoAtCell(int cellX, int cellZ) = 0;          // 0x38
+    // 0x38 (i386 0x1c) FindNetworkOccupant(x, z): the first network piece of the cell (borrowed), or null.
+    virtual ITrafficNetworkMapOccupant* FindNetworkOccupant(int cellX, int cellZ) { (void)cellX; (void)cellZ; return nullptr; }
     virtual TrafficTileInfo* GetFirstTileInfoAtCell(int cellX, int cellZ) = 0;     // 0x68 (0x70 in the spawn paths)
     virtual void GetVisibleCellRect(int rect[4]) = 0;                              // 0x88 (x0, z0, x1, z1)
     // 0xc8 (i386 0x64): the traffic network map's GetSurroundingRoads(out, occupant, maxCells, minCells, networkFlags): the usable

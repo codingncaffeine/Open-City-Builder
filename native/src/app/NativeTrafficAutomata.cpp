@@ -187,6 +187,7 @@ class NetworkApi final : public ITrafficNetworkManagerApi {
 public:
     TrafficTileInfo* GetTileInfoAtCell(int x, int z) override { cSC4TrafficNetworkMap* m = Map(); return m ? m->SafeGetTileInfoAtCell(x, z) : nullptr; }
     TrafficTileInfo* GetFirstTileInfoAtCell(int x, int z) override { return GetTileInfoAtCell(x, z); }
+    ITrafficNetworkMapOccupant* FindNetworkOccupant(int x, int z) override { cSC4TrafficNetworkMap* m = Map(); return m ? m->FindNetworkOccupant(x, z) : nullptr; }
     void GetVisibleCellRect(int rect[4]) override {   // the managers' view rectangle in cells (set by NativeAutomataManagerHost)
         for (int i = 0; i < 4; ++i) rect[i] = visible_[i];
     }

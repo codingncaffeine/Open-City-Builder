@@ -1226,12 +1226,21 @@ void cSC4TrafficAutomataManager::CreateAccident(cISC4Occupant* occupant, int typ
 }
 
 // ---- misc traffic slot -------------------------------------------------------------------------------------------------
+// 0x100115ea6 (i386 0x000cf094): the piece at the route's last cell (the traffic network map's FindNetworkOccupant) and its path
+// info's dispatch destination for the automaton's layer path type, from where the automaton was dispatched to.
 bool cSC4TrafficAutomataManager::GetDispatchDestinationPoint(ITrafficAutomataAutomaton* automaton, cS3DVector3& out) {
-    // 0x100115ea6 PARTIAL: needs the automaton's route deque (+0x388/+0x390/+0x370) and cISC4PathInfo slot 0xa8.
-    SC4_UNWIRED("cSC4TrafficAutomataManager::GetDispatchDestinationPoint (0x100115ea6): destination point from the route not ported");
-    (void)automaton;
-    (void)out;
-    return false;
+    std::deque<RouteData>* route = automaton ? automaton->RouteDeque() : nullptr;
+    if (!route || route->empty()) return false;
+    const RouteData& last = route->back();
+    ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
+    ITrafficNetworkManagerApi* network = host ? host->TrafficNetworkManager() : nullptr;
+    ITrafficNetworkMapOccupant* piece = network ? network->FindNetworkOccupant(last.x, last.z) : nullptr;
+    ITrafficNetworkMapPathInfo* info = piece ? piece->GetPathInfo() : nullptr;   // vslot 0xc4
+    if (!info) return false;
+    const cS3DVector3* from = automaton->DispatchDestination();
+    const cS3DVector3 none{};
+    return info->GetDispatchDestination(static_cast<std::uint32_t>(GetPathTypeForLayer(static_cast<PopulateLayer>(automaton->PopulateLayer()))),
+                                        from ? *from : none, out, nullptr);
 }
 
 // ---- base delegates ----------------------------------------------------------------------------------------------------

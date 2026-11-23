@@ -98,6 +98,10 @@ class PathInfoView final : public ITrafficNetworkMapPathInfo {
 public:
     explicit PathInfoView(cSC4NetworkOccupant* occupant) : occupant_(occupant) {}
     bool IsIntersection(std::uint32_t pathType) override { cISC4PathInfo* p = Info(); return p && p->IsIntersection(pathType); }
+    bool GetDispatchDestination(std::uint32_t pathType, const cS3DVector3& from, cS3DVector3& out, std::uint32_t* key) override {
+        cISC4PathInfo* p = Info();
+        return p && p->GetDispatchDestination(pathType, from, out, key);
+    }
     int SnapPointToAnyPath(cS3DVector3& point, std::uint32_t pathType, std::uint32_t* key) override {
         cISC4PathInfo* p = Info();
         return p ? p->SnapPointToAnyPath(point, pathType, key) : -1;

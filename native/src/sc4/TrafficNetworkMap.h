@@ -147,6 +147,10 @@ public:
     virtual int GetStopPointCount(std::uint32_t pathType, std::uint8_t entry, std::uint8_t exit, std::uint8_t lane) = 0;   // 0x108
     virtual bool GetJunctionKeys(std::uint32_t pathType, std::uint8_t entry, std::vector<std::uint32_t>& keys) = 0;   // 0x130
     virtual void MakeTunnelPaths(ITrafficNetworkMapOccupant* from, ITrafficNetworkMapOccupant* to) = 0;   // 0x100
+    // 0xa8 (i386 0x54) GetDispatchDestination(path type, from, out, key): the point on the piece's paths a dispatched vehicle drives to.
+    virtual bool GetDispatchDestination(std::uint32_t pathType, const cS3DVector3& from, cS3DVector3& out, std::uint32_t* key) {
+        (void)pathType; (void)from; (void)out; (void)key; return false;
+    }
 };
 
 // cISC4NetworkTunnelOccupant (iid 0x8a4bd52b) — only the far end is read.
