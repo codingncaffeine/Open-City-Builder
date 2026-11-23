@@ -1922,14 +1922,16 @@ int RunScenario(const std::string& path) {
             const std::string text = "Snow " + rest;
             std::printf("snow: %s\n", native::RunSnowCheat(text.c_str()) ? "done" : "no effects manager");
         } else if (command == "viewdrag") {   // viewdrag CX0 CZ0 CX1 CZ1 STEPS [OVER]: the city view's own press / moves / release (in process, no
-            // input device) from cell CX0,CZ0 to CX1,CZ1, then OVER more steps past the end in the same direction before the release
-            int cx0 = 0, cz0 = 0, cx1 = 0, cz1 = 0, steps = 10, over = 0;
+            // input device) from cell CX0,CZ0 to CX1,CZ1, then OVER more steps past the end in the same direction before the release;
+            // a cell coordinate may be fractional (13.5: the grid line between cells 13 and 14, where a two-cell-wide pen centres)
+            float cx0 = 0, cz0 = 0, cx1 = 0, cz1 = 0;
+            int steps = 10, over = 0;
             words >> cx0 >> cz0 >> cx1 >> cz1 >> steps;
             if (!(words >> over)) over = 0;
             sc4::cSC4View3DWin* view = gAppWindow ? gAppWindow->View3D() : nullptr;
             if (!view) { std::printf("viewdrag: no city view\n"); continue; }
             const int vw = view->GetW(), vh = view->GetH();
-            auto screenOf = [&](int cx, int cz, int& sx, int& sy) {   // the view point whose ground is nearest the cell centre
+            auto screenOf = [&](float cx, float cz, int& sx, int& sy) {   // the view point whose ground is nearest the cell centre
                 const float tx = cx * 16.0f + 8.0f, tz = cz * 16.0f + 8.0f;
                 float best = 1e30f;
                 for (int y = 0; y < vh; y += 4)
@@ -1948,7 +1950,7 @@ int RunScenario(const std::string& path) {
                 if (!view->PickTerrain(x, y, hit, false)) { cx = cz = -1; return; }
                 cx = int(hit[0] / 16.0f); cz = int(hit[2] / 16.0f);
             };
-            std::printf("viewdrag: cell %d,%d at %d,%d -> cell %d,%d at %d,%d, %d steps, %d over\n", cx0, cz0, sx0, sy0, cx1, cz1, sx1, sy1, steps, over);
+            std::printf("viewdrag: cell %g,%g at %d,%d -> cell %g,%g at %d,%d, %d steps, %d over\n", cx0, cz0, sx0, sy0, cx1, cz1, sx1, sy1, steps, over);
             {
                 sc4::cSC4ViewInputControl* tool = view->GetCurrentViewInputControl();
                 std::printf("viewdrag: current tool %#x\n", tool ? tool->GetID() : 0u);
@@ -2044,7 +2046,11 @@ int RunScenario(const std::string& path) {
                         todo.push_back("frames 10");
                     }
                     look();
-                    std::snprintf(buffer, sizeof buffer, "viewdrag %d %d %d %d 12 0", step.x0, step.z0, step.x1, step.z1);
+                    // a line two cells wide (an avenue): along the grid line between its two rows or columns, where the pen centres
+                    float fx0 = step.x0, fz0 = step.z0, fx1 = step.x1, fz1 = step.z1;
+                    if (step.z1 - step.z0 == 1 && step.x1 - step.x0 > 1) fz0 = fz1 = step.z0 + 0.5f;
+                    else if (step.x1 - step.x0 == 1 && step.z1 - step.z0 > 1) fx0 = fx1 = step.x0 + 0.5f;
+                    std::snprintf(buffer, sizeof buffer, "viewdrag %g %g %g %g 12 0", fx0, fz0, fx1, fz1);
                     todo.push_back(buffer);
                     break;
                 }
