@@ -314,9 +314,11 @@ public:
     void SendCommand(std::uint32_t command, std::uint32_t, std::uint32_t) override {
         if (cSC4View3DWin* view = CityView3DWin()) view->ProcessViewCommand(command);
     }
-    bool FilterUICommand(const cGZMessage&) override {
-        if (NativeTutorialRunning()) SC4_UNWIRED("cSC4WinMapView::FilterUICommand: a running tutorial's command filter is not asked (every data view button passes)");
-        return true;
+    // nsSC4TutorialSystem::FilterUICommandMessage: a running tutorial hears the data view's button commands (its button
+    // tasks finish on them: Big City's "select the Desirability data view") and may veto them.
+    bool FilterUICommand(const cGZMessage& message) override {
+        cGZMessage copy = message;
+        return NativeTutorialFilterUiCommand(copy);
     }
 
     bool LoadDataViewExemplar(std::uint32_t key, WinMapViewExemplar& out) override {
