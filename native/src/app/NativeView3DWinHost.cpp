@@ -510,10 +510,7 @@ struct StubView3DWin final : IView3DWinHost {
         auto* sim = CityComponentAs<cSC4OrdinanceSimulator>(CityComponent::OrdinanceSimulator, kGZCLSID_cSC4OrdinanceSimulator);
         return sim && sim->IsOrdinanceOn(ordinance);
     }
-    static cSC4CitySituationManager* SituationManager() {
-        sc4::cSC4City* city = native::HostCity();
-        return city ? dynamic_cast<cSC4CitySituationManager*>(city->GetComponent(CityComponent::CitySituationManager)) : nullptr;
-    }
+    static cSC4CitySituationManager* SituationManager() { return native::HostCitySituations(); }
     bool CitySituationIndicatorVisible() override {
         auto* m = SituationManager();
         return m && m->GetVisible();   // GetCSIVisible (vslot 0xf0)

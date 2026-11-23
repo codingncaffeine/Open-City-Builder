@@ -361,16 +361,7 @@ private:
     }
 } g_host;
 
-// The city component (a COM wrapper whose plain-object view is the manager, or the manager itself).
-cSC4CitySituationManager* Manager() {
-    cSC4City* city = HostCity();
-    cIGZUnknown* object = city ? city->GetComponent(CityComponent::CitySituationManager) : nullptr;
-    if (!object) return nullptr;
-    if (auto* manager = dynamic_cast<cSC4CitySituationManager*>(object)) return manager;
-    void* raw = nullptr;
-    if (!object->QueryInterface(kGZIID_PlainObject, &raw) || !raw) return nullptr;
-    return static_cast<cSC4CitySituationManager*>(raw);
-}
+cSC4CitySituationManager* Manager() { return HostCitySituations(); }
 
 }  // namespace
 

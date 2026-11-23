@@ -19,15 +19,7 @@
 namespace native {
 namespace {
 sc4::cSC4CameraControl* Camera() { return CityRenderer() ? CityRenderer()->GetCameraControl() : nullptr; }
-sc4::cSC4CitySituationManager* Situations() {
-    sc4::cSC4City* city = HostCity();
-    cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::CitySituationManager) : nullptr;
-    if (!object) return nullptr;
-    if (auto* manager = dynamic_cast<sc4::cSC4CitySituationManager*>(object)) return manager;
-    void* raw = nullptr;   // the component is a COM wrapper: its plain-object view is the manager
-    if (!object->QueryInterface(sc4::kGZIID_PlainObject, &raw) || !raw) return nullptr;
-    return static_cast<sc4::cSC4CitySituationManager*>(raw);
-}
+sc4::cSC4CitySituationManager* Situations() { return HostCitySituations(); }
 }  // namespace
 
 bool NativePlayerDriveCameraPresent() { return Camera() != nullptr; }

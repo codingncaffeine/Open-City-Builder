@@ -60,10 +60,7 @@ cISC4OccupantManager* Occupants() {
     manager->Release();   // the city keeps it
     return manager;
 }
-cSC4CitySituationManager* Situations() {
-    cIGZUnknown* object = Component(CityComponent::CitySituationManager);
-    return object ? dynamic_cast<cSC4CitySituationManager*>(object) : nullptr;
-}
+cSC4CitySituationManager* Situations() { return HostCitySituations(); }
 
 sc4::cSTETerrain* CityTerrainComponent() {
     cSC4City* city = HostCity();

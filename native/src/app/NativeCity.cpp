@@ -37,6 +37,8 @@
 #include "app/NativeDemolition.h"
 #include <list>
 #include "sc4/cSC4City.h"
+#include "sc4/CitySituationManager.h"
+#include "sc4/CommonIIDs.h"
 #include "sc4/Simulator.h"
 #include "rz/cRZFile.h"
 #include "rz/cRZMessage2Standard.h"
@@ -385,6 +387,15 @@ bool LoadCityFile(cSC4App& app, const std::string& path, cRZAutoRefCount<cISC4Re
 
 // The city being loaded or played (the one cSC4City::Init runs on, before the application publishes it).
 sc4::cSC4City* HostCity() { return dynamic_cast<sc4::cSC4City*>(g_hostCity); }
+sc4::cSC4CitySituationManager* HostCitySituations() {
+    sc4::cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::CitySituationManager) : nullptr;
+    if (!object) return nullptr;
+    if (auto* manager = dynamic_cast<sc4::cSC4CitySituationManager*>(object)) return manager;
+    void* raw = nullptr;
+    if (!object->QueryInterface(sc4::kGZIID_PlainObject, &raw) || !raw) return nullptr;
+    return static_cast<sc4::cSC4CitySituationManager*>(raw);
+}
 
 // A new object of a city class (the serializer's factory: GZCOM creators plus the wrappers of the plain classes); one reference.
 cIGZSerializable* NativeCreateSerializable(std::uint32_t classId) { return g_serFactory && classId ? g_serFactory->CreateSerializable(classId) : nullptr; }

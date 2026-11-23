@@ -671,15 +671,7 @@ private:
 };
 
 // The city's situation manager: the city component is a COM wrapper whose plain-object view is the manager.
-cSC4CitySituationManager* CitySituations() {
-    cSC4City* city = HostCity();
-    cIGZUnknown* object = city ? city->GetComponent(CityComponent::CitySituationManager) : nullptr;
-    if (!object) return nullptr;
-    if (auto* manager = dynamic_cast<cSC4CitySituationManager*>(object)) return manager;
-    void* raw = nullptr;
-    if (!object->QueryInterface(kGZIID_PlainObject, &raw) || !raw) return nullptr;
-    return static_cast<cSC4CitySituationManager*>(raw);
-}
+cSC4CitySituationManager* CitySituations() { return HostCitySituations(); }
 
 // The advice detokenizer reaches the city's situation manager.
 class AdviceDetokenizerHostImpl final : public IAdviceDetokenizerHost {
