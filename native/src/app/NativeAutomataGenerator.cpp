@@ -9,6 +9,9 @@
 //   the wanted kind is accepted. The watercraft manager is not asked for a group (NativeAutomataManagerForGroup).
 #include <cstdint>
 #include "platform/Unwired.h"
+#include "sc4/TrafficNetworkMap.h"
+#include "app/NativeCity.h"
+#include "sc4/cSC4City.h"
 #include <cstdio>
 #include <cstdlib>
 #include <set>
@@ -212,9 +215,17 @@ private:
         return lot != nullptr;
     }
     bool NetworkCellHasType(int x, int z, std::uint32_t mask) override { return (NativeNetworkTypesAt(x, z) & mask) != 0; }
-    bool NetworkPositionAccepts(const float position[3], std::uint32_t mask) override {
-        SC4_UNWIRED("cSC4AutomataGenerator spawn point: the network manager's position test (vslot 0x158) is not recovered; a network cell of the wanted kind stands in");
-        return NetworkCellHasType(static_cast<int>(position[0] / 16.0f), static_cast<int>(position[2] / 16.0f), mask);
+    bool NetworkPositionAccepts(float position[3], std::uint32_t mask) override {
+        sc4::cSC4City* city = native::HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::TrafficNetwork) : nullptr;
+        auto* map = object ? dynamic_cast<sc4::cSC4TrafficNetworkMap*>(object) : nullptr;
+        if (!map) return false;
+        cS3DVector3 point(position[0], position[1], position[2]);
+        if (!map->ConstrainPointToNetworkTile(point, mask)) return false;
+        position[0] = point.x;
+        position[1] = point.y;
+        position[2] = point.z;
+        return true;
     }
     float NetworkHeight(float x, float z) override { return AutomataControllerHost()->GroundHeight(x, z); }
     bool TerrainHeightEnabled(float x, float z) override { return AutomataControllerHost()->PointInCity(x, z); }

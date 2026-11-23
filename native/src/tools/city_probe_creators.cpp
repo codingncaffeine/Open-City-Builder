@@ -107,7 +107,7 @@ public:
     float OccupantMeasureB() override { return 0; }
     bool LotMeasure(int, int, float& out) override { out = 0; return false; }
     bool NetworkCellHasType(int, int, std::uint32_t) override { return false; }
-    bool NetworkPositionAccepts(const float[3], std::uint32_t) override { return false; }
+    bool NetworkPositionAccepts(float[3], std::uint32_t) override { return false; }
     float NetworkHeight(float, float) override { return 0; }
     bool TerrainHeightEnabled(float, float) override { return false; }
     float TerrainHeight(float, float) override { return 0; }

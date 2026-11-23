@@ -120,7 +120,7 @@ struct Host : IAutomataGeneratorHost {
     float OccupantMeasureB() override { return measureB; }
     bool LotMeasure(int x, int z, float& out) override { CHECK(x == 1 && z == 2); out = lotMeasure; return lotPresent; }
     bool NetworkCellHasType(int x, int z, std::uint32_t mask) override { lastMask = mask; networkQueries.push_back({x, z}); return true; }
-    bool NetworkPositionAccepts(const float[3], std::uint32_t) override { return networkOk; }
+    bool NetworkPositionAccepts(float[3], std::uint32_t) override { return networkOk; }
     float NetworkHeight(float, float) override { return height; }
     bool TerrainHeightEnabled(float, float) override { return terrain; }
     float TerrainHeight(float, float) override { return terrainHeight; }

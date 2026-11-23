@@ -139,7 +139,9 @@ public:
     // The occupant's first city cell (GetBoundingCityCells) -> the lot there (GetLot(x, z, false)) -> cSC4Lot::GetOccupancy; false when no lot
     virtual bool LotMeasure(int cellX, int cellZ, float& out) = 0;
     virtual bool NetworkCellHasType(int x, int z, std::uint32_t mask) = 0;    // city vslot 0x140 -> 0x70(x,z) -> 0x48(mask)
-    virtual bool NetworkPositionAccepts(const float position[3], std::uint32_t mask) = 0;   // network manager vslot 0x158
+    // The traffic network map (SL::spCity vslot 0x140, i386 0xa0) vslot 0x158 (i386 0xac) ConstrainPointToNetworkTile(point, mask):
+    // the point moves onto the nearest tile of the networks; false when none is near.
+    virtual bool NetworkPositionAccepts(float position[3], std::uint32_t mask) = 0;
     virtual float NetworkHeight(float x, float z) = 0;                        // network manager vslot 0x90
     virtual bool TerrainHeightEnabled(float x, float z) = 0;                  // city vslot 0x310 with the point: it lies in the city
     virtual float TerrainHeight(float x, float z) = 0;                        // spTerrain vslot 0x60
