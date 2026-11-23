@@ -732,6 +732,8 @@ void Present() {
     PaceFrame();
 }
 
+void DestroyCurrentScreen();   // below: the app's current screen goes (the city view stops being the city's)
+
 bool Boot() {
     native::SetPngDecoder(&DecodePngBytes);
     SetSLBufferHost(&gBufferHost);
@@ -811,7 +813,7 @@ bool Boot() {
         native::RegionCallbacks callbacks;
         callbacks.dataDirectory = platform::GameDataDir();
         callbacks.isRegionScreenCurrent = [] { return gAppWindow && gAppWindow->CurrentScreen() && gAppWindow->CurrentScreen()->GetID() == 0xea659793; };
-        callbacks.destroyCurrentScreen = [] { if (gAppWindow) gAppWindow->DestroyCurrentScreen(); };
+        callbacks.destroyCurrentScreen = [] { DestroyCurrentScreen(); };
         callbacks.createRegionScreen = [] { if (gAppWindow) gAppWindow->CreateRegionScreen(); };
         native::InstallLanguageFormatter();
         native::InstallRegionServices(*app, callbacks);
@@ -827,7 +829,7 @@ bool Boot() {
         screen.graphics = gGraphics.get();
         screen.createWindowFromScript = &native::CreateWindowFromScript;
         screen.loadBitmap = [](std::uint32_t group, std::uint32_t instance) { return native::LoadBitmapResource(group, instance); };
-        native::SetCityScreenCallbacks({[] { if (gAppWindow) gAppWindow->DestroyCurrentScreen(); }, [] {
+        native::SetCityScreenCallbacks({[] { DestroyCurrentScreen(); }, [] {
             if (!gAppWindow || !gAppWindow->CreateCityScreen()) return;
             if (sc4::cSC4View3DWin* view = gAppWindow->View3D()) native::SetCityRenderTarget(*view, gDriver.get(), static_cast<gz::cIGZDrawContext*>(gGraphics->Primary()->GetDrawContext()), gW, gH);
         }, [] { if (gAppWindow) gAppWindow->CreateRegionScreen(); }});
@@ -931,6 +933,15 @@ std::uint32_t Flags() {
     const SDL_Keymod mod = SDL_GetModState();
     return ((mod & SDL_KMOD_SHIFT) ? 4u : 0u) | ((mod & SDL_KMOD_CTRL) ? 8u : 0u) | ((gButtons & SDL_BUTTON_LMASK) ? 0x10u : 0u);   // 0x10: the left button is down
 }
+// The app destroys its current screen (city -> region, a failed city load). The city view goes with the city screen: it stops being
+// the city's view at once, as SL::spView3DWin does when the original's view is destroyed (a city's managers can still tick from the
+// region screen's frame, and read the view through it).
+void DestroyCurrentScreen() {
+    if (!gAppWindow) return;
+    if (sc4::cSC4View3DWin* view = gAppWindow->View3D(); view && view == native::CityView3DWin()) native::SetCityView3DWin(nullptr);
+    gAppWindow->DestroyCurrentScreen();
+}
+
 void PostMouse(std::uint32_t type, float x, float y, std::uint32_t extra = 0) {
     const Placement p = FramePlacement();   // window points -> the game's logical screen
     const int gx = int((x - p.x) * float(gW) / p.w), gy = int((y - p.y) * float(gH) / p.h);
