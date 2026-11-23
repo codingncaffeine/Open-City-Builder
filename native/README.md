@@ -1,11 +1,13 @@
 # Open City Builder: the native build
 
 This folder is the playable native game: a C++20 decompilation of the original that builds and runs on Linux with
-SDL3 and OpenGL 3.3. It started from [DeSCAi4](https://github.com/CadenKalez/DeSCAi4) by CadenKalez and contributors,
-a hand-written decompilation of the later Mac release (GPLv3). Their README, with the history of how the
-decompilation was made, is kept as [UPSTREAM-README.md](UPSTREAM-README.md). On top of it are the Linux host, the
-game loop, and the systems and screens ported since. See the [main README](../README.md) for what plays today and
-what is still missing.
+SDL3 and OpenGL 3.3. It is built on [DeSCAi4](https://github.com/CadenKalez/DeSCAi4) by CadenKalez and contributors,
+a hand-written decompilation of the later Mac release (GPLv3). Starting from their work let this project move much
+faster than it could have alone; we're grateful for it. DeSCAi4 recovered most of the game's code and could boot it,
+but did not play: nothing ran the game loop with a renderer. Everything that makes it play is ours: the Linux host
+(window, input, sound, OpenGL drawing), the game loop, and the systems, screens and fixes ported since. Their
+README, with the history of how the decompilation was made, is kept as [UPSTREAM-README.md](UPSTREAM-README.md). See
+the [main README](../README.md) for what plays today and what is still missing.
 
 No game data is included: the game reads your own copy's data folder and never changes it.
 

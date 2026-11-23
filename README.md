@@ -69,9 +69,12 @@ reference.
 
 ## Layout
 
-- `native/`: the playable native build. It is based on [DeSCAi4](https://github.com/CadenKalez/DeSCAi4) by
-  CadenKalez and contributors, a C++20 decompilation of the later Mac release (GPLv3). On top of it are our Linux
-  host, the game loop, and the systems ported since. Upstream's README is kept as `native/UPSTREAM-README.md`.
+- `native/`: the playable native build. It is built on [DeSCAi4](https://github.com/CadenKalez/DeSCAi4) by
+  CadenKalez and contributors, a C++20 decompilation of the later Mac release (GPLv3). Starting from their work let
+  this project move much faster than it could have alone; we're grateful for it. DeSCAi4 recovered most of the
+  game's code and could boot it, but did not play: nothing ran the game loop with a renderer. Everything that makes
+  it play is ours: the Linux host (window, input, sound, OpenGL drawing), the game loop, and the systems, screens and
+  fixes ported since. Their README is kept as `native/UPSTREAM-README.md`.
 - `src/`, `hook/`, `tools/`: the first route, a byte-exact rewrite of the PC release that a loader swapped into the
   original program. It was retired in favor of playability; the compare and inventory tools are still used.
 - `third_party/`: the open-source libraries the original was built with (STLport 4.6, Lua 5.0.2), each under its own
