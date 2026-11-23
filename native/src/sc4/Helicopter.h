@@ -328,6 +328,8 @@ public:
     virtual void* NearestCrimeProp(const cS3DVector3& position, float radius) { (void)position; (void)radius; return nullptr; }
     virtual void HoldCriminal(void* automaton) { (void)automaton; }
     virtual void SetCrimePropState(void* prop, int state) { (void)prop; (void)state; }
+    // sTuningParams i386 +0xbc (the port's cSC4AutomataTuningParams::f134, 1 by default): the pursuit's fade time in seconds.
+    virtual float FadeSeconds() { return 1.0f; }
 };
 
 IHelicopterHost* HelicopterHost();

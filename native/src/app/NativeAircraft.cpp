@@ -398,6 +398,7 @@ public:
         automaton->SetOpacity(0.0f, 0.2f);
         automaton->PushState(7, nullptr, 5000.0f, true, 0, 0, nullptr);
     }
+    float FadeSeconds() override { return AutomataTuning().params.f134; }
     void SetCrimePropState(void* prop, int state) override {
         if (prop) static_cast<cISC4PropOccupant*>(prop)->SetState(static_cast<std::uint32_t>(state));
     }

@@ -1529,10 +1529,44 @@ void cSC4Helicopter::AI_PursueGoal(float delta) {
         return;
     }
     if (behavior == kHeliBehaviorPursue) {
-        // PARTIAL: the pursuit record's target automaton (+0x38 of the state) is the unrecovered pursuit record type
-        // (the port only has tAutomataStateChase, whose +0x38 object is not an automaton interface in this port).
-        SC4_UNWIRED("cSC4Helicopter::AI_PursueGoal: the pursuit behavior (follow the pursuit record's target automaton) is not ported");
-        PopState();
+        // i386 0x004b02c8: follow the chased automaton (the chase state's target) while it flees (its behavior 0x10): aim at where
+        // it will be (its heading times its speed x 1000 x delta ahead), with the spotlight on. Too far away (192): a hidden
+        // helicopter reappears 128 units behind the aim (y kept) and fades in, a visible one fades out (tuning fade time). Close
+        // (32): hover at the target's height plus 20.
+        auto* chase = dynamic_cast<tAutomataStateChase*>(GetState());
+        auto* target = chase && chase->target ? dynamic_cast<cSC4Automaton*>(chase->target) : nullptr;
+        if (!target || target->GetBehavior() != 0x10) {
+            PopState();
+            return;
+        }
+        cS3DVector3 aim{0.0f, 0.0f, 0.0f}, heading{0.0f, 0.0f, 0.0f};
+        target->GetPosition(&aim.x);              // vslot 0x1c
+        target->GetOrientation(&heading.x);       // vslot 0x3c
+        const float lead = target->GetCurrentSpeed() * 1000.0f * delta;   // vslot 0x88, [0x00a706f8] = 1000
+        aim = cS3DVector3{lead * heading.x + aim.x, lead * heading.y + aim.y, lead * heading.z + aim.z};
+        const cS3DVector3 toward{aim.x - position_.x, 0.0f, aim.z - position_.z};
+        const float distance = std::sqrt(toward.x * toward.x + toward.z * toward.z);
+        cS3DVector3 unit = toward;
+        if (distance > 0.0f) unit = cS3DVector3{toward.x / distance, 0.0f, toward.z / distance};
+        AI_StartEngine();
+        spotOn_ = true;
+        AI_AimSpotlight(aim, delta);
+        if (distance > 192.0f) {                                   // kTooFar
+            const float opacity = GetOpacity();                    // vslot 0x80
+            IHelicopterHost* host = HeliHostFor(*this);
+            const float fade = host ? host->FadeSeconds() : 1.0f;  // sTuningParams i386 +0xbc
+            if (opacity == 0.0f) {
+                const float y = position_.y;
+                position_ = cS3DVector3{aim.x - 128.0f * unit.x, y, aim.z - 128.0f * unit.z};   // kTeleportDistance
+                physics_->rotors[1]->position = cS3DVector3{position_.x * kInvModelScale, position_.y * kInvModelScale,
+                                                            position_.z * kInvModelScale};
+                SetOpacity(1.0f, fade);
+            } else if (opacity == 1.0f) {
+                SetOpacity(0.0f, fade);
+            }
+        }
+        AI_ControlMoveXZ(toward, 2.0f, delta);
+        if (distance <= 32.0f) AI_ControlHover(20.0f + aim.y, delta);   // kCloseEnough; _kDefaultMaxDensity = 20
         return;
     }
     if (behavior == kHeliBehaviorArrive) {
