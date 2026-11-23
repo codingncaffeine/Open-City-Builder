@@ -1050,7 +1050,7 @@ SC4Rect<int> RotateLotRect(int facing, int sizeX, int sizeZ, const SC4Rect<int>&
         default: return in;   // 2; a facing outside 0..3 never reaches here (the plop tool passes 0..3)
     }
 }
-// Matches (PC 0x00729ec0): every non-zero byte of the mask must equal the edge byte's low nibble.
+// Matches (PC 0x00729ec0): every non-zero byte of the first word must equal the second word's byte in its low nibble.
 bool MatchesEdgeMask(std::uint32_t mask, std::uint32_t edges) {
     const std::uint32_t k = (((mask + 0x0f0f0f0fu) >> 4) & 0x01010101u) * 15u;
     return ((mask ^ edges) & k) == 0;
@@ -1155,10 +1155,15 @@ int cSC4ZoneDeveloper::CanCreatePloppedLot(SC4Rect<int> rect, int facing, cSC4Lo
                     for (const cSC4LotConfigurationObject& object : objects) {
                         if (object.type != 7) continue;
                         const NetworkObjectPlacement p = GetNetworkObjectPlacement(configuration, object, rect.x0, rect.z0, facing);
+                        if (std::getenv("SC4_PLOPDEBUG"))
+                            std::fprintf(stderr, "plop test: lot node at %d,%d type %u masks %08x/%08x vs cell %d,%d network %08x edges %08x\n", p.x, p.z,
+                                         p.type, p.maskA, p.maskB, x, z, network->GetNetworkFlag(), network->GetEdgeTypesFlag(p.type));
                         if (p.x != x || p.z != z) continue;
                         if ((network->GetNetworkFlag() & 0x1fff) != (1u << (p.type & 31))) break;
                         const std::uint32_t edges = network->GetEdgeTypesFlag(p.type);
-                        if (MatchesEdgeMask(p.maskA, edges) && MatchesEdgeMask(p.maskB, edges)) code = 8;
+                        // i386 0x000df35e: every edge the first mask sets must be on the piece, and every edge the piece has must
+                        // be one the second mask allows.
+                        if (MatchesEdgeMask(p.maskA, edges) && MatchesEdgeMask(edges, p.maskB)) code = 8;
                     }
                 }
             } else {
