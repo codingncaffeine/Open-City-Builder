@@ -1604,6 +1604,9 @@ void cSC4View3DWin::InvokeTertiaryMenu(std::uint32_t menuId, cIGZWin* sender, st
     frameWindow->ChildAdd(catalogWindow);
     frameWindow->SetNotificationTarget(catalogWindow);
     tertiaryState_ = state;
+    // i386 0x0052a5fc: a running tutorial hears about the palette (spCity vslot 0x148 -> IsTutorial / HandleCatalogMenu) before
+    // the remembered scroll and selection come back: it flashes and points at its step's item (the water pump, the small park).
+    host_->TutorialCatalogOpened(catalog);
     if (state) {
         catalog->SetScrollPosition(state->scroll);
         catalog->SetSelectedItemByID(state->selected);
