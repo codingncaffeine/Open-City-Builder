@@ -399,7 +399,9 @@ struct LotHost final : ILotHost {
         m->SetData3(buildingType);
         m->SetData4(static_cast<std::uint32_t>(wealth));
         m->SetIGZUnknown(object);
-        SL::spMS2->MessageSend(m);
+        // Posted, as cSC4Lot::SetState / SetCondition do (i386 0x001210a8: spMS2 vslot 0x10, MessagePost): sent at once, the
+        // tutorial's lot task finished inside the demolish tool's mouse-up and removed the tool under it.
+        SL::spMS2->MessagePost(m, false);
         m->Release();
         object->Release();
     }
