@@ -349,6 +349,7 @@ src/gz/gzcom_creators/cSC4CitySituationAdvice.cpp
 src/gz/gzcom_creators/cSC4CityDetailManager.cpp
 src/sc4/CitySituationAdvice.cpp
 src/sc4/MyStreetSim.cpp
+src/sc4/MySimInputControls.cpp
 src/sc4/AdvisorCitySituations.cpp
 src/sc4/CityDetailManager.cpp
 src/tools/city_probe_automata.cpp

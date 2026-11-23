@@ -589,6 +589,7 @@ src/sc4/PipeOccupantGeometry.cpp
 src/sc4/PowerPoleOccupant.cpp
 src/sc4/CityDetailManager.cpp
 src/sc4/MyStreetSim.cpp
+src/sc4/MySimInputControls.cpp
 src/sc4/AdvisorCitySituations.cpp
 src/sc4/AircraftManager.cpp
 src/app/NativeAircraft.cpp

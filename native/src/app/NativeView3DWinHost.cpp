@@ -106,6 +106,17 @@ bool NativeLlamaCheatActive();   // app/NativeAdvisors.cpp
 void NativeInitMapView(cIGZWin* window);   // app/NativeWinMapView.cpp
 std::string FontStyleName(std::uint32_t guid);   // linux/game_main_linux.cpp
 sc4::cISC4View3DWin* NativeStreetSimView() { return CityView3DWin(); }   // the street-sim tool's view (NativeMySim.cpp)
+// The city view's control stack for the MySim tools (NativeMySim.cpp): spView3D vslot 0x60 current, 0x64 set, 0x68 remove.
+sc4::cSC4ViewInputControl* NativeViewCurrentControl() {
+    sc4::cISC4View3DWin* view = CityView3DWin();
+    return view ? view->GetCurrentViewInputControl() : nullptr;
+}
+void NativeViewSetControl(sc4::cSC4ViewInputControl* control, int operation) {
+    if (sc4::cISC4View3DWin* view = CityView3DWin()) view->SetCurrentViewInputControl(control, operation);
+}
+void NativeViewRemoveControl() {
+    if (sc4::cISC4View3DWin* view = CityView3DWin()) view->RemoveCurrentViewInputControl(false);
+}
 namespace {
 using namespace sc4;
 

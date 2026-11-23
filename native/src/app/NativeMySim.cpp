@@ -61,6 +61,7 @@
 #include "sc4/Lot.h"
 #include "sc4/MySim.h"
 #include "sc4/MyStreetSim.h"
+#include "sc4/MySimInputControls.h"
 #include "sc4/MySimAdvice.h"
 #include "sc4/MySimAgentSimulator.h"
 #include "sc4/MySimBalloonWinProc.h"
@@ -84,6 +85,9 @@
 
 namespace native {
 sc4::cISC4View3DWin* NativeStreetSimView();   // app/NativeView3DWinHost.cpp: the city view as cISC4View3DWin
+sc4::cSC4ViewInputControl* NativeViewCurrentControl();                        // app/NativeView3DWinHost.cpp
+void NativeViewSetControl(sc4::cSC4ViewInputControl* control, int operation);
+void NativeViewRemoveControl();
 
 cIGZWin* NativeCityView3DWindow();                                                // app/NativeCityUi.cpp
 const sc4::cISCPropertyHolder* NativeSimulatorExemplar(std::uint32_t instance);   // app/NativeSimHosts.cpp
@@ -705,16 +709,34 @@ public:
         return proc;
     }
     IMySimPylon* CreatePylon() override { SC4_UNWIRED("IMySimHost::CreatePylon (MySim dispatch tool call box)"); return nullptr; }
-    // --- view input controls (the MySim tools are not native) ---
-    cIGZUnknown* CurrentViewInputControl() override { return nullptr; }
-    void SetCurrentViewInputControl(cIGZUnknown*) override {}
-    cIGZUnknown* ViewCurrentInputControl() override { return nullptr; }
-    void ViewSetInputControl(cIGZUnknown*) override {}
-    void ViewPushInputControl(cIGZUnknown*) override {}
-    cIGZUnknown* CreateMoveInTool(cSC4MySim*) override { SC4_UNWIRED("IMySimHost::CreateMoveInTool (cSC4MySimInputControlMoveIn)"); return nullptr; }
+    // --- view input controls ---
+    // cSC4MySim::mspViewInputControl (the MySim tool the sims last put up) and the city view's control stack (spView3D vslots
+    // 0x60 current, 0x64 SetCurrentViewInputControl(control, 2), 0x68 RemoveCurrentViewInputControl(false)).
+    cIGZUnknown* toolControl_ = nullptr;   // not counted: the view's stack holds the tool
+    cIGZUnknown* CurrentViewInputControl() override { return toolControl_; }
+    void SetCurrentViewInputControl(cIGZUnknown* control) override { toolControl_ = control; }
+    cIGZUnknown* ViewCurrentInputControl() override { return static_cast<cIGZUnknown*>(NativeViewCurrentControl()); }
+    void ViewSetInputControl(cIGZUnknown* control) override {
+        if (!control) NativeViewRemoveControl();
+        else if (auto* tool = dynamic_cast<sc4::cSC4ViewInputControl*>(control)) NativeViewSetControl(tool, 0);
+    }
+    void ViewPushInputControl(cIGZUnknown* control) override {
+        if (auto* tool = control ? dynamic_cast<sc4::cSC4ViewInputControl*>(control) : nullptr) NativeViewSetControl(tool, 2);
+    }
+    // A new tool with no reference of its own: the view's stack takes one when the MySim pushes it.
+    template <class Tool> static cIGZUnknown* MakeTool(cSC4MySim* sim) {
+        auto* tool = new Tool();
+        if (!tool->Init(sim)) {
+            tool->AddRef();
+            tool->Release();
+            return nullptr;
+        }
+        return static_cast<cIGZUnknown*>(tool);
+    }
+    cIGZUnknown* CreateMoveInTool(cSC4MySim* sim) override { return MakeTool<sc4::cSC4MySimInputControlMoveIn>(sim); }
     cIGZUnknown* CreateDispatchToolControl(cSC4MySim*) override { SC4_UNWIRED("IMySimHost::CreateDispatchToolControl (cSC4MySimInputControlDispatch)"); return nullptr; }
-    cIGZUnknown* CreateChangeHouseTool(cSC4MySim*) override { SC4_UNWIRED("IMySimHost::CreateChangeHouseTool (cSC4MySimInputControlChangeHouse)"); return nullptr; }
-    cIGZUnknown* CreateChangeJobTool(cSC4MySim*) override { SC4_UNWIRED("IMySimHost::CreateChangeJobTool (cSC4MySimInputControlChangeJob)"); return nullptr; }
+    cIGZUnknown* CreateChangeHouseTool(cSC4MySim* sim) override { return MakeTool<sc4::cSC4MySimInputControlChangeHouse>(sim); }
+    cIGZUnknown* CreateChangeJobTool(cSC4MySim* sim) override { return MakeTool<sc4::cSC4MySimInputControlChangeJob>(sim); }
     // --- message plumbing ---
     void RegisterInputControlTarget(cIGZMessageTarget2* target) override { if (cIGZMessageServer2* atm = AnimationTickServerView()) atm->AddNotification(target, 0xff); }
     void UnregisterInputControlTarget(cIGZMessageTarget2* target) override { if (cIGZMessageServer2* atm = AnimationTickServerView()) atm->RemoveNotification(target, 0xff); }
@@ -1086,6 +1108,15 @@ public:
 BalloonHost g_balloonHost;
 
 // The street-sim tool: the city view, the occupant manager's box query and the traffic-automaton view of an occupant.
+// The MySim building tools' city services (sc4::IMySimToolHost).
+class BuildingToolHost final : public sc4::IMySimToolHost {
+public:
+    sc4::cISC4View3DWin* View() override { return NativeStreetSimView(); }
+    cSC4MySimAgentSimulator* Agents() override { return Agent(); }
+    cSC4Lot* OccupantLot(cISC4Occupant* occupant) override { cSC4ZoneDeveloper* lots = LotManager(); return lots && occupant ? lots->GetOccupantLot(occupant) : nullptr; }
+    cSC4Lot* LotAt(const cS3DVector3& position) override { cSC4ZoneDeveloper* lots = LotManager(); return lots ? lots->GetLot(position) : nullptr; }
+} g_buildingToolHost;
+
 class StreetToolHost final : public sc4::IMyStreetSimToolHost {
 public:
     sc4::cISC4View3DWin* View() override { return NativeStreetSimView(); }
@@ -1156,6 +1187,7 @@ void InstallMySimHosts() {
     sc4::SetMySimFilterHost(&filter);
     sc4::SetMySimAdviceHost(&advice);
     sc4::SetMyStreetSimToolHost(&g_streetToolHost);
+    sc4::SetMySimToolHost(&g_buildingToolHost);
     // cSC4AdvisorCitySituations::UpdateMySimAdvices (i386): SL::spCity 0x11c GetMySimAgentSimulator, vslot 0x30
     // GetActiveUIPanelSim(slot), then the sim's vslot 0x110 ActivateLuaContext before the MySim advices are tested.
     sc4::SetAdvisorCitySituationsRefresh([] {
