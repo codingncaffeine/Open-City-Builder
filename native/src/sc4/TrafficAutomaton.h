@@ -201,7 +201,7 @@ public:
     // SL::spNeighborsSim slot 0x88, the five connection lists (kinds 3, 0xc, 8, 2, 10) in the order they are queried: the
     // off-map cell (GetConnectionCell) of each, as x, z pairs
     virtual void NeighborConnectionCells(std::vector<std::int32_t>& cells) = 0;
-    // SL::AEMS slot 0x30 (start) / 0x28 (stop), event 0xe in SetPath
+    // SL::AEMS StartSound / EndSound (i386 slots 0x14 / 0x18), e.g. event 0xe (the tunnel) in SetPath
     virtual void StartAudioEvent(std::uint32_t event) = 0;
     virtual void StopAudioEvent(std::uint32_t event) = 0;
     // cSC4DynamicParticleEffect::InitDynamicParticleSystem (0x1006fe9e8)

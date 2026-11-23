@@ -676,11 +676,13 @@ void cSC4TrafficAutomaton::SetPath(ITrafficAutomatonOccupant* occupant, std::uin
     if (networkOccupant_ != old) {
         const bool newTunnel = networkOccupant_ && networkOccupant_->HasNetworkFlag(kTrafficNetworkFlagTunnel);
         const bool oldTunnel = old && old->HasNetworkFlag(kTrafficNetworkFlagTunnel);
+        // i386 0x000d2760: onto a tunnel portal from elsewhere the vehicle fades out (0.8 s) and the tunnel sound starts;
+        // off a portal (onto a road or the other portal) it fades back in (0.1 s) and the sound ends.
         if (newTunnel && !oldTunnel) {
-            SetOpacity(1.0f, 0.1f);
-            if (FindState(kTrafficStateDrive) && trafficHost_) trafficHost_->StartAudioEvent(kAudioEventTunnel);
-        } else if (!newTunnel && oldTunnel) {
             SetOpacity(0.0f, 0.8f);
+            if (FindState(kTrafficStateDrive) && trafficHost_) trafficHost_->StartAudioEvent(kAudioEventTunnel);
+        } else if (oldTunnel) {
+            SetOpacity(1.0f, 0.1f);
             if (FindState(kTrafficStateDrive) && trafficHost_) trafficHost_->StopAudioEvent(kAudioEventTunnel);
         }
     }

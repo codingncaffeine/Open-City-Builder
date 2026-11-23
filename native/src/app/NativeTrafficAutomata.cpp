@@ -19,6 +19,8 @@
 #include "sc4/PedestrianManager.h"
 #include "sc4/TrafficAutomataManager.h"
 #include "sc4/TrafficAutomaton.h"
+#include "sc4/ServiceLocator.h"
+#include "sc4audio/AEMSEvents.h"
 #include "sc4/TrafficNetworkMap.h"
 #include "sc4/TrafficSimulator.h"
 #include "sc4/SpecialVehicles.h"
@@ -125,8 +127,20 @@ public:
             }
         }
     }
-    void StartAudioEvent(std::uint32_t) override {}
-    void StopAudioEvent(std::uint32_t) override {}
+    void StartAudioEvent(std::uint32_t event) override {
+        if (cISC4AEMSEvents* events = AemsEvents()) events->StartSound(static_cast<cISC4AEMSEvents::AEMSEventType>(event));
+    }
+    void StopAudioEvent(std::uint32_t event) override {
+        if (cISC4AEMSEvents* events = AemsEvents()) events->EndSound(static_cast<cISC4AEMSEvents::AEMSEventType>(event));
+    }
+    static cISC4AEMSEvents* AemsEvents() {   // SL::AEMS(); nothing without an audio event system
+        cIGZUnknown* service = SL::AEMS();
+        void* raw = nullptr;
+        if (!service || !service->QueryInterface(kGZIID_cISC4AEMSEvents, &raw) || !raw) return nullptr;
+        auto* events = static_cast<cISC4AEMSEvents*>(raw);
+        events->Release();   // SL::AEMS() keeps the service
+        return events;
+    }
     ITrafficParticleSystem* CreateParticleSystem() override {   // PARTIAL: exhaust / dust particles
         SC4_UNWIRED("cSC4TrafficAutomaton: the dynamic particle system (exhaust / dust) is not created");
         return nullptr;
