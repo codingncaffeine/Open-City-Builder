@@ -2070,6 +2070,8 @@ int RunScenario(const std::string& path) {
             native::TutorialStepInfo step;
             if (!native::NativeTutorialStep(step)) { std::printf("tutorialdo: no tutorial step\n"); continue; }
             static int lastStep = -1, repeats = 0;
+            static int lastToolStep = -1;
+            static std::vector<std::string> lastToolTaps;
             static bool stuck = false;
             repeats = step.number == lastStep ? repeats + 1 : 0;
             lastStep = step.number;
@@ -2108,6 +2110,13 @@ int RunScenario(const std::string& path) {
                 case 3: case 5: {            // place a building, act on a lot: a click in the region; a retry (the tutorial
                                              // bulldozed a misplaced building) tries the region's next cell, middle first
                     if (cx < 0) break;
+                    // a one-placement building (property 0xea2e078b / 0xea3209f8) ends its tool when placed: after a misplaced
+                    // one the player picks it from the menu again (the taps of the step that chose the tool)
+                    {
+                        sc4::cSC4View3DWin* view3d = gAppWindow ? gAppWindow->View3D() : nullptr;
+                        if (step.kind == 3 && view3d && !view3d->GetCurrentViewInputControl())
+                            for (const std::string& tap : lastToolTaps) { todo.push_back(tap); todo.push_back("frames 10"); }
+                    }
                     look();
                     // a retry turns the building a quarter (Home, as a player does); each aim gets all four facings: first the
                     // footprint's middle cell (rounded down; a toll booth takes the road piece under the pointer), then the exact
@@ -2131,6 +2140,11 @@ int RunScenario(const std::string& path) {
                 case 4: case 0x10:           // a button / window: tap what the step flashes (in a catalog, the flashed item)
                     if (step.itemX >= 0) { std::snprintf(buffer, sizeof buffer, "tapat %d %d", step.itemX, step.itemY); todo.push_back(buffer); }
                     else if (step.target) { std::snprintf(buffer, sizeof buffer, "tapid %08x", step.target); todo.push_back(buffer); }
+                    if (!todo.empty()) {   // the taps that choose a tool, kept for a retry that needs the tool again
+                        if (lastToolStep != step.number) lastToolTaps.clear();
+                        lastToolStep = step.number;
+                        lastToolTaps.push_back(todo.back());
+                    }
                     break;
                 case 0xd: case 0xf:          // population / time: let the city run, then Continue if it shows
                     todo.push_back("simspeed 3");
