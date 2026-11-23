@@ -44,6 +44,7 @@
 #include "sc4/SCPropertyHelp.h"
 #include "sc4/Simulator.h"
 #include "sc4/TrafficAutomataManager.h"
+#include "sc4/TrafficSimulator.h"
 #include "sc4/VisualEffect.h"
 #include "sc4/ZoneDeveloper.h"
 #include "sc4/cSC4City.h"
@@ -99,6 +100,7 @@ cISC4OccupantManager* Occupants() {
 }
 cSC4ZoneDeveloper* Lots() { return SerializableComponent<cSC4ZoneDeveloper>(CityComponent::ZoneDeveloper, cSC4ZoneDeveloper::kZoneDeveloperClassId); }
 cSC4Simulator* Simulator() { return SerializableComponent<cSC4Simulator>(CityComponent::Simulator, kGZCLSID_cSC4Simulator); }
+cSC4TrafficSimulator* TrafficSim() { return SerializableComponent<cSC4TrafficSimulator>(CityComponent::TrafficSimulator, kGZCLSID_cSC4TrafficSimulator); }
 cSC4AircraftManager* Manager() { return CityComponentAs<cSC4AircraftManager>(CityComponent::AircraftManager); }
 cSC4PoliceSimulator* PoliceSim() { return CityComponentAs<cSC4PoliceSimulator>(CityComponent::PoliceSimulator); }
 cSC4FireProtectionSimulator* FireSim() { return CityComponentAs<cSC4FireProtectionSimulator>(CityComponent::FireProtectionSimulator); }
@@ -397,6 +399,25 @@ public:
         if (!automaton) return;
         automaton->SetOpacity(0.0f, 0.2f);
         automaton->PushState(7, nullptr, 5000.0f, true, 0, 0, nullptr);
+    }
+    bool CongestionMapWidths(float& widthX, float& widthZ) override {
+        cSC4TrafficSimulator* traffic = TrafficSim();
+        cSC4SimGrid<std::uint8_t>* map = traffic ? traffic->GetCongestionMap() : nullptr;
+        if (!map) { widthX = widthZ = 0.0f; return false; }
+        widthX = map->GetTractWidthX();
+        widthZ = map->GetTractWidthZ();
+        return true;
+    }
+    int CongestionAt(int tractX, int tractZ) override {
+        cSC4TrafficSimulator* traffic = TrafficSim();
+        cSC4SimGrid<std::uint8_t>* map = traffic ? traffic->GetCongestionMap() : nullptr;
+        return map && map->TractIsInBounds(tractX, tractZ) ? map->GetTractValue(tractX, tractZ) : 0;
+    }
+    void CongestionTractCenter(int tractX, int tractZ, float& x, float& z) override {
+        cSC4TrafficSimulator* traffic = TrafficSim();
+        cSC4SimGrid<std::uint8_t>* map = traffic ? traffic->GetCongestionMap() : nullptr;
+        x = z = 0.0f;
+        if (map) map->TractCenterToPosition(tractX, tractZ, x, z);
     }
     float FadeSeconds() override { return AutomataTuning().params.f134; }
     void SetCrimePropState(void* prop, int state) override {

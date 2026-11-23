@@ -8,6 +8,7 @@
 
 #include "platform/Unwired.h"
 #include "sc4/AutomataStates.h"
+#include "sc4/RandomIterator.h"
 
 namespace sc4 {
 
@@ -1619,12 +1620,31 @@ void cSC4Helicopter::AI_PursueGoal(float delta) {
         return;
     }
     if (behavior == kHeliBehaviorTraffic) {
-        // PARTIAL: the traffic simulator's random cell iterator (spTrafficSim slots 0x50/0x70/0x78/0xa8/0xb0) is
-        // unrecovered; the original searches a random rectangle for a cell with traffic and either claims it or falls
-        // back to the idle behaviour.
-        SC4_UNWIRED("cSC4Helicopter::AI_PursueGoal: the traffic behavior (find a random cell with traffic via the traffic simulator) is not ported");
+        // i386 0x004b02c8 case 0x37: tracts of the traffic simulator's congestion map in random order (the walk is clipped to
+        // 0 .. the tract WIDTHS, as the original asks); the first tract with congestion is the destination, claimed unless the
+        // (just reset) destination is claimed already; none found: idle.
         ResetClaimIfValid(destination_);
-        PushState(kHeliBehaviorIdle, nullptr, 0.0f, false, 0, 0, nullptr);
+        IHelicopterHost* host = HeliHostFor(*this);
+        float widthX = 0.0f, widthZ = 0.0f;
+        if (host && host->CongestionMapWidths(widthX, widthZ)) {
+            RandomIterator walk;
+            walk.SetRect(0, 0, static_cast<int>(widthX), static_cast<int>(widthZ));
+            walk.Reset(true);
+            int tx = 0, tz = 0;
+            while (walk.Next(tx, tz)) {
+                if (host->CongestionAt(tx, tz) == 0) continue;
+                if (!ClaimedContains(destination_)) {
+                    ClaimPosition(destination_);
+                    PushState(kHeliBehaviorArrive, nullptr, 6000.0f, false, 0, 0, nullptr);   // 0x45bb8000
+                    host->CongestionTractCenter(tx, tz, destination_.x, destination_.z);
+                    destination_.y = 0.0f;
+                    PushState(kHeliBehaviorSpawn, nullptr, -1.0f, false, 0, 0, nullptr);
+                    return;
+                }
+                destination_ = InvalidVector();
+            }
+        }
+        PushState(kHeliBehaviorIdle, nullptr, -1.0f, false, 0, 0, nullptr);
         return;
     }
     if (behavior != 0) PopState();

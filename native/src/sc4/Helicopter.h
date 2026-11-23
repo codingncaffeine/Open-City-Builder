@@ -330,6 +330,11 @@ public:
     virtual void SetCrimePropState(void* prop, int state) { (void)prop; (void)state; }
     // sTuningParams i386 +0xbc (the port's cSC4AutomataTuningParams::f134, 1 by default): the pursuit's fade time in seconds.
     virtual float FadeSeconds() { return 1.0f; }
+    // SL::spTrafficSim vslot 0x28 GetCongestionMap: its tract widths (vslots 0x38 / 0x3c GetTractWidthX / Z), a tract's value
+    // (vslot 0x58 GetTractValue; 0 outside the map) and a tract's centre (vslot 0x54 TractCenterToPosition). False without a map.
+    virtual bool CongestionMapWidths(float& widthX, float& widthZ) { widthX = widthZ = 0.0f; return false; }
+    virtual int CongestionAt(int tractX, int tractZ) { (void)tractX; (void)tractZ; return 0; }
+    virtual void CongestionTractCenter(int tractX, int tractZ, float& x, float& z) { (void)tractX; (void)tractZ; x = z = 0.0f; }
 };
 
 IHelicopterHost* HelicopterHost();
