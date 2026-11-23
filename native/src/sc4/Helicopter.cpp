@@ -1411,33 +1411,100 @@ void cSC4Helicopter::AI_AimSpotlight(const cS3DVector3& target, float delta) {
     spotAim_.z = rotor[0][2] * ax + rotor[1][2] * ay + rotor[2][2] * az;
 }
 
-// @ 0x1006f0af4. PARTIAL: the 2 KB original distributes the request between the collective, the cyclic lift and the
-// rudder through the rotor tilt (1/scale) and the half-yaw rotation, with a cascade of per-field +/-delta*100 limits and
-// three "already aligned / target behind / closing in" branches; that cascade is not transcribed. The stand-in keeps the
-// observable contract: ease the collective/cyclic controls towards the requested horizontal direction within the same
-// +/-100 limits and derive the attitude from the type limits.
+// @ 0x1006f0af4 (i386 0x004afbc4). Splits a horizontal move request between the cyclic (engine +0x00 forward, +0x04 sideways,
+// stored negated) and the rudder (+0x0c), each moved at most delta x 100 per call:
+//  * the heading is the automaton's orientation turned by half the yaw rate (tenths of a degree), flattened;
+//  * flying fast (over 2) across the request (|velocity . request| < 0.4): brake, the controls chase the velocity in the
+//    rotor frame (x 10 forward, x -10 sideways, -x on the rudder);
+//  * otherwise the rudder turns toward the request (+/-20, scaled by how far off the heading is), the forward cyclic leans in
+//    by distance / maxControl - forward speed (limited by -10 x forward speed and (1 - misalignment) x 50), and with the
+//    request behind and the helicopter at speed (5 or more) it only brakes its forward speed;
+// then roll and pitch follow from the type limits (+0x1c x 0.025 x flight ratio x sideways, +0x24 x 0.025 x forward).
 void cSC4Helicopter::AI_ControlMoveXZ(const cS3DVector3& direction, float maxControl, float delta) {
     if (!engine_ || !physics_ || !physics_->type) return;
-    SC4_UNWIRED("cSC4Helicopter::AI_ControlMoveXZ: the original's force-distribution cascade is not transcribed (approximate steering stand-in)");
-    const float lengthXZ = std::sqrt(direction.x * direction.x + direction.z * direction.z);
+    const auto clampStep = [](float value, float limit) {   // the original's "if -limit <= v { if v <= limit: v else limit } else -limit"
+        if (-limit <= value) return value <= limit ? value : limit;
+        return -limit;
+    };
     const float step = delta * 100.0f;
-    float targetCollective = 0.0f;
-    float targetLift = 0.0f;
-    if (lengthXZ > 0.0f) {
-        const float scale = (maxControl * 10.0f) / lengthXZ;
-        targetCollective = ClampSymmetric(direction.x * scale, 100.0f);
-        targetLift = ClampSymmetric(direction.z * scale, 100.0f);
+    float forwardTarget = 0.0f;   // local_c8
+    float rudderTarget = 0.0f;    // local_c4
+    float sideTarget = 0.0f;      // fVar5 (the negated sideways control)
+    const float length = std::sqrt(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z);
+    if (length > 0.0f) {
+        cS3DVector3 request{direction.x, 0.0f, direction.z};
+        const float requestLength = std::sqrt(request.x * request.x + request.z * request.z);
+        if (requestLength > 0.0f) request = cS3DVector3{request.x / requestLength, 0.0f, request.z / requestLength};
+        // Heading: the orientation turned about +Y by the yaw rate x (pi / 1800) x 0.5 (cS3DQuaternion::From halves it again).
+        const float half = 0.00174533f * physics_->yawRate * 0.5f * 0.5f;
+        const float qy = std::sin(half), qw = std::cos(half);
+        const float yy = qy * (qy + qy), yw = qy * (qw + qw);
+        cS3DVector3 heading{(1.0f - yy) * orientation_.x + yw * orientation_.z, 0.0f,
+                            -yw * orientation_.x + (1.0f - yy) * orientation_.z};
+        const float headingLength = std::sqrt(heading.x * heading.x + heading.z * heading.z);
+        if (headingLength > 0.0f) heading = cS3DVector3{heading.x / headingLength, 0.0f, heading.z / headingLength};
+        const float facing = heading.x * request.x + heading.z * request.z;
+        const cS3DVector3 turn{heading.y * request.z - heading.z * request.y, heading.z * request.x - heading.x * request.z,
+                               heading.x * request.y - heading.y * request.x};   // cross(heading, request)
+        const float misalignment = std::sqrt(turn.x * turn.x + turn.y * turn.y + turn.z * turn.z);
+        cS3DVector3 velocity{physics_->velX * 0.3f, 0.0f, physics_->velZ * 0.3f};
+        const float speed = std::sqrt(velocity.x * velocity.x + velocity.z * velocity.z);
+        if (speed > 0.0f) velocity = cS3DVector3{velocity.x / speed, 0.0f, velocity.z / speed};
+        const float forwardSpeed = (velocity.x * heading.x + velocity.z * heading.z) * speed;
+        const float across = std::fabs(velocity.x * request.x + velocity.z * request.z);
+        if (across < 0.4f && speed > 2.0f) {
+            // Brake: the velocity in the rotor frame (BackTransformVector: transposed rotation, divided by the scale).
+            const HeliTransform& body = physics_->rotors[1]->body;
+            const float vx = physics_->velX * 0.3f, vz = physics_->velZ * 0.3f;
+            const float bx = (body.rotation[0][0] * vx + body.rotation[2][0] * vz) / body.scale;
+            const float bz = (body.rotation[0][2] * vx + body.rotation[2][2] * vz) / body.scale;
+            const float forward = clampStep(bx * 10.0f - engine_->collective, step) + engine_->collective;
+            const float side = -engine_->field04 + clampStep(-10.0f * bz - -engine_->field04, step);
+            const float rudder = engine_->rudder + clampStep(-bx - engine_->rudder, step);
+            engine_->collective = forward;
+            engine_->field04 = -side;
+            engine_->rudder = rudder;
+            const HELI_TYPE_DATA& type = *physics_->type;
+            physics_->rollDeg = clampStep(TypeField(type, 0x1c) * 0.025f * physics_->flightRatio * side, TypeField(type, 0x14));
+            physics_->pitchDeg = clampStep(TypeField(type, 0x24) * 0.025f * forward, TypeField(type, 0x0c));
+            return;
+        }
+        bool behind = false;
+        if (turn.y <= 0.0f) {
+            if (facing <= 0.0f) { forwardTarget = 10.0f; rudderTarget = -20.0f; behind = true; }
+            else { forwardTarget = misalignment * 10.0f; rudderTarget = misalignment * -20.0f; }
+        } else if (facing <= 0.0f) {
+            forwardTarget = -10.0f; rudderTarget = 20.0f; behind = true;
+        } else {
+            forwardTarget = misalignment * -10.0f; rudderTarget = misalignment * 20.0f;
+        }
+        bool computed = false;
+        if (behind && !(speed < 5.0f)) {
+            if (forwardSpeed <= 5.0f) {
+                sideTarget = 0.0f;
+            } else {
+                const float brake = forwardSpeed * -10.0f;
+                sideTarget = brake < -100.0f ? -100.0f : (brake <= 100.0f ? brake : 100.0f);
+            }
+            computed = true;
+        }
+        if (!computed) {
+            const float high = (1.0f - misalignment) * 50.0f;
+            float low = forwardSpeed * -10.0f;
+            const float lean = (length / maxControl - forwardSpeed) * 0.2f - engine_->field04;
+            if (low <= lean) low = lean <= high ? lean : high;
+            sideTarget = low < -100.0f ? -100.0f : (low > 100.0f ? 100.0f : low);
+        }
     }
-    engine_->collective += ClampSymmetric(targetCollective - engine_->collective, step);
-    engine_->collective = ClampSymmetric(engine_->collective, 100.0f);
-    engine_->liftControl += ClampSymmetric(targetLift - engine_->liftControl, step);
-    engine_->liftControl = ClampSymmetric(engine_->liftControl, 100.0f);
+    const float forward = engine_->collective + clampStep(forwardTarget - engine_->collective, step);
+    const float side = -engine_->field04 + clampStep(sideTarget - -engine_->field04, step);
+    const float rudder = clampStep(rudderTarget - engine_->rudder, step) + engine_->rudder;
+    engine_->collective = forward;
+    engine_->field04 = -side;
+    engine_->rudder = -100.0f <= rudder ? (rudder <= 100.0f ? rudder : 100.0f) : -100.0f;
     const HELI_TYPE_DATA& type = *physics_->type;
-    const float roll = ClampSymmetric(TypeField(type, 0x1c) * 0.025f * physics_->flightRatio * engine_->rudder,
-                                      TypeField(type, 0x14));
-    physics_->rollDeg = roll;
-    const float pitch = ClampSymmetric(TypeField(type, 0x24) * 0.025f * engine_->collective, TypeField(type, 0x0c));
-    physics_->pitchDeg = pitch;
+    physics_->rollDeg = clampStep(TypeField(type, 0x1c) * 0.025f * physics_->flightRatio * side, TypeField(type, 0x14));
+    physics_->pitchDeg = clampStep(TypeField(type, 0x24) * 0.025f * forward, TypeField(type, 0x0c));
 }
 
 // @ 0x1006f130c.

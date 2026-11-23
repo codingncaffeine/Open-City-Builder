@@ -52,8 +52,8 @@
 //  * YawPitchRollSlideReal clamps the rates by the type limits *before* integrating, wraps yaw at +/-3600 degrees
 //    (not 360), and clamps roll/pitch to +/-890 and to the type limits.
 //  * AI_ControlHover's error term adds the *already-accumulated* vertical speed back, so it over/under-shoots.
-//  * AI_ControlMoveXZ uses the rotor tilt through 1/scale and the engine force vector with hard -100..100 limits; its
-//    "close/far" branch keeps the previous force when the target is behind it.
+//  * AI_ControlMoveXZ moves each control at most delta x 100 per call; with the request behind and the helicopter at speed
+//    it only brakes, and flying fast across the request it chases the velocity in the rotor frame (documented in the .cpp).
 //  * UpdateSpotlight keeps the aim at (0,-1,1)/sqrt2 unless the "fx_00_spotlight" registered effect is on the stack and
 //    the engine is enabled at zoom 1, and only then rotates it towards the tracked position.
 //  * DetectCollisions' sweep uses the occupant's GetBoundingBox, pushes the helicopter out along the axis with the
@@ -62,15 +62,6 @@
 //    record's effect timer has expired, starts "helicoptermissle" / "ufolaser" before clearing +0x22b.
 //
 // PARTIAL (each with the concrete missing neighbour):
-//  * AI_PursueGoal: the pursuit branch (0x34) needs the pursuit state record's target automaton interface, and the
-//    traffic branch (0x37) needs cSC4TrafficSimulator's random cell iterator (slots 0x50/0x70/0x78/0xa8/0xb0). The
-//    crime (0x36) and accident (0x38) branches are implemented through IHelicopterHost::CrimeAt /
-//    TrafficAccidentLocation.
-//  * RespondToCrimeScene: cSC4CrimeSimulator's crime query and the dispatched crime's 0x108/0x1a0 calls are unrecovered;
-//    the port only performs the query through the seam.
-//  * AI_ControlMoveXZ: the original's force-distribution cascade (rotor tilt 1/scale, half-yaw rotation, per-field
-//    +/-delta*100 limits and the three alignment branches) is not transcribed; the stand-in keeps the limits and the
-//    direction of the response (documented in the .cpp).
 //  * UpdateSpotlight / TranslatePlayerDriveCommands: the renderer spotlight cone (SL::spRenderer slots 0x1e0/0x1e8) and
 //    the player-drive state's tracked-effect fields are behind IHelicopterHost; the effect start/stop and the aim
 //    update are reproduced.
