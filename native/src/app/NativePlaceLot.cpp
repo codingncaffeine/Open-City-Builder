@@ -368,7 +368,11 @@ struct NetworkMap final : IPlaceLotNetworkMap {
 
 struct City final : IPlaceLotCity {
     void PositionToCell(float x, float z, int& cx, int& cz) override { if (cSC4City* c = HostCity()) c->PositionToCell(x, z, cx, cz); }
-    void CellToPosition(int cx, int cz, float& x, float& z) override { x = static_cast<float>(cx) * 16.0f; z = static_cast<float>(cz) * 16.0f; }
+    // city vslot 0x308 (i386 0x184): the cell's CENTRE (the toll booth's pick and PlaceLot's toll booth centre read it as one)
+    void CellToPosition(int cx, int cz, float& x, float& z) override {
+        if (cSC4City* c = HostCity()) c->CellCenterToPosition(cx, cz, x, z);
+        else { x = static_cast<float>(cx) * 16.0f + 8.0f; z = static_cast<float>(cz) * 16.0f + 8.0f; }
+    }
     IPlaceLotNetworkMap* NetworkMap() override { return &g_networkMap; }
     // SL::spCity vslot 0x290, the tutorial system: it runs natively (app/NativeTutorial.cpp) but is not asked here, so a
     // running tutorial does not restrict placement to its target rectangle.
