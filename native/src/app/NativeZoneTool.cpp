@@ -24,6 +24,13 @@
 namespace native {
 namespace {
 
+// cRZMessage2ZoneChange (i386 ctor 0x00674f36, dtor 0x00674e9a): a standard message that owns the SC4CellRegion in void2 and
+// deletes it with itself, so the zone change can be posted.
+class cRZMessage2ZoneChange final : public cRZMessage2Standard {
+public:
+    ~cRZMessage2ZoneChange() override { delete static_cast<sc4::SC4CellRegion<int>*>(GetVoid2()); }
+};
+
 // The current city: SL::spCity, as the original asks (a pointer kept from an earlier city outlives it).
 sc4::cSC4City* CurrentCity() { return dynamic_cast<sc4::cSC4City*>(SL::spCity); }
 sc4::cSC4View3DWin* g_view = nullptr;
@@ -153,21 +160,23 @@ public:
     void ApplyZone(const sc4::SC4CellRegion<int>& changed, int zoneType, bool flag) override {
         if (sc4::cISC4ZoneDeveloper* d = Developer()) d->DoParcellization(changed, zoneType, flag);   // vslot 0x30
     }
-    // PlaceZone's message 0x07699455 (0x1001993a8): the simulators that keep per-zone state (the growth developers' zone cell counts,
-    // land value, network lots, landfill) hear about the change. void1 / the unknown = the zone manager, void2 = the changed region,
-    // data3 = the zone type, data4 = the flag. The original posts it; the region here is the caller's local, so it is sent at once.
+    // PlaceZone's message 0x07699455 (i386 0x00130570): the simulators that keep per-zone state (the growth developers' zone cell
+    // counts, land value, network lots, landfill) and the tutorial's zone task hear about the change. void1 / the unknown = the zone
+    // manager, void2 = a heap copy of the changed region that the message owns (cRZMessage2ZoneChange), data3 = the zone type,
+    // data4 = the flag. It is POSTED, as the original does: sent at once, the tutorial finished its zone task inside the zone
+    // tool's mouse-up and removed the tool before the tool released its capture.
     void PostZoneChanged(const sc4::SC4CellRegion<int>& changed, int zoneType, bool flag) override {
         if (!SL::spMS2) return;
         sc4::cSC4ZoneManager* zones = Zones();
-        auto* message = new cRZMessage2Standard();
+        auto* message = new cRZMessage2ZoneChange();
         message->AddRef();
         message->SetType(0x07699455);
         message->SetVoid1(zones);
         message->SetIGZUnknown(zones ? static_cast<cIGZUnknown*>(static_cast<cIGZSerializable*>(zones)) : nullptr);
-        message->SetVoid2(const_cast<sc4::SC4CellRegion<int>*>(&changed));
+        message->SetVoid2(new sc4::SC4CellRegion<int>(changed));
         message->SetData3(static_cast<std::uint64_t>(static_cast<std::int64_t>(zoneType)));
         message->SetData4(flag ? 1 : 0);
-        SL::spMS2->MessageSend(message);
+        SL::spMS2->MessagePost(message, false);
         message->Release();
     }
 };
