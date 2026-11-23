@@ -620,6 +620,8 @@ public:
     // The network occupant of a cell (occupant manager vslot 0x84 with the tool's network filter, QI 0xa821ef94), one
     // reference, or null.
     virtual cSC4NetworkOccupant* NetworkOccupantAt(std::uint32_t /*x*/, std::uint32_t /*z*/, std::uint32_t /*typeMask*/) { return nullptr; }
+    // The same query through cSC4PlacedNetworkOccupantFilter(the tool's network filter): only a placed piece (IsPlaced) counts.
+    virtual cSC4NetworkOccupant* PlacedNetworkOccupantAt(std::uint32_t /*x*/, std::uint32_t /*z*/, std::uint32_t /*typeMask*/) { return nullptr; }
     // SL::spSurfaceWater vslot 0x28: the water surface height at a terrain vertex (or below every height when dry).
     virtual float WaterSurfaceAtVertex(std::int32_t /*x*/, std::int32_t /*z*/) { return -3.4e38f; }
     // sNetworkTypeInfo[type] +0: 1 = simple edge subtypes, 2 = complex ones, 0 = none.
@@ -766,7 +768,8 @@ public:
     virtual bool AllowTunnels() = 0;                                                       // [64] 0x200
     virtual bool IsStoppedByWater() = 0;                                                   // [65] 0x208
     virtual bool ShouldAutoConnect() = 0;                                                  // [66] 0x210
-    // [67] 0x218 TestForAutoConnectOccupant .. [71] 0x238 CheckForGoodTerrain — not recovered.
+    virtual bool TestForAutoConnectOccupant(int x, int z) = 0;                             // [67] 0x218
+    // [68] 0x220 .. [71] 0x238 CheckForGoodTerrain — not recovered.
     virtual void StartPlacing() = 0;                                                       // [72] 0x240
     // [73] 0x248 CreateCellInfosForCurrentPlacementTiles .. [76] 0x260 GetNetworkHeightForTerrainHeight,
     // [78..80] 0x270..0x280 the constraint inserters, [82..83] the remaining placement helpers — not recovered.
@@ -849,6 +852,7 @@ public:
     bool AllowTunnels() override;                                         // 0x1002ed6e4 (returns true)
     bool IsStoppedByWater() override;                                     // 0x1002ed6ec (returns true)
     bool ShouldAutoConnect() override;                                    // 0x1002ed6f4 (returns false)
+    bool TestForAutoConnectOccupant(int x, int z) override;               // i386 0x004cc8a2
     void StartPlacing() override;                                         // 0x1002ed6fc (empty)
     void PropagateSolvedCellsForSmoothing() override;                     // 0x1002ed708 (empty)
     void ReloadNetworkSpecificInfo(std::uint32_t exemplarId) override;    // 0x1001906fc (empty in the base tool)
@@ -1068,7 +1072,7 @@ public:
     const std::vector<tBridge>& Bridges() const { return bridges_; }
     void SetTerrainHilight(int param);                                    // 0x10018cd24
     // i386 0x004cc96a: the drag's cells (+0xb8) and steps (+0xa0); zMajor / xMajor = the splitter's two flags.
-    void ComputeDraggedCells(const SC4PointU& start, const SC4PointU& end, int zMajor, int xMajor, std::uint32_t networkType);
+    void ComputeDraggedCells(SC4PointU& start, SC4PointU& end, int zMajor, int xMajor, std::uint32_t networkType);
     // i386 0x004ceb..: solve the current line and insert its occupants (or previews); a real placement hands the pieces to
     // `crew` when there is one.
     bool PlaceNetwork(bool place, cSC4NetworkConstructionCrew* crew, bool allowDiagonals, bool connectNeighbor, std::uint32_t networkType);

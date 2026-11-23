@@ -432,6 +432,15 @@ public:
     bool LoadString(std::uint32_t group, std::uint32_t instance, cIGZString& out) override { return native::LoadLocalizedString(group, instance, out); }
     // GetNetworkOccupant (i386 0x00126b82): the first occupant of the cell the tool's cSC4NetworkORFilter takes (a network
     // occupant with one of the tool's network flags), one reference.
+    sc4::cSC4NetworkOccupant* PlacedNetworkOccupantAt(std::uint32_t x, std::uint32_t z, std::uint32_t typeMask) override {
+        sc4::cSC4NetworkOccupant* found = nullptr;
+        ForCellNetworkOccupants(x, z, typeMask, [&found](sc4::cSC4NetworkOccupant* network) {
+            if (found || !network->IsPlaced()) return;
+            network->AddRef();
+            found = network;
+        });
+        return found;
+    }
     sc4::cSC4NetworkOccupant* NetworkOccupantAt(std::uint32_t x, std::uint32_t z, std::uint32_t typeMask) override {
         sc4::cSC4NetworkOccupant* found = nullptr;
         ForCellNetworkOccupants(x, z, typeMask, [&found](sc4::cSC4NetworkOccupant* network) {

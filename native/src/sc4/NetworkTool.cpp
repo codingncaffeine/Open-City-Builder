@@ -428,6 +428,16 @@ bool cSC4NetworkTool::AllowTunnels() { return true; }
 bool cSC4NetworkTool::IsStoppedByWater() { return true; }
 bool cSC4NetworkTool::ShouldAutoConnect() { return false; }
 
+// i386 0x004cc8a2: a placed piece of the tool's networks on the cell.
+bool cSC4NetworkTool::TestForAutoConnectOccupant(int x, int z) {
+    INetworkToolHost* host = GetNetworkToolHost();
+    if (!host || x < 0 || z < 0) return false;
+    cSC4NetworkOccupant* found = host->PlacedNetworkOccupantAt(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z), placementFlagMask_);
+    if (!found) return false;
+    found->Release();
+    return true;
+}
+
 // 0x1002ed6fc / 0x1002ed708 / 0x1001906fc: empty in the base tool (the derived tools do the work).
 void cSC4NetworkTool::StartPlacing() {}
 void cSC4NetworkTool::PropagateSolvedCellsForSmoothing() {}
@@ -921,10 +931,11 @@ bool cSC4NetworkTool::DrawNetworkLine(SC4PointU& start, SC4PointU& end, bool all
 // i386 0x004cc96a. A Bresenham walk from start to end that groups the cells into steps along the long axis: on a
 // z-major drag every z move starts a step and x moves widen it (the step spans an x range), and the other way round.
 // On a tie the walk moves z first, then x, alternating. The pen widths widen the steps' ranges; then every step's
-// cells are listed (+0x60) and the steps record their half-open cell ranges (+0x54).
-// Not ported yet: the wide-pen pass after that (pen x > 1, the highways: it checks the ends against existing network
-// occupants through cSC4PlacedNetworkOccupantFilter and extends or shifts the end steps, 0x004ccd48..0x004cdc4e).
-void cSC4NetworkTool::ComputeDraggedCells(const SC4PointU& start, const SC4PointU& end, int zMajor, int xMajor,
+// cells are listed (+0x60) and the steps record their half-open cell ranges (+0x54). Then the ends meet the networks already
+// placed: a wide pen shifts the whole drag by its offset when one end touches a piece and the cell past it is network too
+// (start and end move with it); a one-wide pen with a diagonal part grows each end by one more step when the cell past it
+// joins a placed piece (auto-connecting tools) or a road cell already connecting that way (the far end: any type but streets).
+void cSC4NetworkTool::ComputeDraggedCells(SC4PointU& start, SC4PointU& end, int zMajor, int xMajor,
                                           std::uint32_t networkType) {
     struct StepBound { int min, max; };
     INetworkToolHost* host = GetNetworkToolHost();
@@ -999,10 +1010,153 @@ void cSC4NetworkTool::ComputeDraggedCells(const SC4PointU& start, const SC4Point
         }
         along += sign;
     }
-    if (penX > 1) {
-        static bool warned = false;
-        if (!warned) { warned = true; std::fprintf(stderr, "network tool: the wide-pen pass of ComputeDraggedCells is not ported (highways)\n"); }
-        SC4_UNWIRED("cSC4NetworkTool::ComputeDraggedCells: the wide-pen pass (highway end steps checked against existing networks) is not ported");
+    if (steps_.empty()) return;
+    // cSC4PlacedNetworkOccupantFilter(the tool's network filter) through occupant manager vslot 0x84 GetFirstOccupantByStandardCityCell;
+    // the piece's edge types for this network (vslot 0x98), 0 without one.
+    const auto placedAt = [&](std::int64_t x, std::int64_t z, std::uint32_t* edges) {
+        if (edges) *edges = 0;
+        if (!host || x < 0 || z < 0 || x > 0xffffffffLL || z > 0xffffffffLL) return false;
+        cSC4NetworkOccupant* found = host->PlacedNetworkOccupantAt(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z), placementFlagMask_);
+        if (!found) return false;
+        if (edges) *edges = found->GetEdgeTypesFlag(static_cast<std::uint8_t>(networkType));
+        found->Release();
+        return true;
+    };
+    if (penX > 1) {   // i386 0x004ccd48
+        SC4PointU a = cells_[steps_[0].firstCell], b = cells_[steps_[0].lastCell];
+        std::uint32_t edgesA = 0, edgesB = 0;
+        bool hitA = placedAt(a.x, a.z, &edgesA);
+        bool hitB = placedAt(b.x, b.z, &edgesB);
+        const bool diagonal = ((edgesA | edgesB) & 0x4000400) != 0;
+        const bool flag17 = ((edgesA | edgesB) & 0x20000) != 0;
+        const bool connected = (edgesA & 0x4040404) != 0 || (edgesB & 0x4040404) != 0;
+        if ((connected || totalSteps_ <= straightSteps_) && hitA != hitB) {
+            bool shift = true;
+            if (straightSteps_ < totalSteps_ && diagonal) {
+                if (!flag17) {
+                    b = cells_[steps_[1].firstCell];
+                } else {
+                    a = cells_[steps_[0].lastCell];
+                    b = cells_[steps_[1].lastCell];
+                    hitA = placedAt(a.x, a.z, nullptr);
+                }
+                hitB = placedAt(b.x, b.z, nullptr);
+                shift = hitA != hitB;
+            }
+            if (shift) {
+                // From the end that touches a piece, one more pen offset away from the other end.
+                const SC4PointU& hit = hitA ? a : b;
+                const SC4PointU& other = hitA ? b : a;
+                const int dx = static_cast<int>(hit.x) - static_cast<int>(other.x);
+                const int dz = static_cast<int>(hit.z) - static_cast<int>(other.z);
+                if (placedAt(static_cast<std::int64_t>(hit.x) + dx, static_cast<std::int64_t>(hit.z) + dz, nullptr) && (dx != 0 || dz != 0)) {
+                    const SC4PointU& last = cells_.back();
+                    const int lastX = static_cast<int>(last.x) + dx, lastZ = static_cast<int>(last.z) + dz;
+                    if (lastX >= 0 && static_cast<std::uint32_t>(lastX) < static_cast<std::uint32_t>(cityWidth_) && lastZ >= 0 &&
+                        static_cast<std::uint32_t>(lastZ) < static_cast<std::uint32_t>(cityHeight_)) {
+                        for (SC4PointU& cell : cells_) {
+                            cell.x = static_cast<std::uint32_t>(static_cast<int>(cell.x) + dx);
+                            cell.z = static_cast<std::uint32_t>(static_cast<int>(cell.z) + dz);
+                        }
+                    }
+                    // Quirk kept: the drag's ends move even when the cells stayed (the last cell would leave the city).
+                    start.x = static_cast<std::uint32_t>(static_cast<int>(start.x) + dx);
+                    start.z = static_cast<std::uint32_t>(static_cast<int>(start.z) + dz);
+                    end.x = static_cast<std::uint32_t>(static_cast<int>(end.x) + dx);
+                    end.z = static_cast<std::uint32_t>(static_cast<int>(end.z) + dz);
+                }
+            }
+        }
+    }
+    if (penX != 1 || (totalSteps_ < 3 && (totalSteps_ != straightSteps_ || totalSteps_ != 2))) return;
+    // i386 0x004cd4a6: a one-wide diagonal drag. The bit of the side a new end cell joins from (the cell info's all-types
+    // neighbourhood +0x54 must already reach that way).
+    const auto joinMask = [](int dx, int dz) {
+        std::uint32_t mask = dx < 0 ? 0x40000u : (dx > 0 ? 4u : 0u);
+        if (dz < 0) mask += 0x4000000u;
+        else if (dz > 0) mask += 0x400u;
+        return mask;
+    };
+    const auto joins = [&](std::uint32_t x, std::uint32_t z, int dx, int dz, bool checkCell) {
+        const bool autoConnect = ShouldAutoConnect() && TestForAutoConnectOccupant(static_cast<int>(x), static_cast<int>(z));   // vslots 0x108 / 0x10c
+        const cSC4NetworkCellInfo* cell = checkCell ? GetCellInfo(x, z) : nullptr;
+        if (cell && (cell->networkFlags & 0x1044) != 0 && (cell->compact54 & joinMask(dx, dz)) != 0) return true;
+        return autoConnect;
+    };
+    const auto newStep = [&](std::size_t sourceStep, std::uint32_t at, std::uint32_t first, int dx, int dz) {
+        const tDraggedStep source = steps_[sourceStep];
+        const std::uint32_t count = source.lastCell - source.firstCell + 1;
+        std::vector<SC4PointU> added;
+        for (std::uint32_t c = source.firstCell; c <= source.lastCell; ++c)
+            added.push_back(SC4PointU{static_cast<std::uint32_t>(static_cast<int>(cells_[c].x) + dx),
+                                      static_cast<std::uint32_t>(static_cast<int>(cells_[c].z) + dz)});
+        cells_.insert(cells_.begin() + at, added.begin(), added.end());
+        tDraggedStep step;
+        step.firstCell = first;
+        step.lastCell = first + count - 1;
+        step.direction = steps_[0].direction;
+        return std::make_pair(step, count);
+    };
+    {   // the start
+        const SC4PointU p = totalSteps_ == straightSteps_ ? cells_[steps_[0].firstCell] : cells_[steps_[1].firstCell];
+        const SC4PointU q = totalSteps_ == straightSteps_ ? cells_[steps_[1].firstCell] : cells_[steps_[2].firstCell];
+        const int dx = static_cast<int>(p.x) - static_cast<int>(q.x), dz = static_cast<int>(p.z) - static_cast<int>(q.z);
+        const SC4PointU first = cells_[steps_[0].firstCell];
+        const std::uint32_t nx = static_cast<std::uint32_t>(dx + static_cast<int>(first.x));
+        const std::uint32_t nz = static_cast<std::uint32_t>(dz + static_cast<int>(first.z));
+        if (nx < static_cast<std::uint32_t>(cityWidth_) && nz < static_cast<std::uint32_t>(cityHeight_) && joins(nx, nz, dx, dz, networkType == kNetworkRoad)) {
+            bool straightStep = false;
+            std::uint32_t at = 0;
+            if (straightSteps_ == 0) {
+                straightStep = true;
+                if (steps_[0].firstCell == steps_[0].lastCell) {   // a one-cell first step moves onto the new cell
+                    cells_[steps_[0].firstCell] = SC4PointU{nx, nz};
+                    at = 1;
+                }
+            }
+            const auto [step, count] = newStep(at, at, at, dx, dz);
+            for (std::size_t s = at; s < static_cast<std::size_t>(totalSteps_); ++s) {
+                steps_[s].firstCell += count;
+                steps_[s].lastCell += count;
+            }
+            steps_.insert(steps_.begin() + at, step);
+            if (!straightStep) ++straightSteps_;
+            ++totalSteps_;
+        }
+    }
+    {   // the far end
+        const std::size_t n = steps_.size();
+        const SC4PointU p = totalSteps_ == straightSteps_ ? cells_[steps_[n - 1].firstCell] : cells_[steps_[n - 2].firstCell];
+        const SC4PointU q = totalSteps_ == straightSteps_ ? cells_[steps_[n - 2].firstCell] : cells_[steps_[n - 3].firstCell];
+        const int dx = static_cast<int>(p.x) - static_cast<int>(q.x), dz = static_cast<int>(p.z) - static_cast<int>(q.z);
+        const SC4PointU last = cells_[steps_[n - 1].firstCell];
+        const std::uint32_t nx = static_cast<std::uint32_t>(dx + static_cast<int>(last.x));
+        const std::uint32_t nz = static_cast<std::uint32_t>(dz + static_cast<int>(last.z));
+        if (nx < static_cast<std::uint32_t>(cityWidth_) && nz < static_cast<std::uint32_t>(cityHeight_) && joins(nx, nz, dx, dz, networkType != kNetworkStreet)) {
+            bool straightStep = false;
+            std::uint32_t back = 0;
+            if (straightSteps_ == 0) {
+                straightStep = true;
+                tDraggedStep& lastStep = steps_.back();
+                if (lastStep.firstCell == lastStep.lastCell) {   // a one-cell last step moves onto the new cell
+                    cells_[lastStep.firstCell] = SC4PointU{nx, nz};
+                    back = 1;
+                }
+            }
+            const std::size_t source = static_cast<std::size_t>(totalSteps_) - 1 - back;
+            const std::uint32_t at = static_cast<std::uint32_t>(cells_.size()) - back;
+            const tDraggedStep sourceStep = steps_[source];
+            const std::uint32_t count = sourceStep.lastCell - sourceStep.firstCell + 1;
+            const auto [step, added] = newStep(source, at, at, dx, dz);
+            (void)added;
+            for (std::size_t s = steps_.size() - back; s < static_cast<std::size_t>(totalSteps_); ++s) {
+                steps_[s].firstCell += count;
+                steps_[s].lastCell += count;
+            }
+            steps_.insert(steps_.end() - static_cast<std::ptrdiff_t>(back), step);
+            if (!straightStep) ++straightSteps_;
+            ++totalSteps_;
+        }
     }
 }
 

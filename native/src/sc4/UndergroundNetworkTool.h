@@ -157,7 +157,7 @@ public:
     bool AllowTunnels() override;                                      // [64] 0x100193080 (false)
     bool IsStoppedByWater() override;                                  // [65] 0x100193088 (false)
     bool ShouldAutoConnect() override;                                 // [66] 0x100193090 (true)
-    bool TestForAutoConnectOccupant(int x, int z);                     // [67] 0x1001a93a6
+    bool TestForAutoConnectOccupant(int x, int z) override;            // [67] 0x1001a93a6
     void CheckForReservedTiles(int& cell, std::uint32_t networkType, bool flag);   // [69] empty
     bool CheckForGoodTerrain(int& failureReason);                      // [71] 0x100193098 (true)
     void StartPlacing() override;                                      // [72] 0x1001a8310

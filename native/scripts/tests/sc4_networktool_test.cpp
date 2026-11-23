@@ -283,6 +283,14 @@ struct FakeHost : INetworkToolHost {
     // The pieces of a small world for DestroyOccupantsAndResolve: cell key -> piece (one reference each).
     std::map<std::uint32_t, cSC4NetworkOccupant*> pieces;
     std::vector<cSC4NetworkOccupant*> removedPieces, demolishedPieces;   // identities only
+    // The placed pieces cSC4PlacedNetworkOccupantFilter lets through (ComputeDraggedCells' end checks).
+    std::map<std::uint32_t, cSC4NetworkOccupant*> placed;
+    cSC4NetworkOccupant* PlacedNetworkOccupantAt(std::uint32_t x, std::uint32_t z, std::uint32_t) override {
+        auto it = placed.find(x | (z << 16));
+        if (it == placed.end() || !it->second->IsPlaced()) return nullptr;
+        it->second->AddRef();
+        return it->second;
+    }
     cSC4NetworkOccupant* NetworkOccupantAt(std::uint32_t x, std::uint32_t z, std::uint32_t) override {
         auto it = pieces.find(x | (z << 16));
         if (it == pieces.end()) return nullptr;
@@ -1053,6 +1061,87 @@ int main() {
         CHECK(f.tool->DrawNetworkLine(start, end, true, 0));
         const std::vector<SC4PointU> down = {{4, 9}, {4, 8}, {4, 7}, {4, 6}};
         CHECK(A::Cells(*f.tool) == down);
+    }
+
+    // ---- ComputeDraggedCells' end passes (i386 0x004ccd48 / 0x004cd4a6) ------------------------------------------
+    {
+        Fixture f(0);
+        f.host.typeInfo.penX = 2;
+        f.host.typeInfo.penZ = 1;
+        f.Init();
+        using A = NetworkToolTestAccess;
+        // A wide pen: nothing placed, the drag stays.
+        SC4PointU start{10, 10}, end{14, 10};
+        CHECK(f.tool->DrawNetworkLine(start, end, true, 2));
+        const std::vector<SC4PointU> plain = A::Cells(*f.tool);
+        const SC4PointU a = plain[A::Steps(*f.tool)[0].firstCell], b = plain[A::Steps(*f.tool)[0].lastCell];
+        CHECK(!(a == b));
+        // One end of the first step on a placed piece and the cell past it network too: the drag moves by that offset.
+        auto* atEnd = new cSC4NetworkOccupant();
+        auto* past = new cSC4NetworkOccupant();
+        atEnd->AddRef();   // the test's references
+        past->AddRef();
+        atEnd->SetAllFlags(1);
+        past->SetAllFlags(1);
+        const int dx = static_cast<int>(a.x) - static_cast<int>(b.x), dz = static_cast<int>(a.z) - static_cast<int>(b.z);
+        f.host.placed[a.x | (a.z << 16)] = atEnd;
+        f.host.placed[static_cast<std::uint32_t>(static_cast<int>(a.x) + dx) | (static_cast<std::uint32_t>(static_cast<int>(a.z) + dz) << 16)] = past;
+        start = {10, 10};
+        end = {14, 10};
+        CHECK(f.tool->DrawNetworkLine(start, end, true, 2));
+        CHECK(A::Cells(*f.tool).size() == plain.size());
+        for (std::size_t i = 0; i < plain.size(); ++i)
+            CHECK(A::Cells(*f.tool)[i] == (SC4PointU{static_cast<std::uint32_t>(static_cast<int>(plain[i].x) + dx),
+                                                     static_cast<std::uint32_t>(static_cast<int>(plain[i].z) + dz)}));
+        CHECK(start.x == static_cast<std::uint32_t>(10 + dx) && start.z == static_cast<std::uint32_t>(10 + dz));
+        CHECK(end.x == static_cast<std::uint32_t>(14 + dx) && end.z == static_cast<std::uint32_t>(10 + dz));
+        // Control: a piece that is not placed does not count.
+        past->SetAllFlags(0);
+        start = {10, 10};
+        end = {14, 10};
+        CHECK(f.tool->DrawNetworkLine(start, end, true, 2));
+        CHECK(A::Cells(*f.tool) == plain);
+        f.host.placed.clear();
+        atEnd->Release();
+        past->Release();
+    }
+    {
+        Fixture f(0);
+        f.host.typeInfo.penX = 1;
+        f.host.typeInfo.penZ = 1;
+        f.Init();
+        using A = NetworkToolTestAccess;
+        // A one-wide diagonal drag: no road cell past its ends, it stays.
+        SC4PointU start{6, 6}, end{9, 9};
+        CHECK(f.tool->DrawNetworkLine(start, end, true, 0));
+        const std::vector<SC4PointU> plain = A::Cells(*f.tool);
+        const int plainSteps = A::TotalSteps(*f.tool);
+        CHECK(plainSteps >= 3);
+        // A road cell past both ends that already reaches back toward the drag: each end grows by one step.
+        cSC4NetworkCellInfo road;
+        road.networkFlags = 0x1044;
+        road.compact54 = 0xffffffffu;
+        f.host.cell = &road;
+        start = {6, 6};
+        end = {9, 9};
+        CHECK(f.tool->DrawNetworkLine(start, end, true, 0));
+        CHECK(A::TotalSteps(*f.tool) == plainSteps + 2);
+        CHECK(A::Steps(*f.tool).size() == static_cast<std::size_t>(plainSteps + 2));
+        CHECK(A::Cells(*f.tool).size() > plain.size());
+        // The steps still cover the cell list in order, without gaps.
+        std::uint32_t next = 0;
+        for (const auto& step : A::Steps(*f.tool)) {
+            CHECK(step.firstCell == next);
+            next = step.lastCell + 1;
+        }
+        CHECK(next == A::Cells(*f.tool).size());
+        // The new first cells sit one step past the old start (outside the plain drag's bounding box).
+        const SC4PointU first = A::Cells(*f.tool).front();
+        CHECK(first.x < 6 || first.z < 6);
+        const SC4PointU last = A::Cells(*f.tool).back();
+        CHECK(last.x > 9 || last.z > 9);
+        // A street is not grown at the far end.
+        f.host.cell = nullptr;
     }
 
     // ---- the multitype rules: a crossing takes its piece, a type running along an allowed overrider gives way ----
