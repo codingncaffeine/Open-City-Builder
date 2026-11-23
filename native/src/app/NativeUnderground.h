@@ -17,6 +17,9 @@ void NativeSubwayReport(int limit, bool paths = false);
 void NativeSubwayRouteReport(int x0, int z0, int x1, int z1, std::uint32_t allowed, std::uint32_t start);
 // modesplit [LABEL]: the commute mode split of the traffic simulator's current trips (app/NativeTrafficAutomata.cpp)
 void NativeModeSplitReport(const char* label);
+void NativeTripRectReport(int x0, int z0, int x1, int z1);
+void NativeCellConnectionReport(int x0, int z0, int x1, int z1);
+void NativeTripProbeReport(int x0, int z0, int x1, int z1, int destinationFlag);
 // routeparity [N]: stored commuter routes searched again toward their destinations (app/NativeTrafficAutomata.cpp)
 void NativeRouteParityReport(int limit);
 // freightprobe X0 Z0 X1 Z1: the freight destinations and one freight search from a lot rect (app/NativeTrafficAutomata.cpp)

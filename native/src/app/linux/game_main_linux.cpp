@@ -1290,6 +1290,11 @@ int RunScenario(const std::string& path) {
             native::NativeLotsRectReport(x0, z0, x1, z1);
         } else if (command == "decline") {   // decline: the lots by state and what the tract developer abandoned / reoccupied
             native::NativeDeclineReport();
+        } else if (command == "growtract") {   // growtract TYPE X Z: the tract developer's Grow on the tract of a city cell for one developer type (hex)
+            std::string type;
+            int x = 0, z = 0;
+            words >> type >> x >> z;
+            native::NativeGrowTractReport(static_cast<std::uint32_t>(std::strtoul(type.c_str(), nullptr, 16)), x, z);
         } else if (command == "lotdev") {   // lotdev: the lot developer's life cycle (initialized, messages by type, night-light deque)
             native::NativeLotDeveloperReport();
         } else if (command == "aircraft") {   // aircraft: the aircraft manager's airports, runway markers and every aircraft
@@ -1497,6 +1502,18 @@ int RunScenario(const std::string& path) {
             words >> x0 >> z0 >> x1 >> z1 >> allowed >> start;
             native::NativeSubwayRouteReport(x0, z0, x1, z1, static_cast<std::uint32_t>(std::strtoul(allowed.c_str(), nullptr, 16)),
                                             static_cast<std::uint32_t>(std::strtoul(start.c_str(), nullptr, 16)));
+        } else if (command == "triprect") {   // triprect X0 Z0 X1 Z1: the trips of the lots touching a cell rectangle (read-only)
+            int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
+            words >> x0 >> z0 >> x1 >> z1;
+            native::NativeTripRectReport(x0, z0, x1, z1);
+        } else if (command == "tripprobe") {   // tripprobe X0 Z0 X1 Z1 [DESTFLAG]: commuter searches from a lot rect (read-only)
+            int x0 = 0, z0 = 0, x1 = 0, z1 = 0, flag = 7;
+            words >> x0 >> z0 >> x1 >> z1 >> flag;
+            native::NativeTripProbeReport(x0, z0, x1, z1, flag);
+        } else if (command == "cellconn") {   // cellconn X0 Z0 X1 Z1: the traffic connection words of a cell rectangle (read-only)
+            int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
+            words >> x0 >> z0 >> x1 >> z1;
+            native::NativeCellConnectionReport(x0, z0, x1, z1);
         } else if (command == "modesplit") {   // modesplit [LABEL]: the commute mode split of the traffic simulator's trips (read-only)
             std::string label;
             words >> label;

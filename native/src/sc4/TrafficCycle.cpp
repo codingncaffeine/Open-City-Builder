@@ -1803,6 +1803,33 @@ void cSC4TrafficSimulator::ScoreAgainstSaved() {
     }
 }
 
+void cSC4TrafficSimulator::ReportTripsInRect(std::FILE* out, int x0, int z0, int x1, int z1) {
+    std::vector<std::unique_ptr<ITrafficLot>> lots;
+    host_->AllLots(lots);
+    int shown = 0;
+    for (auto& lot : lots) {
+        SC4RectInt32 r;
+        lot->OccupiedRect(r);
+        if (r.x1 < x0 || r.x0 > x1 || r.z1 < z0 || r.z0 > z1) continue;
+        ++shown;
+        bool source = false;
+        for (auto& s : sources_)
+            if (s->IsSameLot(lot.get()) || lot->IsSameLot(s.get())) { source = true; break; }
+        std::list<cSC4TripData>* trips = lot->TripList(lot->TrafficSource());
+        const int trip = tripLengthMap_ && unsigned(r.x0) < unsigned(cellsX_) && unsigned(r.z0) < unsigned(cellsZ_) ? tripLengthMap_->GetCellValue(r.x0, r.z0) : -1;
+        std::fprintf(out, "triprect: lot %d,%d..%d,%d zone %d road access %d source %d trip length map %d trips %zu\n", r.x0, r.z0, r.x1, r.z1, lot->ZoneType(),
+                     lot->HasRoadAccess() ? 1 : 0, source ? 1 : 0, trip, trips ? trips->size() : std::size_t(0));
+        if (!trips) continue;
+        for (const cSC4TripData& t : *trips) {
+            std::fprintf(out, "triprect:   type %u strategy %u flags %x status %u count %u dest %d,%d length %.3f types %x route %zu back %zu raw", t.type, t.index, t.flags,
+                         t.kind, t.count, t.sourceX, t.sourceZ, t.distance, t.extra, t.route.size(), t.routeReversed.size());
+            for (std::size_t i = 0; i < t.route.size() && i < 40; ++i) std::fprintf(out, " %02x", t.route[i]);
+            std::fprintf(out, "\n");
+        }
+    }
+    std::fprintf(out, "triprect %d,%d..%d,%d: %d lots, %zu sources in the cycle, state %d\n", x0, z0, x1, z1, shown, sources_.size(), int(cycleState_));
+}
+
 void cSC4TrafficSimulator::DumpTrips(const char* path) {
     std::FILE* f = std::fopen(path, "w");
     if (!f) return;

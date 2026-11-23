@@ -603,6 +603,91 @@ void NativeRouteParityReport(int limit) {
 
 namespace native {
 
+// Kit command `triprect X0 Z0 X1 Z1`: the trips the traffic simulator holds for every lot touching the rectangle. Read-only.
+void NativeTripRectReport(int x0, int z0, int x1, int z1) {
+    auto* simulator = Component<cSC4TrafficSimulator>(CityComponent::TrafficSimulator);
+    if (!simulator) {
+        std::printf("triprect: no traffic simulator\n");
+        return;
+    }
+    simulator->ReportTripsInRect(stdout, x0, z0, x1, z1);
+}
+
+// Kit command `tripprobe X0 Z0 X1 Z1 [DESTFLAG]`: commuter searches from a lot rect as SetupTrip configures a first search
+// (destination filter 0, destination flag DESTFLAG (7 = any job, as an empty lot's probe trip), travel types 0x1cf, start types
+// walk + car, the trip scale as the limit), once per travel strategy's starting costs and once with none, then walk-only. Prints
+// where each ends, its length and its route. Changes nothing.
+void NativeTripProbeReport(int x0, int z0, int x1, int z1, int destinationFlag) {
+    auto* simulator = Component<cSC4TrafficSimulator>(CityComponent::TrafficSimulator);
+    if (!simulator) {
+        std::printf("tripprobe: no traffic simulator\n");
+        return;
+    }
+    std::printf("tripprobe: trip scale %.2f, destination bytes around the rect:", simulator->GetTripScale());
+    for (int z = z0 - 1; z <= z1 + 1; ++z)
+        for (int x = x0 - 1; x <= x1 + 1; ++x) std::printf(" %d,%d=%x", x, z, simulator->DestinationByte(x, z));
+    std::printf("\n");
+    auto search = [&](const char* label, std::uint16_t allowed, std::uint16_t start, int strategy) {
+        cISC4PathFinder* finder = simulator->CreatePathFinder();
+        if (!finder) return;
+        finder->SetTrafficDensity(1);
+        finder->SetTripDestinationFilter(0);
+        finder->ClearAllDestinationFlags();
+        finder->SetDestinationFlag(static_cast<std::uint8_t>(destinationFlag));
+        finder->SetMaxWorkTime(0);
+        finder->SetStartRect(SC4RectInt32{x0, z0, x1, z1});
+        finder->ClearAllFlags();
+        finder->ClearAllTravelTypeFlags();
+        finder->SetStartingCostArray(strategy >= 0 ? simulator->StrategyStartingCosts(strategy) : nullptr);
+        finder->SetMaxTripLength(simulator->GetTripScale());
+        finder->SetTravelTypeFlag(allowed, false);
+        finder->SetTravelTypeFlag(start, true);
+        const int found = finder->FindPath();
+        std::printf("tripprobe: from %d,%d..%d,%d %s (allowed %x start %x strategy %d): %s", x0, z0, x1, z1, label, allowed, start, strategy,
+                    found == 1 ? "found" : "none");
+        if (found == 1) {
+            int ex = 0, ez = 0;
+            finder->GetEndCell(ex, ez);
+            std::vector<std::uint8_t> route;
+            std::uint32_t types = 0;
+            finder->GetCompressedRoute(route, types);
+            std::printf(" end %d,%d length %.3f arrived %u reversible %d types %x raw", ex, ez, finder->GetTripLength(), finder->GetTrafficArrived(),
+                        finder->WasTripReversible() ? 1 : 0, types);
+            for (std::size_t i = 0; i < route.size() && i < 48; ++i) std::printf(" %02x", route[i]);
+        }
+        std::printf("\n");
+        finder->Release();
+    };
+    for (int strategy = -1; strategy < 3; ++strategy) search("commute", 0x1cf, 0x3, strategy);
+    search("walk only", 0x1, 0x1, -1);
+    search("car only", 0x2, 0x2, -1);
+}
+
+// Kit command `cellconn X0 Z0 X1 Z1`: the traffic simulator's connection words of every cell of a rectangle that has any: per
+// travel type the exits by entry side (4 bits per entry side, sides west north east south) and the type changes by exit side,
+// the wormhole bits and the transit switch id. Read-only.
+void NativeCellConnectionReport(int x0, int z0, int x1, int z1) {
+    auto* simulator = Component<cSC4TrafficSimulator>(CityComponent::TrafficSimulator);
+    if (!simulator) {
+        std::printf("cellconn: no traffic simulator\n");
+        return;
+    }
+    for (int z = z0; z <= z1; ++z)
+        for (int x = x0; x <= x1; ++x) {
+            if (x < 0 || z < 0 || x > 255 || z > 255) continue;
+            const auto& cell = simulator->CellConnections(x, z);
+            const std::uint32_t id = simulator->SwitchIdAt(x, z);
+            bool any = id != 0 || cell.wormhole != 0;
+            for (int t = 0; t < 9; ++t) any = any || cell.masks[std::size_t(t)] != 0;
+            if (!any) continue;
+            std::printf("cellconn: %d,%d switch %u wormhole %x", x, z, id, cell.wormhole);
+            for (int t = 0; t < 9; ++t)
+                if (cell.masks[std::size_t(t)] != 0 || cell.switches[std::size_t(t)] != 0xffff)
+                    std::printf(" | type %d exits %04x changes %04x", t, cell.masks[std::size_t(t)], cell.switches[std::size_t(t)]);
+            std::printf("\n");
+        }
+}
+
 // Kit command `freightprobe X0 Z0 X1 Z1`: where the traffic simulator's freight trips may end (cells whose destination byte has the
 // freight bit 8, border cells included, and the border connections that carry freight types), then one search with SetupTrip's
 // freight settings (destination filter 0, destination flag 8, flag 1, travel types 0x30) from the lot rect, and one aimed (filter 3)

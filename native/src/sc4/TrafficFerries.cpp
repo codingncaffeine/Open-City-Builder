@@ -249,17 +249,23 @@ void cSC4TrafficSimulator::FerryConnectionsChanged(const SC4RectInt32& r1) {
                 const int ns = (d + 2) & 3;
                 for (int t = 0; t < 9; ++t) {
                     if ((mask >> t) & 1) {
+                        // Every exit some other entry of the neighbour has is opened to the side facing the arrival cell
+                        // (i386 DoConnectionsChanged 0x0005c96e: the outer index is the ENTRY e != ns, the inner one the exit; the exit toward the
+                        // terminal that step 1 added is copied too, as the original does).
                         const std::uint16_t conn = CellConnections(nx, nz).masks[std::size_t(t)];
                         bool any = false;
-                        for (int x = 0; x < 4; ++x)
-                            if (x != ns && ((conn >> (x + 4 * ns)) & 1)) {
-                                setConnection(nx, nz, ns, x, t);
-                                any = true;
-                            }
+                        for (int e = 0; e < 4; ++e) {
+                            if (e == ns) continue;
+                            for (int x = 0; x < 4; ++x)
+                                if ((conn >> (x + 4 * e)) & 1) {
+                                    setConnection(nx, nz, ns, x, t);
+                                    any = true;
+                                }
+                        }
                         if (any)
                             for (int s = 0; s < 4; ++s) setConnection(ax, az, s, d, t);
                     } else {
-                        CellConnections(nx, nz).masks[std::size_t(t)] &= std::uint16_t(~(0xfu << (4 * ns)));
+                        CellConnections(nx, nz).masks[std::size_t(t)] &= std::uint16_t(~(0x1111u << ns));
                     }
                 }
             }

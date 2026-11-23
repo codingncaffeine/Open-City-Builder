@@ -6,6 +6,7 @@
 // The cell services are the city's simulators: the land value simulator's total map, the fire protection grid, the aura
 // simulator's park map, the traffic simulator's trip length map, power and water; the tunables are the simulator exemplar's.
 // Neutral here (PARTIAL): the lot developer's NeedsAnchorBuilding (false). DemolishLots goes to the demolition utility.
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -484,6 +485,56 @@ bool NativeLotConfigurationsByFilter(std::vector<sc4::cSC4LotConfiguration*>& ou
     manager->GetLotConfigurationsByFilter(set, filter);
     out.assign(set.begin(), set.end());
     return !out.empty();
+}
+
+// Kit command `growtract TYPE X Z` (TYPE = a developer type in hex, e.g. 1010; X Z = a city cell): where the cell's tract stands
+// in that developer's growth list (the daily pass tries one unmarked tract per developer, in list order), its desirability against
+// the developer's threshold, then the tract developer's Grow on that tract as the daily pass calls it, with the attempt's outcome
+// counts (row:outcome=count, rows as TractDeveloper.h kHistogram*). It grows the tract for real.
+void NativeGrowTractReport(std::uint32_t developerType, int cellX, int cellZ) {
+    cSC4TractDeveloper* tract = TractDeveloper();
+    cSC4GrowthDeveloper* developer = GrowthDeveloperOfType(developerType);
+    if (!tract || !developer) {
+        std::printf("growtract: no tract developer or no developer %x\n", developerType);
+        return;
+    }
+    GrowthView* view = ViewOf(developer);
+    ITractValueMap* map = view->GetDesirabilityMap();
+    const int shift = map ? map->GetTractShift() : 0;
+    const int tx = cellX >> shift, tz = cellZ >> shift;
+    std::vector<std::array<std::int32_t, 3>> list;
+    GrowthDeveloperGrowthList(developer, list);
+    int index = -1, style = 1;
+    for (std::size_t i = 0; i < list.size(); ++i)
+        if (list[i][0] == tx && list[i][1] == tz) {
+            index = static_cast<int>(i);
+            style = list[i][2];
+            break;
+        }
+    std::printf("growtract: developer %x cell %d,%d = tract %d,%d (shift %d): growth list place %d of %zu, style %d, desirability %d (threshold %d), "
+                "active demand %.0f, lists valid %d\n",
+                developerType, cellX, cellZ, tx, tz, shift, index, list.size(), style, map ? map->GetCellValue(tx, tz) : 0,
+                developer->GetDesirabilityThreshold(), double(GrowthDeveloperActiveDemand(developer)), GrowthDeveloperListsValid(developer) ? 1 : 0);
+    GrowthProfile profile;
+    profile.developer = view;
+    profile.tractX = tx;
+    profile.tractZ = tz;
+    profile.growthStage = static_cast<std::uint8_t>(style);
+    std::list<int> outcomes;
+    bool declined = false;
+    const int before = g_lotDeveloper.constructions;
+    const auto started = std::chrono::steady_clock::now();
+    const int result = tract->Grow(profile, outcomes, declined);
+    const long long micros = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - started).count();
+    std::printf("growtract: Grow -> %d in %lld us, constructions %d, %zu lots, %zu configurations, outcomes", result, micros,
+                g_lotDeveloper.constructions - before, tract->ExistingLots().size(), tract->SuitableConfigurations().size());
+    for (int outcome : outcomes) std::printf(" %d", outcome);
+    std::printf("; counts");
+    const auto& histograms = tract->Histograms();
+    for (std::size_t row = 0; row < histograms.size(); ++row)
+        for (std::size_t outcome = 0; outcome < histograms[row].size(); ++outcome)
+            if (histograms[row][outcome]) std::printf(" %zu:%zu=%u", row, outcome, histograms[row][outcome]);
+    std::printf("\n");
 }
 
 // The kit verb "decline": the lots of the city by state, and what the tract developer abandoned and reoccupied since the city opened.

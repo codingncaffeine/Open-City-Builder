@@ -16,6 +16,7 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include <cstdio>
 #include <list>
 #include <map>
 #include <memory>
@@ -405,6 +406,7 @@ public:
     bool ActivateTransitSwitch(ITrafficLot* lot);                  // §4.7.1 steps 1-5; true when a switch was made
     bool DeactivateTransitSwitch(const SC4RectInt32& rect);        // §4.7.5 step 1 without the rebuild
     void ApplyTransitSwitches(const SC4RectInt32& r1);             // §4.7.4, the switch phase of DoConnectionsChanged
+    void FerryConnectionsChanged(const SC4RectInt32& r1);          // §4.9.2, the ferry phase of DoConnectionsChanged
     // An id over one cell of the switch grid (what a loaded record's grid gives).
     void SetSwitchIdAt(int x, int z, std::uint32_t id);
     std::list<TransitStationRecord>& TransitStations() { return transitStations_; }   // +0x1e8
@@ -645,6 +647,10 @@ public:
     // ---- accessors ----
     static constexpr std::uint32_t GetSimulatorType() { return kTrafficSimulatorType; }
     float GetTripScale() const { return tunables_.tripScale; }
+    // SetupTrip's starting costs of a travel strategy (0, 1, else)
+    float* StrategyStartingCosts(int strategy) {
+        return strategy == 0 ? tunables_.values_f04.data() : strategy == 1 ? tunables_.values_f28.data() : tunables_.values_ee0.data();
+    }
     float GetTripScaleForDisplay() const { return tunables_.tripScaleForDisplay; }
     float GetFreightScalingFactor() const { return tunables_.freightScalingFactor; }
     // §4.9.5: types 0 and 1 have counts; the original reads unrelated members for higher types, the port answers 0
@@ -714,7 +720,6 @@ private:
     FerryTerminal* FerryByDeparture(int x, int z);
     FerryTerminal* FerryByArrival(int x, int z);
     void RemoveFerryTerminal(const SC4RectInt32& lotRect);                      // §4.9.4 (in DoLotDeactivated)
-    void FerryConnectionsChanged(const SC4RectInt32& r1);                       // §4.9.2 (DoConnectionsChanged step 6)
     void EnterFerryState();                                                     // §4.9.3 / §4.12.2: entering cycle state 19
     void RestartFerryPass();                                                    // DoPostCityInit in a saved state 19
     bool WorkOnFerryRoutes(int& units);                                         // 0x0071DC90 (true: the pass finished)
@@ -828,6 +833,9 @@ private:
     void ScoreAgainstSaved();
     void DumpTrips(const char* path);                // SC4_TRAFFICDUMP: every lot's trips, one line each
 public:
+    // Kit verb `triprect`: the trips of every lot touching the rectangle, with the lot's zone, road access, whether it is a
+    // traffic source of the running cycle and the trip-length map at its first cell. Read-only.
+    void ReportTripsInRect(std::FILE* out, int x0, int z0, int x1, int z1);
     // The commute mode split of the trips the lots hold now: commuter trips (type 0-2) holding a route (status 0, 1 or 3: the
     // route of their last search), weighted by their counts, per travel type the route used out and back (bit t of the trip's
     // used-types word); also the walk-only and mass-transit totals, and freight. Read-only.

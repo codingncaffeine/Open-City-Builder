@@ -1400,6 +1400,24 @@ int main() {
             CHECK(ferries.CellConnections(1, 0).wormhole & 4);
             CHECK(ferries.GetNetworkInfo(0, 1, 0) && ferries.GetNetworkInfo(1, 1, 0));
             CHECK(!(ferries.CellConnections(2, 0).wormhole & 4));
+            // the ferry phase at B's arrival cell (2, 7): the cell north of it carries a west-east walk and car connection.
+            // Walkers (the passenger ferry's type) coming from the arrival side (entry 3) get every exit the other entries
+            // have, and the arrival cell gets its exit north from every entry; cars lose their exits toward the terminal only.
+            {
+                auto& north = ferries.CellConnections(2, 6);
+                const auto savedNorth = north;
+                const auto savedArrival = ferries.CellConnections(2, 7);
+                north.masks[0] = 0x0104;                    // walk: west -> east, east -> west
+                north.masks[1] = 0x0104 | 0x0008 | 0x2000;  // car: the same, plus west -> south (the terminal) and south -> north
+                ferries.CellConnections(2, 7).masks[0] = 0;
+                ferries.FerryConnectionsChanged(SC4RectInt32{2, 7, 2, 7});
+                CHECK(north.masks[0] == 0x5104);            // south -> east and south -> west added
+                CHECK(ferries.CellConnections(2, 7).masks[0] == 0x2222);
+                CHECK(north.masks[1] == 0x2104);            // the exit south is gone from every entry; entry south stays
+                CHECK(ferries.CellConnections(2, 7).masks[1] == savedArrival.masks[1]);
+                north = savedNorth;
+                ferries.CellConnections(2, 7) = savedArrival;
+            }
             // ApplyRoute: walk onto A's departure cell, jump (bit 7) to B's arrival cell: riders and the outbound link counter
             const std::vector<std::uint8_t> route{0x00, 1, 1, 0x80, 1, 0, 0x80, 2, 7};
             ferries.ApplyRoute(route, 5, SC4RectInt32{1, 2, 1, 2}, 2, 6, 0, 0);
