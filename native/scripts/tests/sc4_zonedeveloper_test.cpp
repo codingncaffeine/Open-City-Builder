@@ -1968,9 +1968,10 @@ void TestCanCreatePloppedLot() {
     cSC4LotConfigurationObject piece;
     piece.type = 7;
     piece.minX = 0.0f; piece.maxX = 16.0f; piece.minZ = 0.0f; piece.maxZ = 16.0f;   // lot cell (0, 0)
-    // Type 3 with edge masks; at facing 2 (orientation 0) both masks turn left by 2 bytes (8.4.3 step 5): maskA -> byte 2,
-    // maskB -> byte 1 (edge 1, -z).
-    piece.extra = {3, 0x00000002, 0x02000000};
+    // Type 3 with edge masks; at facing 2 (orientation 0) both masks turn left by 2 bytes (8.4.3 step 5). The original's rule
+    // (i386 0x000df35e): every edge of maskA (-> byte 2) must be on the piece, and every edge of the piece must be allowed by
+    // maskB (-> bytes 1 and 2).
+    piece.extra = {3, 0x00000002, 0x02000002};
     configuration->GetLotConfigurationObjectArray().push_back(piece);
     CHECK(developer->CanCreatePloppedLot(rect, 2, configuration) == 8);
     street.edgeFlags = 0x00020300;         // byte 1 no longer matches the turned maskB's 2
