@@ -42,6 +42,10 @@
 #include "sc4/AutomataControllerManager.h"
 #include "sc4/OccupantFilters.h"
 #include "sc4/Render3D.h"
+#include "sc4/TrafficFilters.h"
+#include "sc4/NetworkOccupant.h"
+#include "app/NativeAudio.h"
+#include "app/NativeCitySystems.h"
 
 namespace native {
 bool NativePlayerDriveCameraPresent();   // app/NativePlayerDriveView.cpp
@@ -72,6 +76,7 @@ bool NativeDriveViewSwapAccelerator(cIGZWinKeyAccelerator* own, cIGZWinKeyAccele
 void NativeDriveViewRestoreAccelerator(cIGZWinKeyAccelerator* saved);
 void NativeDriveViewPushTool(sc4::cSC4ViewInputControl* tool, int operation);
 std::uint32_t NativeDriveViewCurrentToolId();
+bool NativeToggleTrainJunction(sc4::cISC4Occupant* occupant);   // app/NativeTrafficNetworkMap.cpp
 namespace {
 using namespace sc4;
 
@@ -232,6 +237,42 @@ public:
         if (!controller && create) controller = manager->AddControllerFromTemplateName(occupant, name, nullptr);
         if (!controller || active < 0) return;
         controller->Activate(active != 0);
+    }
+    bool ToggleTrainJunctionAt(int x, int y, int& cellX, int& cellZ) override {
+        cSC43DRender* render = CityRenderer();
+        if (!render) return false;
+        static cTrafficNetworkFilter_PlayerDrive filter;
+        s3d::cIS3DModelInstance* model = nullptr;
+        if (!render->Pick(x, y, &filter, model) || !model) return false;
+        cIGZUnknown* owner = model->GetOwner();
+        void* raw = nullptr;
+        sc4::cISC4Occupant* occupant = owner && owner->QueryInterface(sc4::kGZIID_cISC4Occupant, &raw) ? static_cast<sc4::cISC4Occupant*>(raw) : nullptr;
+        model->Release();
+        if (!occupant) return false;
+        const bool toggled = NativeToggleTrainJunction(occupant);
+        if (toggled) {
+            if (native::SoundSystemAvailable()) {
+                const std::uint32_t instance = native::NewSoundInstanceId();
+                native::PostSoundSystemEvent(0xea451903, 0x8be8d9ac, instance);
+                float position[3] = {0.0f, 0.0f, 0.0f};
+                occupant->GetPosition(position);
+                native::PostSoundSystemEvent(0xca45190f, instance, static_cast<std::uint32_t>(position[0]),
+                                             static_cast<std::uint32_t>(position[1]), static_cast<std::uint32_t>(position[2]));
+            }
+            std::uint32_t cx = 0, cz = 0;
+            if (auto* piece = dynamic_cast<cSC4NetworkOccupant*>(occupant)) piece->GetOccupiedCell(cx, cz);   // vslot 0xec
+            cellX = static_cast<int>(cx);
+            cellZ = static_cast<int>(cz);
+        }
+        occupant->Release();
+        return toggled;
+    }
+    bool TerrainCellAt(int x, int y, int& cellX, int& cellZ) override {
+        cSC4City* city = HostCity();
+        float position[3] = {0.0f, 0.0f, 0.0f};
+        if (!city || !CityViewPickTerrain(x, y, position, false)) return false;
+        city->PositionToCell(position[0], position[2], cellX, cellZ);
+        return true;
     }
     // PickAutomaton (i386 0x004b3d02): the renderer's pick (vslot 0x100) through the tool's cAutomataOccupantFilter (+0x84),
     // the picked model's owner as an automaton (QI 0xa9b40f05; the caller releases it).

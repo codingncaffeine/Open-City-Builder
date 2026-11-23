@@ -95,6 +95,13 @@ public:
     // 0x14) the named controller of the automaton's occupant; `active` 1 / 0 sets it active / inactive (controller vslot
     // 0x48), -1 leaves it.
     virtual void SetKeyController(cSC4Automaton* automaton, const cRZString& name, bool create, int active) = 0;
+    // OnMouseDownL's first branch (i386 0x004b5dc4): the network piece under the point (PickNetworkOccupant: renderer vslot
+    // 0x100 with the tool's cTrafficNetworkFilter_PlayerDrive +0x88, QI 0xa821ef94) toggled as a train junction (traffic
+    // network map vslot 0xa8); when it toggles, sound 0x8be8d9ac plays at the piece and its cell comes back.
+    virtual bool ToggleTrainJunctionAt(int x, int y, int& cellX, int& cellZ) { (void)x; (void)y; (void)cellX; (void)cellZ; return false; }
+    // OnMouseMove's hover (i386 0x004b4310): spView3D vslot 0x90 PickTerrain(x, y, out, false), then city vslot 0x17c
+    // PositionToCell; false when the point misses the terrain.
+    virtual bool TerrainCellAt(int x, int y, int& cellX, int& cellZ) { (void)x; (void)y; (void)cellX; (void)cellZ; return false; }
     virtual cSC4Automaton* PickAutomaton(int x, int y) = 0;                                  // spRenderer vslot 0x100 with +0x84, QI 0xa9b40f05 (counted)
     // ---- the dispatch vehicle view (+0x34)
     virtual bool HasDispatchView() = 0;
@@ -192,6 +199,16 @@ private:
     std::list<cIGZMessageTarget2*> callbacks_;    // +0x60 (counted)
     float terrainScale_ = 1.0f;                   // +0x6c
     bool hasTerrain_ = false;                     // +0x68
+    // SC4TrainJunctionView (+0x9c) state: the cell under the pointer (+0x1c / +0x20) and the junction last switched
+    // (+0x24 / +0x28); -1 = none. The view's arrows are drawn from these.
+    int junctionHoverX_ = -1, junctionHoverZ_ = -1;
+    int junctionSelectedX_ = -1, junctionSelectedZ_ = -1;
+public:
+    int JunctionHoverX() const { return junctionHoverX_; }
+    int JunctionHoverZ() const { return junctionHoverZ_; }
+    int JunctionSelectedX() const { return junctionSelectedX_; }
+    int JunctionSelectedZ() const { return junctionSelectedZ_; }
+private:
     // The dashboard windows' procedure (+0x2c in the original: the tool itself): a button activation (message 3 from
     // 0x287259f6) runs DoWinProcMessage.
     class DashboardProc final : public gz::cIGZWinProc {

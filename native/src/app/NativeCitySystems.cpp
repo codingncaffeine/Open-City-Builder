@@ -127,6 +127,7 @@ public:
 
 sc4::cSC4View3DWin* g_cityView3DWin = nullptr;
 sc4::cSC4View3DWin* CityView3DWin() { return g_cityView3DWin; }
+bool CityViewPickTerrain(int x, int y, float out[3], bool flag) { return g_cityView3DWin && g_cityView3DWin->PickTerrain(x, y, out, flag); }
 void SetCityView3DWin(sc4::cSC4View3DWin* view) { g_cityView3DWin = view; }
 int CityViewLevel() { return g_cityView3DWin ? static_cast<int>(g_cityView3DWin->GetCurrentViewLevel()) : 1; }
 

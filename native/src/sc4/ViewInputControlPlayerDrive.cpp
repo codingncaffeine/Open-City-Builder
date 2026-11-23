@@ -141,11 +141,12 @@ bool cSC4ViewInputControlPlayerDrive::InputBlocked() { return g_host && g_host->
 
 // 0x004b72f4: the base Init, the animation ticks (channel 0xff), the terrain scale, the four debug strings, the managers,
 // the junction view on the renderer, the dispatch view (its indicators hidden), the view-changed message and the command
-// table, the tool's key accelerator. PARTIAL: the two pick filters and SC4TrainJunctionView (the train switch picks of
-// OnMouseDownL / OnMouseMove) are not recovered; the debug strings had no reader.
+// table, the tool's key accelerator. The two pick filters live with the host's picks (PickAutomaton, ToggleTrainJunctionAt);
+// the junction view's cells live in the tool, its drawing is not ported; the debug strings had no reader.
 bool cSC4ViewInputControlPlayerDrive::Init() {
     if (initialized_) return true;
-    SC4_UNWIRED("cSC4ViewInputControlPlayerDrive::Init: the two pick filters and SC4TrainJunctionView not ported");
+    junctionHoverX_ = junctionHoverZ_ = junctionSelectedX_ = junctionSelectedZ_ = -1;   // a fresh SC4TrainJunctionView
+    SC4_UNWIRED("SC4TrainJunctionView::DrawTrainJunction: the junction arrows over the hovered and switched cells are not drawn");
     cSC4ViewInputControl::Init();
     if (!g_host) return true;
     auto* target = static_cast<cIGZMessageTarget2*>(this);
@@ -569,12 +570,17 @@ bool cSC4ViewInputControlPlayerDrive::OnKeyUp(std::uint32_t key, std::uint32_t m
     return true;
 }
 
-// 0x004b5dc4: choosing mode: a click on an automaton drives it. Driving mode: outside a countdown, a vehicle of group 0x4006
-// gets command 7 (its horn / siren). PARTIAL: the first branch (a click on a rail junction toggles it through the network map
-// and the junction view, with sound 0x8be8d9ac) needs SC4TrainJunctionView.
+// 0x004b5dc4: a click on a rail junction switches it (the junction view keeps its cell) and does nothing else. Otherwise, in
+// choosing mode a click on an automaton drives it; in driving mode, outside a countdown, a vehicle of group 0x4006 gets
+// command 7 (its horn / siren).
 bool cSC4ViewInputControlPlayerDrive::OnMouseDownL(int x, int y, std::uint32_t modifiers) {
     (void)modifiers;
-    SC4_UNWIRED("cSC4ViewInputControlPlayerDrive::OnMouseDownL: rail junction toggle (SC4TrainJunctionView, sound 0x8be8d9ac) not ported");
+    int cellX = 0, cellZ = 0;
+    if (g_host && g_host->ToggleTrainJunctionAt(x, y, cellX, cellZ)) {
+        junctionSelectedX_ = cellX;
+        junctionSelectedZ_ = cellZ;
+        return true;
+    }
     if (!IsDriveAutoValid()) {
         if (!automaton_ && g_host) {
             if (cSC4Automaton* picked = g_host->PickAutomaton(x, y)) {
@@ -618,7 +624,10 @@ bool cSC4ViewInputControlPlayerDrive::OnMouseUpR(int x, int y, std::uint32_t mod
 // state (+0x214 / +0x218, the tank's turret aim). PARTIAL: the junction view's hovered cell needs SC4TrainJunctionView.
 bool cSC4ViewInputControlPlayerDrive::OnMouseMove(int x, int y, std::uint32_t modifiers) {
     (void)modifiers;
-    SC4_UNWIRED("cSC4ViewInputControlPlayerDrive::OnMouseMove: hovered rail junction cell (SC4TrainJunctionView) not ported");
+    int cellX = -1, cellZ = -1;
+    if (!g_host || !g_host->TerrainCellAt(x, y, cellX, cellZ)) cellX = cellZ = -1;
+    junctionHoverX_ = cellX;   // the junction view's hovered cell
+    junctionHoverZ_ = cellZ;
     if (!IsDriveAutoValid()) {
         cSC4Automaton* picked = g_host ? g_host->PickAutomaton(x, y) : nullptr;
         if (!picked) {

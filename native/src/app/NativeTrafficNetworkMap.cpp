@@ -333,7 +333,22 @@ MapHost g_host;
 void InstallTrafficNetworkMapHost() { sc4::SetDefaultTrafficNetworkMapHost(&g_host); }
 
 // The city's map, once it exists: messages are delivered to it through the host's subscriptions.
-void BindTrafficNetworkMap(sc4::cSC4TrafficNetworkMap* map) { g_host.SetMap(map ? static_cast<cIGZMessageTarget2*>(map) : nullptr); }
+sc4::cSC4TrafficNetworkMap* g_boundMap = nullptr;
+void BindTrafficNetworkMap(sc4::cSC4TrafficNetworkMap* map) {
+    g_boundMap = map;
+    g_host.SetMap(map ? static_cast<cIGZMessageTarget2*>(map) : nullptr);
+}
+
+// cSC4TrafficNetworkMap::ToggleTrainJunction (i386 map vslot 0xa8) for a picked network piece: false when the piece is no
+// train junction.
+bool NativeToggleTrainJunction(sc4::cISC4Occupant* occupant) {
+    if (!g_boundMap || !occupant) return false;
+    sc4::ITrafficNetworkMapOccupant* view = g_host.AsMapOccupant(occupant);
+    if (!view) return false;
+    const bool toggled = g_boundMap->ToggleTrainJunction(view);
+    view->Release();
+    return toggled;
+}
 
 // The lot at a city cell as the traffic classes see it (the lot manager's slot 0x28, flag 0), or null.
 sc4::ITrafficNetworkMapLot* NativeTrafficLotAt(int cellX, int cellZ) { return LotViewOf(NativeLotAtCell(cellX, cellZ, false)); }
