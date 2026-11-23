@@ -280,7 +280,10 @@ public:
     bool IsConnected(std::uint32_t, int) override { return false; }
     void ClearHighlight() override { tool_->Reset(); }
     bool PlaceNetworkOccupants(int x0, int z0, int x1, int z1, std::uint32_t flags, bool nullToolArgument, bool place, int type) override {
-        return tool_->PlaceNetworkOccupants(x0, z0, x1, z1, flags, nullToolArgument ? nullptr : tool_, place, type);
+        const bool ok = tool_->PlaceNetworkOccupants(x0, z0, x1, z1, flags, nullToolArgument ? nullptr : tool_, place, type);
+        static const bool trace = std::getenv("SC4_ZONEDEBUG") != nullptr;   // the zone developer's streets, call by call
+        if (trace) std::fprintf(stderr, "zonedev street: %d,%d..%d,%d flags %#x place %d type %d -> %s\n", x0, z0, x1, z1, flags, place ? 1 : 0, type, ok ? "placed" : "FAILED");
+        return ok;
     }
 
 private:

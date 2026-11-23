@@ -5,6 +5,7 @@
 // original vtable slot of every such call.
 
 #include "sc4/ZoneDeveloper.h"
+#include <string>
 #include "sc4/CommonIIDs.h"
 #include "platform/Unwired.h"
 #include "sc4/DBSegment.h"
@@ -1856,6 +1857,16 @@ void cSC4ZoneDeveloper::LayInJogStreets(const SC4Rect<int>& rect, std::uint32_t 
 void cSC4ZoneDeveloper::DrawStreet(int x0, int z0, int x1, int z1, bool extend) {
     IZoneDeveloperNetworkApi* tool = streetTool_;   // +0x80
     if (!tool) return;
+    static const bool trace = std::getenv("SC4_ZONEDEBUG") != nullptr;
+    if (trace) {
+        std::string cells;
+        const int sx = x1 > x0 ? 1 : (x1 < x0 ? -1 : 0), sz = z1 > z0 ? 1 : (z1 < z0 ? -1 : 0);
+        for (int x = x0, z = z0;; x += sx, z += sz) {
+            cells += RegionHas(currentRegion_, x, z) ? '#' : '.';
+            if ((x == x1 && z == z1) || cells.size() > 200) break;
+        }
+        std::fprintf(stderr, "zonedev DrawStreet %d,%d..%d,%d extend %d region cells %s\n", x0, z0, x1, z1, extend ? 1 : 0, cells.c_str());
+    }
     const auto place = [&](int a, int b, int c, int d) {
         return tool->PlaceNetworkOccupants(a, b, c, d, 0xc49, false, lotChangesEnabled_ != 0, -1);
     };
@@ -2477,11 +2488,14 @@ common:
                             if (static_cast<std::int32_t>(local_64) <= static_cast<std::int32_t>(uVar5) &&
                                 static_cast<std::int32_t>(uVar5) <= static_cast<std::int32_t>(local_a8)) {
                                 if (uVar17 == static_cast<std::uint32_t>(local_b0)) {
+                                    // The street's start (both coordinates saved, as i386 0x000e365a does: local_78 is
+                                    // the x cursor when the lots face along z), then its far end.
                                     *local_78 = static_cast<std::uint32_t>(local_a0);
+                                    const std::uint32_t startX = local_50;
                                     uVar19 = local_4c;
                                     *local_78 = local_54;
                                     bVar12 = true;
-                                    DrawStreet(static_cast<int>(local_50), static_cast<int>(uVar19),
+                                    DrawStreet(static_cast<int>(startX), static_cast<int>(uVar19),
                                                static_cast<int>(local_50), static_cast<int>(local_4c),
                                                uVar5 == static_cast<std::uint32_t>(local_a8) ||
                                                    uVar5 == static_cast<std::uint32_t>(local_64));
