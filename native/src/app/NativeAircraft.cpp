@@ -384,6 +384,23 @@ public:
         city->CellCenterToPosition(cellX, cellZ, position.x, position.z);
         return true;
     }
+    void* NearestCrimeSim(const cS3DVector3& position, float radius) override {
+        cSC4CrimeSimulator* simulator = NativeCrimeSimulator();
+        return simulator ? simulator->GetNearestCrimeSim(&position.x, radius) : nullptr;
+    }
+    void* NearestCrimeProp(const cS3DVector3& position, float radius) override {
+        cSC4CrimeSimulator* simulator = NativeCrimeSimulator();
+        return simulator ? simulator->GetNearestCrimeProp(&position.x, radius) : nullptr;
+    }
+    void HoldCriminal(void* object) override {
+        auto* automaton = object ? dynamic_cast<cSC4Automaton*>(static_cast<cIGZUnknown*>(object)) : nullptr;
+        if (!automaton) return;
+        automaton->SetOpacity(0.0f, 0.2f);
+        automaton->PushState(7, nullptr, 5000.0f, true, 0, 0, nullptr);
+    }
+    void SetCrimePropState(void* prop, int state) override {
+        if (prop) static_cast<cISC4PropOccupant*>(prop)->SetState(static_cast<std::uint32_t>(state));
+    }
     // Crime simulator vslot 0x40 GetCrimeHotspot: the hotspot's cell (x, z), which the helicopter turns into a cell centre.
     bool CrimeAt(const cS3DVector3&, float, cS3DVector3& crime) override {
         cSC4CrimeSimulator* simulator = NativeCrimeSimulator();

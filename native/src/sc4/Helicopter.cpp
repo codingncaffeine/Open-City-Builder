@@ -1494,16 +1494,20 @@ void cSC4Helicopter::AI_ControlMaintainPositionXZ(float delta) {
     physics_->pitchDeg = pitch;
 }
 
-// @ 0x1006f149c. PARTIAL: the crime simulator's Reset/crime queries (SL::spCrimeSim 0x100213f58, slots 0x48/0x50 and the
-// cleared crime's 0x108/0x1a0 dispatch calls) belong to the unrecovered cSC4CrimeSimulator; the host seam exposes only
-// the query, so the dispatch-to-police path is not reproduced.
+// @ 0x1006f149c (i386 0x004a9778): within 20 m, a crime prop is cleared (state 1; up to five of them, asking again after each),
+// and with none left the nearest criminal is held.
 void cSC4Helicopter::RespondToCrimeScene() {
     IHelicopterHost* host = HeliHostFor(*this);
     if (!host) return;
-    cS3DVector3 crime;
-    if (host->CrimeAt(position_, 20.0f, crime)) {
-        // The original drives the crime's dispatch state through the crime simulator; no recovered neighbour for it.
-        SC4_UNWIRED("cSC4Helicopter::RespondToCrimeScene: the crime simulator Reset / dispatch calls (slots 0x48/0x50, crime 0x108/0x1a0) are not made");
+    void* criminal = host->NearestCrimeSim(position_, 20.0f);
+    void* prop = host->NearestCrimeProp(position_, 20.0f);
+    if (!prop) {
+        if (criminal) host->HoldCriminal(criminal);
+        return;
+    }
+    for (int i = 0; i < 5 && prop; ++i) {
+        host->SetCrimePropState(prop, 1);
+        prop = host->NearestCrimeProp(position_, 20.0f);
     }
 }
 

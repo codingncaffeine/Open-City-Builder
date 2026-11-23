@@ -321,6 +321,13 @@ public:
     virtual bool TrafficAccidentLocation(cS3DVector3& position) = 0;
     // ---- crime simulator slot 0x40 (0x100213f58 is Reset; the query used here returns true with a position) ---------
     virtual bool CrimeAt(const cS3DVector3& position, float radius, cS3DVector3& crime) = 0;
+    // RespondToCrimeScene's crime simulator calls (SL::spCrimeSim i386 0x24 GetNearestCrimeSim / 0x28 GetNearestCrimeProp): the
+    // criminal and the idle crime prop nearest the point (borrowed, or null); the criminal held (its vslot 0x84 SetOpacity(0, 0.2),
+    // then vslot 0xd0 PushState(7, none, 5000, true)); a prop's state set (vslot 0x2c SetState).
+    virtual void* NearestCrimeSim(const cS3DVector3& position, float radius) { (void)position; (void)radius; return nullptr; }
+    virtual void* NearestCrimeProp(const cS3DVector3& position, float radius) { (void)position; (void)radius; return nullptr; }
+    virtual void HoldCriminal(void* automaton) { (void)automaton; }
+    virtual void SetCrimePropState(void* prop, int state) { (void)prop; (void)state; }
 };
 
 IHelicopterHost* HelicopterHost();
