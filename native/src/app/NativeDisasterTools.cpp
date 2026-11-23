@@ -2,6 +2,7 @@
 // (sc4::IDisasterToolHost) and the cursor effects of every effect tool (sc4::IEffectToolHost over the effects manager).
 #include "app/NativeAudio.h"
 #include "app/NativeDisasterTools.h"
+#include "sc4/MySim.h"
 #include "sc4/CitySituationEntities.h"
 
 #include <cstdio>
@@ -253,6 +254,41 @@ private:
 sc4::ISituationEffect* NativeCreateSituationEffect(const char* name) {
     cSC4VisualEffect* effect = name ? CreateNamedEffect(name) : nullptr;
     return effect ? new SituationEffectView(effect) : nullptr;
+}
+
+// A MySim's effect (cSC4MySim::StartGhostEffect, i386 0x00542eb6): effect vslot 0xc Start(transition) behind SetActive, vslot
+// 0x1c SetEffectTransform (the matrix's translation, flags 1) behind SetTransform.
+namespace {
+class MySimEffectView final : public sc4::IMySimEffect {
+public:
+    explicit MySimEffectView(cSC4VisualEffect* effect) : effect_(effect) {}
+    bool QueryInterface(std::uint32_t, void** out) override { *out = nullptr; return false; }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override {
+        if (refs_ > 1) return --refs_;
+        effect_->Release();
+        delete this;
+        return 0;
+    }
+    void SetActive(bool active) override { effect_->Start(active ? 1 : 0); }
+    void SetTransform(const float* matrix) override {
+        cS3DTransform transform;
+        transform.translation[0] = matrix[12];
+        transform.translation[1] = matrix[13];
+        transform.translation[2] = matrix[14];
+        transform.flags |= 1;
+        transform.changeCounter = static_cast<std::uint8_t>(transform.changeCounter + 1);
+        effect_->SetEffectTransform(transform);
+    }
+private:
+    cSC4VisualEffect* effect_;
+    std::uint32_t refs_ = 1;
+};
+}  // namespace
+
+sc4::IMySimEffect* NativeCreateMySimEffect(const char* name) {   // SL::spEffectsManager vslot 0x18 CreateEffect(name, out)
+    cSC4VisualEffect* effect = name ? CreateNamedEffect(name) : nullptr;
+    return effect ? new MySimEffectView(effect) : nullptr;
 }
 
 void NativeReleaseEffectHandle(void* handle) {

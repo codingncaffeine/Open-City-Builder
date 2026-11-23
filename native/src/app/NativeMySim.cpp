@@ -100,6 +100,7 @@ sc4::cSC43DRender* CityRenderer();                                  // app/Nativ
 sc4::ISituationAutomaton* SituationAutomatonOf(void* engineAutomaton);                           // app/NativeSituationAutomata.cpp
 sc4::ISituationOccupant* SituationViewOfOccupant(void* engineOccupant);
 void SituationEnterPlayerDriveView(sc4::ISituationAutomaton* automaton, cIGZMessageTarget2* target);
+sc4::IMySimEffect* NativeCreateMySimEffect(const char* name);   // app/NativeDisasterTools.cpp
 
 cIGZWin* NativeCityView3DWindow();                                                // app/NativeCityUi.cpp
 const sc4::cISCPropertyHolder* NativeSimulatorExemplar(std::uint32_t instance);   // app/NativeSimHosts.cpp
@@ -708,7 +709,7 @@ public:
         cISC4OccupantManager* occupants = Occupants();
         if (occupants && sound) occupants->InsertOccupant(static_cast<HomeSound*>(sound)->Occupant(), 0);
     }
-    IMySimEffect* CreateGhostEffect() override { SC4_UNWIRED("IMySimHost::CreateGhostEffect (the MySimGhost effect)"); return nullptr; }
+    IMySimEffect* CreateGhostEffect() override { return NativeCreateMySimEffect("MySimGhost"); }
     bool DispatchIconRect(int, int*) override { SC4_UNWIRED("IMySimHost::DispatchIconRect (dispatch view icon of a tracked MySim)"); return false; }
     // --- objects ---
     IMySimDispatch* CreateDispatch(cSC4MySim* owner) override {   // cSC4MySimDispatch ctor (i386 0x0047...; owner = the sim)

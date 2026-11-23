@@ -1878,8 +1878,8 @@ void cSC4MySim::DoBuildingRemoved(cISC4BuildingOccupant* building, std::uint32_t
     }
 }
 
-// 0x1007a9934 StartGhostEffect(): the "MySimGhost" effect, positioned at the sim with an identity matrix and switched
-// off (the effect manager plays it when the sim dies).
+// 0x1007a9934 StartGhostEffect() (i386 0x00542eb6): the "MySimGhost" effect at the sim (its effect transform), started
+// (vslot 0xc Start(0), behind SetActive).
 void cSC4MySim::StartGhostEffect() {
     ghost_ = nullptr;
     IMySimHost* host = Host();
