@@ -8,6 +8,7 @@
 //
 // The game data: $SC4_GAME_CONTENTS (a folder with GameData/ inside), else game/ in the repository (platform/GameDataPath).
 #include "platform/CrashLog.h"
+#include <deque>
 #include <SDL3/SDL.h>
 #include <epoxy/gl.h>
 #include <png.h>
@@ -1178,7 +1179,9 @@ int RunScenario(const std::string& path) {
     if (!in) { std::printf("scenario: cannot open %s\n", path.c_str()); return 4; }
     std::string line;
     int number = 0;
-    while (std::getline(in, line)) {
+    std::deque<std::string> injected;   // lines a verb (tutorialdo / tutorialplay) adds in front of the rest of the script
+    while (!injected.empty() || std::getline(in, line)) {
+        if (!injected.empty()) { line = injected.front(); injected.pop_front(); }
         ++number;
         const std::size_t hash = line.find('#');
         if (hash != std::string::npos) line.erase(hash);
@@ -1190,6 +1193,22 @@ int RunScenario(const std::string& path) {
         if (command == "frames") {
             int n = 0; words >> n;
             for (int i = 0; i < n; ++i) { Frame(); Nap(); }
+        } else if (command == "tapat") {   // tapat X Y: a real SDL left click at a game point (window points scaled from the game's)
+            int gx = 0, gy = 0; words >> gx >> gy;
+            int ww = 0, wh = 0;
+            SDL_GetWindowSize(gWindow, &ww, &wh);
+            const float x = float(gx) * float(ww) / float(gW), y = float(gy) * float(wh) / float(gH);
+            SDL_Event e{};
+            e.type = SDL_EVENT_MOUSE_MOTION; e.motion.windowID = SDL_GetWindowID(gWindow); e.motion.x = x; e.motion.y = y;
+            SDL_PushEvent(&e); PumpEvents(); Frame(); Nap();
+            for (const SDL_EventType type : {SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_EVENT_MOUSE_BUTTON_UP}) {
+                SDL_Event b{};
+                b.type = type; b.button.windowID = SDL_GetWindowID(gWindow); b.button.button = SDL_BUTTON_LEFT;
+                b.button.down = type == SDL_EVENT_MOUSE_BUTTON_DOWN; b.button.clicks = 1; b.button.x = x; b.button.y = y;
+                SDL_PushEvent(&b); PumpEvents(); Frame(); Nap();
+            }
+            for (int i = 0; i < 5; ++i) { PumpEvents(); Frame(); Nap(); }
+            std::printf("tapat %d,%d\n", gx, gy);
         } else if (command == "sdlclick") {   // sdlclick X Y: a real SDL left click in window points, through the live event path
             float x = 0, y = 0; words >> x >> y;
             SDL_Event e{};
@@ -1973,6 +1992,63 @@ int RunScenario(const std::string& path) {
                 at = child;
             }
             std::printf("\n");
+        } else if (command == "tutorialdo") {   // tutorialdo: the current tutorial step done as a player does it (follows its own hints)
+            native::TutorialStepInfo step;
+            if (!native::NativeTutorialStep(step)) { std::printf("tutorialdo: no tutorial step\n"); continue; }
+            static int lastStep = -1, repeats = 0;
+            static bool stuck = false;
+            repeats = step.number == lastStep ? repeats + 1 : 0;
+            lastStep = step.number;
+            if (stuck) continue;
+            const int regionCells = step.x0 >= 0 ? (step.x1 - step.x0 + 1) * (step.z1 - step.z0 + 1) : 1;
+            if (repeats >= std::max(4, regionCells + 2)) { stuck = true; std::printf("tutorialdo: STUCK at step %d kind %d target %08x\n", step.number, step.kind, step.target); continue; }
+            char buffer[256];
+            std::vector<std::string> todo;
+            // the region's middle cell, rounded up: an even-sized building footprint centres on the cell past the midpoint
+            const int cx = step.x0 >= 0 ? (step.x0 + step.x1 + 1) / 2 : -1, cz = step.x0 >= 0 ? (step.z0 + step.z1 + 1) / 2 : -1;
+            auto look = [&] { std::snprintf(buffer, sizeof buffer, "look %d %d", cx * 16 + 8, cz * 16 + 8); todo.push_back(buffer); todo.push_back("frames 30"); };
+            switch (step.kind) {
+                case 1: case 2: case 0x11:   // zone, network, power line: drag over the region
+                    if (cx < 0) break;
+                    look();
+                    std::snprintf(buffer, sizeof buffer, "viewdrag %d %d %d %d 12 0", step.x0, step.z0, step.x1, step.z1);
+                    todo.push_back(buffer);
+                    break;
+                case 3: case 5: {            // place a building, act on a lot: a click in the region; a retry (the tutorial
+                                             // bulldozed a misplaced building) tries the region's next cell, middle first
+                    if (cx < 0) break;
+                    look();
+                    int px = cx, pz = cz;
+                    if (repeats > 0) {
+                        const int w = step.x1 - step.x0 + 1;
+                        const int index = (repeats - 1) % std::max(1, regionCells);
+                        px = step.x0 + index % w;
+                        pz = step.z0 + index / w;
+                    }
+                    std::snprintf(buffer, sizeof buffer, "viewdrag %d %d %d %d 1 0", px, pz, px, pz);
+                    todo.push_back(buffer);
+                    break;
+                }
+                case 4: case 0x10:           // a button / window: tap what the step flashes (in a catalog, the flashed item)
+                    if (step.itemX >= 0) { std::snprintf(buffer, sizeof buffer, "tapat %d %d", step.itemX, step.itemY); todo.push_back(buffer); }
+                    else if (step.target) { std::snprintf(buffer, sizeof buffer, "tapid %08x", step.target); todo.push_back(buffer); }
+                    break;
+                case 0xd: case 0xf:          // population / time: let the city run, then Continue if it shows
+                    todo.push_back("simspeed 3");
+                    todo.push_back("wait-days 30 60000");
+                    todo.push_back("tapid ca8d8595");
+                    break;
+                default:                     // Continue (8, 11 and the rest)
+                    todo.push_back("tapid ca8d8595");
+                    break;
+            }
+            std::printf("tutorialdo: step %d kind %d region %d,%d..%d,%d target %08x ->", step.number, step.kind, step.x0, step.z0, step.x1, step.z1, step.target);
+            for (const std::string& t : todo) std::printf(" [%s]", t.c_str());
+            std::printf("\n");
+            for (auto it = todo.rbegin(); it != todo.rend(); ++it) injected.push_front(*it);
+        } else if (command == "tutorialplay") {   // tutorialplay N: up to N tutorialdo steps, each followed by 40 frames and tutorialtask
+            int count = 1; words >> count;
+            for (int i = 0; i < count; ++i) { injected.push_back("tutorialdo"); injected.push_back("frames 40"); injected.push_back("tutorialtask"); }
         } else if (command == "tutorialtask") {   // tutorialtask: the current tutorial task's number, kind, target and text
             native::NativeTutorialTaskReport();
         } else if (command == "tutorialcheat") {   // tutorialcheat TEXT: the tutorial system's cheat ("Tutorial next") without the cheat box

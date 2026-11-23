@@ -1,5 +1,6 @@
 // Tutorials on the native build (see NativeTutorial.cpp).
 #pragma once
+#include <cstdint>
 
 struct cGZMessage;
 namespace sc4 { class cISC4WinCatalogView; class ICityMouseRouter; }
@@ -21,6 +22,10 @@ bool NativeTutorialRunning();
 bool NativeTutorialCheat(const char* text);
 // Kits: the current tutorial task (number, kind, target GUID, instruction text) on stdout.
 void NativeTutorialTaskReport();
+// Kits: the current step as a player sees it: its number and kind, its region (x0 < 0: none) and the window it flashes
+// (0: none); false without a running tutorial.
+struct TutorialStepInfo { int number = -1, kind = 0, x0 = -1, z0 = -1, x1 = -1, z1 = -1; std::uint32_t target = 0; int itemX = -1, itemY = -1; };
+bool NativeTutorialStep(TutorialStepInfo& out);
 // The city view's mouse router (cSC4View3DWin::GZOnMouseDownL / UpL / Move reach SL::spCity vslot 0x290, the tutorial
 // system): null without a tutorial system in the open city.
 sc4::ICityMouseRouter* NativeTutorialMouseRouter();
