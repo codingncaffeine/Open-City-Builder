@@ -301,8 +301,6 @@ public:
         cSC4DispatchVehicleView* view = NativeDispatchVehicleView();
         cIGZUnknown* engine = occupant ? SituationEngineOccupant(occupant) : nullptr;
         if (!view) return 0;
-        if (occupant && !engine)
-            SC4_UNWIRED("cSC4CitySituation indicators: a target that is not an engine occupant (the coverage target) gets no indicator");
         return static_cast<std::uint32_t>(
             view->TrackOccupant(static_cast<sc4::cISC4Occupant*>(engine), type, static_cast<std::uint32_t>(value), nullptr));
     }

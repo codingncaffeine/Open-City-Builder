@@ -33,6 +33,7 @@ public:
     bool IsNetworkOccupant() override { return false; }
     bool NetworkFlagsMatch(std::uint32_t) override { return false; }
     void NetworkCell(int& x, int& z) override { x = z = -1; }
+    sc4::cISC4Occupant* Engine() const { return static_cast<sc4::cISC4Occupant*>(prop_); }
 
 private:
     sc4::cSC4PropOccupantAutomataController* prop_;
@@ -42,5 +43,10 @@ private:
 }  // namespace
 
 sc4::ISituationOccupant* NativeNewCoverageTarget(const float position[3]) { return new CoverageTarget(position); }
+// The engine occupant behind a coverage target (the prop controller): what the dispatch indicators track; null otherwise.
+cIGZUnknown* NativeCoverageTargetEngine(sc4::ISituationOccupant* occupant) {
+    auto* target = dynamic_cast<CoverageTarget*>(occupant);
+    return target ? static_cast<cIGZUnknown*>(target->Engine()) : nullptr;
+}
 
 }  // namespace native

@@ -355,9 +355,10 @@ sc4::cSC4Automaton* SituationEngineAutomaton(sc4::ISituationAutomaton* automaton
     return view ? &view->Engine() : nullptr;
 }
 // The engine occupant behind a situation occupant view (null for anything else).
+cIGZUnknown* NativeCoverageTargetEngine(sc4::ISituationOccupant* occupant);   // NativeCoverageTarget.cpp
 cIGZUnknown* SituationEngineOccupant(sc4::ISituationOccupant* occupant) {
     auto* view = dynamic_cast<OccupantSlots*>(occupant);
-    return view ? static_cast<cIGZUnknown*>(&view->Engine()) : nullptr;
+    return view ? static_cast<cIGZUnknown*>(&view->Engine()) : NativeCoverageTargetEngine(occupant);
 }
 // cSC4AutomataManager::EnterPlayerDriveView(automaton, target) (the vehicle manager's).
 void SituationEnterPlayerDriveView(sc4::ISituationAutomaton* automaton, cIGZMessageTarget2* target) {
