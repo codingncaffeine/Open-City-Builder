@@ -110,6 +110,7 @@ public:
     void ShowUIHintsForUsers() override;                           // @ 0x00088920
     void HandleCatalogView(cISC4WinCatalogView* view) override;    // @ 0x000856fc
     cISC4TutorialTask* GetCurrentTask() override;                  // @ 0x00085420
+    cISC4WinCatalogView* FlashingCatalog() const { return catalog_; }   // port: the catalog whose item is flashing (kits)
     bool FilterLeftMouseClick(int& x, int& y, int flags) override; // @ 0x00085ac4
     int ResetTutorialNumAndIndex(int guid, int index) override;    // @ 0x000873d2
     void moveToNext() override;                                    // @ 0x00086b62

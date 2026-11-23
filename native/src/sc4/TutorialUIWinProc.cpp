@@ -494,6 +494,8 @@ void cSC4TutorialUIWinProc::ShowUIHintsForUsers() {
 }
 
 void cSC4TutorialUIWinProc::HandleCatalogView(cISC4WinCatalogView* view) {
+    static const bool trace = std::getenv("SC4_TUTORIALDEBUG") != nullptr;
+    if (trace) std::fprintf(stderr, "tutorial: catalog opened %p (flashing %p)\n", static_cast<void*>(view), static_cast<void*>(flashing_));
     clickPending_ = false;
     if (!view || flashing_ == view->AsIGZWin()) return;
     StopFlashing();
@@ -778,6 +780,9 @@ bool cSC4TutorialUIWinProc::DoMessage(cIGZMessage2* message) {
             ShowUIHintsForUsers();
         } else if (what == 3) {   // point at a catalog item once the catalog has laid it out
             const std::uint64_t delay = standard->GetData3();
+            static const bool trace = std::getenv("SC4_TUTORIALDEBUG") != nullptr;
+            if (trace) std::fprintf(stderr, "tutorial: catalog tick item %08llx delay %llu view %p\n", static_cast<unsigned long long>(standard->GetData2()),
+                                    static_cast<unsigned long long>(delay), standard->GetVoid4());
             auto* view = static_cast<cISC4WinCatalogView*>(standard->GetVoid4());
             if (delay == 0) {
                 int x = 0, y = 0;

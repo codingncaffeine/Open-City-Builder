@@ -9,6 +9,7 @@
 #include "app/NativeBoot.h"
 #include "app/NativeCheats.h"
 #include "app/NativeCity.h"
+#include "app/NativeDemolition.h"
 #include "app/NativeCitySystems.h"
 #include "app/NativeRegion.h"
 #include "app/NativeUi.h"
@@ -44,6 +45,7 @@
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
 #include "sc4/CommonIIDs.h"
+#include "sc4/WinCatalogView.h"
 #include "sc4/Render3D.h"
 #include "s3d/Camera.h"
 #include "app/NativeCityView.h"
@@ -251,12 +253,13 @@ struct UIHost final : ITutorialUIHost {
         cISC4DisasterManager* manager = layer ? layer->GetDisasterManager(id) : nullptr;
         return manager && manager->GetActiveInstanceCount() != 0;
     }
+    // Through native::DemolishRegion, which opens the adapter arena the demolition works on (called bare, a misplaced
+    // building's bulldozing in a tutorial step crashed in UpdateNetworks on adapters that did not exist).
     void DemolishCells(const SC4TutorialRect& rect) override {
-        cSC4Demolition* demolition = NativeDemolitionService();
-        if (!demolition) return;
         DemolitionRegion region;
         region.bounds = DemolitionCellRect{rect.x0, rect.z0, rect.x1, rect.z1};
-        demolition->DemolishRegion(true, region, 0, 1, false, nullptr, nullptr, nullptr, nullptr, 0, 0);
+        std::int64_t cost = 0;
+        native::DemolishRegion(true, region, 0, 1, false, &cost);
     }
     bool DoURL(cIGZString* link) override { return link && NativeHtmlLinkDoURL(*link); }
     int NetworkPiece(sc4::cISC4Occupant* occupant, std::uint32_t networkType, bool tall, int& x, int& z) override {
@@ -336,6 +339,43 @@ void NativeTutorialTaskReport() {
     if (!task) { std::printf("tutorialtask: none\n"); return; }
     std::printf("tutorialtask: %d kind %d target %08x guid %08x text \"%s\"\n", tutorial->GetTutorialTaskNumber(), task->GetWhichFunction(),
                 task->GetTargetGUID(), task->GetGUID(), task->GetInstructionMsg().ToChar());
+}
+
+bool NativeTutorialStep(TutorialStepInfo& out) {
+    cSC4TutorialSystem* tutorial = System();
+    cISC4TutorialTask* task = tutorial && tutorial->IsTutorial() ? tutorial->GetCurrentTask() : nullptr;
+    if (!task) return false;
+    out.number = tutorial->GetTutorialTaskNumber();
+    out.kind = task->GetWhichFunction();
+    const sc4::SC4TutorialRect& r = task->GetRegion();
+    out.x0 = r.x0; out.z0 = r.z0; out.x1 = r.x1; out.z1 = r.z1;
+    cIGZWin* target = task->GetTargetWindow();
+    out.target = target ? target->GetID() : 0;
+    // a catalog the step flashes one item of: the item's middle on screen (the arrow's anchor is just right of the icon)
+    void* raw = nullptr;
+    const std::uint32_t item = task->GetCatalogButtonItemID();
+    // the catalog the tutorial is flashing the item in (the chain of flashed buttons only reaches the button that opens it)
+    sc4::cISC4WinCatalogView* flashing = nullptr;
+    if (auto* proc = dynamic_cast<sc4::cSC4TutorialUIWinProc*>(tutorial->WinProc())) flashing = proc->FlashingCatalog();
+    if (flashing && item) {
+        flashing->AddRef();
+        raw = flashing;
+        target = flashing->AsIGZWin();
+    }
+    if (target && item && (raw || target->QueryInterface(0x49d98264, &raw)) && raw) {
+        auto* catalog = static_cast<sc4::cISC4WinCatalogView*>(raw);
+        int x = 0, y = 0;
+        if (catalog->GetItemPositionByID(item, x, y)) {
+            // GetItemPositionByID answers the arrow's anchor on screen: 16 to the right of the icon, at its middle; the icon
+            // starts at the catalog window's left edge
+            int sx = 0, sy = 0;
+            target->WindowToScreenCoordinates(sx, sy);
+            out.itemX = sx + (x - 16 - sx) / 2;
+            out.itemY = y;
+        }
+        catalog->Release();
+    }
+    return true;
 }
 
 bool NativeTutorialCheat(const char* text) {
