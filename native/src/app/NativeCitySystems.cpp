@@ -5,6 +5,8 @@
 #include "sc4/ServiceLocator.h"
 #include "sc4/Render3D.h"
 #include "sc4/View3DWin.h"
+#include "sc4/RenderProperties.h"
+#include "sc4/ServiceLocator.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSC4SimGrid.h"
 #include "sc4/NetworkOccupant.h"
@@ -158,6 +160,25 @@ void NativeMoveCameraTo(float x, float y, float z) {
     AnnounceCameraScroll(true);
     camera->SetViewTargetPosition(target);
     AnnounceCameraScroll(false);
+}
+// cSC4MySim::Find's camera half (i386 0x00544fee): with the render property bool 0x25 on, a camera zoomed out past 3 goes to
+// zoom 4; then the camera's target is the point.
+bool NativeCameraLookAt(const float pos[3], bool zoomIfFar) {
+    sc4::cSC43DRender* render = CityRenderer();
+    sc4::cSC4CameraControl* camera = render ? render->GetCameraControl() : nullptr;   // spRenderer vslot 0x40
+    if (!camera) return false;
+    constexpr std::uint32_t kZoomInOnFind = 0x25;
+    bool zoomIn = sc4::DefaultRenderProperties().bools[kZoomInOnFind].value;
+    if (auto* properties = dynamic_cast<sc4::cSC4RenderProperties*>(SL::spRenderProperties);
+        properties && properties->NumBoolProperties() > kZoomInOnFind)
+        zoomIn = properties->BoolValue(kZoomInOnFind);
+    if (zoomIfFar && zoomIn && static_cast<float>(camera->Zoom()) < 3.0f) camera->SetZoom(4.0f);
+    cS3DVector3 target;
+    target.x = pos[0];
+    target.y = pos[1];
+    target.z = pos[2];
+    camera->SetViewTargetPosition(target);
+    return true;
 }
 // 3D view vslot 0x58: 1 = the surface; 1 without a view.
 int NativeCurrentViewLevel() {

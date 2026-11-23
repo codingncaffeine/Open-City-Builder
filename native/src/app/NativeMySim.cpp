@@ -62,6 +62,7 @@
 #include "sc4/MySim.h"
 #include "sc4/MyStreetSim.h"
 #include "sc4/MySimInputControls.h"
+#include "sc4/RenderProperties.h"
 #include "s3d/ModelInstance.h"
 #include "sc4/Render3D.h"
 #include "sc4/MySimAdvice.h"
@@ -91,6 +92,7 @@ sc4::cSC4ViewInputControl* NativeViewCurrentControl();                        //
 void NativeViewSetControl(sc4::cSC4ViewInputControl* control, int operation);
 void NativeViewRemoveControl();
 void NativeViewRemoveAllControls();
+bool NativeCameraLookAt(const float pos[3], bool zoomIfFar);   // app/NativeCitySystems.cpp
 void NativeViewClearCursorText(std::uint32_t id);
 bool CityViewPickTerrain(int x, int y, float out[3], bool flag);   // app/NativeCitySystems.cpp
 sc4::cSC43DRender* CityRenderer();                                  // app/NativeCityView.cpp
@@ -651,7 +653,7 @@ public:
     }
     bool GamePaused() override { cSC4Simulator* s = Simulator(); return s && s->IsAnyPaused(); }
     // --- UI / effects ---
-    bool CameraLookAt(const float pos[3], bool zoomIfFar) override { (void)pos; (void)zoomIfFar; SC4_UNWIRED("IMySimHost::CameraLookAt (MySim Find)"); return false; }
+    bool CameraLookAt(const float pos[3], bool zoomIfFar) override { return NativeCameraLookAt(pos, zoomIfFar); }
     void NotificationDialog(const cIGZString& title, const cIGZString& body) override {
         std::fprintf(stderr, "mysim: notification \"%s\": %s\n", title.ToChar(), body.ToChar());
     }
