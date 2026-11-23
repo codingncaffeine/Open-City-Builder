@@ -54,7 +54,9 @@ public:
     virtual cIGZWin* ViewWindow() = 0;                                    // SL::spView3D slot 3, null without a view
     virtual void SetViewZoom(int zoom) = 0;                               // cSC4View3DWin::SetZoom
     virtual void EndViewInput() = 0;                                      // RemoveCurrentViewInputControl(false)
-    virtual bool PickTerrain(int x, int y, float out[3]) = 0;             // PickTerrain(x, y, out, false)
+    virtual bool PickTerrain(int x, int y, float out[3]) = 0;
+    // Port: the view point over a cell's centre (the camera's projection of the ground there); false when off screen.
+    virtual bool CellViewPoint(int cellX, int cellZ, int& x, int& y) { (void)cellX; (void)cellZ; (void)x; (void)y; return false; }             // PickTerrain(x, y, out, false)
     virtual bool SimulatorPaused() = 0;                                   // cSC4Simulator::IsPaused
     virtual void ResumeSimulator() = 0;                                   // cSC4Simulator::Resume
     virtual void PauseSimulator() = 0;                                    // cSC4Simulator::Pause
@@ -153,7 +155,7 @@ private:
     cIGZWin* flashing_ = nullptr;               // +0x34 the flashing button
     bool catalogHandled_ = false;               // +0x38
     bool clickPending_ = false;                 // +0x39
-    int lastInsideX_ = 0, lastInsideY_ = 0;     // port: the last view point inside the region (FilterLeftMouseClick's release)
+    int lastInsideX_ = 0, lastInsideY_ = 0;     // port: the last view point inside the region (FilterLeftMouseClick's fallback)
     bool dispatchDone_ = false;                 // +0x3a
     bool lastTask_ = false;                     // +0x3b
     int windowX_ = 0, windowY_ = 0;             // +0x3c / +0x40

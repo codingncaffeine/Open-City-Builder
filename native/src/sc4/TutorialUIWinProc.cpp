@@ -614,18 +614,27 @@ bool cSC4TutorialUIWinProc::FilterLeftMouseClick(int& x, int& y, int flags) {
     if (kind == kTaskZone || kind == kTaskBuilding || kind == kTaskNetwork || kind == kTaskPower || kind == kTaskLot) {
         const SC4TutorialRect area = task->GetRegion();
         const bool inside = RectContains(area, cellX, cellZ);
+        // DIVERGENCE (2026-11-23, user reports: the tutorial zone drag could not be completed): while a drag that started inside
+        // the region is held, the original drops every move outside it (the preview freezes as soon as the pointer crosses
+        // one edge of the slanted grid) and rewrites a release outside it to the region's far corner as CELL numbers
+        // (x1 - 1, z1 - 1) written into VIEW coordinates, so the tool picked an unrelated cell. Both now go to the view point
+        // over the nearest cell inside the region (the drag follows the pointer along the grid's edge); without that point
+        // (off screen) a move is dropped as before and a release uses the last view point inside the region.
+        auto clampIntoRegion = [&]() -> bool {
+            const int cx = std::min(std::max(cellX, area.x0), area.x1), cz = std::min(std::max(cellZ, area.z0), area.z1);
+            int vx = 0, vy = 0;
+            if (!g_host->CellViewPoint(cx, cz, vx, vy)) return false;
+            x = vx;
+            y = vy;
+            return true;
+        };
         if (flags == 0) {
-            if (clickPending_ && kind != kTaskBuilding) result = inside;
+            if (clickPending_ && kind != kTaskBuilding) result = inside || clampIntoRegion();
             if (clickPending_ && inside) lastInsideX_ = x, lastInsideY_ = y;
         } else if (flags == 1) {
             if (clickPending_) {
                 clickPending_ = false;
-                if (!inside) {
-                    // DIVERGENCE (2026-11-23, user report: the tutorial zone drag could not be completed): the original writes
-                    // the region's far corner as CELL numbers (x1 - 1, z1 - 1) into the release's VIEW coordinates, and the
-                    // tool then picks the ground at that view point near the window's top-left; it only lands on the region's
-                    // side when that pick misses the ground. A release outside the region now happens at the last view
-                    // point the filter let through inside it (where the drag visibly stopped).
+                if (!inside && !clampIntoRegion()) {
                     x = lastInsideX_;
                     y = lastInsideY_;
                 }

@@ -43,6 +43,10 @@
 #include "sc4/cSC424HourClock.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
+#include "sc4/Render3D.h"
+#include "s3d/Camera.h"
+#include "app/NativeCityView.h"
+#include <cmath>
 
 namespace native {
 sc4::IToolEffectsManager* NativeToolEffectsManager();   // NativeDisasterTools.cpp
@@ -184,6 +188,27 @@ struct UIHost final : ITutorialUIHost {
     void SetViewZoom(int zoom) override { if (cSC4View3DWin* view = CityView3DWin()) view->SetZoom(zoom); }
     void EndViewInput() override { if (cSC4View3DWin* view = CityView3DWin()) view->RemoveCurrentViewInputControl(false); }
     bool PickTerrain(int x, int y, float out[3]) override { cSC4View3DWin* view = CityView3DWin(); return view && view->PickTerrain(x, y, out, false); }
+    bool CellViewPoint(int cellX, int cellZ, int& x, int& y) override {
+        cSC4City* city = HostCity();
+        sc4::cSC43DRender* render = CityRenderer();
+        s3d::cS3DCamera* camera = render ? render->GetCamera() : nullptr;
+        cSC4View3DWin* view = CityView3DWin();
+        if (!city || !camera || !view) return false;
+        cIGZUnknown* object = city->GetComponent(CityComponent::Terrain);
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(0xab953253, &raw) || !raw) return false;
+        auto* terrain = static_cast<sc4::cSTETerrain*>(static_cast<cIGZSerializable*>(raw));
+        const float wx = cellX * 16.0f + 8.0f, wz = cellZ * 16.0f + 8.0f;
+        const cS3DVector3 world{wx, terrain->GetAltitude(wx, wz), wz};
+        static_cast<cIGZSerializable*>(raw)->Release();
+        cS3DVector3 screen;
+        if (!camera->Project(world, screen)) return false;
+        x = static_cast<int>(std::lround(screen.x));
+        y = static_cast<int>(std::lround(screen.y));
+        if (x < 0 || y < 0 || x >= view->GetW() || y >= view->GetH()) return false;
+        float hit[3] = {};   // the point must land on that cell
+        return view->PickTerrain(x, y, hit, false) && static_cast<int>(hit[0] / 16.0f) == cellX && static_cast<int>(hit[2] / 16.0f) == cellZ;
+    }
     bool SimulatorPaused() override { cSC4Simulator* s = CitySimulatorObject(); return s && s->IsPaused(); }
     void ResumeSimulator() override { if (cSC4Simulator* s = CitySimulatorObject()) s->Resume(); }
     void PauseSimulator() override { if (cSC4Simulator* s = CitySimulatorObject()) s->Pause(); }
