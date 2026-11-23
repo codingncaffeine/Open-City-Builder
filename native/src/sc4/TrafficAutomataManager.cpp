@@ -832,20 +832,23 @@ void cSC4TrafficAutomataManager::PopulateNetworkOccupant(ITrafficNetworkMapOccup
             if (update.layer == 8) continue;
             const auto layer = static_cast<PopulateLayer>(update.layer);
             if (static_cast<std::uint32_t>(GetPathTypeForLayer(layer)) != pathType) continue;
-            if (static_cast<int>(layer) == 2)
-                SC4_UNWIRED("cSC4TrafficAutomataManager::PopulateNetworkOccupant: layer-2 clock factor (tuning +0x178) and the player-drive path (vslot 0x34, tuning +0x170) not ported");
             LayerWeights entry{layer, {}, 0.0f};
-            GetEdgeDensity(occupant, tile, layer, GetClockMultiplier(layer), entry.weights);
+            float multiplier = GetClockMultiplier(layer);
+            if (static_cast<int>(layer) == 2) multiplier *= AutomataTuning().f21a7c;   // i386 sTuningParams +0x178
+            GetEdgeDensity(occupant, tile, layer, multiplier, entry.weights);
             for (auto& row : entry.weights)
                 for (float v : row) entry.sum += v;
             total += entry.sum;
             layers.push_back(entry);
         }
-        if (layers.empty() || !trafficSimulator_) continue;
+        // While the player drives (vslot 0x34 IsDrivingMode) a piece with no layer of this path type still populates.
+        const bool driving = IsDrivingMode();
+        if ((layers.empty() && !driving) || !trafficSimulator_) continue;
         const float capacity = trafficSimulator_->GetCapacity(travelType, cellX, cellZ);
         if (capacity == 0.0f) continue;
         auto& params = AutomataTuning().spawnRecall[networkType];
-        const float desired = params.curve.GetOutputValue(total / capacity);
+        float desired = params.curve.GetOutputValue(total / capacity);
+        if (driving) desired = AutomataTuning().f21a74;   // i386 sTuningParams +0x170
         TraceSpawnInputs(networkType, total, capacity, desired, smoothed,
                          network->OccupantAutomataCount(occupant, pathType), params.f0, params.f4);
         if (smoothed <= desired || (flags & 2) != 0) {
@@ -853,6 +856,19 @@ void cSC4TrafficAutomataManager::PopulateNetworkOccupant(ITrafficNetworkMapOccup
                   !network->OccupantIsIntersection(occupant) &&
                   static_cast<float>(Random().RandomDoubleUniform()) < params.f0))
                 continue;
+            if (layers.empty()) {
+                // Driving with no layer: the first connected entry / exit pair gets a layer-1 automaton.
+                if (driving) {
+                    bool spawned = false;
+                    for (std::uint8_t from = 0; from < 4 && !spawned; ++from)
+                        for (std::uint8_t to = 0; to < 4 && !spawned; ++to)
+                            if (occupant->PathConnectionExists(pathType, from, to)) {
+                                SpawnAutomaton(occupant, tile, static_cast<PopulateLayer>(1), from, to, 0.0f);
+                                spawned = true;
+                            }
+                }
+                continue;
+            }
             float pick = static_cast<float>(Random().RandomDoubleRangeUniform(0.009999999776482582, static_cast<double>(total)));
             for (const LayerWeights& entry : layers) {
                 pick -= entry.sum;

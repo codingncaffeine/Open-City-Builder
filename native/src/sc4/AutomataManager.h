@@ -470,8 +470,8 @@ struct AutomataTuningGlobals {
     std::uint32_t f21a64 = 0;                  // 0x6bac0b3e (uint8 in the tuning exemplar)
     float f21a68 = 0.0f, f21a6c = 0.0f;        // 0x4bae8fe1 / 0x4bae8fe2
     std::uint8_t f21a70 = 0;                   // 0xebfb4a0a (uint8)
-    float f21a74 = 0.0f;                       // 0xcc101142
-    std::uint32_t f21a78 = 0;                  // 0x6c200139 (uint32: the vehicle count limit while the player drives)
+    float f21a74 = 0.1f;                       // 0xcc101142 (cSC4AutomataTuningParams' constructor seeds this word with 0.1)
+    std::uint32_t f21a78 = 100;                // 0x6c200139 (uint32: the vehicle count limit while the player drives; constructor: 100)
     float f21a7c = 0.0f;                       // 0x8c3e8185 (1 / count)
     float f21974 = 0.0f, f21978 = 0.0f;        // 0xec0700c0 / 0x6c0700c4
     bool f21aa8 = false;                       // 0x4998c91c "clock multipliers enabled"
