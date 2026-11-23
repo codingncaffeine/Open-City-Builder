@@ -1999,10 +1999,12 @@ void cSC4LotDeveloper::GetPositionForLotConfigurationObject(cSC4Lot* lot, cSC4Lo
     }
     if ((lot->GetFlags() & 1) != 0) {                                               // lot vslot 0x30
         position[1] = lot->GetAltitude();                                           // lot vslot 0x40
+    } else if (cISC4Occupant* foundation = GetLotFoundation(lot)) {                  // vslot 0xcc
+        // i386 0x000eef24 path: an object on a lot with a foundation stands at the foundation occupant's height (its vslot 0x20).
+        float at[3] = {};
+        foundation->GetPosition(at);
+        position[1] = at[1];
     } else {
-        // PARTIAL: GetLotFoundation(lot) (vslot 0xcc) exists now, but the foundation top is not used for the objects.
-        if (GetLotFoundation(lot))
-            SC4_UNWIRED("cSC4LotDeveloper::GetPositionForLotConfigurationObject: an object on a lot foundation is not placed on the foundation top");
         const bool water = configuration && configuration->IsCompatibleWithWater();
         if (object->type > 4 || ((1u << object->type) & 0x16u) == 0)
             position[1] = GetLowestOrHighestAreaAltitude(area, false, water);      // vslot 0x44
