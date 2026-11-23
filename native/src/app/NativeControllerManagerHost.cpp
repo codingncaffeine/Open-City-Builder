@@ -10,6 +10,7 @@
 #include "app/NativeCityView.h"
 #include "app/NativeZoneDeveloperHost.h"
 #include "platform/Unwired.h"
+#include "gz/GZCOMDirector.h"
 #include "rz/cRZRandom.h"
 #include "sc4/AutomataAttractor.h"
 #include "sc4/AutomataControllerManager.h"
@@ -59,8 +60,7 @@ struct NativeControllerManagerHost final : IControllerManagerHost {
     IControllerClock* AcquireClock() override { static ClockView clock; return &clock; }
     IControllerScriptSystem* AcquireScriptSystem() override {
         if (auto* scripts = CityComponentAs<cSC4AutomataScriptSystem>(CityComponent::AutomataScriptSystem)) return scripts;
-        SC4_UNWIRED("IControllerManagerHost::AcquireScriptSystem (the city has no automata script system)");
-        static NoScripts none;
+        static NoScripts none;   // only without a city: every city makes its automata script system (cSC4City component 0x370)
         return &none;
     }
     cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
@@ -85,8 +85,11 @@ struct NativeControllerManagerHost final : IControllerManagerHost {
             return attractor;
         }
         if (classKey == kControllerTypeGenerator) return NativeCreateAutomataGenerator();   // app/NativeAutomataGenerator.cpp
-        SC4_UNWIRED("IControllerManagerHost::CreateController (an unknown controller class)");
-        return nullptr;
+        // Any other class a creator is registered for (the primary pointer answers 0x6a1857f8); null as in the original otherwise.
+        cIGZCOM* com = GZCOM();
+        void* raw = nullptr;
+        if (!com || !com->CreateInstance(classKey, kGZIID_cISC4AutomataController, &raw) || !raw) return nullptr;
+        return static_cast<cSC4AutomataController*>(raw);
     }
     // the city's lot manager (city vslot 0x108 -> vslot 0x70): the lot the occupant stands on; the answer is only compared
     // for identity (never two controllers of one template on one lot)
