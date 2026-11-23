@@ -1482,8 +1482,7 @@ void cSC4Vehicle::UpdateAfterDamage(tAutomataStatePlayerDrive* state, const tAut
 // the correction from the point the last step expected (state +0x54/+0x60) to the path target, then snapped back onto the
 // network. Without a collision the path position is placed a radius in front of the driving position, the driving
 // position is pulled a radius behind the path position and the drive direction is smoothed by the parameter at +0x38.
-// PARTIAL: the collision branch (path position reset to the network and the speed reflected) and the final midpoint move
-// cannot be reconstructed from the decompile - the dropped SIMD lanes hide the reset position and the reflection blend.
+// Meeting a lot's edge, the step bounces off it (i386 0x000a6bb0).
 bool cSC4Vehicle::DoPlayerDriveOffRoadTick(float /*unused*/, tAutomataStatePlayerDrive* state, float distance,
                                            const tAutomataPlayerDriveParams* params, ITrafficAutomatonOccupant* occupant) {
     (void)occupant;
@@ -1510,9 +1509,13 @@ bool cSC4Vehicle::DoPlayerDriveOffRoadTick(float /*unused*/, tAutomataStatePlaye
     bool onRoad = false;
     PlayerDriveGetNetwork(state, onRoad, state->drivePos54, &state->drivePos54);
     const float radius = GetRadius();
-    cS3DVector3 collisionPoint = pathPos_;
-    float collisionAmount = 1.0f;
-    if (!DoCollisionCheck(collisionPoint, collisionAmount)) {
+    // i386 vslot 0x310 GetPlayerDriveLotIntersection from the path position to the point a radius ahead of the driving position:
+    // where the step meets a lot's edge (x, z) and the edge's normal (x, z).
+    cS3DVector3 probe = MakeVector(radius * direction.x + state->drivePos54.x, radius * direction.y + state->drivePos54.y,
+                                   radius * direction.z + state->drivePos54.z);
+    cS3DVector2 hitPoint{0.0f, 0.0f};
+    cS3DVector2 hitNormal{0.0f, 0.0f};
+    if (!GetPlayerDriveLotIntersection(pathPos_, probe, &hitPoint, &hitNormal)) {
         pathPos_ = MakeVector(direction.x * radius + state->drivePos54.x, state->drivePos54.y,
                               direction.z * radius + state->drivePos54.z);
         PlayerDriveGetNetwork(state, onRoad, pathPos_, &pathPos_);
@@ -1526,12 +1529,32 @@ bool cSC4Vehicle::DoPlayerDriveOffRoadTick(float /*unused*/, tAutomataStatePlaye
                                        (forward.z - state->driveDir60.z) * smoothing + state->driveDir60.z);
         direction = forward;
     } else {
-        // PARTIAL: the reflected step is kept as "stay put and stop" (see the function comment).
-        SC4_UNWIRED("cSC4Vehicle::DoPlayerDriveOffRoadTick: collision reset to the network and speed reflection not reconstructed (stops instead)");
-        state->drivePos54 = pathPos_;
-        state->driveDir60 = direction;
-        speedTween_.SetDesired(0.0f, 0.0f);
+        // The front stops at the edge (back on the network) and bounces off it: the flat heading reflected about the
+        // edge's normal with a factor of 1.1; a bounce shorter than 0.9 stops the vehicle, otherwise the speed is scaled by
+        // the bounce's length and the heading follows it.
+        pathPos_ = MakeVector(hitPoint.x, state->drivePos54.y, hitPoint.y);
+        PlayerDriveGetNetwork(state, onRoad, pathPos_, &pathPos_);
+        float bx = direction.x, bz = direction.z;
+        const float flat = std::sqrt(bx * bx + bz * bz);
+        if (flat > 0.0f) { bx /= flat; bz /= flat; }
+        const float along = hitNormal.x * bx + hitNormal.y * bz;
+        bx -= hitNormal.x * 1.1f * along;
+        bz -= along * hitNormal.y * 1.1f;
+        float speed = std::sqrt(bx * bx + bz * bz);
+        if (!(speed < 0.9f)) {
+            speed *= GetCurrentSpeed();
+            const float length = std::sqrt(bx * bx + bz * bz);
+            if (length > 0.0f) { bx /= length; bz /= length; }
+            direction = MakeVector(bx, 0.0f, bz);
+        } else {
+            speed = 0.0f;
+        }
         state->value38 = 0.0f;
+        speedTween_.SetDesired(speed, 0.0f);
+        state->value3c = speed;
+        state->driveDir60 = direction;
+        state->drivePos54 = MakeVector(pathPos_.x - radius * direction.x, pathPos_.y - radius * direction.y,
+                                       pathPos_.z - radius * direction.z);
     }
     const cS3DVector3 midpoint = MakeVector(pathPos_.x - (pathPos_.x - state->drivePos54.x) * 0.5f,
                                             pathPos_.y - (pathPos_.y - state->drivePos54.y) * 0.5f,
