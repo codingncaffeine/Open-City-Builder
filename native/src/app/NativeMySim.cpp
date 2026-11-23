@@ -49,6 +49,7 @@
 #include "gz/CommandParameterSet.h"
 #include "gz/cIGZVariant.h"
 #include "platform/Unwired.h"
+#include "sc4/AdvisorCitySituations.h"
 #include "rz/cRZMessage2Standard.h"
 #include "rz/cRZVariant.h"
 #include "sc4/AdviceSubject.h"
@@ -1117,6 +1118,13 @@ void InstallMySimHosts() {
     sc4::SetMySimFilterHost(&filter);
     sc4::SetMySimAdviceHost(&advice);
     sc4::SetMyStreetSimToolHost(&g_streetToolHost);
+    // cSC4AdvisorCitySituations::UpdateMySimAdvices (i386): SL::spCity 0x11c GetMySimAgentSimulator, vslot 0x30
+    // GetActiveUIPanelSim(slot), then the sim's vslot 0x110 ActivateLuaContext before the MySim advices are tested.
+    sc4::SetAdvisorCitySituationsRefresh([] {
+        cSC4MySimAgentSimulator* agent = Agent();
+        int slot = 0;
+        if (cISC4MySim* sim = agent ? agent->GetActiveUIPanelSim(slot) : nullptr) sim->ActivateLuaContext();
+    });
 }
 
 // The agent simulator's get_sim / get_count values (cSC4MySimAgentSimulator::Init, i386 0x0054d538), registered under the

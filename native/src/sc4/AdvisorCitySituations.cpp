@@ -22,7 +22,7 @@ bool cSC4AdvisorCitySituations::Shutdown() { return cSC4AdvisorBase::Shutdown();
 
 void cSC4AdvisorCitySituations::UpdateMySimAdvices() {
     if (g_refresh) g_refresh();
-    else SC4_UNWIRED("cSC4AdvisorCitySituations::UpdateMySimAdvices: the sim-agent manager refresh (SL::spCity 0x238 -> 0x60 -> 0x220) has no host");
+    // without a host (tests): no MySim context to prepare
     auto& advices = MutableAdvices();
     auto& current = MutableCurrentAdvices();
     for (int index = 0; index < static_cast<int>(advices.size()); ++index) {

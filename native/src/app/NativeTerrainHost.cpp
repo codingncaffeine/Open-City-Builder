@@ -42,6 +42,7 @@
 
 namespace native {
 void NativeRegisterMySimAgentGameData(sc4::cSC4MySimAgentSimulator& agent);   // app/NativeMySim.cpp
+bool NativeDisasterOngoing();   // app/NativeRiot.cpp
 bool NeighborsHasConnection(cIGZUnknown* component, std::uint32_t type, int x, int z);      // NativeSurfaceWaterNeighbors.cpp
 void NeighborsDeleteConnection(cIGZUnknown* component, std::uint32_t type, int x, int z);
 void NeighborsCreateConnection(cIGZUnknown* component, std::uint32_t type, int x, int z);
@@ -177,7 +178,7 @@ struct NativeMySimAgentHost final : IMySimAgentHost {
     cIGZMessageServer2* Messages() override { return SL::spMS2; }
     void RegisterGameData(cSC4MySimAgentSimulator& agent) override { native::NativeRegisterMySimAgentGameData(agent); }   // app/NativeMySim.cpp
     void UnregisterGameData(cSC4MySimAgentSimulator&) override {}
-    bool RiotInProgress() override { SC4_UNWIRED("IMySimAgentHost::RiotInProgress (spCity vslot 0x240 -> 0x50)"); return false; }
+    bool RiotInProgress() override { return native::NativeDisasterOngoing(); }   // spCity vslot 0x240 (GetDisasterLayer) -> 0x50 IsADisasterOngoing
     void CellCenter(int cellX, int cellZ, float& x, float& z) override {
         if (cSC4City* city = City4()) city->CellCenterToPosition(cellX, cellZ, x, z);
         else { x = 0; z = 0; }
