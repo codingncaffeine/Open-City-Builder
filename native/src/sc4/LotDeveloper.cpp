@@ -968,6 +968,8 @@ void cSC4LotDeveloper::SetEmptyLotBaseTexture(cSC4Lot* lot) {
             bool flip = false;
             GetBoundaryLotTexture(sides, spec.textureId, spec.rotation, flip);         // this vslot 0x150
             spec.flip = flip ? 1 : 0;
+            static const bool trace = std::getenv("SC4_LOTTEXDEBUG") != nullptr;   // each empty lot cell's base texture
+            if (trace) std::fprintf(stderr, "lottex: cell %d,%d sides %d%d%d%d facing %d texture %#x rotation %d flip %d rgba %u,%u,%u,%u\n", x, z, sides[0], sides[1], sides[2], sides[3], facing, spec.textureId, spec.rotation, spec.flip, red, green, blue, alpha);
             spec.red = red;
             spec.green = green;
             spec.blue = blue;

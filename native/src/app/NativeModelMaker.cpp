@@ -630,6 +630,10 @@ public:
         for (int i = 0; i < 4; ++i) out[i] = TerrainShade(xs[i], zs[i]);
     }
     const sc4::CellTextureBinding* TextureBinding(std::uint32_t instance) override { return LotTextureBinding(instance); }
+    bool CellTriangulationFlipped(int x, int z) override {
+        sc4::cSTETerrain* terrain = native::Terrain();
+        return terrain && x >= 0 && z >= 0 && terrain->IsTriangulationFlipped(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z));
+    }
 };
 
 class LotBaseTextureHost final : public sc4::ILotBaseTextureHost {

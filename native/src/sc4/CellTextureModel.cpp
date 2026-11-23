@@ -154,6 +154,8 @@ void cSC4CellTextureModel::SetupVertices(bool updateVertices, bool, void*, void*
 
 int cSC4CellTextureModel::Draw(SC4DrawContext* context, bool highlight) {
     if (highlight || !context) return 1;
+    static const bool hidden = std::getenv("SC4_NOCELLTEXTURES") != nullptr;   // dev: the lot base textures left out
+    if (hidden) return 1;
     if (static_cast<std::uint32_t>(context->Zoom()) != loadedZoom_) DoZoomChange(context->Zoom());
     const auto rotation = static_cast<std::uint32_t>(context->ViewRotation());
     if (rotation != viewRotation_) {
@@ -190,7 +192,17 @@ int cSC4CellTextureModel::Draw(SC4DrawContext* context, bool highlight) {
         const gd::cGDCombiner combiner{0x21020000u | spec_.combineMode, 0x00030001u, 0};
         context->SetTexCombiner(combiner, 0);
     }
-    context->DrawPrims(1 /* triangle strip */, 10 /* V3F_C4UB_T2F */, 4, vertices_);
+    if (onLockedLot_) {
+        context->DrawPrims(1 /* triangle strip */, 10 /* V3F_C4UB_T2F */, 4, vertices_);   // a flat quad: either diagonal
+    } else {
+        // The terrain cell draw (cSTETerrainView3D::DrawTexturedTerrainQuad 0x10074e5a6): the four vertices split along the
+        // ground's own diagonal for this cell, so the texture lies exactly on the terrain. Split along the other diagonal,
+        // a cell that is not flat let the ground show through around its centre.
+        static const std::uint16_t kNormal[6] = {0, 2, 3, 0, 3, 1}, kFlipped[6] = {0, 2, 1, 1, 2, 3};
+        const bool flipped = g_host && g_host->CellTriangulationFlipped(spec_.cellX, spec_.cellZ);
+        context->SetVertexBuffer(10 /* V3F_C4UB_T2F */, 4, vertices_);
+        context->DrawPrimsIndexed(0 /* triangles */, 6, flipped ? kFlipped : kNormal);
+    }
     return 1;
 }
 

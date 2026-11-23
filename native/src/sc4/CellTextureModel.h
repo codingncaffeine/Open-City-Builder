@@ -45,6 +45,9 @@ public:
     // The terrain's lit vertex colour at the same four corners (what the terrain cell draw the unlocked path uses in the
     // original modulates the texture with), 0..255 grey.
     virtual void CellCornerShades(int cellX, int cellZ, std::uint8_t out[4]) = 0;
+    // The terrain's triangulation of the cell (vertex flags & 0x3000): the terrain cell draw splits the quad along the
+    // same diagonal as the ground (cSTETerrainView3D::DrawTexturedTerrainQuad). False: the (x, z)-(x + 1, z + 1) diagonal.
+    virtual bool CellTriangulationFlipped(int cellX, int cellZ) { (void)cellX; (void)cellZ; return false; }
     // SL::spTextureBindingFactory vslot 0x20 with {0x7ab50e44, 0x0986135e, instance}; null when missing. Not owned.
     virtual const CellTextureBinding* TextureBinding(std::uint32_t instance) = 0;
 };
