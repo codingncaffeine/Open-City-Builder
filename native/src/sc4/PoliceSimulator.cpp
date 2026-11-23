@@ -93,8 +93,7 @@ bool cSC4PoliceSimulator::Shutdown() {
     return true;
 }
 
-// cSC4ProtectionSimulator::DoMessage @ 0x0007cace, then the police simulator's own messages. PARTIAL: 0x0a159d95 (jails) is not
-// routed: no jails natively.
+// cSC4ProtectionSimulator::DoMessage @ 0x0007cace, then the police simulator's own messages (0x0a159d95: a crime, DoCrimeEvent).
 bool cSC4PoliceSimulator::DoMessage(cIGZMessage2* message) {
     auto* standard = static_cast<cIGZMessage2Standard*>(message);
     const auto station = [&]() -> IPoliceOccupant* {
@@ -118,8 +117,8 @@ bool cSC4PoliceSimulator::DoMessage(cIGZMessage2* message) {
         if (static_cast<std::uint32_t>(standard->GetData1()) == 0xe7e2c2db && static_cast<std::uint32_t>(standard->GetData3()) == kPoliceTuningInstance)
             ReadSimulatorTunableValues(host_->SimulatorExemplar());
         break;
-    case 0x0a159d95:
-        SC4_UNWIRED("cSC4PoliceSimulator::DoMessage: jail message 0x0a159d95 not routed (no jails natively)");
+    case 0x0a159d95:   // a crime happened (the crime simulator's event; the message's object is the lot)
+        DoCrimeEvent(standard->GetIGZUnknown());
         break;
     default: break;
     }
@@ -701,6 +700,31 @@ bool cSC4PoliceSimulator::ProtectionGetStationFunding(IPoliceOccupant* station, 
     if (!host_->FundingInfo(station, kPoliceStationFundingProperty, c, f)) return false;
     *cost = c;
     return true;
+}
+
+IPoliceOccupant* cSC4PoliceSimulator::GetNearestStation(int cellX, int cellZ) {
+    float x = 0.0f, z = 0.0f;
+    host_->CellCenterToPosition(cellX, cellZ, x, z);
+    return GetNearestStation(x, z);
+}
+
+// A crime on a lot: with police coverage at the lot's cell above the tunable threshold (property 0x68ddae9f, default 16) it
+// counts as an arrest for the month (and the nearest station's arrests), otherwise the criminal stays at large (and the
+// station's crimes count it); either way the month's crimes grow by one.
+void cSC4PoliceSimulator::DoCrimeEvent(cIGZUnknown* lot) {
+    int x = 0, z = 0;
+    if (!host_->MessageLotCell(lot, x, z)) return;
+    const cSC4SimGrid<std::uint8_t>* coverage = protection_.AdjustedGrid();
+    const int covered = coverage ? coverage->GetCellValue(x, z) : 0;   // the coverage grid's vslot 0x1c
+    IPoliceOccupant* station = GetNearestStation(x, z);
+    if (tunables_.value200 < covered) {
+        ++arrestsThisMonth_;
+        if (station) UpdatePoliceStationCrimeStats(station, kArrest);
+    } else {
+        ++unjailedAdded_;
+        if (station) UpdatePoliceStationCrimeStats(station, kCrime);
+    }
+    ++crimesThisMonth_;
 }
 
 IPoliceOccupant* cSC4PoliceSimulator::GetNearestStation(float x, float z) {

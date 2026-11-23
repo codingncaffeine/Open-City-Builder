@@ -507,6 +507,16 @@ private:
 
 class PoliceHost final : public IPoliceHost {
 public:
+    bool MessageLotCell(cIGZUnknown* object, int& x, int& z) override {
+        void* plain = nullptr;   // the crime message carries the lot's serializable view; the plain object is the lot
+        if (!object || !object->QueryInterface(kGZIID_PlainObject, &plain) || !plain) return false;
+        static_cast<cSC4Lot*>(plain)->GetLocation(x, z);
+        return true;
+    }
+    void CellCenterToPosition(int x, int z, float& px, float& pz) override {
+        if (cSC4City* city = HostCity()) city->CellCenterToPosition(x, z, px, pz);
+        else IPoliceHost::CellCenterToPosition(x, z, px, pz);
+    }
     int CurrentDay() override { cSC4Simulator* s = Simulator(); return s ? static_cast<int>(s->GetSimDateNumber()) : 0; }
     void PostMessage(std::uint32_t message, IPoliceOccupant*) override { PostCityMessage(message); }
     void AddHistory(std::uint32_t historyId, std::int64_t value) override { AddHistoryValue(historyId, value); }

@@ -104,6 +104,10 @@ public:
     virtual void RegisterDispatchSource(bool add) { (void)add; }
     virtual const cISCPropertyHolder* SimulatorExemplar() { return nullptr; }   // {0x6534284a, 0xe7e2c2db, 0x28dfcf89}
     virtual IPoliceOccupant* PoliceOccupant(void*) { return nullptr; }
+    // The crime message's lot (its IGZUnknown, QI 0xe818fced) and the lot's cell (lot vslot 0x54): false without a lot.
+    virtual bool MessageLotCell(cIGZUnknown* lot, int& x, int& z) { (void)lot; x = 0; z = 0; return false; }
+    // SL::spCity vslot 0x184 (i386): the centre of a cell in metres.
+    virtual void CellCenterToPosition(int x, int z, float& px, float& pz) { px = static_cast<float>(x) * 16.0f + 8.0f; pz = static_cast<float>(z) * 16.0f + 8.0f; }
     virtual void WriteOccupant(cIGZOStream&, IPoliceOccupant*) {}        // SC4WriteGZSerializable(stream, occupant)
     virtual bool ReadOccupant(cIGZIStream&, IPoliceOccupant**) { return false; }
 };
@@ -211,6 +215,8 @@ public:
     void DoOccupantChanged(IPoliceOccupant* occupant);
     bool ProtectionGetStationFunding(IPoliceOccupant* station, int* cost) const;
     IPoliceOccupant* GetNearestStation(float x, float z);
+    IPoliceOccupant* GetNearestStation(int cellX, int cellZ);   // i386 0x00076808: from the cell's centre
+    void DoCrimeEvent(cIGZUnknown* lot);                        // message 0x0a159d95 (i386 cSC4PoliceSimulator::DoMessage)
     int GetTotalDispatchCount();
     static bool GetDispatchesAtStation(IPoliceOccupant* station, std::uint32_t* mask, std::uint32_t* baseCall,
                                        std::uint32_t* count);
