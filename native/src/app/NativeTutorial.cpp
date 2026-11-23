@@ -324,6 +324,14 @@ sc4::ICityMouseRouter* NativeTutorialMouseRouter() {
     return System() ? &router : nullptr;
 }
 
+void NativeTutorialTaskReport() {
+    cSC4TutorialSystem* tutorial = System();
+    cISC4TutorialTask* task = tutorial ? tutorial->GetCurrentTask() : nullptr;
+    if (!task) { std::printf("tutorialtask: none\n"); return; }
+    std::printf("tutorialtask: %d kind %d target %08x guid %08x text \"%s\"\n", tutorial->GetTutorialTaskNumber(), task->GetWhichFunction(),
+                task->GetTargetGUID(), task->GetGUID(), task->GetInstructionMsg().ToChar());
+}
+
 bool NativeTutorialCheat(const char* text) {
     cSC4TutorialSystem* tutorial = System();
     if (!tutorial) return false;

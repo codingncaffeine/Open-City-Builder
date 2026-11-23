@@ -19,6 +19,8 @@ bool NativeTutorialRunning();
 // (OnTutorialEvent(1): the zone task's hints and try-again text) and places nothing.
 // Kits: the tutorial cheat as typed ("Tutorial next", "Tutorial step N") handed straight to the tutorial system's DoMessage.
 bool NativeTutorialCheat(const char* text);
+// Kits: the current tutorial task (number, kind, target GUID, instruction text) on stdout.
+void NativeTutorialTaskReport();
 // The city view's mouse router (cSC4View3DWin::GZOnMouseDownL / UpL / Move reach SL::spCity vslot 0x290, the tutorial
 // system): null without a tutorial system in the open city.
 sc4::ICityMouseRouter* NativeTutorialMouseRouter();

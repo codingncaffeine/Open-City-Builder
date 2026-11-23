@@ -528,7 +528,7 @@ bool InvalidateTreeCallback(cIGZWin*, std::uint32_t, void* child, void*) { Inval
 // Debug: prints the window tree below `window` (id, visibility, area) to a depth.
 void DumpTree(cIGZWin* window, int depth, int maxDepth) {
     const cRZRect a = window->GetArea();
-    std::printf("%*s id=%08x vis=%d area=%d,%d,%d,%d kids=%u caption=\"%s\"\n", depth * 2, "", window->GetID(), window->IsVisible(), a.left, a.top, a.right, a.bottom, window->GetChildCount(), window->GetCaption().ToChar());
+    std::printf("%*s id=%08x vis=%d en=%d area=%d,%d,%d,%d kids=%u caption=\"%s\"\n", depth * 2, "", window->GetID(), window->IsVisible(), window->IsEnabled() ? 1 : 0, a.left, a.top, a.right, a.bottom, window->GetChildCount(), window->GetCaption().ToChar());
     if (depth >= maxDepth) return;
     struct Ctx { int depth, max; };
     Ctx ctx{depth + 1, maxDepth};
@@ -1924,6 +1924,8 @@ int RunScenario(const std::string& path) {
             const bool pass = !active || router->ProcessMouse(fx, fy, static_cast<std::uint32_t>(flags));
             std::printf("tutorialfilter %d,%d flags %d: router %s, %s, now %d,%d\n", ox, oy, flags, router ? (active ? "active" : "idle") : "none",
                         pass ? "passes" : "BLOCKED", fx, fy);
+        } else if (command == "tutorialtask") {   // tutorialtask: the current tutorial task's number, kind, target and text
+            native::NativeTutorialTaskReport();
         } else if (command == "tutorialcheat") {   // tutorialcheat TEXT: the tutorial system's cheat ("Tutorial next") without the cheat box
             std::string text; std::getline(words >> std::ws, text);
             std::printf("tutorialcheat %s -> %s\n", text.c_str(), native::NativeTutorialCheat(text.c_str()) ? "sent" : "no tutorial system");
