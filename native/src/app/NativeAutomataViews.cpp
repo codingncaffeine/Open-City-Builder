@@ -3,6 +3,7 @@
 // offset (the offsets are the interface's comments in sc4/AutomataManager.h and TrafficAutomataManager.h).
 #include "app/NativeAutomataViews.h"
 #include "platform/Unwired.h"
+#include "sc4/AutomataStates.h"
 
 #include <map>
 #include <memory>
@@ -190,10 +191,22 @@ public:
             effects->SetModel(nullptr);
         }
     }
-    // The pursuit state's target (state record +0x38): PARTIAL, no pursuit natively yet.
-    IAutomataAutomaton* StateTarget() override { return nullptr; }
-    void SetStateTarget(IAutomataAutomaton*) override {
-        SC4_UNWIRED("cSC4Automaton pursuit state: the chase target (state record +0x38) is not kept natively");
+    // The pursuit state's target (tAutomataStateChase +0x38, counted; GetChaseVector reads it): the state ChaseAutomaton just
+    // pushed takes it.
+    IAutomataAutomaton* StateTarget() override {
+        auto* chase = dynamic_cast<tAutomataStateChase*>(a_.FindState(kStatePursuit));
+        auto* target = chase && chase->target ? dynamic_cast<cSC4Automaton*>(chase->target) : nullptr;
+        return target ? AutomatonView(target) : nullptr;
+    }
+    void SetStateTarget(IAutomataAutomaton* view) override {
+        auto* chase = dynamic_cast<tAutomataStateChase*>(a_.GetState());
+        if (!chase) return;
+        cSC4Automaton* target = AutomatonOf(view);
+        cIGZUnknown* object = target ? static_cast<cIGZUnknown*>(static_cast<cISC4Occupant*>(target)) : nullptr;
+        if (object == chase->target) return;
+        if (object) object->AddRef();
+        if (chase->target) chase->target->Release();
+        chase->target = object;
     }
     void SetPropertyVariant(std::uint32_t id, cRZVariant& value, bool replace) override {
         if (sc4::cISCPropertyHolder* holder = a_.AsPropertyHolder()) holder->AddProperty(id, &value, replace);

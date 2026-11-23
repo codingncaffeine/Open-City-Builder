@@ -8,6 +8,7 @@
 // A translation unit of its own because the automata headers do not combine with the situation manager's.
 #include <cmath>
 #include "platform/Unwired.h"
+#include "sc4/AutomataStates.h"
 #include <cstdint>
 #include <map>
 #include <unordered_set>
@@ -98,10 +99,11 @@ public:
     bool CheckFlag(std::uint32_t flag) override { return a_.CheckAutomataFlag(flag); }           // 0xf8
     void AddListener(cIGZMessageTarget2* target) override { a_.AddCallback(target); }            // 0x138
     void RemoveListener(cIGZMessageTarget2* target) override { a_.RemoveCallback(target); }      // 0x140
-    // 0x1c0: the pursuit state's target. PARTIAL: the recovered automaton states keep no chase target natively.
+    // 0x1c0: the pursuit state's target (tAutomataStateChase, counted).
     ISituationAutomaton* StateTarget() override {
-        SC4_UNWIRED("cSC4CitySituation automaton: the pursuit state's chase target (vslot 0x1c0) is not kept natively");
-        return nullptr;
+        auto* chase = dynamic_cast<tAutomataStateChase*>(a_.FindState(kStatePursuit));
+        auto* target = chase && chase->target ? dynamic_cast<cSC4Automaton*>(chase->target) : nullptr;
+        return target ? static_cast<ISituationAutomaton*>(ViewOfAutomaton(target)) : nullptr;
     }
     std::uint32_t GetBehavior() override { return a_.GetBehavior(); }                            // 0x1d8
     void StartSFX(std::uint32_t sfx) override { a_.StartSFX(sfx); }                              // 0x1e8
