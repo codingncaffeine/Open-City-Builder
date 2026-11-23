@@ -22,6 +22,7 @@
 #include "sc4/BuildingOccupant.h"
 #include "sc4/CommonIIDs.h"
 #include "sc4/Demolition.h"
+#include "sc4/FoundationOccupant.h"
 #include "sc4/Exemplar.h"
 #include "sc4/FloraOccupant.h"
 #include "sc4/Lot.h"
@@ -245,9 +246,10 @@ bool PhiIncludes(cISC4Occupant* occupant, const DemolitionFilterState& state) {
         return false;
     }
     switch (occupant->GetType()) {
-    case kDemolishTypeFoundation:
-        SC4_UNWIRED("cSC4Demolition filter step 5: the foundation interface's slot 9 test is not ported (every foundation passes)");
-        return true;
+    case kDemolishTypeFoundation: {   // i386 0x006326f6: cISC4FoundationOccupant (0xc8fce101) vslot 0x24 GetUsage must be 1
+        auto* foundation = dynamic_cast<sc4::cSC4FoundationOccupant*>(occupant);
+        return foundation && foundation->GetUsage() == 1;
+    }
     case kDemolishTypeBuilding: case kDemolishTypePole: case kDemolishTypeSpecial: case kDemolishTypeProp:
     case kDemolishTypeNetwork: case kDemolishTypeFlora: break;
     default: return false;
