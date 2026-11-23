@@ -2010,7 +2010,7 @@ int RunScenario(const std::string& path) {
             lastStep = step.number;
             if (stuck) continue;
             const int regionCells = step.x0 >= 0 ? (step.x1 - step.x0 + 1) * (step.z1 - step.z0 + 1) : 1;
-            if (repeats >= std::max(4, 2 * regionCells + 4)) { stuck = true; std::printf("tutorialdo: STUCK at step %d kind %d target %08x\n", step.number, step.kind, step.target); continue; }
+            if (repeats >= std::max(4, 4 * regionCells + 4)) { stuck = true; std::printf("tutorialdo: STUCK at step %d kind %d target %08x\n", step.number, step.kind, step.target); continue; }
             char buffer[256];
             std::vector<std::string> todo;
             // the region's middle cell, rounded up: an even-sized building footprint centres on the cell past the midpoint
@@ -2027,9 +2027,11 @@ int RunScenario(const std::string& path) {
                                              // bulldozed a misplaced building) tries the region's next cell, middle first
                     if (cx < 0) break;
                     look();
-                    // each cell twice (a placement's facing can differ from one click to the next), the middle rounded down first
+                    // a retry turns the building a quarter (Home, as a player does); each cell gets all four facings, the
+                    // middle rounded down first
+                    if (step.kind == 3 && repeats > 0) { todo.push_back("key Home"); todo.push_back("frames 5"); }
                     const int w = step.x1 - step.x0 + 1;
-                    const int attempt = repeats / 2;
+                    const int attempt = repeats / 4;
                     int px = (step.x0 + step.x1) / 2, pz = (step.z0 + step.z1) / 2;
                     if (attempt > 0) {
                         const int index = (attempt - 1) % std::max(1, regionCells);
