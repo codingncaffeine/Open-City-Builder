@@ -23,6 +23,8 @@
 #include "sc4/MySimDispatch.h"
 #include "sc4/MyStreetSim.h"
 #include "sc4/AdvisorSystem.h"
+#include "sc4/View3DWin.h"
+#include "sc4/ViewInputControl.h"
 #include "sc4/SLString.h"
 
 static int failures = 0;
@@ -256,7 +258,7 @@ struct ScriptLuaAdapter final : IScriptLua {
 // =====================================================================================================================
 // Fake objects for the seams.
 // =====================================================================================================================
-struct FakeOccupant final : cISC4Occupant {
+struct FakeOccupant final : sc4::cISC4Occupant {
     int refs = 0;
     float position[3] = {0.0f, 0.0f, 0.0f};
     SC4CellRect cells{0, 0, 0, 0};
@@ -264,7 +266,7 @@ struct FakeOccupant final : cISC4Occupant {
     std::uint32_t group = 0;
     bool QueryInterface(std::uint32_t iid, void** out) override {
         if (iid == kGZIID_cISC4Occupant || iid == kGZIID_cIGZUnknown) {
-            *out = static_cast<cIGZUnknown*>(static_cast<cISC4Occupant*>(this));
+            *out = static_cast<cIGZUnknown*>(static_cast<sc4::cISC4Occupant*>(this));
             AddRef();
             return true;
         }
@@ -305,7 +307,7 @@ struct FakeOccupant final : cISC4Occupant {
     std::uint32_t GetFlags() override { return 0; }
 };
 
-struct FakeBuilding final : cISC4BuildingOccupant, cISC4Occupant {
+struct FakeBuilding final : cISC4BuildingOccupant, sc4::cISC4Occupant {
     int refs = 0;
     BuildingProfile profile;
     cRZString name{"Fake Building"};
@@ -322,7 +324,7 @@ struct FakeBuilding final : cISC4BuildingOccupant, cISC4Occupant {
             return true;
         }
         if (iid == kGZIID_cISC4Occupant) {
-            *out = static_cast<cIGZUnknown*>(static_cast<cISC4Occupant*>(this));
+            *out = static_cast<cIGZUnknown*>(static_cast<sc4::cISC4Occupant*>(this));
             AddRef();
             return true;
         }
@@ -335,7 +337,7 @@ struct FakeBuilding final : cISC4BuildingOccupant, cISC4Occupant {
     }
     std::uint32_t AddRef() override { return static_cast<std::uint32_t>(++refs); }
     std::uint32_t Release() override { const int r = --refs; if (r <= 0) delete this; return static_cast<std::uint32_t>(r < 0 ? 0 : r); }
-    cISC4Occupant* AsOccupant() override { return static_cast<cISC4Occupant*>(this); }
+    sc4::cISC4Occupant* AsOccupant() override { return static_cast<sc4::cISC4Occupant*>(this); }
     std::uint32_t GetBuildingType() const override { return 0x1001; }
     void SetBuildingType(std::uint32_t) override {}
     std::int32_t GetBuildingAge() const override { return 0; }
@@ -352,7 +354,7 @@ struct FakeBuilding final : cISC4BuildingOccupant, cISC4Occupant {
     void SetLit(bool value) override { lit = value; }
     void SetName(const cRZString& value) override { name = value; }
     bool GetName(cRZString& out) override { out = name; return true; }
-    // cISC4Occupant
+    // sc4::cISC4Occupant
     bool Init() override { return true; }
     bool Shutdown() override { return true; }
     bool IsInitialized() const override { return true; }
@@ -513,11 +515,11 @@ struct FakePylon final : IMySimPylon {
     void SetBitmap(int, const cIGZString&) override { ++log->bitmaps; }
     void SetFlags(int) override { ++log->flags; }
     void SetKind(int kind) override { ++log->kinds; log->lastKind = kind; }
-    void SetLinkedObject(cISC4Occupant*) override { ++log->linked; }
-    cISC4Occupant* GetLinkedOccupant() override { return occupant; }
+    void SetLinkedObject(sc4::cISC4Occupant*) override { ++log->linked; }
+    sc4::cISC4Occupant* GetLinkedOccupant() override { return occupant; }
     void SetLinkedAgent(cIGZUnknown*) override { ++log->agents; }
     bool IsDead() const override { return false; }
-    cISC4Occupant* AsOccupant() override { return occupant; }
+    sc4::cISC4Occupant* AsOccupant() override { return occupant; }
     void SetVisibility(bool visible) override { ++log->visibility; log->lastVisible = visible; }
 };
 
@@ -605,8 +607,8 @@ struct FakeHost final : IMySimHost {
     std::vector<FakeBuilding*> candidates;
     std::vector<FakeBuilding*> nearby;
     FakeBuilding* neighbor = nullptr;
-    std::map<std::pair<int, int>, cISC4Occupant*> occupantsAtCell;
-    std::vector<cISC4Occupant*> cityOccupants;
+    std::map<std::pair<int, int>, sc4::cISC4Occupant*> occupantsAtCell;
+    std::vector<sc4::cISC4Occupant*> cityOccupants;
     float terrainHeight = 12.5f;
     float seaLevel = 10.0f;
     bool paused = false;
@@ -614,8 +616,8 @@ struct FakeHost final : IMySimHost {
     int hour = 10;
     int residentialAge = 30;
     float eq = 60.0f, hq = 70.0f;
-    std::vector<cISC4Occupant*> schools, hospitals;
-    std::map<cISC4Occupant*, float> schoolGrades, hospitalGrades;
+    std::vector<sc4::cISC4Occupant*> schools, hospitals;
+    std::map<sc4::cISC4Occupant*, float> schoolGrades, hospitalGrades;
     int lifeExpectancy = 71, crime = 33, policeCoverage = 44, fireCoverage = 45, desirability = -12;
     bool powered = true, watered = false;
     int crimeCell[2] = {-1, -1}, coverageRect[4] = {0, 0, 0, 0};
@@ -658,9 +660,9 @@ struct FakeHost final : IMySimHost {
         for (FakeBuilding* b : nearby) b->Release();
         if (neighbor) neighbor->Release();
         for (auto& entry : occupantsAtCell) entry.second->Release();
-        for (cISC4Occupant* o : cityOccupants) o->Release();
-        for (cISC4Occupant* o : schools) o->Release();
-        for (cISC4Occupant* o : hospitals) o->Release();
+        for (sc4::cISC4Occupant* o : cityOccupants) o->Release();
+        for (sc4::cISC4Occupant* o : schools) o->Release();
+        for (sc4::cISC4Occupant* o : hospitals) o->Release();
         SetMySimHost(nullptr);
     }
 
@@ -681,7 +683,7 @@ struct FakeHost final : IMySimHost {
     void BuildingsNearResidence(int, int, int, std::vector<cISC4BuildingOccupant*>& out) override {
         for (FakeBuilding* b : nearby) out.push_back(b);
     }
-    cISC4Occupant* OccupantAtCell(int x, int z) override {
+    sc4::cISC4Occupant* OccupantAtCell(int x, int z) override {
         ++occupantAtCellCalls;
         const auto it = occupantsAtCell.find({x, z});
         if (it == occupantsAtCell.end()) return nullptr;
@@ -710,10 +712,10 @@ struct FakeHost final : IMySimHost {
     int TrafficCongestion(int x, int z) override { ++congestionCalls; return (x + 2 * z) & 0xff; }
     bool SimulatorTickEnabled() override { return simulatorTick; }
     bool GamePaused() override { return paused; }
-    void SpecialBuildings(std::vector<cISC4Occupant*>& out) override { out = cityOccupants; }
+    void SpecialBuildings(std::vector<sc4::cISC4Occupant*>& out) override { out = cityOccupants; }
     void BuildingOccupantGroups(std::uint32_t, std::vector<std::uint32_t>& out) override { out = {0x1001, 0x1002}; }
-    void ResidentialServiceBuildings(bool hospital, std::vector<cISC4Occupant*>& out) override { out = hospital ? hospitals : schools; }
-    bool ResidentialServiceGrade(bool hospital, cISC4Occupant* building, float& grade) override {
+    void ResidentialServiceBuildings(bool hospital, std::vector<sc4::cISC4Occupant*>& out) override { out = hospital ? hospitals : schools; }
+    bool ResidentialServiceGrade(bool hospital, sc4::cISC4Occupant* building, float& grade) override {
         const auto& grades = hospital ? hospitalGrades : schoolGrades;
         const auto it = grades.find(building);
         if (it == grades.end()) return false;
@@ -722,8 +724,8 @@ struct FakeHost final : IMySimHost {
     }
     int ResidentialLifeExpectancy(int, int) override { return lifeExpectancy; }
     std::uint8_t BuildingCondition(cISC4BuildingOccupant* building) override { return building == jobBuilding ? 3 : 2; }
-    bool OccupantPowered(cISC4Occupant*) override { return powered; }
-    bool BuildingWatered(cISC4Occupant*) override { return watered; }
+    bool OccupantPowered(sc4::cISC4Occupant*) override { return powered; }
+    bool BuildingWatered(sc4::cISC4Occupant*) override { return watered; }
     int CrimeAtCell(int x, int z) override { crimeCell[0] = x; crimeCell[1] = z; return crime; }
     int ProtectionCoverage(bool police, int x, int z, int width, int height) override {
         coverageRect[0] = x; coverageRect[1] = z; coverageRect[2] = width; coverageRect[3] = height;
@@ -839,7 +841,7 @@ struct FakeHost final : IMySimHost {
         }
         return value != 0;
     }
-    cISC4AdviceSubject* CreateLuaSubject(cISC4Occupant* occupant, bool) override {
+    cISC4AdviceSubject* CreateLuaSubject(sc4::cISC4Occupant* occupant, bool) override {
         auto* subject = new cSC4AdviceSubject();
         subject->AddRef();
         Keep(static_cast<cIGZUnknown*>(static_cast<cISC4AdviceSubject*>(subject)));
@@ -985,6 +987,80 @@ static void BuildAdvisorTables(FakeLua& lua) {
     lua.globals["advisors"] = LuaValue::Tbl(advisors);
     lua.globals["advices"] = LuaValue::Tbl(std::make_shared<LuaTable>());
 }
+
+
+// ---- the street-sim tool's surroundings: the window manager the control base asks for, the view and the tool host ----
+struct ToolWinMgr final : cIGZWinMgr {
+    struct Dialog {
+        std::uint32_t code = 0;
+        cIGZWin* window = nullptr;
+        std::int64_t result = 0;
+    };
+    std::vector<cIGZWin*> popups;
+    std::vector<Dialog> dialogs;
+    std::vector<cIGZWin*> destroyed;
+    cIGZWin* focus = nullptr;
+    cIGZWin* mainWindow = nullptr;
+
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return 1; }
+    std::uint32_t Release() override { return 1; }
+    cIGZWin* GetMainWindow() override { return mainWindow; }
+    void EndDialog(std::uint32_t code, cIGZWin* window, std::int64_t result) override {
+        dialogs.push_back({code, window, result});
+    }
+    void AppendToPlotStrategy(cIGZWin*) override {}
+    void Plot() override {}
+    void PostMessageToTarget(cIGZWin*, const cGZMessage&) override {}
+    void AddWindowToValidList(cIGZWin*) override {}
+    void RemoveWindowFromValidList(cIGZWin*) override {}
+    void CleanUpWindowReferences(cIGZWin*) override {}
+    bool DestroyWindow(cIGZWin* window) override {
+        destroyed.push_back(window);
+        return true;
+    }
+    bool IsWindowValid(cIGZWin* window) override { return window != nullptr; }
+    cIGZWin* GetWindowFromPoint(int, int) override { return nullptr; }
+    void GetCursorPos(cIGZWin*, int& x, int& y) override { x = y = 0; }
+    void SetCurrentMouseWin(cIGZWin*) override {}
+    cIGZWin* GZGetCapture() override { return nullptr; }
+    void GZSetCapture(cIGZWin*) override {}
+    void GZReleaseCapture(cIGZWin*) override {}
+    cIGZCursorManager* GetCursorManager() override { return nullptr; }
+    cIGZWin* GZGetFocus() override { return focus; }
+    void GZSetFocus(cIGZWin* window) override { focus = window; }
+    cIGZKeyboard* GetKeyboard() override { return nullptr; }
+    int RunPopup(cIGZWin* popup) override {
+        popups.push_back(popup);
+        return 0;
+    }
+};
+
+struct ToolInputHost final : IViewInputHost {
+    ToolWinMgr manager;
+    IViewInputView* View3D() override { return nullptr; }
+    cIGZWinMgr* WindowManager() override { return &manager; }
+    void PlaySound(int, std::uint32_t) override {}
+};
+struct ToolView final : cISC4View3DWin {
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return 1; }
+    std::uint32_t Release() override { return 1; }
+    cSC4ViewInputControl* GetCurrentViewInputControl() override { return current; }
+    bool SetCurrentViewInputControl(cSC4ViewInputControl* control, int operation) override {   // the stack holds a reference
+        if (control) control->AddRef();
+        pushed = control; pushOp = operation; current = control; return true;
+    }
+    bool RemoveCurrentViewInputControl(bool) override { ++removals; current = nullptr; return true; }
+    bool PickOccupant(int, int, sc4::cISC4Occupant*& out) override { out = picked; return picked != nullptr; }
+    bool PickTerrain(int, int, float* out, bool) override { out[0] = ground[0]; out[1] = ground[1]; out[2] = ground[2]; return terrain; }
+    cSC4ViewInputControl* current = nullptr;
+    cSC4ViewInputControl* pushed = nullptr;
+    int pushOp = -1, removals = 0;
+    sc4::cISC4Occupant* picked = nullptr;
+    bool terrain = false;
+    float ground[3] = {0.0f, 0.0f, 0.0f};
+};
 
 int main() {
     SubjectHost subjectHost;
@@ -1358,7 +1434,7 @@ int main() {
         const int distance = sim->DistanceToClosest(0x1001);
         CHECK(distance == 50);                                           // sqrt(30^2 + 40^2)
         CHECK(sim->DistanceToClosest(0x9999) == -1);
-        std::vector<cISC4Occupant*> city;
+        std::vector<sc4::cISC4Occupant*> city;
         auto* special = new FakeBuilding();
         special->AddRef();
         special->position[0] = 100.0f;
@@ -1697,18 +1773,18 @@ int main() {
             bool QueryInterface(std::uint32_t, void**) override { return false; }
             std::uint32_t AddRef() override { return 1; }
             std::uint32_t Release() override { return 1; }
-            int TrackOccupant(cISC4Occupant* occupant, int type, std::uint32_t number, const cRZString*) override {
+            int TrackOccupant(sc4::cISC4Occupant* occupant, int type, std::uint32_t number, const cRZString*) override {
                 tracked = occupant; trackType = type; trackNumber = number; return 77;
             }
             void UntrackOccupant(int id, bool force) override { untracked.push_back(id); untrackForce = force; }
-            cISC4Occupant* tracked = nullptr; int trackType = -1; std::uint32_t trackNumber = 0;
+            sc4::cISC4Occupant* tracked = nullptr; int trackType = -1; std::uint32_t trackNumber = 0;
             std::vector<int> untracked; bool untrackForce = true;
         };
         struct StreetAutomaton final : IMySimDispatchAutomaton, IMySimDispatchRoute {
             bool QueryInterface(std::uint32_t, void**) override { return false; }
             std::uint32_t AddRef() override { return ++refs; }
             std::uint32_t Release() override { return --refs; }
-            cISC4Occupant* AsOccupant() override { return occupant; }
+            sc4::cISC4Occupant* AsOccupant() override { return occupant; }
             void Remove(bool) override {}
             bool PlayAnim(std::uint32_t) override { return true; }
             void SetAutomataFlag(std::uint32_t flag, bool on) override { flags = on ? (flags | flag) : (flags & ~flag); }
@@ -1723,7 +1799,7 @@ int main() {
             bool GetRouteInfo(std::deque<RouteData>&) const override { return false; }
             bool SetRouteInfo(const std::deque<RouteData>&, bool, bool) override { return false; }
             void SetCellLifespan(std::uint8_t lifespan) override { cellLifespan = lifespan; }
-            int refs = 1; cISC4Occupant* occupant = nullptr; std::uint32_t flags = 0, behavior = 0; bool car = false;
+            int refs = 1; sc4::cISC4Occupant* occupant = nullptr; std::uint32_t flags = 0, behavior = 0; bool car = false;
             cIGZMessageTarget2* callback = nullptr; int cellLifespan = -1;
         };
         StreetView view;
@@ -1786,6 +1862,75 @@ int main() {
         street->DoMessage(removed);
         CHECK(!street->Attached() && street->Automaton() == nullptr);
         removed->Release();
+        // ---- the street-sim tool: the button creates it on the view, hover marks, a click attaches, Escape and HideLocation end it
+        {
+            struct ToolHost final : IMyStreetSimToolHost {
+                ToolView view;
+                std::vector<sc4::cISC4Occupant*> box;
+                std::vector<std::pair<sc4::cISC4Occupant*, IMySimDispatchAutomaton*>> automata;
+                float boxMin[3] = {0, 0, 0}, boxMax[3] = {0, 0, 0};
+                cISC4View3DWin* View() override { return &view; }
+                void OccupantsInBox(const float min[3], const float max[3], std::vector<sc4::cISC4Occupant*>& out) override {
+                    for (int i = 0; i < 3; ++i) { boxMin[i] = min[i]; boxMax[i] = max[i]; }
+                    out = box;
+                }
+                IMySimDispatchAutomaton* StreetAutomaton(sc4::cISC4Occupant* occupant) override {
+                    for (auto& entry : automata) if (entry.first == occupant) { entry.second->AddRef(); return entry.second; }
+                    return nullptr;
+                }
+            } toolHost;
+            ToolInputHost inputHost;
+            SetViewInputHost(&inputHost);
+            SetMyStreetSimToolHost(&toolHost);
+            CHECK(street->CreateMyStreetSimTool());
+            auto* tool = static_cast<cSC4MyStreetSimInputControl*>(toolHost.view.pushed);
+            CHECK(tool && toolHost.view.pushOp == 2 && tool->GetID() == kMyStreetSimToolId && !tool->ShouldStack());
+            if (tool) {
+                // a bus under the pointer is marked; a flagged one (automata flag 1) is not
+                walker->group = 0x4200;
+                StreetAutomaton busUnder;
+                busUnder.occupant = walker;
+                toolHost.automata = {{walker, &busUnder}};
+                toolHost.view.picked = walker;
+                tool->OnMouseMove(5, 5, 0);
+                CHECK(tool->Hovered() == &busUnder);
+                busUnder.flags = 1;
+                tool->OnMouseMove(5, 5, 0);
+                CHECK(tool->Hovered() == nullptr);
+                busUnder.flags = 0;
+                // nothing under the pointer: a person within 3 x 7 x 3 of the picked ground
+                toolHost.view.picked = nullptr;
+                toolHost.view.terrain = true;
+                toolHost.view.ground[0] = 100.0f; toolHost.view.ground[1] = 50.0f; toolHost.view.ground[2] = 200.0f;
+                auto* nearby = new FakeOccupant();
+                nearby->AddRef();
+                nearby->group = 0x4001;
+                StreetAutomaton personNear;
+                personNear.occupant = nearby;
+                toolHost.automata.push_back({nearby, &personNear});
+                toolHost.box = {walker, nearby};   // the bus is not a person: skipped
+                tool->OnMouseMove(5, 5, 0);
+                CHECK(tool->Hovered() == &personNear);
+                CHECK(toolHost.boxMin[0] == 97.0f && toolHost.boxMin[1] == 43.0f && toolHost.boxMax[2] == 203.0f);
+                // a click when the tool is not on top does nothing; on top it attaches
+                toolHost.view.current = nullptr;
+                CHECK(!tool->OnMouseDownL(5, 5, 0));
+                CHECK(!street->Attached());
+                toolHost.view.current = tool;
+                CHECK(tool->OnMouseDownL(5, 5, 0));
+                CHECK(street->Attached() && street->Automaton() == &personNear);
+                // HideLocation ends the tool when it is the current control
+                street->HideLocation();
+                CHECK(toolHost.view.removals == 1 && toolHost.view.current == nullptr);
+                CHECK(tool->OnKeyDown(0x1b, 0) && !tool->OnKeyDown(0x20, 0));
+                street->DetachAutomaton();
+                tool->Shutdown();
+                tool->Release();   // the fake stack's reference
+                nearby->Release();
+            }
+            SetMyStreetSimToolHost(nullptr);
+            SetViewInputHost(nullptr);
+        }
         // no automaton: the day does nothing (the base would advance the sim)
         street->simulate_day();
         street->Shutdown();

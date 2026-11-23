@@ -278,7 +278,8 @@ bool cSC4MyStreetSimInputControl::OnMouseDownL(int, int, std::uint32_t) {
         bool value = false;
         cISC4Occupant* occupant = hovered_->AsOccupant();
         cISCPropertyHolder* holder = occupant ? occupant->AsPropertyHolder() : nullptr;
-        if (!cSCPropertyHelp::GetPropertyValue(holder, kPropertyNoStreetSim, value) && sim_)
+        // Port guard: an occupant without a property holder counts as lacking the property (the original never meets one).
+        if ((!holder || !cSCPropertyHelp::GetPropertyValue(holder, kPropertyNoStreetSim, value)) && sim_)
             sim_->AttachAutomaton(hovered_.get());   // street view vslot 0xc
     }
     return true;
