@@ -656,8 +656,12 @@ bool cSC4TutorialUIWinProc::IsRightBuildingPosition(float x, float z) {
     int cellX = 0, cellZ = 0;
     if (!g_host || !task || !g_host->PositionToCell(x, z, cellX, cellZ)) return false;
     SC4TutorialRect lot{};
-    if (!g_host->LotRectAtCell(cellX, cellZ, lot)) return false;
+    const bool haveLot = g_host->LotRectAtCell(cellX, cellZ, lot);
     const SC4TutorialRect& area = task->GetRegion();
+    static const bool trace = std::getenv("SC4_TUTORIALDEBUG") != nullptr;
+    if (trace) std::fprintf(stderr, "tutorial: building at %.1f,%.1f cell %d,%d lot %d %d,%d..%d,%d region %d,%d..%d,%d\n", x, z, cellX, cellZ,
+                            haveLot, lot.x0, lot.z0, lot.x1, lot.z1, area.x0, area.z0, area.x1, area.z1);
+    if (!haveLot) return false;
     return area.x0 == lot.x0 && area.z0 == lot.z0 && area.x1 == lot.x1 && area.z1 == lot.z1;
 }
 
@@ -871,7 +875,10 @@ bool cSC4TutorialUIWinProc::DoMessage(cIGZMessage2* message) {
             else ShowTryAgain(task);
         } else if (kind == kTaskBuilding) {
             std::uint32_t buildingType = 0;
-            if (!g_host->BuildingType(occupant, buildingType) || buildingType != task->GetTargetGUID()) break;
+            const bool typed = g_host->BuildingType(occupant, buildingType);
+            static const bool trace = std::getenv("SC4_TUTORIALDEBUG") != nullptr;
+            if (trace) std::fprintf(stderr, "tutorial: building placed type %d %08x want %08x\n", typed, buildingType, task->GetTargetGUID());
+            if (!typed || buildingType != task->GetTargetGUID()) break;
             float position[3] = {};
             occupant->GetPosition(position);
             if (IsRightBuildingPosition(position[0], position[2])) {
