@@ -1,4 +1,6 @@
 #include "sc4/NetworkOccupantModel.h"
+#include "sc4/ViewUtilities.h"
+#include "sc4/GeometryUtilities.h"
 
 #include "platform/Unwired.h"
 #include "sc4/DrawContext.h"
@@ -160,6 +162,21 @@ void cSC4NetworkOccupantModel::DrawOneWayArrow(SC4DrawContext* context, const cS
     if (occupant_.HasNetworkFlag(kNetworkFlagQuadDrawB)) context->DrawPrimsIndexed(0, 3, indices + 3);
     context->SetRenderState(state);
     occupant_.SetTextureCoordinates(occupant_.GetRotationAndFlip());
+}
+
+// cSC4NetworkOccupant::Pick (i386 0x00133abc): the ray against the piece's bounding box with its top raised 0.1 m (a flat piece
+// still has a face to hit); a hit no farther than the nearest so far becomes the nearest.
+bool cSC4NetworkOccupantModel::Pick(cSC4PickContext* context) {
+    if (!context) return false;
+    float boxMin[3], boxMax[3];
+    occupant_.GetBoundingBox(boxMin, boxMax);
+    boxMax[1] += 0.1f;   // i386 0x00a70714
+    float hit[3] = {0.0f, 0.0f, 0.0f};
+    if (!SC4GeometryUtilities::RayIntersectsBoundingBox(&context->origin.x, &context->direction.x, boxMin, boxMax, hit)) return false;
+    const float distance = SC4GeometryUtilities::LengthOfLine(&context->origin.x, hit);
+    if (distance > context->maxDistance) return false;
+    context->maxDistance = distance;
+    return true;
 }
 
 }  // namespace sc4
