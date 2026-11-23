@@ -1629,6 +1629,44 @@ float cSC4ResidentialSimulator::TractQuotient(const SimGridPtr<float> (&values)[
     return (values[0]->GetTractValue(x, z) * float(p0) + s) / float(sum);
 }
 
+bool cSC4ResidentialSimulator::GetMinAndMaxCellCoords(bool hq, std::uint32_t& minX, std::uint32_t& minZ, std::uint32_t& maxX,
+                                                      std::uint32_t& maxZ, float& minValue, float& maxValue) {
+    const SimGridPtr<float> (&values)[3] = hq ? hq_ : eq_;
+    if (GetPopulation() == 0 || !values[0] || !populationGrids_[0]) {
+        minX = minZ = maxX = maxZ = 0;
+        minValue = maxValue = 0.0f;
+        return false;
+    }
+    const std::int32_t countX = values[0]->GetTractCountX(), countZ = values[0]->GetTractCountZ();   // vslots 0x30 / 0x34
+    minValue = 200.0f;
+    maxValue = -200.0f;
+    std::uint32_t lowX = 0, lowZ = 0, highX = 0, highZ = 0;   // the original leaves them unset when no tract qualifies
+    for (std::int32_t x = 0; x < countX; ++x) {
+        for (std::int32_t z = 0; z < countZ; ++z) {
+            if (populationGrids_[0]->GetTractValue(x, z) == 0 && populationGrids_[1]->GetTractValue(x, z) == 0 &&
+                populationGrids_[2]->GetTractValue(x, z) == 0)
+                continue;
+            const float value = TractQuotient(values, x, z);
+            if (value < minValue) {
+                minValue = value;
+                lowX = static_cast<std::uint32_t>(x);
+                lowZ = static_cast<std::uint32_t>(z);
+            }
+            if (maxValue < value) {
+                maxValue = value;
+                highX = static_cast<std::uint32_t>(x);
+                highZ = static_cast<std::uint32_t>(z);
+            }
+        }
+    }
+    const std::uint32_t size = static_cast<std::uint32_t>(values[0]->GetTractSize());   // vslot 0x28
+    minX = size * lowX + size / 2;
+    minZ = size * lowZ + size / 2;
+    maxX = size * highX + size / 2;
+    maxZ = size * highZ + size / 2;
+    return true;
+}
+
 float cSC4ResidentialSimulator::GetCellEQ(unsigned x, unsigned z) const {
     if (!eq_[0]) return 0.0f;
     const unsigned T = static_cast<unsigned>(eq_[0]->GetTractSize());

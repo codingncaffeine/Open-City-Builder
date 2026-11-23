@@ -8,6 +8,7 @@
 #include <cstring>
 #include "platform/Unwired.h"
 #include <cstdint>
+#include <cfloat>
 #include <cstdio>
 #include <cstdlib>
 #include <list>
@@ -75,6 +76,13 @@ void LocalAtCell(const char* name, double value, int x, int z) {
     if (subject) subject->Release();
 }
 void LocalNone(const char* name, double value) { H()->SetLocal(name, value, nullptr); }
+// A subject naming an object (subject vslot 0x1c SetObject with the object's QueryInterface(1)); none without one.
+void LocalAtObject(const char* name, double value, cIGZUnknown* object) {
+    cISC4AdviceSubject* subject = nullptr;
+    if (object && H()->CreateAdviceSubject(&subject) && subject) subject->SetObject(object);
+    H()->SetLocal(name, value, subject);
+    if (subject) subject->Release();
+}
 
 float DepartmentFunding(std::uint32_t id) {
     auto* b = Comp<cSC4BudgetSimulator>(CityComponent::BudgetSimulator);
@@ -161,9 +169,38 @@ void CityPlanning() {
 
 // ---- HQ occupant variables (7.5)
 void HQ() {
-    SC4_UNWIRED("UpdateSimulatorStatistics HQ (advisors.md 7.5): the occupant minimum-funding / grade locals and the tract extremes are not published");
     auto* res = Comp<cSC4ResidentialSimulator>(CityComponent::ResidentialSimulator);
     if (!res) return;
+    // cSC4AdvisorHQ::update_occupant_variables (i386 0x00332f24): each list walked back to front; the lowest staff funding
+    // fraction (residential vslot 0x50, the list's purpose) x 100 and the lowest grade x 100 (query data, vslot 0x6c / 0x68),
+    // strict <, from FLT_MAX, each with the building as its subject.
+    auto lowest = [&](bool school, std::initializer_list<std::uint32_t> groups, const char* fundingName, const char* gradeName) {
+        std::vector<std::uint32_t> g(groups);
+        cSC4ResidentialSimulator::OccupantList list;
+        if (school) res->GetSchoolBuildings(list, &g); else res->GetHospitalBuildings(list, &g);
+        float minFunding = FLT_MAX, minGrade = FLT_MAX;
+        IResidentialOccupant* fundingAt = nullptr;
+        IResidentialOccupant* gradeAt = nullptr;
+        for (auto it = list.rbegin(); it != list.rend(); ++it) {
+            IResidentialOccupant* o = *it;
+            if (!o) continue;
+            float staff = 0.0f, vehicle = 0.0f;
+            res->GetOccupantFundingPercentages(o, staff, vehicle, school);
+            if (staff < minFunding) { minFunding = staff; fundingAt = o; }
+            ResidentialQueryData q;
+            if (school) res->GetSchoolQueryData(o, q); else res->GetHospitalQueryData(o, q);
+            const float grade = q.grade * 100.0f;
+            if (grade < minGrade) { minGrade = grade; gradeAt = o; }
+        }
+        LocalAtObject(fundingName, minFunding * 100.0f, fundingAt ? fundingAt->Object() : nullptr);
+        LocalAtObject(gradeName, minGrade, gradeAt ? gradeAt->Object() : nullptr);
+        for (auto* o : list) if (o) o->Release();
+    };
+    lowest(false, {0x1513}, "l_hospital_funding_l", "l_hospital_grade_l");
+    lowest(false, {0x1512}, "l_clinic_funding_l", "l_clinic_grade_l");
+    lowest(true, {0x150f, 0x1510, 0x1514, 0x1504}, "l_school_funding_l", "l_school_grade_l");
+    lowest(true, {0x1506}, "l_museum_funding_l", "l_museum_grade_l");
+    lowest(true, {0x1505}, "l_library_funding_l", "l_library_grade_l");
     auto count = [&](bool school, std::initializer_list<std::uint32_t> groups) {
         std::vector<std::uint32_t> g(groups);
         cSC4ResidentialSimulator::OccupantList list;

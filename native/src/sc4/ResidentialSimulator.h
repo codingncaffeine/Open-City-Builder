@@ -254,6 +254,10 @@ public:
     cSC4SimGrid<float>* GetAverageEQGrid(float* minimum, float* maximum) const;
     cSC4SimGrid<float>* GetAverageHQGrid(float* minimum, float* maximum) const;
     cSC4SimGrid<float>* GetGradeMap(bool school) const { return school ? schoolGrade_.get() : hospitalGrade_.get(); }   // 39 / 40
+    // i386 0x001754a4 / 0x00175698 (vslots 0xac / 0xb0): the lowest and highest populated tract's population-weighted EQ / HQ
+    // (strict < from 200 and strict > from -200) and their center cells; all zero and false with no population.
+    bool GetMinAndMaxCellCoords(bool hq, std::uint32_t& minX, std::uint32_t& minZ, std::uint32_t& maxX, std::uint32_t& maxZ,
+                                float& minValue, float& maxValue);
     float GetCellEQ(unsigned x, unsigned z) const;    // slots 35 / 36: cell coordinates
     float GetCellHQ(unsigned x, unsigned z) const;
     float GetCellEQByWealth(unsigned x, unsigned z, int wealth) const;

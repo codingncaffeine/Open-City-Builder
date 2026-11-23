@@ -871,8 +871,18 @@ public:
         if (!r) return 0.0f;
         return vslot == 0x108 ? r->GetGlobalHQ() : vslot == 0x100 ? r->GetGlobalEQ() : 0.0f;
     }
-    void ResidentialTracts(std::uint32_t, float& bestValue, int& bestX, int& bestZ, float& worstValue, int& worstX, int& worstZ) override {
+    // Residential vslots 0xac / 0xb0 (Mac 0x158 EQ / 0x160 HQ) GetEQ/HQMinAndMaxCellCoords: the lowest tract as "best", the
+    // highest as "worst", as cSC4AdvisorHQ publishes them.
+    void ResidentialTracts(std::uint32_t vslot, float& bestValue, int& bestX, int& bestZ, float& worstValue, int& worstX, int& worstZ) override {
         bestValue = worstValue = 0.0f; bestX = bestZ = worstX = worstZ = 0;
+        auto* r = Comp<cSC4ResidentialSimulator>(CityComponent::ResidentialSimulator);
+        if (!r) return;
+        std::uint32_t minX = 0, minZ = 0, maxX = 0, maxZ = 0;
+        r->GetMinAndMaxCellCoords(vslot == 0x160, minX, minZ, maxX, maxZ, bestValue, worstValue);
+        bestX = static_cast<int>(minX);
+        bestZ = static_cast<int>(minZ);
+        worstX = static_cast<int>(maxX);
+        worstZ = static_cast<int>(maxZ);
     }
     bool MessageVoid1IsPropertyHolder(cIGZMessage2*) override { return false; }
     bool MessageVoid1HasProperty(cIGZMessage2*, std::uint32_t) override { return false; }
