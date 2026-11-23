@@ -9,6 +9,8 @@
 #include "sc4/NetworkOccupantWithPreBuiltModel.h"
 
 #include <algorithm>
+#include <cstdlib>
+#include <cstdio>
 #include <cfloat>
 #include <cmath>
 
@@ -531,6 +533,10 @@ void cSC4NetworkOccupantWithPreBuiltModel::ComputeBoundingBox(float* minXyz, flo
                 box.min[0] = box.min[1] = box.min[2] = 1.0f;
                 box.max[0] = box.max[1] = box.max[2] = 0.0f;
                 instance->GetWorldBounds(box);
+                static const bool trace = std::getenv("SC4_NETDEBUG") != nullptr;
+                if (trace && HasNetworkFlag(0x200000))
+                    std::fprintf(stderr, "prebuilt bounds: node piece %08x instance %d/%d box %.0f,%.0f,%.0f..%.0f,%.0f,%.0f\n", PieceId(), i, count,
+                                 box.min[0], box.min[1], box.min[2], box.max[0], box.max[1], box.max[2]);
                 if (box.min[0] <= box.max[0]) {
                     if (runMinX <= runMaxX) {
                         if (runMaxX <= box.max[0]) runMaxX = box.max[0];

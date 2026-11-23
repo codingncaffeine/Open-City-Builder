@@ -1156,6 +1156,7 @@ void cSC4NetworkTool::PlaceNetworkOccupantById(int x, int z, std::uint32_t piece
     const std::int32_t v0 = z * widthPlusOne_ + x;
     const std::int32_t ids[4] = {v0, v0 + widthPlusOne_, v0 + widthPlusOne_ + 1, v0 + 1};
     for (int i = 0; i < 4; ++i) {
+        cell.vertexBaseHeights[i] = ids[i];                                               // the record keeps the corner vertex ids
         const float terrain = host ? host->TerrainVertexHeight(ids[i]) : 0.0f;          // terrain vslot 0x34
         cell.vertexHeights[i] = GetNetworkHeightForTerrainHeight(terrain);
         cell.range70[i] = {cell.vertexHeights[i] - deviation, cell.vertexHeights[i] + deviation};
