@@ -922,12 +922,10 @@ bool cSC4PowerPoleOccupant::Read(cIGZIStream& stream) {
     if (!sbInited) StaticInit();
     std::uint16_t version = 0;
     stream.GetUint16(version);
-    if (version < 5) {   // PARTIAL: the legacy transform of versions 3 and 4 is not recovered
-        SC4_UNWIRED("cSC4PowerPoleOccupant::Read: version 3 / 4 record (legacy transform) refused");
-        return false;
-    }
+    if (version < 4) return false;   // i386 0x00258952: older records are refused
     if (cSC4Occupant::Read(stream)) {
-        stream >> transform_;
+        if (version < 5) LoadLegacyS3DTransform(stream, transform_);   // S3DTransformLegacyLoad
+        else stream >> transform_;
         for (float& value : position_) stream.GetFloat32(value);
         std::uint32_t count = 0;
         stream.GetUint32(count);
