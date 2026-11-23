@@ -360,3 +360,18 @@ void NativeDispatchViewUseAlternateModel(std::uint32_t id, bool alternate) {
 }
 
 }  // namespace native
+
+// cSC4MySim::GetCurrentScreenLocationXY (i386 0x00541704): the dispatch manager's vehicle view (vslot 0x58) and its last screen
+// icon rectangle for the track handle {left, top, right, bottom}; false without either.
+namespace native {
+bool NativeDispatchIconRect(std::uint32_t handle, int rect[4]) {
+    sc4::cSC4DispatchVehicleView* view = native::NativeDispatchVehicleView();
+    const sc4::DispatchViewRect* found = view ? view->GetLastScreenIconRect(handle) : nullptr;
+    if (!found) return false;
+    rect[0] = found->left;
+    rect[1] = found->top;
+    rect[2] = found->right;
+    rect[3] = found->bottom;
+    return true;
+}
+}  // namespace native

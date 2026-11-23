@@ -101,6 +101,7 @@ sc4::ISituationAutomaton* SituationAutomatonOf(void* engineAutomaton);          
 sc4::ISituationOccupant* SituationViewOfOccupant(void* engineOccupant);
 void SituationEnterPlayerDriveView(sc4::ISituationAutomaton* automaton, cIGZMessageTarget2* target);
 sc4::IMySimEffect* NativeCreateMySimEffect(const char* name);   // app/NativeDisasterTools.cpp
+bool NativeDispatchIconRect(std::uint32_t handle, int rect[4]);  // app/NativeDispatchVehicleView.cpp
 
 cIGZWin* NativeCityView3DWindow();                                                // app/NativeCityUi.cpp
 const sc4::cISCPropertyHolder* NativeSimulatorExemplar(std::uint32_t instance);   // app/NativeSimHosts.cpp
@@ -710,7 +711,7 @@ public:
         if (occupants && sound) occupants->InsertOccupant(static_cast<HomeSound*>(sound)->Occupant(), 0);
     }
     IMySimEffect* CreateGhostEffect() override { return NativeCreateMySimEffect("MySimGhost"); }
-    bool DispatchIconRect(int, int*) override { SC4_UNWIRED("IMySimHost::DispatchIconRect (dispatch view icon of a tracked MySim)"); return false; }
+    bool DispatchIconRect(int track, int* rect) override { return NativeDispatchIconRect(static_cast<std::uint32_t>(track), rect); }
     // --- objects ---
     IMySimDispatch* CreateDispatch(cSC4MySim* owner) override {   // cSC4MySimDispatch ctor (i386 0x0047...; owner = the sim)
         auto* dispatch = new cSC4MySimDispatch(static_cast<IMySimDispatchOwner*>(owner));
