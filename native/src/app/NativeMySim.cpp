@@ -62,6 +62,7 @@
 #include "sc4/MySim.h"
 #include "sc4/MyStreetSim.h"
 #include "sc4/MySimInputControls.h"
+#include "sc4/SLBuffer.h"
 #include "sc4/CitySituationManager.h"
 #include "sc4/RenderProperties.h"
 #include "s3d/ModelInstance.h"
@@ -665,7 +666,24 @@ public:
     }
     bool CityName(cIGZString& out) override { cSC4City* c = HostCity(); if (!c) return false; c->GetCityName(out); return true; }
     IMySimCallout* CreateCallout() override { SC4_UNWIRED("IMySimHost::CreateCallout (cSC4WinCalloutBox over the MySim residence)"); return nullptr; }
-    bool LoadMySimBitmap(std::uint32_t, const cIGZString*, cIGZBuffer**) override { SC4_UNWIRED("IMySimHost::LoadMySimBitmap (MySim portraits)"); return false; }
+    // cSC4MySim::GetBitmapBuffer (i386 0x00543daa): the portrait {0x856ddbac, 0x46a006b0, id}, or without an id the image file
+    // the sim names (the image loader 0xa2ffb5d3 at color type 8); one reference for the caller.
+    bool LoadMySimBitmap(std::uint32_t bitmapId, const cIGZString* file, cIGZBuffer** out) override {
+        if (!out) return false;
+        *out = nullptr;
+        cIGZBuffer* buffer = nullptr;
+        if (bitmapId != 0) {
+            cSLBuffer image(cGZPersistResourceKey{0x856ddbac, 0x46a006b0, bitmapId}, 1, false);
+            buffer = image.GetBuffer();
+            if (buffer) buffer->AddRef();
+        } else if (file && file->Strlen() != 0) {
+            cSLBuffer image(cRZString(file->ToChar()), 8, false);
+            buffer = image.GetBuffer();
+            if (buffer) buffer->AddRef();
+        }
+        *out = buffer;
+        return buffer != nullptr;
+    }
     bool CalloutImageAvailable() override { return false; }   // the callout is not native (CreateCallout)
     void ProjectPointToScreen(float xyz[3]) override { float out[3]; if (NativeProjectToViewport(xyz, out)) { xyz[0] = out[0]; xyz[1] = out[1]; xyz[2] = out[2]; } }
     void ReportSimEvent(const cIGZString& text, const float*) override { std::fprintf(stderr, "mysim: event %s\n", text.ToChar()); }
