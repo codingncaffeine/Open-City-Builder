@@ -230,11 +230,13 @@ private:
     cRZString decalColor_;                   // +0xd8
     bool started_ = false;                   // +0x100
     int whichFunction_ = 0;                  // +0x104
-    SC4TutorialRect region_;                 // +0x108
-    std::int32_t startX_ = 0;                // +0x118
-    std::int32_t startZ_ = 0;                // +0x11c
-    std::int32_t endX_ = 0;                  // +0x120
-    std::int32_t endZ_ = 0;                  // +0x124
+    // The constructor (i386 0x000d4716) sets all eight to -1: a task without a region has x0 < 0 (the zone tool's
+    // tutorial gate lets those through).
+    SC4TutorialRect region_{-1, -1, -1, -1}; // +0x108
+    std::int32_t startX_ = -1;               // +0x118
+    std::int32_t startZ_ = -1;               // +0x11c
+    std::int32_t endX_ = -1;                 // +0x120
+    std::int32_t endZ_ = -1;                 // +0x124
     bool csi_ = false;                       // +0x128
     bool csiVisibleSaved_ = false;           // +0x129
     std::int32_t cameraX_ = 0;               // +0x12c

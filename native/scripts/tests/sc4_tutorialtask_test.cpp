@@ -494,7 +494,8 @@ int main() {
         CHECK_EQ(task->GetWindowOffsetY(), 0);
         CHECK(task->IsEdgeScrollingAllowed());   // the no-edge-scroll byte starts 0
         CHECK(task->GetTargetWindow() == nullptr);
-        CHECK(task->GetRegion().x0 == 0 && task->GetRegion().x1 == 0);
+        // the constructor (i386 0x000d4716) starts the region at -1: no region until the action table gives one
+        CHECK(task->GetRegion().x0 == -1 && task->GetRegion().z0 == -1 && task->GetRegion().x1 == -1 && task->GetRegion().z1 == -1);
         CHECK(Text(task->GetInstructionMsg()).empty());
         CHECK(task->DoLink(cRZString("x")));
         CHECK(task->Shutdown());
@@ -647,7 +648,7 @@ int main() {
         CHECK(task->Init(&lua, 1));       // Init always returns true
         CHECK(task->IsValid());           // quirk: the valid flag is re-armed at the end
         CHECK_EQ(task->GetWhichFunction(), 0);
-        CHECK_EQ(task->GetRegion().x1, 0);   // the numbers after the failed one were not read
+        CHECK_EQ(task->GetRegion().x1, -1);  // the numbers after the failed one were not read: the constructor's -1 stays
         CHECK(!task->ExecuteTask());          // function 0 does nothing
         CHECK(lua.stack.empty());             // SetTop restored the stack
         DestroyTask(task);
