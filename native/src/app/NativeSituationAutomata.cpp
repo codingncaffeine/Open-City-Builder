@@ -8,6 +8,7 @@
 // A translation unit of its own because the automata headers do not combine with the situation manager's.
 #include <cmath>
 #include "platform/Unwired.h"
+#include "sc4/NetworkOccupant.h"
 #include "sc4/AutomataStates.h"
 #include <cstdint>
 #include <map>
@@ -68,13 +69,18 @@ public:
     bool IsInGroup(std::uint32_t group) override { return o_.IsOccupantGroup(group); }  // 0xb0
     void SetGroup(std::uint32_t group) override { o_.AddOccupantGroup(group); }         // 0xb8
     ISituationAutomaton* AsAutomaton() override;                                        // QueryInterface(0xa9b40f05)
-    // Recovered-partial: the network occupant queries feed the coverage missions, which are not recovered.
-    bool IsNetworkOccupant() override {
-        SC4_UNWIRED("cSC4CitySituation occupant: the network occupant queries (coverage missions) are not recovered (never a network piece)");
-        return false;
+    // The network occupant queries (QI 0xa821ef94): a network piece, its flags (vslot 0x48 HasAnyNetworkFlag) and its cell.
+    bool IsNetworkOccupant() override { return dynamic_cast<cSC4NetworkOccupant*>(&o_) != nullptr; }
+    bool NetworkFlagsMatch(std::uint32_t flags) override {
+        auto* network = dynamic_cast<cSC4NetworkOccupant*>(&o_);
+        return network && network->HasAnyNetworkFlag(flags);
     }
-    bool NetworkFlagsMatch(std::uint32_t) override { return false; }
-    void NetworkCell(int& x, int& z) override { x = z = 0; }
+    void NetworkCell(int& x, int& z) override {
+        std::uint32_t cx = 0, cz = 0;
+        if (auto* network = dynamic_cast<cSC4NetworkOccupant*>(&o_)) network->GetOccupiedCell(cx, cz);
+        x = static_cast<int>(cx);
+        z = static_cast<int>(cz);
+    }
 
 private:
     cISC4Occupant& o_;
@@ -276,6 +282,34 @@ private:
     float center_[3];
 };
 
+// cSC4OccupantFilterByNetworkFlags (i386 0x007fdeea): network pieces (QI 0xa821ef94) with any of the flags (vslot 0x24), and with
+// a minimum distance those closer than it (measured at the center's height) are left out.
+class NetworkFlagsDistanceFilter final : public cSC4OccupantFilter {
+public:
+    NetworkFlagsDistanceFilter(std::uint32_t flags, const float center[3], float minDistanceSquared)
+        : flags_(flags), minDistanceSquared_(minDistanceSquared) {
+        center_[0] = center ? center[0] : 0.0f;
+        center_[1] = center ? center[1] : 0.0f;
+        center_[2] = center ? center[2] : 0.0f;
+    }
+    bool IsOccupantIncluded(cISC4Occupant* occupant) override {
+        auto* network = dynamic_cast<cSC4NetworkOccupant*>(occupant);
+        if (!network || !network->HasAnyNetworkFlag(flags_)) return false;
+        if (0.0f < minDistanceSquared_) {
+            float position[3] = {0, 0, 0};
+            occupant->GetPosition(position);
+            position[1] = center_[1];
+            const float dx = position[0] - center_[0], dy = position[1] - center_[1], dz = position[2] - center_[2];
+            if (dx * dx + dy * dy + dz * dz < minDistanceSquared_) return false;
+        }
+        return true;
+    }
+private:
+    std::uint32_t flags_;
+    float minDistanceSquared_;
+    float center_[3];
+};
+
 class OccupantManagerView final : public ISituationOccupantManager {
 public:
     static cISC4OccupantManager* Engine() {
@@ -308,9 +342,25 @@ public:
         filter->Release();
         return out;
     }
-    std::vector<ISituationOccupant*> NetworkOccupantsInBox(const float*, const float*, std::uint32_t, const float*, float) override {
-        SC4_UNWIRED("cSC4CitySituation: the network occupants in a box (coverage missions) are not answered");
-        return {};   // Recovered-partial: only the coverage missions ask for network occupants.
+    // InitNetworkCoverageCells (i386 0x004a237c): occupant manager vslot 0x94 GetOccupantsByBBox(list, min, max, filter, -1).
+    std::vector<ISituationOccupant*> NetworkOccupantsInBox(const float boxMin[3], const float boxMax[3], std::uint32_t networkFlags,
+                                                           const float center[3], float minDistanceSquared) override {
+        std::vector<ISituationOccupant*> out;
+        cISC4OccupantManager* manager = Engine();
+        if (!manager) return out;
+        auto* filter = new NetworkFlagsDistanceFilter(networkFlags, center, minDistanceSquared);
+        filter->AddRef();
+        OccupantList list;
+        manager->GetOccupantsByBBox(list, boxMin, boxMax, filter, 0xffffffffu);
+        for (cISC4Occupant* occupant : list) {
+            ISituationOccupant* view = ViewOfOccupant(occupant);
+            if (!view) continue;
+            view->AddRef();
+            out.push_back(view);
+        }
+        manager->ReleaseOccupantList(list);
+        filter->Release();
+        return out;
     }
     void ReleaseOccupants(std::vector<ISituationOccupant*>& list) override {   // vslot 0x180
         for (ISituationOccupant* occupant : list)
