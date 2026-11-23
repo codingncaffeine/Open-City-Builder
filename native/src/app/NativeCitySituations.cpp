@@ -403,6 +403,36 @@ void NativeSituationsReport() {
                 m->GetActiveSituation() ? m->GetMissionSuccessCount(static_cast<std::uint32_t>(m->GetActiveSituation()->GetAdviceId())) : 0u);
 }
 
+// The city situation manager as the automata managers' group budget (SL::spCity vslot 0x188, i386 0xc4
+// GetCitySituationManager). IsSituationAvailable(group) (i386 0x004a3924): one of the situations advisor's current advices is
+// a situation (QI 0x6beb1e8a) whose automata groups (vslot 0x30) hold the group.
+bool NativeSituationUsesAutomataGroup(std::uint32_t group) {
+    cISC4Advisor* advisor = SituationsAdvisor();
+    if (!advisor) return false;
+    for (const auto& entry : advisor->GetCurrentAdvices()) {
+        cISC4Advice* advice = entry.first.get();
+        cISC4CitySituationAdvice* situation = nullptr;
+        if (!advice || !advice->QueryInterface(kGZIID_cISC4CitySituationAdvice, reinterpret_cast<void**>(&situation)) || !situation) continue;
+        const std::vector<std::uint32_t>& groups = situation->GetAutomataGroups();
+        const bool found = std::find(groups.begin(), groups.end(), group) != groups.end();
+        situation->Release();
+        if (found) return true;
+    }
+    return false;
+}
+std::uint32_t NativeSituationTrackedAutomataCount() {   // vslot 0x70 GetTrackedAutomataCount
+    sc4::cSC4CitySituationManager* manager = HostCitySituations();
+    return manager ? manager->GetTrackedAutomataCount() : 0;
+}
+std::uint8_t NativeSituationMaxCSI() {   // vslot 0x6c GetMaxCSI
+    sc4::cSC4CitySituationManager* manager = HostCitySituations();
+    return manager ? manager->GetMaxCSI() : 0;
+}
+void NativeSituationResetTutorials() {   // vslot 0x84 ResetTutorials
+    if (sc4::cSC4CitySituationManager* manager = HostCitySituations()) manager->ResetTutorials();
+}
+bool NativeHasCitySituations() { return HostCitySituations() != nullptr; }
+
 }  // namespace native
 
 namespace native {

@@ -67,6 +67,11 @@ namespace native {
 sc4::ITrafficSimulatorApi* NativeTrafficSimulatorApi();          // app/NativeTrafficAutomata.cpp
 sc4::ITrafficNetworkManagerApi* NativeTrafficNetworkApi();
 void NativeSetTrafficVisibleCells(int x0, int z0, int x1, int z1);
+bool NativeSituationUsesAutomataGroup(std::uint32_t group);   // app/NativeCitySituations.cpp
+std::uint32_t NativeSituationTrackedAutomataCount();
+std::uint8_t NativeSituationMaxCSI();
+void NativeSituationResetTutorials();
+bool NativeHasCitySituations();
 namespace {
 // The city's traffic network map (SL::spCity GetTrafficNetwork), or null.
 sc4::cSC4TrafficNetworkMap* TrafficMap() {
@@ -244,9 +249,16 @@ public:
     IAutomataScriptGroups* ScriptGroups() override { return &g_scriptGroups; }
     IAutomataClock* CityClock() override { return &g_clock; }
     IAutomataKindManager* KindManager(int) override { return nullptr; }
+    // SL::spCity vslot 0x188 (i386 0xc4 GetCitySituationManager): situations reserve automata of their groups up to the max CSI.
     IAutomataGroupBudget* GroupBudget() override {
-        SC4_UNWIRED("IAutomataManagerHost::GroupBudget: the automata group budget is not wired");
-        return nullptr;
+        struct Budget final : IAutomataGroupBudget {
+            bool HandlesGroup(std::uint32_t group) override { return NativeSituationUsesAutomataGroup(group); }   // i386 vslot 0x50
+            std::uint32_t CurrentCount() override { return NativeSituationTrackedAutomataCount(); }               // i386 vslot 0x70
+            std::uint8_t MaxCount() override { return NativeSituationMaxCSI(); }                                   // i386 vslot 0x6c
+            void ClearTrackedAutomata() override { NativeSituationResetTutorials(); }                              // i386 vslot 0x84
+        };
+        static Budget budget;
+        return NativeHasCitySituations() ? &budget : nullptr;
     }
     bool CellToWorld(int cellX, int cellZ, float& x, float& z) override { x = float(cellX) * 16.0f; z = float(cellZ) * 16.0f; return true; }
     bool WorldToCell(float x, float z, int& cellX, int& cellZ) override { cellX = int(x / 16.0f); cellZ = int(z / 16.0f); return true; }
