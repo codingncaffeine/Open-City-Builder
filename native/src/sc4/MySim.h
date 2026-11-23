@@ -313,6 +313,7 @@ public:
 };
 
 // cSC4PylonOccupant (ctor @ 0x10022def8, object size 0x228), the call box the dispatch tool places.
+class cISC4PylonOccupant;
 class IMySimPylon : public cIGZUnknown {
 public:
     virtual bool Init() = 0;                                     // 0x20
@@ -327,6 +328,7 @@ public:
     virtual bool IsDead() const = 0;                             // 0x80
     virtual cISC4Occupant* AsOccupant() = 0;                     // 0x18
     virtual void SetVisibility(bool visible) = 0;                // occupant 0x90 (SetVisibility(visible, true))
+    virtual cISC4PylonOccupant* AsPylon() { return nullptr; }    // the cISC4PylonOccupant itself (the dispatch tool's view)
 };
 
 // What cSC4MySim needs from the running game. One method per original call chain (the global / vslot chain is in the

@@ -62,6 +62,8 @@
 #include "sc4/MySim.h"
 #include "sc4/MyStreetSim.h"
 #include "sc4/MySimInputControls.h"
+#include "s3d/ModelInstance.h"
+#include "sc4/Render3D.h"
 #include "sc4/MySimAdvice.h"
 #include "sc4/MySimAgentSimulator.h"
 #include "sc4/MySimBalloonWinProc.h"
@@ -88,6 +90,10 @@ sc4::cISC4View3DWin* NativeStreetSimView();   // app/NativeView3DWinHost.cpp: th
 sc4::cSC4ViewInputControl* NativeViewCurrentControl();                        // app/NativeView3DWinHost.cpp
 void NativeViewSetControl(sc4::cSC4ViewInputControl* control, int operation);
 void NativeViewRemoveControl();
+void NativeViewRemoveAllControls();
+void NativeViewClearCursorText(std::uint32_t id);
+bool CityViewPickTerrain(int x, int y, float out[3], bool flag);   // app/NativeCitySystems.cpp
+sc4::cSC43DRender* CityRenderer();                                  // app/NativeCityView.cpp
 
 cIGZWin* NativeCityView3DWindow();                                                // app/NativeCityUi.cpp
 const sc4::cISCPropertyHolder* NativeSimulatorExemplar(std::uint32_t instance);   // app/NativeSimHosts.cpp
@@ -251,6 +257,7 @@ public:
     cISC4Occupant* AsOccupant() override { return pylon_->AsOccupant(); }
     void SetVisibility(bool visible) override { if (cISC4Occupant* o = pylon_->AsOccupant()) o->SetVisibility(visible, true); }
     cISC4PylonOccupant* Pylon() const { return pylon_; }
+    cISC4PylonOccupant* AsPylon() override { return pylon_; }
 
 private:
     cISC4PylonOccupant* pylon_;
@@ -708,7 +715,15 @@ public:
         proc->AddRef();
         return proc;
     }
-    IMySimPylon* CreatePylon() override { SC4_UNWIRED("IMySimHost::CreatePylon (MySim dispatch tool call box)"); return nullptr; }
+    // cSC4PylonOccupant (operator new + ctor) seen through IMySimPylon; one reference for the caller.
+    IMySimPylon* CreatePylon() override {
+        auto* pylon = new cSC4PylonOccupant();
+        pylon->AddRef();
+        auto* view = new PylonView(pylon);
+        pylon->Release();   // the view holds it
+        view->AddRef();
+        return view;
+    }
     // --- view input controls ---
     // cSC4MySim::mspViewInputControl (the MySim tool the sims last put up) and the city view's control stack (spView3D vslots
     // 0x60 current, 0x64 SetCurrentViewInputControl(control, 2), 0x68 RemoveCurrentViewInputControl(false)).
@@ -734,7 +749,15 @@ public:
         return static_cast<cIGZUnknown*>(tool);
     }
     cIGZUnknown* CreateMoveInTool(cSC4MySim* sim) override { return MakeTool<sc4::cSC4MySimInputControlMoveIn>(sim); }
-    cIGZUnknown* CreateDispatchToolControl(cSC4MySim*) override { SC4_UNWIRED("IMySimHost::CreateDispatchToolControl (cSC4MySimInputControlDispatch)"); return nullptr; }
+    cIGZUnknown* CreateDispatchToolControl(cSC4MySim* sim) override {   // operator new + ctor(sim) + Init (vslot 0xc)
+        auto* tool = new sc4::cSC4MySimInputControlDispatch(sim);
+        if (!tool->Init()) {
+            tool->AddRef();
+            tool->Release();
+            return nullptr;
+        }
+        return static_cast<cIGZUnknown*>(static_cast<sc4::cSC4ViewInputControl*>(tool));
+    }
     cIGZUnknown* CreateChangeHouseTool(cSC4MySim* sim) override { return MakeTool<sc4::cSC4MySimInputControlChangeHouse>(sim); }
     cIGZUnknown* CreateChangeJobTool(cSC4MySim* sim) override { return MakeTool<sc4::cSC4MySimInputControlChangeJob>(sim); }
     // --- message plumbing ---
@@ -1115,6 +1138,34 @@ public:
     cSC4MySimAgentSimulator* Agents() override { return Agent(); }
     cSC4Lot* OccupantLot(cISC4Occupant* occupant) override { cSC4ZoneDeveloper* lots = LotManager(); return lots && occupant ? lots->GetOccupantLot(occupant) : nullptr; }
     cSC4Lot* LotAt(const cS3DVector3& position) override { cSC4ZoneDeveloper* lots = LotManager(); return lots ? lots->GetLot(position) : nullptr; }
+    void Listen(cIGZMessageTarget2* target, std::uint32_t type, bool on) override {
+        if (!SL::spMS2) return;
+        if (on) SL::spMS2->AddNotification(target, type);
+        else SL::spMS2->RemoveNotification(target, type);
+    }
+    cISC4PylonOccupant* PickPylon(int x, int y) override {
+        cSC43DRender* render = CityRenderer();
+        if (!render) return nullptr;
+        static cMySimPylonFilter filter;
+        s3d::cIS3DModelInstance* model = nullptr;
+        if (!render->Pick(x, y, &filter, model) || !model) return nullptr;
+        cIGZUnknown* owner = model->GetOwner();
+        void* raw = nullptr;
+        cISC4PylonOccupant* pylon = owner && owner->QueryInterface(0xc9b6d7d6, &raw) ? static_cast<cISC4PylonOccupant*>(raw) : nullptr;
+        model->Release();
+        return pylon;
+    }
+    bool PickTerrain(int x, int y, float out[3]) override { return CityViewPickTerrain(x, y, out, false); }
+    float GroundAltitude(float x, float z) override { cSTETerrain* t = Terrain(); return t ? t->GetAltitude(x, z) : 0.0f; }
+    void ProjectToScreen(const float xyz[3], float& x, float& y) override {
+        float out[3] = {0.0f, 0.0f, 0.0f};
+        NativeProjectToViewport(xyz, out);
+        x = out[0];
+        y = out[1];
+    }
+    void ClearCursorText(std::uint32_t id) override { NativeViewClearCursorText(id); }
+    void RemoveAllTools() override { NativeViewRemoveAllControls(); }
+    void PostMessage(std::uint32_t type, std::uint32_t data1, cIGZUnknown* object) override { Post(type, data1, 0, 0, 0, object); }
 } g_buildingToolHost;
 
 class StreetToolHost final : public sc4::IMyStreetSimToolHost {

@@ -114,6 +114,12 @@ sc4::cSC4ViewInputControl* NativeViewCurrentControl() {
 void NativeViewSetControl(sc4::cSC4ViewInputControl* control, int operation) {
     if (sc4::cISC4View3DWin* view = CityView3DWin()) view->SetCurrentViewInputControl(control, operation);
 }
+void NativeViewRemoveAllControls() {
+    if (sc4::cISC4View3DWin* view = CityView3DWin()) view->RemoveAllViewInputControls(false);
+}
+void NativeViewClearCursorText(std::uint32_t id) {
+    if (sc4::cISC4View3DWin* view = CityView3DWin()) view->ClearCursorText(id);
+}
 void NativeViewRemoveControl() {
     if (sc4::cISC4View3DWin* view = CityView3DWin()) view->RemoveCurrentViewInputControl(false);
 }
