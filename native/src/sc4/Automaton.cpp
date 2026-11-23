@@ -401,7 +401,11 @@ bool cSC4Automaton::LoadModels() {
     // The model system (cS3DModelProcessor and the animated-instance loader) is unrecovered: the host turns each stored
     // key into a model instance and the bounding box comes from the first one (what the original does in-process).
     // i386 0x000c1a5c for the radius and the auxiliary models.
-    for (const cGZPersistResourceKey& key : modelKeys_) AddModelInstance(key);
+    // i386 0x000c9f20: each model's owner is the automaton (vslot 0x10 SetOwner(this + 4)), which is how a renderer pick
+    // finds the automaton under the pointer.
+    for (const cGZPersistResourceKey& key : modelKeys_) {
+        if (IAutomatonModel* model = AddModelInstance(key)) model->SetOwner(static_cast<cISC4Occupant*>(this));
+    }
     if (!models_.empty()) {
         float bounds[6] = {1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f};
         models_.front()->GetWorldBounds(bounds, bounds + 3);   // i386 0x000c9f20: instance vslot 0x20
@@ -428,6 +432,7 @@ bool cSC4Automaton::LoadModels() {
 bool cSC4Automaton::UnloadModels() {
     if (effects_) effects_->SetModel(nullptr);
     for (IAutomatonModel* model : models_) {
+        if (model) model->SetOwner(nullptr);   // the owner reference ends with the instance in the original
         if (Host()) Host()->DestroyModel(model);
         else if (model) model->Release();
     }

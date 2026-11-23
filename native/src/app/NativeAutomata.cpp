@@ -75,6 +75,7 @@ public:
         for (int i = 0; i < 3; ++i) { minXyz[i] = box.min[i]; maxXyz[i] = box.max[i]; }
     }
     void GetTransform(cS3DTransform& out) override { instance_->GetTransform(out); }
+    void SetOwner(cIGZUnknown* owner) override { instance_->SetOwner(owner); }
     void SetTransform(const cS3DTransform& transform) override { instance_->SetTransform(transform); }
     void SetOpacity(float opacity, bool translucent) override { if (animated_) animated_->SetOpacity(translucent, opacity); }
     void SetAutoFrameRate(float rate) override { if (animated_) animated_->SetAutoFrameRate(rate); }

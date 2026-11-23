@@ -37,6 +37,11 @@
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
 #include "sc4audio/AEMSEvents.h"
+#include "app/NativeCityView.h"
+#include "s3d/ModelInstance.h"
+#include "sc4/AutomataControllerManager.h"
+#include "sc4/OccupantFilters.h"
+#include "sc4/Render3D.h"
 
 namespace native {
 bool NativePlayerDriveCameraPresent();   // app/NativePlayerDriveView.cpp
@@ -216,12 +221,35 @@ public:
     bool HasScriptSystem() override { return ScriptSystem() != nullptr; }
     bool CountdownInProgress() override { return NativeSituationCountdownInProgress(); }
     bool CSIVisible() override { return NativeSituationCSIVisible(); }
-    void SetKeyController(cSC4Automaton*, const cRZString&, bool, int) override {
-        SC4_UNWIRED("cSC4ViewInputControlPlayerDrive: the key effects' automata controllers are not created");
+    // HandleKeyEffects' controller key (i386 0x004b48ca): the controller manager (city vslot 0xbc) finds the automaton's
+    // controller by name (vslot 0x44 GetController) or, when `create`, adds it from the template name (vslot 0x14
+    // AddControllerFromTemplateName, no position); then vslot 0x48 Activate(1) for active 1, Activate(0) for 0, nothing for -1.
+    void SetKeyController(cSC4Automaton* automaton, const cRZString& name, bool create, int active) override {
+        auto* manager = Concrete<cSC4AutomataControllerManager>(CityComponent::AutomataControllerManager);
+        if (!manager || !automaton) return;
+        cISC4Occupant* occupant = static_cast<cISC4Occupant*>(automaton);
+        cSC4AutomataController* controller = manager->GetController(occupant, name);
+        if (!controller && create) controller = manager->AddControllerFromTemplateName(occupant, name, nullptr);
+        if (!controller || active < 0) return;
+        controller->Activate(active != 0);
     }
-    cSC4Automaton* PickAutomaton(int, int) override {
-        SC4_UNWIRED("cSC4ViewInputControlPlayerDrive choosing mode: the automaton pick under the pointer is not wired");
-        return nullptr;
+    // PickAutomaton (i386 0x004b3d02): the renderer's pick (vslot 0x100) through the tool's cAutomataOccupantFilter (+0x84),
+    // the picked model's owner as an automaton (QI 0xa9b40f05; the caller releases it).
+    cSC4Automaton* PickAutomaton(int x, int y) override {
+        cSC43DRender* render = CityRenderer();
+        if (!render) return nullptr;
+        static cAutomataOccupantFilter filter;
+        s3d::cIS3DModelInstance* model = nullptr;
+        if (!render->Pick(x, y, &filter, model) || !model) return nullptr;
+        cIGZUnknown* owner = model->GetOwner();
+        void* raw = nullptr;
+        cSC4Automaton* automaton = nullptr;
+        if (owner && owner->QueryInterface(0xa9b40f05, &raw) && raw) {
+            automaton = dynamic_cast<cSC4Automaton*>(static_cast<cIGZUnknown*>(raw));
+            if (!automaton) static_cast<cIGZUnknown*>(raw)->Release();
+        }
+        model->Release();
+        return automaton;
     }
     bool HasDispatchView() override { return NativeDispatchViewPresent(); }
     std::uint32_t TrackOccupant(cSC4Automaton* automaton) override {

@@ -195,6 +195,7 @@ public:
     virtual void SetFrame(int) {}                                   // slot 0xe8 (cS3DModelInstanceAnimated::SetFrame)
     virtual void SetZoomAndRotation(int zoom, int rotation) = 0;    // slot 0xd8
     virtual void SetPlayMode(s3d::PlayMode mode) = 0;
+    virtual void SetOwner(cIGZUnknown* owner) { (void)owner; }      // cIS3DModelInstance slot 0x10 (held reference)
     virtual float GetOpacity() const { return 1.0f; }               // slot 0x78: the draw attributes' opacity (+0x10)
 };
 
