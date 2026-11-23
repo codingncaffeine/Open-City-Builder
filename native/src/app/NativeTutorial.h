@@ -30,5 +30,8 @@ bool NativeTutorialStep(TutorialStepInfo& out);
 // system): null without a tutorial system in the open city.
 sc4::ICityMouseRouter* NativeTutorialMouseRouter();
 bool NativeTutorialAllowsZone(int x0, int z0, int x1, int z1, bool flood);
+// SL::spCity vslot 0x290 (the tutorial system) vslot 0x20 IsTutorial, then vslot 0x28 GetCurrentTask and its region (task vslot
+// 0x14): false without a running tutorial or a current task.
+bool NativeTutorialTaskRegion(std::int32_t rect[4]);
 
 }  // namespace native

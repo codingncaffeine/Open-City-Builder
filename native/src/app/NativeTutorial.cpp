@@ -405,6 +405,19 @@ bool NativeTutorialAllowsZone(int x0, int z0, int x1, int z1, bool flood) {
     return false;
 }
 
+bool NativeTutorialTaskRegion(std::int32_t rect[4]) {
+    cSC4TutorialSystem* tutorial = System();
+    if (!tutorial || !tutorial->IsTutorial()) return false;
+    cISC4TutorialTask* task = tutorial->GetCurrentTask();
+    if (!task) return false;
+    const sc4::SC4TutorialRect& area = task->GetRegion();
+    rect[0] = area.x0;
+    rect[1] = area.z0;
+    rect[2] = area.x1;
+    rect[3] = area.z1;
+    return true;
+}
+
 void NativeTutorialCatalogOpened(sc4::cISC4WinCatalogView* catalog) {
     cSC4TutorialSystem* tutorial = System();
     if (tutorial && tutorial->IsTutorial()) tutorial->HandleCatalogMenu(catalog);

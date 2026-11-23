@@ -374,11 +374,22 @@ struct City final : IPlaceLotCity {
         else { x = static_cast<float>(cx) * 16.0f + 8.0f; z = static_cast<float>(cz) * 16.0f + 8.0f; }
     }
     IPlaceLotNetworkMap* NetworkMap() override { return &g_networkMap; }
-    // SL::spCity vslot 0x290, the tutorial system: it runs natively (app/NativeTutorial.cpp) but is not asked here, so a
-    // running tutorial does not restrict placement to its target rectangle.
+    // SL::spCity vslot 0x290 (i386 0x148), the tutorial system: while a tutorial has a current task, a lot goes only exactly on
+    // the task's region (PlaceLot, i386: tutorial vslots 0x20 / 0x28, task vslot 0x14).
     IPlaceLotMission* Mission() override {
-        if (NativeTutorialRunning()) SC4_UNWIRED("cSC4ViewInputControlPlaceLot: the running tutorial's target rectangle (city vslot 0x290) does not restrict placement");
-        return nullptr;
+        struct Region final : IPlaceLotMissionTarget {
+            std::int32_t rect[4] = {};
+            const std::int32_t* Rect() override { return rect; }
+        };
+        struct Tutorial final : IPlaceLotMission {
+            Region region;
+            bool active = false;
+            bool IsActive() override { return active; }
+            IPlaceLotMissionTarget* Target() override { return active ? &region : nullptr; }
+        };
+        static Tutorial tutorial;
+        tutorial.active = NativeTutorialTaskRegion(tutorial.region.rect);
+        return &tutorial;
     }
 } g_city;
 
