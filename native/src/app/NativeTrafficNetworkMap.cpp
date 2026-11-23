@@ -5,6 +5,8 @@
 // address simply gets the same pass-through.
 #include <map>
 #include "platform/Unwired.h"
+#include "sc4/BuildingDevelopmentSimulator.h"
+#include "app/NativeCityView.h"
 #include <memory>
 #include <vector>
 
@@ -219,10 +221,8 @@ public:
         cellX = int(x / 16.0f);
         cellZ = int(z / 16.0f);
     }
-    bool SimulationActive() override {   // PARTIAL: the vehicle / pedestrian managers' IsActive
-        SC4_UNWIRED("cSC4TrafficNetworkMap: the vehicle / pedestrian managers' IsActive is not asked (a loaded city stands in)");
-        return HostCity() != nullptr;
-    }
+    // i386 0x001e7bb2 / DoAnimationTick: the vehicle manager (city vslot 0xac) or the pedestrian manager (0xb0) is active (vslot 0x18).
+    bool SimulationActive() override { return CityAutomataLayersActive(); }
     ITrafficNetworkMapLot* LotAtCell(int x, int z) override { return LotViewOf(NativeLotAtCell(x, z, false)); }
     ITrafficNetworkMapLot* LotOf(cISC4Occupant* occupant) override {
         if (!occupant) return nullptr;
@@ -272,9 +272,10 @@ public:
         if (!slot) slot = std::make_unique<BuildingView>(building);
         return slot.get();
     }
-    int ActiveEdgesForBuilding(std::uint32_t, std::uint8_t) override {   // PARTIAL: BDS vslot 0xf0 (every edge)
-        SC4_UNWIRED("cSC4TrafficNetworkMap: the building development simulator's active edges (vslot 0xf0) are not asked (every edge)");
-        return 0xf;
+    // CheckCellOccupancy (i386): SL::spBuildingDevelopmentSim vslot 0x78 GetDeveloperType(purpose, wealth), the index the lot's
+    // travel population is read with.
+    int ActiveEdgesForBuilding(std::uint32_t purpose, std::uint8_t wealth) override {
+        return static_cast<int>(sc4::cSC4BuildingDevelopmentSimulator::GetDeveloperType_Static(purpose, wealth));
     }
     // The view utilities' visible terrain rectangle (i386 +0x3ec..+0x3f8, kept by cSC43DRender::UpdateVisibleTerrainMetrics):
     // its min corner and its max corner (y unused).

@@ -220,6 +220,7 @@ public:
     // lot slot 0x180: the lot's building occupant, borrowed; null when the lot has none
     virtual ITrafficNetworkMapBuilding* LotBuilding(ITrafficNetworkMapLot* lot) = 0;
     // building development simulator slot 0xf0(purpose, wealth): active edge mask of the building type
+    // SL::spBuildingDevelopmentSim vslot 0x78 GetDeveloperType(purpose, wealth) (the port's name predates knowing the slot).
     virtual int ActiveEdgesForBuilding(std::uint32_t purpose, std::uint8_t wealth) = 0;
     // view utilities: the visible terrain rectangle's min corner (+0x3f4) and max corner (+0x3fc)
     virtual void GetViewPosition(float& x, float& y, float& z) = 0;
