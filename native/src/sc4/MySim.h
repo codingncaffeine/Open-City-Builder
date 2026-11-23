@@ -447,7 +447,6 @@ public:
     // --- cSC4MyStreetSim ------------------------------------------------------------------------------------
     virtual IMySimDispatchVehicleView* DispatchVehicleView() { return nullptr; }   // spDispatchManager 0xb0 (borrowed)
     virtual bool SimulatorAnyPaused() { return false; }                      // spSimulator IsAnyPaused (i386 vslot 0x48)
-    virtual std::uint32_t ViewInputControlId() { return 0; }                // spView3D 0x60 (current control) -> vslot 0x14
     // --- objects --------------------------------------------------------------------------------------------
     virtual IMySimDispatch* CreateDispatch(cSC4MySim* owner) = 0;           // cSC4MySimDispatch ctor @ 0x1006acb3c
     virtual IMySimBalloonWinProc* CreateBalloonWinProc(cISC4MySim* owner) = 0;   // cSC4MySimBalloonWinProc @ 0x1006ab464

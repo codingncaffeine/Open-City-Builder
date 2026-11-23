@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 #include "sc4/View3DWin.h"
+#include "sc4/MyStreetSim.h"
 #include "app/NativeObliterate.h"
 #include "app/NativeSignLabel.h"
 #include "app/NativeTips.h"
@@ -104,6 +105,7 @@ sc4::IAdvisorPopupQueue* CreateAdvisorPopupQueue();
 bool NativeLlamaCheatActive();   // app/NativeAdvisors.cpp
 void NativeInitMapView(cIGZWin* window);   // app/NativeWinMapView.cpp
 std::string FontStyleName(std::uint32_t guid);   // linux/game_main_linux.cpp
+sc4::cISC4View3DWin* NativeStreetSimView() { return CityView3DWin(); }   // the street-sim tool's view (NativeMySim.cpp)
 namespace {
 using namespace sc4;
 
@@ -522,7 +524,16 @@ struct StubView3DWin final : IView3DWinHost {
     void GoToNextDisaster() override { native::GoToNextDisaster(); }
     cSC4ViewInputControl* CreateDispatchTool(int type) override { return native::CreateDispatchTool(type); }
     cSC4ViewInputControl* CreateNetworkTool(int type) override { return native::CreateNetworkTool(type); }
-    void ShowMyStreetSim() override { SC4_UNWIRED("IView3DWinHost::ShowMyStreetSim"); }
+    // SL::spAdvisorSystem GetAdvisor(0x1e) as cISC4MyStreetSim, vslot 0x28: the street-sim tool.
+    void ShowMyStreetSim() override {
+        sc4::cSC4AdvisorSystem* system = sc4::cSC4AdvisorSystem::Instance();
+        sc4::cISC4Advisor* advisor = system ? system->GetAdvisor(sc4::kMyStreetSimAdvisorId) : nullptr;
+        void* raw = nullptr;
+        if (!advisor || !advisor->QueryInterface(sc4::kGZIID_cISC4MyStreetSim, &raw) || !raw) return;
+        auto* street = static_cast<sc4::cSC4MyStreetSim*>(raw);
+        street->CreateMyStreetSimTool();
+        street->Release();
+    }
     void MayorRatingChanged() override { if (sc4::cSC4View3DWin* view = CityView3DWin()) native::UpdateMayorRatingBar(*view); }
     ISimulatorPauseSink* Simulator() override { static SimulatorView view; return CityExists() ? &view : nullptr; }
     void PreCityInit() override { native::PrepareCityRenderStack(native::BootApplication() ? native::BootApplication()->GetCity() : nullptr); }

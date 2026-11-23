@@ -58,6 +58,7 @@
 #include "sc4/GameDataRegistryHelpers.h"
 #include "sc4/Lot.h"
 #include "sc4/MySim.h"
+#include "sc4/MyStreetSim.h"
 #include "sc4/MySimAdvice.h"
 #include "sc4/MySimAgentSimulator.h"
 #include "sc4/MySimBalloonWinProc.h"
@@ -80,6 +81,8 @@
 #include "sc4/cSTETerrain.h"
 
 namespace native {
+sc4::cISC4View3DWin* NativeStreetSimView();   // app/NativeView3DWinHost.cpp: the city view as cISC4View3DWin
+
 cIGZWin* NativeCityView3DWindow();                                                // app/NativeCityUi.cpp
 const sc4::cISCPropertyHolder* NativeSimulatorExemplar(std::uint32_t instance);   // app/NativeSimHosts.cpp
 bool NativeProjectToViewport(const float* xyz, float out[3]);                     // app/NativeAutomataManagerHost.cpp
@@ -1080,6 +1083,27 @@ public:
 };
 BalloonHost g_balloonHost;
 
+// The street-sim tool: the city view, the occupant manager's box query and the traffic-automaton view of an occupant.
+class StreetToolHost final : public sc4::IMyStreetSimToolHost {
+public:
+    sc4::cISC4View3DWin* View() override { return NativeStreetSimView(); }
+    void OccupantsInBox(const float min[3], const float max[3], std::vector<cISC4Occupant*>& out) override {
+        out.clear();
+        cSC4City* city = HostCity();
+        auto* manager = city ? dynamic_cast<cISC4OccupantManager*>(city->GetComponent(CityComponent::OccupantManager)) : nullptr;
+        if (!manager) return;
+        sc4::OccupantList list;
+        manager->GetOccupantsByBBox(list, min, max, 0u, 0xffffffffu);   // vslot 0x90 (type 0, no limit)
+        out.assign(list.begin(), list.end());
+        manager->ReleaseOccupantList(list);                             // vslot 0xc0: the caller only borrows them
+    }
+    IMySimDispatchAutomaton* StreetAutomaton(cISC4Occupant* occupant) override {
+        auto* automaton = dynamic_cast<cSC4TrafficAutomaton*>(occupant);   // QueryInterface(0x8b99ee7c)
+        return automaton ? ViewOf(automaton) : nullptr;
+    }
+};
+StreetToolHost g_streetToolHost;
+
 }  // namespace
 
 void InstallMySimHosts() {
@@ -1092,6 +1116,7 @@ void InstallMySimHosts() {
     sc4::SetMySimDispatchHost(&dispatch);
     sc4::SetMySimFilterHost(&filter);
     sc4::SetMySimAdviceHost(&advice);
+    sc4::SetMyStreetSimToolHost(&g_streetToolHost);
 }
 
 // The agent simulator's get_sim / get_count values (cSC4MySimAgentSimulator::Init, i386 0x0054d538), registered under the

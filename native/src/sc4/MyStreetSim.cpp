@@ -2,6 +2,8 @@
 
 #include "sc4/AdvisorSystem.h"
 #include "sc4/MySimDispatch.h"
+#include "sc4/SCPropertyHelp.h"
+#include "sc4/View3DWin.h"
 
 namespace sc4 {
 
@@ -12,7 +14,6 @@ void SetTableNumber(cISCLua* lua, const char* key, long value) { MySimSetTableNu
 constexpr std::uint32_t kStreetAutomatonFlag = 0x2000000;      // set on a car that carries a street sim
 constexpr std::uint8_t kStreetCellLifespan = 0xff;
 constexpr std::uint32_t kAutomatonBehaviorIdle = 7;
-constexpr std::uint32_t kUDriveItControlId = 0xcc23d564;       // the U-Drive-It input control (-0x33dc2a9c)
 
 // The automaton's occupant group decides the trip: the Lua flag, the travel type and the state (on foot a fixed 6).
 struct TripKind { std::uint32_t groups[2]; const char* key; int travelType; };
@@ -85,15 +86,17 @@ void cSC4MyStreetSim::ShowLocation() {
     AttachAutomaton(automaton.get());   // vslot 0x1a8
 }
 
-// i386 0x00488d36: detach, leave the U-Drive-It control if it is the current one, and keep the automaton for a later
+// i386 0x00488d36: detach, end the street-sim tool if it is the current control, and keep the automaton for a later
 // ShowLocation.
 void cSC4MyStreetSim::HideLocation() {
     if (!automaton_) return;
     cRZAutoRefCount<IMySimDispatchAutomaton> automaton(automaton_.get());
     DetachAutomaton();   // vslot 0x1ac
-    IMySimHost* host = MySimHost();
-    if (host && host->ViewCurrentInputControl() && host->ViewInputControlId() == kUDriveItControlId)
-        host->ViewSetInputControl(nullptr);   // spView3D vslot 0x68(0)
+    IMyStreetSimToolHost* tool = MyStreetSimToolHost();
+    if (cISC4View3DWin* view = tool ? tool->View() : nullptr) {
+        cSC4ViewInputControl* current = view->GetCurrentViewInputControl();   // spView3D vslot 0x60
+        if (current && current->GetID() == kMyStreetSimToolId) view->RemoveCurrentViewInputControl(false);   // vslot 0x68(0)
+    }
     automaton_ = automaton.get();
 }
 
@@ -224,6 +227,100 @@ bool cSC4MyStreetSim::DoMessage(cIGZMessage2* message) {
         if (reason < 6 && ((1u << reason) & 0x2cu) != 0) DetachAutomaton();
     }
     return cSC4MySim::DoMessage(message);
+}
+
+// i386 0x00487ea2: the tool goes on the view's control stack (operation 2) when it initialises.
+bool cSC4MyStreetSim::CreateMyStreetSimTool() {
+    cRZAutoRefCount<cSC4MyStreetSimInputControl> control(new cSC4MyStreetSimInputControl());
+    const bool ok = control->Init(this);
+    IMyStreetSimToolHost* host = MyStreetSimToolHost();
+    if (ok && host && host->View()) host->View()->SetCurrentViewInputControl(control.get(), 2);   // spView3D vslot 0x64
+    return ok;
+}
+
+// ---------------------------------------------------------------------------------------------- the street-sim tool
+
+namespace {
+IMyStreetSimToolHost* g_toolHost = nullptr;
+constexpr float kPersonBoxHalfX = 3.0f, kPersonBoxHalfY = 7.0f, kPersonBoxHalfZ = 3.0f;   // i386 0x00a70728 / 0x00a708d0
+}  // namespace
+IMyStreetSimToolHost* MyStreetSimToolHost() { return g_toolHost; }
+void SetMyStreetSimToolHost(IMyStreetSimToolHost* host) { g_toolHost = host; }
+
+bool cSC4MyStreetSimInputControl::Init() {
+    SetCursor(kMyStreetSimCursor);   // vslot 0x24
+    return cSC4ViewInputControl::Init();
+}
+
+bool cSC4MyStreetSimInputControl::Init(cSC4MyStreetSim* sim) {
+    if (!Init()) return false;   // vslot 0xc
+    sim_ = sim;
+    return true;
+}
+
+bool cSC4MyStreetSimInputControl::Shutdown() {
+    sim_ = nullptr;
+    return cSC4ViewInputControl::Shutdown();
+}
+
+bool cSC4MyStreetSimInputControl::OnKeyDown(std::uint32_t key, std::uint32_t) {
+    if (key != 0x1b) return false;
+    EndInput();
+    return true;
+}
+
+// i386 0x00489612: on top of the stack, a hovered automaton whose exemplar lacks 0x1bc42c49 becomes the street sim's.
+bool cSC4MyStreetSimInputControl::OnMouseDownL(int, int, std::uint32_t) {
+    IMyStreetSimToolHost* host = g_toolHost;
+    cISC4View3DWin* view = host ? host->View() : nullptr;
+    if (!view || view->GetCurrentViewInputControl() != this) return false;   // spView3D vslot 0x60
+    if (hovered_) {
+        bool value = false;
+        cISC4Occupant* occupant = hovered_->AsOccupant();
+        cISCPropertyHolder* holder = occupant ? occupant->AsPropertyHolder() : nullptr;
+        if (!cSCPropertyHelp::GetPropertyValue(holder, kPropertyNoStreetSim, value) && sim_)
+            sim_->AttachAutomaton(hovered_.get());   // street view vslot 0xc
+    }
+    return true;
+}
+
+// i386 0x0048968a.
+bool cSC4MyStreetSimInputControl::OnMouseMove(int x, int y, std::uint32_t) {
+    hovered_ = nullptr;
+    IMyStreetSimToolHost* host = g_toolHost;
+    cISC4View3DWin* view = host ? host->View() : nullptr;
+    if (!view) return true;
+    cRZAutoRefCount<IMySimDispatchAutomaton> automaton;
+    cISC4Occupant* picked = nullptr;
+    if (view->PickOccupant(x, y, picked) && picked) {                  // vslot 0x94
+        IMySimDispatchAutomaton* found = host->StreetAutomaton(picked);
+        automaton = found;
+        if (found) found->Release();   // the auto-ref holds it
+        if (automaton && !automaton->CheckAutomataFlag(1) &&
+            (picked->IsOccupantGroup(0x420b) || picked->IsOccupantGroup(0x4201) || picked->IsOccupantGroup(0x4215) ||
+             picked->IsOccupantGroup(0x4001) || picked->IsOccupantGroup(0x4200)))
+            hovered_ = automaton.get();
+    }
+    if (!automaton) {   // nothing (or no automaton) under the pointer: a person near the picked ground
+        float position[3] = {0.0f, 0.0f, 0.0f};
+        if (view->PickTerrain(x, y, position, true)) {                  // vslot 0x90
+            const float min[3] = {position[0] - kPersonBoxHalfX, position[1] - kPersonBoxHalfY, position[2] - kPersonBoxHalfZ};
+            const float max[3] = {position[0] + kPersonBoxHalfX, position[1] + kPersonBoxHalfY, position[2] + kPersonBoxHalfZ};
+            std::vector<cISC4Occupant*> occupants;
+            host->OccupantsInBox(min, max, occupants);
+            for (cISC4Occupant* occupant : occupants) {
+                IMySimDispatchAutomaton* found = occupant ? host->StreetAutomaton(occupant) : nullptr;
+                automaton = found;
+                if (found) found->Release();
+                if (automaton && !automaton->CheckAutomataFlag(1) && occupant->IsOccupantGroup(0x4001)) {
+                    hovered_ = automaton.get();
+                    break;
+                }
+            }
+        }
+    }
+    SetCursor(hovered_ ? kMyStreetSimCursorPick : kMyStreetSimCursor);   // vslot 0x24
+    return true;
 }
 
 }  // namespace sc4
