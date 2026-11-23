@@ -271,17 +271,11 @@ public:
         void* developer = native::AdoptGrowthDeveloper(object);
         return developer ? new GrowthDeveloperRef(developer) : nullptr;
     }
-    // PARTIAL: terrain vslot 0x44(rect, 0, 1); the highest terrain point of the footprint's corners and centre stands in.
+    // AddNewBuildingOccupant (i386 0x000fc94e): the lot developer (+0x88) vslot 0x44 GetLowestOrHighestAreaAltitude(rect, highest, with water) over the
+    // building's bounds as they are (the original passes the footprint before it is placed at the position).
     float SurfaceHeightForFootprint(const float rect[4]) override {
-        SC4_UNWIRED("cSC4BuildingDevelopmentSimulator footprint height: terrain vslot 0x44(rect, 0, 1) is not recovered; the highest corner / center stands in");
-        sc4::cSTETerrain* terrain = Terrain();
-        if (!terrain) return 0.0f;
-        float best = terrain->GetAltitude((rect[0] + rect[2]) * 0.5f, (rect[1] + rect[3]) * 0.5f);
-        for (int corner = 0; corner < 4; ++corner) {
-            const float h = terrain->GetAltitude(rect[(corner & 1) ? 2 : 0], rect[(corner & 2) ? 3 : 1]);
-            if (best < h) best = h;
-        }
-        return best;
+        sc4::cSC4LotDeveloper* developer = LotDeveloperOf();
+        return developer ? developer->GetLowestOrHighestAreaAltitude(sc4::LotMetreRect{rect[0], rect[1], rect[2], rect[3]}, false, true) : 0.0f;
     }
     void CellToPosition(int x, int z, float& px, float& pz) override { px = (static_cast<float>(x) + 0.5f) * 16.0f; pz = (static_cast<float>(z) + 0.5f) * 16.0f; }
     void PositionToCell(float x, float z, int& cx, int& cz) override {

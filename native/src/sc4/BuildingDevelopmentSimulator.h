@@ -266,7 +266,7 @@ public:
     virtual IGrowthDeveloperRef* CreateGrowthDeveloper() = 0;               // new cSC4GrowthDeveloper (reference-initialised)
     // a developer the city file's record holds (a cSC4GrowthDeveloper the load made); null when the object is not one
     virtual IGrowthDeveloperRef* AdoptGrowthDeveloper(cIGZUnknown*) { return nullptr; }
-    virtual float SurfaceHeightForFootprint(const float rect[4]) = 0;       // this+0xd8 vslot 0x88(rect, 0, 1)
+    virtual float SurfaceHeightForFootprint(const float rect[4]) = 0;       // the lot developer (i386 +0x88) vslot 0x44(rect, 0, 1)
     virtual void CellToPosition(int x, int z, float& px, float& pz) = 0;    // city (this+0x30) vslot 0x308
     virtual void PositionToCell(float x, float z, int& cx, int& cz) = 0;    // city vslot 0x2f8
     virtual float TerrainHeight(float x, float z) = 0;                      // this+0x68 vslot 0x60
