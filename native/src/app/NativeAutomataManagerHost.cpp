@@ -68,6 +68,12 @@ sc4::ITrafficSimulatorApi* NativeTrafficSimulatorApi();          // app/NativeTr
 sc4::ITrafficNetworkManagerApi* NativeTrafficNetworkApi();
 void NativeSetTrafficVisibleCells(int x0, int z0, int x1, int z1);
 namespace {
+// The city's traffic network map (SL::spCity GetTrafficNetwork), or null.
+sc4::cSC4TrafficNetworkMap* TrafficMap() {
+    sc4::cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::TrafficNetwork) : nullptr;
+    return object ? dynamic_cast<sc4::cSC4TrafficNetworkMap*>(object) : nullptr;
+}
 using namespace sc4;
 
 template <class T> T* Plain(CityComponent c) {   // a component held as its plain view (kGZIID_PlainObject)
@@ -211,9 +217,29 @@ public:
     void RemoveCheatListener(cIGZMessageTarget* target) override { native::RemoveGameCheatListener(target, 0); }
     void PostMessage(cIGZMessage2* message, bool front) override { if (SL::spMS2 && message) SL::spMS2->MessagePost(message, front); }
     // ---- city
+    // SL::spCity vslot 0x140 (i386 0xa0 GetTrafficNetwork): the traffic network map, as the automata see it.
     IAutomataNetworkManager* NetworkManager() override {
-        SC4_UNWIRED("IAutomataManagerHost::NetworkManager: the city's network manager is not handed to the automata managers");
-        return nullptr;
+        struct MapView final : IAutomataNetworkManager {
+            bool QueryInterface(std::uint32_t, void**) override { return false; }
+            std::uint32_t AddRef() override { return 1; }
+            std::uint32_t Release() override { return 1; }
+            // vslot 0x70 (i386 0x38) SafeGetTileInfoAtCell: the tile's road / occupancy / building masks
+            bool CellMasks(int cellX, int cellZ, std::uint32_t masks[3]) override {
+                sc4::cSC4TrafficNetworkMap* map = TrafficMap();
+                const sc4::TrafficTileInfo* tile = map ? map->SafeGetTileInfoAtCell(cellX, cellZ) : nullptr;
+                if (!tile) return false;
+                masks[0] = tile->roadMask;
+                masks[1] = tile->occupancyMask;
+                masks[2] = tile->buildingMask;
+                return true;
+            }
+            float Height(float x, float z) override {   // vslot 0x90 (i386 0x48) GetRoadAltitude
+                sc4::cSC4TrafficNetworkMap* map = TrafficMap();
+                return map ? map->GetRoadAltitude(x, z) : 0.0f;
+            }
+        };
+        static MapView view;
+        return TrafficMap() ? &view : nullptr;
     }
     IAutomataScriptGroups* ScriptGroups() override { return &g_scriptGroups; }
     IAutomataClock* CityClock() override { return &g_clock; }
@@ -241,10 +267,15 @@ public:
         }
         return true;
     }
-    bool LotCellMasks(int, int, std::uint32_t masks[3]) override {
-        SC4_UNWIRED("IAutomataManagerHost::LotCellMasks: the network manager's cell masks answer none");
-        masks[0] = masks[1] = masks[2] = 0;
-        return false;
+    // ChooseRandomExemplar (i386 0x000bfeba: the manager's traffic network map +0xa8c vslot 0x38 SafeGetTileInfoAtCell): the tile's
+    // masks (i386 +0x24/+0x28/+0x2c); a cell without a tile answers all ones, so the filter still runs.
+    bool LotCellMasks(int cellX, int cellZ, std::uint32_t masks[3]) override {
+        sc4::cSC4TrafficNetworkMap* map = TrafficMap();
+        const sc4::TrafficTileInfo* tile = map ? map->SafeGetTileInfoAtCell(cellX, cellZ) : nullptr;
+        masks[0] = tile ? tile->roadMask : 0xffffffffu;
+        masks[1] = tile ? tile->occupancyMask : 0xffffffffu;
+        masks[2] = tile ? tile->buildingMask : 0xffffffffu;
+        return true;
     }
     // ---- occupants
     cIGZUnknown* CreateOccupantGroupFilter(const std::vector<std::uint32_t>&) override { return nullptr; }
