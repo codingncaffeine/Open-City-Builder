@@ -487,6 +487,24 @@ bool NativeLotConfigurationsByFilter(std::vector<sc4::cSC4LotConfiguration*>& ou
 }
 
 // The kit verb "decline": the lots of the city by state, and what the tract developer abandoned and reoccupied since the city opened.
+// Kit command `lotsrect X0 Z0 X1 Z1`: every zoned lot of the zone developer that overlaps the cell rectangle, with its rect, state,
+// building type and wealth. Read-only.
+void NativeLotsRectReport(int x0, int z0, int x1, int z1) {
+    cSC4ZoneDeveloper* zones = ZoneDeveloper();
+    int count = 0;
+    if (zones)
+        for (cSC4Lot* lot : zones->Lots()) {
+            if (!lot) continue;
+            std::int32_t r[4] = {0, 0, 0, 0};
+            lot->GetBoundingRect(r);
+            if (r[2] < x0 || r[0] > x1 || r[3] < z0 || r[1] > z1) continue;
+            ++count;
+            std::printf("lotsrect: lot %d,%d..%d,%d state %d building %08x wealth %u\n", r[0], r[1], r[2], r[3], lot->GetState(),
+                        lot->GetBuildingType(false), unsigned(lot->GetOccupantWealth()));
+        }
+    std::printf("lotsrect %d,%d..%d,%d: %d lots\n", x0, z0, x1, z1, count);
+}
+
 void NativeDeclineReport() {
     cSC4ZoneDeveloper* zones = ZoneDeveloper();
     int states[8] = {};

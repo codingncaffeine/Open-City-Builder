@@ -37,6 +37,7 @@ int NativeTractGrow(void* developer, int tractX, int tractZ, std::uint8_t style)
 void NativeTractUpdatePopulation(void* developer, int tractX, int tractZ);
 void InstallTractDeveloperHost();
 void NativeDeclineReport();   // kit verb "decline": lots by state, abandonments and reoccupations
+void NativeLotsRectReport(int x0, int z0, int x1, int z1);   // kit verb "lotsrect": the zoned lots overlapping a cell rectangle
 // The demand simulator's view (NativeDemandHost.cpp): the zone kind (+0x28, 1..3), the source demand channel, the desirability at a
 // cell, every developer.
 std::uint32_t GrowthDeveloperKind(void* developer);

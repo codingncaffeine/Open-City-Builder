@@ -1284,6 +1284,10 @@ int RunScenario(const std::string& path) {
             std::string name, sex;
             words >> name >> sex;
             native::NativeMySimMoveIn(name.empty() ? "Mayor" : name.c_str(), sex != "female", 1);
+        } else if (command == "lotsrect") {   // lotsrect X0 Z0 X1 Z1: the zoned lots overlapping a cell rectangle (read-only)
+            int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
+            words >> x0 >> z0 >> x1 >> z1;
+            native::NativeLotsRectReport(x0, z0, x1, z1);
         } else if (command == "decline") {   // decline: the lots by state and what the tract developer abandoned / reoccupied
             native::NativeDeclineReport();
         } else if (command == "lotdev") {   // lotdev: the lot developer's life cycle (initialized, messages by type, night-light deque)

@@ -541,13 +541,15 @@ void NativeSubwayRouteReport(int x0, int z0, int x1, int z1, std::uint32_t allow
                 (types & 0x40) ? "yes" : "no");
     // the compressed route: {type, x, z}, then runs of {type | 0x40, steps, packed directions}
     if (route.size() >= 3) {
-        std::printf(" start type %u at %u,%u", route[0], route[1], route[2]);
+        std::printf(" start type %u at %u,%u%s", route[0] & 0x3f, route[1], route[2], (route[0] & 0x80) ? " (ferry)" : "");
         for (std::size_t i = 3; i + 1 < route.size();) {
             const std::uint8_t type = route[i] & 0x3f, steps = route[i + 1];
-            std::printf("; %u x%u", type, steps);
+            std::printf("; %u x%u%s", type, steps, (route[i] & 0x80) ? " (after a ferry or off-map hop)" : "");
             i += 2 + (steps + 3) / 4;
         }
     }
+    std::printf(" | raw");
+    for (std::uint8_t b : route) std::printf(" %02x", b);
     std::printf("\n");
     finder->Release();
 }
