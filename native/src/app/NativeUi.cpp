@@ -35,6 +35,7 @@
 #include "gz/WinCtrlFactory.h"
 #include "gz/WinFont.h"
 #include "gz/WinGrid.h"
+#include "gz/WinKnob.h"
 #include "gz/WinLineInput.h"
 #include "gz/WinTextEdit.h"
 #include "gz/WinListBox.h"
@@ -355,6 +356,9 @@ bool InitUiScripts(WinMgr* mgr) {
     // The slider (clsid 0x21325208) and the grid (0xdaa6b9bf): without makers the scripts built bare windows in their place
     // (the audio options' volume sliders drew as filled boxes and its playlist took no rows).
     gz::RegisterDirectorMaker("cGZWinSlider", +[]() -> cIGZUnknown* { return MakeWin<gz::cGZWinSlider>(); });
+    // The knob (clsid 0xcbcbf1e0): the drive dashboard's dials (speed, throttle, altitude); without a maker they were bare
+    // windows, so the dashboard's dials drew as grey squares and took no images or values.
+    gz::RegisterDirectorMaker("cGZWinKnob", +[]() -> cIGZUnknown* { return MakeWin<gz::cGZWinKnob>(); });
     // The list box (clsid 0x598) and the line input (0x21335c5a): the region dialogs' region list and name field.
     gz::RegisterDirectorMaker("cGZWinListBox", +[]() -> cIGZUnknown* {
         return static_cast<cIGZUnknown*>(static_cast<cIGZWin*>(new gz::cGZWinListBox(g_mgr, false)));
