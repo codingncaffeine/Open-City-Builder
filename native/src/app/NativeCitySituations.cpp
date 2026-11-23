@@ -47,6 +47,15 @@
 #include "sc4/ServiceLocator.h"
 #include "sc4/View3DWin.h"
 #include "sc4/cSC4City.h"
+#include <memory>
+#include <map>
+#include "app/NativeZoneDeveloperHost.h"
+#include "sc4/Lot.h"
+#include "sc4/LandfillZone.h"
+#include "sc4/LandfillDeveloper.h"
+#include "sc4/TrafficNetworkMap.h"
+#include "sc4/SurfaceWater.h"
+#include "sc4/cSTETerrain.h"
 #include "app/NativeDemolition.h"   // CityNeighborsSimulator
 #include "sc4/NeighborConnection.h"
 #include "sc4/NeighborsSimulator.h"
@@ -64,6 +73,9 @@ int SituationAutomataManagerCount();
 sc4::ISituationAutomataManager* SituationAutomataManager(int index);
 sc4::ISituationOccupantManager* SituationOccupantManager();
 cIGZUnknown* SituationEngineOccupant(sc4::ISituationOccupant* occupant);
+sc4::ISituationEffect* NativeCreateSituationEffect(const char* name);   // app/NativeDisasterTools.cpp
+bool NativePlayerDriveAutomatonPosition(float out[3]);                 // app/NativePlayerDrive.cpp
+int NativeZoneTypeAt(int x, int z);                                      // app/NativeDisasters.cpp
 sc4::ISituationDispatchView* NativeSituationDispatchView();   // NativeDispatchVehicleView.cpp
 void SituationEnterPlayerDriveView(sc4::ISituationAutomaton* automaton, cIGZMessageTarget2* target);
 std::uint32_t SituationSourceBuildingGroup(std::uint32_t automataGroup);
@@ -161,6 +173,155 @@ public:
     }
 } g_ticks;
 
+// ---- the city services the situations read (SL::spCity / spLotManager / spEffectsManager / spZoneManager / spTerrain /
+// spSurfaceWater / spTrafficNetworkMap / spLandfillDeveloper) ----------------------------------------------------------------
+sc4::cSTETerrain* SituationTerrainObject() {
+    cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(CityComponent::Terrain) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(0xab953253, &raw) || !raw) return nullptr;
+    auto* terrain = static_cast<sc4::cSTETerrain*>(static_cast<cIGZSerializable*>(raw));
+    static_cast<cIGZSerializable*>(raw)->Release();
+    return terrain;
+}
+sc4::cSTESurfaceWater* SituationSurfaceWater() {
+    cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(CityComponent::SurfaceWater) : nullptr;
+    return object ? dynamic_cast<sc4::cSTESurfaceWater*>(object) : nullptr;
+}
+sc4::cSC4TrafficNetworkMap* SituationTrafficMap() {
+    cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(CityComponent::TrafficNetwork) : nullptr;
+    return object ? dynamic_cast<sc4::cSC4TrafficNetworkMap*>(object) : nullptr;
+}
+sc4::cSC4LandfillDeveloper* SituationLandfills() {
+    cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(CityComponent::LandfillDeveloper) : nullptr;
+    return object ? dynamic_cast<sc4::cSC4LandfillDeveloper*>(object) : nullptr;
+}
+
+struct SituationCityView final : ISituationCity {
+    int CellsX() override { cSC4City* c = HostCity(); return c ? c->CellCountX() : 0; }                 // 0x2e8
+    int CellsZ() override { cSC4City* c = HostCity(); return c ? c->CellCountZ() : 0; }                 // 0x2f0
+    float CellSizeXMeters() override { return 16.0f; }                                                   // 0x2d8
+    void WorldToCell(float x, float z, int& cellX, int& cellZ) override {                                // 0x2f8
+        if (cSC4City* c = HostCity()) c->PositionToCell(x, z, cellX, cellZ);
+        else { cellX = static_cast<int>(x / 16.0f); cellZ = static_cast<int>(z / 16.0f); }
+    }
+    void CellToWorld(int cellX, int cellZ, float xyz[3]) override {                                      // 0x308: the cell's centre
+        if (cSC4City* c = HostCity()) c->CellCenterToPosition(cellX, cellZ, xyz[0], xyz[2]);
+        else { xyz[0] = cellX * 16.0f + 8.0f; xyz[2] = cellZ * 16.0f + 8.0f; }
+        sc4::cSTETerrain* terrain = SituationTerrainObject();
+        xyz[1] = terrain ? terrain->GetAltitude(xyz[0], xyz[2]) : 0.0f;
+    }
+} g_situationCity;
+
+// lot manager vslot 0x70 GetOccupantLot: the lot under the occupant (the zone developer's lot map at its cell).
+struct SituationLotView final : ISituationLot {
+    sc4::cSC4Lot* lot = nullptr;
+    void Bounds(int& x0, int& z0, int& x1, int& z1) override {
+        std::int32_t r[4] = {0, 0, 0, 0};
+        if (lot) lot->GetBoundingRect(r);
+        x0 = r[0]; z0 = r[1]; x1 = r[2]; z1 = r[3];
+    }
+};
+struct SituationLotsView final : ISituationLotManager {
+    ISituationLot* LotOfOccupant(ISituationOccupant* occupant) override {
+        if (!occupant) return nullptr;
+        float p[3] = {0, 0, 0};
+        occupant->Position(p);
+        int x = 0, z = 0;
+        g_situationCity.WorldToCell(p[0], p[2], x, z);
+        sc4::cSC4Lot* lot = NativeLotAtCell(x, z, false);
+        if (!lot) return nullptr;
+        std::unique_ptr<SituationLotView>& view = views_[lot];
+        if (!view) view = std::make_unique<SituationLotView>();
+        view->lot = lot;
+        return view.get();
+    }
+private:
+    std::map<sc4::cSC4Lot*, std::unique_ptr<SituationLotView>> views_;
+} g_situationLots;
+
+struct SituationEffectsView final : ISituationEffectsManager {
+    bool CreateEffect(const char* name, ISituationEffect*& out) override {   // effects manager vslot 0x18 by name
+        if (out) {
+            out->Release();
+            out = nullptr;
+        }
+        out = NativeCreateSituationEffect(name);
+        return out != nullptr;
+    }
+} g_situationEffects;
+
+struct SituationDriveView final : ISituationDriveView {
+    void Position(float xyz[3]) override { NativePlayerDriveAutomatonPosition(xyz); }   // the automaton's vslot 0x1c
+} g_situationDrive;
+
+struct SituationZonesView final : ISituationZoneManager {
+    int ZoneTypeAt(int x, int z) override { return NativeZoneTypeAt(x, z); }
+} g_situationZones;
+
+struct SituationTerrainView final : ISituationTerrain {
+    bool IsWaterAt(int x, int z) override {                                    // terrain i386 vslot 0x88 CellHasWater
+        sc4::cSTETerrain* t = SituationTerrainObject();
+        return t && x >= 0 && z >= 0 && t->CellHasWater(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z));
+    }
+    float HeightAt(float x, float z) override { sc4::cSTETerrain* t = SituationTerrainObject(); return t ? t->GetAltitude(x, z) : 0.0f; }
+    float SurfaceWaterDepthAt(int x, int z) override {                         // spSurfaceWater vslot 0x30 GetWaterDepthForCell
+        sc4::cSTESurfaceWater* w = SituationSurfaceWater();
+        return w ? w->GetWaterDepthForCell(x, z) : 0.0f;
+    }
+    bool IsCellWaterZoneCandidate(int x, int z) override {                     // spSurfaceWater vslot 0x38 IsNavigable(x, z, 2, null)
+        sc4::cSTESurfaceWater* w = SituationSurfaceWater();
+        return w && w->IsNavigable(x, z, 2, nullptr);
+    }
+} g_situationTerrain;
+
+struct SituationTrafficView final : ISituationTrafficNetwork {
+    bool HasNetworkAt(int x, int z) override {                                 // map vslot 0x70 (i386 0x38) SafeGetTileInfoAtCell
+        sc4::cSC4TrafficNetworkMap* m = SituationTrafficMap();
+        return m && m->SafeGetTileInfoAtCell(x, z) != nullptr;
+    }
+    bool CellHasNetworkWithFlags(int x, int z, std::uint32_t flags) override {   // vslot 0x68 (i386 0x34): the cell's tiles
+        sc4::cSC4TrafficNetworkMap* m = SituationTrafficMap();
+        for (const sc4::TrafficTileInfo* tile = m ? m->SafeGetTileInfoAtCell(x, z) : nullptr; tile; tile = tile->next)
+            if (tile->occupant && tile->occupant->HasAnyNetworkFlag(flags)) return true;
+        return false;
+    }
+} g_situationTraffic;
+
+// landfill developer vslot 0x60 GetLandfillZoneFromCell: the zone (counted) whose region bounds the situation reads.
+class SituationLandfillLot final : public ISituationLandfillLot {
+public:
+    explicit SituationLandfillLot(sc4::cSC4LandfillZone* zone) : zone_(zone) { zone_->AddRef(); }
+    bool QueryInterface(std::uint32_t, void** out) override { *out = nullptr; return false; }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override {
+        if (refs_ > 1) return --refs_;
+        zone_->Release();
+        delete this;
+        return 0;
+    }
+    const int* Rect() override {
+        const sc4::LandfillCellRegion* region = zone_->Region();
+        if (!region) return nullptr;
+        rect_[0] = region->bounds.x0; rect_[1] = region->bounds.z0; rect_[2] = region->bounds.x1; rect_[3] = region->bounds.z1;
+        return rect_;
+    }
+private:
+    sc4::cSC4LandfillZone* zone_;
+    int rect_[4] = {0, 0, 0, 0};
+    std::uint32_t refs_ = 1;
+};
+struct SituationLandfillView final : ISituationLandfillDeveloper {
+    ISituationLandfillLot* LandfillLotAt(int x, int z) override {
+        sc4::cSC4LandfillDeveloper* d = SituationLandfills();
+        sc4::cSC4LandfillZone* zone = d ? d->GetLandfillZoneFromCell(x, z) : nullptr;
+        return zone ? new SituationLandfillLot(zone) : nullptr;
+    }
+} g_situationLandfill;
+
 class CitySituationManagerHost final : public ICitySituationManagerHost {
 public:
     ISituationLua* Lua() override { return NativeSituationLua(); }
@@ -170,48 +331,28 @@ public:
     ISituationView3D* View3D() override { return &g_view; }
     // SL::spDispatchManager vslot 0xb0 GetDispatchVehicleView: the indicators of the dispatch manager's view.
     ISituationDispatchView* DispatchView() override { return NativeSituationDispatchView(); }
-    ISituationCity* City() override {   // PARTIAL: the city geometry seam (escape / coverage missions, landfill targets)
-        SC4_UNWIRED("ICitySituationManagerHost::City: the city geometry seam (escape / coverage missions, landfill targets) is not wired");
-        return nullptr;
-    }
-    ISituationLotManager* LotManager() override {
-        SC4_UNWIRED("ICitySituationManagerHost::LotManager: the lot manager is not handed to the situations");
-        return nullptr;
-    }
-    ISituationEffectsManager* EffectsManager() override {
-        SC4_UNWIRED("ICitySituationManagerHost::EffectsManager: the effects manager is not handed to the situations");
-        return nullptr;
-    }
+    ISituationCity* City() override { return HostCity() ? &g_situationCity : nullptr; }                 // SL::spCity
+    ISituationLotManager* LotManager() override { return HostCity() ? &g_situationLots : nullptr; }         // SL::spLotManager
+    ISituationEffectsManager* EffectsManager() override { return HostCity() ? &g_situationEffects : nullptr; }   // SL::spEffectsManager
     int AutomataManagerCount() override { return SituationAutomataManagerCount(); }
     ISituationAutomataManager* AutomataManager(int index) override { return SituationAutomataManager(index); }
     ISituationAutomataManager* VehicleManager() override { return SituationAutomataManager(0); }
+    // cSC4AutomataManager::spPlayerDriveView +0x30 (i386), the driven automaton; null while nothing is driven.
     ISituationDriveView* PlayerDriveView() override {
-        SC4_UNWIRED("ICitySituationManagerHost::PlayerDriveView: the player-drive view is not handed to the situations");
-        return nullptr;
+        float position[3];
+        return NativePlayerDriveAutomatonPosition(position) ? &g_situationDrive : nullptr;
     }
     ISituationMissionActor* MySimActor() override {
         SC4_UNWIRED("ICitySituationManagerHost::MySimActor: the MySim is not handed to the situations");
         return nullptr;
     }
     ISituationOccupantManager* OccupantManager() override { return SituationOccupantManager(); }
-    ISituationZoneManager* ZoneManager() override {
-        SC4_UNWIRED("ICitySituationManagerHost::ZoneManager: the zone manager is not handed to the situations");
-        return nullptr;
-    }
-    ISituationTerrain* Terrain() override {
-        SC4_UNWIRED("ICitySituationManagerHost::Terrain: the terrain is not handed to the situations");
-        return nullptr;
-    }
-    ISituationTrafficNetwork* TrafficNetwork() override {
-        SC4_UNWIRED("ICitySituationManagerHost::TrafficNetwork: the traffic network is not handed to the situations");
-        return nullptr;
-    }
+    ISituationZoneManager* ZoneManager() override { return HostCity() ? &g_situationZones : nullptr; }
+    ISituationTerrain* Terrain() override { return SituationTerrainObject() ? &g_situationTerrain : nullptr; }
+    ISituationTrafficNetwork* TrafficNetwork() override { return SituationTrafficMap() ? &g_situationTraffic : nullptr; }
     ISituationAuraSim* AuraSim() override { return SituationAura::Aura() ? &g_aura : nullptr; }
     ISituationBudgetSim* BudgetSim() override { return SituationBudget::Budget() ? &g_budget : nullptr; }
-    ISituationLandfillDeveloper* LandfillDeveloper() override {
-        SC4_UNWIRED("ICitySituationManagerHost::LandfillDeveloper: the landfill developer is not handed to the situations");
-        return nullptr;
-    }
+    ISituationLandfillDeveloper* LandfillDeveloper() override { return SituationLandfills() ? &g_situationLandfill : nullptr; }
     void EnterPlayerDriveView(ISituationAutomaton* automaton, cIGZMessageTarget2* target) override { SituationEnterPlayerDriveView(automaton, target); }
     cIGZWinMgr* WindowManager() override { return ActiveWinMgr(); }
     bool DoURL(const void* text) override { return text && NativeHtmlLinkDoURL(*static_cast<const cIGZString*>(text)); }

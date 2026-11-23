@@ -2,6 +2,7 @@
 // (sc4::IDisasterToolHost) and the cursor effects of every effect tool (sc4::IEffectToolHost over the effects manager).
 #include "app/NativeAudio.h"
 #include "app/NativeDisasterTools.h"
+#include "sc4/CitySituationEntities.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -212,6 +213,46 @@ void NativeMoveEffectTo(void* handle, const float xyz[3]) {
     transform.flags |= 1;
     transform.changeCounter = static_cast<std::uint8_t>(transform.changeCounter + 1);
     effect->SetSourceTransform(transform);
+}
+
+// A situation's effect (cISC4VisualEffect as cSC4CitySituationManager drives it): Start / Stop with the bool as the transition,
+// the transforms from the situation's header (flags in the high byte, change counter in the low one), and the cell
+// rectangle as float parameter 0xc (i386 vslot 0x30 SetFloatParams(0xc, rect, 4)).
+namespace {
+class SituationEffectView final : public sc4::ISituationEffect {
+public:
+    explicit SituationEffectView(cSC4VisualEffect* effect) : effect_(effect) {}
+    bool QueryInterface(std::uint32_t, void** out) override { *out = nullptr; return false; }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override {
+        if (refs_ > 1) return --refs_;
+        effect_->Release();
+        delete this;
+        return 0;
+    }
+    void Start(bool restart) override { effect_->Start(restart ? 1 : 0); }
+    void Stop(bool immediately) override { effect_->Stop(immediately ? 1 : 0); }
+    void SetTransform(const sc4::SituationEffectTransform& t) override { effect_->SetSourceTransform(Make(t)); }
+    void SetEffectTransform(const sc4::SituationEffectTransform& t) override { effect_->SetEffectTransform(Make(t)); }
+    void SetCellRect(const float rect[4]) override { effect_->SetFloatParams(0xc, rect, 4); }
+private:
+    static cS3DTransform Make(const sc4::SituationEffectTransform& t) {
+        cS3DTransform out;
+        out.changeCounter = static_cast<std::uint8_t>(t.header & 0xff);
+        out.flags = static_cast<std::uint8_t>(t.header >> 8);
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 3; ++c) out.rotation[r][c] = t.rotation[r * 3 + c];
+        for (int i = 0; i < 3; ++i) out.translation[i] = t.position[i];
+        return out;
+    }
+    cSC4VisualEffect* effect_;
+    std::uint32_t refs_ = 1;
+};
+}  // namespace
+
+sc4::ISituationEffect* NativeCreateSituationEffect(const char* name) {
+    cSC4VisualEffect* effect = name ? CreateNamedEffect(name) : nullptr;
+    return effect ? new SituationEffectView(effect) : nullptr;
 }
 
 void NativeReleaseEffectHandle(void* handle) {

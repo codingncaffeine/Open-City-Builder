@@ -131,7 +131,8 @@ class ISituationEffect : public cIGZUnknown {
 public:
     virtual void Start(bool restart) = 0;                          // 0x18
     virtual void Stop(bool immediately) = 0;                       // 0x20
-    virtual void SetTransform(const SituationEffectTransform& transform) = 0;   // 0x38 / 0x40
+    virtual void SetTransform(const SituationEffectTransform& transform) = 0;   // 0x40 (i386 0x20) SetSourceTransform
+    virtual void SetEffectTransform(const SituationEffectTransform& transform) { SetTransform(transform); }   // 0x38 (i386 0x1c)
     virtual void SetCellRect(const float rect[4]) = 0;             // 0x60(0xc, rect, 4): x0, z0, x1, z1 in cells
 };
 class ISituationEffectsManager {

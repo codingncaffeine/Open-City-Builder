@@ -1471,7 +1471,7 @@ void cSC4CitySituationManager::DoAnimationTick(float elapsedMilliseconds) {
                 effect->Release();
                 SituationEffectTransform transform;
                 driveView->Position(transform.position);
-                countdownEffect_->SetTransform(transform);
+                countdownEffect_->SetEffectTransform(transform);   // i386 vslot 0x1c (the arrow and the results take 0x20)
                 countdownEffect_->Start(false);
             }
         }
