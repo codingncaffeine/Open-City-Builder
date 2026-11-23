@@ -422,9 +422,8 @@ void cSC4UndergroundNetworkTool::InsertRangeConstraintsForCell(std::uint32_t cel
     cSC4NetworkCellInfo* cell = GetCellInfo(cellKey);
     if (cell == nullptr) return;
     if (cell->buildable) {
-        // 0x1001a7643 tail call: a buildable cell goes through the base tool's constraints instead.
-        IUndergroundNetworkToolHost* host = g_undergroundNetworkToolHost;
-        if (host != nullptr) host->InsertRangeConstraintsForCellBase(cellKey);
+        // 0x1001a7643 tail call: a buildable cell goes through the base tool's constraints instead (i386 0x0014363e).
+        cSC4NetworkTool::InsertRangeConstraintsForCell(cellKey);
         return;
     }
     INetworkConstraintSatisfier* satisfier = constraintA_;   // this + 0x228

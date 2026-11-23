@@ -3,8 +3,7 @@
 // manager and the resource manager; the occupant's are the city's cell mapping and the cell queries.
 //
 // The occupant's custom junction models, mesh access and renderer ChangeModel are answered; PrepareRenderer and the network
-// occupant statics are empty. PARTIAL: the base InsertRangeConstraintsForCell the tool's drag reaches (i386 0x1001b37e4) is
-// not recovered, so dragging pipes is not wired; the tool serves the network manager's demolition and re-solve of pipes.
+// occupant statics are empty.
 #include "app/NativeUnderground.h"
 #include "platform/Unwired.h"
 
@@ -118,10 +117,6 @@ public:
         if (holder) holder->AddRef();
         exemplar->Release();
         return holder;
-    }
-    // i386 0x1001b37e4 (base drag constraints): not recovered; only placement reaches it.
-    void InsertRangeConstraintsForCellBase(std::uint32_t) override {
-        SC4_UNWIRED("cSC4UndergroundNetworkTool: the base InsertRangeConstraintsForCell (i386 0x1001b37e4) is not recovered (pipe drag constraints)");
     }
     // SL::NetworkManager() vslot 0x18 DestroyNetworkOccupants, then the occupant manager releases the list (vslot 0xc0).
     void DestroyNetworkOccupants(std::list<cISC4Occupant*>& occupants) override {

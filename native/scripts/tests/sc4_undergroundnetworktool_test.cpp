@@ -299,6 +299,13 @@ struct FakeTypeInfo final : INetworkTypeInfo {
 
 // The engine globals of the base cSC4NetworkTool (copied from scripts/tests/sc4_networktool_test.cpp).
 struct FakeNetworkToolHost final : INetworkToolHost {
+    bool lotAt = false;   // a one-cell lot under every cell
+    bool LotBoundingRectAt(std::uint32_t x, std::uint32_t z, std::int32_t (&rect)[4]) override {
+        if (!lotAt) return false;
+        rect[0] = rect[2] = static_cast<std::int32_t>(x);
+        rect[1] = rect[3] = static_cast<std::int32_t>(z);
+        return true;
+    }
     ~FakeNetworkToolHost() override {
         if (terrain != nullptr) terrain->Release();
         if (occupants != nullptr) occupants->Release();
@@ -429,10 +436,6 @@ struct FakeUndergroundHost final : IUndergroundNetworkToolHost {
         cSCPropertyHelp::SetPropertyValue(holder, kUndergroundPropTuningFlag, true);
         return holder;
     }
-    void InsertRangeConstraintsForCellBase(std::uint32_t cellKey) override {
-        ++rangeBaseCalls;
-        lastRangeBaseKey = cellKey;
-    }
     void DestroyNetworkOccupants(std::list<cISC4Occupant*>& occupants) override {
         for (cISC4Occupant* occupant : occupants) {
             destroyed.push_back(occupant);
@@ -449,9 +452,7 @@ struct FakeUndergroundHost final : IUndergroundNetworkToolHost {
     std::uint32_t nextHandle = 0x40;
     std::uint32_t lastQueryKey = 0;
     std::uint32_t tuningExemplar = 0;
-    std::uint32_t lastRangeBaseKey = 0;
     int queryCalls = 0, addCalls = 0, removeCalls = 0, tuningCalls = 0;
-    int rangeBaseCalls = 0;
     bool lastRemoveKeep = true;
     int lastAddParam = 0, lastRemoveParam = 0;
 };
@@ -983,12 +984,17 @@ void TestConstraints() {
     CHECK_NEAR(f.satisfier.ranges[1].high, 3.0f);
     CHECK(f.satisfier.preferred.size() == 3);   // hasOccupant
 
-    // A buildable cell takes the base implementation instead.
+    // A buildable cell takes the base implementation instead: no lot under it, nothing; on a lot, its four corners are fixed
+    // at the lot-connection vertex ids (vertex + 100000).
     cell.buildable = true;
     f.tool->InsertRangeConstraintsForCell(Key(1, 1));
-    CHECK(f.host.rangeBaseCalls == 1);
-    CHECK(f.host.lastRangeBaseKey == Key(1, 1));
     CHECK(f.satisfier.solved.size() == 4);   // unchanged
+    f.baseHost.lotAt = true;
+    const std::size_t lotFixedBefore = f.satisfier.fixed.size();
+    f.tool->InsertRangeConstraintsForCell(Key(1, 1));
+    CHECK(f.satisfier.fixed.size() >= lotFixedBefore + 4);
+    CHECK(f.satisfier.fixed[lotFixedBefore].first == cell.vertexBaseHeights[0] + 100000);
+    f.baseHost.lotAt = false;
     cell.buildable = false;
 
     // A solved/immovable cell (+0x5b) only gets four fixed vertices: no AddVertexToSolve, no ranges.

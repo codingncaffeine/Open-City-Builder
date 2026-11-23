@@ -57,8 +57,7 @@
 // Seams (see docs/SEAMS.md): the terrain (height of a vertex / of a cell), the occupant manager (cell query,
 // add and remove), the resource manager (the tuning property holder), the world cache (already a seam of
 // cSC4NetworkTool, extended with the two entry points this tool calls) and the vertical constraint satisfier
-// (same, extended with the seven calls this tool makes). The base-class InsertRangeConstraintsForCell
-// (0x1001b37e4) is not recovered and stays a seam; InsertOccupantsForSolvedCells and ClearCellPreviews are called on the
+// (same, extended with the seven calls this tool makes). InsertOccupantsForSolvedCells and ClearCellPreviews are called on the
 // recovered base. Everything the seams stand for is one original call, noted on the method.
 #pragma once
 #include <cstdint>
@@ -123,9 +122,6 @@ public:
     // four GetPropertyValue calls read. Returned with one reference, or null; the caller Releases it
     // (0x1001a7c7e).
     virtual cISCPropertyHolder* AcquireNetworkTuningProperties(std::uint32_t exemplarId) = 0;
-    // cSC4NetworkTool::InsertRangeConstraintsForCell @ 0x1001b37e4 (not recovered): the base constraint pass a
-    // buildable underground cell takes (0x1001a7643).
-    virtual void InsertRangeConstraintsForCellBase(std::uint32_t cellKey) = 0;
     // SL::NetworkManager() vslot 0x18 DestroyNetworkOccupants(list), then SL::spOccupantManager vslot 0xc0 releases the list
     // (each entry holds one reference). UpdateUndergroundOccupantTerrainHeights removes the pieces the new terrain exposes.
     virtual void DestroyNetworkOccupants(std::list<cISC4Occupant*>& occupants) {
