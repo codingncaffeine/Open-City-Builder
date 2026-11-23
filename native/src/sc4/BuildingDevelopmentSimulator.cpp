@@ -5,7 +5,9 @@
 #include "sc4/cSC4SimGrid.h"
 #include "sc4/cSC4Demand.h"
 #include "sc4/CommonIIDs.h"
+#include "gz/CommandParameterSet.h"
 #include "gz/cIGZSerializable.h"
+#include "gz/cIGZVariant.h"
 #include "rz/cRZAutoRefCount.h"
 
 #include <algorithm>
@@ -699,9 +701,16 @@ bool cSC4BuildingDevelopmentSimulator::DoMessage(cIGZMessage2* message) {
         case 0x66956816:
             DoMonthlySimulation();
             break;
-        case 0xb99ae81:                                      // the PlaceBuilding command
-            SC4_UNWIRED("cSC4BuildingDevelopmentSimulator::DoMessage: the PlaceBuilding command (AddNewBuildingOccupant from its parameters) is not ported");
+        case 0xb99ae81: {                                    // the PlaceBuilding command (i386 0x000f6d62)
+            // void1 = the command's parameters: [0] the building type, [1] and [2] two floats. The original builds the position
+            // {[1], [2], -1} (as the decompile lays its locals out) and adds the building turned twice.
+            auto* parameters = static_cast<cIGZCommandParameterSet*>(standard->GetVoid1());
+            if (!parameters) break;
+            const std::uint32_t buildingType = (*parameters)[0].GetValUint32();
+            float position[3] = {(*parameters)[1].GetValFloat32(), (*parameters)[2].GetValFloat32(), -1.0f};
+            AddNewBuildingOccupant(buildingType, position, 2);   // vslot 0x1c; the building is borrowed
             break;
+        }
         default:
             break;
     }
