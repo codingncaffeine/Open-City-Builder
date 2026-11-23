@@ -239,4 +239,36 @@ void cSC4AdvisorUIImageWinProc::DoAnimationTick(float milliseconds) {
     if (current_) lastFrame_ = current_->GetFrame();
 }
 
+// ---------------------------------------------------------------------------------------------- cSC4SituationUIImageWinProc
+
+// @ 0x004b1780: the window is taken before the base attach (which keeps it as well).
+bool cSC4SituationUIImageWinProc::Init(cIGZWin* window) {
+    if (initialized_) return true;
+    window_ = window;
+    return cSC4AdvisorUIImageWinProc::Init(window);
+}
+
+// @ 0x004b17c4: the clock instead of the animation tick manager; the models load or drop as in the base.
+void cSC4SituationUIImageWinProc::Enable(bool enable) {
+    if (enabled_ == enable) return;
+    enabled_ = enable;
+    if (enable) timer_.Start();
+    else timer_.Stop();
+    LoadModels(enable);
+}
+
+// @ 0x004b1820.
+void cSC4SituationUIImageWinProc::DoPaint() {
+    float elapsed = 0.0f;
+    timer_.GetElapsedTimeFloat(elapsed);
+    if (elapsed < kSituationHeadFrameMilliseconds) {
+        cSC4AdvisorUIImageWinProc::DoPaint();
+        return;
+    }
+    timer_.Stop();
+    DoAnimationTick(elapsed);
+    cSC4AdvisorUIImageWinProc::DoPaint();
+    timer_.Restart();
+}
+
 }  // namespace sc4

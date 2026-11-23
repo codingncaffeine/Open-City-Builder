@@ -20,7 +20,10 @@
 #include "app/NativeCitySystems.h"
 #include "app/NativeGameData.h"
 #include "app/NativeWinMgr.h"
+#include "gz/Buffer.h"
 #include "gz/CheatCodeManager.h"
+#include "gz/Font.h"
+#include "gz/WinFont.h"
 #include "rz/cRZMessage2Standard.h"
 #include "rz/cRZString.h"
 #include "sc4/Advisor.h"
@@ -28,6 +31,7 @@
 #include "sc4/AutoHelpers.h"
 #include "sc4/AuraSimulator.h"
 #include "sc4/BudgetSimulator.h"
+#include "sc4/CivicBuildingSimulator.h"
 #include "sc4/Exemplar.h"
 #include "sc4/SCPropertyHelp.h"
 #include "sc4/ViewInputControl.h"
@@ -48,6 +52,7 @@
 #include "sc4/NeighborsSimulator.h"
 
 namespace native {
+std::string FontStyleName(std::uint32_t guid);   // linux/game_main_linux.cpp
 sc4::ISituationLua* NativeSituationLua();   // NativeCitySituationAdvice.cpp
 // app/NativeSituationAutomata.cpp
 sc4::ISituationOccupant* SituationOccupantOf(void* engineOccupant);
@@ -306,6 +311,54 @@ public:
         const bool found = cSCPropertyHelp::GetPropertyValue(exemplar->AsISCPropertyHolder(), 0xec1b2361, panel);
         exemplar->Release();
         return found;
+    }
+    bool SystemFont(std::uint32_t fontId, SituationDialogFont& out) override {
+        gz::IWinFontSource* fonts = gz::WinFontSource();
+        gz::IWinFont* style = fonts ? fonts->Font(fontId) : nullptr;
+        cIGZFont* font = style ? style->AsFont() : nullptr;
+        if (!font) return false;
+        // The style's own name: the native HTML font system resolves it to the style's face and parameters.
+        const std::string styleName = FontStyleName(fontId);
+        if (!styleName.empty()) out.name = cRZString(styleName.c_str());
+        out.bold = font->GetStyle(1);
+        out.size = font->GetSize();
+        return true;
+    }
+    bool RewardStatus(std::uint32_t guid, SituationRewardStatus& out) override {
+        sc4::cSC4CivicBuildingSimulator* civic = CivicSimulator();
+        if (!civic) return false;
+        const auto* record = civic->GetConditionalBuildingStatus(guid);
+        out.hasRecord = record != nullptr;
+        out.state = record ? record->state : 0;
+        out.advisorHasAdvice = false;
+        if (cSC4AdvisorSystem* system = cSC4AdvisorSystem::Instance()) {
+            if (AdvisorMap* advisors = system->GetAdvisors()) {
+                for (auto& entry : *advisors) {
+                    cISC4Advice* advice = entry.second ? entry.second->GetAdviceByGUID(static_cast<int>(guid)) : nullptr;
+                    if (!advice) continue;
+                    (void)advice->GetTrigger();   // called by the original, its answer unused
+                    out.advisorHasAdvice = true;
+                    break;
+                }
+            }
+        }
+        return true;
+    }
+    cIGZBuffer* SituationPicture(std::uint32_t imageId) override {
+        return static_cast<cIGZBuffer*>(LoadBitmapResource(0x46a006b0, imageId));
+    }
+
+private:
+    static sc4::cSC4CivicBuildingSimulator* CivicSimulator() {
+        cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(CityComponent::CivicBuildingSimulator) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(0xe4fda3d4, &raw) || !raw) return nullptr;
+        auto* serializable = static_cast<cIGZSerializable*>(raw);
+        auto* civic = serializable->GetGZCLSID() == kGZCLSID_cSC4CivicBuildingSimulator
+                          ? static_cast<sc4::cSC4CivicBuildingSimulator*>(serializable) : nullptr;
+        serializable->Release();
+        return civic;
     }
 } g_host;
 

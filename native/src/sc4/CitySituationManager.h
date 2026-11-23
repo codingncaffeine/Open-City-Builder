@@ -59,6 +59,7 @@
 #include "rz/cRZDate.h"
 #include "rz/cRZRandomSuper.h"
 #include "rz/cRZString.h"
+#include "sc4/AdvisorUIImageWinProc.h"
 #include "sc4/CitySituationAdvice.h"
 #include "sc4/GameDataRegistry.h"
 #include "sc4/CitySituationEntities.h"
@@ -66,6 +67,8 @@
 
 class cIGZWin;
 class cIGZVariant;
+
+class cIGZBuffer;
 
 namespace sc4 {
 
@@ -200,6 +203,19 @@ public:
 
 // Everything the manager reaches outside of itself. The application installs one host at startup; a missing host is
 // tolerated until the affected feature is used.
+// The metrics SetupDialog reads from a system font (see ICitySituationManagerHost::SystemFont).
+struct SituationDialogFont {
+    cRZString name{"Arta"};   // the face name (the original pre-loads "Arta")
+    bool bold = false;
+    std::uint32_t size = 0;   // pixels
+};
+// What SetupDialog reads about a reward (see ICitySituationManagerHost::RewardStatus).
+struct SituationRewardStatus {
+    bool hasRecord = false;       // GetConditionalBuildingStatus answered a record
+    std::uint32_t state = 0;      // its state word: bit 1 = the reward is unlocked, high word = live buildings of it
+    bool advisorHasAdvice = false;   // some advisor holds an advice with the reward's guid
+};
+
 class ICitySituationManagerHost {
 public:
     virtual ~ICitySituationManagerHost() = default;
@@ -274,6 +290,17 @@ public:
     // SL::spRM vslot 0x18 on the exemplar {0x6534284a, 0x690f693f, dashboardId}: its property 0xec1b2361 (the mission
     // status panel the drive shows).
     virtual bool DashboardMissionPanel(std::uint32_t dashboardId, std::uint32_t& panelId) { (void)dashboardId; (void)panelId; return false; }
+    // SetupDialog's two faces: RZ::WCM() vslot 0x14(fontId) (the system font for a style id, borrowed), then the font's
+    // vslot 0x14 GetName, 0x1c GetStyle(1) (bold) and 0x28 GetSize (pixels). False when there is no such font.
+    virtual bool SystemFont(std::uint32_t fontId, SituationDialogFont& out) { (void)fontId; (void)out; return false; }
+    // SetupDialog's reward line: SL::spCivicBuildingSim vslot 0x18 GetConditionalBuildingStatus(guid) (the record, may be
+    // null), then the advisors of SL::spAdvisorSystem (vslot 0x20, the advisor map) are walked for the first whose vslot
+    // 0x30 GetAdviceByGUID(guid) answers an advice; that advice's vslot 0x20 (GetTrigger) is called and its answer unused.
+    // False when there is no civic building simulator (the original then adds no reward line).
+    virtual bool RewardStatus(std::uint32_t guid, SituationRewardStatus& out) { (void)guid; (void)out; return false; }
+    // SL::spRM vslot 0xc GetResource({0x856ddbac, 0x46a006b0, imageId}, iid 0x6f1568e) and that image's vslot 0x10: the
+    // still picture the dialog shows when the picture id is no head model. One reference; null when it is missing.
+    virtual cIGZBuffer* SituationPicture(std::uint32_t imageId) { (void)imageId; return nullptr; }
     // SL::spAdvisorSystem vslot 0x38(0x1d) = the "city situations" advisor, vslot 0x58 = its advice list; every entry is
     // QueryInterface'd for 0x6beb1e8a (DoMessage 0x26d31ec1 re-triggers them all).
     virtual std::vector<cISC4CitySituationAdvice*> AdvisorSituations() = 0;
@@ -434,6 +461,7 @@ public:
     cIGZWin* PopupDialog() const { return popupDialog_.get(); }      // port: the open dialog (the kit's accept path)
 
 private:
+    friend struct CitySituationManagerTestAccess;   // the unit test's view of the status, the situation and the picture proc
     bool initialized_ = false;                                   // +0x28
     std::uint32_t refCount_ = 0;                                 // +0x2c
     cRZDate today_;                                              // +0x30
@@ -447,7 +475,7 @@ private:
     // +0xa58. The original hashes the automaton pointers shifted down (tAutomatonPtrHash); that only changes the
     // iteration order of the set, which the port leaves to std::hash.
     std::unordered_set<ISituationAutomaton*> trackedAutomata_;
-    cRZAutoRefCount<cIGZWin> situationWindow_;                   // +0xa80
+    cRZAutoRefCount<cSC4SituationUIImageWinProc> imageWinProc_;  // +0xa80 (i386 +0xa20): the dialog picture's procedure
     ISituationLotManager* lotManager_ = nullptr;                 // +0xa88 (borrowed from the host)
     ISituationOccupantManager* occupantManager_ = nullptr;       // +0xa90 (borrowed)
     cRZAutoRefCount<cIGZWin> popupDialog_;                       // +0xa98

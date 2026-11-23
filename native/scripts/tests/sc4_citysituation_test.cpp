@@ -15,7 +15,12 @@
 
 #include "rz/PortMemoryStreams.h"
 #include "rz/cRZMessage2Standard.h"
+#include "gz/Win.h"
+#include "gz/WinBMP.h"
+#include "gz/WinGen.h"
+#include "gz/WinHTML.h"
 #include "sc4/CitySituationManager.h"
+#include "sc4/DrawContext.h"
 #include "sc4/GameDataRegistry.h"
 #include "rz/cRZCOMDllDirector.h"
 
@@ -23,6 +28,11 @@ static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
 
 using namespace sc4;
+
+// The picture procedure's paint path (no renderer in the test, so these never run).
+void SC4DrawContext::SetCamera(s3d::cS3DCamera*) {}
+void SC4DrawContext::SetDefaultRenderStateUnilaterally() {}
+void SC4DrawContext::SetDepthOffset(int) {}
 
 namespace {
 
@@ -278,17 +288,23 @@ public:
     const cRZString& GetSuccessText() const override { return text; }
     const cRZString& GetFailureText() const override { return text; }
     const cRZString& GetProgressText(std::uint16_t) const override { return text; }
-    std::uint32_t GetSituationImageId() const override { return 0; }
-    std::uint32_t GetSuccessImageId() const override { return 0; }
-    std::uint32_t GetSuccessMood() const override { return 0; }
+    std::uint32_t GetSituationImageId() const override { return situationImage; }
+    std::uint32_t GetSuccessImageId() const override { return successImage; }
+    std::uint32_t GetSuccessMood() const override { return successMood; }
     std::uint32_t GetFailureImageId() const override { return 0; }
     std::uint32_t GetFailureMood() const override { return 0; }
     int GetScriptTableRef() const override { return -2; }
     std::uint32_t GetEvilTwinGuid() const override { return 0; }
-    std::uint32_t GetRewardGuid() const override { return 0; }
-    const cRZString& GetRewardProgressText() const override { return text; }
-    const cRZString& GetRewardUnlockedText() const override { return text; }
-    std::uint32_t GetRewardUnlockedImageId() const override { return 0; }
+    std::uint32_t GetRewardGuid() const override { return rewardGuid; }
+    const cRZString& GetRewardProgressText() const override { return rewardProgress; }
+    const cRZString& GetRewardUnlockedText() const override { return rewardUnlocked; }
+    std::uint32_t GetRewardUnlockedImageId() const override { return rewardImage; }
+    const cRZString& GetAdviceTitle() const override { return title; }
+    const cRZString& GetAdviceMessage() const override { return message; }
+    int GetAdviceMood() const override { return mood; }
+    std::uint32_t situationImage = 0, successImage = 0, successMood = 0, rewardGuid = 0, rewardImage = 0;
+    int mood = 0;
+    cRZString title, message, rewardProgress, rewardUnlocked;
     std::uint32_t GetCoverageType() const override { return coverageType; }
     std::uint32_t GetCoverageZone() const override { return coverageZone; }
     std::uint32_t GetCoverageOccupantGroup() const override { return 0; }
@@ -420,6 +436,27 @@ public:
 // --- the host ---------------------------------------------------------------------------------------------------
 class FakeHost final : public ICitySituationManagerHost {
 public:
+    bool fonts = false;
+    SituationDialogFont titleFont, messageFont;
+    bool SystemFont(std::uint32_t fontId, SituationDialogFont& out) override {
+        if (!fonts) return false;
+        out = fontId == 0x4a809914 ? titleFont : messageFont;
+        return true;
+    }
+    bool civic = false;
+    SituationRewardStatus reward;
+    std::vector<std::uint32_t> rewardAsks;
+    bool RewardStatus(std::uint32_t guid, SituationRewardStatus& out) override {
+        rewardAsks.push_back(guid);
+        if (!civic) return false;
+        out = reward;
+        return true;
+    }
+    std::vector<std::uint32_t> pictureAsks;
+    cIGZBuffer* SituationPicture(std::uint32_t imageId) override {
+        pictureAsks.push_back(imageId);
+        return nullptr;
+    }
     ISituationLua* Lua() override { return lua; }
     cIGZMessageServer2* MessageServer() override { return &messages; }
     ISituationApp* App() override { return app; }
@@ -571,7 +608,375 @@ cRZMessage2Standard* MakeMessage(std::uint32_t type) {
 // The registry registers itself with the director framework only in Init, which the test does not call.
 IDirectorFramework* DirectorFramework() { return nullptr; }
 
+
+namespace {
+// --- the situation dialog rig (SetupDialog): the recovered cGZWin with its script children answered by fakes ------------
+struct Html final : cIGZWinHTML {
+    std::uint32_t refs = 0;
+    cIGZWin* window = nullptr;
+    std::string document;
+    std::string baseUrl;
+    std::vector<int> clearedFlags;
+    std::int32_t documentWidth = 300, documentHeight = 100;
+
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid != 1 && iid != kGZIID_cIGZWinHTML) return false;
+        *out = static_cast<cIGZWinHTML*>(this);
+        AddRef();
+        return true;
+    }
+    std::uint32_t AddRef() override { return ++refs; }
+    std::uint32_t Release() override {
+        if (refs) --refs;
+        return refs;
+    }
+    cIGZWin* AsIGZWin() override { return window; }
+    bool SetWWWSystem(html::IHtmlWebSystem*) override { return false; }
+    std::int32_t GetLoadStatus() override { return 2; }
+    void GetScrollPosition(int& x, int& y) override { x = y = 0; }
+    void SetScrollPosition(int, int) override {}
+    bool GetAnchorPosition(const cIGZString&, cRZRect&) override { return false; }
+    bool ScrollToAnchor(const cIGZString&) override { return false; }
+    void GetDocumentSize(gz::cRZSize& size) override { size.width = documentWidth; size.height = documentHeight; }
+    bool SetScrollBarImageVertical(cIGZBuffer*, const cRZRect&) override { return false; }
+    bool SetScrollBarImageHorizontal(cIGZBuffer*, const cRZRect&) override { return false; }
+    bool GetScrollBarImageVertical(cIGZBuffer*& image, cRZRect&) const override { image = nullptr; return false; }
+    bool GetScrollBarImageHorizontal(cIGZBuffer*& image, cRZRect&) const override { image = nullptr; return false; }
+    bool GetURL(cRZString&) override { return false; }
+    bool GetNewURL(cRZString&) override { return false; }
+    bool SetURL(const cRZString&, bool) override { return false; }
+    bool SetBaseURL(const cRZString&) override { return false; }
+    bool SetRelativeURL(const cRZString&) override { return false; }
+    bool SetURL(cRZURL&, bool) override { return false; }
+    bool GetDocument(std::string& out) override { out = document; return true; }
+    bool SetDocument(const std::string& text, const cRZString& base) override {
+        document = text;
+        baseUrl = base.ToChar();
+        return true;
+    }
+    void SetMissingBitmapPath(const cIGZString&) override {}
+    bool CancelCurrentLoadRequest() override { return false; }
+    bool DoLinkJump(const cIGZString&) override { return false; }
+    void SetFlag(int) override {}
+    void SetFlags(int) override {}
+    void ClearFlag(int flag) override { clearedFlags.push_back(flag); }
+    bool IsFlagSet(int) override { return false; }
+    std::int32_t GetFlags() override { return 0; }
+    void GetGutters(int&, int&, int&, int&) override {}
+    void SetGutters(int, int, int, int) override {}
+    void SetTextSizeTable(const std::uint32_t*) override {}
+};
+
+struct Gen final : gz::cIGZWinGen {
+    std::uint32_t refs = 0;
+    cIGZWin* window = nullptr;
+    gz::cIGZWinProc* proc = nullptr;
+    std::vector<gz::cIGZWinProc*> procs;
+
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid != 1 && iid != gz::kGZIID_cIGZWinGen) return false;
+        *out = static_cast<gz::cIGZWinGen*>(this);
+        AddRef();
+        return true;
+    }
+    std::uint32_t AddRef() override { return ++refs; }
+    std::uint32_t Release() override {
+        if (refs) --refs;
+        return refs;
+    }
+    cIGZWin* AsIGZWin() override { return window; }
+    std::uint32_t GetCLSID() const override { return gz::kGZCLSID_cGZWinGen; }
+    bool GetWinGenFlag(int) const override { return false; }
+    bool SetWinGenFlag(int, bool) override { return false; }
+    bool SetWinProc(gz::cIGZWinProc* p) override {
+        proc = p;
+        procs.push_back(p);
+        return true;
+    }
+    gz::cIGZWinProc* GetWinProc() const override { return proc; }
+    bool GetWinProcAs(std::uint32_t, void** out) const override { (void)out; return false; }
+    bool GetUserArea(cRZRect& out) const override { out = cRZRect{}; return true; }
+    bool SetUserArea(const cRZRect&) override { return false; }
+    bool SetBackgroundBitmap(gz::BGBltType, cIGZBuffer*) override { return false; }
+    bool GetBackgroundBitmap(gz::BGBltType&, cIGZBuffer*&) const override { return false; }
+    bool SetBackgroundBitmap(cIGZBuffer*) override { return false; }
+    bool GetBackgroundBitmap(cIGZBuffer** out) const override { *out = nullptr; return false; }
+    bool SetBackgroundBlitType(gz::BGBltType) override { return false; }
+    bool GetBackgroundBlitType(gz::BGBltType&) const override { return false; }
+    bool SetUserData(std::uint32_t, std::uint32_t) override { return false; }
+    bool GetUserData(std::uint32_t, std::uint32_t&) const override { return false; }
+    bool SetUserData(std::uint32_t) override { return false; }
+    std::uint32_t GetUserData() const override { return 0; }
+    void SetUserData(std::uint32_t, cIGZUnknown*) override {}
+    bool GetUserData(std::uint32_t, std::uint32_t, void**) override { return false; }
+    void RemoveUserData(std::uint32_t) override {}
+    bool SetGutters(std::uint8_t, std::uint8_t) override { return false; }
+    bool GetGutters(int&, int&) override { return false; }
+    void SetGutters(std::int8_t, std::int8_t, std::int8_t, std::int8_t) override {}
+    bool GetGutters(int&, int&, int&, int&) const override { return false; }
+    bool AddColorBar(int, int, int, const cRZRect&) override { return false; }
+    void AddDividerH(int, int) override {}
+    bool RemoveColorBar(int) override { return false; }
+};
+
+struct Manager final : cIGZWinMgr {
+    struct Dialog {
+        std::uint32_t code = 0;
+        cIGZWin* window = nullptr;
+        std::int64_t result = 0;
+    };
+    std::vector<cIGZWin*> popups;
+    std::vector<Dialog> dialogs;
+    std::vector<cIGZWin*> destroyed;
+    cIGZWin* focus = nullptr;
+    cIGZWin* mainWindow = nullptr;
+
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return 1; }
+    std::uint32_t Release() override { return 1; }
+    cIGZWin* GetMainWindow() override { return mainWindow; }
+    void EndDialog(std::uint32_t code, cIGZWin* window, std::int64_t result) override {
+        dialogs.push_back({code, window, result});
+    }
+    void AppendToPlotStrategy(cIGZWin*) override {}
+    void Plot() override {}
+    void PostMessageToTarget(cIGZWin*, const cGZMessage&) override {}
+    void AddWindowToValidList(cIGZWin*) override {}
+    void RemoveWindowFromValidList(cIGZWin*) override {}
+    void CleanUpWindowReferences(cIGZWin*) override {}
+    bool DestroyWindow(cIGZWin* window) override {
+        destroyed.push_back(window);
+        return true;
+    }
+    bool IsWindowValid(cIGZWin* window) override { return window != nullptr; }
+    cIGZWin* GetWindowFromPoint(int, int) override { return nullptr; }
+    void GetCursorPos(cIGZWin*, int& x, int& y) override { x = y = 0; }
+    void SetCurrentMouseWin(cIGZWin*) override {}
+    cIGZWin* GZGetCapture() override { return nullptr; }
+    void GZSetCapture(cIGZWin*) override {}
+    void GZReleaseCapture(cIGZWin*) override {}
+    cIGZCursorManager* GetCursorManager() override { return nullptr; }
+    cIGZWin* GZGetFocus() override { return focus; }
+    void GZSetFocus(cIGZWin* window) override { focus = window; }
+    cIGZKeyboard* GetKeyboard() override { return nullptr; }
+    int RunPopup(cIGZWin* popup) override {
+        popups.push_back(popup);
+        return 0;
+    }
+};
+
+struct Bmp final : gz::cIGZWinBMP {
+    std::uint32_t refs = 0;
+    int sets = 0;
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return ++refs; }
+    std::uint32_t Release() override {
+        if (refs) --refs;
+        return refs;
+    }
+    cIGZWin* AsIGZWin() override { return nullptr; }
+    void SetBMP(cIGZBuffer*) override { ++sets; }
+    bool GetBMP(std::uint32_t, void**) const override { return false; }
+    void SetAlphaBlending(bool, float) override {}
+    void GetAlphaBlending(bool& on, float& alpha) const override { on = false; alpha = 1.0f; }
+    void SetImageArea(const cRZRect&) override {}
+    void GetImageArea(cRZRect& area) const override { area = cRZRect{}; }
+    bool GetWinBMPFlag(int) const override { return false; }
+    void SetWinBMPFlag(int, bool) override {}
+};
+
+struct SituationDialog final : cGZWin {
+    explicit SituationDialog(cIGZWinMgr* mgr) : cGZWin(mgr) {}
+    Html* html = nullptr;
+    Gen* image = nullptr;
+    Bmp* picture = nullptr;
+    cIGZWin* controls = nullptr;
+    std::vector<std::uint32_t> lookups;
+    bool GetChildAsRecursive(std::uint32_t id, std::uint32_t iid, void** out) override {
+        lookups.push_back(id);
+        if (id == 2 && iid == kGZIID_cIGZWinHTML && html) { html->AddRef(); *out = static_cast<cIGZWinHTML*>(html); return true; }
+        if (id == 4 && iid == gz::kGZIID_cIGZWinGen && image) { image->AddRef(); *out = static_cast<gz::cIGZWinGen*>(image); return true; }
+        if (id == 3 && iid == gz::kGZIID_cIGZWinBMP && picture) { picture->AddRef(); *out = static_cast<gz::cIGZWinBMP*>(picture); return true; }
+        return false;
+    }
+    cIGZWin* GetChildWindowFromIDRecursive(std::uint32_t id) override { return id == 5 ? controls : nullptr; }
+};
+
+}  // namespace
+
+namespace sc4 {
+struct CitySituationManagerTestAccess {
+    static void SetStatus(cSC4CitySituationManager& m, std::uint32_t status) { m.status_ = status; }
+    static void SetActive(cSC4CitySituationManager& m, cISC4CitySituationAdvice* advice) { m.activeSituation_ = advice; }
+    static cSC4SituationUIImageWinProc* ImageProc(cSC4CitySituationManager& m) { return m.imageWinProc_.get(); }
+};
+}  // namespace sc4
+
+namespace {
+
+// SetupDialog: the page for each status (briefing, success with and without a reward, failure, not available), the faces,
+// the dialog growing with the document up to 450 pixels, the window parameters and the picture procedure / still picture.
+void TestSetupDialog() {
+    using Access = CitySituationManagerTestAccess;
+    FakeHost host;
+    host.fonts = true;
+    host.titleFont.name = cRZString("Head");
+    host.titleFont.bold = true;
+    host.titleFont.size = 16;   // (16*4 + 8) / 18 = 4
+    host.messageFont.name = cRZString("Body");
+    host.messageFont.size = 12; // (12*4 + 8) / 18 = 3
+    SetCitySituationManagerHost(&host);
+    Manager windows;
+    auto* manager = new cSC4CitySituationManager();
+    manager->AddRef();
+    auto* advice = new FakeAdvice();
+    advice->title = cRZString("Fire!");
+    advice->message = cRZString("Put it out.");
+    advice->mood = 1;
+    advice->situationImage = 0x1234;
+    advice->text = cRZString("Done.");
+    advice->successImage = 0x55;
+    advice->successMood = 2;
+
+    auto build = [&](cISC4CitySituationAdvice* situation, Html& html, SituationDialog& dialog, Gen& gen, Bmp& bmp,
+                     cGZWin& htmlWindow, cGZWin& controls) {
+        dialog.SetArea(0, 0, 300, 200);
+        htmlWindow.SetArea(10, 10, 290, 110);   // 100 high
+        controls.SetArea(10, 150, 290, 190);
+        html.window = &htmlWindow;
+        dialog.html = &html;
+        dialog.image = &gen;
+        dialog.picture = &bmp;
+        dialog.controls = &controls;
+        manager->SetupDialog(&dialog, situation, nullptr);
+    };
+
+    // the briefing: the advice's own title / message / mood / picture; a document 50 pixels past the page grows the
+    // dialog by 50 (+20 padding) and moves the controls down; no aura or money line without an active situation
+    {
+        Html html; Gen gen; Bmp bmp;
+        SituationDialog dialog(&windows);
+        cGZWin htmlWindow(&windows), controls(&windows);
+        html.documentHeight = 130;
+        build(advice, html, dialog, gen, bmp, htmlWindow, controls);
+        CHECK(html.document.find("<FONT FACE=\"Head\" SIZE=4><B>Fire!</B></FONT>") != std::string::npos);
+        CHECK(html.document.find("<FONT FACE=\"Body\" SIZE=3>Put it out.</FONT>") != std::string::npos);
+        CHECK(html.document.find("TEXT=\"#394472\"") != std::string::npos && html.document.find("LINK=\"#0000ff\"") != std::string::npos);
+        CHECK(html.document.find("&nbsp;") == std::string::npos);
+        CHECK(html.baseUrl == "sc4://");
+        CHECK(std::count(html.clearedFlags.begin(), html.clearedFlags.end(), kHtmlOutline) == 1);
+        CHECK(dialog.GetH() == 250 && htmlWindow.GetH() == 150 && controls.GetT() == 200);
+        cIGZVariant* param = nullptr;
+        CHECK(dialog.GetParam(kSituationParamAdvice, &param) && param && param->GetValUnknown() == advice);
+        if (param) param->Release();
+        cSC4SituationUIImageWinProc* proc = Access::ImageProc(*manager);
+        CHECK(proc && gen.proc == proc && proc->Enabled() && proc->Mood() == 2);   // mood 1 maps to 2
+        CHECK(proc && proc->TimerRunning());   // its own clock, started by Enable
+        CHECK(proc && proc->Current() == nullptr && host.pictureAsks.size() == 1 && host.pictureAsks[0] == 0x1234);
+        manager->EndDialog(&dialog);
+        CHECK(Access::ImageProc(*manager) == nullptr);
+    }
+    // the dialog never grows past 450 pixels
+    {
+        Html html; Gen gen; Bmp bmp;
+        SituationDialog dialog(&windows);
+        cGZWin htmlWindow(&windows), controls(&windows);
+        html.documentHeight = 1000;
+        build(advice, html, dialog, gen, bmp, htmlWindow, controls);
+        CHECK(dialog.GetH() == 450 && htmlWindow.GetH() == 350);
+        manager->EndDialog(&dialog);
+    }
+    // a success with an aura and money (active situation): the result text, the gap, the two lines
+    Access::SetActive(*manager, advice);
+    Access::SetStatus(*manager, kSituationSuccess);
+    {
+        Html html; Gen gen; Bmp bmp;
+        SituationDialog dialog(&windows);
+        cGZWin htmlWindow(&windows), controls(&windows);
+        build(advice, html, dialog, gen, bmp, htmlWindow, controls);
+        CHECK(html.document.find("Done.&nbsp;<BR>&nbsp;<BR><BR><BR></FONT>") != std::string::npos);   // the lines' strings are empty here
+        CHECK(host.pictureAsks.back() == 0x55);
+        manager->EndDialog(&dialog);
+    }
+    // the aura counts from magnitude 1 (absolute), the money when not 0
+    advice->successAuraMagnitude = -0.5f;
+    advice->successMoney = 0;
+    {
+        Html html; Gen gen; Bmp bmp;
+        SituationDialog dialog(&windows);
+        cGZWin htmlWindow(&windows), controls(&windows);
+        build(advice, html, dialog, gen, bmp, htmlWindow, controls);
+        CHECK(html.document.find("Done.</FONT>") != std::string::npos);
+        manager->EndDialog(&dialog);
+    }
+    advice->successAuraMagnitude = -1.0f;
+    {
+        Html html; Gen gen; Bmp bmp;
+        SituationDialog dialog(&windows);
+        cGZWin htmlWindow(&windows), controls(&windows);
+        build(advice, html, dialog, gen, bmp, htmlWindow, controls);
+        CHECK(html.document.find("Done.&nbsp;<BR>&nbsp;<BR><BR></FONT>") != std::string::npos);
+        manager->EndDialog(&dialog);
+    }
+    // a reward: no civic simulator = no line; locked = the progress text; unlocked with no building yet = the unlocked
+    // text and picture; unlocked with buildings standing = an empty line; the unlocked bit needs an advisor's advice
+    advice->rewardGuid = 0x777;
+    advice->rewardProgress = cRZString("Keep going.");
+    advice->rewardUnlocked = cRZString("Unlocked!");
+    advice->rewardImage = 0x99;
+    struct Case { bool civic; SituationRewardStatus status; const char* tail; std::uint32_t picture; };
+    const Case cases[] = {
+        {false, {}, "Done.</FONT>", 0x55},
+        {true, {true, 0, true}, "Done.&nbsp;<BR>&nbsp;<BR>Keep going.</FONT>", 0x55},
+        {true, {true, 2, true}, "Done.&nbsp;<BR>&nbsp;<BR>Unlocked!</FONT>", 0x99},
+        {true, {true, 2 | (3u << 16), true}, "Done.&nbsp;<BR>&nbsp;<BR></FONT>", 0x55},
+        {true, {true, 2, false}, "Done.&nbsp;<BR>&nbsp;<BR>Keep going.</FONT>", 0x55},
+    };
+    for (const Case& c : cases) {
+        host.civic = c.civic;
+        host.reward = c.status;
+        Html html; Gen gen; Bmp bmp;
+        SituationDialog dialog(&windows);
+        cGZWin htmlWindow(&windows), controls(&windows);
+        build(advice, html, dialog, gen, bmp, htmlWindow, controls);
+        CHECK(html.document.find(c.tail) != std::string::npos);
+        CHECK(host.rewardAsks.back() == 0x777 && host.pictureAsks.back() == c.picture);
+        manager->EndDialog(&dialog);
+    }
+    // no situation: "not available" (status 5), mood 3, picture 0x17; the parameter holds null
+    Access::SetActive(*manager, nullptr);
+    {
+        Html html; Gen gen; Bmp bmp;
+        SituationDialog dialog(&windows);
+        cGZWin htmlWindow(&windows), controls(&windows);
+        build(nullptr, html, dialog, gen, bmp, htmlWindow, controls);
+        CHECK(manager->GetCurrentStatus() == kSituationUnavailable);
+        CHECK(host.pictureAsks.back() == 0x17);
+        cSC4SituationUIImageWinProc* proc = Access::ImageProc(*manager);
+        CHECK(proc && proc->Mood() == 0);   // mood 3 maps to 0
+        manager->EndDialog(&dialog);
+    }
+    // without the HTML page: no page, picture 0 at mood 3
+    {
+        SituationDialog dialog(&windows);
+        Gen gen; Bmp bmp;
+        dialog.image = &gen;
+        dialog.picture = &bmp;
+        manager->SetupDialog(&dialog, advice, nullptr);
+        CHECK(host.pictureAsks.back() == 0);
+        manager->EndDialog(&dialog);
+    }
+    manager->SetupDialog(nullptr, advice, nullptr);   // no dialog: nothing
+    manager->Release();
+    advice->Release();
+    SetCitySituationManagerHost(nullptr);
+}
+
+
+}  // namespace
+
 int main() {
+    TestSetupDialog();
     SetCitySituationManagerHost(nullptr);
 
     // --- the default state of a fresh manager ---------------------------------------------------------------
@@ -1133,13 +1538,13 @@ int main() {
         auto* occupant = new FakeOccupant();
         automaton.occupant = occupant;
         occupant->automaton = &automaton;
-        automaton.position[0] = mode == 2 ? 500.0f : 63.0f * 16.0f + 8.0f;   // cell 63 of 64: within two cells of the edge
+        automaton.position[0] = mode == 2 ? 500.0f : 62.0f * 16.0f + 8.0f;   // cell 62 of 64: exactly two cells from the edge
         automaton.position[2] = 8.0f;                                       // cell 0
         vehicles.instances = {&automaton};
         host.app = &app;
         host.city = &city;
         host.neighbors = true;
-        host.connectionCells = {mode == 1 ? std::make_pair(64, 40) : std::make_pair(64, 1)};
+        host.connectionCells = {mode == 1 ? std::make_pair(64, 40) : std::make_pair(64, 0)};   // 2 cells away: within sqrt(5)
         host.managers = {&vehicles};
         auto* advice = new FakeAdvice();
         advice->successCondition = 2;
@@ -1351,6 +1756,13 @@ int main() {
         std::uint32_t left = 3;
         manager->WalkCoverageNetwork(SituationCellPoint{5, 5}, 2, 1, left);
         CHECK(left == 0 && manager->CoverageHas(6, 5) && manager->CoverageHas(8, 5) && !manager->CoverageHas(9, 5));
+        // a dead end of two cells: the walk turns back once onto the start, and a cell already in the set costs nothing
+        network.roads.insert({5, 30});
+        network.roads.insert({6, 30});
+        manager->InitCoverageCells();
+        left = 5;
+        manager->WalkCoverageNetwork(SituationCellPoint{5, 30}, 2, 1, left);
+        CHECK(left == 3 && manager->CoverageHas(5, 30) && manager->CoverageHas(6, 30));
         // growing a lot's 3 x 1 cells (wider than tall) to 7: whole rows past z1 first
         advice->coverageType = kCoverageCells;
         advice->cells.clear();
@@ -1367,8 +1779,11 @@ int main() {
         automaton.position[2] = 8.0f;
         for (int x = 3; x <= 5; ++x)
             for (int z = 0; z <= 1; ++z) zones.zone[{x, z}] = 3;
+        terrain.water.insert({5, 1});   // a zoned cell under water is never a target
         CHECK(manager->InitCoverageCells());
         CHECK(manager->CoverageTotal() >= 4 && manager->CoverageTotal() <= 6 && manager->CoverageHas(3, 0));
+        CHECK(!manager->CoverageHas(5, 1));
+        terrain.water.clear();
         // the water kind of the zone: the flood fill keeps to navigable cells
         advice->coverageType = kCoverageWater;
         advice->coverageZone = 0;

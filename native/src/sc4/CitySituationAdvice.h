@@ -196,6 +196,11 @@ public:
     virtual void UpdateSituationFields() = 0;                                  // 0x1b8
     // The base advice's priority (cISC4Advice vslot 0x38); the situation track list sorts on it.
     virtual int Priority() const { return 0; }
+    // The base advice's title, message and mood (AsAdvice() vslots 0x48 GetTextTitle, 0x50 GetTextMessage, 0x18 GetMood);
+    // the situation advice answers the first two from its script table. The situation dialog reads them.
+    virtual const cRZString& GetAdviceTitle() const { static const cRZString empty; return empty; }
+    virtual const cRZString& GetAdviceMessage() const { static const cRZString empty; return empty; }
+    virtual int GetAdviceMood() const { return 0; }
     // GetAdvisorId / GetMood of the base advice, and the advice id used as the situation key (cSC4Advice +0xe0).
     virtual int GetAdviceId() const = 0;
 };
@@ -270,6 +275,9 @@ public:
     int GetAdviceId() const override { return base_ ? base_->AdviceId() : 0; }
     int Priority() const override { return base_ ? base_->Priority() : 0; }
     const cRZString& GetTextTitle() const;                              // @ 0x1006a9026 (thunk 0x1006a9236)
+    const cRZString& GetAdviceTitle() const override { return GetTextTitle(); }
+    const cRZString& GetAdviceMessage() const override { return GetTextMessage(); }
+    int GetAdviceMood() const override { return base_ ? base_->Mood() : 0; }
     const cRZString& GetTextMessage() const;                            // @ 0x1006a92e0 (thunk 0x1006a96ea)
 
 private:

@@ -8,7 +8,9 @@
 #include <cstring>
 #include <limits>
 
+#include "gz/WinBMP.h"
 #include "gz/WinGen.h"
+#include "gz/WinHTML.h"
 #include "gz/WinProc.h"
 #include "platform/Unwired.h"
 #include "rz/cRZCmdLine.h"
@@ -16,6 +18,7 @@
 #include "rz/cRZVariant.h"
 #include "s3d/S3DMath.h"
 #include "sc4/CitySituationManager.h"
+#include "sc4/SLString.h"
 #include "sc4/SpiralIterator.h"
 #include "sc4/GeometryUtilities.h"
 
@@ -24,6 +27,25 @@ namespace sc4 {
 namespace {
 
 constexpr std::uint32_t kCheatTriggerMission = 0x8c4136db;
+// The situation dialog (SetupDialog): children of the script window, the system faces, the strings (group 0x6a231ea4).
+constexpr std::uint32_t kSituationDialogHtmlId = 2;        // cIGZWinHTML page
+constexpr std::uint32_t kSituationDialogPictureId = 3;     // cIGZWinBMP still picture
+constexpr std::uint32_t kSituationDialogImageId = 4;       // cIGZWinGen head
+constexpr std::uint32_t kSituationDialogControlsId = 5;    // moved down as the dialog grows
+constexpr std::uint32_t kSituationDialogTitleFontId = 0x4a809914;
+constexpr std::uint32_t kSituationDialogMessageFontId = 0x4a809915;
+constexpr int kSituationDialogMaxHeight = 0x1c2;
+constexpr std::uint32_t kSituationTextAuraLine = 0x2c34e0ac;
+constexpr std::uint32_t kSituationTextMoneyLine = 0x0c34e0b1;
+constexpr std::uint32_t kSituationTextNoSituationTitle = 0x4c16bd84;
+constexpr std::uint32_t kSituationTextUnavailable = 0x2c16bcfe;
+constexpr std::uint32_t kSituationTextBriefingHeader = 0xec34d5ef;
+constexpr std::uint32_t kSituationUnavailableImageId = 0x17;
+constexpr const char* kSituationDialogGap = "&nbsp;<BR>&nbsp;<BR>";
+constexpr const char* kSituationDialogHtmlFormat =
+    "<HTML><HEAD></HEAD><BODY TEXT=\"#%02x%02x%02x\" BGCOLOR=\"#%02x%02x%02x\" "
+    "LINK=\"#%02x%02x%02x\"><P><FONT FACE=\"%s\" SIZE=%d>%s%s%s</FONT></P>"
+    "<P><FONT FACE=\"%s\" SIZE=%d>%s%s%s</FONT></P></BODY></HTML>";
 constexpr std::uint32_t kPlayerDriveCreationFlags = 0x2010002;   // CreateAutomatonForPlayerDrive / CreateTarget
 constexpr float kPlayerDriveCreationRadius = 64.0f;              // 0x42800000: the distance from the source building
 constexpr float kCountdownMilliseconds = 4000.0f;                // 0x457a0000
@@ -1708,23 +1730,161 @@ void cSC4CitySituationManager::ShowSituationPopup(cISC4CitySituationAdvice* situ
     dialog->Release();
 }
 
-// i386 0x0049f374: fills the dialog. Recovered-partial: the original builds an HTML page (title and text of the advice
-// or of the result, the time limit / money / aura lines, the reward texts) like cSC4AdvisorPopupTracker::SetupDialog,
-// resizes the dialog to it and attaches cSC4SituationUIImageWinProc to the picture; only the window parameters the
-// buttons read (the advice, the joyride automaton) are set here.
+// i386 0x0049f374: fills the dialog. The HTML page (child 2) carries the title and the text: the briefing (the advice's own
+// message) while the situation is set up, the success or failure text for a result, the "not available" text without a
+// situation. The briefing and the results add the aura and money lines when the situation has them (an aura of magnitude
+// 1 or more, money other than 0); a success with a reward adds the reward's progress or unlocked text instead. The page is
+// written in the two system faces, the dialog grows with the document up to 450 pixels and is centred in its parent; the
+// advice and the automaton go into the window parameters the buttons read; the picture (child 4) gets the situation's head
+// or, when no head model exists for that id, the still picture on child 3.
 void cSC4CitySituationManager::SetupDialog(cIGZWin* dialog, cISC4CitySituationAdvice* situation, ISituationAutomaton* automaton) {
     if (!dialog) return;
-    SC4_UNWIRED("cSC4CitySituationManager::SetupDialog: the mission dialog's HTML page (title, text, time/money/aura and reward lines) and image proc are not built");
-    if (!situation) status_ = kSituationUnavailable;
-    if (situation) dialog->SetParam(kSituationParamAdvice, new cRZVariant(static_cast<cIGZUnknown*>(situation)));
+    ICitySituationManagerHost* host = CitySituationManagerHost();
+    std::uint32_t mood = 3, imageId = 0;
+    cIGZWinHTML* html = nullptr;
+    if (dialog->GetChildAsRecursive(kSituationDialogHtmlId, kGZIID_cIGZWinHTML, reinterpret_cast<void**>(&html)) && html) {
+        cRZString page;
+        SituationDialogFont titleFont, messageFont;
+        const bool hasTitleFace = host && host->SystemFont(kSituationDialogTitleFontId, titleFont);
+        const bool hasMessageFace = host && host->SystemFont(kSituationDialogMessageFontId, messageFont);
+        const bool titleBold = hasTitleFace && titleFont.bold;
+        const bool messageBold = hasMessageFace && messageFont.bold;
+        const std::uint32_t titleSize = hasTitleFace ? (titleFont.size * 4 + 8) / 18 : 4;
+        const std::uint32_t messageSize = hasMessageFace ? (messageFont.size * 4 + 8) / 18 : 3;
+        cIGZWin* htmlWindow = html->AsIGZWin();
+        std::uint8_t fillR = 0, fillG = 0, fillB = 0;
+        htmlWindow->GetFillColor(fillR, fillG, fillB);
+        html->ClearFlag(kHtmlOutline);
+
+        cRZString title, message;
+        float auraRadius = 0.0f, auraMagnitude = 0.0f;
+        std::int64_t money = 0;
+        GetSituationAura(auraRadius, auraMagnitude);
+        GetSituationMoney(money);
+        const cSLString auraLine(kAdvisorTextGroup, kSituationTextAuraLine, true);
+        const cSLString moneyLine(kAdvisorTextGroup, kSituationTextMoneyLine, true);
+        if (!situation) {
+            title = cSLString(kAdvisorTextGroup, kSituationTextNoSituationTitle, false);
+            status_ = kSituationUnavailable;
+        } else {
+            if (situation->CheckSituationFlag(kSituationFlagMySimMission) && mySim_) mySim_->PrepareScript();
+            title = situation->GetAdviceTitle();
+        }
+        const bool hasAura = std::fabs(auraMagnitude) >= 1.0f;   // i386 0x00a706d8
+        const bool hasMoney = money != 0;
+        auto append = [&message](const std::string& more) { message.AppendChars(more.data(), static_cast<std::uint32_t>(more.size())); };
+        auto addAuraAndMoney = [&]() {
+            if (hasAura) append(std::string(auraLine.ToChar()) + "<BR>");
+            if (hasMoney) append(std::string(moneyLine.ToChar()) + "<BR>");
+        };
+        if (status_ == kSituationFailure) {
+            message = situation->GetFailureText();
+            mood = situation->GetFailureMood();
+            imageId = situation->GetFailureImageId();
+            if (hasAura || hasMoney) {
+                append(kSituationDialogGap);
+                addAuraAndMoney();
+            }
+        } else if (status_ == kSituationUnavailable) {
+            message = cSLString(kAdvisorTextGroup, kSituationTextUnavailable, false);
+            mood = 3;
+            imageId = kSituationUnavailableImageId;
+        } else if (status_ == kSituationSuccess) {
+            message = situation->GetSuccessText();
+            mood = situation->GetSuccessMood();
+            imageId = situation->GetSuccessImageId();
+            const std::uint32_t reward = situation->GetRewardGuid();
+            if (reward == 0) {
+                if (hasAura || hasMoney) {
+                    append(kSituationDialogGap);
+                    addAuraAndMoney();
+                }
+            } else {
+                SituationRewardStatus status;
+                if (host && host->RewardStatus(reward, status)) {
+                    // The unlocked bit only counts once an advisor holds the reward's advice; an unlocked reward with
+                    // buildings of it already standing adds an empty line.
+                    const bool unlocked = status.advisorHasAdvice && status.hasRecord && (status.state & 2u) != 0;
+                    cRZString extra;
+                    if (!unlocked) {
+                        extra = situation->GetRewardProgressText();
+                    } else if ((status.state >> 16) == 0) {
+                        extra = situation->GetRewardUnlockedText();
+                        imageId = situation->GetRewardUnlockedImageId();
+                    }
+                    append(std::string(kSituationDialogGap) + extra.ToChar());
+                }
+            }
+        } else {
+            message = situation->GetAdviceMessage();
+            mood = static_cast<std::uint32_t>(situation->GetAdviceMood());
+            imageId = situation->GetSituationImageId();
+            if (hasAura || hasMoney) {
+                const cSLString header(kAdvisorTextGroup, kSituationTextBriefingHeader, true);
+                append(std::string(kSituationDialogGap) + header.ToChar() + "<BR>");
+                addAuraAndMoney();
+            }
+        }
+        page.Sprintf(kSituationDialogHtmlFormat, 0x39u, 0x44u, 0x72u, static_cast<std::uint32_t>(fillR),
+                     static_cast<std::uint32_t>(fillG), static_cast<std::uint32_t>(fillB), 0u, 0u, 0xffu,
+                     titleFont.name.ToChar(), static_cast<int>(titleSize), titleBold ? "<B>" : "", title.ToChar(),
+                     titleBold ? "</B>" : "", messageFont.name.ToChar(), static_cast<int>(messageSize),
+                     messageBold ? "<B>" : "", message.ToChar(), messageBold ? "</B>" : "");
+        html->SetDocument(std::string(page.ToChar(), page.Strlen()), cRZString("sc4://"));
+
+        // The dialog grows by what the document needs past the page's height, at most to 450 pixels; the controls
+        // (child 5) move down with it.
+        gz::cRZSize documentSize;
+        html->GetDocumentSize(documentSize);
+        documentSize.height += 0x14;
+        const cRZRect& htmlArea = htmlWindow->GetArea();
+        const int htmlHeight = htmlArea.bottom - htmlArea.top;
+        if (htmlHeight < documentSize.height) {
+            int extra = documentSize.height - htmlHeight;
+            if (dialog->GetH() + extra > kSituationDialogMaxHeight) extra = kSituationDialogMaxHeight - dialog->GetH();
+            dialog->SetSize(dialog->GetW(), dialog->GetH() + extra);
+            htmlWindow->SetSize(htmlArea.right - htmlArea.left, htmlHeight + extra);
+            if (cIGZWin* controls = dialog->GetChildWindowFromIDRecursive(kSituationDialogControlsId))
+                controls->GZWinMoveTo(controls->GetL(), controls->GetT() + extra);
+        }
+        html->Release();
+    }
+    if (cIGZWin* parent = dialog->GetParentWin())
+        dialog->GZWinMoveTo((parent->GetW() - dialog->GetW()) / 2, (parent->GetH() - dialog->GetH()) / 2);
+    dialog->SetParam(kSituationParamAdvice, new cRZVariant(static_cast<cIGZUnknown*>(situation)));
     if (automaton) dialog->SetParam(kSituationParamAutomaton, new cRZVariant(static_cast<cIGZUnknown*>(automaton)));
+
+    gz::cIGZWinGen* imageWindow = nullptr;
+    if (dialog->GetChildAsRecursive(kSituationDialogImageId, gz::kGZIID_cIGZWinGen, reinterpret_cast<void**>(&imageWindow)) &&
+        imageWindow) {
+        imageWinProc_ = new cSC4SituationUIImageWinProc(static_cast<int>(imageId));
+        imageWinProc_->Init(imageWindow->AsIGZWin());
+        imageWinProc_->Enable(true);
+        imageWinProc_->ForceMood(static_cast<int>(mood));
+        imageWindow->SetWinProc(imageWinProc_.get());
+        if (!imageWinProc_->Current()) {
+            gz::cIGZWinBMP* picture = nullptr;
+            if (dialog->GetChildAsRecursive(kSituationDialogPictureId, gz::kGZIID_cIGZWinBMP, reinterpret_cast<void**>(&picture)) &&
+                picture) {
+                if (cIGZBuffer* buffer = host ? host->SituationPicture(imageId) : nullptr) {
+                    picture->SetBMP(buffer);
+                    buffer->Release();
+                }
+                picture->Release();
+            }
+        }
+        imageWindow->Release();
+    }
 }
 
 // i386 0x0049ee8c: disables the picture's window procedure, drops the two window parameters, forgets the dialog, ends it
 // (window manager code 0xf) and destroys the window.
 void cSC4CitySituationManager::EndDialog(cIGZWin* window) {
     if (!window) return;
-    situationWindow_ = nullptr;   // the image window procedure (cSC4SituationUIImageWinProc, not recovered)
+    if (imageWinProc_) {
+        imageWinProc_->Enable(false);
+        imageWinProc_ = nullptr;
+    }
     window->SetParam(kSituationParamAdvice, nullptr);
     window->SetParam(kSituationParamAutomaton, nullptr);
     if (window == popupDialog_.get()) popupDialog_ = nullptr;

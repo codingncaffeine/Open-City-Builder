@@ -24,6 +24,7 @@
 #include "gz/cIGZMessage2.h"
 #include "rz/cRZAutoRefCount.h"
 #include "rz/cRZRandom.h"
+#include "rz/cRZTimer.h"
 #include "s3d/Camera.h"
 #include "sc4/AdvisorPopupTracker.h"
 
@@ -85,12 +86,12 @@ public:
     virtual void SetMood(int mood) { ForceMood(mood); }            // @ 0x0021ecda
     virtual void SetOffset(int offset) { offset_ = offset; }       // @ 0x0021ecc8
 
-    bool Init(cIGZWin* window);                                    // @ 0x0021ed48
+    virtual bool Init(cIGZWin* window);                            // @ 0x0021ed48
     bool Shutdown();                                               // @ 0x0021eb72
-    void PlaceHead(float x, float y, float z, float scale);        // @ 0x0021ef54
-    void LoadModels(bool load);                                    // @ 0x0021f2f8
-    void DoPaint();                                                // @ 0x0021effc
-    void DoAnimationTick(float milliseconds);                      // @ 0x0021f1d2
+    virtual void PlaceHead(float x, float y, float z, float scale);   // @ 0x0021ef54 (vtable +0x38)
+    virtual void LoadModels(bool load);                            // @ 0x0021f2f8 (vtable +0x3c)
+    virtual void DoPaint();                                        // @ 0x0021effc (vtable +0x40)
+    virtual void DoAnimationTick(float milliseconds);              // @ 0x0021f1d2 (vtable +0x44)
 
     // Harness views.
     int Mood() const { return mood_; }
@@ -105,18 +106,20 @@ public:
     s3d::cS3DCamera* Camera() const { return camera_; }
     int Offset() const { return offset_; }
 
+protected:
+    bool initialized_ = false;                                     // +0x0c
+    bool enabled_ = false;                                         // +0x0d
+    cRZAutoRefCount<cIGZWin> window_;                              // +0x28
+
 private:
     void DropCamera();
     std::uint32_t refCount_ = 0;                                   // +0x08
-    bool initialized_ = false;                                     // +0x0c
-    bool enabled_ = false;                                         // +0x0d
     int mood_ = 0;                                                 // +0x10
     std::uint32_t modelIdA_ = 0;                                   // +0x14
     cRZAutoRefCount<s3d::cIS3DModelInstanceAnimated> modelA_;     // +0x18
     std::uint32_t modelIdB_ = 0;                                   // +0x1c
     cRZAutoRefCount<s3d::cIS3DModelInstanceAnimated> modelB_;     // +0x20
     cRZAutoRefCount<s3d::cIS3DModelInstanceAnimated> current_;    // +0x24
-    cRZAutoRefCount<cIGZWin> window_;                              // +0x28
     cRZRect area_{};                                               // +0x2c (absolute)
     std::uint16_t mainWidth_ = 0, mainHeight_ = 0;                 // +0x3c / +0x3e
     s3d::cS3DCamera* camera_ = nullptr;                            // +0x40 (counted; its Release does not delete)
@@ -128,6 +131,29 @@ private:
     int loopTarget_ = 0;                                           // +0xd0
     cRZRandom random_{0xffffffffu};                                // +0xd4
     int offset_ = 0;                                               // +0xe8 pixels left free at the right / top
+};
+
+// cSC4SituationUIImageWinProc — the picture of the situation (mission) dialog, child 3 of the script window
+// (6 functions, i386 0x004b1690..0x004b1820; object 0x100 bytes). It is the advisor head with its own clock: no animation
+// tick registration; the paint after the window drives the head instead. A timer (milliseconds, +0xec) runs while the
+// proc is enabled; a paint that finds 25 ms or more on it stops it, advances the head by the whole elapsed time, draws and
+// restarts the timer; a sooner paint only draws. Its "advisor id" is the situation's picture id: when no head model
+// loads for it (Current() null after Enable(true)), the dialog shows that id as a still picture instead.
+constexpr float kSituationHeadFrameMilliseconds = 25.0f;   // i386 0x00a70708
+
+class cSC4SituationUIImageWinProc final : public cSC4AdvisorUIImageWinProc {
+public:
+    explicit cSC4SituationUIImageWinProc(int imageId) : cSC4AdvisorUIImageWinProc(imageId) {}   // @ 0x004b1690
+    ~cSC4SituationUIImageWinProc() override = default;                                          // @ 0x004b16e8
+
+    bool Init(cIGZWin* window) override;   // @ 0x004b1780
+    void Enable(bool enable) override;     // @ 0x004b17c4
+    void DoPaint() override;               // @ 0x004b1820
+
+    bool TimerRunning() const { return timer_.IsTimerRunning(); }   // harness view
+
+private:
+    cRZTimer timer_{cRZTimer::kMilliseconds};   // +0xec
 };
 
 }  // namespace sc4
