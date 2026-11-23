@@ -1121,6 +1121,7 @@ void DoubleClick(int cx, int cy) {
 }  // namespace
 namespace native {
 std::uint32_t NativeSimDayNumber();   // app/NativeCityPanel.cpp
+int NativeZoneTypeAt(int x, int z);   // app/NativeDisasters.cpp
 
 // The HTML windows' fonts (app/NativeWinHtml.cpp, cIGZFontSys::CreateFont): the game font file of the first listed face
 // that exists, bold / italic preferred, one shared cGZFont per (file, pixel size). Null when no listed face exists.
@@ -1516,13 +1517,24 @@ int RunScenario(const std::string& path) {
             int percent = 100;
             words >> percent;
             native::NativeSetPowerFunding(percent);
-        } else if (command == "demolish") {   // demolish X0 Z0 X1 Z1: the bulldozer's commit on a cell rectangle (the player's privilege, effects on)
+        } else if (command == "demolish") {   // demolish X0 Z0 X1 Z1 [PRIVILEGE]: the bulldozer's commit on a cell rectangle (default the player's privilege 1; 0 = as the tutorial asks), effects on
             sc4::DemolitionRegion region;
             words >> region.bounds.x0 >> region.bounds.z0 >> region.bounds.x1 >> region.bounds.z1;
+            int privilege = 1;
+            if (!(words >> privilege)) privilege = 1;
             std::int64_t cost = 0;
-            const bool ok = native::DemolishRegion(true, region, 1, 1, false, &cost);
+            const bool ok = native::DemolishRegion(true, region, privilege, 1, false, &cost);
             std::printf("demolish %d,%d..%d,%d -> %s, cost %lld\n", region.bounds.x0, region.bounds.z0, region.bounds.x1, region.bounds.z1,
                         ok ? "ok" : "refused", static_cast<long long>(cost));
+        } else if (command == "zones") {   // zones X0 Z0 X1 Z1: the zone type of every cell of a rectangle (read-only)
+            int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
+            words >> x0 >> z0 >> x1 >> z1;
+            std::printf("zones %d,%d..%d,%d\n", x0, z0, x1, z1);
+            for (int zz = z0; zz <= z1; ++zz) {
+                std::printf("  z=%3d:", zz);
+                for (int xx = x0; xx <= x1; ++xx) std::printf(" %2d", native::NativeZoneTypeAt(xx, zz));
+                std::printf("\n");
+            }
         } else if (command == "walls") {   // walls: the lot retaining walls and their models
             native::NativeWallReport();
         } else if (command == "ports") {   // ports: the airport and seaport developers' ports
