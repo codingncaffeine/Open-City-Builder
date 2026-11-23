@@ -2075,7 +2075,7 @@ int RunScenario(const std::string& path) {
             lastStep = step.number;
             if (stuck) continue;
             const int regionCells = step.x0 >= 0 ? (step.x1 - step.x0 + 1) * (step.z1 - step.z0 + 1) : 1;
-            if (repeats >= std::max(4, 4 * regionCells + 4)) { stuck = true; std::printf("tutorialdo: STUCK at step %d kind %d target %08x\n", step.number, step.kind, step.target); continue; }
+            if (repeats >= std::max(4, 4 * regionCells + 8)) { stuck = true; std::printf("tutorialdo: STUCK at step %d kind %d target %08x\n", step.number, step.kind, step.target); continue; }
             char buffer[256];
             std::vector<std::string> todo;
             // the region's middle cell, rounded up: an even-sized building footprint centres on the cell past the midpoint
@@ -2109,18 +2109,22 @@ int RunScenario(const std::string& path) {
                                              // bulldozed a misplaced building) tries the region's next cell, middle first
                     if (cx < 0) break;
                     look();
-                    // a retry turns the building a quarter (Home, as a player does); each cell gets all four facings, the
-                    // middle rounded down first
+                    // a retry turns the building a quarter (Home, as a player does); each aim gets all four facings: first the
+                    // footprint's middle cell (rounded down; a toll booth takes the road piece under the pointer), then the exact
+                    // middle of the highlighted footprint (a grid line for an even size, where such a lot centres), then each cell.
                     if (step.kind == 3 && repeats > 0) { todo.push_back("key Home"); todo.push_back("frames 5"); }
                     const int w = step.x1 - step.x0 + 1;
                     const int attempt = repeats / 4;
-                    int px = (step.x0 + step.x1) / 2, pz = (step.z0 + step.z1) / 2;
-                    if (attempt > 0) {
-                        const int index = (attempt - 1) % std::max(1, regionCells);
-                        px = step.x0 + index % w;
-                        pz = step.z0 + index / w;
+                    float fx = float((step.x0 + step.x1) / 2), fz = float((step.z0 + step.z1) / 2);
+                    if (attempt == 1) {
+                        fx = (step.x0 + step.x1 + 1) * 0.5f - 0.5f;
+                        fz = (step.z0 + step.z1 + 1) * 0.5f - 0.5f;
+                    } else if (attempt > 1) {
+                        const int index = (attempt - 2) % std::max(1, regionCells);
+                        fx = float(step.x0 + index % w);
+                        fz = float(step.z0 + index / w);
                     }
-                    std::snprintf(buffer, sizeof buffer, "viewdrag %d %d %d %d 1 0", px, pz, px, pz);
+                    std::snprintf(buffer, sizeof buffer, "viewdrag %g %g %g %g 1 0", fx, fz, fx, fz);
                     todo.push_back(buffer);
                     break;
                 }
