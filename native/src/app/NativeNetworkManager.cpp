@@ -14,6 +14,7 @@
 #include "sc4/CommonIIDs.h"
 #include "sc4/ComplexViewOccupantFilter.h"
 #include "sc4/DBSegment.h"
+#include "sc4/Exemplar.h"
 #include "sc4/Lot.h"
 #include "sc4/NetworkManager.h"
 #include "sc4/NetworkOccupant.h"
@@ -266,6 +267,12 @@ public:
         }
         occupants->ReleaseOccupantList(list);
         return found;
+    }
+    sc4::cISCResExemplar* PrebuiltModelExemplar(std::uint32_t group, std::uint32_t instance) override {
+        const cGZPersistResourceKey key{0x6534284au, group, instance};
+        void* raw = nullptr;
+        if (!SL::spRM || !SL::spRM->GetResource(key, 0xa52160f5u, &raw, 0, nullptr) || !raw) return nullptr;
+        return static_cast<sc4::cISCResExemplar*>(raw);
     }
     bool LotBuildingAltitude(int x, int z, float& altitude) override {
         sc4::cSC4Lot* lot = NativeLotAtCell(x, z, false);

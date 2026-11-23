@@ -151,6 +151,7 @@ class cSC4PipeOccupant;             // forward: the manager only hands the out-p
 class cSC4PipeConnectionOccupant;   // forward: ditto
 class cSC4Lot;                      // AutoconnectLotNodes: the lot whose nodes connect (its cell rectangle)
 class cSC4NetworkOccupant;
+class cISCResExemplar;
 class cISC4OccupantFilter;          // cSC4OccupantFilter / cSC4WaterOccupantFilter / cSC4SubwayOccupantFilter
 
 // cISC4NetworkOccupant (iid 0xa821ef94) as this class uses it. The comments are the original byte offsets.
@@ -233,6 +234,8 @@ public:
     // SL::spLotManager vslot 0x14 GetLot(x, z, false) -> lot vslot 0xc0 GetBuilding -> occupant vslot 0x20 GetPosition: the height
     // of the building on the cell's lot; false without one.
     virtual bool LotBuildingAltitude(int x, int z, float& altitude) { (void)x; (void)z; (void)altitude; return false; }
+    // spRM vslot 0xc GetResource({0x6534284a, group, instance}, iid 0xa52160f5): a pre-built model exemplar, one reference, or null.
+    virtual cISCResExemplar* PrebuiltModelExemplar(std::uint32_t group, std::uint32_t instance) { (void)group; (void)instance; return nullptr; }
     // SC4WriteGZSerializable(stream, object) @ 0x1000435e3 and SC4ReadGZSerializable(stream, iid, &out, false)
     // @ 0x100043267. Both need a DB segment stream, so they stay a seam.
     virtual bool WriteGZSerializable(cIGZOStream& stream, const cIGZUnknown* object) = 0;
@@ -348,6 +351,8 @@ public:
     void AddShadowMapping(std::uint32_t matchValue, std::uint32_t matchMask, std::uint32_t addValue,
                           std::uint32_t transformMask, std::uint8_t alphaDelta, bool stop,
                           std::uint32_t subtractMask);                      // 0x10016edc8
+    // GetAllIntersectionPieces2's walk on the port's pieces (the views carry no network-piece slots of their own).
+    void CollectIntersectionPieces(cSC4NetworkOccupant* piece, ilist<cISC4Occupant*>& out, cSC4NetworkOccupant* root);
     void GetAllIntersectionPieces2(INetworkManagerOccupant* occupant, ilist<cISC4Occupant*>& out,
                                    INetworkManagerOccupantManager* manager, INetworkManagerOccupant* root,
                                    cISC4OccupantFilter* filter);             // 0x1001712aa (PARTIAL)

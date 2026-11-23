@@ -2,6 +2,8 @@
 
 #include "sc4/Lot.h"
 #include "sc4/NetworkOccupant.h"
+#include "sc4/Exemplar.h"
+#include "sc4/NetworkOccupantWithPreBuiltModel.h"
 #include "sc4/NetworkTool.h"   // eNetworkType enumerators, kNetworkTypeCount, kFlagForNetworkType
 #include "platform/Unwired.h"
 
@@ -432,16 +434,81 @@ void cSC4NetworkManager::QueueRemovals(bool queue) {
     unique.clear();
 }
 
-// 0x100170230 — PARTIAL. The retrofit pass walks the +0xd8 list, asks every entry's CheckForRetrofit
-// (occupant vslot 0x30), collects its intersection pieces (this class's vslot 0x60 -> the recursion in
-// GetAllIntersectionPieces2, itself unrecovered), reads the connection-node edge pair (occupant vslot 0x238),
-// finds the cell occupant through the occupant manager (+0x108) and rewrites the old piece ids through the
-// 10-entry kOldIntxPieceToNewIntxPiece table (0x100a19570; the original's loop runs 11 iterations and reads
-// the 11th pair past the table) plus the position offsets at 0x100a19574. It then calls AddModel
-// (cSC4NetworkOccupantWithPreBuiltModel 0x1001ba886) with the placement offsets. None of the occupant slots
-// 0x1a0/0xd0/0x238 nor the table's 11th entry is understood yet, so the body is left out.
+// i386 0x00112768. Pieces of old saves (version < 8) were queued by their Init: each one still flagged has its whole intersection
+// collected; the intersection's origin piece names the old piece (its path override) and its rotation. An old piece found in
+// kOldIntxPieceToNewIntxPiece gives every piece of the intersection its new id: the new base + its offset from the
+// intersection's corner in the origin's frame (x * 0x100 + z * 0x10), the pre-built model of that id when one exists, no path
+// override, the new quad, and the retrofit flag cleared; each piece posts 0x99ef1145.
 void cSC4NetworkManager::Retrofit() {
-    SC4_UNWIRED("cSC4NetworkManager::Retrofit: old intersection pieces are not rewritten to the new piece ids (kOldIntxPieceToNewIntxPiece)");
+    struct Pair { std::uint32_t oldPiece, newPiece; };
+    static constexpr Pair kOldIntxPieceToNewIntxPiece[11] = {   // i386 0x008448a0 (the 11th pair is the zero terminator)
+        {0x02010000, 0x0c000000}, {0x02010100, 0x0c001000}, {0x02010200, 0x0c002000}, {0x02010300, 0x0c003000},
+        {0x02011000, 0x0c004000}, {0x02011100, 0x0c005000}, {0x02011200, 0x0c006000}, {0x02012000, 0x0c008000},
+        {0x02012100, 0x0c009000}, {0x02012200, 0x0c00a000}, {0x02012300, 0x0c00b000}};
+    // (anonymous namespace)::ReverseTransformPoint (i386 0x00110386): undo a piece's flip and rotation on a cell offset.
+    const auto reverse = [](long& x, long& z, std::uint8_t rotation) {
+        if (rotation & 0x80) x = -x;
+        if (rotation & 2) { x = -x; z = -z; }
+        if (rotation & 1) { const long t = x; x = z; z = -t; }
+    };
+    if (std::getenv("SC4_NETDEBUG")) std::fprintf(stderr, "network manager: retrofit message, %zu queued\n", retrofitList_.size());
+    if (retrofitList_.empty()) return;
+    INetworkManagerHost* host = NetworkManagerHost();
+    for (cISC4Occupant* queued : retrofitList_) {
+        auto* piece = dynamic_cast<cSC4NetworkOccupant*>(queued);
+        if (!host || !piece || !piece->CheckForRetrofit()) continue;               // vslot 0x18
+        ilist<cISC4Occupant*> pieces;
+        CollectIntersectionPieces(piece, pieces, piece);                           // this vslot 0x30
+        int ox = 0, oz = 0;
+        cSC4NetworkOccupant* origin = piece->GetComplexPieceOrigin(ox, oz) ? host->FirstNetworkOccupantAt(ox, oz, 0x1f4f) : nullptr;
+        if (origin) {
+            const std::uint32_t oldPiece = origin->GetPathIDOverride();             // vslot 0xd0
+            const std::uint8_t rotation = origin->GetRotationAndFlip();              // vslot 0x68
+            std::uint32_t newBase = 0;
+            for (const Pair& pair : kOldIntxPieceToNewIntxPiece)
+                if (pair.oldPiece == oldPiece) { newBase = pair.newPiece; break; }
+            if (newBase != 0) {
+                long minX = 0, minZ = 0;
+                for (cISC4Occupant* entry : pieces) {
+                    std::uint32_t x = 0, z = 0;
+                    static_cast<cSC4NetworkOccupant*>(entry)->GetOccupiedCell(x, z);
+                    long dx = static_cast<long>(x) - ox, dz = static_cast<long>(z) - oz;
+                    reverse(dx, dz, rotation);
+                    minX = minX <= dx ? minX : dx;
+                    minZ = dz < minZ ? dz : minZ;
+                }
+                for (cISC4Occupant* entry : pieces) {
+                    auto* p = static_cast<cSC4NetworkOccupant*>(entry);
+                    std::uint32_t x = 0, z = 0;
+                    p->GetOccupiedCell(x, z);
+                    long dx = static_cast<long>(x) - ox, dz = static_cast<long>(z) - oz;
+                    reverse(dx, dz, rotation);
+                    const std::uint32_t id = static_cast<std::uint32_t>((dx - minX) * 0x100 + static_cast<long>(newBase) + (dz - minZ) * 0x10);
+                    if (auto* prebuilt = dynamic_cast<cSC4NetworkOccupantWithPreBuiltModel*>(p)) {   // QI 0x49c1a034
+                        if (cISCResExemplar* exemplar = host->PrebuiltModelExemplar(0xa8434037u, id)) {
+                            const float offset[3] = {0.0f, 0.0f, 0.0f};
+                            prebuilt->AddModel(exemplar, offset, static_cast<std::uint8_t>(rotation & 3));
+                            exemplar->Release();
+                        }
+                    }
+                    p->SetPathIDOverride(0);                                       // vslot 0xcc
+                    p->SetQuadDraw(id, rotation);                                  // vslot 0x78
+                    p->ClearNetworkFlag(0x2000000);
+                    p->ClearNetworkFlag(0x4000000);
+                    p->SetNetworkFlag(0x8000000);
+                    p->SetRetrofitFlag(false);                                     // vslot 0x1c
+                    p->PostOccupantMessage(0x99ef1145, 0);                         // cISC4Occupant vslot 0x3c
+                    if (std::getenv("SC4_NETDEBUG"))
+                        std::fprintf(stderr, "network manager: retrofit %u,%u old %08x -> piece %08x rotation %02x\n", x, z, oldPiece, id, rotation);
+                }
+            }
+            origin->Release();
+        }
+        for (cISC4Occupant* entry : pieces) entry->Release();
+    }
+    if (std::getenv("SC4_NETDEBUG")) std::fprintf(stderr, "network manager: retrofit pass over %zu queued pieces\n", retrofitList_.size());
+    for (cISC4Occupant* queued : retrofitList_) if (queued) queued->Release();   // the list's references (AddToRetrofitList)
+    retrofitList_.clear();
 }
 
 // 0x1001700d8. When the view rotation changes, every network occupant in the city is asked to rebuild its
@@ -475,6 +542,8 @@ void cSC4NetworkManager::AddToRetrofitList(cISC4Occupant* occupant) {
     if (occupant == nullptr) return;
     occupant->AddRef();
     retrofitList_.push_front(occupant);
+    static const bool trace = std::getenv("SC4_NETDEBUG") != nullptr;
+    if (trace && retrofitList_.size() % 50 == 1) std::fprintf(stderr, "network manager: %zu pieces queued for retrofit\n", retrofitList_.size());
 }
 
 // ============================================================================================================
@@ -776,26 +845,48 @@ bool cSC4NetworkManager::RemoveOrReplaceOccupant(INetworkManagerTool* tool, cISC
 // occupant's intersection-owner accessor (vslot 0x180) and same-intersection test (vslot 0x210), whose meanings
 // are only inferred from the call sites. Its cell accessor (vslot 0x1d8 = GetCell(x, z)) *is* identified, but
 // without the other two the visited-set recursion cannot be reproduced honestly.
+// i386 0x00111f6e: the pieces of the intersection `occupant` belongs to (root: the piece whose structure counts, itself when
+// null), each with one reference, unless the list holds it already.
 void cSC4NetworkManager::GetAllIntersectionPieces(INetworkManagerOccupant* occupant, ilist<cISC4Occupant*>& out,
                                                   INetworkManagerOccupantManager* manager,
                                                   INetworkManagerOccupant* root) {
-    (void)occupant;
-    (void)out;
-    (void)manager;
-    (void)root;
-    SC4_UNWIRED("cSC4NetworkManager::GetAllIntersectionPieces: not ported (the intersection's pieces are not collected)");
+    (void)manager;   // the occupant manager comes from the host here
+    auto* piece = occupant ? dynamic_cast<cSC4NetworkOccupant*>(occupant->AsOccupant()) : nullptr;
+    auto* rootPiece = root ? dynamic_cast<cSC4NetworkOccupant*>(root->AsOccupant()) : piece;
+    if (!piece || !rootPiece) return;
+    if (std::find(out.begin(), out.end(), static_cast<cISC4Occupant*>(piece)) == out.end()) CollectIntersectionPieces(piece, out, rootPiece);
 }
 
+// i386 0x00111da4.
 void cSC4NetworkManager::GetAllIntersectionPieces2(INetworkManagerOccupant* occupant, ilist<cISC4Occupant*>& out,
                                                    INetworkManagerOccupantManager* manager,
                                                    INetworkManagerOccupant* root,
                                                    cISC4OccupantFilter* filter) {
-    (void)occupant;
-    (void)out;
     (void)manager;
-    (void)root;
-    (void)filter;
-    SC4_UNWIRED("cSC4NetworkManager::GetAllIntersectionPieces2: not ported (the intersection's pieces are not collected)");
+    (void)filter;   // the surface-network OR filter (0x1f4f) the walk uses
+    auto* piece = occupant ? dynamic_cast<cSC4NetworkOccupant*>(occupant->AsOccupant()) : nullptr;
+    auto* rootPiece = root ? dynamic_cast<cSC4NetworkOccupant*>(root->AsOccupant()) : piece;
+    if (piece && rootPiece) CollectIntersectionPieces(piece, out, rootPiece);
+}
+
+// The piece joins the list (one reference); each neighbor cell's surface piece (0x1f4f) that is part of a complex piece (0x100000),
+// not listed yet and of the same structure as the root is walked in turn.
+void cSC4NetworkManager::CollectIntersectionPieces(cSC4NetworkOccupant* piece, ilist<cISC4Occupant*>& out, cSC4NetworkOccupant* root) {
+    static constexpr int kNextX[4] = {-1, 0, 1, 0}, kNextZ[4] = {0, -1, 0, 1};
+    piece->AddRef();
+    out.push_back(piece);
+    INetworkManagerHost* host = NetworkManagerHost();
+    if (!host) return;
+    std::uint32_t x = 0, z = 0;
+    piece->GetOccupiedCell(x, z);
+    for (int e = 0; e < 4; ++e) {
+        cSC4NetworkOccupant* next = host->FirstNetworkOccupantAt(static_cast<int>(x) + kNextX[e], static_cast<int>(z) + kNextZ[e], 0x1f4f);
+        if (!next) continue;
+        if (next->HasNetworkFlag(0x100000) && std::find(out.begin(), out.end(), static_cast<cISC4Occupant*>(next)) == out.end() &&
+            next->IsPartOfTheSameStructure(*root))
+            CollectIntersectionPieces(next, out, root);
+        next->Release();
+    }
 }
 
 // i386 0x0011204e. A lot's network connection node: the type's tool places piece 0x100 on the cell (not usable yet), the piece is

@@ -26,6 +26,8 @@
 #include "gz/cIGZMessage2.h"
 #include "gz/cIGZPersistResourceKeyList.h"
 #include "rz/cRZMessage2Standard.h"
+#include "app/NativeDemolition.h"
+#include "sc4/NetworkManager.h"
 #include "sc4/BuildingOccupant.h"
 #include "sc4/CommonIIDs.h"
 #include "sc4/DBSegment.h"
@@ -450,7 +452,10 @@ public:
         server->MessagePost(m, false);
         m->Release();
     }
-    void RegisterWithNetworkManager(cISC4Occupant*) override {}
+    // cSC4NetworkOccupant::Init of a piece flagged for retrofit (an old save's): SL::NetworkManager vslot 0x5c AddToRetrofitList.
+    void RegisterWithNetworkManager(cISC4Occupant* occupant) override {
+        if (sc4::cSC4NetworkManager* manager = CityNetworkManager()) manager->AddToRetrofitList(occupant);
+    }
     bool IntersectionPieceId(std::uint32_t pieceId) override { return cSC4NetworkOccupant::IsAvenueIntersectionPieceId(pieceId); }
     void ReadPersistRef(cIGZIStream& stream, std::uint32_t clsid, cIGZUnknown*& out) override {
         void* raw = nullptr;
