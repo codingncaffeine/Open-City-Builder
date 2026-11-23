@@ -804,7 +804,8 @@ bool cSC4AutomataManager::TranslateDispatchLocation(const tAutomataLocation& loc
             if (!g_host || !g_host->WorldToCell(position[0], position[2], cellX, cellZ)) return false;
             rect.x0 = cellX;
             rect.x1 = cellX;
-            rect.z0 = cellZ;   // quirk: z1 is left untouched in this path
+            rect.z0 = cellZ;
+            rect.z1 = cellZ;   // i386 0x000becfc: the store shared with the cell-rect case (LAB_000beeb0)
             return true;
         }
         case kLocationWorldPosition:

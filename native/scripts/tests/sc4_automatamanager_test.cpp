@@ -825,7 +825,9 @@ int main() {
     CHECK(rect.x0 == 11 && rect.x1 == 13);
     automaton.occupant.type = 0x12345678;
     CHECK(manager->TranslateDispatchLocation(location, rect));
-    CHECK(rect.x0 == 0 && rect.z0 == 2 && rect.x1 == 0);   // z1 untouched (quirk)
+    rect.z1 = 77;
+    CHECK(manager->TranslateDispatchLocation(location, rect));
+    CHECK(rect.x0 == 0 && rect.z0 == 2 && rect.x1 == 0 && rect.z1 == 2);   // one cell: z1 is written too
     location.kind = 9;
     CHECK(!manager->TranslateDispatchLocation(location, rect));
     location.occupant = nullptr;

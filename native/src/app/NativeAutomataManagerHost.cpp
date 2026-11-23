@@ -34,6 +34,8 @@
 #include "sc4/TrafficAutomataManager.h"
 #include "sc4/TrafficNetworkMap.h"
 #include "sc4/VehicleManager.h"
+#include "sc4/ZoneDeveloper.h"
+#include "sc4/Lot.h"
 #include "sc4/cSC424HourClock.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
@@ -224,9 +226,19 @@ public:
     bool WorldToCell(float x, float z, int& cellX, int& cellZ) override { cellX = int(x / 16.0f); cellZ = int(z / 16.0f); return true; }
     float CellSize() override { return 16.0f; }
     int CityCellCount() override { cSC4City* c = HostCity(); return c ? c->CellCountX() : 0; }
+    // i386 0x000becfc: the building's cells (occupant vslot 0x2c), then the lot under them answers with its own rect (lot manager
+    // GetLot at the rect's x0 and z1, as the original asks; lot GetBoundingRect), so a route to a building ends beside its lot.
     bool OccupantCells(IAutomataOccupant* occupant, tCellRect& rect) override {
         if (!occupant) return false;
         occupant->GetBoundingCityCells(rect);
+        cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::ZoneDeveloper) : nullptr;
+        auto* lots = object ? dynamic_cast<sc4::cSC4ZoneDeveloper*>(object) : nullptr;
+        if (sc4::cSC4Lot* lot = lots ? lots->GetLot(rect.x0, rect.z1, false) : nullptr) {
+            std::int32_t r[4] = {0, 0, 0, 0};
+            lot->GetBoundingRect(r);
+            rect.x0 = r[0]; rect.z0 = r[1]; rect.x1 = r[2]; rect.z1 = r[3];
+        }
         return true;
     }
     bool LotCellMasks(int, int, std::uint32_t masks[3]) override {
