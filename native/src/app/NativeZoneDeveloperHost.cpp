@@ -13,6 +13,8 @@
 #include "app/NativeTraffic.h"
 #include "sc4/TrafficSimulator.h"
 #include "app/NativeZoneDeveloperHost.h"
+#include "app/NativeDemolition.h"
+#include "sc4/Demolition.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -56,6 +58,14 @@ using namespace sc4;
 
 // The current city: SL::spCity, as the original asks (a pointer kept from an earlier city outlives it).
 sc4::cSC4City* CurrentCity() { return dynamic_cast<sc4::cSC4City*>(SL::spCity); }
+
+// SL::spLotConfigurationManager: the city's lot configuration manager (a plain object), or null.
+cSC4LotConfigurationManager* ZoneLotConfigurations() {
+    cSC4City* city = CurrentCity();
+    cIGZUnknown* object = city ? city->GetComponent(CityComponent::LotConfigurationManager) : nullptr;
+    void* raw = nullptr;
+    return object && object->QueryInterface(kGZIID_PlainObject, &raw) ? static_cast<cSC4LotConfigurationManager*>(raw) : nullptr;
+}
 
 template <class T> T* Component(CityComponent c, std::uint32_t clsid) {
     cIGZUnknown* object = CurrentCity() ? CurrentCity()->GetComponent(c) : nullptr;
@@ -315,10 +325,35 @@ struct ZoneDeveloperHost final : IZoneDeveloperHost {
         bridge.filter = filter;
         if (filter) NativeLotConfigurationsByFilter(out, &bridge);
     }
-    void AllLotConfigurations(std::vector<cSC4LotConfiguration*>&) override {}
-    void LotConfigurationForBuildingType(cSC4LotConfiguration*& out, std::uint32_t) override { out = nullptr; }
-    bool LotConfigurationCompatibleWithZone(cISC4LotConfigurationRef*, int) override { return false; }
-    void DemolishRegion(const SC4CellRegion<int>&, int, std::uint32_t) override { SC4_UNWIRED("IZoneDeveloperHost::DemolishRegion (demolition utility)"); }
+    // SL::spLotConfigurationManager vslot 0xa0 GetLotConfigurationMap (the plop-all cheat; the port's map has its own order).
+    void AllLotConfigurations(std::vector<cSC4LotConfiguration*>& out) override {
+        out.clear();
+        for (const auto& entry : cSC4LotConfigurationManager::GetLotConfigurationMap())
+            if (entry.second) out.push_back(entry.second);
+    }
+    // vslot 0xb0 CreateGenericLotConfiguration(out, buildingType).
+    void LotConfigurationForBuildingType(cSC4LotConfiguration*& out, std::uint32_t buildingType) override {
+        out = nullptr;
+        if (cSC4LotConfigurationManager* manager = ZoneLotConfigurations()) manager->CreateGenericLotConfiguration(out, buildingType);
+    }
+    // cISC4LotConfiguration vslot 0x78 IsCompatibleWithZoneType: the configuration the lot names, by its id.
+    bool LotConfigurationCompatibleWithZone(cISC4LotConfigurationRef* configuration, int zoneType) override {
+        if (!configuration) return false;
+        const auto& map = cSC4LotConfigurationManager::GetLotConfigurationMap();
+        const auto it = map.find(configuration->GetID());
+        return it != map.end() && it->second && it->second->IsCompatibleWithZoneType(zoneType);
+    }
+    // OnDezone's orphan rail: SL::spDemolition vslot 0x18 DemolishRegion(true, region, privilege, flags, false, ...).
+    void DemolishRegion(const SC4CellRegion<int>& region, int privilege, std::uint32_t flags) override {
+        sc4::DemolitionRegion cells;
+        cells.bounds = sc4::DemolitionCellRect{region.bounds.x0, region.bounds.z0, region.bounds.x1, region.bounds.z1};
+        const int w = region.bounds.x1 - region.bounds.x0 + 1, h = region.bounds.z1 - region.bounds.z0 + 1;
+        if (w <= 0 || h <= 0) return;
+        cells.mask.assign(static_cast<std::size_t>(w), std::vector<bool>(static_cast<std::size_t>(h), false));
+        for (int dx = 0; dx < w; ++dx)
+            for (int dz = 0; dz < h; ++dz) cells.mask[dx][dz] = region.Test(region.bounds.x0 + dx, region.bounds.z0 + dz);
+        native::DemolishRegion(true, cells, privilege, flags, false, nullptr);
+    }
     bool CheatCodesEnabled() override { return native::GameCheatCodeManager() && native::GameDebugMode(); }
     void RegisterCheatCode(const char* text, std::uint32_t id, cIGZMessageTarget2* target) override {
         native::RegisterGameCheat(id, text);
