@@ -16,6 +16,8 @@
 #include <vector>
 
 #include "app/NativeCity.h"
+#include "sc4/Lot.h"
+#include "sc4/ZoneDeveloper.h"
 #include "sc4/AdviceSubject.h"
 #include "sc4/AdvisorConcrete.h"
 #include "sc4/AdvisorSystem.h"
@@ -271,20 +273,65 @@ void Safety() {
         G("g_police_coverage_p", X100(police->GetPercentCoverage()));
         G("g_jail_capacity", police->GetJailCapacity());
     }
-    SC4_UNWIRED("UpdateSimulatorStatistics Safety (advisors.md 7.6): g_school_strike_chance / g_health_strike_chance publish 0 (residential +0x28 / +0x2c not read)");
-    G("g_school_strike_chance", 0.0);   // PARTIAL: residential +0x28 / +0x2c
-    G("g_health_strike_chance", 0.0);
+    if (auto* res = Comp<cSC4ResidentialSimulator>(CityComponent::ResidentialSimulator)) {
+        G("g_school_strike_chance", X100(res->ChanceOfSchoolStrike()));   // residential vslot 0x28
+        G("g_health_strike_chance", X100(res->ChanceOfHealthStrike()));   // vslot 0x2c
+    } else {
+        G("g_school_strike_chance", 0.0);
+        G("g_health_strike_chance", 0.0);
+    }
     G("g_fire_funding_p", X100(DepartmentFunding(0x28f55a9f)));
     G("g_police_funding_p", X100(DepartmentFunding(0xa2963983)));
+    // cSC4AdvisorSafety::update_occupant_variables (i386): the stations front to back; the lowest funding fraction (strict <,
+    // from 100) x 100 with that station as subject, and the first station whose lot exists without road access (lot vslot
+    // 0x70 HasRoadAccess) as l_X_no_roads = 1.
+    auto* lots = Comp<cSC4ZoneDeveloper>(CityComponent::ZoneDeveloper);
+    auto noRoads = [&](cIGZUnknown* object) {
+        void* raw = nullptr;
+        if (!lots || !object || !object->QueryInterface(kGZIID_cISC4Occupant, &raw) || !raw) return false;
+        auto* occupant = static_cast<cISC4Occupant*>(raw);
+        cSC4Lot* lot = lots->GetOccupantLot(occupant);   // spLotManager vslot 0x38
+        occupant->Release();
+        return lot && !lot->HasRoadAccess();
+    };
     if (fire) {
         G("g_fire_station_count", static_cast<double>(fire->GetFireStationCount()));
         G("ga_fire_coverage", fire->GetAverageCoverage());
         G("g_fire_coverage_p", X100(fire->GetPercentCoverage()));
-        if (fire->GetFireStationCount() == 0) LocalNone("l_fire_funding_p", 10000.0);
+        std::list<IFireOccupant*> stations;
+        fire->GetFireStations(stations);   // vslot 0x58
+        float lowest = 100.0f;
+        cIGZUnknown* lowestAt = nullptr;
+        cIGZUnknown* noRoadsAt = nullptr;
+        for (IFireOccupant* station : stations) {
+            if (!station) continue;
+            int cost = 0;
+            SC4Percentage fraction{};
+            fire->GetStationFunding(station, &cost, &fraction);   // vslot 0x20
+            if (fraction.value < lowest) { lowest = fraction.value; lowestAt = station->Object(); }
+            if (!noRoadsAt && noRoads(station->Object())) noRoadsAt = station->Object();
+        }
+        LocalAtObject("l_fire_funding_p", X100(lowest), lowestAt);
+        LocalAtObject("l_fire_station_no_roads", noRoadsAt ? 1.0 : 0.0, noRoadsAt);
     }
-    if (police && police->GetPoliceStationCount() == 0) LocalNone("l_police_funding_p", 10000.0);
-    LocalNone("l_fire_station_no_roads", 0.0);
-    LocalNone("l_police_no_roads", 0.0);
+    if (police) {
+        std::list<IProtectionStation*> stations;
+        police->GetPoliceStations(stations);   // vslot 0x54
+        float lowest = 100.0f;
+        cIGZUnknown* lowestAt = nullptr;
+        cIGZUnknown* noRoadsAt = nullptr;
+        for (IProtectionStation* station : stations) {
+            auto* officer = dynamic_cast<IPoliceOccupant*>(station);
+            if (!officer) continue;
+            int cost = 0;
+            SC4Percentage fraction{};
+            police->GetStationFunding(officer, &cost, &fraction);   // vslot 0x1c
+            if (fraction.value < lowest) { lowest = fraction.value; lowestAt = station->Object(); }
+            if (!noRoadsAt && noRoads(station->Object())) noRoadsAt = station->Object();
+        }
+        LocalAtObject("l_police_funding_p", X100(lowest), lowestAt);
+        LocalAtObject("l_police_no_roads", noRoadsAt ? 1.0 : 0.0, noRoadsAt);
+    }
 }
 
 // ---- Traffic (7.7)
