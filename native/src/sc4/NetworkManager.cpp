@@ -1,5 +1,7 @@
 #include "sc4/NetworkManager.h"
 
+#include "sc4/Lot.h"
+#include "sc4/NetworkOccupant.h"
 #include "sc4/NetworkTool.h"   // eNetworkType enumerators, kNetworkTypeCount, kFlagForNetworkType
 #include "platform/Unwired.h"
 
@@ -7,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <strings.h>
 
@@ -797,32 +800,95 @@ void cSC4NetworkManager::GetAllIntersectionPieces2(INetworkManagerOccupant* occu
     SC4_UNWIRED("cSC4NetworkManager::GetAllIntersectionPieces2: not ported (the intersection's pieces are not collected)");
 }
 
-// 0x100171494 — PARTIAL. Builds a connection-node occupant: the network tool's placement pass (slots 0x18
-// Init, 0x40 PlaceNetworkOccupantById, 0x20 Shutdown, 0x260), the occupant manager's cell query (+0x108), the
-// lot manager's lot -> buildable-property chain and the new occupant's initialisation slots 0x120/0x80/0xf0/
-// 0xb8/0xa0/0x70 are all unrecovered. The pipe/subway tools that would place the node are not recovered either.
+// i386 0x0011204e. A lot's network connection node: the type's tool places piece 0x100 on the cell (not usable yet), the piece is
+// found again through the occupant manager, set to the height of the lot's building over the network (when the cell's lot has
+// one), given the lot object's path override and rotation, marked as a lot node (0x200000, 0x8000000; 0x2000000 / 0x4000000 off),
+// left unusable, and keeps the node's two edge masks.
 bool cSC4NetworkManager::CreateConnectionNode(cISC4Occupant*& out, eNetworkType type, const SC4PointT<int>& cell,
-                                               std::uint32_t a, std::uint32_t b, std::uint32_t c,
-                                               std::uint8_t d) {
-    (void)type;
-    (void)cell;
-    (void)a;
-    (void)b;
-    (void)c;
-    (void)d;
+                                               std::uint32_t edgesA, std::uint32_t edgesB, std::uint32_t pathOverride,
+                                               std::uint8_t rotation) {
     out = nullptr;
-    SC4_UNWIRED("cSC4NetworkManager::CreateConnectionNode: not ported (no connection-node occupant is built)");
-    return false;
+    INetworkManagerHost* host = NetworkManagerHost();
+    INetworkManagerTool* tool = GetNetworkTool(type, false);                     // vslot 0x14
+    if (!host || !tool) return false;
+    tool->Init();                                                                // tool vslot 0xc
+    tool->PlaceNetworkOccupantById(cell.x, cell.z, 0x100, false, type);          // tool vslot 0x20
+    tool->Shutdown();                                                            // tool vslot 0x10
+    const auto index = static_cast<std::size_t>(type);
+    cSC4NetworkOccupant* node = index < kNetworkTypeCount ? host->FirstNetworkOccupantAt(cell.x, cell.z, kFlagForNetworkType[index]) : nullptr;
+    if (std::getenv("SC4_NETDEBUG"))
+        std::fprintf(stderr, "network manager: connection node type %u at %d,%d edges %08x/%08x path %08x rotation %u -> %s\n", static_cast<unsigned>(index),
+                     cell.x, cell.z, edgesA, edgesB, pathOverride, rotation, node ? "made" : "NOT FOUND");
+    if (!node) return false;
+    float altitude = 0.0f;
+    if (host->LotBuildingAltitude(cell.x, cell.z, altitude)) {
+        const float height = tool->GetNetworkHeightForTerrainHeight(altitude);   // tool vslot 0x130
+        const float heights[4] = {height, height, height, height};
+        node->SetVertexHeights(heights);                                         // vslot 0x90
+    }
+    if (pathOverride != 0) {
+        node->SetConnectionPathIDOverride(pathOverride);                         // vslot 0x40
+        node->SetQuadDraw(node->PieceId(), rotation);                            // vslots 0x78 / 0x5c
+    }
+    node->SetNetworkFlag(0x200000);
+    node->SetNetworkFlag(0x8000000);
+    node->ClearNetworkFlag(0x2000000);
+    node->ClearNetworkFlag(0x4000000);
+    node->SetUsable(false);                                                      // vslot 0x50
+    node->SetConnectionNodeEdgeTypes(edgesA, edgesB);                            // vslot 0x38
+    out = node;                                                                  // the lookup's reference goes to the caller
+    return true;
 }
 
-// 0x100171780 — PARTIAL. Walks the lot's network-adjacent occupants and asks each network type's tool to
-// place the connecting line (tool slots 0x38/0x18/0x20, the lot's cell rectangle at vslot 0x70, the occupant
-// manager's cell query +0x108 and the occupant's cell/edge-mask slots 0x1d8/0x68/0x140), none of which is
-// recovered; cSC4NetworkORFilter and the 0xb0 OR-filter mask are missing as well.
-void cSC4NetworkManager::AutoconnectLotNodes(cISC4Lot* lot, const ilist<cISC4Occupant*>& occupants) {
-    (void)lot;
-    (void)occupants;
-    SC4_UNWIRED("cSC4NetworkManager::AutoconnectLotNodes: not ported (the lot's connecting network lines are not placed)");
+// i386 0x0011237c. Each node of the lot reaches out of the lot on every edge its second mask opens and that is not connected yet:
+// when the cell beyond holds a piece of a compatible family (the surface networks 0x1f4f, or rail / monorail family 0xb0), the
+// walk follows that line while it stays inside the lot, and the node's type draws a line from the node to where it ended. Edges
+// 0 and 1 (west, north) always look; edges 2 and 3 only when the next cell leaves the lot.
+void cSC4NetworkManager::AutoconnectLotNodes(cSC4Lot* lot, const ilist<cISC4Occupant*>& occupants) {
+    static constexpr std::int32_t kNextX[4] = {-1, 0, 1, 0};                     // nSC4Networks::kNextX
+    static constexpr std::int32_t kNextZ[4] = {0, -1, 0, 1};                     // nSC4Networks::kNextZ
+    INetworkManagerHost* host = NetworkManagerHost();
+    if (!host || !lot) return;
+    std::int32_t rect[4] = {};
+    lot->GetBoundingRect(rect);                                                  // lot vslot 0x38
+    const auto inside = [&](int x, int z) { return rect[0] <= x && rect[1] <= z && x <= rect[2] && z <= rect[3]; };
+    for (cISC4Occupant* occupant : occupants) {
+        auto* node = dynamic_cast<cSC4NetworkOccupant*>(occupant);
+        if (!node) continue;
+        std::uint32_t type = 0;
+        while (type < kNetworkTypeCount && !node->HasNetworkFlag(kFlagForNetworkType[type])) ++type;   // vslot 0x20
+        if (type >= kNetworkTypeCount) continue;
+        const std::uint32_t mask = (kFlagForNetworkType[type] & 0x1f4f) ? 0x1f4fu : 0xb0u;
+        std::uint32_t x = 0, z = 0;
+        node->GetOccupiedCell(x, z);                                             // vslot 0xec
+        std::uint32_t edgesA = 0, edgesB = 0;
+        node->GetConnectionNodeEdgeTypes(edgesA, edgesB);                        // vslot 0x34
+        const std::uint32_t open = edgesB & 0x7070707u;
+        const std::uint32_t openEdges = ((open + 0x7070707u) & 0x8080808u) * 0x1020408u >> 27;   // a bit per edge byte that is set
+        const std::uint32_t active = node->GetActiveEdges();                     // vslot 0xa0
+        for (int edge = 0; edge < 4; ++edge) {
+            if ((~(active & 0xff) & openEdges & (1u << edge)) == 0) continue;
+            int nx = static_cast<int>(x) + kNextX[edge], nz = static_cast<int>(z) + kNextZ[edge];
+            if (edge >= 2 && inside(nx, nz)) continue;
+            cSC4NetworkOccupant* found = host->FirstNetworkOccupantAt(nx, nz, mask);   // occupant manager vslot 0x84
+            if (!found) continue;
+            while (inside(nx, nz)) {
+                found->Release();
+                found = host->FirstNetworkOccupantAt(nx + kNextX[edge], nz + kNextZ[edge], mask);
+                if (!found) break;
+                nx += kNextX[edge];
+                nz += kNextZ[edge];
+            }
+            if (found) found->Release();
+            if (INetworkManagerTool* tool = GetNetworkTool(static_cast<eNetworkType>(type), false)) {
+                tool->AddRef();
+                tool->Init();                                                    // tool vslot 0xc
+                tool->PlaceNetworkOccupants(static_cast<int>(x), static_cast<int>(z), nx, nz, true);   // vslot 0x1c (0, 0, 1, -1)
+                tool->Shutdown();                                                // tool vslot 0x10
+                tool->Release();
+            }
+        }
+    }
 }
 
 }  // namespace sc4

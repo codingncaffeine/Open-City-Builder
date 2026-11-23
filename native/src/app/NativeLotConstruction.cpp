@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "app/NativeDemolition.h"
+#include "sc4/NetworkManager.h"
 #include "app/NativeBuildingDevelopment.h"
 #include "app/NativeCity.h"
 #include "app/NativeConstruction.h"
@@ -634,6 +635,7 @@ public:
             if (lot) out.push_back(lot.get());   // the lot manager keeps them
     }
     cISC4OccupantManager* OccupantManager() override { return Occupants(); }
+    cISC4NetworkManager* NetworkManager() override { return CityNetworkManager(); }
 private:
     std::map<const cISCPropertyHolder*, cISCResExemplar*> held_;
 } g_cityServices;

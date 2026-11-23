@@ -1141,6 +1141,43 @@ bool cSC4NetworkTool::PlaceNetworkOccupants(int x0, int z0, int x1, int z1, std:
     return result;
 }
 
+// Mac i386 0x0012832c. A one-cell record for the network type (status 0) whose corners sit at the network's height over the
+// terrain's corner heights, each with the type's deviation either side; solved as {piece, rotation 2}. The tool counts as placing
+// (+0x50) while vslot 0x128 inserts the piece, then goes back to what it was.
+void cSC4NetworkTool::PlaceNetworkOccupantById(int x, int z, std::uint32_t pieceId, bool usable, std::uint32_t networkType) {
+    INetworkToolHost* host = GetNetworkToolHost();
+    const INetworkTypeInfo* info = host && networkType < kNetworkTypeCount ? host->NetworkTypeInfo(networkType) : nullptr;
+    const float deviation = info ? info->PlacementParams().float40[0] : 0.0f;
+    cSC4NetworkCellInfo cell;
+    cell.x = static_cast<std::uint32_t>(x);
+    cell.z = static_cast<std::uint32_t>(z);
+    cell.networkFlags = networkType < kNetworkTypeCount ? kFlagForNetworkType[networkType] : 0;
+    cell.status = 0;
+    const std::int32_t v0 = z * widthPlusOne_ + x;
+    const std::int32_t ids[4] = {v0, v0 + widthPlusOne_, v0 + widthPlusOne_ + 1, v0 + 1};
+    for (int i = 0; i < 4; ++i) {
+        const float terrain = host ? host->TerrainVertexHeight(ids[i]) : 0.0f;          // terrain vslot 0x34
+        cell.vertexHeights[i] = GetNetworkHeightForTerrainHeight(terrain);
+        cell.range70[i] = {cell.vertexHeights[i] - deviation, cell.vertexHeights[i] + deviation};
+    }
+    tSolvedCell solved;
+    solved.pieceType = pieceId;
+    solved.rotationFlip = 2;
+    solved.cellKey = 0;
+    const bool wasPlacing = unknown98_;
+    unknown98_ = true;
+    std::list<cSC4NetworkOccupant*> placed;
+    InsertNetworkOccupant(cell, solved, &placed);                                         // vslot 0x128
+    for (cSC4NetworkOccupant* occupant : placed) {
+        if (usable) {
+            occupant->SetUsable(true);
+            occupant->ClearNetworkFlag(0x4000);
+        }
+        occupant->Release();
+    }
+    unknown98_ = wasPlacing;
+}
+
 
 // i386 0x00152598. The i386 record holds the block at +0x50; the i386 offsets are in the comments. Angles are read in
 // degrees and kept in radians (FLOAT_00a70840 = pi / 180).

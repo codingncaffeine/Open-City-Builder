@@ -149,7 +149,8 @@ using ilist = std::list<T>;
 
 class cSC4PipeOccupant;             // forward: the manager only hands the out-parameter through
 class cSC4PipeConnectionOccupant;   // forward: ditto
-class cISC4Lot;                     // forward: AutoconnectLotNodes only (PARTIAL)
+class cSC4Lot;                      // AutoconnectLotNodes: the lot whose nodes connect (its cell rectangle)
+class cSC4NetworkOccupant;
 class cISC4OccupantFilter;          // cSC4OccupantFilter / cSC4WaterOccupantFilter / cSC4SubwayOccupantFilter
 
 // cISC4NetworkOccupant (iid 0xa821ef94) as this class uses it. The comments are the original byte offsets.
@@ -191,6 +192,12 @@ public:
     virtual bool Init() = 0;                                                  // +0x18
     virtual bool Shutdown() = 0;                                              // +0x20
     virtual void DestroyOccupantsAndResolve(std::vector<INetworkManagerOccupant*>& occupants) = 0;  // +0x190
+    // cSC4NetworkTool i386 vslot 0x20 PlaceNetworkOccupantById(x, z, piece, usable, type) and vslot 0x1c PlaceNetworkOccupants(x0, z0,
+    // x1, z1, 0, null, place, -1) as CreateConnectionNode / AutoconnectLotNodes call them; vslot 0x130 the network's height over a
+    // terrain height. A tool without them (none here) places nothing.
+    virtual void PlaceNetworkOccupantById(int x, int z, std::uint32_t pieceId, bool usable, eNetworkType type) { (void)x; (void)z; (void)pieceId; (void)usable; (void)type; }
+    virtual bool PlaceNetworkOccupants(int x0, int z0, int x1, int z1, bool place) { (void)x0; (void)z0; (void)x1; (void)z1; (void)place; return false; }
+    virtual float GetNetworkHeightForTerrainHeight(float terrainHeight) { return terrainHeight; }
 };
 
 // Everything outside the object. One method per original call; the global/slot is in the comment.
@@ -218,6 +225,12 @@ public:
     virtual INetworkManagerOccupantManager* OccupantManager() = 0;   // SL::spOccupantManager
     // SL::sp24HourClock vslot 0xe0 (cSC424HourClock::IsNight): the message branch 0x26d31ec1 lights the tracked pieces at night.
     virtual bool IsNight() = 0;
+    // SL::spOccupantManager vslot 0x84 GetFirstOccupantByStandardCityCell(out, x, z, cSC4NetworkORFilter(mask)): the first network
+    // piece on the cell with any of the mask's flags, one reference, or null.
+    virtual cSC4NetworkOccupant* FirstNetworkOccupantAt(int x, int z, std::uint32_t flagMask) { (void)x; (void)z; (void)flagMask; return nullptr; }
+    // SL::spLotManager vslot 0x14 GetLot(x, z, false) -> lot vslot 0xc0 GetBuilding -> occupant vslot 0x20 GetPosition: the height
+    // of the building on the cell's lot; false without one.
+    virtual bool LotBuildingAltitude(int x, int z, float& altitude) { (void)x; (void)z; (void)altitude; return false; }
     // SC4WriteGZSerializable(stream, object) @ 0x1000435e3 and SC4ReadGZSerializable(stream, iid, &out, false)
     // @ 0x100043267. Both need a DB segment stream, so they stay a seam.
     virtual bool WriteGZSerializable(cIGZOStream& stream, const cIGZUnknown* object) = 0;
@@ -260,7 +273,7 @@ public:
     virtual bool CreateConnectionNode(cISC4Occupant*& out, eNetworkType type, const SC4PointT<int>& cell,
                                       std::uint32_t a, std::uint32_t b, std::uint32_t c,
                                       std::uint8_t d) = 0;                     // [20] 0x0a0
-    virtual void AutoconnectLotNodes(cISC4Lot* lot, const ilist<cISC4Occupant*>& occupants) = 0;  // [21] 0x0a8
+    virtual void AutoconnectLotNodes(cSC4Lot* lot, const ilist<cISC4Occupant*>& occupants) = 0;  // [21] 0x0a8
     virtual const char* GetEnglishNetworkName(eNetworkType type) = 0;          // [22] 0x0b0
     virtual void AddToRetrofitList(cISC4Occupant* occupant) = 0;               // [23] 0x0b8
     // [24]/[25] 0x0c0/0x0c8 destructors; [26]/[27]/[28] are cIGZSerializable's Read/Write/GetGZCLSID;
@@ -319,7 +332,7 @@ public:
     bool CreateConnectionNode(cISC4Occupant*& out, eNetworkType type, const SC4PointT<int>& cell,
                               std::uint32_t a, std::uint32_t b, std::uint32_t c,
                               std::uint8_t d) override;                            // 0x100171494 (PARTIAL)
-    void AutoconnectLotNodes(cISC4Lot* lot, const ilist<cISC4Occupant*>& occupants) override;  // 0x100171780 (PARTIAL)
+    void AutoconnectLotNodes(cSC4Lot* lot, const ilist<cISC4Occupant*>& occupants) override;  // i386 0x0011237c
     const char* GetEnglishNetworkName(eNetworkType type) override;                 // 0x100171c3c
     void AddToRetrofitList(cISC4Occupant* occupant) override;                      // 0x100171c50
 

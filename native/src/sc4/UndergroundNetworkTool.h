@@ -163,7 +163,7 @@ public:
     virtual float GetNetworkVertexHt(int vertexId) const;              // [75] 0x1001a7c30
     // The same slot under the base port's name (i386 vslot 0x12c): the base insertion reads the pipe heights through it.
     float GetNetworkVertexHeight(std::int32_t vertex) override { return GetNetworkVertexHt(vertex); }
-    virtual float GetNetworkHeightForTerrainHeight(float terrainHeight) const;   // [76] 0x1001930a0
+    float GetNetworkHeightForTerrainHeight(float terrainHeight) const override;   // [76] 0x1001930a0
     void PropagateSolvedCellsForSmoothing() override;                  // [77] 0x1001a932a
     void InsertRangeConstraintsForCell(std::uint32_t cellKey);         // [78] 0x1001a7616
     void ApplyPlaneConstraintToRegularCells(std::vector<tImmovablePortion>& portions);   // [79] empty

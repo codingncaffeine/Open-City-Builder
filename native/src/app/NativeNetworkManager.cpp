@@ -7,12 +7,14 @@
 
 #include "app/NativeCity.h"
 #include "app/NativeDemolition.h"
+#include "app/NativeZoneDeveloperHost.h"
 #include "gz/RZServices.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "rz/cRZIniFile.h"
 #include "sc4/CommonIIDs.h"
 #include "sc4/ComplexViewOccupantFilter.h"
 #include "sc4/DBSegment.h"
+#include "sc4/Lot.h"
 #include "sc4/NetworkManager.h"
 #include "sc4/NetworkOccupant.h"
 #include "sc4/NetworkOccupantWithPreBuiltModel.h"
@@ -120,6 +122,15 @@ public:
     }
     bool Shutdown() override { return tool_ ? tool_->Shutdown() : true; }
     sc4::cSC4NetworkTool* Tool() const { return tool_; }
+    void PlaceNetworkOccupantById(int x, int z, std::uint32_t pieceId, bool usable, sc4::eNetworkType type) override {
+        if (tool_) tool_->PlaceNetworkOccupantById(x, z, pieceId, usable, static_cast<std::uint32_t>(type));
+    }
+    bool PlaceNetworkOccupants(int x0, int z0, int x1, int z1, bool place) override {
+        return tool_ && tool_->PlaceNetworkOccupants(x0, z0, x1, z1, 0, nullptr, place, -1);
+    }
+    float GetNetworkHeightForTerrainHeight(float terrainHeight) override {
+        return tool_ ? tool_->GetNetworkHeightForTerrainHeight(terrainHeight) : terrainHeight;
+    }
     // The manager hands one reference per view; the tool borrows the pieces.
     void DestroyOccupantsAndResolve(std::vector<sc4::INetworkManagerOccupant*>& occupants) override {
         std::vector<sc4::cSC4NetworkOccupant*> pieces;
@@ -234,6 +245,36 @@ public:
         sc4::cSC4PipeTool::FindPipeConnectionOccupant(CityOccupants(), x, z, out);
     }
     sc4::INetworkManagerOccupantManager* OccupantManager() override { return CityOccupants() ? &g_managerOccupants : nullptr; }
+    // GetFirstOccupantByStandardCityCell with a cSC4NetworkORFilter: the first network piece on the cell with any of the flags.
+    sc4::cSC4NetworkOccupant* FirstNetworkOccupantAt(int x, int z, std::uint32_t flagMask) override {
+        sc4::cISC4OccupantManager* occupants = CityOccupants();
+        if (!occupants || x < 0 || z < 0) return nullptr;
+        const int cell[2] = {x, z};
+        sc4::OccupantList list;
+        sc4::cSC4NetworkOccupant* found = nullptr;
+        if (!occupants->GetOccupantsByStandardCityCells(list, cell, cell, 0xc772bf98u, 0xffffffffu)) return nullptr;
+        for (sc4::cISC4Occupant* occupant : list) {
+            auto* network = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);
+            if (!found && network && (network->GetNetworkFlag() & flagMask) != 0) {
+                network->AddRef();
+                found = network;
+            }
+        }
+        occupants->ReleaseOccupantList(list);
+        return found;
+    }
+    bool LotBuildingAltitude(int x, int z, float& altitude) override {
+        sc4::cSC4Lot* lot = NativeLotAtCell(x, z, false);
+        cIGZUnknown* building = lot ? lot->GetBuilding() : nullptr;
+        void* raw = nullptr;
+        if (!building || !building->QueryInterface(sc4::kGZIID_cISC4Occupant, &raw) || !raw) return false;
+        auto* occupant = static_cast<sc4::cISC4Occupant*>(raw);
+        float position[3] = {};
+        occupant->GetPosition(position);
+        occupant->Release();
+        altitude = position[1];
+        return true;
+    }
     // SL::sp24HourClock->IsNight(): the city's 24-hour clock.
     bool IsNight() override {
         sc4::cSC4City* city = HostCity();

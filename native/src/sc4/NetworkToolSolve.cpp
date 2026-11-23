@@ -747,12 +747,27 @@ int cSC4NetworkTool::SolveNetwork(std::uint32_t networkType, bool retry) {
     for (std::uint32_t key : removed) solvedCells_.insert(key);
     int result;
     if (retry || solvedCells_.empty()) {
-        if (!AdjustTileSubsets(solvedCellList_, retry) || !VerifyTileSubsets(solvedCellList_)) return validSteps_ - 1;
+        const bool adjusted = AdjustTileSubsets(solvedCellList_, retry);
+        const bool verified = adjusted && VerifyTileSubsets(solvedCellList_);
+        if (std::getenv("SC4_NETDEBUG"))
+            std::fprintf(stderr, "network solve: subsets (retry %d, %zu solved cells, %zu in list, %zu padded): adjust %d verify %d\n", retry ? 1 : 0,
+                         solvedCells_.size(), solvedCellList_.size(), padded.size(), adjusted ? 1 : 0, verified ? 1 : 0);
+        if (!verified) return validSteps_ - 1;
     }
     // Cells left unsolved cut the drag back to the earliest step they belong to.
     result = validSteps_;
     for (std::uint32_t key : solvedCells_) {
         const cSC4NetworkCellInfo* cell = GetCellInfo(key);
+        {
+            if (std::getenv("SC4_NETDEBUG")) {
+                std::fprintf(stderr, "network solve: cell %u,%u unsolved (step %d, flags %08x, occupant %d)", key & 0xffffu, key >> 16,
+                             cell ? cell->stepIndex : -1, cell ? cell->networkFlags : 0u, cell && cell->hasOccupant ? 1 : 0);
+                if (cell)
+                    for (std::uint32_t t = 0; t < 13; ++t)
+                        if (cell->tileNeighborhoods[t]) std::fprintf(stderr, " t%u=%08x", t, cell->tileNeighborhoods[t]);
+                std::fprintf(stderr, " status %d\n", cell ? cell->status : -1);
+            }
+        }
         if (!cell || cell->status == 0) {
             if (result == validSteps_) --result;
         } else if (cell->stepIndex < result) {
@@ -2400,17 +2415,17 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, cSC4NetworkConstructionCrew* crew
         int steps = totalSteps_;
         validSteps_ = steps;
         IdentifyStartingConditions(steps);                                          // vslot 0x110
-        if (steps < validSteps_) { failureReason_ = kFailStart; validSteps_ = 0; }
+        if (steps < validSteps_) { if (std::getenv("SC4_NETDEBUG")) std::fprintf(stderr, "network check: IdentifyStartingConditions cut %d steps to %d\n", validSteps_, steps); failureReason_ = kFailStart; validSteps_ = 0; }
         IdentifyTunnelCells(steps);                                                 // the count is read, never cut
-        if (steps < validSteps_) { failureReason_ = kFailTunnel; validSteps_ = 0; }
+        if (steps < validSteps_) { if (std::getenv("SC4_NETDEBUG")) std::fprintf(stderr, "network check: IdentifyTunnelCells cut %d steps to %d\n", validSteps_, steps); failureReason_ = kFailTunnel; validSteps_ = 0; }
         CheckForReservedTiles(steps, networkType, false);                           // vslot 0x114
-        if (steps < validSteps_) { failureReason_ = kFailReserved; validSteps_ = 0; }
+        if (steps < validSteps_) { if (std::getenv("SC4_NETDEBUG")) std::fprintf(stderr, "network check: CheckForReservedTiles cut %d steps to %d\n", validSteps_, steps); failureReason_ = kFailReserved; validSteps_ = 0; }
         steps = UpdateOccupantHighlights(validSteps_);                              // vslot 0xf4
-        if (steps < validSteps_) { failureReason_ = kFailReserved; validSteps_ = 0; }
+        if (steps < validSteps_) { if (std::getenv("SC4_NETDEBUG")) std::fprintf(stderr, "network check: UpdateOccupantHighlights cut %d steps to %d\n", validSteps_, steps); failureReason_ = kFailReserved; validSteps_ = 0; }
         IdentifyBridgeCells(steps, networkType);                                    // the bridge steps (direction 1) leave the terrain check
-        if (steps < validSteps_) { failureReason_ = kFailBridge; validSteps_ = 0; }
+        if (steps < validSteps_) { if (std::getenv("SC4_NETDEBUG")) std::fprintf(stderr, "network check: IdentifyBridgeCells cut %d steps to %d\n", validSteps_, steps); failureReason_ = kFailBridge; validSteps_ = 0; }
         CheckForGoodTerrain(steps);                                                 // vslot 0x11c
-        if (steps < validSteps_) { failureReason_ = kFailStart; validSteps_ = 0; }
+        if (steps < validSteps_) { if (std::getenv("SC4_NETDEBUG")) std::fprintf(stderr, "network check: CheckForGoodTerrain cut %d steps to %d\n", validSteps_, steps); failureReason_ = kFailStart; validSteps_ = 0; }
         if (hasBridgeTypes_) IdentifyLandBridgeCells(validSteps_, networkType);     // i386 +0x394
         bool solved = false;
         while (validSteps_ > 0) {

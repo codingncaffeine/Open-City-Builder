@@ -10,6 +10,9 @@
 
 #include "gz/StreamOps.h"
 #include "platform/Unwired.h"
+#include "sc4/NetworkTool.h"
+#include "sc4/NetworkOccupant.h"
+#include "sc4/NetworkManager.h"
 #include "rz/cRZRandom.h"
 #include "sc4/DBSegment.h"
 #include "sc4/BuildingOccupant.h"
@@ -62,7 +65,6 @@ ILotDailyServices* g_daily = nullptr;
 ILotDeveloperCityServices* g_city = nullptr;
 ILotConstructionServices* g_construction = nullptr;
 ILotBaseTextureServices* g_textureServices = nullptr;
-constexpr std::uint32_t kOccupantTypeNetwork = 0xc772bf98;
 constexpr std::uint32_t kOccupantTypeProp = 0xa823821e;
 constexpr std::uint32_t kAnimationTickPriority = 0xc0;           // the every-frame bucket of the animation-tick manager
 constexpr std::uint32_t kPropPropNightLight = 0x4a9f188b;        // a prop that turns on and off with its building's lights
@@ -1163,13 +1165,12 @@ bool cSC4LotDeveloper::ClearLotBuildings(cSC4Lot* lot, std::uint32_t state, bool
 }
 
 // Slot 12 (i386 0x000f1b84): the flora of a lot with flag 1, the lot's props, its network connection nodes and its buildings
-// (state 5, foundations too). PARTIAL: RemoveNetworkConnectionNodes (the lot's network pieces with flag 0x200000 handed to the
-// network manager) is not ported.
+// (state 5, foundations too).
 bool cSC4LotDeveloper::StartDemolishLot(cSC4Lot* lot) {
     if (!lot || !g_construction) return false;
     if (lot->GetFlags() & 1) g_construction->RemoveLotFlora(lot);                   // lot vslot 0x30
     g_construction->RemoveLotProps(lot);
-    SC4_UNWIRED("cSC4LotDeveloper::StartDemolishLot: RemoveNetworkConnectionNodes (the lot's 0x200000 network pieces) is not ported");
+    RemoveNetworkConnectionNodes(lot);
     return ClearLotBuildings(lot, 5, true, 0);
 }
 
@@ -1370,7 +1371,6 @@ bool cSC4LotDeveloper::StartConstruction(cSC4Lot* lot, cSC4LotConfiguration* con
 }
 
 // i386 DoMessage 0xe8bda2e7 (x64 0x10014e...): the lot is looked up at the snapshot's location and must still have its size.
-//   PARTIAL: AddNetworkConnectionNodes (0x000f14ee) is not ported.
 void cSC4LotDeveloper::DoLotStateChanged(const cSC4Lot& snapshot, std::uint32_t oldState, std::uint32_t newState) {
     const bool built = newState - 3 < 2;
     const bool finished = oldState == 2 && newState == 3;
@@ -1387,11 +1387,67 @@ void cSC4LotDeveloper::DoLotStateChanged(const cSC4Lot& snapshot, std::uint32_t 
     snapshot.GetSize(snapshotX, snapshotZ);
     if (sizeX != snapshotX || sizeZ != snapshotZ) return;
     if (built) SetNormalLotBaseTexture(lot, configuration);                         // vslot 0xb0 (lot, configuration, 1)
-    if (built) SC4_UNWIRED("cSC4LotDeveloper::DoLotStateChanged: AddNetworkConnectionNodes (0x000f14ee) is not ported");
+    if (built) AddNetworkConnectionNodes(lot, configuration);
     if (finished) {
         AddLotProps(lot, configuration);
         AddLotFlora(lot, configuration);
     }
+}
+
+// i386 0x000f14ee. Every network object (type 7) of the configuration becomes a connection node: its cell is the one under the
+// object's position, its two edge masks turn with the lot (rotated left 8 bits per quarter turn), its ids are {network type,
+// edges, edges, path override (optional)}. The new nodes are connected to the networks beside the lot, then the list goes.
+void cSC4LotDeveloper::AddNetworkConnectionNodes(cSC4Lot* lot, cSC4LotConfiguration* configuration) {
+    if (!lot || !configuration || !g_city) return;
+    cISC4NetworkManager* networks = g_city->NetworkManager();
+    if (!networks) return;
+    const auto rotl = [](std::uint32_t v, unsigned s) { s &= 31; return s ? (v << s) | (v >> (32 - s)) : v; };
+    ilist<cISC4Occupant*> nodes;
+    for (const cSC4LotConfigurationObject& object : configuration->GetLotConfigurationObjectArray()) {   // vslot 0x5c
+        if (object.type != 7) continue;
+        float position[3] = {};
+        std::int32_t rotation = 0;
+        GetPositionForLotConfigurationObject(lot, configuration, &object, position, rotation);   // vslot 0x9c
+        const SC4PointT<int> cell{static_cast<int>(std::floor(position[0] * 0.0625f)), static_cast<int>(std::floor(position[2] * 0.0625f))};
+        if (object.extra.size() <= 2) continue;
+        std::uint32_t edgesA = object.extra[1], edgesB = object.extra[2];
+        if (rotation != 0) {
+            edgesA = rotl(edgesA, static_cast<unsigned>(rotation) * 8u);
+            edgesB = rotl(edgesB, static_cast<unsigned>(rotation) * 8u);
+        }
+        const std::uint32_t pathOverride = object.extra.size() < 4 ? 0u : object.extra[3];
+        cISC4Occupant* node = nullptr;
+        networks->CreateConnectionNode(node, static_cast<eNetworkType>(object.extra[0]), cell, edgesA, edgesB, pathOverride,
+                                       static_cast<std::uint8_t>(rotation & 0xff));   // SL::NetworkManager vslot 0x50
+        if (node) nodes.push_back(node);
+    }
+    networks->AutoconnectLotNodes(lot, nodes);                                        // vslot 0x54
+    if (cISC4OccupantManager* occupants = g_city->OccupantManager()) occupants->ReleaseOccupantList(nodes);   // +0x28 vslot 0xc0
+    else for (cISC4Occupant* node : nodes) node->Release();
+}
+
+// i386 0x000f1758. The network pieces on the lot's cells that are lot nodes (0x200000) go to the network manager to be destroyed.
+void cSC4LotDeveloper::RemoveNetworkConnectionNodes(cSC4Lot* lot) {
+    if (!lot || !g_city) return;
+    cISC4OccupantManager* occupants = g_city->OccupantManager();
+    cISC4NetworkManager* networks = g_city->NetworkManager();
+    if (!occupants || !networks) return;
+    std::int32_t rect[4] = {};
+    lot->GetBoundingRect(rect);                                                       // lot vslot 0x38
+    const int minimum[2] = {rect[0], rect[1]}, maximum[2] = {rect[2], rect[3]};
+    OccupantList pieces;
+    if (!occupants->GetOccupantsByStandardCityCells(pieces, minimum, maximum, 0xc772bf98u, 0xffffffffu)) return;   // vslot 0xa0
+    for (auto it = pieces.begin(); it != pieces.end();) {
+        auto* network = dynamic_cast<cSC4NetworkOccupant*>(*it);
+        if (network && network->HasNetworkFlag(0x200000)) {
+            ++it;
+        } else {
+            (*it)->Release();
+            it = pieces.erase(it);
+        }
+    }
+    networks->DestroyNetworkOccupants(pieces);                                        // SL::NetworkManager vslot 0x18
+    occupants->ReleaseOccupantList(pieces);
 }
 
 // @ i386 0x000ef4c0. Every prop object (type 1) of the configuration that is not flagged (bit 0) becomes a prop.

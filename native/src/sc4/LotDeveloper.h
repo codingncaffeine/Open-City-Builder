@@ -167,6 +167,7 @@ class cISC4Occupant;
 // What StartConstruction and the building placement reach outside the class: the building development simulator (+0x18), the
 // city (+0x1c), the occupant manager (+0x28) with the blocking-lot filter (+0x58) and the demolition utility (+0x20), the terrain
 // (+0x3c), and the lot configuration manager behind the lot's configuration reference.
+class cISC4NetworkManager;
 class ILotConstructionServices {
 public:
     virtual ~ILotConstructionServices() = default;
@@ -286,6 +287,7 @@ public:
     // lot manager vslot 0x1c GetLotsInCellRect(list, x1, z1, x2, z2, true): the lots touching the rectangle, borrowed
     virtual void LotsInCellRect(int x1, int z1, int x2, int z2, std::vector<cSC4Lot*>& out) = 0;
     virtual cISC4OccupantManager* OccupantManager() = 0;                   // +0x28 (borrowed)
+    virtual cISC4NetworkManager* NetworkManager() { return nullptr; }      // SL::NetworkManager() (borrowed)
 };
 
 // The lot developer's own interface (class id 0xa990bfe0, iid 0x4818e5d2). Only the COM identity is
@@ -446,6 +448,8 @@ public:
     std::uint32_t PickFloraTypeForLot(const std::vector<std::uint32_t>& types);                                      // i386 0x000f2efa
     std::uint32_t PickLotBaseTextureForLot(cSC4Lot* lot, const std::vector<std::uint32_t>& textures);               // i386 0x000ef182
     void GetPositionForBuilding(cSC4Lot* lot, float position[3], std::int32_t& rotation);                            // vslot 0xa0
+    void AddNetworkConnectionNodes(cSC4Lot* lot, cSC4LotConfiguration* configuration);                               // i386 0x000f14ee
+    void RemoveNetworkConnectionNodes(cSC4Lot* lot);                                                                  // i386 0x000f1758
     void GetPositionForLotConfigurationObject(cSC4Lot* lot, cSC4LotConfiguration* configuration,
                                               const cSC4LotConfigurationObject* object, float position[3],
                                               std::int32_t& rotation);                                                // vslot 0x9c

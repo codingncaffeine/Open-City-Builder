@@ -802,6 +802,9 @@ public:
     // pieces of those network types; an end next to a piece of another type is handed to `follow` afterwards.
     bool PlaceNetworkOccupants(int x0, int z0, int x1, int z1, std::uint32_t flags, cSC4NetworkTool* follow, bool place,
                                int networkType);
+    // Mac i386 0x0012832c (interface slot [8]): one piece `pieceId` on the cell at the network's height over the terrain's corners,
+    // inserted as placed (the lot developer's connection nodes); `usable` makes it usable and opaque at once.
+    void PlaceNetworkOccupantById(int x, int z, std::uint32_t pieceId, bool usable, std::uint32_t networkType);
     int GetCostOfSolution() override;                                    // i386 0x00124dbe
     void QueryUserForPotentialIntersections() override;                   // i386 0x0012b18c
     bool Shutdown() override;                                             // 0x100187ce8
@@ -866,7 +869,8 @@ public:
                                                 std::vector<int>& landBridgeTypes);
 
     // --- plain members ---
-    void GetNetworkHeightForTerrainHeight(float /*terrainHeight*/) {}     // 0x1001906f0 (empty)
+    // i386 vslot 0x130 (0x1001906f0): the network's height over a terrain height; the surface networks sit on the terrain.
+    virtual float GetNetworkHeightForTerrainHeight(float terrainHeight) const { return terrainHeight; }
     void DebugDumpEdgeTypes(const cIGZString& /*dump*/) {}                // 0x10041530c (empty)
     bool IsTerrainOK(std::uint32_t x, std::uint32_t z);                   // 0x10071e4ca
     virtual bool IdentifyStartingConditions(int& steps);                  // 0x10071e47a (i386 vslot 0x110)
