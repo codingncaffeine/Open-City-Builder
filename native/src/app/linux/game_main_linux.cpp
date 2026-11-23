@@ -7,6 +7,7 @@
 //   sc4_game --script scenarios/first_city.txt   run a scenario in a hidden window (see RunScenario); exit code 0 = it held
 //
 // The game data: $SC4_GAME_CONTENTS (a folder with GameData/ inside), else game/ in the repository (platform/GameDataPath).
+#include "platform/CrashLog.h"
 #include <SDL3/SDL.h>
 #include <epoxy/gl.h>
 #include <png.h>
@@ -939,6 +940,7 @@ void PostMouse(std::uint32_t type, float x, float y, std::uint32_t extra = 0) {
         std::fprintf(stderr, "mouse %#x at window %.0f,%.0f -> game %d,%d (window %dx%d points, %dx%d pixels, frame %.0f,%.0f %.0fx%.0f, game %dx%d)\n",
                      type, x, y, gx, gy, ww, wh, pw, ph, p.x, p.y, p.w, p.h, gW, gH);
     }
+    if (type != kGZMsgMouseMove) platform::Breadcrumb("mouse %#x at game %d,%d", type, gx, gy);
     gMgr->GZWinMsgPost_Mouse(type, gx, gy, extra | Flags());
 }
 
@@ -998,6 +1000,7 @@ void HandleEvent(const SDL_Event& e) {
         const bool down = e.type == SDL_EVENT_KEY_DOWN;
         // Every key goes to the window manager as the game's key message; the windows' keyboard accelerators (the
         // game's own shortcut tables, NativeKeyboard.cpp) turn the keys nobody takes into commands.
+        if (down && !e.key.repeat) platform::Breadcrumb("key down %s (vk %#x)", SDL_GetKeyName(e.key.key), VirtualKey(e.key.key));
         if (const std::uint32_t vk = VirtualKey(e.key.key))
             gMgr->GZWinMsgPost_Keyboard(down ? kGZMsgKeyDown : kGZMsgKeyUp, vk, KeyModifierWord(e.key.mod));
         // Windows' TranslateMessage follows these keys' WM_KEYDOWN (and each repeat) with a WM_CHAR of their control
@@ -1903,6 +1906,7 @@ void CloseWindows() {
 }
 
 int main(int argc, char** argv) {
+    platform::InstallCrashHandler();   // a crash leaves ~/.local/state/open-city-builder/crash-*.log
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     // The stub SDL clock (PumpTimers refreshes it every frame) must be valid before the boot: a cRZTimer restarted while it reads 0
     // counts as stopped and never advances (the animation tick manager's timer did).

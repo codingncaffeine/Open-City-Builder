@@ -1,3 +1,4 @@
+#include "platform/CrashLog.h"
 #include "sc4/TutorialUIWinProc.h"
 
 #include <algorithm>
@@ -289,6 +290,7 @@ void cSC4TutorialUIWinProc::moveToNext() {
         const auto next = static_cast<std::uint32_t>(index + 1);
         const auto size = static_cast<std::uint32_t>(tasks_.size());
         if (next < size && 0 < static_cast<int>(next) && static_cast<int>(next) < last) {
+            platform::Breadcrumb("tutorial: task %d done (kind %d), next %u", index, task->GetWhichFunction(), next);
             if (task->GetWhichFunction() != kTaskViewOnly) g_host->EndViewInput();
             if (catalog_) {
                 catalog_->FlashItemByID(0xffffffffu, 0, 0);

@@ -845,6 +845,7 @@ src/render/gd/GLGDriver.cpp
 src/app/linux/GameAudioSDL.cpp
 src/app/linux/StubClock.cpp
 src/app/linux/game_main_linux.cpp
+src/app/linux/CrashLog.cpp
 src/app/NativeNetworkTool.cpp
 src/app/NativeNetworkManager.cpp
 src/app/NativeNetworkConstructionCrew.cpp

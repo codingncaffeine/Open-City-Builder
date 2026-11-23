@@ -1,4 +1,5 @@
 // cSC4View3DWin — see View3DWin.h for the layout, the vtable groups, the seams and the quirks.
+#include "platform/CrashLog.h"
 #include "sc4/View3DWin.h"
 #include "platform/Unwired.h"
 #include "platform/PerfLog.h"
@@ -770,6 +771,7 @@ cSC4ViewInputControl* cSC4View3DWin::GetCurrentViewInputControl() {         // 0
 }
 
 bool cSC4View3DWin::SetCurrentViewInputControl(cSC4ViewInputControl* control, int operation) {   // 0x1007823ae
+    platform::Breadcrumb("view: set tool %#x (operation %d)", control ? control->GetID() : 0u, operation);
     if (control) control->SetWindow(static_cast<cIGZWin*>(static_cast<cGZWin*>(this)));
     cSC4ViewInputControl* previous = GetCurrentViewInputControl();
     if (previous) previous->AddRef();
@@ -815,6 +817,7 @@ void cSC4View3DWin::SendViewInputControlChangeMessage(cSC4ViewInputControl* prev
 bool cSC4View3DWin::RemoveCurrentViewInputControl(bool keepCursor) {        // 0x100782660
     cSC4ViewInputControl* control = GetCurrentViewInputControl();
     if (!control) return false;
+    platform::Breadcrumb("view: remove tool %#x", control->GetID());
     control->AddRef();
     GZReleaseCapture();
     tools_.pop_back();                  // the reference the vector held is released by the two Releases below
