@@ -282,6 +282,8 @@ public:
     virtual bool InsertOccupant(cISC4Occupant* occupant) = 0;                     // slot 0xa0
     virtual void RemoveOccupant(cISC4Occupant* occupant) = 0;                     // slot 0xa8
     virtual bool RefreshOccupant(cISC4Occupant* occupant) = 0;                    // slot 0xc0
+    // slot 0x88 PositionToOccupantManagerCell: the occupant-manager cell under (x, z); untouched without a manager
+    virtual void OccupantManagerCell(float x, float z, std::int32_t& cellX, std::int32_t& cellZ) { (void)x; (void)z; (void)cellX; (void)cellZ; }
     // ---- city (SL::spCity, the lot and network managers)
     virtual bool HasCity() = 0;
     virtual float CitySizeX() = 0;                                                // city slot 0x2c8

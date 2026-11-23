@@ -20,6 +20,7 @@
 #include "sc4/Render3D.h"
 #include "app/NativeCityView.h"
 #include "sc4/ServiceLocator.h"
+#include "sc4/OccupantManager.h"
 #include "sc4audio/AEMSEvents.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSTETerrain.h"
@@ -184,6 +185,17 @@ public:
     bool InsertOccupant(cISC4Occupant*) override { return true; }
     void RemoveOccupant(cISC4Occupant*) override {}
     bool RefreshOccupant(cISC4Occupant*) override { return true; }
+    void OccupantManagerCell(float x, float z, std::int32_t& cellX, std::int32_t& cellZ) override {
+        cIGZUnknown* object = CurrentCity() ? CurrentCity()->GetComponent(CityComponent::OccupantManager) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(kGZIID_cISC4OccupantManager, &raw) || !raw) return;
+        auto* manager = static_cast<cISC4OccupantManager*>(raw);
+        int cx = cellX, cz = cellZ;
+        manager->PositionToOccupantManagerCell(x, z, cx, cz);
+        cellX = cx;
+        cellZ = cz;
+        manager->Release();
+    }
     bool HasCity() override { return CurrentCity() != nullptr; }
     float CitySizeX() override { auto* t = Terrain(); return t ? static_cast<float>(t->CellCountX()) * 16.0f : 0.0f; }
     float CitySizeZ() override { auto* t = Terrain(); return t ? static_cast<float>(t->CellCountZ()) * 16.0f : 0.0f; }

@@ -1009,16 +1009,16 @@ float cSC4Automaton::GetSpeedModifier() const {
 }
 
 // ---- effects, lighting, attraction -----------------------------------------------------------------------------------
-// i386 0x000c06c6. PARTIAL: the keys of a player-driven automaton are not read (no key counts as held).
+// i386 0x000c06c6. A key's effect counts as held while the player-drive record's key byte (i386 +0x205 + key) is set.
 void cSC4Automaton::StartAllEffects() {
     IAutomatonEffects* effects = EnsureEffects();
     if (!effects) return;
     std::vector<AutomatonKeyEffect> keys;
     if (IAutomatonGroupTemplate* group = GetAutomataGroup()) group->KeyEffects(keys);
     std::vector<std::pair<std::string, bool>> keyed;
-    if (!keys.empty() && FindState(kStatePlayerDrive))
-        SC4_UNWIRED("cSC4Automaton::StartAllEffects: a player-driven automaton's held keys are not read (every key effect starts as not held)");
-    for (const AutomatonKeyEffect& key : keys) keyed.emplace_back(key.effect, false);
+    auto* drive = static_cast<tAutomataStatePlayerDrive*>(FindState(kStatePlayerDrive));
+    for (const AutomatonKeyEffect& key : keys)
+        keyed.emplace_back(key.effect, drive && key.key < 13 && drive->keyEffectOn205[key.key] != 0);
     effects->StartAllEffectsByKeys(keyed);
 }
 
@@ -1054,15 +1054,17 @@ void cSC4Automaton::RecreateNamedEffects(const cRZString& effect, int transition
     if (IAutomatonEffects* effects = EnsureEffects()) effects->RecreateNamed(effect, transition, on);
 }
 
-// i386 0x000be656: the effects of the group's player-drive keys stop, except those whose key is held (PARTIAL: no key
-// counts as held).
+// i386 0x000be656: the effects of the group's player-drive keys stop, except those whose key is held (the drive record's
+// key byte, i386 +0x205 + key).
 void cSC4Automaton::StopKeyEffects() {
     if (!effects_) return;
     std::vector<AutomatonKeyEffect> keys;
     if (IAutomatonGroupTemplate* group = GetAutomataGroup()) group->KeyEffects(keys);
-    if (!keys.empty() && FindState(kStatePlayerDrive))
-        SC4_UNWIRED("cSC4Automaton::StopKeyEffects: the effects of held player-drive keys are not kept running (no key counts as held)");
-    for (const AutomatonKeyEffect& key : keys) effects_->StopNamed(cRZString(key.effect.c_str()), 1);
+    auto* drive = static_cast<tAutomataStatePlayerDrive*>(FindState(kStatePlayerDrive));
+    for (const AutomatonKeyEffect& key : keys) {
+        if (drive && key.key < 13 && drive->keyEffectOn205[key.key] != 0) continue;
+        effects_->StopNamed(cRZString(key.effect.c_str()), 1);
+    }
 }
 
 // i386 0x000c050c: every player-drive key of the group that names a registration point gets its effect there, not started.
@@ -1904,8 +1906,8 @@ bool cSC4Automaton::DoPlopJumpTick(float milliseconds) {
     return true;
 }
 
-// PARTIAL: advances the 13 command timers and then runs TranslatePlayerDriveCommands; the occupant-manager vehicle
-// query that the original performs after it (slot 0x88) is not in the port's occupant-manager seam.
+// i386 0x000bc412: advances the held commands' times (capped at FLT_MAX), runs TranslatePlayerDriveCommands, and records the
+// occupant-manager cell under the automaton in the drive record (i386 +0x26c / +0x270).
 bool cSC4Automaton::DoPlayerDriveTick(float milliseconds) {
     if (CheckAutomataFlag(kAutomataFlagMarkedForRemove)) return false;
     tAutomataState* generic = GetState();
@@ -1921,7 +1923,7 @@ bool cSC4Automaton::DoPlayerDriveTick(float milliseconds) {
         value = next;
     }
     TranslatePlayerDriveCommands(state, milliseconds);
-    SC4_UNWIRED("cSC4Automaton::DoPlayerDriveTick: the occupant-manager vehicle query after the command translation (slot 0x88) is not ported");
+    if (Host()) Host()->OccupantManagerCell(position_.x, position_.z, state->cellX298, state->cellZ29c);
     return true;
 }
 

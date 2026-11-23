@@ -495,6 +495,7 @@ public:
     std::uint32_t ViewZoom() override { return A()->ViewZoom(); }
     bool IsDrivingMode() override { return A()->IsDrivingMode(); }
     void PostAudioEvent(std::uint32_t event) override { A()->PostAudioEvent(event); }
+    void OccupantManagerCell(float x, float z, std::int32_t& cellX, std::int32_t& cellZ) override { A()->OccupantManagerCell(x, z, cellX, cellZ); }
     std::uint32_t RandomBelow(std::uint32_t range) override { return A()->RandomBelow(range); }
     std::int32_t RandomInt(std::int32_t lo, std::int32_t hi) override { return A()->RandomInt(lo, hi); }
     double RandomDouble(double lo, double hi) override { return A()->RandomDouble(lo, hi); }
