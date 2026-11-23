@@ -1658,19 +1658,47 @@ int RunScenario(const std::string& path) {
             if (!OnRegionScreen()) { std::printf("scenario %d: expected the region screen\n", number); return 5; }
         } else if (command == "expect-city") {
             if (!(gAppWindow && gAppWindow->View3D())) { std::printf("scenario %d: expected a city view\n", number); return 5; }
-        } else if (command == "where" || command == "tapid") {
+        } else if (command == "where" || command == "tapid" || command == "tapvia") {
             // where HEXID: the screen rectangle of the first window with that id (finding a button to tap);
             // tapid HEXID: the same, then a single click at its center.
+            // tapvia X Y HEXID: when that window is not shown (a parent hidden), first a click at game point X,Y (the button
+            // that opens its panel, as a player does), then tapid.
+            int viaX = 0, viaY = 0;
+            if (command == "tapvia") words >> viaX >> viaY;
             std::string hex;
             words >> hex;
             const std::uint32_t id = std::uint32_t(std::strtoul(hex.c_str(), nullptr, 16));
+            if (command == "tapvia") {
+                cIGZWin* target = gMgr->GetMainWindow()->GetChildWindowFromIDRecursive(id);
+                bool shown = target && target->IsVisible();
+                for (cIGZWin* p = target ? target->GetParentWin() : nullptr; p && shown; p = p->GetParentWin()) shown = p->IsVisible();
+                if (!shown) {
+                    int ww = 0, wh = 0;
+                    SDL_GetWindowSize(gWindow, &ww, &wh);
+                    const float x = float(viaX) * float(ww) / float(gW), y = float(viaY) * float(wh) / float(gH);
+                    SDL_Event e{};
+                    e.type = SDL_EVENT_MOUSE_MOTION; e.motion.windowID = SDL_GetWindowID(gWindow); e.motion.x = x; e.motion.y = y;
+                    SDL_PushEvent(&e); PumpEvents(); Frame(); Nap();
+                    for (const SDL_EventType type : {SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_EVENT_MOUSE_BUTTON_UP}) {
+                        SDL_Event b{};
+                        b.type = type; b.button.windowID = SDL_GetWindowID(gWindow); b.button.button = SDL_BUTTON_LEFT;
+                        b.button.down = type == SDL_EVENT_MOUSE_BUTTON_DOWN; b.button.clicks = 1; b.button.x = x; b.button.y = y;
+                        SDL_PushEvent(&b); PumpEvents(); Frame(); Nap();
+                    }
+                    for (int i = 0; i < 10; ++i) { PumpEvents(); Frame(); Nap(); }
+                    std::printf("tapvia %08x: not shown, clicked %d,%d first\n", id, viaX, viaY);
+                }
+                command = "tapid";
+            }
             if (cIGZWin* w = gMgr->GetMainWindow()->GetChildWindowFromIDRecursive(id)) {
                 cRZRect a = w->GetArea();
                 int x = a.left, y = a.top;
                 for (cIGZWin* p = w->GetParentWin(); p; p = p->GetParentWin()) { const cRZRect pa = p->GetArea(); x += pa.left; y += pa.top; }
                 const int cx = x + (a.right - a.left) / 2, cy = y + (a.bottom - a.top) / 2;
-                std::printf("%s %08x: %d,%d %dx%d visible=%d center %d,%d\n", command.c_str(), id, x, y, a.right - a.left,
-                            a.bottom - a.top, w->IsVisible(), cx, cy);
+                bool shown = w->IsVisible();   // shown on screen: the window and every parent visible
+                for (cIGZWin* p = w->GetParentWin(); p && shown; p = p->GetParentWin()) shown = p->IsVisible();
+                std::printf("%s %08x: %d,%d %dx%d visible=%d shown=%d center %d,%d\n", command.c_str(), id, x, y, a.right - a.left,
+                            a.bottom - a.top, w->IsVisible(), shown ? 1 : 0, cx, cy);
                 if (command == "tapid") {   // a real SDL click (as sdlclick) at the center, in window points
                     int ww = 0, wh = 0;
                     SDL_GetWindowSize(gWindow, &ww, &wh);
@@ -1931,6 +1959,19 @@ int RunScenario(const std::string& path) {
             std::printf("hittest %d,%d: capture %08x focus %08x modal %08x nest %u, chain:", hx, hy, id(gMgr->GZGetCapture()), id(gMgr->GZGetFocus()),
                         id(gMgr->ModalWindow()), gMgr->GetModalNestCount());
             for (cIGZWin* w = gMgr->GetMainWindow()->GetChildWindowFromPoint(hx, hy); w; w = w->GetParentWin()) std::printf(" %08x", w->GetID());
+            // the deepest shown window at the point: each level's child under the point, in that window's own coordinates
+            std::printf(", deepest:");
+            cIGZWin* at = gMgr->GetMainWindow();
+            int lx = hx, ly = hy;
+            for (int level = 0; at && level < 16; ++level) {
+                cIGZWin* child = at->GetChildWindowFromPoint(lx, ly);
+                if (!child || child == at) break;
+                const cRZRect ca = child->GetArea();
+                lx -= ca.left;
+                ly -= ca.top;
+                std::printf(" %08x", child->GetID());
+                at = child;
+            }
             std::printf("\n");
         } else if (command == "tutorialtask") {   // tutorialtask: the current tutorial task's number, kind, target and text
             native::NativeTutorialTaskReport();
