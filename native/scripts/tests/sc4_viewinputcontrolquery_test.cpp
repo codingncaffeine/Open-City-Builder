@@ -922,7 +922,7 @@ int main() {
         CHECK(host.messages.sent.size() == 1 && host.messages.sent[0] == 0x2acd2cf3);
         CHECK(host.messages.targeted.size() == adds);   // the tip refresh was not requested here
         CHECK(!tool->MouseDown());   // the building flavour clears it after DescribePick
-        CHECK(host.mgr.setCapture == viewWin);
+        CHECK(host.mgr.setCapture == nullptr);   // i386 vslot 0x74 is PlayResultSound(0): the tool does not take the mouse
         CHECK(tool->OnMouseUpL(3, 4, 1) && !tool->MouseDown());
 
         host.sim.frame = 0;

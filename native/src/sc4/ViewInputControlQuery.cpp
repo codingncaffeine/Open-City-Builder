@@ -613,8 +613,11 @@ bool cSC4ViewInputControlQuery::OnMouseDownL(int x, int y, std::uint32_t modifie
     } else {
         mouseDown_ = false;
         DescribePick(x, y, gsQueryString1, gsQueryString2, gsQueryString3, IsDebugQueryEnabled());
+        // i386 0x0021ad32: vslot 0x74 is PlayResultSound(0) (no sound). It was ported as SetCapture(): the query tool kept the
+        // mouse after every query, so once a query window closed every click went to the city view (the tutorial's Continue,
+        // the panels).
+        PlayResultSound(0);
     }
-    SetCapture();
     return true;
 }
 
