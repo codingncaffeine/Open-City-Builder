@@ -525,7 +525,7 @@ private:
     int toolKind_ = 0;                                               // +0x48
     std::uint32_t lotConfigurationId_ = 0;                           // +0x4c
     std::uint32_t buildingType_ = 0;                                 // +0x50
-    int initialFacing_ = 0;                                          // +0x54 (never written after the ctor)
+    int initialFacing_ = 0;                                          // +0x54 (i386 +0x38; the rotate keys set it)
     int facing_ = 0;                                                 // +0x58
     int feedbackFacing_ = -1;                                        // +0x5c
     int mouseX_ = 0;                                                 // +0x60

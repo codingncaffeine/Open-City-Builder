@@ -1,6 +1,8 @@
 // cSC4ViewInputControlPlaceLot — see the header for the layout, the quirks and the seams. The addresses in
 // the comments are the original's (Sim City 4 Deluxe Editionsub 1.2.1, x86_64).
 #include "sc4/ViewInputControlPlaceLot.h"
+#include <cstdlib>
+#include <cstdio>
 #include "platform/Unwired.h"
 
 #include <algorithm>
@@ -734,7 +736,24 @@ bool cSC4ViewInputControlPlaceLot::OnKeyDown(std::uint32_t key, std::uint32_t mo
             if (cIGZWinKeyAccelerator* accelerator = view->KeyAccelerator()) {
                 // vslot 0x58 TestForAccelerator(key, modifiers, true, command)
                 std::uint32_t command = 0;
-                accelerator->TestForAccelerator(key, modifiers, true, command);
+                const bool accelerated = accelerator->TestForAccelerator(key, modifiers, true, command);
+                if (std::getenv("SC4_PLOPDEBUG"))
+                    std::fprintf(stderr, "place lot: key %#x modifiers %#x -> command %08x (facing %d)\n", key, modifiers, command, facing_);
+                if (accelerated) {
+                    // i386 0x002da480: the two rotate commands turn the building a quarter turn (0x6a935cd5 clockwise,
+                    // 0x6a935cd1 back); the new facing is both the current and the starting one, and the preview is
+                    // redone at the last pointer position without the automatic facing (0x100).
+                    int turned = 0;
+                    if (command == 0x6a935cd5u) turned = facing_ + 1;
+                    else if (command == 0x6a935cd1u) turned = facing_ + 3;
+                    else return false;
+                    turned &= 3;
+                    facing_ = turned;
+                    initialFacing_ = turned;
+                    OnMouseMove(mouseX_, mouseY_, 0x100);                               // vslot 0x50
+                    SetVisualUserFeedback(feedbackValid_, feedbackSecondary_, cS3DVector3{previewX_, previewY_, previewZ_});
+                    return true;
+                }
             }
         }
     }
