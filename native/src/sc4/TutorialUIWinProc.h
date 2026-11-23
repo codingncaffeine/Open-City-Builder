@@ -153,6 +153,7 @@ private:
     cIGZWin* flashing_ = nullptr;               // +0x34 the flashing button
     bool catalogHandled_ = false;               // +0x38
     bool clickPending_ = false;                 // +0x39
+    int lastInsideX_ = 0, lastInsideY_ = 0;     // port: the last view point inside the region (FilterLeftMouseClick's release)
     bool dispatchDone_ = false;                 // +0x3a
     bool lastTask_ = false;                     // +0x3b
     int windowX_ = 0, windowY_ = 0;             // +0x3c / +0x40

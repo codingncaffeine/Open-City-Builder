@@ -616,16 +616,23 @@ bool cSC4TutorialUIWinProc::FilterLeftMouseClick(int& x, int& y, int flags) {
         const bool inside = RectContains(area, cellX, cellZ);
         if (flags == 0) {
             if (clickPending_ && kind != kTaskBuilding) result = inside;
+            if (clickPending_ && inside) lastInsideX_ = x, lastInsideY_ = y;
         } else if (flags == 1) {
             if (clickPending_) {
                 clickPending_ = false;
-                if (!inside) {   // a drag that ends outside the region ends on its far corner instead
-                    x = area.x1 - 1;
-                    y = area.z1 - 1;
+                if (!inside) {
+                    // DIVERGENCE (2026-11-23, user report: the tutorial zone drag could not be completed): the original writes
+                    // the region's far corner as CELL numbers (x1 - 1, z1 - 1) into the release's VIEW coordinates, and the
+                    // tool then picks the ground at that view point near the window's top-left; it only lands on the region's
+                    // side when that pick misses the ground. A release outside the region now happens at the last view
+                    // point the filter let through inside it (where the drag visibly stopped).
+                    x = lastInsideX_;
+                    y = lastInsideY_;
                 }
             }
         } else if (flags == -1) {
             if (!clickPending_) clickPending_ = inside;
+            if (clickPending_ && inside) lastInsideX_ = x, lastInsideY_ = y;
             result = clickPending_;
         }
     }

@@ -1866,6 +1866,55 @@ int RunScenario(const std::string& path) {
             std::string rest; std::getline(words >> std::ws, rest);
             const std::string text = "Snow " + rest;
             std::printf("snow: %s\n", native::RunSnowCheat(text.c_str()) ? "done" : "no effects manager");
+        } else if (command == "viewdrag") {   // viewdrag CX0 CZ0 CX1 CZ1 STEPS [OVER]: the city view's own press / moves / release (in process, no
+            // input device) from cell CX0,CZ0 to CX1,CZ1, then OVER more steps past the end in the same direction before the release
+            int cx0 = 0, cz0 = 0, cx1 = 0, cz1 = 0, steps = 10, over = 0;
+            words >> cx0 >> cz0 >> cx1 >> cz1 >> steps;
+            if (!(words >> over)) over = 0;
+            sc4::cSC4View3DWin* view = gAppWindow ? gAppWindow->View3D() : nullptr;
+            if (!view) { std::printf("viewdrag: no city view\n"); continue; }
+            const int vw = view->GetW(), vh = view->GetH();
+            auto screenOf = [&](int cx, int cz, int& sx, int& sy) {   // the view point whose ground is nearest the cell centre
+                const float tx = cx * 16.0f + 8.0f, tz = cz * 16.0f + 8.0f;
+                float best = 1e30f;
+                for (int y = 0; y < vh; y += 4)
+                    for (int x = 0; x < vw; x += 4) {
+                        float hit[3] = {};
+                        if (!view->PickTerrain(x, y, hit, false)) continue;
+                        const float d = (hit[0] - tx) * (hit[0] - tx) + (hit[2] - tz) * (hit[2] - tz);
+                        if (d < best) { best = d; sx = x; sy = y; }
+                    }
+                return best < 64.0f;
+            };
+            int sx0 = 0, sy0 = 0, sx1 = 0, sy1 = 0;
+            if (!screenOf(cx0, cz0, sx0, sy0) || !screenOf(cx1, cz1, sx1, sy1)) { std::printf("viewdrag: a cell is not on screen\n"); continue; }
+            auto cellAt = [&](int x, int y, int& cx, int& cz) {
+                float hit[3] = {};
+                if (!view->PickTerrain(x, y, hit, false)) { cx = cz = -1; return; }
+                cx = int(hit[0] / 16.0f); cz = int(hit[2] / 16.0f);
+            };
+            std::printf("viewdrag: cell %d,%d at %d,%d -> cell %d,%d at %d,%d, %d steps, %d over\n", cx0, cz0, sx0, sy0, cx1, cz1, sx1, sy1, steps, over);
+            {
+                sc4::cSC4ViewInputControl* tool = view->GetCurrentViewInputControl();
+                std::printf("viewdrag: current tool %#x\n", tool ? tool->GetID() : 0u);
+            }
+            const bool pressed = view->GZOnMouseDownL(sx0, sy0, 0);
+            std::printf("viewdrag: press %s\n", pressed ? "taken" : "not taken");
+            int x = sx0, y = sy0;
+            for (int i = 1; i <= steps + over; ++i) {
+                x = sx0 + (sx1 - sx0) * i / steps;
+                y = sy0 + (sy1 - sy0) * i / steps;
+                int fx = x, fy = y;
+                sc4::ICityMouseRouter* router = native::NativeTutorialMouseRouter();
+                const bool filterPasses = !(router && router->IsActive()) || router->ProcessMouse(fx, fy, 0);   // a move query changes nothing
+                view->GZOnMouseMove(x, y, 0x10);   // the left button held (the window manager's modifier flags)
+                int cx = 0, cz = 0;
+                cellAt(x, y, cx, cz);
+                std::printf("viewdrag: move %d at %d,%d over cell %d,%d, tutorial filter %s\n", i, x, y, cx, cz, filterPasses ? "passes" : "BLOCKS");
+                PumpTimers();
+            }
+            const bool released = view->GZOnMouseUpL(x, y, 0);
+            std::printf("viewdrag: released at %d,%d (%s)\n", x, y, released ? "taken" : "not taken");
         } else if (command == "tutorialfilter") {   // tutorialfilter X Y FLAGS: the city view's tutorial mouse filter at a view point (-1 press, 0 move, 1 release)
             int fx = 0, fy = 0, flags = 0;
             words >> fx >> fy >> flags;

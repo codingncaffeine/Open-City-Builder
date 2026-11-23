@@ -204,6 +204,9 @@ bool cSC4ViewInputControlZone::ComputeAndMarkSelectedArea() {
     cSC4ZoneManager* zones = g_host->ZoneManager();
     const bool ok = zones->PlaceZone(*region, zoneType_, false, false, true, flood_ != nullptr, zoneType_ != 0, &cost, &reason,
                                      &demolishLots_);
+    static const bool trace = std::getenv("SC4_ZONEDEBUG") != nullptr;
+    if (trace) std::fprintf(stderr, "zone tool area %d,%d..%d,%d: %s reason %d cost %lld\n", selected_.x0, selected_.z0, selected_.x1, selected_.z1,
+                            ok ? "ok" : "refused", reason, static_cast<long long>(cost));
     int buildings = 0;
     bool emptyCounts = false;
     for (cSC4Lot* lot : demolishLots_) {
@@ -361,6 +364,8 @@ bool cSC4ViewInputControlZone::OnMouseUpL(int x, int y, std::uint32_t modifiers)
         end_ = {static_cast<int>(position[0] / cellSize_), static_cast<int>(position[2] / cellSize_)};
     }
     const bool ok = ComputeAndMarkSelectedArea();
+    static const bool trace = std::getenv("SC4_ZONEDEBUG") != nullptr;
+    if (trace) std::fprintf(stderr, "zone tool release at %d,%d: start %d,%d end %d,%d -> area %s\n", x, y, start_.x, start_.z, end_.x, end_.z, ok ? "ok" : "REFUSED");
     if (!ok) {
         if (PlaysSound(zoneType_)) g_host->PlaySound(kZoneDragErrorSound[zoneType_]);
     } else {
