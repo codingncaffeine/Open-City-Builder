@@ -182,6 +182,10 @@ public:
     // +0x160 (table index 0x2c): walk the occupants of one type; the callback returns false to stop.
     virtual void IterateOccupants(bool (*callback)(cISC4Occupant*, void*), void* context,
                                   std::uint32_t type) = 0;
+    // +0xa4 (i386) GetOccupantsByStandardCityCells(out, min cell, max cell, cSC4NetworkORFilter(mask), -1): the network pieces of
+    // the cell rectangle carrying any of the mask's flags, one reference each.
+    virtual void GetNetworkOccupantsByCells(ilist<cISC4Occupant*>& out, const std::int32_t* minCell, const std::int32_t* maxCell,
+                                            std::uint32_t flagMask) { (void)out; (void)minCell; (void)maxCell; (void)flagMask; }
 };
 
 // The network tools Init creates and GetNetworkTool hands out (cSC4NetworkTool / cSC4PipeTool /
@@ -201,6 +205,10 @@ public:
     virtual float GetNetworkHeightForTerrainHeight(float terrainHeight) { return terrainHeight; }
     // cSC4NetworkManager::RemoveOrReplaceOccupant's work with this tool's cell records (cSC4NetworkTool::RemoveOrReplaceOccupant).
     virtual bool RemoveOrReplaceOccupant(cISC4Occupant* occupant, bool& replaced) { (void)occupant; (void)replaced; return false; }
+    // cSC4UndergroundNetworkTool::UpdateUndergroundOccupantTerrainHeights(cells, pieces, type) (i386 0x0013bf6e) on the pipe and
+    // subway tools: `pieces` holds one reference each and is emptied. Other tools have no buried pieces.
+    virtual void UpdateUndergroundOccupantTerrainHeights(const std::vector<SC4PointT<std::uint32_t>>& cells,
+                                                         std::list<cSC4NetworkOccupant*>& pieces, eNetworkType type);
 };
 
 // Everything outside the object. One method per original call; the global/slot is in the comment.
@@ -228,6 +236,10 @@ public:
     virtual INetworkManagerOccupantManager* OccupantManager() = 0;   // SL::spOccupantManager
     // SL::sp24HourClock vslot 0xe0 (cSC424HourClock::IsNight): the message branch 0x26d31ec1 lights the tracked pieces at night.
     virtual bool IsNight() = 0;
+    // SL::spCity vslots 0x174 / 0x178 (i386): the city's cell counts along x and z.
+    virtual void CityCellCounts(std::int32_t& cellsX, std::int32_t& cellsZ) { cellsX = 0; cellsZ = 0; }
+    // SL::spTerrain vslot 0x30 (i386) GetAltitude(x, z): the terrain height at a point.
+    virtual float TerrainAltitude(float x, float z) { (void)x; (void)z; return 0.0f; }
     // SL::spOccupantManager vslot 0x84 GetFirstOccupantByStandardCityCell(out, x, z, cSC4NetworkORFilter(mask)): the first network
     // piece on the cell with any of the mask's flags, one reference, or null.
     virtual cSC4NetworkOccupant* FirstNetworkOccupantAt(int x, int z, std::uint32_t flagMask) { (void)x; (void)z; (void)flagMask; return nullptr; }
@@ -345,6 +357,8 @@ public:
     void Reload();                                                          // 0x10016e1ec
     void Retrofit();                                                        // 0x100170230 (PARTIAL)
     void DoViewRotationChange(int oldRotation, int newRotation);            // 0x1001700d8
+    void DoTerrainChanged(cIGZMessage2* message);                           // i386 0x00112dbe, message 0x278e6003
+    void UpdateBuriedPiecesInRegion();                                      // i386 0x00112dbe, LAB_0011357b
     void AddTextureMapping(std::uint32_t matchValue, std::uint32_t matchMask, std::uint32_t addValue,
                            std::uint32_t transformMask, std::uint8_t alphaDelta, bool stop,
                            std::uint32_t subtractMask);                     // 0x10016ec7e

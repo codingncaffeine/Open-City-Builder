@@ -28,6 +28,8 @@
 #include "sc4/ResourceAsFile.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/SubwayTool.h"
+#include "sc4/UndergroundNetworkTool.h"
+#include "sc4/cSTETerrain.h"
 #include "sc4/cSC424HourClock.h"
 #include "sc4/cSC4City.h"
 
@@ -136,6 +138,16 @@ public:
     float GetNetworkHeightForTerrainHeight(float terrainHeight) override {
         return tool_ ? tool_->GetNetworkHeightForTerrainHeight(terrainHeight) : terrainHeight;
     }
+    // The pipe and subway tools re-solve their pieces under changed terrain.
+    void UpdateUndergroundOccupantTerrainHeights(const std::vector<sc4::SC4PointU>& cells, std::list<sc4::cSC4NetworkOccupant*>& pieces,
+                                                 sc4::eNetworkType type) override {
+        auto* underground = dynamic_cast<sc4::cSC4UndergroundNetworkTool*>(tool_);
+        if (!underground) {
+            sc4::INetworkManagerTool::UpdateUndergroundOccupantTerrainHeights(cells, pieces, type);
+            return;
+        }
+        underground->UpdateUndergroundOccupantTerrainHeights(cells, pieces, static_cast<std::uint32_t>(type));
+    }
     // The manager hands one reference per view; the tool borrows the pieces.
     void DestroyOccupantsAndResolve(std::vector<sc4::INetworkManagerOccupant*>& occupants) override {
         std::vector<sc4::cSC4NetworkOccupant*> pieces;
@@ -205,6 +217,19 @@ public:
     }
     void IterateOccupants(bool (*callback)(sc4::cISC4Occupant*, void*), void* context, std::uint32_t type) override {
         if (sc4::cISC4OccupantManager* manager = CityOccupants()) manager->IterateOccupants(callback, context, nullptr, nullptr, type);
+    }
+    // GetOccupantsByStandardCityCells with a cSC4NetworkORFilter(mask): the network pieces carrying any of the flags.
+    void GetNetworkOccupantsByCells(sc4::ilist<sc4::cISC4Occupant*>& out, const std::int32_t* minCell, const std::int32_t* maxCell,
+                                    std::uint32_t flagMask) override {
+        sc4::cISC4OccupantManager* manager = CityOccupants();
+        if (!manager) return;
+        sc4::OccupantList list;
+        if (!manager->GetOccupantsByStandardCityCells(list, minCell, maxCell, 0xc772bf98u, 0xffffffffu)) return;
+        for (sc4::cISC4Occupant* occupant : list) {
+            auto* network = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant);
+            if (network && (network->GetNetworkFlag() & flagMask) != 0) out.push_back(occupant);
+            else occupant->Release();
+        }
     }
 } g_managerOccupants;
 
@@ -285,6 +310,21 @@ public:
         occupant->Release();
         altitude = position[1];
         return true;
+    }
+    void CityCellCounts(std::int32_t& cellsX, std::int32_t& cellsZ) override {
+        sc4::cSC4City* city = HostCity();
+        cellsX = city ? city->CellCountX() : 0;
+        cellsZ = city ? city->CellCountZ() : 0;
+    }
+    float TerrainAltitude(float x, float z) override {
+        sc4::cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::Terrain) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(0xab953253, &raw) || !raw) return 0.0f;
+        auto* terrain = static_cast<sc4::cSTETerrain*>(static_cast<cIGZSerializable*>(raw));
+        const float altitude = terrain->GetAltitude(x, z);
+        static_cast<cIGZSerializable*>(raw)->Release();
+        return altitude;
     }
     // SL::sp24HourClock->IsNight(): the city's 24-hour clock.
     bool IsNight() override {

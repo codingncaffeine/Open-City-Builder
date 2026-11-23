@@ -670,25 +670,150 @@ void cSC4UndergroundNetworkTool::SetQuadTrianglesToDraw(cSC4NetworkOccupant* occ
     underground->Release();
 }
 
-// 0x1001a85e2 — PARTIAL. See the header: this function is 2788 bytes and its body is mostly
-//   * cSC4NetworkTool::SmoothenNetwork @ 0x1001b14a0 (the base class's vertical solver pass, ported in the base since),
-//   * SL::NetworkManager() (0x100041188) slot +0x30 and SL::spOccupantManager slot +0x180 (batch move/remove of
-//     cISC4NetworkOccupant lists; neither object has a seam yet),
-//   * an inlined libc++ __hash_table rehash for the solved-cell dedupe (the port uses the base's
-//     unknown128_/std::unordered_set and solvedCellList_ instead of reproducing the pointer juggling).
-// Only the three cache resets at the top of the original are ported (0x1001a85e2..0x1001a8638); everything
-// after them (the per-occupant terrain re-read, the smoothing, and the two update/destroy branches) is left
-// out. The function is recovered-partial in notes/ledger_pending/cSC4UndergroundNetworkTool.txt.
+// i386 0x0013bf6e (Mac x86_64 0x1001a85e2). Every piece whose recorded terrain differs from the terrain now becomes a solved cell
+// that keeps its own heights and neighbourhood, may sink to the network depth under the new ground (range -500 .. terrain - depth,
+// preferred terrain - depth) and joins the smoothing. A solve that works moves every smoothed piece to its solved heights. One
+// that fails keeps the pieces still under the ground by the two clearances and removes the rest through the network manager.
+// The pieces touched are rebuilt (geometry, path info).
+// Reference counts: the original releases a piece's list entry when the solve works but not when a failed solve keeps it, and
+// keeps the reference FindUndergroundOccupant handed it for a removed piece; the port releases each reference once.
 void cSC4UndergroundNetworkTool::UpdateUndergroundOccupantTerrainHeights(std::vector<SC4PointU> cells,
                                                                          std::list<cSC4NetworkOccupant*>& occupants,
                                                                          std::uint32_t networkType) {
-    (void)cells;
-    (void)occupants;
-    (void)networkType;
-    if (worldCache_ != nullptr) worldCache_->Clear();   // cSC4NetworkWorldCache::Clear 0x10079d868
+    (void)cells;   // the original takes the changed cells by value and never reads them
+    IUndergroundNetworkToolHost* host = g_undergroundNetworkToolHost;
+    std::list<cSC4UndergroundOccupant*> updated;
+    if (worldCache_ != nullptr) worldCache_->Clear();   // cSC4NetworkWorldCache::Clear
     unknown128_.clear();
     solvedCellList_.clear();
-    SC4_UNWIRED("cSC4UndergroundNetworkTool::UpdateUndergroundOccupantTerrainHeights (0x1001a85e2): terrain re-read, smoothing and update / destroy of underground pieces not ported");
+
+    for (cSC4NetworkOccupant* piece : occupants) {
+        auto* underground = static_cast<cSC4UndergroundOccupant*>(piece);
+        float recorded[4] = {};
+        float terrain[4] = {};
+        underground->GetTerrainHeights(recorded);                                   // vslot 0x1c4
+        std::uint32_t x = 0, z = 0;
+        piece->GetOccupiedCell(x, z);                                               // vslot 0xec
+        if (host != nullptr) host->TerrainCellHeights(static_cast<int>(x), static_cast<int>(z), terrain);   // terrain vslot 0x44
+        bool same = true;
+        for (int i = 0; i < 4 && same; ++i) same = recorded[i] == terrain[i];
+        if (same) continue;
+
+        cSC4NetworkCellInfo info;
+        underground->GetVertexHeights(info.vertexHeights);                         // vslot 0x88
+        info.x = x;
+        info.z = z;
+        info.networkFlags = kFlagForNetworkType[networkType];
+        info.status = 0;
+        info.stepIndex = -1;
+        info.hasOccupant = false;
+        info.unknown5a = 0;
+        info.solvedOrImmovable = false;
+        info.occupantId = 1;
+        info.shortStep = false;
+        info.buildable = false;
+        info.pieceFromSolvedList = true;
+        info.tileNeighborhoods[networkType_] = piece->GetEdgeTypesFlag(static_cast<std::uint8_t>(networkType));   // vslot 0x98
+        info.RecomputeEdgesFromAllTypes();
+        for (int i = 0; i < 4; ++i) {
+            const float buried = terrain[i] - networkDepth_;
+            info.range70[i] = {-500.0f, buried};
+            info.preferred90[i] = {buried, buried};
+        }
+        const std::int32_t vertex = static_cast<std::int32_t>(z) * widthPlusOne_ + static_cast<std::int32_t>(x);
+        info.vertexBaseHeights[0] = vertex;
+        info.vertexBaseHeights[1] = vertex + widthPlusOne_;
+        info.vertexBaseHeights[2] = vertex + widthPlusOne_ + 1;
+        info.vertexBaseHeights[3] = vertex + 1;
+        info.solvedCellIndex = static_cast<std::int32_t>(solvedCellList_.size());
+        const std::uint32_t key = (z << 16) + x;
+        if (worldCache_ != nullptr) {
+            if (cSC4NetworkCellInfo* cached = worldCache_->CreateCell(key)) *cached = info;
+        }
+        tSolvedCell solved;
+        solved.pieceType = piece->PieceId();                                       // vslot 0x5c
+        solved.rotationFlip = piece->GetRotationAndFlip();                         // vslot 0x68
+        solved.cellKey = key;
+        unknown128_.insert(key);
+        solvedCellList_.push_back(solved);
+    }
+
+    totalSteps_ = 2;      // i386 +0x70
+    straightSteps_ = 1;   // i386 +0x74
+    validSteps_ = 2;      // i386 +0x78
+    const auto release = [&occupants](cSC4UndergroundOccupant* found) {
+        const auto it = std::find(occupants.begin(), occupants.end(), static_cast<cSC4NetworkOccupant*>(found));
+        if (it == occupants.end()) return;
+        (*it)->Release();
+        occupants.erase(it);
+    };
+    const auto cellOf = [this](std::uint32_t key) -> cSC4NetworkCellInfo* {
+        return worldCache_ != nullptr ? worldCache_->CreateCell(key) : nullptr;
+    };
+
+    if (!SmoothenNetwork(2)) {
+        std::list<cISC4Occupant*> removed;
+        const std::vector<tSolvedCell> solvedCells = solvedCellList_;
+        for (const tSolvedCell& solved : solvedCells) {
+            cSC4NetworkCellInfo* cell = cellOf(solved.cellKey);
+            cSC4UndergroundOccupant* found = nullptr;
+            if (cell == nullptr ||
+                !FindUndergroundOccupant(static_cast<int>(cell->x), static_cast<int>(cell->z), found, NetworkGZIID()))
+                continue;
+            float heights[4] = {};
+            float terrain[4] = {};
+            found->GetVertexHeights(heights);                                      // vslot 0x88
+            bool buried = true;
+            for (int i = 0; i < 4 && buried; ++i) {
+                terrain[i] = host != nullptr ? host->TerrainHeight(static_cast<std::uint32_t>(cell->vertexBaseHeights[i])) : 0.0f;
+                buried = tuningB_ + tuningA_ + heights[i] <= terrain[i];
+            }
+            if (buried) {
+                found->SetTerrainHeights(terrain);                                 // vslot 0x1c8
+                updated.push_back(found);
+                release(found);
+                continue;
+            }
+            cISC4Occupant* occupant = static_cast<cISC4Occupant*>(static_cast<cSC4NetworkOccupant*>(found));   // vslot 0xc0
+            occupant->AddRef();
+            removed.push_back(occupant);
+            found->Release();
+        }
+        if (host != nullptr) {
+            host->DestroyNetworkOccupants(removed);
+        } else {
+            for (cISC4Occupant* occupant : removed) occupant->Release();
+        }
+    } else {
+        for (std::uint32_t key : unknown128_) {
+            cSC4NetworkCellInfo* cell = cellOf(key);
+            cSC4UndergroundOccupant* found = nullptr;
+            if (cell == nullptr ||
+                !FindUndergroundOccupant(static_cast<int>(cell->x), static_cast<int>(cell->z), found, NetworkGZIID()))
+                continue;
+            float terrain[4] = {};
+            for (int i = 0; i < 4; ++i) {
+                terrain[i] = host != nullptr ? host->TerrainHeight(static_cast<std::uint32_t>(cell->vertexBaseHeights[i])) : 0.0f;
+                if (constraintA_ != nullptr) constraintA_->GetHeight(cell->vertexBaseHeights[i], cell->vertexHeights[i]);
+            }
+            found->SetVertexHeights(cell->vertexHeights);                          // vslot 0x19c
+            found->SetTerrainHeights(terrain);                                     // vslot 0x1c8
+            updated.push_back(found);
+            release(found);
+        }
+    }
+
+    for (cSC4UndergroundOccupant* piece : updated) {
+        piece->CreateGeometry(true);   // vslot 0x1a4
+        piece->SetUsable(false);       // vslot 0x50
+        piece->ReleasePathInfo();      // vslot 0xc8
+        piece->SetUsable(true);
+        piece->Release();
+    }
+    for (cSC4NetworkOccupant* piece : occupants) piece->Release();
+    occupants.clear();
+    solvedCellList_.clear();
+    unknown128_.clear();
 }
 
 }  // namespace sc4

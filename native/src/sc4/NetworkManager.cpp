@@ -723,11 +723,8 @@ bool cRefreshBridgeModels::Go(cISC4Occupant* occupant, void* context) {
 //                            unregister itself) and release the thirteen tools in ascending order.
 //   0x6ab97795               occupant manager IterateOccupants(Go, ..., type 0xc772bf98).
 //   0xea3b0af1               reset the region rectangle and arm the extend flag (+0x1e).
-// Not implemented (the rest of the original body): 0x278e6003 (city-size change) and 0x6a3b0afd, which
-// rebuild the pipe/subway occupant terrain heights. cSC4NetworkORFilter and
-// cSC4UndergroundNetworkTool::UpdateUndergroundOccupantTerrainHeights exist now; the occupant manager's +0x148 query
-// and the pipe/subway tools' height passes are not reached from here, so the fan-out is left out (the region
-// rectangle is not updated).
+//   0x278e6003               terrain heights changed: DoTerrainChanged.
+//   0x6a3b0afd               the terrain edit ended: UpdateBuriedPiecesInRegion.
 bool cSC4NetworkManager::DoMessage(cIGZMessage2* message) {
     if (message == nullptr) return true;
     const std::uint32_t type = message->GetType();
@@ -809,9 +806,11 @@ bool cSC4NetworkManager::DoMessage(cIGZMessage2* message) {
         }
         break;
     }
-    case 0x278e6003:
-    case 0x6a3b0afd:
-        SC4_UNWIRED("cSC4NetworkManager::DoMessage: the pipe/subway occupant terrain heights and the region rectangle are not rebuilt (0x278e6003 / 0x6a3b0afd)");
+    case 0x278e6003:   // terrain heights changed: data1 = x0 << 16 | x1, data2 = z0 << 16 | z1, data4 = the reason
+        DoTerrainChanged(message);
+        break;
+    case 0x6a3b0afd:   // the terrain edit ended: the buried pieces of the gathered rectangle follow the terrain
+        UpdateBuriedPiecesInRegion();
         break;
     case 0xea3b0af1: {
         extendRegion_ = true;
@@ -825,6 +824,131 @@ bool cSC4NetworkManager::DoMessage(cIGZMessage2* message) {
         break;
     }
     return true;
+}
+
+// i386 0x00112dbe, the 0x278e6003 branch. The changed cells (grown by one cell toward the origin, clipped to the city) join the
+// rectangle the next 0x6a3b0afd handles (while 0xea3b0af1 armed the extend flag) or are handled at once. Unless the reason is 5,
+// every network piece in the cells whose height at the four cell corners is no longer 0 .. 0.01 above the terrain is destroyed;
+// reason 4 keeps all of them, every reason but 3 keeps the buried pieces (pipes, subways) and reason 6 keeps those with network
+// flag 0x80000.
+void cSC4NetworkManager::DoTerrainChanged(cIGZMessage2* message) {
+    const auto data1 = static_cast<std::uint32_t>(static_cast<cIGZMessage2Standard*>(message)->GetData1());
+    const auto data2 = static_cast<std::uint32_t>(static_cast<cIGZMessage2Standard*>(message)->GetData2());
+    std::int32_t cellsX = 0, cellsZ = 0;
+    if (g_host != nullptr) g_host->CityCellCounts(cellsX, cellsZ);
+    std::int32_t minCell[2] = {static_cast<std::int32_t>((data1 >> 16) - 1), static_cast<std::int32_t>((data2 >> 16) - 1)};
+    std::int32_t maxCell[2] = {static_cast<std::int32_t>(data1 & 0xffff), static_cast<std::int32_t>(data2 & 0xffff)};
+    if (minCell[0] < 0) minCell[0] = 0;
+    if (minCell[1] < 0) minCell[1] = 0;
+    if (cellsX - 1 < maxCell[0]) maxCell[0] = cellsX - 1;
+    if (cellsZ - 1 < maxCell[1]) maxCell[1] = cellsZ - 1;
+    if (!extendRegion_) {
+        regionMinX_ = minCell[0];
+        regionMinZ_ = minCell[1];
+        regionMaxX_ = maxCell[0];
+        regionMaxZ_ = maxCell[1];
+    } else {
+        regionMinX_ = std::min(regionMinX_, minCell[0]);
+        regionMaxX_ = std::max(regionMaxX_, maxCell[0]);
+        regionMinZ_ = std::min(regionMinZ_, minCell[1]);
+        regionMaxZ_ = std::max(regionMaxZ_, maxCell[1]);
+    }
+    const auto reason = static_cast<std::uint32_t>(static_cast<cIGZMessage2Standard*>(message)->GetData4());
+    INetworkManagerOccupantManager* manager = g_host != nullptr ? g_host->OccupantManager() : nullptr;
+    if (reason != 5 && manager != nullptr) {
+        ilist<cISC4Occupant*> found;
+        ilist<cISC4Occupant*> removed;
+        manager->GetNetworkOccupantsByCells(found, minCell, maxCell, 0x1fff);
+        for (cISC4Occupant* occupant : found) {
+            auto* piece = dynamic_cast<cSC4NetworkOccupant*>(occupant);
+            bool keep = piece == nullptr || reason == 4 ||
+                        (reason != 3 && (piece->IsOfType(kNetworkPipe) || piece->IsOfType(kNetworkSubway)));
+            if (!keep) {
+                std::uint32_t x = 0, z = 0;
+                piece->GetOccupiedCell(x, z);                                    // vslot 0xec
+                const float x0 = static_cast<float>(static_cast<std::int32_t>(x) << 4);
+                const float z0 = static_cast<float>(static_cast<std::int32_t>(z) << 4);
+                const float corners[4][2] = {{x0, z0}, {x0 + 16.0f, z0}, {x0, z0 + 16.0f}, {x0 + 16.0f, z0 + 16.0f}};
+                keep = true;
+                for (const auto& corner : corners) {
+                    const float above = piece->GetAltitude(corner[0], corner[1]) - g_host->TerrainAltitude(corner[0], corner[1]);
+                    if (!(0.0f <= above && static_cast<double>(above) <= 0.01)) {   // [0x00a70e80] = 0.01
+                        keep = false;
+                        break;
+                    }
+                }
+                if (!keep && reason == 6 && piece->HasNetworkFlag(0x80000)) keep = true;   // vslot 0x20
+            }
+            if (keep) occupant->Release();
+            else removed.push_back(occupant);
+        }
+        DestroyNetworkOccupants(removed);                                        // vslot 0x18
+        manager->ReleaseOccupantList(removed);
+    }
+    if (!extendRegion_) UpdateBuriedPiecesInRegion();
+}
+
+// i386 0x00112dbe from LAB_0011357b (also the whole 0x6a3b0afd branch): the pipes and subways in the gathered rectangle go to
+// their tools' UpdateUndergroundOccupantTerrainHeights (each tool Init / Shutdown around the call), then the rectangle is reset.
+void cSC4NetworkManager::UpdateBuriedPiecesInRegion() {
+    if (regionMaxX_ < regionMinX_ || regionMaxZ_ < regionMinZ_) {
+        extendRegion_ = false;
+        return;
+    }
+    std::vector<std::vector<SC4PointU>> cells(kNetworkTypeCount);
+    INetworkManagerOccupantManager* manager = g_host != nullptr ? g_host->OccupantManager() : nullptr;
+    if (manager != nullptr) {
+        ilist<cISC4Occupant*> found;
+        const std::int32_t minCell[2] = {regionMinX_, regionMinZ_};
+        const std::int32_t maxCell[2] = {regionMaxX_, regionMaxZ_};
+        manager->GetNetworkOccupantsByCells(found, minCell, maxCell, 0x90);   // the pipe and subway flags
+        std::list<cSC4NetworkOccupant*> pipes, subways;
+        for (cISC4Occupant* occupant : found) {
+            auto* piece = dynamic_cast<cSC4NetworkOccupant*>(occupant);
+            for (std::uint32_t type = 0; piece != nullptr && type < static_cast<std::uint32_t>(kNetworkTypeCount); ++type) {
+                if (!piece->IsOfType(type)) continue;                             // vslot 0x58
+                SC4PointU cell;
+                piece->GetOccupiedCell(cell.x, cell.z);
+                cells[type].push_back(cell);
+                if (type == kNetworkPipe) {
+                    piece->AddRef();
+                    pipes.push_back(piece);
+                } else if (type == kNetworkSubway) {
+                    piece->AddRef();
+                    subways.push_back(piece);
+                }
+            }
+            occupant->Release();
+        }
+        const auto update = [this, &cells](std::list<cSC4NetworkOccupant*>& pieces, eNetworkType type) {
+            if (pieces.empty()) return;
+            INetworkManagerTool* tool = GetNetworkTool(type, false);
+            if (tool == nullptr) {
+                for (cSC4NetworkOccupant* piece : pieces) piece->Release();
+                pieces.clear();
+                return;
+            }
+            tool->Init();
+            tool->UpdateUndergroundOccupantTerrainHeights(cells[static_cast<std::size_t>(type)], pieces, type);
+            tool->Shutdown();
+        };
+        update(pipes, kNetworkPipe);
+        update(subways, kNetworkSubway);
+    }
+    regionMinZ_ = 0x7fffffff;
+    regionMinX_ = 0x7fffffff;
+    regionMaxX_ = -1;
+    regionMaxZ_ = -1;
+    extendRegion_ = false;
+}
+
+// The base answer: no buried pieces, the references go.
+void INetworkManagerTool::UpdateUndergroundOccupantTerrainHeights(const std::vector<SC4PointT<std::uint32_t>>& cells,
+                                                                  std::list<cSC4NetworkOccupant*>& pieces, eNetworkType type) {
+    (void)cells;
+    (void)type;
+    for (cSC4NetworkOccupant* piece : pieces) piece->Release();
+    pieces.clear();
 }
 
 // ============================================================================================================

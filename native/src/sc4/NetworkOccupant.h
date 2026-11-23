@@ -243,8 +243,10 @@ public:
     static std::uint32_t FlagForNetworkType(std::uint32_t networkType);
     static std::uint32_t HasConnectionOnEdge(std::uint32_t config, int edge);
 
-protected:
+    // cISC4NetworkOccupant (i386 vslot 0xc8): the underground tool drops a moved piece's path info.
     virtual void ReleasePathInfo();                              // 0x10019f722 (vslot 0x190)
+
+protected:
     void PostChanged();
     // +0x190 also holds the path info the pre-built-model occupant resolves; its Write persists it.
     cIGZUnknown* PathInfoRef() const { return persistRef_; }

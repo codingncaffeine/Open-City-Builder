@@ -15,6 +15,7 @@
 
 #include "app/NativeCity.h"
 #include "app/NativeCityView.h"
+#include "app/NativeDemolition.h"
 #include "app/NativeLighting.h"
 #include "app/NativeModelMaker.h"
 #include "sc4/Render3D.h"
@@ -34,6 +35,7 @@
 #include "sc4/ServiceLocator.h"
 #include "sc4/UndergroundConnectionOccupant.h"
 #include "sc4/NetworkTool.h"
+#include "sc4/NetworkManager.h"
 #include "sc4/UndergroundNetworkTool.h"
 #include "sc4/UndergroundOccupant.h"
 #include "sc4/cSC4City.h"
@@ -120,6 +122,12 @@ public:
     // i386 0x1001b37e4 (base drag constraints): not recovered; only placement reaches it.
     void InsertRangeConstraintsForCellBase(std::uint32_t) override {
         SC4_UNWIRED("cSC4UndergroundNetworkTool: the base InsertRangeConstraintsForCell (i386 0x1001b37e4) is not recovered (pipe drag constraints)");
+    }
+    // SL::NetworkManager() vslot 0x18 DestroyNetworkOccupants, then the occupant manager releases the list (vslot 0xc0).
+    void DestroyNetworkOccupants(std::list<cISC4Occupant*>& occupants) override {
+        if (cSC4NetworkManager* manager = CityNetworkManager()) manager->DestroyNetworkOccupants(occupants);
+        for (cISC4Occupant* occupant : occupants) occupant->Release();
+        occupants.clear();
     }
 };
 

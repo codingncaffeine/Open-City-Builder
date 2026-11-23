@@ -126,6 +126,12 @@ public:
     // cSC4NetworkTool::InsertRangeConstraintsForCell @ 0x1001b37e4 (not recovered): the base constraint pass a
     // buildable underground cell takes (0x1001a7643).
     virtual void InsertRangeConstraintsForCellBase(std::uint32_t cellKey) = 0;
+    // SL::NetworkManager() vslot 0x18 DestroyNetworkOccupants(list), then SL::spOccupantManager vslot 0xc0 releases the list
+    // (each entry holds one reference). UpdateUndergroundOccupantTerrainHeights removes the pieces the new terrain exposes.
+    virtual void DestroyNetworkOccupants(std::list<cISC4Occupant*>& occupants) {
+        for (cISC4Occupant* occupant : occupants) occupant->Release();
+        occupants.clear();
+    }
 };
 void SetUndergroundNetworkToolHost(IUndergroundNetworkToolHost* host);
 IUndergroundNetworkToolHost* GetUndergroundNetworkToolHost();
@@ -184,7 +190,8 @@ public:
     bool FindUndergroundConnectionOccupant(int x, int z, std::uint32_t gziid,
                                            cSC4UndergroundConnectionOccupant*& out);   // 0x1001a81d6
     void PropagateFromCell(cSC4NetworkCellInfo* cell, int depth);      // 0x1001a913c
-    // PARTIAL: only the three clears are ported. See the .cpp for the reason.
+    // i386 0x0013bf6e: the pieces whose terrain changed are re-solved to follow it; `occupants` holds one reference each and is
+    // emptied.
     void UpdateUndergroundOccupantTerrainHeights(std::vector<SC4PointU> cells,
                                                  std::list<cSC4NetworkOccupant*>& occupants,
                                                  std::uint32_t networkType);   // 0x1001a85e2

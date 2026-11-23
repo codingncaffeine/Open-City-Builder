@@ -110,6 +110,9 @@ struct TestOccupant final : cSC4UndergroundOccupant {
         for (int i = 0; i < 4; ++i) terrainHeights[i] = heights[i];
         ++terrainSetCalls;
     }
+    void GetTerrainHeights(float* heights) override {
+        for (int i = 0; i < 4; ++i) heights[i] = terrainHeights[i];
+    }
     void SetVertexHeights(float* heights) override {
         for (int i = 0; i < 4; ++i) vertexHeights[i] = heights[i];
         ++vertexSetCalls;
@@ -268,6 +271,8 @@ struct RecordingSatisfier final : INetworkConstraintSatisfier {
     void InsertEqualityConstraint(std::uint32_t a, std::uint32_t b) override {
         equalities.push_back({a, b});
     }
+    bool Solve() override { return solveResult; }
+    bool solveResult = true;
     std::map<int, float> heights;
     std::vector<std::pair<int, float>> solved;
     std::vector<RangeCall> ranges;
@@ -428,6 +433,14 @@ struct FakeUndergroundHost final : IUndergroundNetworkToolHost {
         ++rangeBaseCalls;
         lastRangeBaseKey = cellKey;
     }
+    void DestroyNetworkOccupants(std::list<cISC4Occupant*>& occupants) override {
+        for (cISC4Occupant* occupant : occupants) {
+            destroyed.push_back(occupant);
+            occupant->Release();
+        }
+        occupants.clear();
+    }
+    std::vector<cISC4Occupant*> destroyed;
 
     std::map<std::uint32_t, std::vector<cISC4Occupant*>> cellOccupants;
     std::map<std::uint32_t, float> terrainHeights;
@@ -1223,16 +1236,70 @@ void TestSetQuadTrianglesToDraw() {
     f.tool->SetQuadTrianglesToDraw(nullptr, compact);   // no crash
 }
 
-void TestUpdateTerrainHeightsPartial() {
-    Fixture f;
-    f.tool->Init();
-    f.cache.cells[Key(1, 1)] = cSC4NetworkCellInfo{};
-    NetworkToolTestAccess::SolvedCellList(*f.tool).push_back(Solved(Key(1, 1)));
-    std::list<cSC4NetworkOccupant*> occupants;
-    f.tool->UpdateUndergroundOccupantTerrainHeights({SC4PointU{1, 1}}, occupants, kNetworkPipe);
-    CHECK(f.cache.cells.empty());   // the world cache was cleared
-    CHECK(NetworkToolTestAccess::SolvedCellList(*f.tool).empty());
-    CHECK(f.cache.clears == 1);
+// i386 0x0013bf6e: a piece whose recorded terrain is unchanged is left alone; the others become solved cells and follow the
+// solve, or (when it fails) keep their heights while still buried by the two clearances and are removed otherwise.
+void TestUpdateTerrainHeights() {
+    {   // unchanged terrain: nothing is solved, the list reference goes
+        Fixture f;
+        f.tool->Init();
+        auto* pipe = new TestOccupant();
+        for (float& h : pipe->terrainHeights) h = 0.0f;
+        std::list<cSC4NetworkOccupant*> occupants{pipe};
+        f.tool->UpdateUndergroundOccupantTerrainHeights({}, occupants, kNetworkPipe);
+        CHECK(occupants.empty());
+        CHECK(pipe->vertexSetCalls == 0 && pipe->terrainSetCalls == 0 && pipe->geometryCalls == 0);
+        CHECK(pipe->fakeRefs == 0);
+        CHECK(f.cache.clears == 1);
+    }
+    {   // the solve works: the piece takes the solved heights and the terrain under it, and is rebuilt
+        Fixture f;
+        f.tool->Init();
+        auto* pipe = new TestOccupant();
+        for (float& h : pipe->vertexHeights) h = -3.0f;
+        for (float& h : f.host.cellHeights) h = 10.0f;
+        f.host.cellOccupants[Key(0, 0)] = {static_cast<cSC4NetworkOccupant*>(pipe)};
+        pipe->AddRef();   // the list's reference
+        std::list<cSC4NetworkOccupant*> occupants{pipe};
+        // The solver is asked for the cell's vertex ids: answer 7.5 for any of the first few.
+        for (int v = 0; v < 64; ++v) f.satisfier.heights[v] = 7.5f;
+        for (int v = 0; v < 64; ++v) f.host.terrainHeights[static_cast<std::uint32_t>(v)] = 10.0f;
+        f.tool->UpdateUndergroundOccupantTerrainHeights({}, occupants, kNetworkPipe);
+        const cSC4NetworkCellInfo& cell = f.cache.cells[Key(0, 0)];
+        CHECK(cell.range70[0].low == -500.0f && cell.range70[0].high == 10.0f - 2.5f);   // terrain - network depth
+        CHECK(cell.preferred90[2].low == 7.5f && cell.preferred90[2].high == 7.5f);
+        CHECK(cell.pieceFromSolvedList && cell.solvedCellIndex == 0);
+        CHECK(pipe->vertexSetCalls == 1 && pipe->vertexHeights[0] == 7.5f && pipe->vertexHeights[3] == 7.5f);
+        CHECK(pipe->terrainSetCalls == 1 && pipe->terrainHeights[1] == 10.0f);
+        CHECK(pipe->geometryCalls == 1 && pipe->lastGeometryUpdate);
+        CHECK(occupants.empty());
+        CHECK(f.host.destroyed.empty());
+        CHECK(pipe->fakeRefs == 1);   // only the cell's own reference is left
+        CHECK(NetworkToolTestAccess::SolvedCellList(*f.tool).empty());
+    }
+    for (int buried = 0; buried < 2; ++buried) {   // the solve fails: kept when still under the ground, removed otherwise
+        Fixture f;
+        f.tool->Init();
+        f.satisfier.solveResult = false;
+        auto* pipe = new TestOccupant();
+        // Clearances 1.25 + 3.75 = 5 over a terrain of 0: -6 stays buried, -4 would show.
+        for (float& h : pipe->vertexHeights) h = buried ? -6.0f : -4.0f;
+        for (float& h : f.host.cellHeights) h = 2.0f;
+        f.host.cellOccupants[Key(0, 0)] = {static_cast<cSC4NetworkOccupant*>(pipe)};
+        pipe->AddRef();
+        std::list<cSC4NetworkOccupant*> occupants{pipe};
+        f.tool->UpdateUndergroundOccupantTerrainHeights({}, occupants, kNetworkPipe);
+        CHECK(occupants.empty());
+        CHECK(pipe->vertexSetCalls == 0);
+        if (buried) {
+            CHECK(f.host.destroyed.empty());
+            CHECK(pipe->terrainSetCalls == 1 && pipe->terrainHeights[0] == 0.0f);
+            CHECK(pipe->geometryCalls == 1);
+        } else {
+            CHECK(f.host.destroyed.size() == 1 && f.host.destroyed[0] == static_cast<cISC4Occupant*>(static_cast<cSC4NetworkOccupant*>(pipe)));
+            CHECK(pipe->terrainSetCalls == 0 && pipe->geometryCalls == 0);
+        }
+        CHECK(pipe->fakeRefs == 1);
+    }
 }
 
 // cSC4PipeTool::CreateNetworkOccupant (i386 0x0012c8a0): a pipe on the cell's corners, the cell's occupant, its network
@@ -1358,7 +1425,7 @@ int main() {
     TestPropagation();
     TestStartPlacing();
     TestSetQuadTrianglesToDraw();
-    TestUpdateTerrainHeightsPartial();
+    TestUpdateTerrainHeights();
     TestPipeToolCreatesPipe();
     TestSubwayToolCreatesSubway();
     for (auto* o : TestOccupant::All()) delete o;
