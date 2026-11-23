@@ -5,6 +5,8 @@
 // cSC4TrafficAutomataManager::Dispatch (i386 0x000ce2f6).
 #include <cstdio>
 #include "platform/Unwired.h"
+#include "sc4/Render3D.h"
+#include "app/NativeCityView.h"
 #include <cstdlib>
 #include <list>
 #include <map>
@@ -48,6 +50,8 @@ namespace native {
 // app/NativeFireCrew.cpp and app/NativeDisasters.cpp: the crews and the fire count of the fire engines' host.
 cIGZUnknown* NativeNewFireFilter();
 cIGZUnknown* NativeNewSpillFilter();
+int NativeToxicSpillCount();                       // app/NativeDisasters.cpp
+int NativeToxicSpillsInRect(const int rect[4]);
 bool NativeCountOccupantsInBox(const float* min, const float* max, cIGZUnknown* filter, int& count);
 cIGZUnknown* NativeNewFireCrew(sc4::cSC4FireTruck& truck);
 void NativeSetFireCrewCompetence(cIGZUnknown* crew, float competence);
@@ -561,19 +565,17 @@ public:
     bool OccupantsInBox(const float* min, const float* max, cIGZUnknown* filter, int& count) override {
         return NativeCountOccupantsInBox(min, max, filter, count);
     }
-    int SpillTotal() override {
-        SC4_UNWIRED("cSC4FireTruck: the toxic spill counts (spill manager) are not wired (always 0)");
-        return 0;
-    }
-    int SpillsInRect(const int*) override { return 0; }
+    int SpillTotal() override { return NativeToxicSpillCount(); }                     // the toxic manager's count
+    int SpillsInRect(const int* rect) override { return NativeToxicSpillsInRect(rect); }
     cIGZUnknown* NewFireCrew(cSC4FireTruck& truck) override { return NativeNewFireCrew(truck); }
     void SetFireCrewCompetence(cIGZUnknown* crew, float competence) override { NativeSetFireCrewCompetence(crew, competence); }
     void RegisterFireCrew(cIGZUnknown* crew) override { NativeRegisterFireCrew(crew); }
     void SetupFireCrew(cIGZUnknown* crew) override { NativeSetupFireCrew(crew); }
     void RemoveFireCrew(cIGZUnknown* crew) override { NativeRemoveFireCrew(crew); }
-    bool PickGroundPoint(float, float, cS3DVector3&) override {
-        SC4_UNWIRED("cSC4FireTruck player drive: the hose aim's ground pick is not wired");
-        return false;
+    // SL::spRenderer vslot 0x1e8 PickTerrain(x, y, out, 1, 1): the ground under the hose aim's screen point.
+    bool PickGroundPoint(float screenX, float screenY, cS3DVector3& out) override {
+        sc4::cSC43DRender* renderer = CityRenderer();
+        return renderer && renderer->PickTerrain(static_cast<int>(screenX), static_cast<int>(screenY), &out.x, true, true);
     }
     bool CityCells(int& width, int& height) override { return CityCellCount(width, height); }
     float MaxStreamDistance() override { return AutomataTuning().f21a18; }

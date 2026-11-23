@@ -619,6 +619,28 @@ int NativeCurrentSeason() {
     auto* weather = CityAs<sc4::cSC4WeatherSimulator>(sc4::CityComponent::WeatherSimulator);
     return weather ? static_cast<int>(weather->GetCurrentSeason()) : 0;
 }
+// The toxic spill manager (disaster manager 0xebfb0404, interface 0x4c1e8345): the spills in the city / in a cell rectangle.
+namespace {
+cISC4DisasterManagerToxic* ToxicManager() {
+    cISC4DisasterLayer* layer = Layer();
+    cISC4DisasterManager* manager = layer ? layer->GetDisasterManager(kDisasterManagerIdToxic) : nullptr;
+    cISC4DisasterManagerToxic* toxic = nullptr;
+    if (!manager || !manager->QueryInterface(kGZIID_cISC4DisasterManagerToxic, reinterpret_cast<void**>(&toxic)) || !toxic) return nullptr;
+    toxic->Release();   // the layer keeps the manager
+    return toxic;
+}
+}  // namespace
+int NativeToxicSpillCount() {
+    cISC4DisasterManagerToxic* toxic = ToxicManager();
+    return toxic ? toxic->GetToxicCount() : 0;
+}
+int NativeToxicSpillsInRect(const int rect[4]) {
+    cISC4DisasterManagerToxic* toxic = ToxicManager();
+    if (!toxic || !rect) return 0;
+    SC4CellRect cells;
+    cells.x0 = rect[0]; cells.z0 = rect[1]; cells.x1 = rect[2]; cells.z1 = rect[3];
+    return toxic->GetToxicCountInCellRect(cells);
+}
 int NativeZoneTypeAt(int x, int z) {
     auto* zones = CityAs<sc4::cSC4ZoneManager>(sc4::CityComponent::ZoneManager);
     return zones ? zones->GetZoneType(x, z) : 0;
