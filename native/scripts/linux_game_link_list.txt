@@ -406,6 +406,7 @@ src/sc4/PropOccupantVisualEffect.cpp
 src/sc4/PropOccupantTerrainDecal.cpp
 src/sc4/PropOccupantBurntBuilding.cpp
 src/sc4/PylonOccupant.cpp
+src/sc4/TexUtil.cpp
 src/sc4/SeaportDeveloper.cpp
 src/sc4/SignpostOccupant.cpp
 src/sc4/TextDecalOccupant.cpp

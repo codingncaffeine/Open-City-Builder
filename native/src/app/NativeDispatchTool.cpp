@@ -24,6 +24,13 @@
 #include "sc4/cSC4City.h"
 
 namespace native {
+// app/NativeDispatchVehicleView.cpp: the call-number services shared with the dispatch indicators.
+sc4::IPylonFont* NativeCallNumberFont();
+bool NativeCallNumberCreateBuffer(cIGZBuffer** out);
+bool NativeCallNumberUpload(cIGZBuffer* buffer, std::uint32_t& handle);
+void NativeCallNumberReleaseTexture(std::uint32_t handle);
+bool NativeBitmapFromFile(const cIGZString& path, cIGZBuffer** out);
+
 std::uint32_t NativeFshTexture(std::uint32_t group, std::uint32_t instance);   // app/NativeModelMaker.cpp
 sc4::cISC4DispatchManager* NativeDispatchManager();                            // app/NativeDispatch.cpp
 sc4::IPylonOccupant* NativePylonView(sc4::cSC4PylonOccupant* pylon);
@@ -68,7 +75,7 @@ private:
     std::uint32_t id_;
 };
 
-// PARTIAL: the call number digits (the font, buffer and texture upload behind CreateBuffer / CallNumberFont / UploadTexture) and
+// The call number digits use the shared call-number services (app/NativeDispatchVehicleView.cpp); still PARTIAL:
 // the MySim portraits are not native yet: a call box shows its picture without its number.
 class PylonHost final : public IPylonOccupantHost {
 public:
@@ -103,19 +110,16 @@ public:
         z = v ? v->ViewDirection().z : 1.0f;
     }
     bool OccupantDrawSuppressed() override { return false; }
-    bool CreateBuffer(cIGZBuffer**) override {
-        SC4_UNWIRED("cSC4PylonOccupant call number: the digit buffer, font and texture upload are not native (the call box shows no number)");
-        return false;
-    }
-    IPylonFont* CallNumberFont() override { return nullptr; }
-    bool UploadTexture(cIGZBuffer*, std::uint32_t&) override { return false; }
-    void ReleaseTexture(std::uint32_t) override {}
+    bool CreateBuffer(cIGZBuffer** out) override { return NativeCallNumberCreateBuffer(out); }
+    IPylonFont* CallNumberFont() override { return NativeCallNumberFont(); }
+    bool UploadTexture(cIGZBuffer* buffer, std::uint32_t& handle) override { return NativeCallNumberUpload(buffer, handle); }
+    void ReleaseTexture(std::uint32_t handle) override { NativeCallNumberReleaseTexture(handle); }
     IPylonTextureBinding* CreateTextureBinding(std::uint32_t instance) override {
         const std::uint32_t id = NativeFshTexture(kPylonTextureGroup, instance);
         if (Debug()) std::fprintf(stderr, "dispatch: pylon texture %08x -> %u\n", instance, id);
         return id ? new PylonTexture(id) : nullptr;
     }
-    bool LoadBitmapFromFile(const cIGZString&, cIGZBuffer**) override { return false; }
+    bool LoadBitmapFromFile(const cIGZString& path, cIGZBuffer** out) override { return NativeBitmapFromFile(path, out); }
 private:
     static SC4ViewUtilities* Utilities() { cSC43DRender* r = CityRenderer(); return r ? r->GetViewUtilities() : nullptr; }
 } g_pylonHost;

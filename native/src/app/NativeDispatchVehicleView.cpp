@@ -8,6 +8,8 @@
 //   number font are not recovered (the call boxes, sc4/PylonOccupant, stop at the same place): the indicators draw their
 //   icons and arrows, but no call number digits and no MySim / situation pictures.
 #include <cstdint>
+#include <fstream>
+#include <iterator>
 #include <vector>
 
 #include "platform/Unwired.h"
@@ -15,6 +17,13 @@
 #include "app/NativeCity.h"
 #include "app/NativeCitySystems.h"
 #include "app/NativeCityView.h"
+#include "app/NativeGraphics.h"
+#include "app/NativeUi.h"
+#include "gz/Buffer.h"
+#include "gz/Font.h"
+#include "gz/WinFont.h"
+#include "render/gd/IGZGDriver.h"
+#include "sc4/TexUtil.h"
 #include "gz/WinInterfaces.h"
 #include "rz/cRZTimer.h"
 #include "sc4/AutomataDriveParams.h"
@@ -103,6 +112,77 @@ private:
     cSC4Automaton* a_;
 };
 
+}  // namespace
+
+using namespace sc4;
+
+// SL::spGDriver: the city renderer's draw-context driver (null before the city view draws).
+gd::cIGZGDriver* NativeCallNumberDriver() {
+    cSC43DRender* renderer = CityRenderer();
+    SC4DrawContext* context = renderer ? renderer->GetDrawContext() : nullptr;
+    return context ? context->Driver() : nullptr;
+}
+
+// ---- the call-number services the indicators and the dispatch call box share --------------------------------------------
+
+namespace {
+// RZ::WCM() vslot 0x14(0x68963c4c): the window system's default font as the call boxes use it. The digits are drawn
+// into a private window buffer of the target's size and copied into the target (the target is cleared to transparent
+// first by its caller, so the copy is the text on transparency, as the original's draw into the target).
+class CallNumberFontAdapter final : public IPylonFont {
+public:
+    void AddRef() override {}
+    void Release() override {}
+    int GetFontSize() override { cIGZFont* f = Font(); return f ? static_cast<int>(f->GetSize()) : 0; }
+    void SetFontSize(int size) override { if (cIGZFont* f = Font()) f->SetSize(static_cast<std::uint32_t>(size)); }
+    int TextHeight(const char*, std::uint32_t) override { gz::IWinFont* w = WinFont(); return w ? w->LineHeight(0, 0) : 0; }
+    int TextWidth(const char* text, std::uint32_t length) override { gz::IWinFont* w = WinFont(); return w ? w->TextWidth(text, length) : 0; }
+    void DrawText(cIGZBuffer* target, int x, int y, const char* text, std::uint32_t length, std::uint32_t color,
+                  std::uint32_t color2, const void*, int flags) override {
+        gz::IWinFont* w = WinFont();
+        if (!w || !target) return;
+        const int width = static_cast<int>(target->Width()), height = static_cast<int>(target->Height());
+        Buffer scratch(width, height, false);
+        w->DrawText(&scratch, x, y, text, length, color, color2, nullptr, flags);
+        const cRZRect area{0, 0, width, height};
+        target->Blt(scratch.Pixels(), area, area, nullptr);
+    }
+private:
+    static gz::IWinFont* WinFont() {
+        gz::IWinFontSource* fonts = gz::WinFontSource();
+        return fonts ? fonts->Font(0x68963c4c) : nullptr;
+    }
+    static cIGZFont* Font() { gz::IWinFont* w = WinFont(); return w ? w->AsFont() : nullptr; }
+};
+CallNumberFontAdapter g_callNumberFont;
+}  // namespace
+
+IPylonFont* NativeCallNumberFont() { return gz::WinFontSource() ? &g_callNumberFont : nullptr; }
+bool NativeCallNumberCreateBuffer(cIGZBuffer** out) {   // RZ::GS() vslot 0x10
+    auto* buffer = new cGZBuffer();
+    buffer->AddRef();
+    *out = buffer;
+    return true;
+}
+bool NativeCallNumberUpload(cIGZBuffer* buffer, std::uint32_t& handle) {   // nsTexUtil::SetupTexture(buffer, spGDriver, &h, true, 0, 0, 0)
+    gd::cIGZGDriver* driver = NativeCallNumberDriver();
+    return driver && nsTexUtil::SetupTexture(buffer, driver, handle, true, nullptr, nullptr, nullptr);
+}
+void NativeCallNumberReleaseTexture(std::uint32_t handle) { nsTexUtil::ReleaseTexture(NativeCallNumberDriver(), handle); }
+// GZCOM 0xa2ffb5d3 / 0x02ffbb60 vslot 0x20(path, &buffer, 8): a bitmap file decoded into a new buffer (one reference).
+bool NativeBitmapFromFile(const cIGZString& path, cIGZBuffer** out) {
+    *out = nullptr;
+    PngDecoder decode = DecodeFunction();
+    std::ifstream file(path.ToChar(), std::ios::binary);
+    if (!decode || !file) return false;
+    const std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    cGZBuffer* buffer = decode(bytes);
+    *out = buffer;
+    return buffer != nullptr;
+}
+
+namespace {
+
 class Host final : public IDispatchVehicleViewHost {
 public:
     cIGZMessageServer2* Messages() override { return SL::spMS2; }
@@ -114,20 +194,11 @@ public:
         const std::uint32_t id = NativeFshTexture(kPylonTextureGroup, instance);
         return id ? new IconTexture(id) : nullptr;
     }
-    void ReleaseTexture(std::uint32_t) override {}   // nothing was uploaded (UploadTexture)
-    bool UploadTexture(cIGZBuffer*, std::uint32_t&) override {
-        SC4_UNWIRED("cSC4DispatchVehicleView::BuildCallNumberDisplay: nsTexUtil::SetupTexture (buffer -> driver texture) is not recovered (no call numbers / pictures on the indicators)");
-        return false;
-    }
-    bool CreateBuffer(cIGZBuffer**) override { return false; }   // only the font path asks, and it has no font
-    IPylonFont* CallNumberFont() override {
-        SC4_UNWIRED("cSC4DispatchVehicleView::BuildCallNumberDisplay: RZ::WCM()'s call number font is not recovered (no digits on the indicators)");
-        return nullptr;
-    }
-    bool LoadBitmapFromFile(const cIGZString&, cIGZBuffer**) override {
-        SC4_UNWIRED("cSC4DispatchVehicleView::BuildCallNumberDisplay: the MySim picture from a bitmap file (GZCOM 0xa2ffb5d3) is not recovered");
-        return false;
-    }
+    void ReleaseTexture(std::uint32_t handle) override { NativeCallNumberReleaseTexture(handle); }
+    bool UploadTexture(cIGZBuffer* buffer, std::uint32_t& handle) override { return NativeCallNumberUpload(buffer, handle); }
+    bool CreateBuffer(cIGZBuffer** out) override { return NativeCallNumberCreateBuffer(out); }
+    IPylonFont* CallNumberFont() override { return NativeCallNumberFont(); }
+    bool LoadBitmapFromFile(const cIGZString& path, cIGZBuffer** out) override { return NativeBitmapFromFile(path, out); }
     // SL::spRM {0x856ddbac, 0x46a006b0, id}: the picture bitmap resource.
     bool LoadPictureBitmap(std::uint32_t id, cIGZBuffer** out) override {
         cSLBuffer bitmap(kPylonBitmapType, kPylonBitmapGroup, id, kPylonBitmapColorType, false);
