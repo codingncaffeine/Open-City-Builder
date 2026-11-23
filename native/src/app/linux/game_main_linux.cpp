@@ -1685,6 +1685,34 @@ int RunScenario(const std::string& path) {
             if (!OnRegionScreen()) { std::printf("scenario %d: expected the region screen\n", number); return 5; }
         } else if (command == "expect-city") {
             if (!(gAppWindow && gAppWindow->View3D())) { std::printf("scenario %d: expected a city view\n", number); return 5; }
+        } else if (command == "tapin") {   // tapin PARENT CHILD: when window PARENT is open on screen, a click on its child CHILD (hex ids)
+            std::string parentHex, childHex;
+            words >> parentHex >> childHex;
+            const std::uint32_t parentId = std::uint32_t(std::strtoul(parentHex.c_str(), nullptr, 16));
+            const std::uint32_t childId = std::uint32_t(std::strtoul(childHex.c_str(), nullptr, 16));
+            cIGZWin* parent = gMgr->GetMainWindow()->GetChildWindowFromIDRecursive(parentId);
+            bool open = parent && parent->IsVisible();
+            for (cIGZWin* p = parent ? parent->GetParentWin() : nullptr; p && open; p = p->GetParentWin()) open = p->IsVisible();
+            cIGZWin* w = open ? parent->GetChildWindowFromIDRecursive(childId) : nullptr;
+            if (!w) { std::printf("tapin %08x %08x: %s\n", parentId, childId, open ? "no such child" : "not open"); continue; }
+            cRZRect a = w->GetArea();
+            int x = a.left, y = a.top;
+            for (cIGZWin* p = w->GetParentWin(); p; p = p->GetParentWin()) { const cRZRect pa = p->GetArea(); x += pa.left; y += pa.top; }
+            const int cx = x + (a.right - a.left) / 2, cy = y + (a.bottom - a.top) / 2;
+            int ww = 0, wh = 0;
+            SDL_GetWindowSize(gWindow, &ww, &wh);
+            const float fx = float(cx) * float(ww) / float(gW), fy = float(cy) * float(wh) / float(gH);
+            SDL_Event e{};
+            e.type = SDL_EVENT_MOUSE_MOTION; e.motion.windowID = SDL_GetWindowID(gWindow); e.motion.x = fx; e.motion.y = fy;
+            SDL_PushEvent(&e); PumpEvents(); Frame(); Nap();
+            for (const SDL_EventType type : {SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_EVENT_MOUSE_BUTTON_UP}) {
+                SDL_Event b{};
+                b.type = type; b.button.windowID = SDL_GetWindowID(gWindow); b.button.button = SDL_BUTTON_LEFT;
+                b.button.down = type == SDL_EVENT_MOUSE_BUTTON_DOWN; b.button.clicks = 1; b.button.x = fx; b.button.y = fy;
+                SDL_PushEvent(&b); PumpEvents(); Frame(); Nap();
+            }
+            for (int i = 0; i < 5; ++i) { PumpEvents(); Frame(); Nap(); }
+            std::printf("tapin %08x %08x: clicked %d,%d\n", parentId, childId, cx, cy);
         } else if (command == "where" || command == "tapid" || command == "tapvia") {
             // where HEXID: the screen rectangle of the first window with that id (finding a button to tap);
             // tapid HEXID: the same, then a single click at its center.
@@ -1967,8 +1995,16 @@ int RunScenario(const std::string& path) {
             std::printf("viewdrag: press %s\n", pressed ? "taken" : "not taken");
             int x = sx0, y = sy0;
             for (int i = 1; i <= steps + over; ++i) {
-                x = sx0 + (sx1 - sx0) * i / steps;
-                y = sy0 + (sy1 - sy0) * i / steps;
+                // each move at the screen point over the ground the drag has reached (a player follows the row on the ground; a
+                // straight screen line wanders across rows over hills and valleys); past the end, along the screen line
+                const float t = float(i) / float(steps);
+                if (i <= steps && !screenOf(cx0 + (cx1 - cx0) * t, cz0 + (cz1 - cz0) * t, x, y)) {
+                    x = sx0 + (sx1 - sx0) * i / steps;
+                    y = sy0 + (sy1 - sy0) * i / steps;
+                } else if (i > steps) {
+                    x = sx0 + (sx1 - sx0) * i / steps;
+                    y = sy0 + (sy1 - sy0) * i / steps;
+                }
                 int fx = x, fy = y;
                 sc4::ICityMouseRouter* router = native::NativeTutorialMouseRouter();
                 const bool filterPasses = !(router && router->IsActive()) || router->ProcessMouse(fx, fy, 0);   // a move query changes nothing
@@ -2046,12 +2082,16 @@ int RunScenario(const std::string& path) {
                         todo.push_back("frames 10");
                     }
                     look();
-                    // a line two cells wide (an avenue): along the grid line between its two rows or columns, where the pen centres
+                    // a line two cells wide (an avenue): just past the grid line between its two rows or columns (exactly on the
+                    // line the pick can take either side), in the second row near the first, where the pen pairs the two
                     float fx0 = step.x0, fz0 = step.z0, fx1 = step.x1, fz1 = step.z1;
-                    if (step.z1 - step.z0 == 1 && step.x1 - step.x0 > 1) fz0 = fz1 = step.z0 + 0.5f;
-                    else if (step.x1 - step.x0 == 1 && step.z1 - step.z0 > 1) fx0 = fx1 = step.x0 + 0.5f;
+                    if (step.z1 - step.z0 == 1 && step.x1 - step.x0 > 1) fz0 = fz1 = step.z0 + 0.625f;
+                    else if (step.x1 - step.x0 == 1 && step.z1 - step.z0 > 1) fx0 = fx1 = step.x0 + 0.625f;
                     std::snprintf(buffer, sizeof buffer, "viewdrag %g %g %g %g 12 0", fx0, fz0, fx1, fz1);
                     todo.push_back(buffer);
+                    // a drag over water opens the bridge chooser (0x0c525b9e): Accept (0x2000) takes the bridge it offers first
+                    todo.push_back("frames 20");
+                    todo.push_back("tapin 0c525b9e 00002000");
                     break;
                 }
                 case 3: case 5: {            // place a building, act on a lot: a click in the region; a retry (the tutorial

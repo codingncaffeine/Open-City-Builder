@@ -252,23 +252,31 @@ bool cSC4NetworkTool::AdjustBridgeSpan(int& start, int& end, float& depth, float
 bool cSC4NetworkTool::SelectBridgeStartAndEnd(int step, int& start, int& end, int& bridgeType, float& altitude,
                                               std::uint32_t networkType) {
     INetworkToolHost* host = GetNetworkToolHost();
+    static const bool trace = std::getenv("SC4_NETDEBUG") != nullptr;
+    const auto refuse = [&](const char* why, int at) {
+        if (trace) std::fprintf(stderr, "bridge: water at step %d: no bridge, %s (step %d)\n", step, why, at);
+        return false;
+    };
     start = step - 1;
-    if (start < 0) return false;
-    if (steps_[static_cast<std::size_t>(start)].direction != 0 || !CheckBridgeStepEdgeTypes(start, networkType)) return false;
+    if (start < 0) return refuse("no step before", start);
+    if (steps_[static_cast<std::size_t>(start)].direction != 0 || !CheckBridgeStepEdgeTypes(start, networkType)) return refuse("bank step not straight or its edges forbid", start);
     end = step;
     for (;;) {
         ++end;
-        if (validSteps_ - 1 <= end || steps_[static_cast<std::size_t>(end)].direction != 0) return false;
-        if (!IsStepGoodForBridge(end) || !CheckBridgeStepEdgeTypes(end, networkType)) return false;
+        if (validSteps_ - 1 <= end || steps_[static_cast<std::size_t>(end)].direction != 0) return refuse("the drag ends over the water or turns", end);
+        if (!IsStepGoodForBridge(end)) return refuse("a step not good for a bridge", end);
+        if (!CheckBridgeStepEdgeTypes(end, networkType)) return refuse("a step's edges forbid a bridge", end);
         const tDraggedStep& s = steps_[static_cast<std::size_t>(end)];
         bool water = false;
         for (std::uint32_t c = s.firstCell; c <= s.lastCell && !water; ++c) water = CellHasWater(host, cells_[c].x, cells_[c].z);
         if (water) continue;
-        if (straightSteps_ <= end) return false;
+        if (straightSteps_ <= end) return refuse("the far bank is past the straight part", end);
         float depth = 0.0f;
         AdjustBridgeSpan(start, end, depth, altitude, networkType);
         bridgeType = FindBestBridgeType(start, end, true, depth, networkType);
-        return bridgeType >= 0;
+        if (bridgeType < 0) return refuse("no bridge type fits the span", end);
+        if (trace) std::fprintf(stderr, "bridge: steps %d..%d type %d depth %.1f altitude %.1f\n", start, end, bridgeType, depth, altitude);
+        return true;
     }
 }
 
