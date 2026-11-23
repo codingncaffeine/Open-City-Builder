@@ -10,6 +10,8 @@
 #include <set>
 #include <string>
 #include "gz/SimHostRegistry.h"
+#include "sc4/NetworkOccupant.h"
+#include "sc4/ServiceLocator.h"
 #include "sc4/RetainedReference.h"
 #include "sc4/DBSegment.h"
 #include "sc4/CommercialSimulator.h"
@@ -218,6 +220,11 @@ public:
     int CityCellsX() override { Seam("IZoneManagerHost::CityCellsX"); return {}; }
     int CityCellsZ() override { Seam("IZoneManagerHost::CityCellsZ"); return {}; }
     cISCPropertyHolder* GetTunables(const cGZPersistResourceKey& key) override { Seam("IZoneManagerHost::GetTunables"); return nullptr; }
+    cIGZMessageServer2* MessageServer() override { return SL::spMS2; }   // the dezone under new networks (zones.md 5.1)
+    int NetworkOccupantHasAnyFlag(cISC4Occupant* occupant, std::uint32_t flags) override {
+        auto* network = dynamic_cast<cSC4NetworkOccupant*>(occupant);
+        return network ? (network->HasAnyNetworkFlag(flags) ? 1 : 0) : -1;
+    }
 };
 Probe4 g_IZoneManagerHost;
 }

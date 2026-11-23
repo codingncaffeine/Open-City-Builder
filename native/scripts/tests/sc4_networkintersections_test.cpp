@@ -64,7 +64,7 @@ struct Host : INetworkToolHost {
     cSC4NetworkCellInfo* GetCellInfo(std::uint32_t) override { return nullptr; }
     cIGZUnknown* GetTuningProperty(std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t) override { return nullptr; }
     bool LoadString(std::uint32_t, std::uint32_t, cIGZString&) override { return false; }
-    bool DemolishForNetwork(bool, const std::vector<SC4PointU>& cells, std::int64_t& cost) override {
+    bool DemolishForNetwork(bool, const std::vector<SC4PointU>& cells, std::uint32_t, std::int64_t& cost) override {
         demolished = cells;
         cost = 0;
         return demolishAllowed;

@@ -647,7 +647,9 @@ public:
     // cSC4NetworkRoutines::ComputeDemolitionRegionForPlacementCells + spDemolition vslot 0x18 (DemolishRegion with
     // cSC4DemolishByNetworksOccupantFilter): price (commit false) or demolish (true) what stands on the cells; false when
     // the region may not be cleared.
-    virtual bool DemolishForNetwork(bool /*commit*/, const std::vector<SC4PointU>& /*cells*/, std::int64_t& cost) { cost = 0; return true; }
+    // ComputeDemolitionRegionForPlacementCells (i386 0x0061F7C0) + spDemolition DemolishRegion: the lots under the candidate
+    // cells; `layerMask` is the tool's OR filter mask (a lot cell holding a network occupant of the layer stays out).
+    virtual bool DemolishForNetwork(bool /*commit*/, const std::vector<SC4PointU>& /*cells*/, std::uint32_t /*layerMask*/, std::int64_t& cost) { cost = 0; return true; }
     // DestroyOccupantsAndResolve's outside calls (network-tools.md §10): the synchronous 0xaa7a014d send (message server
     // slot 3; void1 and IGZUnknown = the occupant), occupant manager RemoveOccupant(o, false, 0) (slot 21), the network
     // manager's GetAllIntersectionPieces (slot 12; one reference each) and a tunnel portal's other end (QI 0x8a4bd52b,

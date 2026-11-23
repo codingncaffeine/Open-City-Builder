@@ -792,7 +792,7 @@ int cIntRule::Test(int x, int z, cSC4NetworkTool& tool) const {
         cells.push_back({static_cast<std::uint32_t>(cx), static_cast<std::uint32_t>(cz)});
     }
     std::int64_t cost = 0;
-    const bool allowed = !host || host->DemolishForNetwork(false, cells, cost);
+    const bool allowed = !host || host->DemolishForNetwork(false, cells, kNetworkFlagMask, cost);
     return allowed ? kMatch : kNoMatch;
 }
 

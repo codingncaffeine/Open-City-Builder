@@ -1163,7 +1163,7 @@ void TestDeferAndMessages() {
     CHECK(developer->DoMessage(&initMessage));
     CHECK(host.road.refs == 1);   // already attached
 
-    // The occupant-removed message deletes the lot under the occupant and stops (the remnant/connection
+    // The network-inserted message deletes the lot under the occupant and stops (the remnant/connection
     // passes are not recovered).
     cSC4Lot* lot = nullptr;
     CHECK(TrackedCreateLot(developer, 4, 4, 1, 1, 0, lot));
@@ -1172,7 +1172,7 @@ void TestDeferAndMessages() {
     occupant.position[2] = 4 * 16.0f + 8.0f;
     cRZMessage2Standard removal;
     removal.SetType(0x99ef1142);
-    removal.SetData3(0xc7729698);
+    removal.SetData3(0xc772bf98);   // the network occupant type
     removal.SetVoid1(&occupant);
     removal.SetData4(1);
     CHECK(developer->DoMessage(&removal));
@@ -1805,8 +1805,8 @@ void TestOnDezoneAndRemnants() {
     developer->CreateLotRemnants(4, 4, 2, 2, 3);
     CHECK(developer->GetLotCount() == 2);
 
-    // A building removed from a zoned lot (0x99ef1142, subtype 0xc7729698): the lot goes and its cells get remnant lots
-    // (i386 0x000e2d6c), facing as the old lot did; a cell outside the old lot stays empty.
+    // A network occupant inserted on a zoned lot (0x99ef1142, data3 = the network occupant type 0xc772bf98): the lot goes and
+    // its cells get remnant lots (i386 0x000e2d6c), facing as the old lot did; a cell outside the old lot stays empty.
     developer->DeleteLots(0, 0, 15, 15);
     cSC4Lot* built = nullptr;
     CHECK(TrackedCreateLot(developer, 4, 4, 2, 2, 0, built));
@@ -1817,7 +1817,7 @@ void TestOnDezoneAndRemnants() {
     cRZMessage2Standard removed;
     removed.SetType(0x99ef1142u);
     removed.SetVoid1(&building);
-    removed.SetData3(0xc7729698u);
+    removed.SetData3(0xc772bf98u);
     removed.SetData4(0);
     CHECK(developer->DoMessage(&removed));
     CHECK(developer->GetLotCount() == 2);

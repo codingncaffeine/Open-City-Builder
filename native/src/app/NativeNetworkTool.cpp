@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -57,6 +58,7 @@
 #include "sc4/Lot.h"
 
 namespace native {
+int NativeZoneTypeAt(int x, int z);   // NativeDisasters.cpp: the zone manager's GetZoneType
 namespace {
 
 // The current city: SL::spCity, as the original asks (a pointer kept from an earlier city outlives it).
@@ -496,22 +498,52 @@ public:
         std::vector<std::uint8_t> bytes;
         return type < 13 && LoadResourceBytes(0x6534284a, kTypeRecords[type].exemplar, piece, bytes);
     }
-    // DestroyHilightedOccupants (i386 0x00122e3c) and the pricing: spDemolition DemolishRegion(commit, the cells, privilege 1,
-    // 0x2001, false, cSC4DemolishByNetworksOccupantFilter, cost).
-    bool DemolishForNetwork(bool commit, const std::vector<sc4::SC4PointU>& cells, std::int64_t& cost) override {
-        cost = 0;
-        if (cells.empty()) return true;
-        sc4::DemolitionRegion region;
-        region.bounds = sc4::DemolitionCellRect{static_cast<int>(cells[0].x), static_cast<int>(cells[0].z), static_cast<int>(cells[0].x), static_cast<int>(cells[0].z)};
+    // DestroyHilightedOccupants (i386 0x00122e3c) and the pricing (network-tools.md 8.0.1): ComputeDemolitionRegionForPlacementCells
+    // (i386 0x0061F7C0) turns the candidate cells into the region of the LOTS under them: every candidate's lot (lot-manager GetLot,
+    // its inclusive rect) adds its zoned cells that hold no network occupant of the tool's layer; a marked zone of 10..15 refuses
+    // the placement before any demolition. Then spDemolition DemolishRegion(commit, region, privilege 1, 0x2001, false,
+    // cSC4DemolishByNetworksOccupantFilter, cost). Candidates without a lot only widen the region's bounds.
+    bool DemolishForNetwork(bool commit, const std::vector<sc4::SC4PointU>& cells, std::uint32_t layerMask, std::int64_t& cost) override {
+        if (cells.empty()) return true;   // no outputs written
+        sc4::cSC4ZoneDeveloper* lots = LotManager();
+        int minX = INT32_MAX, minZ = INT32_MAX, maxX = 0, maxZ = 0;   // the union, exclusive maxima
+        auto grow = [&](int x0, int z0, int x1, int z1) {
+            minX = std::min(minX, x0); minZ = std::min(minZ, z0);
+            maxX = std::max(maxX, x1); maxZ = std::max(maxZ, z1);
+        };
+        std::vector<std::array<int, 4>> rects;   // converted rects (exclusive maxima), not deduplicated
         for (const sc4::SC4PointU& c : cells) {
-            region.bounds.x0 = std::min(region.bounds.x0, static_cast<int>(c.x));
-            region.bounds.z0 = std::min(region.bounds.z0, static_cast<int>(c.z));
-            region.bounds.x1 = std::max(region.bounds.x1, static_cast<int>(c.x));
-            region.bounds.z1 = std::max(region.bounds.z1, static_cast<int>(c.z));
+            const int x = static_cast<int>(c.x), z = static_cast<int>(c.z);
+            grow(x, z, x + 1, z + 1);
+            sc4::cSC4Lot* lot = lots ? lots->GetLot(x, z, false) : nullptr;
+            if (!lot) continue;
+            std::int32_t r[4] = {0, 0, 0, 0};
+            lot->GetBoundingRect(r);
+            grow(r[0], r[1], r[2] + 1, r[3] + 1);
+            rects.push_back({r[0], r[1], r[2] + 1, r[3] + 1});
         }
-        region.mask.assign(static_cast<std::size_t>(region.bounds.x1 - region.bounds.x0 + 1),
-                           std::vector<bool>(static_cast<std::size_t>(region.bounds.z1 - region.bounds.z0 + 1), false));
-        for (const sc4::SC4PointU& c : cells) region.mask[c.x - region.bounds.x0][c.z - region.bounds.z0] = true;
+        sc4::DemolitionRegion region;
+        if (minX > maxX) return true;
+        // the region keeps the union's exclusive maxima as its inclusive maxima (one extra unmarked row and column)
+        region.bounds = sc4::DemolitionCellRect{minX, minZ, maxX, maxZ};
+        region.mask.assign(static_cast<std::size_t>(maxX - minX + 1), std::vector<bool>(static_cast<std::size_t>(maxZ - minZ + 1), false));
+        std::uint32_t zoneMask = 0;
+        for (const auto& r : rects) {
+            for (int x = r[0]; x < r[2]; ++x) {
+                for (int z = r[1]; z < r[3]; ++z) {
+                    const int zone = NativeZoneTypeAt(x, z);
+                    if (zone == 0) continue;
+                    bool occupied = false;
+                    ForCellNetworkOccupants(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z), layerMask,
+                                            [&occupied](sc4::cSC4NetworkOccupant*) { occupied = true; });
+                    if (occupied) continue;
+                    region.mask[static_cast<std::size_t>(x - minX)][static_cast<std::size_t>(z - minZ)] = true;
+                    zoneMask |= 1u << (static_cast<unsigned>(zone) & 31u);
+                }
+            }
+        }
+        if (zoneMask & 0xfc00u) return false;   // zones 10..15 may not be cleared; cost untouched
+        cost = 0;
         return native::DemolishRegion(commit, region, 1, 0x2001, false, &cost, nullptr, 0, 0, &g_byNetworks);
     }
     std::uint32_t PieceTexture(std::uint32_t piece, int&) override {

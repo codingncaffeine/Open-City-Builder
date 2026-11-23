@@ -1299,7 +1299,7 @@ int cSC4NetworkTool::UpdateOccupantHighlights(int validSteps) {
     SC4_UNWIRED("cSC4NetworkTool::UpdateOccupantHighlights: cSC4NetworkRoutines::UpdateHighlights (highlight what the network will demolish) not ported");
     std::int64_t cost = 0;
     INetworkToolHost* host = GetNetworkToolHost();
-    const bool ok = !host || host->DemolishForNetwork(false, demolitionCells_, cost);
+    const bool ok = !host || host->DemolishForNetwork(false, demolitionCells_, placementFlagMask_, cost);
     baseCost_ = static_cast<std::int32_t>(cost);
     return validSteps - (ok ? 0 : 1);
 }
@@ -1309,7 +1309,7 @@ int cSC4NetworkTool::UpdateOccupantHighlights(int validSteps) {
 void cSC4NetworkTool::DestroyHilightedOccupants() {
     if (!demolitionCells_.empty()) {
         std::int64_t cost = 0;
-        if (INetworkToolHost* host = GetNetworkToolHost()) host->DemolishForNetwork(true, demolitionCells_, cost);
+        if (INetworkToolHost* host = GetNetworkToolHost()) host->DemolishForNetwork(true, demolitionCells_, placementFlagMask_, cost);
         demolitionCells_.clear();
     }
     ClearOccupantHighlights();

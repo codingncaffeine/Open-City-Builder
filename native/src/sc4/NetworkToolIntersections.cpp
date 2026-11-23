@@ -92,7 +92,7 @@ bool cSC4NetworkTool::InsertIsolatedHighwayIntersection(int x, int z, std::uint3
     unknown484_ = 0;
     std::int64_t cost = 0;
     INetworkToolHost* host = GetNetworkToolHost();
-    if (host && !host->DemolishForNetwork(false, demolitionCells_, cost)) return false;
+    if (host && !host->DemolishForNetwork(false, demolitionCells_, placementFlagMask_, cost)) return false;
     baseCost_ = static_cast<std::int32_t>(cost);
     int steps = validSteps_;
     CheckForReservedTiles(steps, static_cast<std::uint32_t>(type), true);              // vslot 0x114

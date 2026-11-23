@@ -2,8 +2,10 @@
 
 #include <algorithm>
 
+#include <cstdio>
 #include <cstdlib>
 
+#include "gz/cIGZMessage2.h"
 #include "sc4/DBSegment.h"
 #include "sc4/SCPropertyHelp.h"
 #include "sc4/ZoneDeveloper.h"
@@ -11,6 +13,9 @@
 namespace sc4 {
 
 namespace {
+constexpr std::uint32_t kMessageInsertOccupant = 0x99ef1142;   // kSC4MessageInsertOccupant
+constexpr std::uint32_t kInsertedNetworkType = 0xc772bf98;    // the network occupant type in data3
+constexpr std::uint32_t kNetworkFlagsKeepZone = 0x80200090;      // a network occupant with any of them leaves the zones alone
 const cGZPersistResourceKey kZoneTunablesKey{0x6534284a, 0xe7e2c2db, 0xe9482490};
 }
 
@@ -41,10 +46,26 @@ std::uint32_t cSC4ZoneManager::Release() {
     return --refCount_;
 }
 
-// The original's DoMessage handles the zoned-building-removal message (0x99ef1142 / 0xc7729698) and
-// drives PlaceZone; that stage machine is unrecovered, so the port does not route messages here.
-bool cSC4ZoneManager::DoMessage(cIGZMessage2*) {
-    return false;
+// i386 0x004DCA70 (zones.md 5.1): only kSC4MessageInsertOccupant (0x99ef1142) whose data3 is the network occupant type
+// (0xc772bf98). A network occupant with none of the flags 0x80200090 dezones its bounding cells, free of charge
+// (PlaceZone(region, 0, commit, skip funds, no slope check, skip size, lots inside)); the zone developer then re-parcels
+// what is left. The rectangle is clipped to the city (the original also writes outside the grid, which is undefined).
+bool cSC4ZoneManager::DoMessage(cIGZMessage2* message) {
+    auto* standard = dynamic_cast<cIGZMessage2Standard*>(message);
+    if (!standard || standard->GetType() != kMessageInsertOccupant || standard->GetData3() != kInsertedNetworkType) return true;
+    auto* occupant = static_cast<cISC4Occupant*>(standard->GetVoid1());
+    if (!occupant) return true;
+    if (host_->NetworkOccupantHasAnyFlag(occupant, kNetworkFlagsKeepZone) != 0) return true;   // not a network, or it keeps the zone
+    SC4CellRect cells;
+    occupant->GetBoundingCityCells(cells);   // occupant slot 11
+    if (!zoneGrid_) return true;
+    const int maxX = zoneGrid_->GetTractCountX() - 1, maxZ = zoneGrid_->GetTractCountZ() - 1;   // the zone grid is one tract per cell
+    SC4Rect<int> rect{std::max(cells.x0, 0), std::max(cells.z0, 0), std::min(cells.x1, maxX), std::min(cells.z1, maxZ)};
+    if (rect.x0 > rect.x1 || rect.z0 > rect.z1) return true;
+    SC4CellRegion<int> region = SC4CellRegion<int>::Make(rect, true);
+    const bool placed = PlaceZone(region, 0, true, true, false, true, true, nullptr, nullptr, nullptr);
+    if (std::getenv("SC4_ZONEDEBUG")) std::fprintf(stderr, "zone manager: network inserted, dezone %d,%d..%d,%d -> %d\n", rect.x0, rect.z0, rect.x1, rect.z1, placed ? 1 : 0);
+    return true;
 }
 
 std::uint32_t cSC4ZoneManager::GetDevelopmentFailureCount(int zoneType, int result) const {
@@ -212,6 +233,7 @@ bool cSC4ZoneManager::Init() {
     if (initialized_) return true;
     ReadSimulatorTunableValues();
     host_->RegisterNotifications();
+    if (cIGZMessageServer2* server = host_->MessageServer()) server->AddNotification(this, kMessageInsertOccupant);
     if (!countsLoaded_) {
         const std::int32_t cells = host_->CityCellsX() * host_->CityCellsZ();
         std::fill(std::begin(zoneCount_), std::end(zoneCount_), 0);
@@ -235,6 +257,7 @@ bool cSC4ZoneManager::Shutdown() {
     if (!initialized_) return true;
     initialized_ = false;
     host_->UnregisterNotifications();
+    if (cIGZMessageServer2* server = host_->MessageServer()) server->RemoveNotification(this, kMessageInsertOccupant);
     if (zoneGrid_) {
         zoneGrid_->Shutdown();
         zoneGrid_ = nullptr;

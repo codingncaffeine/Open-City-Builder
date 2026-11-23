@@ -9,7 +9,7 @@
 // (exemplar {type 0x6534284a, group 0xe7e2c2db, instance 0xe9482490}, properties 0xe94825b2..b9).
 //
 // Not recovered yet (pending in the ledger): PlaceZone (the core zoning transaction) and the
-// message handler that calls it for zoned-building removal (0x99ef1142 / 0xc7729698).
+// message handler that calls it for zoned-building removal (0x99ef1142 / 0xc772bf98).
 #pragma once
 #include <cstdint>
 #include <map>
@@ -28,6 +28,7 @@
 #include "sc4/cSC4SimGrid.h"
 
 namespace sc4 {
+class cISC4Occupant;
 
 constexpr std::uint32_t kZoneManagerClassId = 0x298f9b2d;
 constexpr std::uint32_t kGZIID_cISC4ZoneManager = 0x67652433;
@@ -47,6 +48,11 @@ public:
     virtual int CityCellsZ() = 0;
     virtual cISCPropertyHolder* GetTunables(const cGZPersistResourceKey& key) = 0;   // null when absent
     virtual void RegisterNotifications() {}                                           // occupant removed (0x99ef1142)
+    // SL::spMS2: the manager listens to kSC4MessageInsertOccupant (0x99ef1142) through it (DoMessage, dezone under new networks).
+    virtual cIGZMessageServer2* MessageServer() { return nullptr; }
+    // QueryInterface(0xa821ef94) as cISC4NetworkOccupant + slot 9 HasAnyNetworkFlag(flags): -1 when the occupant is no network
+    // occupant, else 1 when it has any of `flags`, 0 when none.
+    virtual int NetworkOccupantHasAnyFlag(cISC4Occupant* occupant, std::uint32_t flags) { (void)occupant; (void)flags; return -1; }
     virtual void UnregisterNotifications() {}
     // The five services the manager references in its stream, in stream order and with the
     // interface ids it reads them as: city 0x66ba4db5, occupant manager 0xc6bb8334, terrain
@@ -108,7 +114,7 @@ public:
     bool QueryInterface(std::uint32_t iid, void** out) override;
     std::uint32_t AddRef() override { return ++refCount_; }
     std::uint32_t Release() override;
-    bool DoMessage(cIGZMessage2* message) override;   // unrecovered; the port does not route messages here
+    bool DoMessage(cIGZMessage2* message) override;   // i386 0x004DCA70: dezone under every new network occupant (zones.md 5.1)
 
     bool Init();
     bool Shutdown();

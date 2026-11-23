@@ -40,7 +40,7 @@ constexpr std::uint32_t kZoneDeveloperIIDSerializable = 0xe4fda3d4;
 
 // The messages Init subscribes to and DoMessage handles.
 constexpr std::uint32_t kZoneMessageOccupantRemoved = 0x99ef1142;
-constexpr std::uint32_t kZoneMessageOccupantRemovedSubType = 0xc7729698;
+constexpr std::uint32_t kZoneMessageOccupantRemovedSubType = 0xc772bf98;   // the network occupant type (data3)
 constexpr std::uint32_t kZoneMessageHighLightScale = 0xa6b79602;
 constexpr std::uint32_t kZoneMessageCheatCode = 0x230e27ac;
 constexpr std::uint32_t kZoneMessageCityInit = 0x26d31ec1;
@@ -385,7 +385,7 @@ bool cSC4ZoneDeveloper::DoMessage(cIGZMessage2* message) {
             bool skip = false;
             if (occupant->QueryInterface(kGZIID_cISC4NetworkOccupant, &network) && network) {
                 auto* view = static_cast<IZoneDeveloperNetworkOccupant*>(network);
-                skip = view->HasNetworkFlag(kNetworkOccupantSkipFlag);
+                skip = view->HasAnyNetworkFlag(kNetworkOccupantSkipFlag);   // any of 0x80200090 (zones.md 5.2 step 1)
                 view->Release();
             }
             if (skip) return true;
@@ -397,6 +397,7 @@ bool cSC4ZoneDeveloper::DoMessage(cIGZMessage2* message) {
             city_->PositionToCell(position[0], position[2], cellX, cellZ);   // city vslot 0x2f8
             if (cellX < 0 || cellZ < 0 || cellX >= cellsX_ || cellZ >= cellsZ_) return true;   // original indexes unchecked
             cSC4Lot* lot = lotMap_[static_cast<std::size_t>(cellX)][static_cast<std::size_t>(cellZ)];
+            if (std::getenv("SC4_ZONEDEBUG")) std::fprintf(stderr, "zone developer: network inserted at %d,%d, lot %s\n", cellX, cellZ, lot ? "yes" : "no");
             if (lot) {
                 std::int32_t rect[4] = {0, 0, 0, 0};
                 lot->GetBoundingRect(rect);                         // cISC4Lot vslot 0x70
