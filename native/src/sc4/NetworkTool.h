@@ -922,6 +922,7 @@ public:
                            std::unordered_set<std::uint32_t>& unsolved, const cSC4TileEvaluator& evaluator, std::uint32_t networkType);
     bool AdjustTileSubsets(std::vector<tSolvedCell>& cells, bool retry);
     bool VerifyTileSubsets(std::vector<tSolvedCell>& cells);
+    int PatchTilePair(std::uint32_t firstPiece, tSolvedCell& first, tSolvedCell& second, int side);   // i386 0x001459f2
     // --- the height solve (i386 0x001444ae SmoothenNetwork and its helpers, 0x00145306 / 0x001454d0) ---
     // `pad` widens the smoothing set around the drag (PlaceNetwork retries with 0..3, or 1..3 with bridges).
     bool SmoothenNetwork(int pad);

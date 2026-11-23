@@ -9,7 +9,11 @@
 #include <vector>
 
 #include "gz/cIGZMessage2.h"
+#include "rz/cRZFile.h"
 #include "rz/cRZString.h"
+#include <cstdlib>
+#include <fstream>
+#include <string>
 #include "sc4/NetworkTool.h"
 #include "sc4/ResourceAsFile.h"
 #include "sc4/NetworkOccupant.h"
@@ -71,6 +75,9 @@ struct NetworkToolTestAccess {
         t.SolveMultiTypeIntersections(cells, solved, type);
     }
     static std::vector<tSolvedCell>& SolvedCellList(cSC4NetworkTool& t) { return t.solvedCellList_; }
+    static bool Adjust(cSC4NetworkTool& t, std::vector<tSolvedCell>& cells, bool retry) { return t.AdjustTileSubsets(cells, retry); }
+    static bool Verify(cSC4NetworkTool& t, std::vector<tSolvedCell>& cells) { return t.VerifyTileSubsets(cells); }
+    static std::unordered_set<std::uint32_t>& SolvedSet(cSC4NetworkTool& t) { return t.solvedCells_; }
     static void SetDrag(cSC4NetworkTool& t, int valid, int straight, int direction) {
         t.validSteps_ = valid;
         t.straightSteps_ = straight;
@@ -283,6 +290,15 @@ struct FakeHost : INetworkToolHost {
     // The pieces of a small world for DestroyOccupantsAndResolve: cell key -> piece (one reference each).
     std::map<std::uint32_t, cSC4NetworkOccupant*> pieces;
     std::vector<cSC4NetworkOccupant*> removedPieces, demolishedPieces;   // identities only
+    // Resource files by instance (ReloadRules' ini files), read from disk.
+    std::map<std::uint32_t, std::string> resourceFiles;
+    cIGZFile* OpenResourceFile(const cGZPersistResourceKey& key) override {
+        auto it = resourceFiles.find(key.instance);
+        if (it == resourceFiles.end()) return nullptr;
+        auto* file = new cRZFile(it->second.c_str());
+        file->AddRef();
+        return file;
+    }
     // The placed pieces cSC4PlacedNetworkOccupantFilter lets through (ComputeDraggedCells' end checks).
     std::map<std::uint32_t, cSC4NetworkOccupant*> placed;
     cSC4NetworkOccupant* PlacedNetworkOccupantAt(std::uint32_t x, std::uint32_t z, std::uint32_t) override {
@@ -1061,6 +1077,63 @@ int main() {
         CHECK(f.tool->DrawNetworkLine(start, end, true, 0));
         const std::vector<SC4PointU> down = {{4, 9}, {4, 8}, {4, 7}, {4, 6}};
         CHECK(A::Cells(*f.tool) == down);
+    }
+
+    // ---- the tile conflict rules and verifiers (AdjustTileSubsets / VerifyTileSubsets, i386 0x00146264 / 0x00145f50) ----
+    {
+        Fixture f(0);
+        f.Init();
+        using A = NetworkToolTestAccess;
+        const char* tmp = std::getenv("TMPDIR");
+        const std::string dir = tmp ? tmp : "/tmp";
+        const std::string rules = dir + "/sc4_networktool_ruleoverrides.ini", verifiers = dir + "/sc4_networktool_verifiers.ini";
+        std::ofstream(rules) << "[RuleOverrides]\r\n; a pair that becomes another\r\n0x100,0,0,0x200,0,0=0x101,0,0,0x201,0,0\r\n"
+                                "0x300,0,0,0x200,0,0=0,0,0,0,0,0\r\nnot,a,rule=1\r\n";
+        std::ofstream(verifiers) << "[TileVerifiers]\r\n0x500 = 5,0x600,0,0\r\n0x500 = 1,0x700,0,0\r\n";
+        f.host.resourceFiles[0x10000002] = rules;
+        f.host.resourceFiles[0x8a5993b9] = verifiers;
+        cSC4NetworkTool::ReloadRules();
+        const std::uint32_t left = 5 | (5u << 16), right = 6 | (5u << 16);
+        const auto at = [&](std::uint32_t key, std::int32_t index) {
+            cSC4NetworkCellInfo& cell = f.host.worldCache->cells[key];
+            cell.solvedCellIndex = index;
+        };
+        // A rule pair (the right piece across side 2 of the left one) becomes the new pair.
+        std::vector<tSolvedCell> cells = {tSolvedCell{0x100, 0, {}, left}, tSolvedCell{0x200, 0, {}, right}};
+        at(left, 0);
+        at(right, 1);
+        CHECK(A::Adjust(*f.tool, cells, false));
+        CHECK(cells.size() == 2 && cells[0].pieceType == 0x101 && cells[1].pieceType == 0x201);
+        CHECK(cells[0].rotationFlip == 0 && cells[1].rotationFlip == 0);
+        // Turned a quarter, the same pieces do not match the rule.
+        cells = {tSolvedCell{0x100, 1, {}, left}, tSolvedCell{0x200, 1, {}, right}};
+        CHECK(A::Adjust(*f.tool, cells, false));
+        CHECK(cells[0].pieceType == 0x100 && cells[1].pieceType == 0x200);
+        // A forbidden pair fails, or with a retry drops the piece and reopens its cell.
+        cells = {tSolvedCell{0x300, 0, {}, left}, tSolvedCell{0x200, 0, {}, right}};
+        CHECK(!A::Adjust(*f.tool, cells, false));
+        A::SolvedSet(*f.tool).clear();
+        CHECK(A::Adjust(*f.tool, cells, true));
+        CHECK(cells.size() == 1 && cells[0].pieceType == 0x200);
+        CHECK(A::SolvedSet(*f.tool).count(left) == 1);
+        CHECK(f.host.worldCache->cells[right].solvedCellIndex == 0);
+        // A verified piece needs one of its patterns around it: meta 5 is the cell at +x.
+        f.host.worldCache->cells.clear();
+        cells = {tSolvedCell{0x500, 0, {}, left}};
+        at(left, 0);
+        at(right, -1);
+        CHECK(!A::Verify(*f.tool, cells));
+        CHECK(cells.empty());
+        cells = {tSolvedCell{0x500, 0, {}, left}, tSolvedCell{0x600, 0, {}, right}};
+        at(right, 1);
+        CHECK(A::Verify(*f.tool, cells));
+        CHECK(cells.size() == 2);
+        // Turned a half (rotation 2), the pattern looks at -x instead.
+        cells = {tSolvedCell{0x500, 2, {}, left}, tSolvedCell{0x600, 2, {}, right}};
+        CHECK(!A::Verify(*f.tool, cells));
+        f.host.resourceFiles.clear();
+        std::remove(rules.c_str());
+        std::remove(verifiers.c_str());
     }
 
     // ---- ComputeDraggedCells' end passes (i386 0x004ccd48 / 0x004cd4a6) ------------------------------------------

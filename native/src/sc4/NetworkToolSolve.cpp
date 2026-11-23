@@ -32,6 +32,7 @@
 #include "gz/cGZPersistResourceKey.h"
 #include "gz/cIGZFile.h"
 #include "rz/cRZIniFile.h"
+#include "rz/RZStringUtils.h"
 #include "sc4/NetworkWorldCache.h"
 #include "sc4/NetworkPreview.h"
 #include "sc4/NetworkTunnelOccupant.h"
@@ -798,6 +799,82 @@ std::map<std::pair<std::uint32_t, std::uint32_t>, std::unordered_map<std::uint64
 // The AllowedOverrides matrix (sNetworkTypeInfo +0xfc per type): bit t = this type may override type t.
 std::uint32_t g_overrideMatrix[kNetworkTypeCount] = {};
 
+// cSC4NetworkTileConflictRule (sTileConflictRules, a multimap by the first piece): a pair of neighbouring pieces and what they
+// become; a first new piece of 0 means the pair may not meet. Rotations carry the flip in bit 7.
+struct tTileConflictRule {
+    std::uint32_t piece1 = 0;
+    std::uint8_t rotation1 = 0;
+    std::uint32_t piece2 = 0;
+    std::uint8_t rotation2 = 0;
+    std::uint32_t newPiece1 = 0;
+    std::uint8_t newRotation1 = 0;
+    std::uint32_t newPiece2 = 0;
+    std::uint8_t newRotation2 = 0;
+};
+std::multimap<std::uint32_t, tTileConflictRule> g_tileConflictRules;
+// cSC4NetworkTileVerificationEntry (8 bytes): a piece (and its rotation | flip << 7) that must stand at a meta position
+// around the verified piece. sTilePatternVerifyRules: piece -> the patterns, any of which verifies it.
+struct tTileVerificationEntry {
+    std::uint32_t piece = 0;
+    std::uint8_t rotation = 0;
+    std::uint8_t meta = 0;
+};
+std::multimap<std::uint32_t, std::vector<tTileVerificationEntry>> g_tileVerifyRules;
+
+// (anonymous namespace)::AddRuleOverrides (i386 0x00152142): "piece1,rotation1,flip1,piece2,rotation2,flip2" =
+// the same six for the new pair; a line that does not read six numbers on both sides is skipped.
+void AddRuleOverrides(const cRZString& key, const cRZString& value, void*) {
+    int a[6] = {}, b[6] = {};
+    if (std::sscanf(key.ToChar(), " %i , %i , %d , %i , %i , %d", &a[0], &a[1], &a[2], &a[3], &a[4], &a[5]) != 6) return;
+    if (std::sscanf(value.ToChar(), " %i , %i , %d , %i , %i , %d", &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]) != 6) return;
+    const auto rotation = [](int r, int flip) { return static_cast<std::uint8_t>(static_cast<std::uint8_t>(r) | (flip != 0 ? 0x80 : 0)); };
+    tTileConflictRule rule;
+    rule.piece1 = static_cast<std::uint32_t>(a[0]);
+    rule.rotation1 = rotation(a[1], a[2]);
+    rule.piece2 = static_cast<std::uint32_t>(a[3]);
+    rule.rotation2 = rotation(a[4], a[5]);
+    rule.newPiece1 = static_cast<std::uint32_t>(b[0]);
+    rule.newRotation1 = rotation(b[1], b[2]);
+    rule.newPiece2 = static_cast<std::uint32_t>(b[3]);
+    rule.newRotation2 = rotation(b[4], b[5]);
+    g_tileConflictRules.emplace(rule.piece1, rule);
+}
+
+// cRZString::SplitTokenDelimited: `out` takes the text before the first delimiter and `text` the rest; without one, `out`
+// takes it all and the result is false.
+bool SplitTokenDelimited(std::string& text, char delimiter, std::string& out) {
+    const std::size_t at = text.find(delimiter);
+    if (at == std::string::npos) {
+        out = text;
+        text.clear();
+        return false;
+    }
+    out = text.substr(0, at);
+    text.erase(0, at + 1);
+    return true;
+}
+
+// (anonymous namespace)::LoadVerifiersCallback (i386 0x00155c14): "piece = meta,piece,rotation,flip, ..." in groups of four.
+void LoadVerifiersCallback(const cRZString& key, const cRZString& value, void*) {
+    std::vector<tTileVerificationEntry>& pattern =
+        g_tileVerifyRules.emplace(RZAtoUint32HexA(key.ToChar()), std::vector<tTileVerificationEntry>{})->second;
+    std::string rest = value.ToChar();
+    std::string meta, piece, rotation, flip;
+    bool more = true;
+    do {
+        SplitTokenDelimited(rest, ',', meta);
+        SplitTokenDelimited(rest, ',', piece);
+        SplitTokenDelimited(rest, ',', rotation);
+        more = SplitTokenDelimited(rest, ',', flip);
+        tTileVerificationEntry entry;
+        entry.piece = RZAtoUint32HexA(piece.c_str());
+        entry.rotation = static_cast<std::uint8_t>(static_cast<std::uint8_t>(std::atoi(rotation.c_str())) +
+                                                   (static_cast<std::uint8_t>(std::atoi(flip.c_str())) != 0 ? 0x80 : 0));
+        entry.meta = static_cast<std::uint8_t>(std::atoi(meta.c_str()));
+        pattern.push_back(entry);
+    } while (more);
+}
+
 // nSC4Networks::kNetworkMultitypePriority (i386 0x00845520): the higher value keeps its pieces in a shared cell.
 constexpr int kNetworkMultitypePriority[kNetworkTypeCount] = {3, 5, 6, 2, 1, 0, 4, 1, 7, 7, 3, 0, 5};
 
@@ -993,12 +1070,27 @@ void cSC4NetworkTool::PlaceNeighborConnections() {
     }
 }
 
-// i386 0x00125220 (0x100186d56). PORTED: the multitype rules {0x0a5bcf4b, 0xaa5bcf57, 0x10000001}
-// (ReadAllMultiTypeIntersectionSolutions + SC4NetworkLoadOverrideMatrix) and the highway intersection rules (0x10000000,
-// ReadHighwayIntersectionRules). Not yet: the network type info ini (0x8a5971c5/0x8a5993b9, the host holds those records)
-// and the tile-conflict overrides (0x10000002).
+// i386 0x00125220 (0x100186d56): the network type info ini {0, 0x8a5971c5, 0x8a5993b9} (the host holds the type records; the
+// tile pattern verifiers "[TileVerifiers]" its ReloadNetworkTypeInfo ends with are loaded here), the multitype rules
+// {0x0a5bcf4b, 0xaa5bcf57, 0x10000001} (ReadAllMultiTypeIntersectionSolutions + SC4NetworkLoadOverrideMatrix), the tile
+// conflict rules (0x10000002, "[RuleOverrides]") and the highway intersection rules (0x10000000, ReadHighwayIntersectionRules).
 void cSC4NetworkTool::ReloadRules() {
     if (INetworkToolHost* host = GetNetworkToolHost()) {
+        if (cIGZFile* file = host->OpenResourceFile(cGZPersistResourceKey{0, 0x8a5971c5, 0x8a5993b9})) {
+            cRZIniFile ini(file);
+            g_tileVerifyRules.clear();   // cSC4NetworkTypeInfo::LoadTilePatternVerifiers (i386 0x0015205e)
+            ini.EnumEntries(cRZString("TileVerifiers"), LoadVerifiersCallback, &g_tileVerifyRules);
+            file->Release();
+        }
+        if (cIGZFile* file = host->OpenResourceFile(cGZPersistResourceKey{kNetworkRulesType, kNetworkRulesGroup, 0x10000002})) {
+            cRZIniFile ini(file);
+            g_tileConflictRules.clear();   // cSC4NetworkTypeInfo::LoadTileConflictRules (i386 0x00151bc0)
+            ini.EnumEntries(cRZString("RuleOverrides"), AddRuleOverrides, &g_tileConflictRules);
+            file->Release();
+        }
+        if (std::getenv("SC4_NETDEBUG"))
+            std::fprintf(stderr, "network rules: %zu tile conflict rules, %zu tile verifier patterns\n", g_tileConflictRules.size(),
+                         g_tileVerifyRules.size());
         if (cIGZFile* file = host->OpenResourceFile(cGZPersistResourceKey{kNetworkRulesType, kNetworkRulesGroup, 0x10000000})) {
             cRZIniFile ini(file);
             ReloadIntersectionRules(ini);
@@ -1226,19 +1318,199 @@ void cSC4NetworkTool::ApplyNetworkRules(std::unordered_set<std::uint32_t>& padde
     }
 }
 
-// i386 0x00146290: the tile conflict rules (cSC4NetworkTypeInfo::LoadTileConflictRules, sTileConflictRules) patch pairs of
-// neighbouring pieces that may not meet. With no rules loaded it returns true at once, which is what this port does until
-// the conflict rules are loaded (NOT PORTED: the patch loop and PatchTilePair).
-bool cSC4NetworkTool::AdjustTileSubsets(std::vector<tSolvedCell>&, bool) {
-    SC4_UNWIRED("cSC4NetworkTool::AdjustTileSubsets: tile conflict rules (PatchTilePair patch loop) not ported");
-    return true;
+// i386 0x001459f2. `first` and `second` meet across `side` of `first` (kNextX / kNextZ). Both rotations are turned so the
+// side faces the rules' frame; a rule of first's piece with second's piece (any piece when second's is 0, an immovable
+// neighbour) and both rotations (flip-mirrored when the flips differ) gives the new pair, turned back: 1. A rule whose new
+// first piece is 0 forbids the pair: 2. No rule: 0.
+int cSC4NetworkTool::PatchTilePair(std::uint32_t firstPiece, tSolvedCell& first, tSolvedCell& second, int side) {
+    const auto range = g_tileConflictRules.equal_range(firstPiece);
+    const std::uint8_t turnBack = static_cast<std::uint8_t>(side + 2);
+    const std::uint8_t turn = static_cast<std::uint8_t>(8 - turnBack);
+    const auto rotate = [](std::uint8_t rotation, std::uint8_t by) {
+        return static_cast<std::uint8_t>((rotation & 0x80) ? rotation - by + 8 : rotation + by);
+    };
+    const std::uint32_t secondPiece = second.pieceType;
+    const std::uint8_t firstRotation = static_cast<std::uint8_t>(rotate(first.rotationFlip, turn) & 0x83);
+    const std::uint8_t secondRotation = rotate(second.rotationFlip, turn);
+    for (auto it = range.first; it != range.second; ++it) {
+        const tTileConflictRule& rule = it->second;
+        if (secondPiece != rule.piece2) continue;
+        const bool mirrored = ((rule.rotation1 ^ firstRotation) & 0x80) != 0;
+        const std::uint8_t want2 = mirrored ? static_cast<std::uint8_t>((secondRotation & 0x83) ^ 0x82) : static_cast<std::uint8_t>(secondRotation & 0x83);
+        const std::uint8_t want1 = mirrored ? static_cast<std::uint8_t>(firstRotation ^ 0x82) : firstRotation;
+        if (rule.rotation1 != want1 || (secondPiece != 0 && rule.rotation2 != want2)) continue;
+        if (rule.newPiece1 == 0) return 2;
+        first.pieceType = rule.newPiece1;
+        second.pieceType = rule.newPiece2;
+        first.rotationFlip = rule.newRotation1;
+        second.rotationFlip = rule.newRotation2;
+        if (mirrored) {
+            first.rotationFlip ^= 0x82;
+            second.rotationFlip ^= 0x82;
+        }
+        first.rotationFlip = static_cast<std::uint8_t>(rotate(first.rotationFlip, turnBack) & 0x83);
+        second.rotationFlip = static_cast<std::uint8_t>(rotate(second.rotationFlip, turnBack) & 0x83);
+        return 1;
+    }
+    return 0;
 }
 
-// i386 0x00145f40: the tile pattern verifiers (sTilePatternVerifyRules, "TileVerifiers"). With no verifiers loaded it
-// returns true (0x00145f68), as here (NOT PORTED: the pattern walk).
-bool cSC4NetworkTool::VerifyTileSubsets(std::vector<tSolvedCell>&) {
-    SC4_UNWIRED("cSC4NetworkTool::VerifyTileSubsets: TileVerifiers pattern walk not ported (verifiers not loaded)");
-    return true;
+// i386 0x00146264: the tile conflict rules patch each solved piece against its four neighbours (solved pieces in place;
+// placed ones, or 0 for an immovable or buildable neighbour cell, through a copy that joins the solved list when a rule
+// changes it). A patched piece is checked again from its first side (at most 101 times); a pass that patched anything runs
+// again; more patches than max(100, 8 x pieces) fail. A forbidden pair fails, or with `retry` drops the piece (its cell goes
+// back to the unsolved set) and starts over.
+bool cSC4NetworkTool::AdjustTileSubsets(std::vector<tSolvedCell>& cells, bool retry) {
+    if (g_tileConflictRules.empty()) return true;
+    const int count8 = static_cast<int>(cells.size()) * 8;
+    int budget = count8 < 0x65 ? 100 : count8;
+    const auto cellAt = [this](std::uint32_t key) { return worldCache_ ? worldCache_->GetCell(key) : nullptr; };
+    for (;;) {
+        bool changed = false, restart = false;
+        std::size_t i = 0;
+        while (!restart && i < cells.size()) {
+            int patches = 0;
+            bool again = true;
+            while (again) {
+                again = false;
+                if (patches == 101) break;
+                const std::uint32_t key = cells[i].cellKey;
+                for (int side = 0; side < 4; ++side) {
+                    const std::uint32_t next = (key & 0xffff) + static_cast<std::uint32_t>(kNextX[side]) +
+                                               (((key >> 16) + static_cast<std::uint32_t>(kNextZ[side])) << 16);
+                    cSC4NetworkCellInfo* cell = cellAt(next);
+                    if (!cell) continue;
+                    tSolvedCell copy;
+                    tSolvedCell* neighbor = nullptr;
+                    bool isCopy = false;
+                    if (cell->solvedCellIndex < 0) {
+                        if (!cell->occupant) continue;
+                        copy.pieceType = cell->occupant->PieceId();                 // vslot 0x5c
+                        copy.rotationFlip = cell->occupant->GetRotationAndFlip();   // vslot 0x68
+                        copy.cellKey = next;
+                        neighbor = &copy;
+                        isCopy = true;
+                    } else {
+                        neighbor = &cells[static_cast<std::size_t>(cell->solvedCellIndex)];
+                    }
+                    if (cell->solvedOrImmovable || cell->buildable) {   // i386 +0x53 / +0x56
+                        if (!isCopy) copy = *neighbor;
+                        neighbor = &copy;
+                        copy.pieceType = 0;
+                        isCopy = true;
+                    }
+                    int result = PatchTilePair(cells[i].pieceType, cells[i], *neighbor, side);
+                    bool flipped = false;
+                    while (result != 2) {
+                        if (result == 1) {
+                            if (--budget < 0) return false;
+                            if (isCopy) {
+                                cell->solvedCellIndex = static_cast<std::int32_t>(cells.size());
+                                cells.push_back(*neighbor);
+                            }
+                            ++patches;
+                            changed = true;
+                            again = true;
+                            break;
+                        }
+                        if (flipped || !isCopy) break;
+                        result = PatchTilePair(neighbor->pieceType, *neighbor, cells[i], (side + 2) & 3);
+                        flipped = true;
+                    }
+                    if (again) break;
+                    if (result == 2) {
+                        if (!retry) return false;
+                        solvedCells_.insert(cells[i].cellKey);
+                        for (std::size_t j = i + 1; j < cells.size(); ++j)
+                            if (cSC4NetworkCellInfo* later = cellAt(cells[j].cellKey)) later->solvedCellIndex -= 1;
+                        cells.erase(cells.begin() + static_cast<std::ptrdiff_t>(i));
+                        restart = true;
+                        break;
+                    }
+                }
+                if (restart) break;
+            }
+            if (!restart) ++i;
+        }
+        if (restart) continue;
+        if (!changed) return true;
+    }
+}
+
+// i386 0x00145f50: a piece with tile pattern verifiers stays only when one of its patterns matches the pieces around it
+// (each entry's meta position turned by the piece's rotation and mirrored by its flip; the neighbour's solved or placed
+// piece, rotation relative to the verified one). A piece no pattern verifies is dropped (its cell goes back to the unsolved
+// set); the answer is false when any was.
+bool cSC4NetworkTool::VerifyTileSubsets(std::vector<tSolvedCell>& cells) {
+    if (g_tileVerifyRules.empty()) return true;
+    const auto cellAt = [this](std::uint32_t key) { return worldCache_ ? worldCache_->GetCell(key) : nullptr; };
+    bool removed = false;
+    std::size_t i = 0;
+    while (i < cells.size()) {
+        const auto range = g_tileVerifyRules.equal_range(cells[i].pieceType);
+        if (range.first == range.second) {
+            ++i;
+            continue;
+        }
+        const std::uint32_t key = cells[i].cellKey;
+        const std::uint8_t rotation = cells[i].rotationFlip;
+        bool verified = false;
+        for (auto it = range.first; it != range.second && !verified; ++it) {
+            bool all = true;
+            for (const tTileVerificationEntry& entry : it->second) {
+                std::int8_t dx = 0, dz = 0;
+                cSC4TileInfo::ConvertMetaToRelativePos(entry.meta, dx, dz);
+                if (rotation & 1) {
+                    const std::int8_t z = dz;
+                    dz = dx;
+                    dx = static_cast<std::int8_t>(-z);
+                }
+                if (rotation & 2) {
+                    dx = static_cast<std::int8_t>(-dx);
+                    dz = static_cast<std::int8_t>(-dz);
+                }
+                if (rotation & 0x80) dx = static_cast<std::int8_t>(-dx);
+                const std::uint32_t z = (key >> 16) + static_cast<std::uint32_t>(static_cast<std::int32_t>(dz));
+                const std::uint32_t x = static_cast<std::uint32_t>(static_cast<std::int32_t>(dx)) + (key & 0xffff);
+                if (static_cast<std::uint32_t>(cityWidth_) <= x || static_cast<std::uint32_t>(cityHeight_) <= z) {
+                    all = false;
+                    break;
+                }
+                const cSC4NetworkCellInfo* cell = cellAt(x + z * 0x10000);
+                if (!cell) {
+                    all = false;
+                    break;
+                }
+                std::uint32_t piece = 0;
+                std::uint8_t other = 0;
+                if (cell->solvedCellIndex < 0) {
+                    if (cell->occupant) {
+                        piece = cell->occupant->PieceId();
+                        other = cell->occupant->GetRotationAndFlip();
+                    }
+                } else {
+                    piece = cells[static_cast<std::size_t>(cell->solvedCellIndex)].pieceType;
+                    other = cells[static_cast<std::size_t>(cell->solvedCellIndex)].rotationFlip;
+                }
+                other = ((rotation ^ other) & 0x80) ? static_cast<std::uint8_t>(other + rotation) : static_cast<std::uint8_t>(other - rotation + 8);
+                if (piece != entry.piece || (other & 0x83) != entry.rotation) {
+                    all = false;
+                    break;
+                }
+            }
+            verified = all;
+        }
+        if (verified) {
+            ++i;
+            continue;
+        }
+        solvedCells_.insert(key);
+        for (std::size_t j = i + 1; j < cells.size(); ++j)
+            if (cSC4NetworkCellInfo* later = cellAt(cells[j].cellKey)) later->solvedCellIndex -= 1;
+        cells.erase(cells.begin() + static_cast<std::ptrdiff_t>(i));
+        removed = true;
+    }
+    return !removed;
 }
 
 // ============================================================================================================
