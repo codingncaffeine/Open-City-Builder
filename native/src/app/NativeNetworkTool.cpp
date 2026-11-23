@@ -867,6 +867,21 @@ void NativeBridgeReport(int x0, int z0, int x1, int z1) {
 }  // namespace native
 
 namespace native {
+// Kit instrument: every vertex of the rectangle rises by `rise`, then the terrain redisplays the cells with `reason` (the
+// 0x278e6003 message's data4, as a terrain tool's stroke posts it).
+void NativeTerrainEdit(int x0, int z0, int x1, int z1, float rise, std::uint32_t reason) {
+    sc4::cSTETerrain* t = Terrain();
+    if (!t) {
+        std::printf("terrainedit: no terrain\n");
+        return;
+    }
+    const std::int32_t stride = static_cast<std::int32_t>(t->VertexCountX());
+    for (int z = z0; z <= z1; ++z)
+        for (int x = x0; x <= x1; ++x) t->SetAltitude(z * stride + x, t->GetAltitudeAtVertex(x, z) + rise);
+    t->RedisplayTerrain(true, true, sc4::TerrainRect{x0, z0, x1, z1}, static_cast<std::int32_t>(reason));
+    std::printf("terrainedit %d,%d..%d,%d rise %.2f reason %u\n", x0, z0, x1, z1, rise, reason);
+}
+
 void NativeTerrainHeightsReport(int x0, int z0, int x1, int z1) {
     sc4::cSTETerrain* t = Terrain();
     if (!t) {

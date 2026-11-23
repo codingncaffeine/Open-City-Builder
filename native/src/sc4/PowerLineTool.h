@@ -125,6 +125,8 @@ public:
     virtual ~IPowerLineOccupant() = default;
     // cSC4PowerLineOccupant [3] +0x18 GetConnectedPoles: one reference per returned pole.
     virtual void GetConnectedPoles(IPowerPoleOccupant*& first, IPowerPoleOccupant*& second, bool& connected) = 0;
+    // [5] GetCell: the wire's cell.
+    virtual void GetCell(std::uint32_t& x, std::uint32_t& z) { x = 0; z = 0; }
 };
 
 // One occupant of the city (seam over cISC4Occupant for the calls the tool makes).
@@ -154,6 +156,12 @@ public:
     virtual void OnInserted() = 0;                                            // +0x48 InsertAllPowerLineOccupants
     virtual std::uint32_t DirectionFlags() const = 0;                         // field +0x100
     virtual void SetDirectionFlags(std::uint32_t flags) = 0;                  // field +0x100
+    // UpdateOnZoneChange's calls (i386 slots): the cells of a connection's wire (+0x14), of the wire to a pole (+0x5c),
+    // dropping every connection (+0x18) and one connection (cSC4PowerPoleOccupant::RemoveConnection).
+    virtual bool GetWireCells(int connection, std::vector<SC4PointU>& out) { (void)connection; out.clear(); return false; }
+    virtual bool GetWireCellsTo(IPowerPoleOccupant* pole, std::vector<SC4PointU>& out) { (void)pole; out.clear(); return false; }
+    virtual void BreakAllConnectionsAtDestination(bool quiet) { (void)quiet; }
+    virtual void RemoveConnectionTo(IPowerPoleOccupant* pole, bool quiet) { (void)pole; (void)quiet; }
 };
 
 // Everything cSC4PowerLineTool reaches outside itself. scripts/tests/sc4_powerlinetool_test.cpp supplies a fake.
@@ -220,7 +228,7 @@ public:
     // --- cISC4NetworkTool overrides (recovered slots) ---
     bool Init() override;                                             // [3] 0x1002ecf2a
     bool Shutdown() override;                                         // [4] 0x1002ed32a
-    void UpdateOnZoneChange(SC4RectU rect, std::uint32_t network) override;  // [10] 0x1002ec3c2 (PARTIAL)
+    void UpdateOnZoneChange(SC4RectU rect, std::uint32_t network) override;  // [10] 0x1002ec3c2 (i386 0x0022e388)
     std::uint32_t CursorId() override;                                // [43] 0x1002ea220
     std::uint32_t DirectionalCursorBase() override;                   // [44] 0x1002ea22c
     void GetFailureReasonString(std::uint32_t reason, cRZString& out) override;  // [54] 0x1002ed37c

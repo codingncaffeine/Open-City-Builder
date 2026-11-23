@@ -125,6 +125,10 @@ public:
     // (vslot 0x68(0)) when its class (vslot 0x14) is 0x88f154fb.
     virtual void DestroyPlantLots(const std::vector<cISC4Occupant*>& plants, std::uint32_t flags) { (void)plants; (void)flags; }
     virtual void DropViewToolOfClass(std::uint32_t clsid) { (void)clsid; }
+    // Message 0x07699455 (a zone change; data3 = the zone type, 0 = dezoned): SL::NetworkManager GetNetworkTool(5, false) (the power
+    // line tool), AddRef, Init (vslot 0xc),
+    // UpdateOnZoneChange(rect, data3) (vslot 0x28), Shutdown (vslot 0x10), Release. `rect` = x0, z0, x1, z1.
+    virtual void PowerLineToolZoneChange(const std::uint32_t rect[4], std::uint32_t network) { (void)rect; (void)network; }
     // neighbours (+0x30): deals of a type (vslot 0x74), power connections (0x44, or 0x48 to one city), an unvisited connection to a
     // city (0x3c) and whether the connection's other side is live (0x38 -> 0x34); the deal's city is its vslot [7]
     virtual void Deals(std::uint32_t type, std::vector<cISC4NeighborDeal*>& out) { (void)type; (void)out; }

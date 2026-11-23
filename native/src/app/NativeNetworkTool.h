@@ -28,5 +28,6 @@ void NativeSupportStructureReport(int x0, int z0, int x1, int z1);   // supports
 // Kit verb `terrainheights X0 Z0 X1 Z1` (read-only): the terrain altitude of every vertex in the inclusive rectangle, one
 // line per vertex row.
 void NativeTerrainHeightsReport(int x0, int z0, int x1, int z1);
+void NativeTerrainEdit(int x0, int z0, int x1, int z1, float rise, std::uint32_t reason);   // kit verb `terrainedit`
 
 }  // namespace native

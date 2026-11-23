@@ -114,6 +114,7 @@ public:
         if (a && !first) a->Release();
         if (b && !second) b->Release();
     }
+    void GetCell(std::uint32_t& x, std::uint32_t& z) override { line_->GetCell(x, z); }
 
 private:
     cSC4PowerLineOccupant* line_;

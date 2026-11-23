@@ -143,10 +143,18 @@ public:
     void RemoveConnection(tConnection& connection, bool quiet);                         // 0x100320270
     void RemoveConnection(cSC4PowerPoleOccupant* pole, bool quiet);                     // 0x100320340
     void DrawConnection(cSC4PowerPoleOccupant* pole, bool byCellOrder);                 // 0x1003204a4
-    void BreakAllConnectionsAtDestination(bool quiet);                                  // 0x100320544
+    void BreakAllConnectionsAtDestination(bool quiet) override;                         // 0x100320544
     void InsertAllPowerLineOccupants();                                                 // 0x100323ce8
     bool GetWireCells(cSC4PowerPoleOccupant* pole, std::vector<SC4PointU>& out);        // 0x10032203c
-    bool GetWireCells(int connection, std::vector<SC4PointU>& out);                     // 0x100322088
+    bool GetWireCells(int connection, std::vector<SC4PointU>& out) override;            // 0x100322088
+    bool GetWireCellsTo(IPowerPoleOccupant* pole, std::vector<SC4PointU>& out) override {
+        auto* other = dynamic_cast<cSC4PowerPoleOccupant*>(pole);
+        if (!other) { out.clear(); return false; }
+        return GetWireCells(other, out);
+    }
+    void RemoveConnectionTo(IPowerPoleOccupant* pole, bool quiet) override {
+        if (auto* other = dynamic_cast<cSC4PowerPoleOccupant*>(pole)) RemoveConnection(other, quiet);
+    }
     // The pole's own model instance for the model maker (the transform carries the position).
     void GetModelInstances(s3d::cIS3DModelInstance** out, int& count);                  // 0x100321efc
 

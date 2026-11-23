@@ -161,7 +161,6 @@ void cSC4PowerSimulator::DoTerrainHeightsChanged(const PowerRect& rect) {
 }
 
 // ---- messages ---------------------------------------------------------------------------------------------
-// PARTIAL: the network manager's half of 0x07699455 is not ported.
 bool cSC4PowerSimulator::DoMessage(cIGZMessage2* message) {
     if (!message) return true;
     auto* standard = static_cast<cIGZMessage2Standard*>(message);
@@ -224,9 +223,11 @@ bool cSC4PowerSimulator::DoMessage(cIGZMessage2* message) {
             host_->DropViewToolOfClass(0x88f154fbu);
         }
         break;
-    case kMsgPowerNetworkCells:
-        SC4_UNWIRED("cSC4PowerSimulator::DoMessage: the network manager half of 0x07699455 not ported");
-        if (const auto* rect = static_cast<const std::uint32_t*>(standard->GetVoid2())) CellChanged(rect[0], rect[1], rect[2], rect[3]);
+    case kMsgPowerNetworkCells:   // i386 0x001863f4: the cells of a zone change (void2 = the rectangle, data3 = the network)
+        if (const auto* rect = static_cast<const std::uint32_t*>(standard->GetVoid2())) {
+            CellChanged(rect[0], rect[1], rect[2], rect[3]);   // the original runs it between the tool's Init and its zone change
+            host_->PowerLineToolZoneChange(rect, static_cast<std::uint32_t>(standard->GetData3()));
+        }
         break;
     case kMsgPowerLotStateChanged: {   // a lot reaching state 1 on a powered cell has power at once
         int x = 0, z = 0;

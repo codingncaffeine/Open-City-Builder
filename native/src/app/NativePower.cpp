@@ -23,7 +23,9 @@
 #include "sc4/NeighborConnection.h"
 #include "sc4/NeighborDeal.h"
 #include "sc4/NeighborsSimulator.h"
+#include "sc4/NetworkManager.h"
 #include "sc4/NetworkOccupant.h"
+#include "sc4/NetworkTool.h"
 #include "sc4/Occupant.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/PowerPoleOccupant.h"
@@ -38,6 +40,7 @@
 #include "sc4/cSC4ZoneManager.h"
 
 namespace native {
+sc4::cSC4NetworkTool* NativeManagerNetworkTool(std::uint32_t type);   // app/NativeNetworkManager.cpp
 namespace {
 using namespace sc4;
 
@@ -285,6 +288,17 @@ public:
         native::DemolishLots(true, lots.data(), static_cast<int>(lots.size()), 0, flags, false, nullptr);
     }
     void DropViewToolOfClass(std::uint32_t clsid) override { native::DropViewToolOfClass(clsid); }
+    void PowerLineToolZoneChange(const std::uint32_t rect[4], std::uint32_t network) override {
+        sc4::cSC4NetworkManager* manager = CityNetworkManager();
+        sc4::INetworkManagerTool* view = manager ? manager->GetNetworkTool(sc4::kNetworkPowerLine, false) : nullptr;
+        if (!view) return;
+        view->AddRef();
+        view->Init();
+        if (sc4::cSC4NetworkTool* tool = NativeManagerNetworkTool(sc4::kNetworkPowerLine))
+            tool->UpdateOnZoneChange(sc4::SC4RectU{rect[0], rect[1], rect[2], rect[3]}, network);
+        view->Shutdown();
+        view->Release();
+    }
     void Deals(std::uint32_t type, std::vector<cISC4NeighborDeal*>& out) override {
         cSC4NeighborsSimulator* neighbors = Neighbors();
         if (!neighbors) return;

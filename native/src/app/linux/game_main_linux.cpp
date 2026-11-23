@@ -1481,6 +1481,12 @@ int RunScenario(const std::string& path) {
             int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
             words >> x0 >> z0 >> x1 >> z1;
             native::NativeTerrainHeightsReport(x0, z0, x1, z1);
+        } else if (command == "terrainedit") {   // terrainedit X0 Z0 X1 Z1 RISE REASON: raise a vertex rectangle, redisplay with a reason
+            int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
+            float rise = 0.0f;
+            std::uint32_t reason = 0;
+            words >> x0 >> z0 >> x1 >> z1 >> rise >> reason;
+            native::NativeTerrainEdit(x0, z0, x1, z1, rise, reason);
         } else if (command == "tunnelparams") {   // tunnelparams TYPE: a network type's tunnel rules (slopes, portal exemplars, clearances)
             std::uint32_t type = 0;
             words >> type;

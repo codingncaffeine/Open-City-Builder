@@ -1,11 +1,11 @@
 // cSC4PowerLineTool — see PowerLineTool.h for the layout, the vtable slots and the seams. Hand-written from
 // the Ghidra decompilation of the Aspyr macOS build (0x1002e9c30..0x1002ed8e0); every address below is the
-// original function / call site. UpdateOnZoneChange is marked PARTIAL: the reduced implementation keeps exactly
-// what its comment says (also listed under PARTIAL: in notes/ledger_pending/cSC4PowerLineTool.txt).
+// original function / call site.
 #include "sc4/PowerLineTool.h"
 #include "platform/Unwired.h"
 
 #include <algorithm>
+#include <list>
 #include <cfloat>
 #include <cmath>
 #include <cstddef>
@@ -828,15 +828,101 @@ void cSC4PowerLineTool::PlacePoles(bool resolve) {
 }
 
 
-// 0x1002ec3c2, PARTIAL. The original (1739 bytes) sets the +0x98 update flag, then walks every pole and wire
-// occupant of the changed rectangle: poles outside the rectangle are destroyed, poles inside it have their
-// connections broken (GetWireCells / RemoveConnection), wires whose endpoints survive are re-routed through
-// FindNewPolePosition in both directions, and the destroyed poles are removed from the city. None of that
-// occupant-level work is reproduced here; only the update flag the rest of the tool reads is recovered.
+// 0x1002ec3c2 (i386 0x0022e388). After a zone change on a network: every pole inside the rectangle goes (its connections
+// broken, removed from the city), each of its wires first rerouted to a new pole found along the wire outside the rectangle
+// (FindNewPolePosition from the pole's end); every wire cell in the rectangle whose two poles both survive (one per pole
+// pair) disconnects them and reroutes both halves the same way.
 void cSC4PowerLineTool::UpdateOnZoneChange(SC4RectU rect, std::uint32_t network) {
-    (void)rect;
-    SC4_UNWIRED("cSC4PowerLineTool::UpdateOnZoneChange: poles and wires of the changed rectangle are not destroyed / disconnected / re-routed");
-    if (network != 0) unknown98_ = true;
+    if (network == 0) return;
+    unknown98_ = true;
+    IPowerLineToolHost* host = GetPowerLineToolHost();
+    if (host == nullptr) return;
+    const SC4CellRect cells{static_cast<std::int32_t>(rect.x0), static_cast<std::int32_t>(rect.z0), static_cast<std::int32_t>(rect.x1),
+                            static_cast<std::int32_t>(rect.z1)};
+    std::vector<ICityOccupant*> found;
+    host->GetOccupantsInCellRect(found, cells.x0, cells.z0, cells.x1, cells.z1);   // occupant manager vslot 0xa4
+    std::list<IPowerLineOccupant*> lines;
+    std::list<IPowerPoleOccupant*> poles;
+    const auto release = [](IPowerPoleOccupant* pole) { if (pole) pole->Release(); };
+    for (ICityOccupant* occupant : found) {
+        if (IPowerPoleOccupant* pole = occupant->QueryPole()) {
+            float position[3] = {};
+            occupant->GetPosition(position);
+            int cx = 0, cz = 0;
+            host->PositionToCityCell(position[0], position[2], cx, cz);   // occupant manager vslot 0x4c
+            if (cx < cells.x0 || cells.x1 < cx || cz < cells.z0 || cells.z1 < cz) {
+                pole->Release();
+            } else {
+                const int count = pole->GetNumberOfConnections();
+                for (int i = 0; i < count; ++i) {
+                    std::vector<SC4PointU> wire;
+                    pole->GetWireCells(i, wire);
+                    const int size = static_cast<int>(wire.size());
+                    if (size < 2) continue;
+                    int start = size - 1, end = 0, step = -1;
+                    if (wire[0].x == static_cast<std::uint32_t>(cx) && wire[0].z == static_cast<std::uint32_t>(cz)) {
+                        start = 1;
+                        end = size;
+                        step = 1;
+                    }
+                    FindNewPolePosition(cells, start, end, step, wire, pole, pole->GetConnectionOccupant(i));
+                }
+                poles.push_back(pole);
+            }
+        } else if (IPowerLineOccupant* line = occupant->QueryPowerLine()) {
+            IPowerPoleOccupant *first = nullptr, *second = nullptr;
+            bool connected = false;
+            line->GetConnectedPoles(first, second, connected);
+            bool known = false;
+            for (IPowerLineOccupant* other : lines) {
+                IPowerPoleOccupant *a = nullptr, *b = nullptr;
+                bool c = false;
+                other->GetConnectedPoles(a, b, c);
+                release(a);
+                release(b);
+                if (first == a || a == second || first == b || second == b) {
+                    known = true;
+                    break;
+                }
+            }
+            if (known) line->Release();
+            else lines.push_back(line);
+            release(first);
+            release(second);
+        }
+        occupant->Release();
+    }
+    for (IPowerLineOccupant* line : lines) {
+        IPowerPoleOccupant *first = nullptr, *second = nullptr;
+        bool connected = false;
+        line->GetConnectedPoles(first, second, connected);
+        if (first && second && std::find(poles.begin(), poles.end(), first) == poles.end() &&
+            std::find(poles.begin(), poles.end(), second) == poles.end()) {
+            std::vector<SC4PointU> wire;
+            first->GetWireCellsTo(second, wire);
+            const int size = static_cast<int>(wire.size());
+            if (size > 1) {
+                std::uint32_t x = 0, z = 0;
+                line->GetCell(x, z);
+                for (int i = 0; i < size; ++i) {
+                    if (wire[static_cast<std::size_t>(i)].x != x || wire[static_cast<std::size_t>(i)].z != z) continue;
+                    first->RemoveConnectionTo(second, false);
+                    second->RemoveConnectionTo(first, false);
+                    FindNewPolePosition(cells, i, size, 1, wire, first, second);
+                    FindNewPolePosition(cells, i, size, -1, wire, second, first);
+                    break;
+                }
+            }
+        }
+        release(first);
+        release(second);
+        line->Release();
+    }
+    for (IPowerPoleOccupant* pole : poles) {
+        pole->BreakAllConnectionsAtDestination(true);   // vslot 0x18
+        host->RemovePoleOccupant(pole, true);           // occupant manager vslot 0x54 (pole, 1, 0)
+        pole->Release();
+    }
 }
 
 // ============================================================================================================
