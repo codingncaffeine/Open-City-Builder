@@ -2368,8 +2368,8 @@ void cSC4NetworkTool::CreateNetworkOccupant(cSC4NetworkCellInfo* cell, cSC4Netwo
     } else if (clsid == kGZCLSID_cSC4NetworkOccupantWithPreBuiltModel) {
         occupant = new cSC4NetworkOccupantWithPreBuiltModel();                           // the intersection pieces
     } else {
-        SC4_UNWIRED("cSC4NetworkTool::CreateNetworkOccupant: network occupant class not ported, a plain network occupant stands in");
-        std::fprintf(stderr, "network tool: occupant class %08x not ported, using a plain network occupant\n", clsid);
+        // The original knows only these four classes (another id leaves its pointer unset); no caller passes one.
+        std::fprintf(stderr, "network tool: unknown occupant class %08x, using a plain network occupant\n", clsid);
         occupant = new cSC4NetworkOccupant();
     }
     *out = occupant;
@@ -2383,6 +2383,8 @@ void cSC4NetworkTool::CreateNetworkOccupant(cSC4NetworkCellInfo* cell, cSC4Netwo
     occupant->Init(c);                                                                  // vslot 0xc
     if (!unknown98_) occupant->SetNetworkFlag(0x80000000u);
     else occupant->ClearNetworkFlag(0x80000000u);
+    // QueryInterface 0x49c1a034: a pre-built model piece shears its model to the corners it was just given.
+    if (auto* prebuilt = dynamic_cast<cSC4NetworkOccupantWithPreBuiltModel*>(occupant)) prebuilt->RecomputeShearTransform();
     if (clsid == 0x8a4bd52b) {
         occupant->SetNetworkFlag(0x10000000);
         occupant->ClearNetworkFlag(0x4000);
@@ -2860,12 +2862,8 @@ std::uint32_t FirstTypeOf(std::uint32_t flags) {
 //   3. re-solve: the movable pieces within two cells of every re-solve cell, then insert the solved pieces;
 //   4. a piece the solve left unsolved loses its weaker network type (two types) or is queued for removal; a lot
 //      connection node is only marked unusable.
-// PARTIAL: the first constraint satisfier's Shutdown / Init(0, terrain maximum + kDefaultMaxDensity) are not on the
-// INetworkConstraintSatisfier seam; the fixed corners go in only when the host supplies one (natively it does not, as
-// for placement).
 void cSC4NetworkTool::DestroyOccupantsAndResolve(const std::vector<cSC4NetworkOccupant*>& occupants) {
     if (occupants.empty()) return;
-    SC4_UNWIRED("cSC4NetworkTool::DestroyOccupantsAndResolve: constraint satisfier Shutdown / Init before the re-solve not ported");
     INetworkToolHost* host = GetNetworkToolHost();
     forceReload_ = true;                       // +0x53
     const bool saved = unknown98_;             // +0x50, restored at the end
@@ -2970,9 +2968,11 @@ void cSC4NetworkTool::DestroyOccupantsAndResolve(const std::vector<cSC4NetworkOc
         }
         removal.clear();
 
-        // 3. re-solve around the cells
+        // 3. re-solve around the cells (the first satisfier starts over: Shutdown, Init(0, terrain maximum + kDefaultMaxDensity))
         solvedCells_.clear();
+        if (constraintA_) constraintA_->Shutdown();
         solvedCellList_.clear();
+        if (constraintA_) constraintA_->Init(0.0f, (host ? host->TerrainMaxAllowedHeight() : 0.0f) + kSmoothingHeadroom);   // terrain vslot 0x60
         for (std::uint32_t key : resolveCells) {
             const std::uint32_t cx = key & 0xffff, cz = key >> 16;
             const std::uint32_t x0 = cx < 3 ? 0 : cx - 2, z0 = cz < 3 ? 0 : cz - 2;
