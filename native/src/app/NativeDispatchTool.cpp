@@ -49,8 +49,7 @@ bool Debug() {
 cSC4View3DWin* g_view = nullptr;
 
 // cPylonFilter::IsOccupantIncluded (i386 0x006f9af6): a pylon occupant (type 0xa9b6d7de) that answers cISC4PylonOccupant with a
-// non-zero UI state. PARTIAL: the original also turns away a pylon whose slot 0x40 is set and one whose owner (slot 0x50)
-// answers 0x0a1da42f (a MySim's call box).
+// non-zero UI state (vslot 0x1c), is not being dragged (vslot 0x40) and whose owner (vslot 0x50) is not a MySim (0x0a1da42f).
 class PylonFilter final : public cSC4OccupantFilter {
 public:
     bool IsOccupantIncluded(sc4::cISC4Occupant* occupant) override {
@@ -58,10 +57,17 @@ public:
         void* raw = nullptr;
         if (!occupant->QueryInterface(kDispatchPylonIid, &raw) || !raw) return false;
         auto* pylon = static_cast<cISC4PylonOccupant*>(raw);
-        const bool shown = pylon->GetUIState() != 0;
+        bool included = pylon->GetUIState() != 0 && !pylon->GetDragState();
+        if (included) {
+            void* sim = nullptr;
+            cIGZUnknown* owner = pylon->GetPylonOwner();
+            if (owner && owner->QueryInterface(0x0a1da42fu, &sim) && sim) {
+                static_cast<cIGZUnknown*>(sim)->Release();
+                included = false;
+            }
+        }
         pylon->Release();
-        if (shown) SC4_UNWIRED("cPylonFilter::IsOccupantIncluded: the slot 0x40 test and the MySim call box owner test (0x0a1da42f) are not ported");
-        return shown;
+        return included;
     }
 } g_pylonFilter;
 
@@ -127,37 +133,24 @@ private:
 class DispatchToolHostImpl final : public IDispatchToolHost {
 public:
     cISC4DispatchManager* DispatchManager() override { return NativeDispatchManager(); }
-    // PARTIAL: cSC43DRender::Pick (spRenderer vslot 0x100 with cPylonFilter) is not recovered natively; the call boxes the
-    // manager holds are tested in screen space instead: the projection of each one's world box, nearest the camera last drawn
-    // first (the original's pick takes the frontmost model).
+    // SL::spRenderer vslot 0x100 Pick(x, y, cPylonFilter): the frontmost call box under the point, as the manager's view.
     IPylonOccupant* PickPylon(int x, int y) override {
-        SC4_UNWIRED("cSC4ViewInputControlDispatch pick: cSC43DRender::Pick with cPylonFilter is not recovered; a screen-space box test stands in");
         auto* manager = dynamic_cast<cSC4DispatchManager*>(NativeDispatchManager());
-        if (!manager) return nullptr;
-        IPylonOccupant* best = nullptr;
-        float bestDepth = 0.0f;
-        for (IPylonOccupant* view : manager->AllPylons()) {
-            auto* object = view ? dynamic_cast<cSC4PylonOccupant*>(view->AsOccupant()) : nullptr;
-            if (!object || !g_pylonFilter.IsOccupantIncluded(view->AsOccupant())) continue;
-            const float* lo = object->WorldBoundsMin();
-            const float* hi = object->WorldBoundsMax();
-            float sx0 = 1e30f, sy0 = 1e30f, sx1 = -1e30f, sy1 = -1e30f;
-            for (int corner = 0; corner < 8; ++corner) {
-                const float p[3] = {(corner & 1) ? hi[0] : lo[0], (corner & 2) ? hi[1] : lo[1], (corner & 4) ? hi[2] : lo[2]};
-                float px = 0, py = 0;
-                if (!ProjectToViewport(p, px, py)) return nullptr;
-                sx0 = std::min(sx0, px); sx1 = std::max(sx1, px);
-                sy0 = std::min(sy0, py); sy1 = std::max(sy1, py);
-            }
-            if (float(x) < sx0 || float(x) > sx1 || float(y) < sy0 || float(y) > sy1) continue;
-            const float depth = sy1;   // lower on the screen = nearer the camera
-            if (!best || depth > bestDepth) {
-                best = view;
-                bestDepth = depth;
-            }
-        }
-        if (best) best->AddRef();   // one reference for the caller, like the original QI
-        return best;
+        cSC43DRender* render = CityRenderer();
+        if (!manager || !render) return nullptr;
+        s3d::cIS3DModelInstance* model = nullptr;
+        if (!render->Pick(x, y, &g_pylonFilter, model) || !model) return nullptr;
+        cIGZUnknown* owner = model->GetOwner();
+        void* raw = nullptr;
+        sc4::cISC4Occupant* occupant = owner && owner->QueryInterface(sc4::kGZIID_cISC4Occupant, &raw) ? static_cast<sc4::cISC4Occupant*>(raw) : nullptr;
+        model->Release();
+        if (!occupant) return nullptr;
+        IPylonOccupant* found = nullptr;
+        for (IPylonOccupant* view : manager->AllPylons())
+            if (view && view->AsOccupant() == occupant) { found = view; break; }
+        occupant->Release();
+        if (found) found->AddRef();   // one reference for the caller, like the original QI
+        return found;
     }
     bool PickTerrain(int x, int y, float out[3]) override { return g_view && g_view->PickTerrain(x, y, out, false); }
     float Altitude(float x, float z) override { return NativeDispatchAltitude(x, z); }
