@@ -134,13 +134,12 @@ bool cSC4SubBudgetWindow::Create(cIGZWin** window, std::uint32_t purpose, std::u
 
 // DestroySubBudgetWindow (i386 0x0026961a): the neighbor-deal proposals are dropped (ReleaseDeals), then end_dialog.
 void cSC4SubBudgetWindow::Destroy() {
-    // PARTIAL: the simulator pause around the dialog (spSimulator 0x28 in on_init, 0x34 here) is not applied.
-    SC4_UNWIRED("cSC4SubBudgetWindow::Destroy: simulator resume (spSimulator 0x34) after the dialog not applied");
     if (Trace())
         for (const BudgetRestoreInfo& info : restore_)
             if (info.department) std::fprintf(stderr, "sub budget: destroy: department %08x funding %.2f (opened at %.2f)\n", info.department->GetDepartmentID(),
                                               info.department->GetFundingPercentage(), info.funding);
     ReleaseDeals();
+    if (g_host) g_host->SimulatorHiddenPause(false);   // spSimulator vslot 0x34 HiddenResume
     if (dialog_) EndDialog(dialog_, kResultClose);   // the window's destroyed message runs on_shutdown, which drops the references
 }
 
@@ -490,8 +489,8 @@ void cSC4SubBudgetWindow::Departments(std::vector<cSC4DepartmentBudget*>& out) {
 // total) or per listed line item, on the income side and the expense side; OK and Cancel at the bottom.
 bool cSC4SubBudgetWindow::OnInit(cIGZWin* window) {
     if (!window) return false;
-    SC4_UNWIRED("cSC4SubBudgetWindow::OnInit: simulator pause (spSimulator 0x28) while the dialog is open not applied");
     if (initialized_) return true;
+    if (g_host) g_host->SimulatorHiddenPause(true);   // spSimulator vslot 0x28 HiddenPause
     if (Trace()) std::fprintf(stderr, "sub budget: on_init purpose 0x%08x\n", purpose_);
     if (period_ == 0) {
         incomeTitle_ = Text(0xaa5690b0); incomeHeader_ = Text(0xca569b75);

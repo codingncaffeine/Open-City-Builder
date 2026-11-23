@@ -98,6 +98,9 @@ public:
         (void)holder; (void)kind; (void)secondary; (void)fraction; return false;
     }
     virtual void MoneyString(std::int64_t amount, cRZString& out) { (void)amount; out = cRZString(); }   // SC4MakeMoneyString
+    // SL::spSimulator HiddenPause (i386 vslot 0x28, on_init) / HiddenResume (vslot 0x34, DestroySubBudgetWindow): the simulation
+    // holds while the dialog is open.
+    virtual void SimulatorHiddenPause(bool pause) { (void)pause; }
     // a building row's name button: the camera looks at the building (QI 0x26bb767e slot 8 GetPosition, renderer slot 0x40
     // camera control SetViewTargetPosition)
     virtual bool LookAtBuilding(cISCPropertyHolder* holder) { (void)holder; return false; }

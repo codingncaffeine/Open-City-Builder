@@ -189,6 +189,10 @@ BudgetWindow* g_window = nullptr;
 // directly on the window classes with the same settings.
 class SubBudgetHost final : public sc4::ISubBudgetWindowHost {
 public:
+    void SimulatorHiddenPause(bool pause) override {
+        auto* simulator = Component<sc4::cSC4Simulator>(sc4::CityComponent::Simulator, sc4::kGZCLSID_cSC4Simulator);
+        if (simulator) pause ? simulator->HiddenPause() : simulator->HiddenResume();
+    }
     sc4::cSC4BudgetSimulator* BudgetSimulator() override {
         return Component<sc4::cSC4BudgetSimulator>(sc4::CityComponent::BudgetSimulator, sc4::kGZCLSID_cSC4BudgetSimulator);
     }
