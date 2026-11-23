@@ -45,6 +45,7 @@ public:
     virtual std::uint32_t GetID() { return id_; }
     virtual void SetID(std::uint32_t id) { id_ = id; }
     virtual cIGZCursor* GetCursor() { return cursor_; }
+    std::uint32_t CursorId() const { return cursorId_; }
     virtual void SetCursor(cIGZCursor* cursor);
     virtual void SetCursor(std::uint32_t cursorId);
     virtual void SetWindow(cIGZWin* window) { window_ = window; }

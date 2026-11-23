@@ -572,7 +572,7 @@ int main() {
         CHECK(f.aircraftHost.audioPlayed.size() == 1 && f.aircraftHost.audioPlayed[0] == 8);
         auto* drive = static_cast<tAutomataStatePlayerDrive*>(plane->GetState());
         CHECK(drive != nullptr);
-        CHECK(drive->value170 == 0xf);
+        CHECK(drive->shells == 0xf);
         CHECK(drive->timeout1d8 == 0x44fa0000u);
         CHECK(drive->value40 == 0);
         CHECK_NEAR(drive->groupSpeed, 1.0f);

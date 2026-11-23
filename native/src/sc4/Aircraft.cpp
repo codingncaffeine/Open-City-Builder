@@ -90,7 +90,7 @@ bool cSC4Aircraft::HandleEnterState(tAutomataState* state) {
     tAutomataState* top = GetState();
     if (top && top->stateType == kStatePlayerDrive) {
         auto* drive = static_cast<tAutomataStatePlayerDrive*>(top);
-        drive->value170 = 0xf;
+        drive->shells = 0xf;
         drive->timeout1d8 = 0x44fa0000;   // 2000.0f
     }
     return cSC4Automaton::HandleEnterState(state);

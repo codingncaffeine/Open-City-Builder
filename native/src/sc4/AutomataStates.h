@@ -112,23 +112,32 @@ public:
     float effectTimerC4 = 0.0f;            // +0xc4
     std::uint8_t hint117 = 0;              // +0x117
     std::uint8_t hint119 = 0;              // +0x119
-    std::uint32_t value170 = 0;            // +0x170
-    std::int32_t animStage1a4 = 0;         // +0x1a4
+    // The weapon block the dashboard shows (i386 +0x144 / +0x178 / +0x1ff; the 64-bit build keeps the tail 0x2c higher).
+    std::uint32_t shells = 0;              // +0x170 (i386 +0x144): rounds at the start (15, the tank 12)
+    std::int32_t shotsFired = 0;           // +0x1a4 (i386 +0x178): ammunition text = shells - shotsFired
     std::uint32_t timeout1d8 = 0;          // +0x1d8 (bits of 2000.0f)
     std::uint32_t effectDelay20c = 0;      // +0x20c
-    std::uint8_t wakeStarted22b = 0;       // +0x22b
+    std::uint8_t fireArmed = 0;            // +0x22b (i386 +0x1ff): fire button 0x6c3a0a6f; the next shot clears it
     // The helicopter's spotlight effect state (cSC4Helicopter::TranslatePlayerDriveCommands / UpdateSpotlight).
     float effectParam240 = 0.0f;           // +0x240
     float effectParam244 = 0.0f;           // +0x244
     cS3DVector3 effectPosition248;         // +0x248
     std::uint8_t spotlightStarted255 = 0;  // +0x255
-    float steerRate260 = 0.0f;             // +0x260
+    float pitchGaugeScale = 0.0f;          // +0x260 (i386 +0x234): the factor pitchGauge was scaled by
     std::int32_t cellX298 = 0;             // +0x298 (occupant manager slot 0x88 result, cSC4Helicopter::DoPlayerDriveTick)
     std::int32_t cellZ29c = 0;             // +0x29c
-    float steerVisual264 = 0.0f;           // +0x264
-    float wakeAngle268 = 0.0f;             // +0x268
-    float wakeTurn26c = 6.2831855f;        // +0x26c
-    float heading270 = 0.0f;               // +0x270
+    // The dashboard dials (cSC4ViewInputControlPlayerDrive::UpdateDashboard): knob 0x6bcbce73 shows pitchGauge on
+    // -0.5236..0.5236, knob 0x6c0ae7b1 the compass triple (min, max, value).
+    float pitchGauge = 0.0f;               // +0x264 (i386 +0x238)
+    float compassMin = 0.0f;               // +0x268 (i386 +0x23c)
+    float compassMax = 6.2831855f;         // +0x26c (i386 +0x240)
+    float compassValue = 0.0f;             // +0x270 (i386 +0x244)
+    // The tank's barrel dials (cSC4Tank::HandleEnterState / TranslatePlayerDriveCommands): pitch knob 0x2bf98d69, turret
+    // knob 0xebf98d37, velocity knob 0x2c0c1c8c, each (min, max, value); and the drive cursor (0 = the tool's default).
+    float barrelPitch[3] = {};             // i386 +0x248 / +0x24c / +0x250
+    float barrelTurn[3] = {};              // i386 +0x254 / +0x258 / +0x25c
+    float barrelVelocity[3] = {};          // i386 +0x260 / +0x264 / +0x268
+    std::uint32_t cursor = 0;              // i386 +0x114
     // The vehicle player-drive run-time block (original +0x48..+0x70 and +0x254; not serialized, cSC4Watercraft never
     // reads it). The effect / particle / occupant / accident pointers the original also keeps in this record live on
     // cSC4Vehicle in the port (see Vehicle.h).

@@ -989,8 +989,25 @@ int main() {
         CHECK(boat->DriveMode() == 2);
         CHECK_NEAR(drive->value38, 0.5f);
         CHECK(boat->Speed() != 0.0f);
-        CHECK_NEAR(drive->steerVisual264, -0.03125f);
-        CHECK_NEAR(drive->wakeTurn26c, 6.2831855f);
+        CHECK_NEAR(drive->pitchGauge, -0.03125f);
+        CHECK_NEAR(drive->compassMax, 6.2831855f);
+        // The compass: the heading clockwise from -z (+x = pi/2; -x = 3 pi/2; -z = 0 or 2 pi).
+        CHECK(boat->Orientation().x == 1.0f && boat->Orientation().z == 0.0f);
+        CHECK_NEAR(drive->compassValue, 1.5707964f);
+        {
+            const float west[3] = {-1.0f, 0.0f, 0.0f};
+            boat->SetOrientation(west);
+            CHECK(boat->TranslatePlayerDriveCommands(drive, 10.0f));
+            CHECK_NEAR(drive->compassValue, 4.712389f);
+            const float south[3] = {0.0f, 0.0f, 1.0f};
+            boat->SetOrientation(south);
+            CHECK(boat->TranslatePlayerDriveCommands(drive, 10.0f));
+            CHECK_NEAR(drive->compassValue, 3.1415927f);
+            const float east[3] = {1.0f, 0.0f, 0.0f};
+            boat->SetOrientation(east);
+            drive->history[0] = 0.5f;
+            drive->steering6c = 0.25f;
+        }
         CHECK(boat->Animation(5) != nullptr);
         CHECK(static_cast<FakeAnimation*>(boat->Animation(5))->plays > 0);   // waterski starts while moving
         // Idle with the tow hint: the boat starts looking for a tow.

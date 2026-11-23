@@ -861,8 +861,8 @@ bool cSC4Watercraft::HandleEnterState(tAutomataState* state) {
                     }
                 }
             }
-            drive->value170 = 0xf;
-            drive->animStage1a4 = 0;
+            drive->shells = 0xf;
+            drive->shotsFired = 0;
             drive->timeout1d8 = 0x44fa0000;   // 2000.0f
             break;
         }
@@ -1842,11 +1842,11 @@ bool cSC4Watercraft::TranslatePlayerDriveCommands(tAutomataStatePlayerDrive* sta
     }
     if (0.0f <= state->effectTimerC4) {
         UpdateEffects();
-        if (state->wakeStarted22b) {
+        if (state->fireArmed) {
             if (animations_[5]) animations_[5]->Play(false);
             state->effectDelay20c = 0;
-            state->wakeStarted22b = 0;
-            ++state->animStage1a4;
+            state->fireArmed = 0;
+            ++state->shotsFired;
         }
     }
     if (watercraftHost_ && animations_[5]) {
@@ -1874,11 +1874,18 @@ bool cSC4Watercraft::TranslatePlayerDriveCommands(tAutomataStatePlayerDrive* sta
     state->steering6c = Clamp(state->steering6c, driveParameters_.minTurn, driveParameters_.maxTurn);
     turn_ = state->steering6c;
     speed_ = Clamp(speed_, driveParameters_.minSpeed, driveParameters_.maxSpeed);
-    state->steerVisual264 = state->steering6c * -0.125f;
-    state->wakeAngle268 = 0.0f;
-    state->wakeTurn26c = kTwoPi;
-    const cS3DVector3 orientation = Normalize(simulatedOrientation_);
-    state->heading270 = -orientation.z < 0.0f ? kTwoPi - std::acos(Clamp(-orientation.y, -1.0f, 1.0f)) : 0.0f;
+    state->pitchGauge = state->steering6c * -0.125f;
+    state->compassMin = 0.0f;
+    state->compassMax = kTwoPi;
+    // i386 0x003837c5..: the heading against -z. cross((0, 0, -1), orientation).y = -orientation.x; when that is not
+    // above 0 the angle is 2 pi - acos (in double), else acosf; the compass value is 2 pi minus it. No clamp of the dot.
+    {
+        const float dot = -orientation_.z;
+        float angle;
+        if (!(-orientation_.x > 0.0f)) angle = static_cast<float>(6.283185307179586 - std::acos(static_cast<double>(dot)));
+        else angle = std::acos(dot);
+        state->compassValue = kTwoPi - angle;
+    }
     SpeedTween().SetDesired(std::fabs(speed_), 0.0f);
     if (watercraftHost_ && state->hint119 && speed_ == 0.0f && !towTarget_) {
         towSearchActive_ = true;

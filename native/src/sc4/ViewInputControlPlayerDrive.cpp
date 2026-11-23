@@ -44,6 +44,12 @@ constexpr std::uint32_t kDashboardZoomInButton = 0x4992046a, kDashboardZoomOutBu
 // Update's gauges: knobs (min, max, value) and texts.
 constexpr std::uint32_t kGaugeSpeed = 0xebcb9403, kGaugeThrottle = 0x2bcb940b, kGaugeAltitude = 0x2bcbce68;
 constexpr std::uint32_t kAltitudeText = 0xec0ea996, kMoneyText = 0xac0ea9db, kHeadlightButton = 0x0c16c9b9;
+// The vehicle gauges: pitch (-30..30 degrees in radians, 0xbf060a92 / 0x3f060a92), the tank's barrel pitch / turret /
+// velocity, the compass; the ammunition text and the fire button (both found recursively).
+constexpr std::uint32_t kGaugePitch = 0x6bcbce73, kGaugeBarrelPitch = 0x2bf98d69, kGaugeBarrelTurn = 0xebf98d37;
+constexpr std::uint32_t kGaugeCompass = 0x6c0ae7b1, kGaugeBarrelVelocity = 0x2c0c1c8c;
+constexpr std::uint32_t kAmmoText = 0x8c3923ae, kFireButton = 0x6c3a0a6f;
+constexpr float kPitchGaugeLimit = 0.52359879f;
 constexpr std::uint32_t kPlayerDriveShowHelp = 0xac1f0449, kPlayerDriveShowDashboard = 0xcc1f0457, kPlayerDriveToggleHelp = 0xac1f045d;
 constexpr std::uint32_t kWinProcButtonMessage = 3, kWinProcButtonSender = 0x287259f6;
 
@@ -645,8 +651,10 @@ bool cSC4ViewInputControlPlayerDrive::DoWinProcMessage(std::uint32_t buttonId) {
 
 // Update's dashboard block (0x004b63ca): with a drive state, the speed knob (0..MaxSpeed, the current speed), the throttle
 // knob (the state's minimum..maximum, its speed clamped), the altitude (height above the ground under the automaton: text
-// "%.0f" and a knob 0..100 on the height's last hundred), the headlight button (flag 1 = toggle 4) and the city's money; then,
-// with or without a state, the view's mission status panel.
+// "%.0f" and a knob 0..100 on the height's last hundred), the vehicle knobs the vehicle classes fill in the drive state
+// (pitch, the tank's barrel pitch / turret / velocity, the compass), the headlight button (flag 1 = toggle 4), the city's
+// money, and where the dashboard has it the ammunition (shells - shots fired) with the fire button checked while armed;
+// then, with or without a state, the view's mission status panel.
 void cSC4ViewInputControlPlayerDrive::UpdateDashboard() {
     if (!dashboard_ || !g_host) return;
     if (tAutomataStatePlayerDrive* state = DriveState(automaton_)) {
@@ -665,6 +673,11 @@ void cSC4ViewInputControlPlayerDrive::UpdateDashboard() {
         SetText(dashboard_, kAltitudeText, text);
         while (100.0f < altitude) altitude -= 100.0f;
         SetKnob(dashboard_, kGaugeAltitude, 0.0f, 100.0f, altitude);
+        SetKnob(dashboard_, kGaugePitch, -kPitchGaugeLimit, kPitchGaugeLimit, state->pitchGauge);
+        SetKnob(dashboard_, kGaugeBarrelPitch, state->barrelPitch[0], state->barrelPitch[1], state->barrelPitch[2]);
+        SetKnob(dashboard_, kGaugeBarrelTurn, state->barrelTurn[0], state->barrelTurn[1], state->barrelTurn[2]);
+        SetKnob(dashboard_, kGaugeCompass, state->compassMin, state->compassMax, state->compassValue);
+        SetKnob(dashboard_, kGaugeBarrelVelocity, state->barrelVelocity[0], state->barrelVelocity[1], state->barrelVelocity[2]);
         if (auto* lights = DashboardChild<gz::cIGZWinBtn>(dashboard_, kHeadlightButton, gz::kGZIID_cIGZWinBtn)) {
             lights->SetBtnFlag(1, toggle44_);
             lights->Release();
@@ -672,9 +685,16 @@ void cSC4ViewInputControlPlayerDrive::UpdateDashboard() {
         cRZString money;
         SC4MakeMoneyString(g_host->CityMoney(), money);
         SetText(dashboard_, kMoneyText, money);
-        SC4_UNWIRED("cSC4ViewInputControlPlayerDrive::Update: the vehicle-specific gauges (knobs 0x6bcbce73 / 0x2bf98d69 / 0xebf98d37 / "
-                    "0x6c0ae7b1 / 0x2c0c1c8c, ammunition text 0x8c3923ae, button 0x6c3a0a6f: drive-state i386 +0x144..+0x268) and the "
-                    "drive-state cursor (+0x114) are not read");
+        if (auto* ammo = DashboardChild<gz::cIGZWinText>(dashboard_, kAmmoText, gz::kGZIID_cIGZWinText, true)) {
+            cRZString rounds;
+            rounds.Sprintf("%d", static_cast<int>(state->shells) - state->shotsFired);
+            if (cIGZWin* window = ammo->AsIGZWin()) window->SetCaption(rounds);
+            ammo->Release();
+            if (auto* fire = DashboardChild<gz::cIGZWinBtn>(dashboard_, kFireButton, gz::kGZIID_cIGZWinBtn, true)) {
+                fire->SetChecked(state->fireArmed != 0);
+                fire->Release();
+            }
+        }
     }
     g_host->UpdateMissionStatusPanel();
 }
@@ -684,6 +704,12 @@ void cSC4ViewInputControlPlayerDrive::UpdateDashboard() {
 // crash the tool ends.
 void cSC4ViewInputControlPlayerDrive::Update() {
     if (IsDriveAutoValid()) {
+        // The drive state's cursor while command 8 is held, else the tool's default.
+        if (tAutomataStatePlayerDrive* state = DriveState(automaton_)) {
+            const std::uint32_t cursor = (state->history[8] == -1.0f || state->cursor == 0) ? kPlayerDriveDefaultCursor : state->cursor;
+            cursorId_ = cursor;
+            SetCursor(cursor);
+        }
         UpdateDashboard();
         if (tAutomataStatePlayerDrive* state = DriveState(automaton_)) {
             float velocity = 0.0f;

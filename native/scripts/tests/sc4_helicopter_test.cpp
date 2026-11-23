@@ -760,6 +760,19 @@ int main() {
         CHECK_NEAR(engine->field04, -state->value38);
         CHECK(engine->liftControl == state->value3c);
         CHECK(state->steering6c <= 100.0f && state->steering6c >= -100.0f);
+        // The dashboard's pitch gauge (i386 +0x238) = 0.01 * steering * type +0xc * pi/1800; +0x234 = its factor. With the
+        // engine running and no collective key, a steering of 50 decays by 1 - 2 * 0.1 to 40.
+        {
+            state->history[0] = state->history[3] = -1.0f;
+            state->steering6c = 50.0f;
+            data->engineEnabled = 1;
+            data->enginePower = 400.0f;
+            CHECK(helicopter->TranslatePlayerDriveCommands(state, 100.0f));
+            CHECK(HeliTypeFloat(*data->type, 0x0c) != 0.0f);
+            CHECK_NEAR(state->steering6c, 40.0f);
+            CHECK_NEAR(state->pitchGauge, 0.01f * state->steering6c * HeliTypeFloat(*data->type, 0x0c) * 0.0017453292f);
+            CHECK_NEAR(state->pitchGaugeScale, 0.0017453292f * HeliTypeFloat(*data->type, 0x0c));
+        }
         CHECK(state->value38 <= 100.0f && state->value38 >= -100.0f);
         CHECK(state->value3c <= 100.0f && state->value3c >= -100.0f);
         CHECK(data->rollDeg <= HeliTypeFloat(*data->type, 0x14) + 1e-3f);
@@ -952,8 +965,8 @@ int main() {
         helicopter->HandleEnterState(state);
         CHECK(state->value40 == 0xc2c80000u);
         CHECK_NEAR(state->groupSpeed, -100.0f);
-        CHECK(state->value170 == 0xf);
-        CHECK(state->animStage1a4 == 0);
+        CHECK(state->shells == 0xf);
+        CHECK(state->shotsFired == 0);
         CHECK(state->timeout1d8 == 0x44fa0000u);
         // Exiting the player drive reloads the type mass into the physics block.
         helicopter->Physics()->mass = 1.0f;

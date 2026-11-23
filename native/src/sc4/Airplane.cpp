@@ -1509,10 +1509,10 @@ bool cSC4Airplane::TranslatePlayerDriveCommands(tAutomataStatePlayerDrive* state
     if (h[7] >= 0.0f) {
         IAutomatonEffects* effects = Effects();
         if (effects) effects->UpdatePlacement();
-        if (state->wakeStarted22b && effects && effects->StartNamedEffects(cRZString("jetbomb"), 0, false)) {
+        if (state->fireArmed && effects && effects->StartNamedEffects(cRZString("jetbomb"), 0, false)) {
             state->effectDelay20c = 0;
-            state->wakeStarted22b = 0;
-            ++state->animStage1a4;
+            state->fireArmed = 0;
+            ++state->shotsFired;
         }
     }
     const float s = milliseconds * 0.001f;
@@ -1584,8 +1584,8 @@ bool cSC4Airplane::TranslatePlayerDriveCommands(tAutomataStatePlayerDrive* state
         reverse = back > cap ? cap : back;
     }
     state->value3c = reverse;
-    state->steerVisual264 = controlWish_[1] * descentAngle_;   // +0x3b0
-    state->steerRate260 = descentAngle_;
+    state->pitchGauge = controlWish_[1] * descentAngle_;   // +0x3b0
+    state->pitchGaugeScale = descentAngle_;
     return true;
 }
 
@@ -1650,8 +1650,8 @@ bool cSC4Airplane::HandleEnterState(tAutomataState* state) {
             auto* drive = static_cast<tAutomataStatePlayerDrive*>(state);
             drive->value40 = 0;
             drive->groupSpeed = 1.0f;
-            drive->value170 = 0xf;
-            drive->animStage1a4 = 0;
+            drive->shells = 0xf;
+            drive->shotsFired = 0;
             drive->timeout1d8 = 0x44fa0000;   // 2000.0f
             if (state_ != AirplaneState::kFlying) {
                 if (IAircraftHost* host = HostFor(*this)) host->PlayAudioEvent(8);

@@ -295,6 +295,19 @@ int main() {
     auto* lights = static_cast<gz::cGZWinBtn*>(addChild(new gz::cGZWinBtn(&host.mgr), 0x0c16c9b9));
     auto* rightButton = static_cast<gz::cGZWinBtn*>(addChild(new gz::cGZWinBtn(&host.mgr), 0x6bcb93f5));
     auto* zoomOut = addChild(new cGZWin(&host.mgr), 0xe9920494);
+    auto* pitchKnob = static_cast<gz::cGZWinKnob*>(addChild(new gz::cGZWinKnob(&host.mgr), 0x6bcbce73));
+    auto* barrelPitchKnob = static_cast<gz::cGZWinKnob*>(addChild(new gz::cGZWinKnob(&host.mgr), 0x2bf98d69));
+    auto* turretKnob = static_cast<gz::cGZWinKnob*>(addChild(new gz::cGZWinKnob(&host.mgr), 0xebf98d37));
+    auto* compassKnob = static_cast<gz::cGZWinKnob*>(addChild(new gz::cGZWinKnob(&host.mgr), 0x6c0ae7b1));
+    auto* barrelSpeedKnob = static_cast<gz::cGZWinKnob*>(addChild(new gz::cGZWinKnob(&host.mgr), 0x2c0c1c8c));
+    // the ammunition text and the fire button sit one level down (found recursively)
+    auto* weaponPanel = addChild(new cGZWin(&host.mgr), 0x11112222);
+    auto* ammoText = new gz::cGZWinText(&host.mgr);
+    ammoText->SetID(0x8c3923ae);
+    weaponPanel->ChildAdd(ammoText);
+    auto* fireButton = new gz::cGZWinBtn(&host.mgr);
+    fireButton->SetID(0x6c3a0a6f);
+    weaponPanel->ChildAdd(fireButton);
     auto* help = new FakeGenWindow(&host.mgr);
     help->SetArea(0, 0, 460, 132);
     host.scripts[0x4bcb938a] = dash;
@@ -386,9 +399,38 @@ int main() {
     CHECK(std::strcmp(moneyText->GetCaption().ToChar(), "\xc2\xa7" "1234567") == 0);
     CHECK(lights->GetBtnFlag(1));
     CHECK(host.missionUpdates == 1);
+    // The vehicle gauges start empty (no vehicle filled them): pitch on -30..30 degrees, ammunition 0, fire off; the
+    // cursor is the tool's default while command 8 is not held.
+    CHECK(std::fabs(pitchKnob->GetMinValue() + 0.52359879f) < 1e-7f && std::fabs(pitchKnob->GetMaxValue() - 0.52359879f) < 1e-7f);
+    CHECK(pitchKnob->GetValue() == 0.0f && compassKnob->GetMaxValue() == 6.2831855f);
+    CHECK(std::strcmp(ammoText->GetCaption().ToChar(), "0") == 0 && !fireButton->IsChecked());
+    CHECK(tool->CursorId() == 0xc16c4e1b);
     state->value3c = 0.75f;                                    // above the maximum: the maximum
+    // A tank's record: barrel pitch 0..0.4 on 0.2, turret 0..2 pi on 1, velocity 30..100 on 60, compass on 2; 12 shells,
+    // 3 fired, armed; its cursor 0xac0ece77 while command 8 is held.
+    state->pitchGauge = 0.25f;
+    state->barrelPitch[0] = 0.0f, state->barrelPitch[1] = 0.4f, state->barrelPitch[2] = 0.2f;
+    state->barrelTurn[0] = 0.0f, state->barrelTurn[1] = 6.2831855f, state->barrelTurn[2] = 1.0f;
+    state->barrelVelocity[0] = 30.0f, state->barrelVelocity[1] = 100.0f, state->barrelVelocity[2] = 60.0f;
+    state->compassValue = 2.0f;
+    state->shells = 12;
+    state->shotsFired = 3;
+    state->fireArmed = 1;
+    state->cursor = 0xac0ece77;
+    state->history[8] = 1.0f;
     tool->DoMessage(tick);
     CHECK(throttleKnob->GetValue() == 0.5f && host.missionUpdates == 2);
+    CHECK(pitchKnob->GetValue() == 0.25f);
+    CHECK(barrelPitchKnob->GetMaxValue() == 0.4f && barrelPitchKnob->GetValue() == 0.2f);
+    CHECK(turretKnob->GetMaxValue() == 6.2831855f && turretKnob->GetValue() == 1.0f);
+    CHECK(barrelSpeedKnob->GetMinValue() == 30.0f && barrelSpeedKnob->GetMaxValue() == 100.0f && barrelSpeedKnob->GetValue() == 60.0f);
+    CHECK(compassKnob->GetValue() == 2.0f);
+    CHECK(std::strcmp(ammoText->GetCaption().ToChar(), "9") == 0 && fireButton->IsChecked());
+    CHECK(tool->CursorId() == 0xac0ece77);
+    state->history[8] = -1.0f;                                 // released: the default cursor
+    state->fireArmed = 0;
+    tool->DoMessage(tick);
+    CHECK(tool->CursorId() == 0xc16c4e1b && !fireButton->IsChecked());
     // The panel toggles: 0xac1f0449 the help panel, 0xcc1f0457 the dashboard, 0xac1f045d flips between them.
     auto* panelCommand = new cRZMessage2Standard();
     panelCommand->AddRef();

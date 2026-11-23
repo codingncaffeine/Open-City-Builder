@@ -1844,13 +1844,13 @@ bool cSC4Helicopter::TranslatePlayerDriveCommands(tAutomataStatePlayerDrive* sta
     cSC4Automaton::TranslatePlayerDriveCommands(state, milliseconds);
     if (state->effectTimerC4 >= 0.0f && rotorStill_) {
         rotorStill_->Update();
-        if (state->wakeStarted22b) {
+        if (state->fireArmed) {
             bool started = rotorStill_->StartNamed(cRZString("helicoptermissle"), 0, false);
             if (!started) started = rotorStill_->StartNamed(cRZString("ufolaser"), 0, false);
             if (started) {
                 state->effectDelay20c = 0;
-                state->wakeStarted22b = 0;
-                ++state->animStage1a4;
+                state->fireArmed = 0;
+                ++state->shotsFired;
             }
         }
     }
@@ -1955,8 +1955,9 @@ bool cSC4Helicopter::TranslatePlayerDriveCommands(tAutomataStatePlayerDrive* sta
         const cS3DVector3 velocity{physics_->velX * kModelScale, physics_->velY * kModelScale,
                                    physics_->velZ * kModelScale};
         speedTween_.SetDesired(Magnitude(velocity) * 0.001f, 0.0f);
-        state->steerRate260 = TypeField(type, 0x0c) * kDegToRad * state->steering6c * 0.01f;
-        state->steerVisual264 = TypeField(type, 0x0c) * kDegToRad;
+        // i386 0x004af136 tail: +0x238 (the pitch gauge) = 0.01 * steering * type +0xc * pi/1800, +0x234 its factor.
+        state->pitchGauge = 0.01f * state->steering6c * TypeField(type, 0x0c) * kDegToRad;
+        state->pitchGaugeScale = kDegToRad * TypeField(type, 0x0c);
     }
     return true;
 }
@@ -1987,8 +1988,8 @@ bool cSC4Helicopter::HandleEnterState(tAutomataState* state) {
         auto* drive = static_cast<tAutomataStatePlayerDrive*>(state);
         drive->value40 = 0xc2c80000u;    // +0x40 = -100.0f bits
         drive->groupSpeed = -100.0f;     // +0x44 = -100.0f
-        drive->value170 = 0xf;
-        drive->animStage1a4 = 0;
+        drive->shells = 0xf;
+        drive->shotsFired = 0;
         drive->timeout1d8 = 0x44fa0000;
     }
     return result;

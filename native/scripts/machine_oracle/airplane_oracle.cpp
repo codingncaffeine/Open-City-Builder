@@ -757,7 +757,7 @@ int main() {
             std::memcpy(&out[2], record + 0x260, 4);
             std::memcpy(&out[3], record + 0x264, 4);
             same = same && Same(out[0], drive.value3c) && Same(out[1], drive.steering6c) &&
-                   Same(out[2], drive.steerRate260) && Same(out[3], drive.steerVisual264);
+                   Same(out[2], drive.pitchGaugeScale) && Same(out[3], drive.pitchGauge);
             Check(same, "TranslatePlayerDriveCommands", t);
         }
 
