@@ -19,6 +19,7 @@ sc4::cSC4ViewInputControl* CreateNetworkIntxTool(std::uint32_t ruleId);
 void NativePuzzleReport(std::uint32_t only);
 void NativePlacePuzzle(std::uint32_t id, int x, int z, int rotation);
 void NativeIntersectionPieceReport();
+void NativeNetworkEndReport(int limit);   // kit verb netends
 // Kit verb `prebuiltpieces X0 Z0 X1 Z1` (read-only): the pre-built model network pieces of a rectangle, their support models
 // and the shadow texture the network manager maps each to at the current zoom.
 void NativePreBuiltPieceReport(int x0, int z0, int x1, int z1);

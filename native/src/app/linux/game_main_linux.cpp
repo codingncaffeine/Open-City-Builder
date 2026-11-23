@@ -1448,6 +1448,10 @@ int RunScenario(const std::string& path) {
             int x = 0, z = 0, rotation = 0;
             words >> id >> x >> z >> rotation;
             native::NativePlacePuzzle(static_cast<std::uint32_t>(std::strtoul(id.c_str(), nullptr, 16)), x, z, rotation);
+        } else if (command == "netends") {   // netends [N]: up to N line ends (a piece with one neighbor of its type) and their edges (read-only)
+            int limit = 40;
+            words >> limit;
+            native::NativeNetworkEndReport(limit);
         } else if (command == "intxpieces") {   // intxpieces: every pre-built intersection piece of the city (read-only)
             native::NativeIntersectionPieceReport();
         } else if (command == "prebuiltpieces") {   // prebuiltpieces X0 Z0 X1 Z1: the pre-built model pieces, support models, shadow textures (read-only)
@@ -2025,12 +2029,21 @@ int RunScenario(const std::string& path) {
             const int cx = step.x0 >= 0 ? (step.x0 + step.x1 + 1) / 2 : -1, cz = step.x0 >= 0 ? (step.z0 + step.z1 + 1) / 2 : -1;
             auto look = [&] { std::snprintf(buffer, sizeof buffer, "look %d %d", cx * 16 + 8, cz * 16 + 8); todo.push_back(buffer); todo.push_back("frames 30"); };
             switch (step.kind) {
-                case 1: case 2: case 0x11:   // zone, network, power line: drag over the region
+                case 1: case 2: case 0x11: {   // zone, network, power line: drag over the region
                     if (cx < 0) break;
+                    // no tool yet: the menu item the tutorial highlights first (the player picks the tool the text names)
+                    sc4::cSC4View3DWin* view3d = gAppWindow ? gAppWindow->View3D() : nullptr;
+                    sc4::cSC4ViewInputControl* tool = view3d ? view3d->GetCurrentViewInputControl() : nullptr;
+                    if (!tool && step.itemX >= 0) {
+                        std::snprintf(buffer, sizeof buffer, "tapat %d %d", step.itemX, step.itemY);
+                        todo.push_back(buffer);
+                        todo.push_back("frames 10");
+                    }
                     look();
                     std::snprintf(buffer, sizeof buffer, "viewdrag %d %d %d %d 12 0", step.x0, step.z0, step.x1, step.z1);
                     todo.push_back(buffer);
                     break;
+                }
                 case 3: case 5: {            // place a building, act on a lot: a click in the region; a retry (the tutorial
                                              // bulldozed a misplaced building) tries the region's next cell, middle first
                     if (cx < 0) break;

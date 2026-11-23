@@ -1154,6 +1154,49 @@ void NativePlacePuzzle(std::uint32_t id, int x, int z, int rotation) {
 }
 
 // Kit verb `intxpieces` (read-only): every network piece of the city marked as part of a pre-built intersection (0x100000).
+// The line ends of the city: every network piece with exactly one neighbor piece of its own type, with its edge flags for that type
+// (how a dragged line's last cell is encoded). Up to `limit` lines (read-only).
+void NativeNetworkEndReport(int limit) {
+    sc4::cISC4OccupantManager* occupants = Occupants();
+    sc4::cSTETerrain* terrain = Terrain();
+    if (!occupants || !terrain) {
+        std::printf("netends: no city\n");
+        return;
+    }
+    const int cell0[2] = {0, 0};
+    const int cell1[2] = {static_cast<int>(terrain->CellCountX()) - 1, static_cast<int>(terrain->CellCountZ()) - 1};
+    sc4::OccupantList list;
+    if (!occupants->GetOccupantsByStandardCityCells(list, cell0, cell1, 0xc772bf98u, 0xffffffffu)) return;
+    std::map<std::pair<std::uint32_t, std::uint32_t>, std::vector<sc4::cSC4NetworkOccupant*>> byCell;
+    for (sc4::cISC4Occupant* occupant : list)
+        if (auto* network = dynamic_cast<sc4::cSC4NetworkOccupant*>(occupant)) {
+            std::uint32_t x = 0, z = 0;
+            network->GetOccupiedCell(x, z);
+            byCell[{x, z}].push_back(network);
+        }
+    static constexpr int kStep[4][2] = {{-1, 0}, {0, -1}, {1, 0}, {0, 1}};
+    int shown = 0;
+    for (const auto& [cell, pieces] : byCell) {
+        for (sc4::cSC4NetworkOccupant* network : pieces) {
+            for (std::uint32_t type = 0; type < 13; ++type) {
+                if (!network->IsOfType(type)) continue;
+                int neighbors = 0;
+                for (const auto& step : kStep) {
+                    auto it = byCell.find({cell.first + step[0], cell.second + step[1]});
+                    if (it == byCell.end()) continue;
+                    for (sc4::cSC4NetworkOccupant* other : it->second) if (other->IsOfType(type)) { ++neighbors; break; }
+                }
+                if (neighbors != 1 || shown >= limit) continue;
+                ++shown;
+                std::printf("netend %u,%u type %u piece %08x rot %02x flags %08x edges %08x\n", cell.first, cell.second, type, network->PieceId(),
+                            network->GetRotationAndFlip(), network->GetNetworkFlag(), network->GetEdgeTypesFlag(static_cast<std::uint8_t>(type)));
+            }
+        }
+    }
+    occupants->ReleaseOccupantList(list);
+    std::printf("netends: %d shown\n", shown);
+}
+
 void NativeIntersectionPieceReport() {
     sc4::cISC4OccupantManager* occupants = Occupants();
     sc4::cSTETerrain* terrain = Terrain();
