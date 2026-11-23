@@ -234,7 +234,9 @@ public:
     virtual ISituationAutomataManager* AutomataManager(int index) = 0;
     virtual ISituationAutomataManager* VehicleManager() = 0;                // SL::spVehicleManager (ReleaseInstances)
     virtual ISituationDriveView* PlayerDriveView() = 0;                     // cSC4AutomataManager::spPlayerDriveView[0x50]
-    virtual ISituationMissionActor* MySimActor() = 0;                       // SL::spMySim (may be null)
+    virtual ISituationMissionActor* MySimActor() = 0;                       // port only (the original's Init asks for no MySim)
+    // InitiateSituation's MySim (+0xa28 the MySim agent simulator, vslot 0x30 GetActiveUIPanelSim(+0xb00)): one reference, or null.
+    virtual ISituationMySim* ActiveMySim() { return nullptr; }
     virtual ISituationOccupantManager* OccupantManager() = 0;
     virtual ISituationZoneManager* ZoneManager() = 0;
     virtual ISituationTerrain* Terrain() = 0;

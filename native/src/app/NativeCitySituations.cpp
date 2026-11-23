@@ -76,6 +76,7 @@ cIGZUnknown* SituationEngineOccupant(sc4::ISituationOccupant* occupant);
 sc4::ISituationEffect* NativeCreateSituationEffect(const char* name);   // app/NativeDisasterTools.cpp
 bool NativePlayerDriveAutomatonPosition(float out[3]);                 // app/NativePlayerDrive.cpp
 int NativeZoneTypeAt(int x, int z);                                      // app/NativeDisasters.cpp
+sc4::ISituationMySim* NativeActiveSituationMySim();                      // app/NativeMySim.cpp
 sc4::ISituationDispatchView* NativeSituationDispatchView();   // NativeDispatchVehicleView.cpp
 void SituationEnterPlayerDriveView(sc4::ISituationAutomaton* automaton, cIGZMessageTarget2* target);
 std::uint32_t SituationSourceBuildingGroup(std::uint32_t automataGroup);
@@ -342,10 +343,8 @@ public:
         float position[3];
         return NativePlayerDriveAutomatonPosition(position) ? &g_situationDrive : nullptr;
     }
-    ISituationMissionActor* MySimActor() override {
-        SC4_UNWIRED("ICitySituationManagerHost::MySimActor: the MySim is not handed to the situations");
-        return nullptr;
-    }
+    ISituationMissionActor* MySimActor() override { return nullptr; }   // nothing asks for it (port-only slot)
+    ISituationMySim* ActiveMySim() override { return NativeActiveSituationMySim(); }
     ISituationOccupantManager* OccupantManager() override { return SituationOccupantManager(); }
     ISituationZoneManager* ZoneManager() override { return HostCity() ? &g_situationZones : nullptr; }
     ISituationTerrain* Terrain() override { return SituationTerrainObject() ? &g_situationTerrain : nullptr; }

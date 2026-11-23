@@ -49,6 +49,7 @@
 #include "gz/CommandParameterSet.h"
 #include "gz/cIGZVariant.h"
 #include "platform/Unwired.h"
+#include "sc4/CitySituationEntities.h"
 #include "sc4/AdvisorCitySituations.h"
 #include "rz/cRZMessage2Standard.h"
 #include "rz/cRZVariant.h"
@@ -1106,6 +1107,43 @@ public:
 StreetToolHost g_streetToolHost;
 
 }  // namespace
+
+sc4::ISituationOccupant* SituationViewOfOccupant(void* engineOccupant);   // app/NativeSituationAutomata.cpp
+// The sim of the open MySim panel as a MySim mission binds it: its residence (vslot 0x58, as an occupant) and its Lua context
+// (vslot 0x220 ActivateLuaContext) before the mission's script calls.
+namespace {
+class SituationMySimView final : public sc4::ISituationMySim {
+public:
+    explicit SituationMySimView(cISC4MySim* sim) : sim_(sim) { sim_->AddRef(); }
+    bool QueryInterface(std::uint32_t, void** out) override { *out = nullptr; return false; }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override {
+        if (refs_ > 1) return --refs_;
+        sim_->Release();
+        delete this;
+        return 0;
+    }
+    sc4::ISituationOccupant* FindMissionOccupant() override {
+        cISC4BuildingOccupant* home = sim_->GetResidence();
+        void* raw = nullptr;
+        if (!home || !home->QueryInterface(sc4::kGZIID_cISC4Occupant, &raw) || !raw) return nullptr;
+        auto* occupant = static_cast<sc4::cISC4Occupant*>(raw);
+        occupant->Release();   // the city keeps the building
+        return SituationViewOfOccupant(occupant);
+    }
+    void PrepareScript() override { sim_->ActivateLuaContext(); }
+private:
+    cISC4MySim* sim_;
+    std::uint32_t refs_ = 1;
+};
+}  // namespace
+
+sc4::ISituationMySim* NativeActiveSituationMySim() {
+    cSC4MySimAgentSimulator* agent = Agent();
+    int slot = 0;
+    cISC4MySim* sim = agent ? agent->GetActiveUIPanelSim(slot) : nullptr;
+    return sim ? new SituationMySimView(sim) : nullptr;
+}
 
 void InstallMySimHosts() {
     sc4::SetMySimBalloonHost(&g_balloonHost);

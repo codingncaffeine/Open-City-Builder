@@ -299,10 +299,13 @@ bool cSC4CitySituationManager::InitiateSituation(cISC4CitySituationAdvice* situa
     status_ = kSituationNone;
     resultDelay_ = 0.0f;
     missionSoundPlayed_ = false;
-    // Recovered-partial: a MySim mission (flag 0x20) binds the sim the occupant manager's vslot 0x30 hands out; the
-    // port has no MySim source for the situations (mySim_ stays null).
-    if (activeSituation_->CheckSituationFlag(kSituationFlagMySimMission))
-        SC4_UNWIRED("cSC4CitySituationManager::InitiateSituation: a MySim mission's sim (occupant manager vslot 0x30) is not bound");
+    // A MySim mission (flag 0x20) binds the sim of the open MySim panel (the MySim agent simulator's GetActiveUIPanelSim).
+    if (activeSituation_->CheckSituationFlag(kSituationFlagMySimMission)) {
+        ICitySituationManagerHost* host = CitySituationManagerHost();
+        ISituationMySim* sim = host ? host->ActiveMySim() : nullptr;
+        mySim_ = sim;
+        if (sim) sim->Release();
+    }
     SetActiveAutomaton(automaton);
     bool result = false;
     bool setUp = false;

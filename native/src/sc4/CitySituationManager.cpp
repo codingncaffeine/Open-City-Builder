@@ -578,7 +578,6 @@ bool cSC4CitySituationManager::Init() {
             for (const auto& command : commands)
                 registry->AddChildEntry(reinterpret_cast<void*>(command.second), command.first, command.second, node, 0, this);
         }
-        if (ISituationMySim* mySim = host->MySimActor() ? nullptr : nullptr) mySim_ = mySim;   // (no MySim source yet)
     }
 
     HandleTuningParametersChanged();
