@@ -511,6 +511,17 @@ struct StubView3DWin final : IView3DWinHost {
         return sim && sim->IsOrdinanceOn(ordinance);
     }
     static cSC4CitySituationManager* SituationManager() { return native::HostCitySituations(); }
+    bool MissionPanelStateNow(MissionPanelState& out) override {   // spCity GetCitySituationManager -> the panel's reads
+        auto* m = SituationManager();
+        if (!m) return false;
+        const cISC4CitySituationAdvice* situation = m->GetActiveSituation();
+        out.active = situation != nullptr;
+        out.timeLimitSeconds = m->GetCurrentTimeLimitSeconds();
+        out.timeRemainingSeconds = m->GetCurrentTimeRemainingSeconds();
+        out.hasCondition = situation && situation->GetSuccessConditionText(out.condition);
+        if (out.hasCondition) out.progress = situation->GetProgressText(static_cast<std::uint16_t>(m->GetCurrentTargetIndex()));
+        return true;
+    }
     bool CitySituationIndicatorVisible() override {
         auto* m = SituationManager();
         return m && m->GetVisible();   // GetCSIVisible (vslot 0xf0)

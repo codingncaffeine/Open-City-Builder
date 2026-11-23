@@ -1326,6 +1326,12 @@ int RunScenario(const std::string& path) {
         } else if (command == "wintree") {   // wintree [DEPTH]: the window tree under the main window (id, visible, area, kids)
             int depth = 4; words >> depth;
             DumpTree(gMgr->GetMainWindow(), 0, depth);
+        } else if (command == "winhide") {   // winhide ID: hides the first window with id ID (hex) under the main window
+            std::string text; words >> text;
+            const std::uint32_t id = static_cast<std::uint32_t>(std::strtoul(text.c_str(), nullptr, 16));
+            cIGZWin* window = id ? gMgr->GetMainWindow()->GetChildWindowFromIDRecursive(id) : nullptr;
+            if (window) window->HideWindow();
+            std::printf("winhide %08x: %s\n", id, window ? "hidden" : "not found");
         } else if (command == "cityview") {   // cityview: the city view's compass, alert border and other parts as they stand
             native::NativeCityViewReport();
         } else if (command == "registry") {   // registry: the game-data registry's entry tree

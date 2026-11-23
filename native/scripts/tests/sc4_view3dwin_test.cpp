@@ -977,6 +977,13 @@ struct FakeHost final : IView3DWinHost {
         if (!compassWindow) { compassWindow = new FakeCompassWindow(windowManager); compassWindow->AddRef(); }
         return compassWindow;
     }
+    bool missionManager = false;
+    MissionPanelState missionState;
+    bool MissionPanelStateNow(MissionPanelState& out) override {
+        if (!missionManager) return false;
+        out = missionState;
+        return true;
+    }
     void LocalisedString(std::uint32_t, std::uint32_t instance, cRZString& out) override {
         localisedStrings.push_back(instance);
         out.AssignFromCString("Show panel");
@@ -2172,6 +2179,81 @@ int main() {
         view->HideMissionStatusPanel();
         CHECK(View3DWinTestAccess::MissionPanel(*view) == nullptr);
         view->HideMissionStatusPanel();                         // nothing left
+        // ShowMissionStatusPanel (i386 0x00528864): the panel 0x10000006 from script group 0x96a006b0 / the given instance,
+        // 8 from the view's top right, details hidden, the summary fitted to its hidden progress line; with no active
+        // situation the "no mission" text. UpdateMissionStatusPanel: the countdown, red in the last minute, blinking (red on
+        // odd seconds) from 20 s down. UpdateMissionProgress: the condition and progress captions, the summary fitted to the line.
+        {
+            auto* panelWin = new cGZWin(&mgr); panelWin->SetID(0x10000006u); panelWin->SetArea(0, 0, 212, 325);
+            auto* timer = new FakeTextControl(&mgr); timer->SetID(0x4c081a8eu); panelWin->ChildAdd(timer);
+            auto* condition = new cGZWin(&mgr); condition->SetID(0x8c087e51u); panelWin->ChildAdd(condition);
+            auto* details = new cGZWin(&mgr); details->SetID(0xcc1a6983u); panelWin->ChildAdd(details);
+            auto* summary = new cGZWin(&mgr); summary->SetID(0x10000005u); summary->SetArea(12, 0, 212, 300); panelWin->ChildAdd(summary);
+            auto* progressBox = new cGZWin(&mgr); progressBox->SetID(0x0c3cb614u); progressBox->SetArea(13, 228, 187, 314); summary->ChildAdd(progressBox);
+            auto* progressLine = new cGZWin(&mgr); progressLine->SetID(0x6c3cb626u); progressBox->ChildAdd(progressLine);
+            host.scriptWindows[0x10000006u] = panelWin;
+            host.scriptRequests.clear();
+            host.missionManager = true;
+            host.missionState = {};
+            view->ShowMissionStatusPanel(0);                                    // no panel id: nothing
+            CHECK(View3DWinTestAccess::MissionPanel(*view) == nullptr && host.scriptRequests.empty());
+            view->ShowMissionStatusPanel(0x1234u);
+            CHECK(View3DWinTestAccess::MissionPanel(*view) == panelWin);
+            CHECK(host.scriptRequests.size() == 1 && host.scriptRequests[0].first.group == 0x96a006b0u &&
+                  host.scriptRequests[0].first.instance == 0x1234u && host.scriptRequests[0].second == 0x10000006u);
+            CHECK(panelWin->GetL() == 800 - 212 - 8 && panelWin->GetT() == 8);
+            CHECK(!details->IsVisible());
+            CHECK(summary->GetH() == 228 + 8 && !progressBox->IsVisible());
+            CHECK(std::strcmp(condition->GetCaption().ToChar(), "Show panel") == 0);       // the "no mission" string
+            CHECK(timer->caption == "");
+            view->ShowMissionStatusPanel(0x1234u);                              // already shown: no second request
+            CHECK(host.scriptRequests.size() == 1);
+            // The countdown: hours dropped, red under a minute, blinking from 20 s down.
+            host.missionState.active = true;
+            host.missionState.timeLimitSeconds = 300.0f;
+            host.missionState.timeRemainingSeconds = 3725.9f;                  // 1:02:05 -> "02:05"
+            view->UpdateMissionStatusPanel();
+            CHECK(timer->caption == "02:05" && timer->colors[0] == 0xffffffffu);
+            host.missionState.timeRemainingSeconds = 60.0f;                    // a full minute: default
+            view->UpdateMissionStatusPanel();
+            CHECK(timer->caption == "01:00" && timer->colors[0] == 0xffffffffu);
+            host.missionState.timeRemainingSeconds = 42.5f;                    // under a minute, above 20: red
+            view->UpdateMissionStatusPanel();
+            CHECK(timer->caption == "00:42" && timer->colors[0] == 0xffff0000u);
+            host.missionState.timeRemainingSeconds = 20.0f;                    // 20 and below, even: default
+            view->UpdateMissionStatusPanel();
+            CHECK(timer->caption == "00:20" && timer->colors[0] == 0xffffffffu);
+            host.missionState.timeRemainingSeconds = 19.0f;                    // odd: red
+            view->UpdateMissionStatusPanel();
+            CHECK(timer->caption == "00:19" && timer->colors[0] == 0xffff0000u);
+            host.missionState.timeRemainingSeconds = -3.0f;                    // past zero: "00:00"; -3 is odd: red
+            view->UpdateMissionStatusPanel();
+            CHECK(timer->caption == "00:00" && timer->colors[0] == 0xffff0000u);
+            host.missionState.timeLimitSeconds = 0.0f;                         // no limit: empty, default colour
+            view->UpdateMissionStatusPanel();
+            CHECK(timer->caption == "" && timer->colors[0] == 0xffffffffu);
+            // The progress: condition + the current target's line; the summary ends 8 below the shown line.
+            host.missionState.hasCondition = true;
+            host.missionState.condition.AssignFromCString("Reach Target");
+            host.missionState.progress.AssignFromCString("Target 1 of 3");
+            cRZString dummy;
+            view->UpdateMissionProgress(&dummy, 0);                             // state 0: captions kept, line hidden
+            CHECK(std::strcmp(condition->GetCaption().ToChar(), "Show panel") == 0 && !progressBox->IsVisible());
+            view->UpdateMissionProgress(&dummy, 1);
+            CHECK(std::strcmp(condition->GetCaption().ToChar(), "Reach Target") == 0);
+            CHECK(std::strcmp(progressLine->GetCaption().ToChar(), "Target 1 of 3") == 0);
+            CHECK(progressBox->IsVisible() && summary->GetH() == 314 + 8);
+            host.missionState.progress.AssignFromCString("");                  // an empty line: hidden again
+            view->UpdateMissionProgress(&dummy, 1);
+            CHECK(!progressBox->IsVisible() && summary->GetH() == 228 + 8);
+            host.missionManager = false;                                        // no manager: nothing changes
+            host.missionState.progress.AssignFromCString("Target 2 of 3");
+            view->UpdateMissionProgress(&dummy, 1);
+            CHECK(!progressBox->IsVisible());
+            view->HideMissionStatusPanel();
+            CHECK(View3DWinTestAccess::MissionPanel(*view) == nullptr);
+            host.scriptWindows.erase(0x10000006u);
+        }
         // CloseSecondaryMenu hides, ChildDeletes and releases the menu window and clears its state word.
         auto* menu = new cGZWin(&mgr);
         menu->AddRef();

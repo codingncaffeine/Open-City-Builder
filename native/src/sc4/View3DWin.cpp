@@ -1441,6 +1441,74 @@ void cSC4View3DWin::HideMissionStatusPanel() {                              // 0
     if (panel) panel->Release();
 }
 
+namespace {
+constexpr std::uint32_t kMissionPanelGroup = 0x96a006b0u, kMissionPanelId = 0x10000006u;
+constexpr std::uint32_t kMissionDetailsId = 0xcc1a6983u, kMissionSummaryId = 0x10000005u, kMissionProgressTextId = 0x0c3cb614u;
+constexpr std::uint32_t kMissionTimerTextId = 0x4c081a8eu, kMissionConditionId = 0x8c087e51u, kMissionProgressId = 0x6c3cb626u;
+constexpr std::uint32_t kMissionTimerRed = 0xffff0000u, kMissionTimerDefault = 0xffffffffu;
+
+// The summary box fits its progress line: shown, the box ends 8 below the line's bottom; hidden, 8 below its top.
+void FitMissionSummary(cIGZWin* summary, cIGZWin* progressText, bool hasProgress) {
+    if (!summary || !progressText) return;
+    if (hasProgress) {
+        summary->SetH(progressText->GetB() + 8);
+        progressText->ShowWindow();
+    } else {
+        summary->SetH(progressText->GetT() + 8);
+        progressText->HideWindow();
+    }
+}
+}  // namespace
+
+// i386 0x00528864: the panel 0x10000006 from script (group 0x96a006b0, instance = the mission's panel) at the view's top right,
+// its details hidden, the view filtering its messages; the summary box fitted, the countdown drawn, and with no active
+// situation the "no mission" condition text.
+void cSC4View3DWin::ShowMissionStatusPanel(std::uint32_t id) {
+    if (missionPanel_ || id == 0 || !host_) return;
+    const cGZPersistResourceKey key{0, kMissionPanelGroup, id};
+    missionPanel_ = host_->CreateWindowFromScript(key, static_cast<cIGZWin*>(this), kMissionPanelId);
+    if (!missionPanel_) return;
+    nsGZWinUtils::SetWindowVisible(missionPanel_, kMissionDetailsId, false, false);
+    missionPanel_->GZWinMoveTo(GetW() - missionPanel_->GetW() - 8, 8);
+    nsGZWinUtils::SetWindowNotificationTargetRecursive(missionPanel_, missionPanel_);
+    missionPanel_->AddMessageFilter(static_cast<cIGZWinMessageFilter*>(this));    // vslot 0x1d0 (i386)
+    cIGZWin* summary = missionPanel_->GetChildWindowFromID(kMissionSummaryId);
+    cIGZWin* progressText = summary ? summary->GetChildWindowFromID(kMissionProgressTextId) : nullptr;
+    if (summary && progressText) {
+        summary->SetH(progressText->GetT() + 8);
+        progressText->HideWindow();
+    }
+    KillKeyboardScrolling();                                                    // view vslot 0x8c (i386)
+    UpdateMissionStatusPanel();                                                 // view vslot 0xe8 (i386)
+    IView3DWinHost::MissionPanelState state;
+    if (host_->MissionPanelStateNow(state) && !state.active) UpdateMissionProgress(nullptr, 1);
+}
+
+// i386 0x0051ef18: the countdown "MM:SS" (hours dropped) in text 0x4c081a8e while the active situation has a time limit;
+// red in the last minute, then from 20 s down blinking (red on odd seconds). Empty with no limit or no situation.
+void cSC4View3DWin::UpdateMissionStatusPanel() {
+    if (!missionPanel_) return;
+    cRZString text;
+    std::uint32_t color = kMissionTimerDefault;
+    IView3DWinHost::MissionPanelState state;
+    if (host_ && host_->MissionPanelStateNow(state) && state.active) {
+        const auto remaining = static_cast<std::int32_t>(static_cast<std::uint32_t>(static_cast<std::int64_t>(state.timeRemainingSeconds)));
+        if (static_cast<std::int32_t>(state.timeLimitSeconds) > 0) {
+            const std::int32_t clamped = remaining < 0 ? 0 : remaining;
+            const std::int32_t inHour = clamped - (clamped / 3600) * 3600;
+            text.Sprintf("%02.2d:%02.2d", inHour / 60, inHour % 60);
+            if (remaining < 60 && (remaining > 20 || (remaining & 1) != 0)) color = kMissionTimerRed;
+        }
+    }
+    void* out = nullptr;
+    if (missionPanel_->GetChildAsRecursive(kMissionTimerTextId, gz::kGZIID_cIGZWinText, &out) && out) {
+        auto* timer = static_cast<gz::cIGZWinText*>(out);
+        if (cIGZWin* window = timer->AsIGZWin()) window->SetCaption(text);
+        timer->SetTextColor(gz::cIGZWinText::kColorText, gz::cRZColor{color});
+        timer->Release();
+    }
+}
+
 void cSC4View3DWin::CloseSecondaryMenu() {                                  // 0x100791d18
     cIGZWin* menu = secondaryMenu_;
     if (!menu) return;
@@ -3638,7 +3706,27 @@ void cSC4View3DWin::DoBudgetFailure() { if (host_) host_->BudgetFailure(); }    
 void cSC4View3DWin::Update24HourClock(std::uint32_t hour, std::uint32_t minute) { if (host_) host_->ClockChanged(hour, minute); }   // 0x100788912
 void cSC4View3DWin::UpdateAmbientLightLevel() { if (host_) host_->AmbientLightChanged(); }                 // 0x100788bfc
 void cSC4View3DWin::UpdateMayorRatingBar() { if (host_) host_->MayorRatingChanged(); }                     // 0x100788084
-void cSC4View3DWin::UpdateMissionProgress(cIGZUnknown* mission, std::uint32_t state) { if (host_) host_->MissionProgress(mission, state); }   // 0x100787b66
+// 0x100787b66 (i386 0x005285e6): with no mission the "no mission" condition text (SL 0x6a231ea4 / 0xac2bd618); with one and
+// a nonzero state the active situation's success condition and the current target's progress line. The summary box fits
+// the progress line (shown only when it has text).
+void cSC4View3DWin::UpdateMissionProgress(cIGZUnknown* mission, std::uint32_t state) {
+    if (!missionPanel_ || !host_) return;
+    IView3DWinHost::MissionPanelState now;
+    if (!host_->MissionPanelStateNow(now)) return;
+    cIGZWin* summary = missionPanel_->GetChildWindowFromID(kMissionSummaryId);
+    cIGZWin* progressText = summary ? summary->GetChildWindowFromID(kMissionProgressTextId) : nullptr;
+    cRZString progress;
+    if (!mission) {
+        cRZString none;
+        host_->LocalisedString(0x6a231ea4u, 0xac2bd618u, none);
+        nsGZWinUtils::SetWindowCaption(missionPanel_, kMissionConditionId, none);
+    } else if (state != 0 && now.active && now.hasCondition) {
+        nsGZWinUtils::SetWindowCaption(missionPanel_, kMissionConditionId, now.condition);
+        progress = now.progress;
+        nsGZWinUtils::SetWindowCaption(missionPanel_, kMissionProgressId, progress);
+    }
+    FitMissionSummary(summary, progressText, progress.Strlen() != 0);
+}
 void cSC4View3DWin::AddBackgroundImageToRenderer() { if (host_) host_->AddBackgroundImage(); }            // 0x100787334
 
 }  // namespace sc4

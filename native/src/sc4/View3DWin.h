@@ -719,11 +719,18 @@ public:
     }   // Update24HourClock
     virtual void AmbientLightChanged() { SC4_UNWIRED("IView3DWinHost::AmbientLightChanged: ambient light level update not wired (UpdateAmbientLightLevel 0x100788bfc)"); }                               // UpdateAmbientLightLevel
     virtual void MayorRatingChanged() {}                                // UpdateMayorRatingBar
-    virtual void MissionProgress(cIGZUnknown* mission, std::uint32_t state) {
-        (void)mission;
-        (void)state;
-        SC4_UNWIRED("IView3DWinHost::MissionProgress: the mission progress panel update is not wired (UpdateMissionProgress 0x100787b66)");
-    }   // UpdateMissionProgress
+    // The mission status panel's reads (Show/UpdateMissionStatusPanel, UpdateMissionProgress): SL::spCity vslot 0x188
+    // (GetCitySituationManager); false when there is none. Then the manager's GetActiveSituation, GetCurrentTimeLimitSeconds,
+    // GetCurrentTimeRemainingSeconds, and the active situation's GetSuccessConditionText + GetProgressText(GetCurrentTargetIndex).
+    struct MissionPanelState {
+        bool active = false;              // GetActiveSituation() != null
+        float timeLimitSeconds = 0.0f;
+        float timeRemainingSeconds = 0.0f;
+        bool hasCondition = false;        // GetSuccessConditionText answered true
+        cRZString condition;
+        cRZString progress;               // GetProgressText(GetCurrentTargetIndex())
+    };
+    virtual bool MissionPanelStateNow(MissionPanelState& out) { (void)out; return false; }
     virtual void AddBackgroundImage() { SC4_UNWIRED("IView3DWinHost::AddBackgroundImage: the background image is not added to the renderer (0x100787334)"); }                                // AddBackgroundImageToRenderer
     // --- HandleButtonActivated's services
     virtual void PlayUISound(std::uint32_t sound) { (void)sound; }      // SL::spSS vslot 0x50(1, sound, 0, 0, 0) (AddRef / Release around it)
@@ -914,6 +921,8 @@ public:
     // --- cISC4View3DWin: the mission / cursor-text / cost-indicator and menu members
     void MinimizeUI(bool minimize) override;                       // @ 0x100792b4e (vslot 0x1b8)
     void HideMissionStatusPanel() override;                        // @ 0x100792e7e
+    void ShowMissionStatusPanel(std::uint32_t id) override;        // i386 @ 0x00528864
+    void UpdateMissionStatusPanel() override;                      // i386 @ 0x0051ef18 (the countdown)
     void SetCursorText(std::uint32_t id, std::uint32_t order, const cIGZString* line1,
                        const cIGZString* line2, int icon) override;   // @ 0x10079132c
     void ClearCursorText(std::uint32_t id) override;               // @ 0x100791772
@@ -1012,7 +1021,7 @@ public:
     void Update24HourClock(std::uint32_t hour, std::uint32_t minute);   // @ 0x100788912 (PARTIAL: host)
     void UpdateAmbientLightLevel();                                // @ 0x100788bfc (PARTIAL: host)
     void UpdateMayorRatingBar();                                   // @ 0x100788084 (PARTIAL: host)
-    void UpdateMissionProgress(cIGZUnknown* mission, std::uint32_t state);   // @ 0x100787b66 (PARTIAL: host)
+    void UpdateMissionProgress(cIGZUnknown* mission, std::uint32_t state);   // @ 0x100787b66 (i386 0x005285e6)
     void AddBackgroundImageToRenderer();                           // @ 0x100787334 (PARTIAL: host)
     // --- the panel commands (PARTIAL: the menu builders behind HandleButtonActivated / DoPanelCommandGUI)
     void HandleButtonActivated(cIGZWin* window, cGZMessage& message);   // @ 0x10078afde (PARTIAL)
