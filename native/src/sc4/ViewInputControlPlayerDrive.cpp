@@ -12,6 +12,16 @@
 #include "sc4/OccupantGroupTemplate.h"
 #include "sc4/SCPropertyHelp.h"
 #include "sc4audio/AEMSEvents.h"
+#include "gz/WinBtn.h"
+#include "gz/WinGen.h"
+#include "gz/WinInterfaces.h"
+#include "gz/WinKnob.h"
+#include "gz/WinText.h"
+#include "gz/WinUtils.h"
+#include "gz/cGZPersistResourceKey.h"
+#include "gz/Buffer.h"
+#include "sc4/SC4Utilities.h"
+#include "sc4/WinMiniMap.h"
 
 namespace sc4 {
 
@@ -25,6 +35,49 @@ constexpr std::uint32_t kAutomatonEventRemoved = 3;
 constexpr std::uint32_t kAutomatonEventFinalCrash = 0xb;
 constexpr std::uint32_t kDashboardLeftButton = 0x8bcb93fc;
 constexpr std::uint32_t kDashboardRightButton = 0x6bcb93f5;
+// The dashboard (ShowUI): script group 0x96a006b0, window ids 0x4bcb938a (dashboard) / 0xec1a5cbf (the key help panel,
+// instance 0x8c1a5c9f), dial images in group 0x46a006b0; the minimap child 0x0bc3b559 gets SetFlags(0x11, 0x10).
+constexpr std::uint32_t kDashboardGroup = 0x96a006b0, kDashboardWindowId = 0x4bcb938a;
+constexpr std::uint32_t kDashboardHelpInstance = 0x8c1a5c9f, kDashboardHelpWindowId = 0xec1a5cbf;
+constexpr std::uint32_t kDashboardMiniMapId = 0x0bc3b559;
+constexpr std::uint32_t kDashboardZoomInButton = 0x4992046a, kDashboardZoomOutButton = 0xe9920494;
+// Update's gauges: knobs (min, max, value) and texts.
+constexpr std::uint32_t kGaugeSpeed = 0xebcb9403, kGaugeThrottle = 0x2bcb940b, kGaugeAltitude = 0x2bcbce68;
+constexpr std::uint32_t kAltitudeText = 0xec0ea996, kMoneyText = 0xac0ea9db, kHeadlightButton = 0x0c16c9b9;
+constexpr std::uint32_t kPlayerDriveShowHelp = 0xac1f0449, kPlayerDriveShowDashboard = 0xcc1f0457, kPlayerDriveToggleHelp = 0xac1f045d;
+constexpr std::uint32_t kWinProcButtonMessage = 3, kWinProcButtonSender = 0x287259f6;
+
+// GetChildAs on the dashboard: the child's `iid` view (counted) or null.
+template <class T> T* DashboardChild(cIGZWin* dashboard, std::uint32_t id, std::uint32_t iid, bool recursive = false) {
+    void* out = nullptr;
+    if (!dashboard) return nullptr;
+    const bool ok = recursive ? dashboard->GetChildAsRecursive(id, iid, &out) : dashboard->GetChildAs(id, iid, &out);
+    return ok ? static_cast<T*>(out) : nullptr;
+}
+void SetKnob(cIGZWin* dashboard, std::uint32_t id, float minimum, float maximum, float value) {
+    if (auto* knob = DashboardChild<gz::cIGZWinKnob>(dashboard, id, gz::kGZIID_cIGZWinKnob)) {
+        knob->SetMinValue(minimum);
+        knob->SetMaxValue(maximum);
+        knob->SetValue(value);
+        knob->Release();
+    }
+}
+void SetText(cIGZWin* dashboard, std::uint32_t id, const cRZString& text, bool recursive = false) {
+    if (auto* label = DashboardChild<gz::cIGZWinText>(dashboard, id, gz::kGZIID_cIGZWinText, recursive)) {
+        if (cIGZWin* window = label->AsIGZWin()) window->SetCaption(text);
+        label->Release();
+    }
+}
+void SetDashboardButtonChecked(cIGZWin* dashboard, std::uint32_t id, bool checked) {
+    if (auto* button = DashboardChild<gz::cIGZWinBtn>(dashboard, id, gz::kGZIID_cIGZWinBtn)) {
+        button->SetChecked(checked);
+        button->Release();
+    }
+}
+// Bottom center of the view.
+void PlaceAtBottomCenter(cIGZWin* window, cIGZWin* view) {
+    if (window && view) window->GZWinMoveTo((view->GetW() - window->GetW()) / 2, view->GetH() - window->GetH());
+}
 // The AEMS events the drive commands start / end (HandleDriveCommandKeyDown / Up).
 constexpr std::uint32_t kAemsEngine = 0, kAemsForward = 1, kAemsReverse = 2, kAemsTurn = 3, kAemsMouse = 4, kAemsCommand5 = 6;
 
@@ -48,6 +101,8 @@ cSC4ViewInputControlPlayerDrive::cSC4ViewInputControlPlayerDrive() {
 }
 
 cSC4ViewInputControlPlayerDrive::~cSC4ViewInputControlPlayerDrive() {
+    if (dashboard_) dashboard_->Release();
+    if (dashboardHelp_) dashboardHelp_->Release();
     if (automaton_) automaton_->Release();
     if (rollover_) rollover_->Release();
     for (cIGZMessageTarget2* target : callbacks_)
@@ -295,23 +350,80 @@ void cSC4ViewInputControlPlayerDrive::EnterDrivingMode(cSC4Automaton* automaton,
     PauseEverything(false);
 }
 
-// 0x004b4b1c / 0x004b38ee: the dashboard windows and the view's mission status panel. PARTIAL: the windows themselves
-// (SC4CreateWindowFromScript of the exemplar's 0x2be8e61b instance, its dials from 0x2be8e834 / 0x2be8e6cb / 0xabe8e6cc and the
-// second panel 0xec1a5cbf) are the host's.
+// 0x004b4b1c: the dashboard exemplar {0x6534284a, 0x690f693f, id} names the dashboard window (script group 0x96a006b0, its
+// 0x2be8e61b instance; window 0x4bcb938a) and the mission status panel (0xec1b2361). Each dial child gets its image (group
+// 0x46a006b0) and frame count, the window the tool as its procedure, the minimap child SetFlags(0x11, 0x10); it sits at the
+// view's bottom center. The key help panel (instance 0x8c1a5c9f, window 0xec1a5cbf) starts hidden at the same place. Then
+// the view shows the mission status panel.
 void cSC4ViewInputControlPlayerDrive::ShowUI(std::uint32_t id) {
+    if (!g_host) return;
     std::uint32_t missionPanel = 0;
-    if (!dashboard_ && g_host) dashboard_ = g_host->ShowDashboard(id, missionPanel);
-    if (!dashboard_) SC4_UNWIRED("cSC4ViewInputControlPlayerDrive::ShowUI: the dashboard window (exemplar 0x2be8e61b and its dials) was not created");
-    if (missionPanel != 0 && g_host) g_host->ShowMissionStatusPanel(missionPanel);
+    IPlayerDriveHost::Dashboard spec;
+    if (!dashboard_ && g_host->DashboardExemplar(id, spec)) {
+        missionPanel = spec.missionPanel;
+        cIGZWin* view = g_host->ViewWindow();
+        dashboard_ = g_host->CreateWindowFromScript(cGZPersistResourceKey{0, kDashboardGroup, spec.windowInstance}, view, kDashboardWindowId);
+        if (dashboard_) {
+            for (std::size_t i = 0; i < spec.dialIds.size() && i < spec.dialImages.size() && i < spec.dialFrames.size(); ++i) {
+                auto* dial = DashboardChild<gz::cIGZWinKnob>(dashboard_, spec.dialIds[i], gz::kGZIID_cIGZWinKnob);
+                if (!dial) continue;
+                cIGZBuffer* image = g_host->DashboardImage(spec.dialImages[i]);
+                dial->SetKnobImage(image);
+                if (image) image->Release();
+                dial->SetFrameCount(spec.dialFrames[i]);
+                dial->Release();
+            }
+            void* gen = nullptr;
+            if (dashboard_->QueryInterface(gz::kGZIID_cIGZWinGen, &gen) && gen) {
+                static_cast<gz::cIGZWinGen*>(gen)->SetWinProc(&dashboardProc_);
+                static_cast<gz::cIGZWinGen*>(gen)->Release();
+            }
+            if (auto* map = DashboardChild<cISC4WinMiniMap>(dashboard_, kDashboardMiniMapId, kMiniMapIID)) {
+                map->SetFlags(0x11, 0x10);
+                map->Release();
+            }
+            PlaceAtBottomCenter(dashboard_, view);
+            dashboardHelp_ = g_host->CreateWindowFromScript(cGZPersistResourceKey{0, kDashboardGroup, kDashboardHelpInstance}, view,
+                                                            kDashboardHelpWindowId);
+            if (dashboardHelp_) {
+                dashboardHelp_->HideWindow();
+                PlaceAtBottomCenter(dashboardHelp_, view);
+                if (dashboardHelp_->QueryInterface(gz::kGZIID_cIGZWinGen, &gen) && gen) {
+                    static_cast<gz::cIGZWinGen*>(gen)->SetWinProc(&dashboardProc_);
+                    static_cast<gz::cIGZWinGen*>(gen)->Release();
+                }
+            }
+        }
+    }
+    if (missionPanel != 0) g_host->ShowMissionStatusPanel(missionPanel);
 }
 
+// 0x004b38ee: both dashboard windows leave the view; the view hides the mission status panel.
 void cSC4ViewInputControlPlayerDrive::HideUI() {
     if (!g_host) return;
-    if (dashboard_) {
-        g_host->HideDashboard();
-        dashboard_ = false;
+    cIGZWin* view = g_host->ViewWindow();
+    for (cIGZWin** window : {&dashboard_, &dashboardHelp_}) {
+        if (!*window) continue;
+        if (view) view->ChildRemove(*window);
+        cIGZWin* old = *window;
+        *window = nullptr;
+        old->Release();
     }
     g_host->HideMissionStatusPanel();
+}
+
+bool cSC4ViewInputControlPlayerDrive::DashboardProc::QueryInterface(std::uint32_t iid, void** out) {
+    if (iid == gz::kGZIID_cIGZWinProc || iid == 1) {
+        *out = static_cast<gz::cIGZWinProc*>(this);
+        AddRef();
+        return true;
+    }
+    return owner_->QueryInterface(iid, out);
+}
+
+bool cSC4ViewInputControlPlayerDrive::DashboardProc::DoWinProcMessage(cIGZWin*, cGZMessage& message) {
+    if (message.type != kWinProcButtonMessage || message.param1 != kWinProcButtonSender) return false;
+    return owner_->DoWinProcMessage(static_cast<std::uint32_t>(message.param2));
 }
 
 // 0x004b5aca: commands 0, 1, 2, 3, 5, 7 reach the automaton and start their AEMS events (1, 2, 3, 3, 6, 4); 2 and 3 press
@@ -324,7 +436,7 @@ bool cSC4ViewInputControlPlayerDrive::HandleDriveCommandKeyDown(std::uint32_t co
         case 1: event = kAemsReverse; break;
         case 2:
         case 3:
-            if (dashboard_ && g_host) g_host->SetDashboardButton(command == 2 ? kDashboardLeftButton : kDashboardRightButton, true);
+            SetDashboardButtonChecked(dashboard_, command == 2 ? kDashboardLeftButton : kDashboardRightButton, true);
             event = kAemsTurn;
             break;
         case 4:
@@ -364,7 +476,7 @@ bool cSC4ViewInputControlPlayerDrive::HandleDriveCommandKeyUp(std::uint32_t comm
         case 1: event = kAemsReverse; break;
         case 2:
         case 3:
-            if (dashboard_ && g_host) g_host->SetDashboardButton(command == 2 ? kDashboardLeftButton : kDashboardRightButton, false);
+            SetDashboardButtonChecked(dashboard_, command == 2 ? kDashboardLeftButton : kDashboardRightButton, false);
             event = kAemsTurn;
             break;
         case 4:
@@ -531,15 +643,49 @@ bool cSC4ViewInputControlPlayerDrive::DoWinProcMessage(std::uint32_t buttonId) {
     return true;
 }
 
-// 0x004b63ca: per animation tick while the automaton is valid: the AEMS velocity (|speed| / MaxSpeed) and throttle (the drive
-// state's speed between its minimum and maximum), and the view's mission status panel; 9 seconds after the final crash the
-// tool ends. PARTIAL: the dashboard gauges (speed, throttle, altitude, heading, money, the passenger counts) and the
-// cursor of the drive state (+0x114) are the dashboard's.
+// Update's dashboard block (0x004b63ca): with a drive state, the speed knob (0..MaxSpeed, the current speed), the throttle
+// knob (the state's minimum..maximum, its speed clamped), the altitude (height above the ground under the automaton: text
+// "%.0f" and a knob 0..100 on the height's last hundred), the headlight button (flag 1 = toggle 4) and the city's money; then,
+// with or without a state, the view's mission status panel.
+void cSC4ViewInputControlPlayerDrive::UpdateDashboard() {
+    if (!dashboard_ || !g_host) return;
+    if (tAutomataStatePlayerDrive* state = DriveState(automaton_)) {
+        SetKnob(dashboard_, kGaugeSpeed, 0.0f, speedReference_, static_cast<float>(automaton_->GetCurrentSpeed()));
+        float minimum = 0.0f;
+        std::memcpy(&minimum, &state->value40, sizeof minimum);
+        const float maximum = state->groupSpeed;
+        const float speed = state->value3c;
+        const float throttle = minimum <= speed ? (speed <= maximum ? speed : maximum) : minimum;
+        SetKnob(dashboard_, kGaugeThrottle, minimum, maximum, throttle);
+        float position[3] = {0.0f, 0.0f, 0.0f};                  // automaton vslot 0x1c (i386)
+        automaton_->GetPosition(position);
+        float altitude = position[1] - g_host->DriveGroundHeight(automaton_, position[0], position[2]);
+        cRZString text;
+        text.Sprintf("%.0f", static_cast<double>(altitude));
+        SetText(dashboard_, kAltitudeText, text);
+        while (100.0f < altitude) altitude -= 100.0f;
+        SetKnob(dashboard_, kGaugeAltitude, 0.0f, 100.0f, altitude);
+        if (auto* lights = DashboardChild<gz::cIGZWinBtn>(dashboard_, kHeadlightButton, gz::kGZIID_cIGZWinBtn)) {
+            lights->SetBtnFlag(1, toggle44_);
+            lights->Release();
+        }
+        cRZString money;
+        SC4MakeMoneyString(g_host->CityMoney(), money);
+        SetText(dashboard_, kMoneyText, money);
+        SC4_UNWIRED("cSC4ViewInputControlPlayerDrive::Update: the vehicle-specific gauges (knobs 0x6bcbce73 / 0x2bf98d69 / 0xebf98d37 / "
+                    "0x6c0ae7b1 / 0x2c0c1c8c, ammunition text 0x8c3923ae, button 0x6c3a0a6f: drive-state i386 +0x144..+0x268) and the "
+                    "drive-state cursor (+0x114) are not read");
+    }
+    g_host->UpdateMissionStatusPanel();
+}
+
+// 0x004b63ca: per animation tick while the automaton is valid: the dashboard (UpdateDashboard), the AEMS velocity
+// (|speed| / MaxSpeed) and throttle (the drive state's speed between its minimum and maximum); 9 seconds after the final
+// crash the tool ends.
 void cSC4ViewInputControlPlayerDrive::Update() {
     if (IsDriveAutoValid()) {
+        UpdateDashboard();
         if (tAutomataStatePlayerDrive* state = DriveState(automaton_)) {
-            SC4_UNWIRED("cSC4ViewInputControlPlayerDrive::Update: dashboard gauges and the drive-state cursor (+0x114) not ported");
-            if (dashboard_ && g_host) g_host->UpdateMissionStatusPanel();
             float velocity = 0.0f;
             if (speedReference_ > 0.0f) velocity = static_cast<float>(std::fabs(automaton_->GetCurrentSpeed()) / speedReference_);
             float minimum = 0.0f;
@@ -569,6 +715,25 @@ bool cSC4ViewInputControlPlayerDrive::DoMessage(cIGZMessage2* message) {
     const std::uint32_t type = message->GetType();
     if (type == kPlayerDriveTickMessage) {
         Update();
+        return true;
+    }
+    if (type == kPlayerDriveViewChanged) {                       // the zoom buttons follow what the view can still do
+        if (dashboard_ && g_host) {
+            nsGZWinUtils::SetWindowEnabled(dashboard_, kDashboardZoomInButton, g_host->CanZoomIn());
+            nsGZWinUtils::SetWindowEnabled(dashboard_, kDashboardZoomOutButton, g_host->CanZoomOut());
+        }
+        return true;
+    }
+    if (type == kPlayerDriveShowHelp || type == kPlayerDriveShowDashboard || type == kPlayerDriveToggleHelp) {
+        if (!dashboard_) return true;
+        const bool showDashboard = type == kPlayerDriveShowDashboard || (type == kPlayerDriveToggleHelp && !dashboard_->IsVisible());
+        if (showDashboard) {
+            dashboard_->ShowWindow();
+            if (dashboardHelp_) dashboardHelp_->HideWindow();
+        } else {
+            dashboard_->HideWindow();
+            if (dashboardHelp_) dashboardHelp_->ShowWindow();
+        }
         return true;
     }
     auto* standard = dynamic_cast<cIGZMessage2Standard*>(message);

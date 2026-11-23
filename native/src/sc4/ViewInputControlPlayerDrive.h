@@ -25,13 +25,19 @@
 #include "rz/cRZString.h"
 #include "rz/cRZTimer.h"
 #include "sc4/ViewInputControl.h"
+#include "gz/WinProc.h"
+#include <vector>
 
 class cISC4AEMSEvents;
+class cIGZWin;
+class cIGZBuffer;
+struct cGZPersistResourceKey;
 
 namespace sc4 {
 
 class cSC4Automaton;
 class cSC4OccupantGroupTemplate;
+class tAutomataStatePlayerDrive;
 struct tAutomataPlayerDriveParams;
 
 constexpr std::uint32_t kPlayerDriveToolId = 0x2b709676;          // the tool id the views compare (CurrentInputControlIsPlayerDrive)
@@ -96,10 +102,26 @@ public:
     virtual void UntrackOccupant(std::uint32_t id) = 0;                                      // UntrackOccupant(id, false)
     virtual void ShowAllIndicators(bool show) = 0;                                           // ShowAllIndicators(4, show)
     virtual void UseAlternateModel(std::uint32_t id, bool alternate) = 0;
-    // ---- the dashboard (ShowUI / HideUI / Update's gauges); answers false when the dashboard is not shown
-    virtual bool ShowDashboard(std::uint32_t id, std::uint32_t& missionPanel) = 0;
-    virtual void HideDashboard() = 0;
-    virtual void SetDashboardButton(std::uint32_t id, bool down) = 0;                         // child (0x8810) vslot 0x24
+    // ---- the dashboard (ShowUI / HideUI / Update's gauges)
+    virtual cIGZWin* ViewWindow() = 0;                                                       // view (+0x1c) vslot 0xc (borrowed)
+    // spRM vslot 0xc: the exemplar {0x6534284a, 0x690f693f, id} (iid 0xa52160f5); false when there is none. Its properties:
+    // 0x2be8e61b the dashboard window's script instance (0 when missing), 0xec1b2361 the mission status panel (0 when
+    // missing), and, only when all three are present, the dials: 0x2be8e834 child ids, 0x2be8e6cb image instances,
+    // 0xabe8e6cc frame counts (one entry each, the first list's length).
+    struct Dashboard {
+        std::uint32_t windowInstance = 0;
+        std::uint32_t missionPanel = 0;
+        std::vector<std::uint32_t> dialIds, dialImages, dialFrames;
+    };
+    virtual bool DashboardExemplar(std::uint32_t id, Dashboard& out) = 0;
+    // SC4CreateWindowFromScript(key, parent, id, cIGZWin iid): one reference, null on failure.
+    virtual cIGZWin* CreateWindowFromScript(const cGZPersistResourceKey& key, cIGZWin* parent, std::uint32_t id) = 0;
+    virtual cIGZBuffer* DashboardImage(std::uint32_t instance) = 0;                          // cSLBuffer(0, 0x46a006b0, instance, 1, 0): one reference
+    virtual long long CityMoney() = 0;                                                       // spCity vslot 0xd0 (budget) vslot 0x18
+    // The altitude gauge's ground under (x, z): an automaton in occupant group 0x4004 (occupant vslot 0x58) reads the terrain's
+    // altitude (spTerrain 0x30) where the point is in bounds (0x2c), else the sea level (0x74); any other reads the terrain
+    // map's cell height (spCity 0x17c -> spTerrainMap 0x48) in bounds, else the sea level.
+    virtual float DriveGroundHeight(cSC4Automaton* automaton, float x, float z) = 0;
     // ---- SL::AEMS() (null when there is no audio event system)
     virtual cISC4AEMSEvents* AEMS() = 0;
     virtual void LoadAutomatonSoundBank(cSC4Automaton* automaton, bool load) = 0;            // AEMS vslot 0xc / 0x10(holder, 0xcbbba52f)
@@ -131,6 +153,8 @@ public:
     bool OnMouseMove(int x, int y, std::uint32_t modifiers) override;             // 0x004b4310
     void EndInput() override;                                                     // 0x004b3f32
     bool DoWinProcMessage(std::uint32_t buttonId);                                // 0x004b3daa (the button-click branch)
+    cIGZWin* DashboardWindow() const { return dashboard_; }
+    cIGZWin* DashboardHelpWindow() const { return dashboardHelp_; }
 
     void EnterChoosingMode();                                                     // 0x004b4100
     void EnterDrivingMode(cSC4Automaton* automaton, bool flag);                   // 0x004b5184
@@ -168,7 +192,22 @@ private:
     std::list<cIGZMessageTarget2*> callbacks_;    // +0x60 (counted)
     float terrainScale_ = 1.0f;                   // +0x6c
     bool hasTerrain_ = false;                     // +0x68
-    bool dashboard_ = false;                      // +0xa4 / +0xa8
+    // The dashboard windows' procedure (+0x2c in the original: the tool itself): a button activation (message 3 from
+    // 0x287259f6) runs DoWinProcMessage.
+    class DashboardProc final : public gz::cIGZWinProc {
+    public:
+        explicit DashboardProc(cSC4ViewInputControlPlayerDrive* owner) : owner_(owner) {}
+        bool QueryInterface(std::uint32_t iid, void** out) override;
+        std::uint32_t AddRef() override { return owner_->AddRef(); }
+        std::uint32_t Release() override { return owner_->Release(); }
+        bool DoWinProcMessage(cIGZWin* window, cGZMessage& message) override;
+    private:
+        cSC4ViewInputControlPlayerDrive* owner_;
+    };
+    void UpdateDashboard();                                                       // Update's gauge block (0x004b63ca)
+    cIGZWin* dashboard_ = nullptr;                // +0xa4 (counted)
+    cIGZWin* dashboardHelp_ = nullptr;            // +0xa8 (counted): the key help panel 0xec1a5cbf
+    DashboardProc dashboardProc_{this};
 };
 
 }  // namespace sc4

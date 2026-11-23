@@ -64,6 +64,11 @@ bool NativeDriveViewCanZoom(bool in) {
     return v && (in ? v->CanZoomIn() : v->CanZoomOut());
 }
 void NativeDriveViewClearCursorText(std::uint32_t id) { if (sc4::cSC4View3DWin* v = CityView3DWin()) v->ClearCursorText(id); }
+// The view as a window (view vslot 0xc): the dashboard's parent (borrowed; null outside a city).
+cIGZWin* NativeDriveViewWindow() {
+    sc4::cSC4View3DWin* v = CityView3DWin();
+    return v ? static_cast<cIGZWin*>(static_cast<cGZWin*>(v)) : nullptr;
+}
 // op 1 shows panel `id`, 0 hides it, 2 updates it (view vslots 0xe0 / 0xe4 / 0xe8).
 void NativeDriveViewMissionPanel(int op, std::uint32_t id) {
     sc4::cSC4View3DWin* v = CityView3DWin();

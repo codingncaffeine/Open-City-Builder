@@ -20,6 +20,9 @@
 #include "app/NativeAnimationTicks.h"
 #include "app/NativeUi.h"
 #include "sc4/AutomataDriveParams.h"
+#include "gz/Buffer.h"
+#include "sc4/BudgetSimulator.h"
+#include "sc4/Exemplar.h"
 #include "sc4/AutomataManager.h"
 #include "sc4/AutomataScriptSystem.h"
 #include "sc4/AutomataStates.h"
@@ -58,6 +61,7 @@ void NativeDriveViewSetZoom(int zoom);
 bool NativeDriveViewCanZoom(bool in);
 void NativeDriveViewClearCursorText(std::uint32_t id);
 void NativeDriveViewMissionPanel(int op, std::uint32_t id);
+cIGZWin* NativeDriveViewWindow();
 void NativeDriveViewHideWindow(std::uint32_t id);
 bool NativeDriveViewSwapAccelerator(cIGZWinKeyAccelerator* own, cIGZWinKeyAccelerator*& saved);
 void NativeDriveViewRestoreAccelerator(cIGZWinKeyAccelerator* saved);
@@ -226,13 +230,54 @@ public:
     void UntrackOccupant(std::uint32_t id) override { NativeDispatchViewUntrack(id, false); }
     void ShowAllIndicators(bool show) override { NativeDispatchViewShowAllIndicators(4, show); }
     void UseAlternateModel(std::uint32_t id, bool alternate) override { NativeDispatchViewUseAlternateModel(id, alternate); }
-    bool ShowDashboard(std::uint32_t, std::uint32_t& missionPanel) override {
-        SC4_UNWIRED("cSC4ViewInputControlPlayerDrive: the dashboard windows are not created");
-        missionPanel = 0;
-        return false;
+    cIGZWin* ViewWindow() override { return NativeDriveViewWindow(); }
+    bool DashboardExemplar(std::uint32_t id, Dashboard& out) override {   // spRM {0x6534284a, 0x690f693f, id} as cISCResExemplar
+        void* resource = nullptr;
+        if (!SL::spRM || !SL::spRM->GetResource(cGZPersistResourceKey{0x6534284a, 0x690f693f, id}, 0xa52160f5, &resource, 0, nullptr) ||
+            !resource)
+            return false;
+        auto* exemplar = static_cast<cISCResExemplar*>(resource);
+        const sc4::cISCPropertyHolder* holder = exemplar->AsISCPropertyHolder();
+        cSCPropertyHelp::GetPropertyValue(holder, 0x2be8e61b, out.windowInstance);
+        cSCPropertyHelp::GetPropertyValue(holder, 0xec1b2361, out.missionPanel);
+        std::vector<std::uint32_t> ids, images, frames;
+        if (cSCPropertyHelp::GetPropertyValue(holder, 0x2be8e834, ids) && cSCPropertyHelp::GetPropertyValue(holder, 0x2be8e6cb, images) &&
+            cSCPropertyHelp::GetPropertyValue(holder, 0xabe8e6cc, frames)) {
+            out.dialIds = std::move(ids);
+            out.dialImages = std::move(images);
+            out.dialFrames = std::move(frames);
+        }
+        exemplar->Release();
+        return true;
     }
-    void HideDashboard() override {}
-    void SetDashboardButton(std::uint32_t, bool) override {}
+    cIGZWin* CreateWindowFromScript(const cGZPersistResourceKey& key, cIGZWin* parent, std::uint32_t id) override {
+        return native::CreateWindowFromScript(key, parent, id);
+    }
+    cIGZBuffer* DashboardImage(std::uint32_t instance) override { return LoadBitmapResource(0x46a006b0, instance); }
+    long long CityMoney() override {
+        cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(CityComponent::BudgetSimulator) : nullptr;
+        void* raw = nullptr;   // the component's serializable view (0xe4fda3d4) is the simulator
+        if (!object || !object->QueryInterface(0xe4fda3d4, &raw) || !raw) return 0;
+        auto* serializable = static_cast<cIGZSerializable*>(raw);
+        auto* budget = dynamic_cast<cSC4BudgetSimulator*>(serializable);
+        serializable->Release();
+        return budget ? static_cast<long long>(budget->GetTotalFunds()) : 0;
+    }
+    float DriveGroundHeight(cSC4Automaton* automaton, float x, float z) override {
+        cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(CityComponent::Terrain) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(0xab953253, &raw) || !raw) return 0.0f;
+        auto* terrain = static_cast<cSTETerrain*>(static_cast<cIGZSerializable*>(raw));
+        static_cast<cIGZSerializable*>(raw)->Release();   // the city keeps it
+        const bool inBounds = terrain->LocationIsInBounds(x, z);
+        if (!inBounds) return terrain->GetSeaLevel();
+        if (automaton && automaton->AsOccupant()->IsOccupantGroup(0x4004)) return terrain->GetAltitude(x, z);
+        int cellX = 0, cellZ = 0;
+        city->PositionToCell(x, z, cellX, cellZ);
+        return terrain->GetMaxSurfaceLevel(static_cast<std::uint32_t>(cellX), static_cast<std::uint32_t>(cellZ));
+    }
     cISC4AEMSEvents* AEMS() override {
         cIGZUnknown* service = SL::AEMS();
         void* raw = nullptr;

@@ -2,9 +2,12 @@
 // drive state, the camera follow, the zoom limits from the player-drive parameters, the resumed managers, the engine sound),
 // the scripts' key map reaching the automaton's command history and the AEMS, the mission countdown blocking the keys, the
 // choosing mode's pause, Escape ending the tool (the exit callback, the automaton leaving, the view dropping the tool) and the
-// automaton's removal callback.
+// automaton's removal callback. The dashboard: its windows from the exemplar (dials, bottom-center placement, the hidden key
+// help panel, the mission status panel), the tick's gauges (speed, throttle, altitude, money, headlights), the steering
+// buttons, the panel toggles, the zoom buttons after a view change, its button procedure, and HideUI.
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -14,6 +17,14 @@
 #include "sc4/Automaton.h"
 #include "sc4/SCPropertyHelp.h"
 #include "sc4/ViewInputControlPlayerDrive.h"
+#include "sc4/SC4Utilities.h"
+#include "gz/Win.h"
+#include "gz/WinBtn.h"
+#include "gz/WinGen.h"
+#include "gz/WinKnob.h"
+#include "gz/WinText.h"
+#include "gz/cGZPersistResourceKey.h"
+#include <map>
 #include "sc4audio/AEMSEvents.h"
 #include "vic_fakes.h"
 
@@ -97,6 +108,63 @@ struct Callback final : cIGZMessageTarget2 {
     }
 };
 
+// The money text's formatter: the symbol and the plain number.
+struct Formatter final : ILanguageFormatter {
+    void FormatMoney(std::int64_t value, cIGZString& out, const cRZString& symbol) override {
+        cRZString text;
+        text.Sprintf("%s%lld", symbol.ToChar(), static_cast<long long>(value));
+        out.Copy(text);
+    }
+    void FormatMoney(double, cIGZString&, const cIGZString&, const cRZString&) override {}
+    void FormatNumber(std::int64_t, cRZString&) override {}
+};
+// A script-built generic window: takes the dashboard's window procedure.
+struct FakeGenWindow final : cGZWin, gz::cIGZWinGen {
+    explicit FakeGenWindow(cIGZWinMgr* mgr) : cGZWin(mgr) {}
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid == gz::kGZIID_cIGZWinGen || iid == 0x5386d516) {
+            *out = static_cast<gz::cIGZWinGen*>(this);
+            AddRef();
+            return true;
+        }
+        return cGZWin::QueryInterface(iid, out);
+    }
+    std::uint32_t AddRef() override { return cGZWin::AddRef(); }
+    std::uint32_t Release() override { return cGZWin::Release(); }
+    cIGZWin* AsIGZWin() override { return this; }
+    std::uint32_t GetCLSID() const override { return 0; }
+    bool GetWinGenFlag(int) const override { return false; }
+    bool SetWinGenFlag(int, bool) override { return true; }
+    bool SetWinProc(gz::cIGZWinProc* proc) override { winProc = proc; ++winProcs; return true; }
+    gz::cIGZWinProc* GetWinProc() const override { return winProc; }
+    bool GetWinProcAs(std::uint32_t, void**) const override { return false; }
+    bool GetUserArea(cRZRect& out) const override { out = {}; return true; }
+    bool SetUserArea(const cRZRect& area) override { userArea = area; ++userAreas; return true; }
+    bool SetBackgroundBitmap(gz::BGBltType, cIGZBuffer*) override { return true; }
+    bool GetBackgroundBitmap(gz::BGBltType&, cIGZBuffer*&) const override { return false; }
+    bool SetBackgroundBitmap(cIGZBuffer*) override { return true; }
+    bool GetBackgroundBitmap(cIGZBuffer** out) const override { *out = nullptr; return true; }
+    bool SetBackgroundBlitType(gz::BGBltType) override { return true; }
+    bool GetBackgroundBlitType(gz::BGBltType& type) const override { type = gz::kBGTiled; return true; }
+    bool SetUserData(std::uint32_t, std::uint32_t) override { return true; }
+    bool GetUserData(std::uint32_t, std::uint32_t& value) const override { value = 0; return true; }
+    bool SetUserData(std::uint32_t) override { return true; }
+    std::uint32_t GetUserData() const override { return 0; }
+    void SetUserData(std::uint32_t, cIGZUnknown*) override {}
+    bool GetUserData(std::uint32_t, std::uint32_t, void**) override { return false; }
+    void RemoveUserData(std::uint32_t) override {}
+    bool SetGutters(std::uint8_t, std::uint8_t) override { return true; }
+    bool GetGutters(int& x, int& y) override { x = y = 0; return true; }
+    void SetGutters(std::int8_t, std::int8_t, std::int8_t, std::int8_t) override {}
+    bool GetGutters(int& l, int& t, int& r, int& b) const override { l = t = r = b = 0; return true; }
+    bool AddColorBar(int, int, int, const cRZRect&) override { return true; }
+    void AddDividerH(int, int) override {}
+    bool RemoveColorBar(int) override { return true; }
+    gz::cIGZWinProc* winProc = nullptr;
+    cRZRect userArea;
+    int winProcs = 0, userAreas = 0;
+};
+
 struct Host final : IViewInputHost, IPlayerDriveHost {
     View view;
     Mgr mgr;
@@ -116,17 +184,17 @@ struct Host final : IViewInputHost, IPlayerDriveHost {
     void SetTickTarget(cIGZMessageTarget2*, bool add) override { ticks += add ? 1 : -1; }
     void SetMessageTarget(cIGZMessageTarget2*, std::uint32_t, bool add) override { messages += add ? 1 : -1; }
     void SetCommandTable(bool add) override { commandTable += add ? 1 : -1; }
-    void PostCommand(std::uint32_t) override {}
+    void PostCommand(std::uint32_t command) override { commands.push_back(command); }
     float TerrainScale() override { return 16.0f; }
     void MinimizeUI(bool m) override { minimized = m ? 1 : 0; }
     void SetZoomLimits(int lo, int hi) override { zoomMin = lo; zoomMax = hi; }
     void SetZoom(int z) override { zoom = z; }
     bool CanZoomIn() override { return true; }
-    bool CanZoomOut() override { return true; }
+    bool CanZoomOut() override { return canZoomOut; }
     void ClearCursorText(std::uint32_t) override {}
-    void ShowMissionStatusPanel(std::uint32_t) override {}
-    void HideMissionStatusPanel() override {}
-    void UpdateMissionStatusPanel() override {}
+    void ShowMissionStatusPanel(std::uint32_t id) override { missionShown.push_back(id); }
+    void HideMissionStatusPanel() override { ++missionHides; }
+    void UpdateMissionStatusPanel() override { ++missionUpdates; }
     void HideDriveWindow() override {}
     void InstallKeyAccelerator(bool install) override { accelerator += install ? 1 : -1; }
     bool AllowMaxZoom() override { return false; }
@@ -153,9 +221,30 @@ struct Host final : IViewInputHost, IPlayerDriveHost {
     void UntrackOccupant(std::uint32_t) override {}
     void ShowAllIndicators(bool) override {}
     void UseAlternateModel(std::uint32_t, bool) override {}
-    bool ShowDashboard(std::uint32_t, std::uint32_t&) override { return false; }
-    void HideDashboard() override {}
-    void SetDashboardButton(std::uint32_t, bool) override {}
+    // the dashboard
+    cGZWin* viewWin = nullptr;
+    std::map<std::uint32_t, cIGZWin*> scripts;             // by window id
+    std::vector<std::pair<cGZPersistResourceKey, std::uint32_t>> scriptRequests;
+    Dashboard dashboardSpec;
+    std::vector<std::uint32_t> exemplarRequests, imageRequests, missionShown;
+    int missionUpdates = 0, missionHides = 0;
+    long long money = 1234567;
+    float ground = -250.0f;
+    bool canZoomOut = true;
+    std::vector<std::uint32_t> commands;
+    cIGZWin* ViewWindow() override { return viewWin; }
+    bool DashboardExemplar(std::uint32_t id, Dashboard& out) override { exemplarRequests.push_back(id); out = dashboardSpec; return true; }
+    cIGZWin* CreateWindowFromScript(const cGZPersistResourceKey& key, cIGZWin* parent, std::uint32_t id) override {
+        scriptRequests.emplace_back(key, id);
+        auto it = scripts.find(id);
+        if (it == scripts.end()) return nullptr;
+        if (parent) parent->ChildAdd(it->second);
+        it->second->AddRef();
+        return it->second;
+    }
+    cIGZBuffer* DashboardImage(std::uint32_t instance) override { imageRequests.push_back(instance); return nullptr; }
+    long long CityMoney() override { return money; }
+    float DriveGroundHeight(cSC4Automaton*, float, float) override { return ground; }
     cISC4AEMSEvents* AEMS() override { return &aems; }
     void LoadAutomatonSoundBank(cSC4Automaton*, bool load) override { bankLoads += load ? 1 : -1; }
     void ExitPlayerDriveView() override { ++exits; }
@@ -170,6 +259,8 @@ float History(cSC4Automaton* a, int command) {
 
 int main() {
     Host host;
+    Formatter formatter;
+    SetLanguageFormatter(&formatter);
     SetViewInputHost(&host);
     SetPlayerDriveHost(&host);
     FakeAutomatonHost automatonHost;
@@ -186,6 +277,33 @@ int main() {
     tool->EnterChoosingMode();
     CHECK(host.simPaused);
     CHECK(host.paused[0] == 1 && host.paused[1] == 1 && host.paused[2] == 1 && host.paused[3] == 1);
+
+    // The dashboard windows the scripts build: the view 800 x 600; the dashboard 474 x 136 with its dials, texts and
+    // buttons; the key help panel 460 x 132.
+    cGZWin viewWin(&host.mgr);
+    viewWin.AddRef();
+    viewWin.SetArea(0, 0, 800, 600);
+    host.viewWin = &viewWin;
+    auto* dash = new FakeGenWindow(&host.mgr);
+    dash->SetArea(0, 0, 474, 136);
+    auto addChild = [&](cGZWin* child, std::uint32_t id) { child->SetID(id); child->SetArea(0, 0, 70, 70); dash->ChildAdd(child); return child; };
+    auto* speedKnob = static_cast<gz::cGZWinKnob*>(addChild(new gz::cGZWinKnob(&host.mgr), 0xebcb9403));
+    auto* throttleKnob = static_cast<gz::cGZWinKnob*>(addChild(new gz::cGZWinKnob(&host.mgr), 0x2bcb940b));
+    auto* altitudeKnob = static_cast<gz::cGZWinKnob*>(addChild(new gz::cGZWinKnob(&host.mgr), 0x2bcbce68));
+    auto* altitudeText = static_cast<gz::cGZWinText*>(addChild(new gz::cGZWinText(&host.mgr), 0xec0ea996));
+    auto* moneyText = static_cast<gz::cGZWinText*>(addChild(new gz::cGZWinText(&host.mgr), 0xac0ea9db));
+    auto* lights = static_cast<gz::cGZWinBtn*>(addChild(new gz::cGZWinBtn(&host.mgr), 0x0c16c9b9));
+    auto* rightButton = static_cast<gz::cGZWinBtn*>(addChild(new gz::cGZWinBtn(&host.mgr), 0x6bcb93f5));
+    auto* zoomOut = addChild(new cGZWin(&host.mgr), 0xe9920494);
+    auto* help = new FakeGenWindow(&host.mgr);
+    help->SetArea(0, 0, 460, 132);
+    host.scripts[0x4bcb938a] = dash;
+    host.scripts[0xec1a5cbf] = help;
+    host.dashboardSpec.windowInstance = 0xabcb937d;
+    host.dashboardSpec.missionPanel = 0xac1d544d;
+    host.dashboardSpec.dialIds = {0xebcb9403, 0x2bcb940b};
+    host.dashboardSpec.dialImages = {0xcbcba952, 0xcbcb6e9f};
+    host.dashboardSpec.dialFrames = {55, 54};
 
     auto* car = new cSC4Automaton(&automatonHost);
     car->AddRef();
@@ -205,6 +323,21 @@ int main() {
     CHECK(host.aems.log == "+0");
     CHECK(host.aems.velocity == 0.0f && host.aems.throttle == 0.0f);
     CHECK(tool->IsDriveAutoValid());
+    // ShowUI: the car's default dashboard exemplar 0x0be8824f; the dashboard (script 0x96a006b0 / 0xabcb937d, window
+    // 0x4bcb938a) at the view's bottom center with its dial images and frame counts; the help panel (0x8c1a5c9f, window
+    // 0xec1a5cbf) hidden at the bottom center; the mission status panel 0xac1d544d.
+    CHECK(host.exemplarRequests.size() == 1 && host.exemplarRequests[0] == 0x0be8824f);
+    CHECK(host.scriptRequests.size() == 2);
+    CHECK(host.scriptRequests[0].first.group == 0x96a006b0 && host.scriptRequests[0].first.instance == 0xabcb937d &&
+          host.scriptRequests[0].second == 0x4bcb938a);
+    CHECK(host.scriptRequests[1].first.group == 0x96a006b0 && host.scriptRequests[1].first.instance == 0x8c1a5c9f &&
+          host.scriptRequests[1].second == 0xec1a5cbf);
+    CHECK(tool->DashboardWindow() == dash && tool->DashboardHelpWindow() == help);
+    CHECK(dash->GetL() == (800 - 474) / 2 && dash->GetT() == 600 - 136);
+    CHECK(help->GetL() == (800 - 460) / 2 && help->GetT() == 600 - 132 && !help->IsVisible());
+    CHECK(host.imageRequests == (std::vector<std::uint32_t>{0xcbcba952, 0xcbcb6e9f}));
+    CHECK(speedKnob->GetFrameCount() == 55 && throttleKnob->GetFrameCount() == 54);
+    CHECK(host.missionShown == (std::vector<std::uint32_t>{0xac1d544d}));
 
     // ---- the key map drives the automaton's command history and the AEMS
     CHECK(tool->OnKeyDown('W', 0));
@@ -213,6 +346,7 @@ int main() {
     CHECK(tool->OnKeyDown('D', 0));
     CHECK(History(car, 3) == 0.0f);
     CHECK(host.aems.log == "+0+1+3");
+    CHECK(rightButton->IsChecked());                           // the dashboard's right-turn button pressed
     CHECK(tool->OnKeyDown('W', 0x40000000));   // a repeat is swallowed
     CHECK(host.aems.log == "+0+1+3");
     CHECK(!tool->OnKeyDown('Q', 0));           // not in the key map
@@ -243,6 +377,53 @@ int main() {
     tool->DoMessage(tick);
     CHECK(std::fabs(host.aems.throttle - 0.5f) < 1e-6f);
     CHECK(host.aems.velocity == 0.0f);
+    // The tick's gauges: speed 0..MaxSpeed; throttle min..max with the speed clamped (-0.25 -> the minimum 0); the altitude
+    // above the ground (0 - -250 = 250: text "250", knob 0..100 on 50); the city's money; headlights = toggle 4 (on).
+    CHECK(speedKnob->GetMinValue() == 0.0f && speedKnob->GetMaxValue() == 0.5f && speedKnob->GetValue() == 0.0f);
+    CHECK(throttleKnob->GetMinValue() == 0.0f && throttleKnob->GetMaxValue() == 0.5f && throttleKnob->GetValue() == 0.0f);
+    CHECK(std::strcmp(altitudeText->GetCaption().ToChar(), "250") == 0);
+    CHECK(altitudeKnob->GetMaxValue() == 100.0f && altitudeKnob->GetValue() == 50.0f);
+    CHECK(std::strcmp(moneyText->GetCaption().ToChar(), "\xc2\xa7" "1234567") == 0);
+    CHECK(lights->GetBtnFlag(1));
+    CHECK(host.missionUpdates == 1);
+    state->value3c = 0.75f;                                    // above the maximum: the maximum
+    tool->DoMessage(tick);
+    CHECK(throttleKnob->GetValue() == 0.5f && host.missionUpdates == 2);
+    // The panel toggles: 0xac1f0449 the help panel, 0xcc1f0457 the dashboard, 0xac1f045d flips between them.
+    auto* panelCommand = new cRZMessage2Standard();
+    panelCommand->AddRef();
+    panelCommand->SetType(0xac1f0449);
+    tool->DoMessage(panelCommand);
+    CHECK(!dash->IsVisible() && help->IsVisible());
+    panelCommand->SetType(0xac1f045d);
+    tool->DoMessage(panelCommand);
+    CHECK(dash->IsVisible() && !help->IsVisible());
+    tool->DoMessage(panelCommand);
+    CHECK(!dash->IsVisible() && help->IsVisible());
+    panelCommand->SetType(0xcc1f0457);
+    tool->DoMessage(panelCommand);
+    CHECK(dash->IsVisible() && !help->IsVisible());
+    // A view change: the zoom buttons follow CanZoomIn / CanZoomOut.
+    host.canZoomOut = false;
+    panelCommand->SetType(0xa6b79602);
+    tool->DoMessage(panelCommand);
+    CHECK(!zoomOut->IsEnabled());
+    panelCommand->Release();
+    // The dashboard's procedure: a button activation posts its command (zoom in -> 0x6a935cb7); other messages pass.
+    {
+        void* raw = nullptr;
+        CHECK(dash->GetWinProc() != nullptr);
+        cGZMessage click;
+        click.type = 3;
+        click.param1 = 0x287259f6;
+        click.param2 = 0x4992046a;
+        CHECK(dash->GetWinProc()->DoWinProcMessage(dash, click));
+        CHECK(host.commands.size() == 1 && host.commands[0] == 0x6a935cb7);
+        click.param1 = 0x12345678;
+        CHECK(!dash->GetWinProc()->DoWinProcMessage(dash, click));
+        CHECK(host.commands.size() == 1);
+        (void)raw;
+    }
 
     // ---- Escape: the exit callback, the automaton leaves the city, the view drops the tool
     CHECK(tool->OnKeyDown(0x1b, 0));
@@ -277,6 +458,9 @@ int main() {
     CHECK(tool->Shutdown());
     CHECK(host.ticks == 0 && host.messages == 0 && host.commandTable == 0 && host.accelerator == 0);
     CHECK(host.exits == 1 && host.minimized == 0);
+    // HideUI (from Shutdown): both windows leave the view, the view hides the mission status panel.
+    CHECK(tool->DashboardWindow() == nullptr && tool->DashboardHelpWindow() == nullptr);
+    CHECK(viewWin.GetChildCount() == 0 && host.missionHides >= 1);
     CHECK(exitWatcher.refs == 1);
 
     tick->Release();
