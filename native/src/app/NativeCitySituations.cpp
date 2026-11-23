@@ -4,8 +4,8 @@
 // manager, the HTML link handler and the "city situations" advisor (id 0x1d). Also the kit's read-only `situations` verb.
 // The automata, occupants and their managers come through the views of app/NativeSituationAutomata.cpp.
 //   PARTIAL: the city geometry, lot / zone managers, terrain, traffic network, the landfill developer, the effects manager
-//   and the MySim answer null; cSC4DispatchVehicleView (the situation indicators) is not recovered (NativeDispatch.cpp
-//   CreateDispatchVehicleView), so DispatchView answers null as the dispatch manager does.
+//   and the MySim answer null. The situation indicators are the dispatch manager's cSC4DispatchVehicleView
+//   (app/NativeDispatchVehicleView.cpp).
 #include <cmath>
 #include "platform/Unwired.h"
 #include <cstdio>
@@ -64,6 +64,7 @@ int SituationAutomataManagerCount();
 sc4::ISituationAutomataManager* SituationAutomataManager(int index);
 sc4::ISituationOccupantManager* SituationOccupantManager();
 cIGZUnknown* SituationEngineOccupant(sc4::ISituationOccupant* occupant);
+sc4::ISituationDispatchView* NativeSituationDispatchView();   // NativeDispatchVehicleView.cpp
 void SituationEnterPlayerDriveView(sc4::ISituationAutomaton* automaton, cIGZMessageTarget2* target);
 std::uint32_t SituationSourceBuildingGroup(std::uint32_t automataGroup);
 
@@ -167,10 +168,8 @@ public:
     ISituationApp* App() override { return SL::spSC4 ? &g_app : nullptr; }
     ISituationCheatCodes* CheatCodes() override { return GameCheatCodeManager() ? &g_cheats : nullptr; }
     ISituationView3D* View3D() override { return &g_view; }
-    ISituationDispatchView* DispatchView() override {
-        SC4_UNWIRED("ICitySituationManagerHost::DispatchView: cSC4DispatchVehicleView (the situation indicators) is not recovered");
-        return nullptr;
-    }
+    // SL::spDispatchManager vslot 0xb0 GetDispatchVehicleView: the indicators of the dispatch manager's view.
+    ISituationDispatchView* DispatchView() override { return NativeSituationDispatchView(); }
     ISituationCity* City() override {   // PARTIAL: the city geometry seam (escape / coverage missions, landfill targets)
         SC4_UNWIRED("ICitySituationManagerHost::City: the city geometry seam (escape / coverage missions, landfill targets) is not wired");
         return nullptr;

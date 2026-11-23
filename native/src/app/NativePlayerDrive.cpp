@@ -44,6 +44,12 @@ bool NativePlayerDriveCameraSetTarget(const float xyz[3]);
 bool NativePlayerDriveCameraSetVelocity(const float xyz[3]);
 bool NativePlayerDriveCameraTarget(float out[3]);
 bool NativeSituationCountdownInProgress();
+// app/NativeDispatchVehicleView.cpp: the dispatch manager's cSC4DispatchVehicleView (SL::spDispatchManager vslot 0xb0).
+bool NativeDispatchViewPresent();
+std::uint32_t NativeDispatchViewTrackPlayerDrive(sc4::cISC4Occupant* occupant);
+void NativeDispatchViewUntrack(std::uint32_t id, bool force);
+void NativeDispatchViewShowAllIndicators(int type, bool show);
+void NativeDispatchViewUseAlternateModel(std::uint32_t id, bool alternate);
 bool NativeSituationCSIVisible();
 bool NativeSituationStatus(std::uint32_t& status);
 void NativeDriveViewMinimizeUI(bool minimize);
@@ -213,14 +219,13 @@ public:
         SC4_UNWIRED("cSC4ViewInputControlPlayerDrive choosing mode: the automaton pick under the pointer is not wired");
         return nullptr;
     }
-    bool HasDispatchView() override {
-        SC4_UNWIRED("cSC4ViewInputControlPlayerDrive: the dispatch vehicle view (indicators, tracking) is not recovered");
-        return false;
+    bool HasDispatchView() override { return NativeDispatchViewPresent(); }
+    std::uint32_t TrackOccupant(cSC4Automaton* automaton) override {
+        return automaton ? NativeDispatchViewTrackPlayerDrive(static_cast<cISC4Occupant*>(automaton)) : 0u;
     }
-    std::uint32_t TrackOccupant(cSC4Automaton*) override { return 0; }
-    void UntrackOccupant(std::uint32_t) override {}
-    void ShowAllIndicators(bool) override {}
-    void UseAlternateModel(std::uint32_t, bool) override {}
+    void UntrackOccupant(std::uint32_t id) override { NativeDispatchViewUntrack(id, false); }
+    void ShowAllIndicators(bool show) override { NativeDispatchViewShowAllIndicators(4, show); }
+    void UseAlternateModel(std::uint32_t id, bool alternate) override { NativeDispatchViewUseAlternateModel(id, alternate); }
     bool ShowDashboard(std::uint32_t, std::uint32_t& missionPanel) override {
         SC4_UNWIRED("cSC4ViewInputControlPlayerDrive: the dashboard windows are not created");
         missionPanel = 0;

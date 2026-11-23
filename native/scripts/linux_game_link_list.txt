@@ -190,6 +190,7 @@ src/rz/cRZRandomSuper.cpp
 src/s3d/S3DMath.cpp
 src/s3d/Camera.cpp
 src/s3d/TriangleIterator.cpp
+src/s3d/ModelProcessor.cpp
 src/sc4/Render3D.cpp
 src/sc4/PathFinder.cpp
 src/sc4/PathInfo.cpp
@@ -279,6 +280,7 @@ src/tools/city_probe_creators_lotconfig.cpp
 src/gz/GZCOM.cpp
 src/gz/GZCOMCreators7.cpp
 src/sc4/DispatchManager.cpp
+src/sc4/DispatchVehicleView.cpp
 src/sc4/AircraftDispatchSource.cpp
 src/sc4/cSC424HourClock.cpp
 src/sc4/BuildingDevelopmentSimulator.cpp
@@ -771,6 +773,7 @@ src/app/NativeDecalOverlay.cpp
 src/app/NativeDemolition.cpp
 src/app/NativeDemolishTool.cpp
 src/app/NativeDispatch.cpp
+src/app/NativeDispatchVehicleView.cpp
 src/app/NativeDispatchTool.cpp
 src/sc4/ViewInputControlDemolish.cpp
 src/sc4/ViewInputControlDispatch.cpp

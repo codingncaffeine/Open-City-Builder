@@ -57,6 +57,10 @@ void NativeRemoveFireCrew(cIGZUnknown* crew);
 int NativeFireCount();
 void InstallFireCrewHost();
 sc4::cSC4CrimeSimulator* NativeCrimeSimulator();   // app/NativeCrime.cpp
+// app/NativeDispatchVehicleView.cpp: cSC4DispatchVehicleView and its renderer layer.
+sc4::IDispatchVehicleView* NativeCreateDispatchVehicleView();
+bool NativeAddDispatchVehicleViewLayer(sc4::IDispatchVehicleView* view);
+bool NativeRemoveDispatchVehicleViewLayer(sc4::IDispatchVehicleView* view);
 void NativePedestriansInBox(const float* lo, const float* hi, std::vector<sc4::cISC4Occupant*>& out);   // app/NativeTrafficAutomata.cpp
 
 // app/NativeRiotPolice.cpp: the figures of the patrol cars' host
@@ -382,11 +386,8 @@ class DispatchHostImpl final : public IDispatchHost {
 public:
     cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
     IDispatchCity* City() override { return HostCity() ? &g_city : nullptr; }
-    // PARTIAL: cSC4DispatchVehicleView (the on-screen vehicle labels) is not recovered natively.
-    IDispatchVehicleView* CreateDispatchVehicleView() override {
-        SC4_UNWIRED("cSC4DispatchManager::CreateDispatchVehicleView: cSC4DispatchVehicleView (the on-screen vehicle labels) is not recovered");
-        return nullptr;
-    }
+    // cSC4DispatchVehicleView (sc4/DispatchVehicleView.*): operator new + ctor + AddRef.
+    IDispatchVehicleView* CreateDispatchVehicleView() override { return NativeCreateDispatchVehicleView(); }
     IPylonOccupant* CreatePylonOccupant() override {
         auto* pylon = new cSC4PylonOccupant();
         pylon->AddRef();
@@ -400,8 +401,9 @@ public:
         cSC4AircraftManager* aircraft = AircraftDispatch::Aircraft();
         return aircraft && aircraft->CanCreateGroup(group) ? &g_aircraftDispatch : nullptr;
     }
-    void AddDispatchViewLayer(IDispatchVehicleView*) override {}
-    void RemoveDispatchViewLayer(IDispatchVehicleView*) override {}
+    // SL::spRenderer vslots 0x100 / 0x108: AddViewObject(view, 5, 1000) / RemoveViewObject(view).
+    void AddDispatchViewLayer(IDispatchVehicleView* view) override { NativeAddDispatchVehicleViewLayer(view); }
+    void RemoveDispatchViewLayer(IDispatchVehicleView* view) override { NativeRemoveDispatchVehicleViewLayer(view); }
     // The record streams hold the objects themselves: the views turn back into them for writing and are made for them on reading.
     bool WriteSerializable(cIGZOStream& stream, const cIGZUnknown* object) override {
         if (cSC4Automaton* automaton = AutomatonOfDispatchView(object)) return SC4WriteGZSerializable(stream, static_cast<cISC4Occupant*>(automaton));

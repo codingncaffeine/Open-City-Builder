@@ -136,6 +136,7 @@ the caller fills (see `scripts/terrain_shot.mm`).
 | `IDisasterHost` | `src/sc4/Disaster.h` | src/sc4/Disaster.cpp, src/sc4/DisasterInstanceEarthquake.cpp, src/sc4/DisasterInstanceVolcano.cpp ... | implemented | scripts/tests/sc4_disaster_test.cpp, scripts/tests/sc4_disasterinstanceriot_test.cpp |
 | `IDisasterToolHost` | `src/sc4/ViewInputControlDisaster.h` | src/sc4/ViewInputControlDisaster.cpp | implemented | src/app/NativeDisasterTools.cpp |
 | `IDispatchHost` | `src/sc4/DispatchManager.h` | src/sc4/DispatchManager.cpp | implemented | scripts/tests/sc4_aircraftdispatchsource_test.cpp, scripts/tests/sc4_dispatchmanager_test.cpp |
+| `IDispatchVehicleViewHost` | `src/sc4/DispatchVehicleView.h` | src/sc4/DispatchVehicleView.cpp | implemented | scripts/tests/sc4_dispatchvehicleview_test.cpp, src/app/NativeDispatchVehicleView.cpp |
 | `IDispatchToolHost` | `src/sc4/ViewInputControlDispatch.h` | src/sc4/ViewInputControlDispatch.cpp | implemented | src/app/NativeDispatchTool.cpp |
 | `IDrawContextHost` | `src/gz/DrawContext.h` | src/gz/DrawContext.cpp | implemented | scripts/tests/gz_drawcontext_test.cpp, scripts/tests/gz_drawsystem_test.cpp |
 | `IDrawFontRendererHost` | `src/gz/DrawFontRenderer.h` | src/gz/DrawFontRenderer.cpp | implemented | scripts/tests/gz_drawfontrenderer_test.cpp, src/app/game_main.mm |

@@ -3,7 +3,7 @@
 // (app/hosts/StubAutomataManager.cpp) for the native game: the framework (messages, the animation ticks), the city (script
 // groups, the 24 hour clock, cells, terrain), resources (tuning, exemplars), creation of automata by class id and the
 // managers' views of loaded automata.
-//   PARTIAL: the debug view, path views, the dispatch view, the group budget, the network manager and its cell masks, the
+//   PARTIAL: the debug view, path views, the group budget, the network manager and its cell masks, the
 //   traffic simulator's edge counts and the response occupants answer neutrally. The cheats reach the game's cheat manager.
 #include <cstdio>
 #include "platform/Unwired.h"
@@ -56,6 +56,8 @@ void NativeSetPlayerDriveControl(sc4::IAutomataPlayerDriveControl* control);
 sc4::IAutomataPlayerDriveControl* NativePlayerDriveControl();
 void NativeAddPlayerDriveControl(sc4::IAutomataPlayerDriveControl* control, int operation);
 bool NativeCurrentInputControlIsPlayerDrive();
+bool NativeDispatchViewPresent();   // app/NativeDispatchVehicleView.cpp
+void NativeDispatchViewShowAllIndicators(int type, bool show);
 sc4::IAutomataCameraControl* NativeAutomataCameraControl();
 sc4::ITrafficNetworkMapLot* NativeTrafficLotAt(int cellX, int cellZ);   // app/NativeTrafficNetworkMap.cpp
 }
@@ -175,6 +177,12 @@ public:
     }
 };
 
+// cSC4DispatchVehicleView as the automata managers reach it.
+class DispatchViewForward final : public IAutomataDispatchView {
+public:
+    void ShowAllIndicators(int type, bool show) override { NativeDispatchViewShowAllIndicators(type, show); }
+};
+
 class Host final : public IVehicleManagerHost {
 public:
     // ---- framework
@@ -251,9 +259,10 @@ public:
     IAutomataPathView* CreatePathView() override { return nullptr; }
     void AddRendererLayer(IAutomataPathView*) override {}
     void RemoveRendererLayer(IAutomataPathView*) override {}
+    // SL::spDispatchManager vslot 0xb0 GetDispatchVehicleView (the cheat hides the situation indicators through it).
     IAutomataDispatchView* DispatchView() override {
-        SC4_UNWIRED("IAutomataManagerHost::DispatchView: cSC4DispatchVehicleView (the on-screen vehicle labels) is not recovered");
-        return nullptr;
+        static DispatchViewForward view;
+        return NativeDispatchViewPresent() ? &view : nullptr;
     }
     void ReleaseObject(cIGZUnknown* object) override { if (object) object->Release(); }
     // ---- simulator / misc
