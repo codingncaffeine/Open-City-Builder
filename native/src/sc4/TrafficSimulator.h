@@ -446,6 +446,11 @@ public:
     int StrikeDays() const { return strikeDays_; }
     void SetStrikeEligible(std::int64_t count) { strikeEligible_ = count; }
     bool StrikeActiveFlag() const { return strikeActive_; }
+    // The statistics block's monthly funding copies (i386 stats +0x228 / +0x22c, DoMonthlySimulation) and the average freight
+    // trip length byte (+0x238, WorkOnFinalCalculations), as the traffic advisor reads them.
+    float StatsRoadFunding() const { return statsRoadFunding_; }
+    float StatsMassTransitFunding() const { return statsMassTransitFunding_; }
+    std::uint8_t StatsFreightTripLength() const { return freightByte_; }
     float StrikeChance() const { return strikeChance_; }
     struct BudgetCounters { std::uint32_t c908 = 0, c90c = 0, c910 = 0, c914 = 0, c920 = 0, c924 = 0, c928 = 0, c92c = 0, c930 = 0, c938 = 0; };
     BudgetCounters& Counters() { return counters_; }
@@ -703,6 +708,7 @@ private:
     int strikeDays_ = 0;
     std::int64_t strikeEligible_ = 0;
     bool strikeActive_ = false;
+    float statsRoadFunding_ = 0.0f, statsMassTransitFunding_ = 0.0f;
     float strikeChance_ = 0;
     BudgetCounters counters_;
 

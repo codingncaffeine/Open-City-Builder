@@ -336,9 +336,14 @@ void Safety() {
 
 // ---- Traffic (7.7)
 void Traffic() {
-    SC4_UNWIRED("UpdateSimulatorStatistics Traffic (advisors.md 7.7): g_road_funding_p / g_masstransit_funding_p, station utilizations, connection congestion and port counts by size and stage are not published");
+    SC4_UNWIRED("UpdateSimulatorStatistics Traffic: the transit station counts and utilizations (the traffic statistics' station block) are not published");
     auto* traffic = Comp<cSC4TrafficSimulator>(CityComponent::TrafficSimulator);
     if (traffic) {
+        // cSC4AdvisorTraffic::update_variables (i386 0x00335d98): the statistics block's funding, strike and freight fields.
+        G("g_road_funding_p", X100(traffic->StatsRoadFunding()));
+        G("g_masstransit_funding_p", X100(traffic->StatsMassTransitFunding()));
+        G("g_transit_strike", traffic->StrikeActiveFlag() ? 1.0 : 0.0);
+        G("ga_freight_trip_length", static_cast<double>(traffic->StatsFreightTripLength()));
         const auto& rows = traffic->PublishedStats();
         static const struct { const char* net; int row; } kNets[] = {
             {"road", 0}, {"rail", 1}, {"street", 3}, {"avenue", 6}, {"subway", 7}, {"elevated", 8}, {"monorail", 9}, {"bridge", 13}};
@@ -358,13 +363,70 @@ void Traffic() {
             G(name, traffic->CellCount(t.type));
         }
     }
+    // The first port lot (from the back) without road access, as a local at the lot's cell; else 0 with no subject.
+    auto noRoadAccess = [](const char* name, std::vector<cSC4Lot*>& lots) {
+        for (auto it = lots.rbegin(); it != lots.rend(); ++it) {
+            cSC4Lot* lot = *it;
+            if (lot && !lot->HasRoadAccess()) {   // lot vslot 0x70
+                int x = 0, z = 0;
+                lot->GetLocation(x, z);            // vslot 0x54
+                LocalAtCell(name, 1.0, x, z);
+                return;
+            }
+        }
+        LocalNone(name, 0.0);
+    };
     if (auto* airports = Comp<cSC4AirportDeveloper>(CityComponent::AirportDeveloper)) {
         G("ga_airport_efficiency", X100(airports->GetAvgEfficiency()));
+        std::vector<cSC4Lot*> lots;
+        airports->GetAllPortLots(lots);   // vslot 0x20
+        noRoadAccess("l_airport_no_road_access", lots);
+        // update_occupant_variables: GetNumPorts(size, stage) with sizes 2 small, 4 medium, 8 large (0xe all) and stages
+        // 1 / 2 / 4 (0x1f all).
         G("g_airport_count", airports->GetNumPorts(0xe, 0x1f));
+        G("g_medium_airport_count", airports->GetNumPorts(4, 0x1f));
+        G("g_small_airport_count", airports->GetNumPorts(2, 0x1f));
+        G("g_large_airport_count", airports->GetNumPorts(8, 0x1f));
+        static const struct { const char* name; int size, stage; } kStages[] = {
+            {"g_medium_airport_s1_count", 4, 1}, {"g_small_airport_s1_count", 2, 1}, {"g_large_airport_s1_count", 8, 1},
+            {"g_medium_airport_s2_count", 4, 2}, {"g_small_airport_s2_count", 2, 2}, {"g_large_airport_s2_count", 8, 2},
+            {"g_medium_airport_s3_count", 4, 4}, {"g_small_airport_s3_count", 2, 4}, {"g_large_airport_s3_count", 8, 4}};
+        for (const auto& s : kStages) G(s.name, airports->GetNumPorts(s.size, s.stage));
     }
     if (auto* seaports = Comp<cSC4SeaportDeveloper>(CityComponent::SeaportDeveloper)) {
         G("ga_seaport_efficiency", X100(seaports->GetAvgEfficiency()));
+        std::vector<cSC4Lot*> lots;
+        seaports->GetAllPortLots(lots);
+        noRoadAccess("l_seaport_no_road_access", lots);
         G("g_seaport_count", seaports->GetNumPorts(0xe, 0x1f));
+        G("g_seaport_s1_count", seaports->GetNumPorts(0xe, 1));
+        G("g_seaport_s2_count", seaports->GetNumPorts(0xe, 2));
+        G("g_seaport_s3_count", seaports->GetNumPorts(0xe, 4));
+        G("g_seaport_volume", static_cast<double>(static_cast<std::uint32_t>(seaports->GetNumSeaportTrips())));   // vslot 0x34
+    }
+    // The highest congestion (strict >, from 0) at the inner cell of each road, then each avenue, neighbor connection; the
+    // avenue pass keeps the road pass's cell when no avenue cell is congested (as the original).
+    auto* neighbors = Comp<cSC4NeighborsSimulator>(CityComponent::NeighborsSimulator);
+    cSC4SimGrid<std::uint8_t>* congestion = traffic ? traffic->GetCongestionMap() : nullptr;
+    if (neighbors) {
+        int atX = 0, atZ = 0;
+        auto worst = [&](std::uint32_t type, const char* name) {
+            ConnectionList list;
+            neighbors->GetConnectionsOfType(type, list);   // vslot 0x44
+            std::uint8_t highest = 0;
+            for (auto it = list.rbegin(); it != list.rend(); ++it) {
+                int x = 0, z = 0;
+                if (!*it || !(*it)->GetConnectionInnerCell(x, z) || !congestion) continue;
+                const std::uint8_t value = congestion->GetCellValue(x, z);
+                if (highest < value) { highest = value; atX = x; atZ = z; }
+            }
+            LocalAtCell(name, static_cast<double>(highest), atX, atZ);
+        };
+        worst(2, "l_road_connection_congestion_h");
+        worst(8, "l_avenue_connection_congestion_h");
+        ConnectionList rail;
+        neighbors->GetConnectionsOfType(1, rail);
+        G("g_rail_neighbor_connection_count", static_cast<double>(rail.size()));
     }
 }
 

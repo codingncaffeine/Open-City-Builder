@@ -1987,6 +1987,8 @@ void cSC4TrafficSimulator::DoMonthlySimulation() {
     ApplyMassTransitFunding(transit);
     UpdateStrikes();
     CheckForAccident();
+    statsRoadFunding_ = host_->RoadFundingFraction();          // the departments' funding again (i386 0x0005f5d2)
+    statsMassTransitFunding_ = host_->MassTransitFundingFraction();
     host_->RecordHistory(0xea5ba01d, std::uint32_t(std::int64_t(statsPublished_[0].average * 100.0f)));
     host_->RecordHistory(0x8a5d4116, std::uint32_t(std::int64_t(avgCarCommute_ * 25.0f)));
     for (std::uint32_t i = 0; i < 9; ++i) host_->RecordHistory(0xabb8faac + i, typeCountsPublished_[i]);
