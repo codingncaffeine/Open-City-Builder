@@ -119,8 +119,6 @@ public:
     std::uint32_t effectDelay20c = 0;      // +0x20c
     std::uint8_t fireArmed = 0;            // +0x22b (i386 +0x1ff): fire button 0x6c3a0a6f; the next shot clears it
     // The helicopter's spotlight effect state (cSC4Helicopter::TranslatePlayerDriveCommands / UpdateSpotlight).
-    float effectParam240 = 0.0f;           // +0x240
-    float effectParam244 = 0.0f;           // +0x244
     cS3DVector3 effectPosition248;         // +0x248
     std::uint8_t spotlightStarted255 = 0;  // +0x255
     float pitchGaugeScale = 0.0f;          // +0x260 (i386 +0x234): the factor pitchGauge was scaled by
@@ -149,7 +147,8 @@ public:
     // The U-Drive-It tool's bytes in the record (cSC4ViewInputControlPlayerDrive; i386 offsets).
     std::uint8_t keyEffectOn205[13] = {};  // +0x205: one on / off byte per drive command (HandleKeyEffects)
     std::uint8_t toggle229 = 0;            // +0x229: flipped by drive command 9
-    std::int32_t mouseX214 = 0;            // +0x214 / +0x218: the mouse position while driving (OnMouseMove)
+    std::int32_t mouseX214 = 0;            // i386 +0x214 / +0x218: the mouse position while driving (OnMouseMove); the
+                                           // helicopter spotlight and the fire hose pick the terrain under it
     std::int32_t mouseY218 = 0;
     tAutomataStatePlayerDrive() { for (float& v : history) v = -1.0f; }
 };

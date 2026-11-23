@@ -214,7 +214,7 @@ bool cSC4FireTruck::ChooseNewDestination() {
 bool cSC4FireTruck::TranslatePlayerDriveCommands(tAutomataStatePlayerDrive* state, float milliseconds) {
     if (!(state->history[8] < 0.0f) && fireHost_) {
         cS3DVector3 hit{0.0f, 0.0f, 0.0f};
-        if (fireHost_->PickGroundPoint(state->effectParam240, state->effectParam244, hit)) {
+        if (fireHost_->PickGroundPoint(static_cast<float>(state->mouseX214), static_cast<float>(state->mouseY218), hit)) {
             int width = 0, height = 0;
             if (fireHost_->CityCells(width, height)) {
                 const float limitX = static_cast<float>(width << 4), limitZ = static_cast<float>(height << 4);

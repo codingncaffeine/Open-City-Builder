@@ -2103,7 +2103,7 @@ bool cSC4Helicopter::TranslatePlayerDriveCommands(tAutomataStatePlayerDrive* sta
         physics_->field140 = 0.0f;
         spotOn_ = state->spotlightStarted255 != 0;
         if (state->history[8] >= 0.0f && host) {   // +0xc8
-            if (host->RendererSpotlightHit(state->effectParam240, state->effectParam244, spotTarget_)) {
+            if (host->RendererSpotlightHit(static_cast<float>(state->mouseX214), static_cast<float>(state->mouseY218), spotTarget_)) {
                 state->effectPosition248 = spotTarget_;
             }
             state->spotlightStarted255 = 1;
