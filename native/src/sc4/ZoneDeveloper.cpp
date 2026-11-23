@@ -379,16 +379,11 @@ bool cSC4ZoneDeveloper::DoMessage(cIGZMessage2* message) {
             if (standard->GetData3() != kZoneMessageOccupantRemovedSubType) return true;
             auto* occupant = static_cast<cISC4Occupant*>(standard->GetVoid1());
             if (!occupant) return true;
-            // QI(0xa821ef94): occupants that already advertise the skip flag are ignored (e.g. network
-            // occupants whose own removal owns the lot).
-            void* network = nullptr;
-            bool skip = false;
-            if (occupant->QueryInterface(kGZIID_cISC4NetworkOccupant, &network) && network) {
-                auto* view = static_cast<IZoneDeveloperNetworkOccupant*>(network);
-                skip = view->HasAnyNetworkFlag(kNetworkOccupantSkipFlag);   // any of 0x80200090 (zones.md 5.2 step 1)
-                view->Release();
-            }
-            if (skip) return true;
+            // QI(0xa821ef94): a network occupant with any of the flags 0x80200090 keeps the lot (zones.md 5.2 step 1). The
+            // occupant is read through the occupant manager's view of it, as GetNetwork does: the interface pointer itself
+            // has the full cISC4NetworkOccupant layout, not this class's short seam.
+            IZoneDeveloperNetworkOccupant* view = occupantManager_ ? occupantManager_->NetworkView(occupant) : nullptr;
+            if (view && view->HasAnyNetworkFlag(kNetworkOccupantSkipFlag)) return true;
 
             float position[3] = {0, 0, 0};
             occupant->GetPosition(position);                       // cISC4Occupant vslot 0x40
@@ -2841,22 +2836,16 @@ void cSC4ZoneDeveloper::CreateLotRemnants(int x, int z, int width, int depth, in
 // straightened road/street piece (exactly one neighbour connection) sits next to it, place a street
 // segment between the two.
 void cSC4ZoneDeveloper::ConnectRoadToAnyAdjacentStreets(cISC4Occupant* occupant) {
-    if (!occupant) return;
-    void* raw = nullptr;
-    if (!occupant->QueryInterface(kGZIID_cISC4NetworkOccupant, &raw) || !raw) return;
-    auto* network = static_cast<IZoneDeveloperNetworkOccupant*>(raw);
+    if (!occupant || !occupantManager_) return;
+    // the occupant manager's view of the piece (borrowed, valid until the next lookup: read before the neighbours are)
+    IZoneDeveloperNetworkOccupant* network = occupantManager_->NetworkView(occupant);   // QI 0xa821ef94
+    if (!network) return;
     IZoneDeveloperNetworkApi* tool = nullptr;
     if (network->IsOfType(0) || network->IsOfType(10)) tool = roadTool_;          // +0x88
     else if (network->IsOfType(3)) tool = streetTool_;                            // +0x80
     else if (network->IsOfType(0xb)) tool = dirtRoadTool_;                        // +0x78
-    if (!tool) {
-        network->Release();
-        return;
-    }
-    if (network->IsImmovable()) {   // vslot 0x88
-        network->Release();
-        return;
-    }
+    if (!tool) return;
+    if (network->IsImmovable()) return;   // vslot 0x88
     SC4CellRect rect{};
     occupant->GetBoundingCityCells(rect);   // occupant vslot 0x58
     const int x = rect.x0, z = rect.z0;
@@ -2883,21 +2872,15 @@ void cSC4ZoneDeveloper::ConnectRoadToAnyAdjacentStreets(cISC4Occupant* occupant)
         if (roadDirection != neighbour.expected && dirtDirection != neighbour.expected) continue;
         tool->PlaceNetworkOccupants(x, z, neighbour.x, neighbour.z, 0, true, true, -1);
     }
-    network->Release();
 }
 
 // @ 0x10012a534. A rail piece was removed: for each of the four neighbours, when a straight rail piece
 // sits on it (a two-connection rail with matching edges), look two cells further for a street or a
 // dirt road and connect across the gap.
 void cSC4ZoneDeveloper::ConnectStreetsAcrossRail(cISC4Occupant* occupant) {
-    if (!occupant || !dirtRoadTool_ || !streetTool_) return;
-    void* raw = nullptr;
-    if (!occupant->QueryInterface(kGZIID_cISC4NetworkOccupant, &raw) || !raw) return;
-    auto* network = static_cast<IZoneDeveloperNetworkOccupant*>(raw);
-    if (network->IsImmovable()) {
-        network->Release();
-        return;
-    }
+    if (!occupant || !dirtRoadTool_ || !streetTool_ || !occupantManager_) return;
+    IZoneDeveloperNetworkOccupant* network = occupantManager_->NetworkView(occupant);   // QI 0xa821ef94 (borrowed view)
+    if (!network || network->IsImmovable()) return;
     SC4CellRect rect{};
     occupant->GetBoundingCityCells(rect);   // occupant vslot 0x58
     const int x = rect.x0, z = rect.z0;
@@ -2936,7 +2919,6 @@ void cSC4ZoneDeveloper::ConnectStreetsAcrossRail(cISC4Occupant* occupant) {
             dirtRoadTool_->PlaceNetworkOccupants(x, z, pass.farX, pass.farZ, 0, true, true, -1);
         }
     }
-    network->Release();
 }
 
 // @ 0x10012abe4. Cheat command: place one lot of every lot configuration, walking the city row by row.
