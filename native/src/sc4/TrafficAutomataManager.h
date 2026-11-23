@@ -312,7 +312,7 @@ public:
                                             float multiplier, float (*weights)[4]);    // 0x2f0 @ 0x100115310
     virtual bool PopulateNetworkOccupantForCrimeLayer(ITrafficNetworkMapOccupant* occupant, TrafficTileInfo* tile,
                                                       float density, std::uint32_t cellX, std::uint32_t cellZ);   // 0x2f8
-    virtual bool GetDispatchDestinationPoint(ITrafficAutomataAutomaton* automaton, cS3DVector3& out);   // 0x300 (PARTIAL)
+    virtual bool GetDispatchDestinationPoint(ITrafficAutomataAutomaton* automaton, cS3DVector3& out);   // 0x300 (i386 0x180)
     virtual int ChooseNetworkTypeForPathType(ITrafficNetworkMapOccupant* occupant, std::uint32_t pathType);   // 0x308
 
     // ---- non-virtual helpers (the original declares them as plain members) ----

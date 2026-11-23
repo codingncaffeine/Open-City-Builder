@@ -26,6 +26,10 @@
 #include "gz/cGZPersistResourceManager.h"
 #include "sc4/AnimationTickManager.h"
 #include "sc4/AutomataManager.h"
+#include "sc4/AutomataControllerManager.h"
+#include "sc4/Budget.h"
+#include "sc4/BudgetSimulator.h"
+#include "sc4/ResidentialSimulator.h"
 #include "sc4/AutomataScriptSystem.h"
 #include "sc4/Exemplar.h"
 #include "sc4/OccupantGroupTemplate.h"
@@ -433,7 +437,47 @@ public:
     void ShowVehicleHeadlights(IAutomataAutomaton*, bool, bool) override {}
     IAutomataAutomaton* CreateVehicleAutomaton() override { return CreateAutomatonByClassId(kVehicleFallbackGroup); }
     void NotifyKindManagersTuningChanged() override {}
-    void HandleFundsChangedSweep() override {}
+    // cSC4VehicleManager::HandleFundsChanged (i386 0x000a1fd0): the ambulance generator ("ambulance_out") of every hospital and the
+    // four school bus generators of every school run while the building is locally funded above zero (its health 0xea56549e /
+    // education 0x4a5654ba item), and stop otherwise (controller vslot 0x48 Activate).
+    void HandleFundsChangedSweep() override {
+        cSC4City* city = HostCity();
+        if (!city) return;
+        auto* residential = dynamic_cast<sc4::cSC4ResidentialSimulator*>(city->GetComponent(sc4::CityComponent::ResidentialSimulator));
+        auto* budget = dynamic_cast<sc4::cSC4BudgetSimulator*>(city->GetComponent(sc4::CityComponent::BudgetSimulator));
+        if (!residential || !budget) return;
+        auto* controllers = dynamic_cast<sc4::cSC4AutomataControllerManager*>(city->GetComponent(sc4::CityComponent::AutomataControllerManager));
+        auto* scripts = dynamic_cast<sc4::cSC4AutomataScriptSystem*>(city->GetComponent(sc4::CityComponent::AutomataScriptSystem));
+        const auto funded = [budget](sc4::IResidentialOccupant* building, std::uint32_t department, std::uint32_t item) {
+            sc4::cSC4DepartmentBudget* d = budget->GetDepartmentBudget(department);   // vslot 0x6c
+            cISCPropertyHolder* holder = building->PropertyHolder();
+            return d && holder && d->IsLocallyFundedObjectInDepartment(holder, item) && 0.0f < d->GetLocalFundingPercent(holder, item);
+        };
+        const auto occupantOf = [](sc4::IResidentialOccupant* building) -> sc4::cISC4Occupant* {
+            cIGZUnknown* object = building->Object();
+            return object ? dynamic_cast<sc4::cISC4Occupant*>(object) : nullptr;
+        };
+        if (tControllerTemplate* ambulance = scripts ? scripts->FindControllerTemplate(cRZString("ambulance_out")) : nullptr) {
+            sc4::cSC4ResidentialSimulator::OccupantList hospitals;
+            residential->GetHospitalBuildings(hospitals, nullptr);
+            for (sc4::IResidentialOccupant* hospital : hospitals) {
+                const bool on = funded(hospital, 0xaa538cb3, 0xea56549e);
+                sc4::cISC4Occupant* occupant = occupantOf(hospital);
+                if (sc4::cSC4AutomataController* c = controllers && occupant ? controllers->GetController(occupant, ambulance) : nullptr) c->Activate(on);
+                hospital->Release();
+            }
+        }
+        static const char* const kSchoolBusTemplates[] = {"hs_bus_in", "hs_bus_out", "k6_bus_in", "k6_bus_out"};
+        sc4::cSC4ResidentialSimulator::OccupantList schools;
+        residential->GetSchoolBuildings(schools, nullptr);
+        for (sc4::IResidentialOccupant* school : schools) {
+            const bool on = funded(school, 0x4a538cc6, 0x4a5654ba);
+            sc4::cISC4Occupant* occupant = occupantOf(school);
+            for (const char* name : kSchoolBusTemplates)
+                if (sc4::cSC4AutomataController* c = controllers && occupant ? controllers->GetController(occupant, cRZString(name)) : nullptr) c->Activate(on);
+            school->Release();
+        }
+    }
 };
 Host g_host;
 

@@ -160,10 +160,9 @@ bool cSC4VehicleManager::DoMessage(cIGZMessage2* message) {
     return cSC4AutomataManager::DoMessage(message);
 }
 
-// 0x1000da428 PARTIAL: the building-occupant sweep through the city's two occupant lists and the script system's
-// name-based group lookup is unrecovered; the port delegates to the host seam.
+// 0x1000da428 (i386 0x000a1fd0): the hospitals' ambulance and the schools' bus generators follow the buildings' funding (the
+// city lists, templates and controllers are the host's: HandleFundsChangedSweep).
 void cSC4VehicleManager::HandleFundsChanged() {
-    SC4_UNWIRED("cSC4VehicleManager::HandleFundsChanged (0x1000da428): building-occupant sweep with the script group lookup not ported (native host sweep is empty)");
     if (IVehicleManagerHost* host = VehicleHostOrGlobal()) host->HandleFundsChangedSweep();
 }
 
