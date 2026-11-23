@@ -141,6 +141,9 @@ struct tLookaheadNode {
 class ITrafficParticle {
 public:
     virtual ~ITrafficParticle() = default;
+    // The particle's float record (the original's handle points at it): [0] x, [1] z, [2] / [3] velocity x / z, [4] height,
+    // [6] heading angle, [10] height offset. Null until the dynamic particle system exists.
+    virtual float* Fields() { return nullptr; }
 };
 class ITrafficParticleSystem {
 public:

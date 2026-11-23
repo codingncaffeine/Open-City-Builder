@@ -1718,9 +1718,8 @@ float cSC4Vehicle::GetSpeedModifier() const {
 //     current entry edge.
 //   * The tail moves the damage effect with the vehicle and adds the disaster layer's damage (three times its value)
 //     before the crash effect update; the actual speed is the travelled distance over the frame time.
-// PARTIAL: the driving state's dynamic-particle writes (+0x90: position, angle and the heading * 1000 * tween fields) are
-// not reproduced (cSC4DynamicParticleEffect is unrecovered), and the skid path query through the path info's vslot 0x138
-// (used when the state bytes +0x112/+0x113 are set) has no counterpart in the recovered cISC4PathInfo.
+//   * A quick steering tap moves the vehicle to the neighboring lane (the path info's path intersection), and the driving
+//     particle follows the vehicle.
 bool cSC4Vehicle::DoPlayerDriveTick(float milliseconds) {
     const cS3DVector3 startPosition = position_;
     auto* state = static_cast<tAutomataStatePlayerDrive*>(GetState());
@@ -1729,7 +1728,6 @@ bool cSC4Vehicle::DoPlayerDriveTick(float milliseconds) {
     if (!vehicleHost_ || !vehicleHost_->FindPlayerDriveParams(this, &params) || !params) return false;
     const float damage = static_cast<float>(static_cast<std::uint32_t>(state->damage70));
     if (damage > params->F(0x5c)) return true;
-    SC4_UNWIRED("cSC4Vehicle::DoPlayerDriveTick: dynamic-particle writes (+0x90) and the skid path query (path info vslot 0x138) not ported");
     const float reverseBefore = state->history[1];
     const float easedSpeed = EasedTween(speedTween_);
     if (trafficHost_) {
@@ -1885,9 +1883,43 @@ bool cSC4Vehicle::DoPlayerDriveTick(float milliseconds) {
             }
         }
     }
+    // Lane change (i386 0x000a659f): moving on a path, a quick tap of a steering command (tapped[2] / tapped[3]) looks from
+    // the vehicle along its heading plus five units to that side (cross_y of the heading, negated for command 2) for another
+    // of the piece's paths (path info vslot 0x9c GetPathIntersection, minimum dot 0.8); a hit snapped onto that path (vslot
+    // 0x4c) within 4 units of height switches the vehicle to it at the hit segment.
+    if (GetActualSpeed() > 0.0f && path_ && pathInfo_ && (state->tapped[2] != 0 || state->tapped[3] != 0)) {
+        cS3DVector3 side = MakeVector(-orientation_.z, 0.0f, orientation_.x);
+        if (state->tapped[2] != 0) side = MakeVector(-side.x, -side.y, -side.z);
+        side = SafeNormalize(side, side);
+        side = Scale(side, 5.0f);
+        const cS3DVector3 look = MakeVector(side.x + orientation_.x, side.y + orientation_.y, side.z + orientation_.z);
+        cS3DVector3 hit = MakeVector(0.0f, 0.0f, 0.0f);
+        std::uint32_t hitKey = 0;
+        int segment = 0;
+        if (pathInfo_->GetPathIntersection(pathKey_, position_, look, 0.8f, hit, hitKey, segment)) {
+            const tPath* other = pathInfo_->GetPath(hitKey, nullptr);
+            if (other) {
+                pathInfo_->SnapPointToPath(hit, &other->points);
+                if (std::fabs(hit.y - position_.y) < 4.0f) {
+                    SetPath(occupant, hitKey, nullptr, true);
+                    pathIndex_ = static_cast<std::uint32_t>(segment);
+                }
+            }
+        }
+    }
     if (driveEffect_) {
         float matrix[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, position_.x, position_.y, position_.z, 1};
         driveEffect_->SetTransform(matrix);
+    }
+    // The driving particle (i386 record +0x70) follows the vehicle: its position, its height over the offset, the heading
+    // angle (-atan2(x, z)) and a velocity of the heading x 1000 x the eased speed.
+    if (float* particle = particle_ ? particle_->Fields() : nullptr) {
+        particle[0] = position_.x;
+        particle[1] = position_.z;
+        particle[6] = -static_cast<float>(std::atan2(static_cast<double>(orientation_.x), static_cast<double>(orientation_.z)));
+        particle[4] = position_.y + particle[10];
+        particle[2] = 1000.0f * orientation_.x * tweenSpeed;
+        particle[3] = orientation_.z * 1000.0f * tweenSpeed;
     }
     if (vehicleHost_) {
         const float disaster = vehicleHost_->PlayerDriveDisasterDamage(position_.x, position_.z);
