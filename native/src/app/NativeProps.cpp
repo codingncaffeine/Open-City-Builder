@@ -9,6 +9,8 @@
 
 #include "app/NativeCity.h"
 #include "app/NativeProps.h"
+#include "app/NativeZoneDeveloperHost.h"
+#include "gz/GZCOMDirector.h"
 #include "gz/cGZPersistResourceManager.h"
 #include "gz/cIGZPersistResourceKeyList.h"
 #include "rz/cRZRandom.h"
@@ -90,9 +92,13 @@ public:
         auto it = held_.find(exemplar);
         if (it != held_.end() && prop) prop->SetDefaultExemplar(it->second);
     }
-    cSC4PropOccupant* CreateRegisteredProp(std::uint32_t) override {   // PARTIAL: no registered prop classes
-        SC4_UNWIRED("cSC4PropManager: registered prop classes are not created (a plain cSC4PropOccupant stands in)");
-        return nullptr;
+    // GZCOM()->CreateInstance(class, cISC4PropOccupant 0xe9793a65, &out) (i386 0x0012cf92): any prop class a creator is
+    // registered for, one reference; null leaves the manager's own fallbacks.
+    cSC4PropOccupant* CreateRegisteredProp(std::uint32_t classId) override {
+        cIGZCOM* com = GZCOM();
+        void* raw = nullptr;
+        if (!com || !com->CreateInstance(classId, kGZIID_cISC4PropOccupant, &raw) || !raw) return nullptr;
+        return static_cast<cSC4PropOccupant*>(static_cast<cISC4PropOccupant*>(raw));
     }
     cSC4PropOccupant* CreateTerrainDecalProp() override {                                  // prop class 0x2977aa48 (one reference)
         auto* prop = new cSC4PropOccupantTerrainDecal();
@@ -115,10 +121,7 @@ public:
         if (cSC4City* city = HostCity()) city->CellCornerToPosition(cx, cz, x, z);
         else { x = static_cast<float>(cx) * 16.0f; z = static_cast<float>(cz) * 16.0f; }
     }
-    cSC4Lot* LotAtCell(int, int) override {   // PARTIAL: lot manager vslot 0x28 (street props only)
-        SC4_UNWIRED("cSC4PropManager street props: the lot manager's lot at a cell (vslot 0x28) answers none");
-        return nullptr;
-    }
+    cSC4Lot* LotAtCell(int x, int z) override { return NativeLotAtCell(x, z, false); }   // lot manager vslot 0x28
     void CreateTextDecal(const std::vector<std::uint32_t>&) override {   // PARTIAL: message 0xbeaf1a2
         SC4_UNWIRED("cSC4PropManager: the text decal message (0xbeaf1a2) is not posted");
     }
