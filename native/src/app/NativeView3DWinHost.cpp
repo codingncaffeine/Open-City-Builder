@@ -9,6 +9,7 @@
 #include <functional>
 #include <string>
 #include <vector>
+#include "sc4/ViewInputControlLevelTerrain.h"
 #include "sc4/View3DWin.h"
 #include "sc4/MyStreetSim.h"
 #include "app/NativeObliterate.h"
@@ -106,6 +107,22 @@ bool NativeLlamaCheatActive();   // app/NativeAdvisors.cpp
 void NativeInitMapView(cIGZWin* window);   // app/NativeWinMapView.cpp
 std::string FontStyleName(std::uint32_t guid);   // linux/game_main_linux.cpp
 sc4::cISC4View3DWin* NativeStreetSimView() { return CityView3DWin(); }   // the street-sim tool's view (NativeMySim.cpp)
+// The level-terrain tool's services: the city's terrain and the view's terrain pick (vslot 0x90, flag 0).
+namespace {
+class LevelTerrainHostImpl final : public sc4::ILevelTerrainHost {
+public:
+    sc4::cSTETerrain* Terrain() override {
+        sc4::cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::Terrain) : nullptr;
+        return object ? dynamic_cast<sc4::cSTETerrain*>(object) : nullptr;
+    }
+    bool PickTerrain(int x, int y, float out[3]) override {
+        sc4::cSC4View3DWin* view = CityView3DWin();
+        return view && view->PickTerrain(x, y, out, false);
+    }
+} g_levelTerrainHost;
+struct LevelTerrainHostInstaller { LevelTerrainHostInstaller() { sc4::SetLevelTerrainHost(&g_levelTerrainHost); } } g_levelTerrainHostInstaller;
+}  // namespace
 // The city view's control stack for the MySim tools (NativeMySim.cpp): spView3D vslot 0x60 current, 0x64 set, 0x68 remove.
 sc4::cSC4ViewInputControl* NativeViewCurrentControl() {
     sc4::cISC4View3DWin* view = CityView3DWin();
@@ -636,7 +653,7 @@ struct StubView3DWin final : IView3DWinHost {
     IAdvisorWindow* AdvisorWindow() override { return native::NativeAdvisorWindow(); }
     cSC4ViewInputControl* CreateZoningTool(std::uint32_t type) override { return native::CreateZoneTool(static_cast<int>(type)); }
     cSC4ViewInputControl* CreateTerrainScrubberTool(std::uint32_t type, bool flag) override { return native::CreateTerrainScrubberTool(type, flag); }
-    cSC4ViewInputControl* CreateLevelTerrainTool() override { return {}; }
+    cSC4ViewInputControl* CreateLevelTerrainTool() override { return new cSC4ViewInputControlLevelTerrain(); }   // operator new + ctor
     cSC4ViewInputControl* CreateCityScrollTool() override { return new cSC4ViewInputControlCityScroll(); }
     void CityScrollSetMouseScroll(cSC4ViewInputControl* tool, int x, int y) override {
         if (auto* scroll = dynamic_cast<cSC4ViewInputControlCityScroll*>(tool)) scroll->SetMouseScroll(x, y);
