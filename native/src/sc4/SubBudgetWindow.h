@@ -134,7 +134,7 @@ public:
     struct SliderInfo {                                                                               // +0x2c entries
         std::uint32_t id = 0;
         cSC4DepartmentBudget* department = nullptr;
-        std::uint32_t moneyText = 0;   // the row's money text (port: UpdateValues re-captions it)
+        std::uint32_t moneyText = 0;   // port: the row's money text
         bool departmentRow = false;    // a department total row (item rows carry a hidden slider)
     };
     struct BudgetRestoreInfo { float funding = 0.0f; cSC4DepartmentBudget* department = nullptr; };   // +0x38 entries
@@ -219,16 +219,10 @@ private:
     cRZString individualTitle_, secondColumn_;   // the dialog's title, the second slider column's header (+0xd4)
     std::vector<std::pair<std::uint32_t, cISCPropertyHolder*>> rowHolders_;   // port: the sliders' and names' building
                                                                              // (the original keeps it as window property 0x4bfee088)
-    std::uint32_t expenseTotalText_ = 0;         // port: the expense total's money text
-    struct ItemRow { std::uint32_t moneyText = 0; cSC4DepartmentBudget* department = nullptr; std::uint32_t item = 0; };
-    std::vector<ItemRow> itemRows_;              // port: the expense item rows UpdateValues re-captions
     // ordinances (purpose 1): +0xa0 ids, +0xa4 (opening, current) on-pairs, +0x74 check button row -> ordinance index
     std::vector<std::uint32_t> ordinanceIds_;
     std::vector<std::pair<bool, bool>> ordinanceOn_;
     std::vector<std::uint32_t> ordinanceRows_;
-    struct OrdinanceRow { std::uint32_t moneyText = 0; std::uint32_t index = 0; bool income = false; };
-    std::vector<OrdinanceRow> ordinanceMoney_;   // port: the rows' money texts (UpdateOrdinanceBudget)
-    std::uint32_t incomeTotalText_ = 0;
     // neighbor deals: +0x50 the combo boxes (id, deal), +0x5c the running deals' (city serial, type), +0x68 every listed
     // deal (type, deal), +0x100 the list the simulator's queries fill
     struct ComboInfo { std::uint32_t id = 0; cRZAutoRefCount<cISC4NeighborDeal> deal; };

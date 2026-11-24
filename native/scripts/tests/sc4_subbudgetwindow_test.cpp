@@ -226,6 +226,54 @@ int main() {
     window->Shutdown();   // the fake window manager only records EndDialog; the destroyed message drops the dialog's references
     dialog->Release();
 
+    // ---- the department path scrolls: six departments of one listed item each = twelve expense rows, nine slots
+    {
+        constexpr std::uint32_t kGroup2 = 0x0bcd0001;
+        const std::int64_t money[6] = {100, 200, 300, 400, 500, 600};
+        for (int i = 0; i < 6; ++i) {
+            auto* d = budget->CreateDepartmentBudget(0x5000 + i, kGroup2);
+            auto* item = d->CreateLineItem(0x6000 + i, false);
+            item->SetType(0);
+            item->SetFullExpenses(money[i]);
+            item->SetDisplayFlag(1, true);
+            d->SetFundingPercentage(1.0f, 0, true);
+        }
+        budget->DoBudgetGroupChanged(kGroup2);
+        auto* list = new sc4::cSC4SubBudgetWindow();
+        list->AddRef();
+        cIGZWin* win = nullptr;
+        CHECK(list->Create(&win, kGroup2, 0, 0));
+        view->ChildAdd(win);
+        CHECK(win->Init());
+        CHECK(list->ExpenseRows() == 12);
+        auto shown = [&](std::uint32_t id) {
+            cIGZWin* child = win->GetChildWindowFromIDRecursive(id);
+            return child && child->GetFlag(1);
+        };
+        CHECK(!shown(0x453) && shown(0x454));            // the arrows on_init makes: twelve rows, down shown
+        CHECK(Caption(win, 0xabcde04) == "100");          // slot 0 = the first department
+        CHECK(Caption(win, 0xabcde1c) == "500");          // slot 8 = the fifth department row
+        CHECK(Caption(win, 0xabcde1f) == "2100");         // the total counts the rows past the ninth slot
+        list->DoWinMsg(win, 3, 0x287259f6, 0x454, 0);    // two rows down
+        CHECK(shown(0x453) && shown(0x454));
+        CHECK(Caption(win, 0xabcde04) == "200");          // slot 0 = the second department now
+        CHECK(Caption(win, 0xabcde07) == "200");          // and its item
+        CHECK(Caption(win, 0xabcde1c) == "600");
+        CHECK(Caption(win, 0xabcde1f) == "2100");
+        CHECK(list->SliderCount() == 9);
+        list->DoWinMsg(win, 3, 0x287259f6, 0x454, 0);    // 12 <= 4 + 9: last page, down hides
+        CHECK(!shown(0x454));
+        CHECK(Caption(win, 0xabcde04) == "300");
+        list->DoWinMsg(win, 3, 0x287259f6, 0x453, 0);
+        list->DoWinMsg(win, 3, 0x287259f6, 0x453, 0);
+        CHECK(!shown(0x453) && shown(0x454));
+        CHECK(Caption(win, 0xabcde04) == "100");
+        win->Release();
+        list->Destroy();
+        win->Shutdown();
+        list->Release();
+    }
+
     // ---- the single-building dialog (purpose 0, a department id): twelve hospitals, nine rows shown
     for (int i = 0; i < 12; ++i) {
         auto* holder = new sc4::cSCPropertyHolder();

@@ -213,7 +213,6 @@ bool cSC4SubBudgetWindow::OnShutdown() {
     if (!initialized_) return true;
     initialized_ = false;
     sliders_.clear();
-    itemRows_.clear();
     for (BudgetRestoreInfo& info : restore_)
         if (info.department) info.department->Release();
     restore_.clear();
@@ -229,7 +228,6 @@ bool cSC4SubBudgetWindow::OnShutdown() {
 }
 
 // on_button_activated (i386 0x0027825c): OK keeps the funding, Cancel restores it; both close the dialog.
-//   PARTIAL: the ordinance info popups (500+n) and the scroll arrows of the department path.
 bool cSC4SubBudgetWindow::OnButtonActivated(cIGZWin* window, std::uint32_t id) {
     if (Trace()) std::fprintf(stderr, "sub budget: button %08x\n", id);
     if (id == 0xcd) {   // the ordinance dialog's Accept: every changed ordinance switched (spOrdinanceSim 0x34)
@@ -281,7 +279,7 @@ bool cSC4SubBudgetWindow::OnButtonActivated(cIGZWin* window, std::uint32_t id) {
         EndDialog(window, kResultClose);
         return true;
     }
-    if (id >= 0x451 && id <= 0x454 && (purpose_ == 2 || individual_)) {   // the scroll arrows (two rows a click)
+    if (id >= 0x451 && id <= 0x454) {   // the scroll arrows (two rows a click), every path
         const bool income = id <= 0x452, down = id == 0x452 || id == 0x454;
         std::uint32_t& scroll = income ? incomeScroll_ : expenseScroll_;
         const std::uint32_t rows = income ? incomeRows_ : expenseRows_;
@@ -296,8 +294,10 @@ bool cSC4SubBudgetWindow::OnButtonActivated(cIGZWin* window, std::uint32_t id) {
             if (scroll == 0 || (scroll -= 2, scroll == 0)) show(up, false);
             if (scroll + 9 < rows) show(downId, true);
         }
-        if (individual_) UpdateIndividualBudget(window, false);   // the single-building list (i386 0x00278532..)
-        else UpdateNeighborBudget(window);
+        if (purpose_ == 1) UpdateOrdinanceBudget(window);
+        else if (purpose_ == 2) UpdateNeighborBudget(window);
+        else if (individual_) UpdateIndividualBudget(window, false);   // the single-building list (i386 0x00278532..)
+        else UpdateValues(window);
         return false;
     }
     if (id == kButtonOk) {
@@ -316,8 +316,6 @@ bool cSC4SubBudgetWindow::OnButtonActivated(cIGZWin* window, std::uint32_t id) {
         EndDialog(window, kResultClose);
         return true;
     }
-    if (id >= 0x451 && id <= 0x454)
-        SC4_UNWIRED("cSC4SubBudgetWindow::OnButtonActivated: row scrolling of the department path not ported");
     return false;
 }
 
@@ -698,9 +696,11 @@ bool cSC4SubBudgetWindow::OnInit(cIGZWin* window) {
         initialized_ = true;
         return true;
     }
+    int arrowIncomeTop = -1, arrowExpenseTop = -1;   // the department path's scroll arrows (made after OK / Cancel)
     if (individual_) {
         InitIndividualBudget(window);
     } else {
+        incomeScroll_ = expenseScroll_ = 0;
         std::vector<cSC4DepartmentBudget*> departments;
         Departments(departments);
         // the group's name and the funding the dialog opened with
@@ -878,7 +878,6 @@ bool cSC4SubBudgetWindow::OnInit(cIGZWin* window) {
                             AddText(body_, textId, 0x30, expenseTop_, name, 0, kFontItem, 'D', 'U', 'f');
                             SC4MakeMoneyString(item->GetCurrentExpenses() * multiplier_, money);
                             AddText(body_, textId + 1, width_ - 0x26, expenseTop_, money, 6, kFontItem, 'w', 0, 0);
-                            itemRows_.push_back({textId + 1, department, item->GetID()});
                             char text[32];
                             std::snprintf(text, sizeof(text), "%d", static_cast<int>(item->GetSecondaryInfoField()));
                             count = cRZString(text);
@@ -908,10 +907,9 @@ bool cSC4SubBudgetWindow::OnInit(cIGZWin* window) {
                 cRZString money;
                 SC4MakeMoneyString(total_, money);
                 AddText(body_, textId + 1, width_ - 0x26, expenseTop_, money, 6, kFontHeader, 'w', 0, 0);
-                expenseTotalText_ = textId + 1;
             }
-            (void)incomeTop;
-            (void)expenseTop;
+            arrowIncomeTop = incomeTop;
+            arrowExpenseTop = expenseTop;
             ReleaseDepartments(departments);
         }
     }
@@ -928,6 +926,21 @@ bool cSC4SubBudgetWindow::OnInit(cIGZWin* window) {
         cancel->SetCaption(cSLString(0x6a231eaa, 0x6a56b0bb, true));
         cancel->SetNotificationTarget(window);
     }
+    if (arrowIncomeTop >= 0) {   // the scroll arrows (i386 on_init tail): up hidden, down shown when a side has ten rows or more
+        const struct { std::uint32_t id; int y; std::uint32_t image; bool shown; } arrows[] = {
+            {0x451, arrowIncomeTop + 4, 0x140155cb, false},
+            {0x452, arrowIncomeTop + 4 + rowStep_ * 8, 0x140155cc, incomeRows_ >= 10},
+            {0x453, arrowExpenseTop + 4, 0x140155cb, false},
+            {0x454, arrowExpenseTop + 4 + rowStep_ * 8, 0x140155cc, expenseRows_ >= 10},
+        };
+        for (const auto& arrow : arrows) {
+            AddImageButton(window, arrow.id, width_ - 0x21, arrow.y, arrow.image, false);
+            if (cIGZWin* button = window->GetChildWindowFromIDRecursive(arrow.id)) {
+                button->SetNotificationTarget(window);
+                if (!arrow.shown) button->SetFlag(1, false);
+            }
+        }
+    }
     if (width_ > 0 && height_ > 0 && window->GetW() == 0) window->SetSize(width_, height_);
     for (const SliderInfo& info : sliders_)
         if (cIGZWin* slider = window->GetChildWindowFromIDRecursive(info.id)) slider->SetNotificationTarget(window);
@@ -935,33 +948,187 @@ bool cSC4SubBudgetWindow::OnInit(cIGZWin* window) {
     return true;
 }
 
-// UpdateValues (i386 0x00271a46), the department path: the money texts and the totals again after a funding change.
-//   The original walks the rows exactly as on_init does and re-captions them; the port keeps the money text id of each
-//   slider's row (a department's expenses are the only figures a slider changes) and the total's.
-void cSC4SubBudgetWindow::UpdateValues(cIGZWin*) {
-    if (updating_ || !body_) return;
+// UpdateValues (i386 0x00271a46), the department path: the rows again from the scroll offsets (+0xec income, +0xf0
+//   expenses) after a funding change or a scroll arrow. The slots on_init made (three texts each, ids from 0xabcde03; the
+//   expense slots also a funding bar 0xabce200 + n, a slider 0xabcdf00 + n and a button 0xabce600 + n) are re-captioned
+//   with the rows from the offset on, a department row in the department font, an item row in the item font; rows above
+//   the offset and past the ninth slot only add to the total. A side of more than eight rows that now shows fewer than
+//   nine blanks the next slot. The slider list is rebuilt with the rows shown.
+void cSC4SubBudgetWindow::UpdateValues(cIGZWin* window) {
+    if (updating_ || !body_ || !window) return;
     updating_ = true;
     std::vector<cSC4DepartmentBudget*> departments;
     Departments(departments);
-    std::int64_t total = 0;
-    for (cSC4DepartmentBudget* department : departments) total += department->GetTotalExpenses() * multiplier_;
-    for (const SliderInfo& info : sliders_) {
-        if (!info.departmentRow || !info.department) continue;
+    const std::uint32_t shownIncome = std::min<std::uint32_t>(incomeRows_, kMaxRows);
+    sliders_.clear();
+    auto caption = [&](std::uint32_t id, const cIGZString& text) {
+        if (cIGZWin* child = body_->GetChildWindowFromIDRecursive(id)) child->SetCaption(text);
+    };
+    auto font = [&](std::uint32_t id, std::uint32_t style) {   // the text's font again (interface 0x212cdc1f vslot 0x48)
+        void* raw = nullptr;
+        if (!body_->GetChildAsRecursive(id, gz::kGZIID_cIGZWinText, &raw) || !raw) return;
+        if (gz::IWinFont* face = g_host->Font(style)) static_cast<gz::cIGZWinText*>(raw)->SetFont(face);
+        static_cast<gz::cIGZWinText*>(raw)->Release();
+    };
+    auto show = [&](cIGZWin* parent, std::uint32_t id, bool on) {
+        if (cIGZWin* child = parent->GetChildWindowFromIDRecursive(id)) child->SetFlag(1, on);
+    };
+    std::vector<cSC4LineItem*> items;
+    std::uint32_t textId = 0xabcde01;
+    if (incomeRows_ != 0) {
+        total_ = 0;
+        textId = 0xabcde03;
+        std::uint32_t shown = 0, ordinal = 0;
+        for (cSC4DepartmentBudget* department : departments) {
+            department->GetAllLineItems(items);
+            bool rowDone = false;
+            for (cSC4LineItem* item : items) {
+                if (item->GetType() != 1) continue;
+                if (!rowDone) {
+                    if (QuietPurpose(purpose_) && department->GetTotalIncome() == 0) {
+                        rowDone = false;
+                    } else {
+                        if (ordinal < incomeScroll_ || shown > 8) {
+                            total_ += department->GetTotalIncome() * multiplier_;
+                        } else {
+                            cRZString name, money;
+                            department->GetDepartmentName(name);
+                            caption(textId, name);
+                            font(textId, kFontDepartment);
+                            SC4MakeMoneyString(department->GetTotalIncome() * multiplier_, money);
+                            total_ += department->GetTotalIncome() * multiplier_;
+                            caption(textId + 1, money);
+                            font(textId + 1, kFontDepartment);
+                            show(body_, textId + 2, false);
+                            textId += 3;
+                            ++shown;
+                        }
+                        ++ordinal;
+                        rowDone = true;
+                    }
+                }
+                if (item->GetID() > 100 && item->GetIncome() == 0) break;
+                // the income side counts every item in the ordinal and every listed item as shown, above the offset too
+                // (the expense side below counts only what it shows: both as the original)
+                if ((item->GetDisplayFlags() & 1) == 0) { ++ordinal; continue; }
+                if (incomeScroll_ <= ordinal && shown < 9) {
+                    cRZString name, money;
+                    item->GetName(name);
+                    caption(textId, name);
+                    font(textId, kFontItem);
+                    SC4MakeMoneyString(item->GetIncome() * multiplier_, money);
+                    caption(textId + 1, money);
+                    font(textId + 1, kFontItem);
+                    char text[32];
+                    std::snprintf(text, sizeof(text), "%d", static_cast<int>(item->GetSecondaryInfoField()));
+                    caption(textId + 2, cRZString(text));
+                    show(body_, textId + 2, (item->GetDisplayFlags() & 2) != 0);
+                    textId += 3;
+                }
+                ++shown;
+                ++ordinal;
+            }
+            ReleaseItems(items);
+        }
+        if ((shownIncome & 1) == 0) incomeTop_ += rowStep_;   // as the original (its on_init already stepped once)
+        if (incomeRows_ > 8 && shown < 9) {
+            for (std::uint32_t i = 0; i < 3; ++i) caption(textId + i, cRZString());
+            textId += 3;
+        }
         cRZString money;
-        SC4MakeMoneyString(info.department->GetTotalExpenses() * multiplier_, money);
-        if (cIGZWin* text = body_->GetChildWindowFromIDRecursive(info.moneyText)) text->SetCaption(money);
+        SC4MakeMoneyString(total_, money);
+        caption(textId + 1, money);
+        textId += 2;
     }
-    for (const ItemRow& row : itemRows_) {
-        cSC4LineItem* item = row.department ? row.department->GetLineItem(row.item) : nullptr;
-        if (!item) continue;
+    if (expenseRows_ != 0) {
+        textId += 2;
+        total_ = 0;
+        std::uint32_t sliderId = 0xabcdf00, bitmapId = 0xabce200, buttonId = 0xabce600;
+        std::uint32_t shown = 0, ordinal = 0;
+        for (cSC4DepartmentBudget* department : departments) {
+            department->GetAllLineItems(items);
+            bool rowDone = false;
+            for (cSC4LineItem* item : items) {
+                if (item->GetType() != 0) continue;
+                if (!rowDone) {
+                    if (QuietPurpose(purpose_) && department->GetIdealMonthlyFunding() == 0) {
+                        rowDone = false;
+                    } else {
+                        if (ordinal < expenseScroll_ || shown > 8) {
+                            total_ += department->GetTotalExpenses() * multiplier_;
+                        } else {
+                            cRZString name, money;
+                            department->GetDepartmentName(name);
+                            caption(textId, name);
+                            font(textId, kFontDepartment);
+                            SC4MakeMoneyString(department->GetTotalExpenses() * multiplier_, money);
+                            total_ += department->GetTotalExpenses() * multiplier_;
+                            caption(textId + 1, money);
+                            font(textId + 1, kFontDepartment);
+                            show(body_, textId + 2, false);
+                            sliders_.push_back({sliderId, department, textId + 1, true});
+                            textId += 3;
+                            const float maximum = department->GetMaxAllowedFundingPercentage();
+                            void* raw = nullptr;
+                            if (window->GetChildAsRecursive(sliderId, gz::kGZIID_cIGZWinSlider, &raw) && raw) {
+                                auto* slider = static_cast<gz::cIGZWinSlider*>(raw);
+                                slider->SetMinimumValue(0);
+                                slider->SetMaximumValue(static_cast<int>(maximum * kPercent));
+                                slider->SetValue(static_cast<int>(kPercent * department->GetFundingPercentage()));
+                                slider->Release();
+                            }
+                            const bool fixed = department->GetIsFixedFunding();
+                            if (cIGZWin* bar = window->GetChildWindowFromIDRecursive(bitmapId)) {
+                                bar->SetFlag(1, !fixed);
+                                if (!fixed) {
+                                    float barX = 11000.0f / (kPercent * maximum) + 260.0f - 12.0f;
+                                    bar->GZWinMoveTo(static_cast<int>(barX), bar->GetArea().top);
+                                }
+                            }
+                            show(window, sliderId, !fixed);
+                            const std::uint32_t local = LocalPurposeOf(department->GetDepartmentID());
+                            show(window, buttonId, local != 0 && department->HasLocallyFundedItemsByPurpose(local));
+                            ++bitmapId; ++sliderId; ++buttonId;
+                            ++shown;
+                        }
+                        ++ordinal;
+                        rowDone = true;
+                    }
+                }
+                if (item->GetID() > 100 && item->GetFullExpenses() == 0) break;
+                if ((item->GetDisplayFlags() & 1) == 0) continue;
+                if (expenseScroll_ <= ordinal && shown < 9) {
+                    cRZString name, money;
+                    item->GetName(name);
+                    caption(textId, name);
+                    font(textId, kFontItem);
+                    SC4MakeMoneyString(item->GetCurrentExpenses() * multiplier_, money);
+                    caption(textId + 1, money);
+                    font(textId + 1, kFontItem);
+                    char text[32];
+                    std::snprintf(text, sizeof(text), "%d", static_cast<int>(item->GetSecondaryInfoField()));
+                    caption(textId + 2, cRZString(text));
+                    show(body_, textId + 2, (item->GetDisplayFlags() & 2) != 0);
+                    sliders_.push_back({sliderId, department, textId + 1, false});
+                    textId += 3;
+                    for (std::uint32_t hidden : {bitmapId, sliderId, buttonId}) show(window, hidden, false);
+                    ++bitmapId; ++sliderId; ++buttonId;
+                    ++shown;
+                }
+                ++ordinal;
+            }
+            ReleaseItems(items);
+        }
+        if ((expenseRows_ & 1) == 0) expenseTop_ += rowStep_;   // as the original (it tests the row count's low bit here)
+        if (expenseRows_ > 8 && shown < 9) {
+            for (std::uint32_t i = 0; i < 3; ++i) caption(textId + i, cRZString());
+            textId += 3;
+            show(window, bitmapId, false);
+            show(window, sliderId, false);
+        }
         cRZString money;
-        SC4MakeMoneyString(item->GetCurrentExpenses() * multiplier_, money);
-        if (cIGZWin* text = body_->GetChildWindowFromIDRecursive(row.moneyText)) text->SetCaption(money);
-    }
-    if (expenseTotalText_ != 0) {
-        cRZString money;
-        SC4MakeMoneyString(total, money);
-        if (cIGZWin* text = body_->GetChildWindowFromIDRecursive(expenseTotalText_)) text->SetCaption(money);
+        SC4MakeMoneyString(total_, money);
+        caption(textId + 1, money);
     }
     ReleaseDepartments(departments);
     updating_ = false;
@@ -975,8 +1142,9 @@ void cSC4SubBudgetWindow::InitOrdinanceBudget(cIGZWin* window) {
     ordinanceIds_.clear();
     ordinanceOn_.clear();
     ordinanceRows_.clear();
-    ordinanceMoney_.clear();
     incomeRows_ = expenseRows_ = 0;
+    incomeScroll_ = expenseScroll_ = 0;
+    int arrowIncomeTop = -1, arrowExpenseTop = -1;
     if (ordinances) {
         std::uint32_t count = static_cast<std::uint32_t>(ordinances->GetOrdinanceAvailableCount());
         ordinanceIds_.resize(count);
@@ -997,6 +1165,8 @@ void cSC4SubBudgetWindow::InitOrdinanceBudget(cIGZWin* window) {
         const std::uint32_t shownIncome = std::min<std::uint32_t>(incomeRows_, kMaxRows);
         const std::uint32_t shownExpense = std::min<std::uint32_t>(expenseRows_, kMaxRows);
         SetupWindow(window, shownIncome, shownExpense);
+        arrowIncomeTop = incomeTop_;
+        arrowExpenseTop = expenseTop_;
         AddText(body_, 0xabcde00, 0x14, 8, Text(0x8a579f31), 0, kFontTitle, 'D', 'U', 'f');
         std::uint32_t textId = 0xabcde01, checkId = 300, infoId = 500;
         auto monthly = [&](std::uint32_t index) -> std::int64_t {
@@ -1035,7 +1205,6 @@ void cSC4SubBudgetWindow::InitOrdinanceBudget(cIGZWin* window) {
                 }
                 if (income) AddText(body_, textId + 1, width_ - 0x26, top, text, 6, kFontItem, 0, 'f', 0);
                 else AddText(body_, textId + 1, width_ - 0x26, top, text, 6, kFontItem, 'w', 0, 0);
-                ordinanceMoney_.push_back({textId + 1, index, income});
                 textId += 2;
                 top += rowStep_;
                 ++shown;
@@ -1046,7 +1215,6 @@ void cSC4SubBudgetWindow::InitOrdinanceBudget(cIGZWin* window) {
             SC4MakeMoneyString(total, text);
             if (income) AddText(body_, textId + 1, width_ - 0x26, top, text, 6, kFontHeader, 0, 'f', 0);
             else AddText(body_, textId + 1, width_ - 0x26, top, text, 6, kFontHeader, 'w', 0, 0);
-            (income ? incomeTotalText_ : expenseTotalText_) = textId + 1;
             textId += 2;
         }
     }
@@ -1065,35 +1233,105 @@ void cSC4SubBudgetWindow::InitOrdinanceBudget(cIGZWin* window) {
     }
     for (std::uint32_t id = 300; id < 300 + ordinanceRows_.size(); ++id)
         if (cIGZWin* check = window->GetChildWindowFromIDRecursive(id)) check->SetNotificationTarget(window);
+    if (arrowIncomeTop >= 0) {   // the scroll arrows: up hidden, down shown when a side has nine rows or more
+        const struct { std::uint32_t id; int y; std::uint32_t image; bool shown; } arrows[] = {
+            {0x451, arrowIncomeTop + 4, 0x140155cb, false},
+            {0x452, arrowIncomeTop + 4 + rowStep_ * 8, 0x140155cc, incomeRows_ >= 9},
+            {0x453, arrowExpenseTop + 4, 0x140155cb, false},
+            {0x454, arrowExpenseTop + 4 + rowStep_ * 8, 0x140155cc, expenseRows_ >= 9},
+        };
+        for (const auto& arrow : arrows) {
+            AddImageButton(window, arrow.id, width_ - 0x21, arrow.y, arrow.image, false);
+            if (cIGZWin* button = window->GetChildWindowFromIDRecursive(arrow.id)) {
+                button->SetNotificationTarget(window);
+                if (!arrow.shown) button->SetFlag(1, false);
+            }
+        }
+    }
 }
 
-// updateOrdinanceBudget (i386 0x002628da): the rows' money (shown only while the ordinance is checked) and both totals.
-void cSC4SubBudgetWindow::UpdateOrdinanceBudget(cIGZWin*) {
+// updateOrdinanceBudget (i386 0x002628da): the rows again from the scroll offsets (+0xec income, +0xf0 expenses). The
+//   slots initOrdinanceBudget made (name + money texts from 0xabcde03, check button 300 + n, info button 500 + n) are bound
+//   to the ordinances from the offset on (the slot list +0x74 rebuilt), the money shown and the check button set while the
+//   ordinance is checked; rows above the offset and past the ninth slot only add to the total. A side of more than eight
+//   rows that now shows fewer than nine blanks the next slot and hides its buttons, a full side shows its last slot's.
+void cSC4SubBudgetWindow::UpdateOrdinanceBudget(cIGZWin* window) {
     cSC4OrdinanceSimulator* ordinances = g_host ? g_host->OrdinanceSimulator() : nullptr;
-    if (!ordinances || !body_) return;
-    std::int64_t totals[2] = {0, 0};
-    for (std::uint32_t index = 0; index < ordinanceIds_.size(); ++index) {
-        cISC4Ordinance* ordinance = ordinances->GetOrdinanceByID(ordinanceIds_[index]);
-        if (!ordinance || !ordinanceOn_[index].second) continue;
-        auto* simple = dynamic_cast<cSC4OrdinanceSimple*>(ordinance);
-        const std::int64_t income = simple ? simple->GetCurrentMonthlyIncome() : 0;
-        totals[ordinance->IsIncomeOrdinance() ? 0 : 1] += (ordinance->IsIncomeOrdinance() ? income : -income) * multiplier_;
-    }
-    for (const OrdinanceRow& row : ordinanceMoney_) {
-        cRZString text;
-        if (ordinanceOn_[row.index].second) {
-            auto* simple = dynamic_cast<cSC4OrdinanceSimple*>(ordinances->GetOrdinanceByID(ordinanceIds_[row.index]));
-            const std::int64_t income = simple ? simple->GetCurrentMonthlyIncome() : 0;
-            SC4MakeMoneyString((row.income ? income : -income) * multiplier_, text);
+    if (!ordinances || !body_ || !window) return;
+    // vslot 0x30: the available ordinances again
+    if (std::uint32_t count = static_cast<std::uint32_t>(ordinanceIds_.size()); count)
+        ordinances->GetOrdinanceAvailableArray(ordinanceIds_.data(), count);
+    ordinanceRows_.clear();
+    auto monthly = [&](std::uint32_t index) -> std::int64_t {   // vslot 0x14
+        auto* simple = dynamic_cast<cSC4OrdinanceSimple*>(ordinances->GetOrdinanceByID(ordinanceIds_[index]));
+        return simple ? simple->GetCurrentMonthlyIncome() : 0;
+    };
+    auto setText = [&](std::uint32_t id, const cIGZString& text) {
+        if (cIGZWin* child = body_->GetChildWindowFromIDRecursive(id)) child->SetCaption(text);
+    };
+    auto setChecked = [&](std::uint32_t id, bool on) {   // interface 0x8810 vslot 0x24
+        void* raw = nullptr;
+        if (window->GetChildAsRecursive(id, gz::kGZIID_cIGZWinBtn, &raw) && raw) {
+            static_cast<gz::cIGZWinBtn*>(raw)->SetChecked(on);
+            static_cast<gz::cIGZWinBtn*>(raw)->Release();
         }
-        if (cIGZWin* win = body_->GetChildWindowFromIDRecursive(row.moneyText)) win->SetCaption(text);
-    }
+    };
+    auto show = [&](std::uint32_t id, bool on) {
+        if (cIGZWin* child = window->GetChildWindowFromIDRecursive(id)) child->SetFlag(1, on);
+    };
+    std::uint32_t textId = 0xabcde01, checkId = 300, infoId = 500;
     for (int side = 0; side < 2; ++side) {
-        const std::uint32_t id = side == 0 ? incomeTotalText_ : expenseTotalText_;
-        if (id == 0) continue;
+        const bool income = side == 0;
+        const std::uint32_t rows = income ? incomeRows_ : expenseRows_;
+        if (rows == 0) continue;
+        if (income) textId = 0xabcde03;
+        else textId += 2;
+        const std::uint32_t scroll = income ? incomeScroll_ : expenseScroll_;
+        int& top = income ? incomeTop_ : expenseTop_;
+        std::int64_t total = 0;
+        std::uint32_t shown = 0, ordinal = 0;
+        for (std::uint32_t index = 0; index < ordinanceIds_.size(); ++index) {
+            cISC4Ordinance* ordinance = ordinances->GetOrdinanceByID(ordinanceIds_[index]);
+            if (!ordinance || ordinance->IsIncomeOrdinance() != income) continue;
+            const bool on = index < ordinanceOn_.size() && ordinanceOn_[index].second;
+            const std::int64_t money = (income ? monthly(index) : -monthly(index)) * multiplier_;
+            if (ordinal < scroll || shown > 8) {
+                if (on) total += money;
+            } else {
+                setText(textId, ordinance->GetName());
+                cRZString text;
+                if (on) {
+                    SC4MakeMoneyString(money, text);
+                    total += money;
+                }
+                setChecked(checkId, on);
+                setText(textId + 1, text);
+                textId += 2;
+                ordinanceRows_.push_back(index);
+                ++checkId;
+                ++infoId;
+                top += rowStep_;   // as the original (the field is not read again)
+                ++shown;
+            }
+            ++ordinal;
+        }
+        if (rows > 8) {
+            if (shown < 9) {
+                setText(textId, cRZString());
+                setText(textId + 1, cRZString());
+                textId += 2;
+                show(checkId, false);
+                show(infoId, false);
+                ++checkId;
+                ++infoId;
+            } else {
+                show(checkId - 1, true);
+                show(infoId - 1, true);
+            }
+        }
         cRZString text;
-        SC4MakeMoneyString(totals[side], text);
-        if (cIGZWin* win = body_->GetChildWindowFromIDRecursive(id)) win->SetCaption(text);
+        SC4MakeMoneyString(total, text);
+        setText(textId + 1, text);
     }
 }
 
