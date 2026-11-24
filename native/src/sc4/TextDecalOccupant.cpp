@@ -139,13 +139,13 @@ bool cSC4TextDecalOccupant::DoMessage(cIGZMessage2* message) {
         ITextDecalViewSet* view = *static_cast<ITextDecalViewSet**>(static_cast<cIGZMessage2Standard*>(message)->GetVoid2());
         if (view->ContainsOccupant(self) && host && host->PropDeveloperAllowsDecals()) {
             if (!IsFlagSet(kTextDecalFlagShown)) SetFlag(kTextDecalFlagShown);
-            return DoPropMessage(message);
+            return cSC4PropOccupant::DoMessage(message);
         }
         if (IsFlagSet(kTextDecalFlagShown)) ClearFlag(kTextDecalFlagShown);
     } else if (type == kMessageTextDecalRefresh) {
         UpdateDecal();
     }
-    return DoPropMessage(message);
+    return cSC4PropOccupant::DoMessage(message);
 }
 
 // 0x100711ba0
