@@ -8,6 +8,7 @@
 #include "sc4/MySimAgentSimulator.h"
 #include "sc4/MySimWinProc.h"
 #include "sc4/ServiceLocator.h"
+#include "sc4/WinLocationSaver.h"
 #include "sc4/View3DWin.h"
 
 namespace native {
@@ -69,8 +70,12 @@ public:
     sc4::IMySimAgentSimulator* MySimAgentSimulator() override { return NativeMySimAgentSimulator() ? &agentView_ : nullptr; }
     sc4::IModelManager* VehicleManager() override { return nullptr; }
     sc4::IModelManager* PedestrianManager() override { return nullptr; }
-    void RestoreWindowLocation(cIGZWin*) override {}
-    void SaveWindowLocation(cIGZWin*) override {}
+    void RestoreWindowLocation(cIGZWin* window) override {   // SL::spWinLocationSaver
+        if (auto* saver = static_cast<cSLWinLocationSaver*>(SL::spWinLocationSaver)) saver->RestoreWindowLocation(window, true);
+    }
+    void SaveWindowLocation(cIGZWin* window) override {
+        if (auto* saver = static_cast<cSLWinLocationSaver*>(SL::spWinLocationSaver)) saver->SaveWindowLocation(window);
+    }
     bool CityName(cIGZString&) override { return false; }
     sc4::IPickSimWinProc* CreatePickSimWinProc(std::uint32_t) override { return nullptr; }
     cIGZWinMgr* WindowManager() override { return window_ ? window_->GetWindowManager() : nullptr; }

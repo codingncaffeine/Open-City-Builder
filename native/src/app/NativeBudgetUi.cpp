@@ -34,6 +34,7 @@
 #include "sc4/Ordinance.h"
 #include "sc4/SubBudgetWindow.h"
 #include "sc4/ServiceLocator.h"
+#include "sc4/WinLocationSaver.h"
 #include "sc4/SC4Utilities.h"
 #include "sc4/Simulator.h"
 #include "sc4/View3DWin.h"
@@ -124,8 +125,15 @@ public:
     void RemoveTickNotification(cIGZMessageTarget2* target) override { StopToolTick(target); }
     void HiddenPause() override { if (auto* s = Component<sc4::cSC4Simulator>(sc4::CityComponent::Simulator, sc4::kGZCLSID_cSC4Simulator)) s->HiddenPause(); }
     void HiddenResume() override { if (auto* s = Component<sc4::cSC4Simulator>(sc4::CityComponent::Simulator, sc4::kGZCLSID_cSC4Simulator)) s->HiddenResume(); }
-    bool SaveWindowLocation(cIGZWin*) override { return false; }
-    bool RestoreWindowLocation(cIGZWin*, bool) override { return false; }
+    // SL::spWinLocationSaver vslots 0x28 / 0x48: the tax, loan and department windows open where the player left them
+    bool SaveWindowLocation(cIGZWin* window) override {
+        auto* saver = static_cast<cSLWinLocationSaver*>(SL::spWinLocationSaver);
+        return saver && saver->SaveWindowLocation(window);
+    }
+    bool RestoreWindowLocation(cIGZWin* window, bool keepOnScreen) override {
+        auto* saver = static_cast<cSLWinLocationSaver*>(SL::spWinLocationSaver);
+        return saver && saver->RestoreWindowLocation(window, keepOnScreen);
+    }
     void DecimalSeparator(cIGZString& out) override { out.AssignFromCString("."); }
     std::uint32_t MakeNativeColor(std::uint8_t r, std::uint8_t g, std::uint8_t b) override { return 0xff000000u | (std::uint32_t(r) << 16) | (std::uint32_t(g) << 8) | b; }
     bool FilterUICommandMessage(cGZMessage& message) override { return NativeTutorialFilterUiCommand(message); }   // a running tutorial may veto it
