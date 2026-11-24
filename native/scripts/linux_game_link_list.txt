@@ -255,6 +255,8 @@ src/gz/UIScriptService.cpp
 src/dbpf/DBPFReader.cpp
 src/sc4/BuildingSelectWinProc.cpp
 src/sc4/MySimWinProc.cpp
+src/sc4/PickSimWinProc.cpp
+src/sc4/MySimPool.cpp
 src/sc4/WinMapView.cpp
 src/sc4/WinRegionClouds.cpp
 src/sc4/WinRegionScroll.cpp

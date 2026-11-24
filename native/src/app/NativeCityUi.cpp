@@ -7,6 +7,11 @@
 #include "sc4/GraphsViewWinProc.h"
 #include "sc4/MySimAgentSimulator.h"
 #include "sc4/MySimWinProc.h"
+#include "sc4/App.h"
+#include "app/NativeWinMgr.h"
+#include "app/NativeBoot.h"
+#include "sc4/MySimPool.h"
+#include "sc4/PickSimWinProc.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/WinLocationSaver.h"
 #include "sc4/View3DWin.h"
@@ -77,7 +82,8 @@ public:
         if (auto* saver = static_cast<cSLWinLocationSaver*>(SL::spWinLocationSaver)) saver->SaveWindowLocation(window);
     }
     bool CityName(cIGZString&) override { return false; }
-    sc4::IPickSimWinProc* CreatePickSimWinProc(std::uint32_t) override { return nullptr; }
+    // the "add a sim" dialog for a MySim slot (cSC4PickSimWinProc); the panel Init's it, which runs it modally
+    sc4::IPickSimWinProc* CreatePickSimWinProc(std::uint32_t index) override;
     cIGZWinMgr* WindowManager() override { return window_ ? window_->GetWindowManager() : nullptr; }
     bool CreateTransportDialog(const cGZPersistResourceKey& key, cIGZWin* parent, std::uint32_t id, std::uint32_t iid, void** out) override {
         cIGZWin* window = CreateWindowFromScript(key, parent, id);
@@ -142,6 +148,45 @@ private:
 };
 
 }  // namespace
+
+// The "add a sim" dialog's and the MySim pool's services.
+class PickSimHost final : public sc4::IPickSimHost, public sc4::IMySimPoolHost {
+public:
+    cIGZWinMgr* WindowManager() override { return ActiveWinMgr(); }
+    gz::cIGZWinGen* CreateDialog(const cGZPersistResourceKey& key, std::uint32_t id) override {
+        cIGZWin* window = CreateWindowFromScript(key, nullptr, id);   // a parentless script window goes on the main window
+        if (!window) return nullptr;
+        void* raw = nullptr;
+        const bool ok = window->QueryInterface(gz::kGZIID_cIGZWinGen, &raw) && raw;
+        window->Release();
+        return ok ? static_cast<gz::cIGZWinGen*>(raw) : nullptr;
+    }
+    cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
+    void MySimDirectory(cIGZString& out) override {
+        if (cSC4App* app = BootApplication()) app->GetMySimDirectory(out);
+    }
+    void RestoreWindowLocation(cIGZWin* window) override {
+        if (auto* saver = static_cast<cSLWinLocationSaver*>(SL::spWinLocationSaver)) saver->RestoreWindowLocation(window, true);
+    }
+    void SaveWindowLocation(cIGZWin* window) override {
+        if (auto* saver = static_cast<cSLWinLocationSaver*>(SL::spWinLocationSaver)) saver->SaveWindowLocation(window);
+    }
+    void MoveIn(cRZString& name, bool male, std::uint8_t zodiac, cRZString& bio, std::uint32_t bitmapId, cRZString& bitmapFile,
+                std::uint8_t slot) override {
+        if (sc4::cSC4MySimAgentSimulator* agent = NativeMySimAgentSimulator())
+            agent->MoveIn(slot, name, male, zodiac, bio, bitmapId, bitmapFile);
+    }
+    bool LoadExemplarString(cIGZString& out, sc4::cISCPropertyHolder* exemplar, std::uint32_t property) override {
+        return native::LoadExemplarString(out, exemplar, property);
+    }
+};
+
+sc4::IPickSimWinProc* MySimHost::CreatePickSimWinProc(std::uint32_t index) {
+    static PickSimHost host;
+    sc4::SetPickSimHost(&host);
+    sc4::SetMySimPoolHost(&host);
+    return new sc4::cSC4PickSimWinProc(index);
+}
 
 sc4::IMySimWindow* CreateMySimWindow(gz::cIGZWinGen* panel) {
     static MySimHost host;
