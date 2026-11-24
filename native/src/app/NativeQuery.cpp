@@ -26,6 +26,9 @@
 #include "app/NativeGrowthDevelopers.h"
 #include "app/NativeUi.h"
 #include "gz/cGZPersistResourceManager.h"
+#include "sc4/SeaportDeveloper.h"
+#include "sc4/AirportDeveloper.h"
+#include "sc4/LandfillDeveloper.h"
 #include "sc4/SubBudgetWindow.h"
 #include "sc4/AuraSimulator.h"
 #include "sc4/Exemplar.h"
@@ -270,6 +273,7 @@ struct QueryLot final : IQueryLot {
         }
         return occupant;
     }
+    cSC4Lot* Lot() const { return lot_; }
 
 private:
     cSC4Lot* lot_;
@@ -296,6 +300,45 @@ struct QueryLots final : IQueryLotManager {
         return lot ? WrapLot(lot) : nullptr;
     }
 } g_lots;
+
+// The landfill and port developers as the query rows ask them (vslots 0x50 GetLandfillUsage, 0x40 GetCurrentBudget; port 0x60 usage
+// values for the lot, 0x70 GetMaintenanceCost).
+struct QueryLandfill final : IQueryLandfillDeveloper {
+    void GetLandfillUsage(std::uint32_t& usage, std::uint32_t& capacity) override {
+        usage = capacity = 0;
+        if (auto* d = CityAs<cSC4LandfillDeveloper>(CityComponent::LandfillDeveloper)) d->GetLandfillUsage(usage, capacity);
+    }
+    std::int64_t GetCurrentBudget() override {
+        auto* d = CityAs<cSC4LandfillDeveloper>(CityComponent::LandfillDeveloper);
+        return d ? d->GetCurrentBudget() : 0;
+    }
+} g_landfill;
+struct QueryAirports final : IQueryPortDeveloper {
+    bool GetUsageAndCapacity(IQueryLot* lot, std::uint32_t& usage, std::uint32_t& capacity) override {
+        auto* d = CityAs<cSC4AirportDeveloper>(CityComponent::AirportDeveloper);
+        auto* q = static_cast<QueryLot*>(lot);
+        usage = capacity = 0;
+        return d && q && d->GetAirportUsageValues(q->Lot(), usage, capacity);
+    }
+    std::int64_t GetMaintenanceCost(IQueryLot* lot) override {
+        auto* d = CityAs<cSC4AirportDeveloper>(CityComponent::AirportDeveloper);
+        auto* q = static_cast<QueryLot*>(lot);
+        return d && q ? d->GetMaintenanceCost(q->Lot()) : 0;
+    }
+} g_airports;
+struct QuerySeaports final : IQueryPortDeveloper {
+    bool GetUsageAndCapacity(IQueryLot* lot, std::uint32_t& usage, std::uint32_t& capacity) override {
+        auto* d = CityAs<cSC4SeaportDeveloper>(CityComponent::SeaportDeveloper);
+        auto* q = static_cast<QueryLot*>(lot);
+        usage = capacity = 0;
+        return d && q && d->GetSeaportUsageValues(q->Lot(), usage, capacity);
+    }
+    std::int64_t GetMaintenanceCost(IQueryLot* lot) override {
+        auto* d = CityAs<cSC4SeaportDeveloper>(CityComponent::SeaportDeveloper);
+        auto* q = static_cast<QueryLot*>(lot);
+        return d && q ? d->GetMaintenanceCost(q->Lot()) : 0;
+    }
+} g_seaports;
 
 struct QueryPower final : IQueryPowerSim {
     bool IsPowered(sc4::cISC4Occupant* occupant) override {
@@ -810,18 +853,10 @@ public:
     }
     IQueryLandValueSim* LandValueSim() override { return &g_landValue; }
     IQueryPollutionSim* PollutionSim() override { return &g_pollution; }
-    IQueryLandfillDeveloper* LandfillDeveloper() override {
-        SC4_UNWIRED("cSC4ViewInputControlQuery: the landfill developer is not asked (landfill usage rows read nothing)");
-        return nullptr;
-    }
-    IQueryPortDeveloper* AirportDeveloper() override {
-        SC4_UNWIRED("cSC4ViewInputControlQuery: the airport developer is not asked (airport usage rows read nothing)");
-        return nullptr;
-    }
-    IQueryPortDeveloper* SeaportDeveloper() override {
-        SC4_UNWIRED("cSC4ViewInputControlQuery: the seaport developer is not asked (seaport usage rows read nothing)");
-        return nullptr;
-    }
+    // SL::spLandfillDeveloper / the city's airport (slot 0x268) and seaport (slot 0x260) developers.
+    IQueryLandfillDeveloper* LandfillDeveloper() override { return CityAs<cSC4LandfillDeveloper>(CityComponent::LandfillDeveloper) ? &g_landfill : nullptr; }
+    IQueryPortDeveloper* AirportDeveloper() override { return CityAs<cSC4AirportDeveloper>(CityComponent::AirportDeveloper) ? &g_airports : nullptr; }
+    IQueryPortDeveloper* SeaportDeveloper() override { return CityAs<cSC4SeaportDeveloper>(CityComponent::SeaportDeveloper) ? &g_seaports : nullptr; }
     // the rating rows' per-cell maps (pollution sim 0x14(map) -> 0x1c, residential 0x9c / 0xa0, crime 0x14, traffic 0x24 / 0x34)
     std::uint16_t PollutionMapValue(int map, int x, int z) override {
         auto* pollution = CityAs<cSC4PollutionSimulator>(CityComponent::PollutionSimulator);
