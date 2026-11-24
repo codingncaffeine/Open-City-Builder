@@ -51,6 +51,7 @@
 namespace native {
 const sc4::cSC4SimGrid<std::uint8_t>* NativeFlammabilityGrid();   // app/NativeAdvisorFlammability.cpp
 void NativeMoveCameraTo(float x, float y, float z);                // app/NativeCitySystems.cpp
+void NativeZoomInForDisaster(int zoom);                            // app/NativeCitySystems.cpp
 int NativeCurrentViewLevel();
 void NativeStartEffectOnOccupant(const char* name, sc4::cISC4Occupant* occupant);   // app/NativeFireEffects.cpp
 void NativeStartEffectAt(const char* name, const float position[3]);
@@ -150,8 +151,7 @@ public:
     int CityCellCountZ() override { cSC4City* city = HostCity(); return city ? city->CellCountZ() : 0; }
     void MoveCamera(float x, float y, float z, int zoomLevel) override {
         NativeMoveCameraTo(x, y, z);
-        (void)zoomLevel;   // PARTIAL: the jump keeps the player's zoom
-        SC4_UNWIRED("cSC4DisasterManager camera jump: the zoom level of the jump is not applied (the player's zoom stays)");
+        NativeZoomInForDisaster(zoomLevel);
     }
     bool AutoJumpToDisasters() override { return SL::spPreferences && SL::spPreferences[0xf08] != 0; }
     cISC4DisasterManager* CreateManager(std::uint32_t classId) override {

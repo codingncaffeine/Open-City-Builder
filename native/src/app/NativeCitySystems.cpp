@@ -161,6 +161,21 @@ void NativeMoveCameraTo(float x, float y, float z) {
     camera->SetViewTargetPosition(target);
     AnnounceCameraScroll(false);
 }
+// cSC4DisasterLayer::GoToNextDisaster's zoom (i386 0x0034a65c): after the target moved, with the render property bool 0x25 on,
+// a camera more than one level further out than the disaster's zoom goes to that zoom.
+void NativeZoomInForDisaster(int zoom) {
+    sc4::cSC43DRender* render = CityRenderer();
+    sc4::cSC4CameraControl* camera = render ? render->GetCameraControl() : nullptr;
+    if (!camera) return;
+    const int current = camera->Zoom();   // +0x108
+    if (!(static_cast<float>(current) - 1.0f < static_cast<float>(zoom))) return;
+    auto* properties = dynamic_cast<sc4::cSC4RenderProperties*>(SL::spRenderProperties);
+    if (!properties) return;
+    constexpr std::uint32_t kZoomInOnFind = 0x25;
+    const bool zoomIn = properties->NumBoolProperties() > kZoomInOnFind ? properties->BoolValue(kZoomInOnFind)
+                                                                         : sc4::DefaultRenderProperties().bools[kZoomInOnFind].value;
+    if (zoomIn && static_cast<float>(current) < static_cast<float>(zoom - 1)) camera->SetZoom(static_cast<float>(zoom));
+}
 // cSC4MySim::Find's camera half (i386 0x00544fee): with the render property bool 0x25 on, a camera zoomed out past 3 goes to
 // zoom 4; then the camera's target is the point.
 bool NativeCameraLookAt(const float pos[3], bool zoomIfFar) {
