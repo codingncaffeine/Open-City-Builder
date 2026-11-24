@@ -106,6 +106,7 @@ sc4::IAdvisorPopupQueue* CreateAdvisorPopupQueue();
 bool NativeLlamaCheatActive();   // app/NativeAdvisors.cpp
 void NativeInitMapView(cIGZWin* window);   // app/NativeWinMapView.cpp
 std::string FontStyleName(std::uint32_t guid);   // linux/game_main_linux.cpp
+std::uint32_t NativeVehicleGroupForCatalogItem(std::uint32_t item);   // NativeAutomataManagerHost.cpp
 sc4::cISC4View3DWin* NativeStreetSimView() { return CityView3DWin(); }   // the street-sim tool's view (NativeMySim.cpp)
 // The level-terrain tool's services: the city's terrain and the view's terrain pick (vslot 0x90, flag 0).
 namespace {
@@ -604,7 +605,16 @@ struct StubView3DWin final : IView3DWinHost {
         return true;
     }
     void InvokeDisaster(cSC4View3DWin& view, std::uint32_t id) override { native::InvokeDisasterTool(view, id); }
-    bool FocusVehicle(std::uint32_t) override { SC4_UNWIRED("IView3DWinHost::FocusVehicle (vehicle managers)"); return false; }
+    // InvokeCatalogItemCommand's earned-vehicle branch (i386 0x00529df8): the vehicle, aircraft and watercraft managers'
+    // exemplar records (vslot 0x70 GetExemplarData) are searched for the exemplar whose key instance is the item; its default
+    // group starts a situation (city situation manager vslot 0x5c InitiateSituationByAutomataGroup(group, true, true)).
+    bool FocusVehicle(std::uint32_t item) override {
+        const std::uint32_t group = NativeVehicleGroupForCatalogItem(item);
+        if (group == 0) return false;
+        if (sc4::cSC4CitySituationManager* situations = HostCitySituations())
+            situations->InitiateSituationByAutomataGroup(group, true, true);
+        return true;
+    }
     // new cSC4GamePreferencesWinProc; AddRef; ShowDialog(kGameOptions) (vslot 0x28); DoModalWin; the view takes the focus back
     void RunPreferencesDialog(int which) override {
         if (which == 2) {

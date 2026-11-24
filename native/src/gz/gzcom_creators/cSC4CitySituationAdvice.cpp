@@ -34,6 +34,7 @@ private:
         bool Init(int adviceId) override { return o_->cSC4Advice::Init(adviceId); }
         void Shutdown() override { o_->cSC4Advice::Shutdown(); }
         int AdviceId() override { return o_->cSC4Advice::AdviceId(); }
+        std::uint32_t Guid() override { return static_cast<std::uint32_t>(o_->cSC4Advice::GetGUID()); }
         int AdvisorId() override { return o_->cSC4Advice::GetAdvisorID(); }
         void SetFlags(int flags, bool on) override { o_->cSC4Advice::SetFlags(flags, on); }
         int Mood() override { return o_->cSC4Advice::GetMood(); }

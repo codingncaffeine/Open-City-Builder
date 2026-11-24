@@ -113,6 +113,7 @@ public:
     virtual bool Init(int adviceId) = 0;               // cSC4Advice::Init
     virtual void Shutdown() = 0;                       // cSC4Advice::Shutdown
     virtual int AdviceId() = 0;                        // field at this+0xe0
+    virtual std::uint32_t Guid() { return 0; }         // cISC4Advice vslot 0x28 GetGUID (+0xdc)
     virtual int AdvisorId() = 0;                       // vslot 0x58
     virtual void SetFlags(int flags, bool on) = 0;     // vslot 0x70
     virtual int Mood() = 0;                            // vslot 0x30 (GetMood)
@@ -203,6 +204,8 @@ public:
     virtual int GetAdviceMood() const { return 0; }
     // GetAdvisorId / GetMood of the base advice, and the advice id used as the situation key (cSC4Advice +0xe0).
     virtual int GetAdviceId() const = 0;
+    // AsAdvice() vslot 0x28 (i386) GetGUID: the advice's guid, the key InitiateSituationByGuid looks a situation up by.
+    virtual std::uint32_t GetAdviceGuid() const { return 0; }
 };
 
 class cSC4CitySituationAdvice final : public cISC4CitySituationAdvice {
@@ -273,6 +276,7 @@ public:
     bool IsGroupRelevant(const std::vector<std::uint32_t>& groups) const override;   // @ 0x1006a9c08
     void UpdateSituationFields() override;                              // @ 0x1006a88c6
     int GetAdviceId() const override { return base_ ? base_->AdviceId() : 0; }
+    std::uint32_t GetAdviceGuid() const override { return base_ ? base_->Guid() : 0u; }
     int Priority() const override { return base_ ? base_->Priority() : 0; }
     const cRZString& GetTextTitle() const;                              // @ 0x1006a9026 (thunk 0x1006a9236)
     const cRZString& GetAdviceTitle() const override { return GetTextTitle(); }

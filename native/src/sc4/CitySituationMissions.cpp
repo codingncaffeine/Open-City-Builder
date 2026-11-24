@@ -224,6 +224,34 @@ bool cSC4CitySituationManager::DoMessage(cIGZMessage2* message) {
 // i386 0x004a3f32: the "city situations" advisor's advice `guid`; the automata of its groups (or of `automataGroup`)
 // are tried in turn (driveable ones only), else a new automaton is made near a source building. With `forOccupant` the
 // situation goes through InitiateSituationForOccupant (popup first); without, it starts and activates at once.
+// i386 0x004a43b6: the newest tracked situation that takes the group starts by its guid for that group; with none and `joyride`,
+// the first drivable automaton of the group (else a new one made for driving) goes on a joyride.
+bool cSC4CitySituationManager::InitiateSituationByAutomataGroup(std::uint32_t group, bool forOccupant, bool joyride) {
+    const std::vector<std::uint32_t> groups{group};
+    for (auto it = situationTracks_.rbegin(); it != situationTracks_.rend(); ++it) {
+        cISC4CitySituationAdvice* situation = it->advice.get();
+        if (!situation || !situation->IsGroupRelevant(groups)) continue;   // vslot 0xd8
+        return InitiateSituationByGuid(situation->GetAdviceGuid(), forOccupant, group);
+    }
+    if (!joyride) return false;
+    cRZAutoRefCount<ISituationAutomaton> automaton;
+    std::unordered_set<ISituationAutomaton*> instances;
+    if (GetInstancesOfGroup(groups, instances)) {
+        for (ISituationAutomaton* candidate : instances) {
+            if (candidate && CanPlayerDrive(candidate)) {
+                automaton = candidate;
+                break;
+            }
+        }
+        ICitySituationManagerHost* host = CitySituationManagerHost();
+        if (ISituationAutomataManager* vehicles = host ? host->VehicleManager() : nullptr) vehicles->ReleaseInstances(instances);
+    }
+    if (!automaton) automaton = CreateAutomatonForPlayerDrive(groups);
+    if (!automaton) return false;
+    StartJoyride(automaton.get(), true, nullptr);
+    return true;
+}
+
 bool cSC4CitySituationManager::InitiateSituationByGuid(std::uint32_t guid, bool forOccupant, std::uint32_t automataGroup) {
     ICitySituationManagerHost* host = CitySituationManagerHost();
     cRZAutoRefCount<cISC4CitySituationAdvice> situation;

@@ -503,6 +503,9 @@ sc4::cSC4AutomataManager* NativeAutomataManagerForGroup(std::uint32_t group) {
 }
 // SL::spVehicleManager / spPedestrianManager / spAircraftManager / spWatercraftManager by index (the automata scripts' source
 // managers).
+// The default group of the vehicle, aircraft or watercraft exemplar whose key instance is a catalog item (the earned-vehicle
+// branch of cSC4View3DWin::InvokeCatalogItemCommand searches the managers' GetExemplarData records in that order); 0 for none.
+std::uint32_t NativeVehicleGroupForCatalogItem(std::uint32_t item);
 sc4::cSC4AutomataManager* NativeAutomataManagerAt(int index) {
     static constexpr CityComponent kManagers[4] = {CityComponent::VehicleManager, CityComponent::PedestrianManager, CityComponent::AircraftManager,
                                                    CityComponent::WatercraftManager};
@@ -537,4 +540,18 @@ bool NativePointInViewFrustum(const float* xyz) {
     return view && view->IsPointInViewFrustum(xyz);
 }
 
+}  // namespace native
+
+namespace native {
+std::uint32_t NativeVehicleGroupForCatalogItem(std::uint32_t item) {
+    for (int index : {0, 2, 3}) {   // vehicles, aircraft, watercraft
+        sc4::cSC4AutomataManager* manager = native::NativeAutomataManagerAt(index);
+        if (!manager) continue;
+        for (const sc4::tExemplarData& record : manager->GetExemplarData()) {
+            cGZPersistResourceKey key;
+            if (record.exemplar && record.exemplar->GetKey(key) && key.instance == item) return record.defaultGroup;
+        }
+    }
+    return 0;
+}
 }  // namespace native

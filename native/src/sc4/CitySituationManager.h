@@ -439,6 +439,7 @@ public:
 
     // The mission flow (the cISC4CitySituationManager slots, i386 offsets in the comments).
     bool InitiateSituationByGuid(std::uint32_t guid, bool forOccupant, std::uint32_t automataGroup);   // 0x54, i386 0x004a3f32
+    bool InitiateSituationByAutomataGroup(std::uint32_t group, bool forOccupant, bool joyride);        // 0x5c, i386 0x004a43b6
     bool InitiateSituationForOccupant(ISituationOccupant* occupant, cISC4CitySituationAdvice* situation);   // 0x58, i386 0x004a4278
     void StartJoyride(ISituationAutomaton* automaton, bool countdown, cIGZMessageTarget2* target);   // 0x60, i386 0x0049ea32
     void InitiatePlayerDriveMode(bool enter);                        // 0xa4, i386 0x0049ea7e
