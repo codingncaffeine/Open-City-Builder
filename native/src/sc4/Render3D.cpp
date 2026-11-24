@@ -3,7 +3,7 @@
 // 0x1007693d0..0x100769508), the camera / clip / driver / backing-store wiring, the screen-shake list, the two
 // stats strings, the per-frame draw pass (0x100763ac6..0x1007663a8) and — since RENDER3D-2 — the model change queue
 // and the quad-grid rebuild (0x10076113a..0x1007657c6). DoMessage (0x100762b36) is ported but for the backing-store
-// switch and the lighting-manager swap; UpdateVisibleTerrainMetrics (0x1007630ca) and picking are ported too.
+// switch; UpdateVisibleTerrainMetrics (0x1007630ca) and picking are ported too.
 #include "sc4/TexUtil.h"
 #include "sc4/Render3D.h"
 #include "platform/Unwired.h"
@@ -3361,8 +3361,15 @@ bool cSC43DRender::DoMessage(cIGZMessage2* message) {
         if (host && host->HasTerrain()) UpdateVisibleTerrainMetrics();
     } else if (type == 0xc53d10aa) {
         ReadProperties();
-    } else if (type == 0x8acaa95f) {
-        SC4_UNWIRED("cSC43DRender::DoMessage: lighting-manager swap 0x8acaa95f not ported");
+    } else if (type == 0x8acaa95f) {   // the driver lost its device: the background picture is uploaded again (i386 0x0050c0f6)
+        cIGZBuffer* picture = backgroundPicture_;
+        if (picture && backgroundTexture_ != 0) {
+            picture->AddRef();
+            const bool visible = backgroundPictureVisible_;
+            SetBackgroundPicture(static_cast<cIGZBuffer*>(nullptr), false);
+            SetBackgroundPicture(picture, visible);
+            picture->Release();
+        }
     }
     return true;
 }
