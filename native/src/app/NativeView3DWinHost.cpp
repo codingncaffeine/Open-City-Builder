@@ -880,9 +880,13 @@ public:
         return true;
     }
     void FormatNumber(long value, cIGZString& out) override { out.AssignFromCString(GroupDigits(value).c_str()); }
-    bool GetRegionName(cIGZString&) override {
-        SC4_UNWIRED("cSCStringDetokenizerDefault #Region#: the region's name is not asked (the token reads unknown)");
-        return false;
+    // #Region# (i386 0x0003ea72): SL::spSC4 vslot 0x88 GetRegion -> its name.
+    bool GetRegionName(cIGZString& out) override {
+        cISC4Region* region = SL::spSC4 ? SL::spSC4->GetRegion() : nullptr;
+        cIGZString* name = region ? region->GetName() : nullptr;
+        if (!name) return false;
+        out.Copy(*name);
+        return true;
     }
 };
 
