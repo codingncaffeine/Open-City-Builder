@@ -50,8 +50,11 @@
 #include "sc4/NetworkManager.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/cSTETerrain.h"
+#include "sc4/SLBuffer.h"
+#include "sc4/WeatherSimulator.h"
 
 namespace native {
+sc4::cSC4CrimeSimulator* NativeCrimeSimulator();   // app/NativeCrime.cpp
 const sc4::cSC4SimGrid<std::uint8_t>* NativeFlammabilityGrid();   // app/NativeAdvisorFlammability.cpp
 const sc4::cSC4SimGrid<std::uint8_t>* NativePoweredGrid();        // app/NativePower.cpp
 const sc4::cISC4GrowthDeveloper* GrowthDeveloperInterfaceOfType(std::uint32_t type);   // app/NativeGrowthDevelopers.cpp
@@ -301,9 +304,27 @@ public:
     }
     int CitySizeXInCells() override { cSC4City* city = HostCity(); return city ? static_cast<int>(city->CellCountX()) : 0; }
     int CitySizeZInCells() override { cSC4City* city = HostCity(); return city ? static_cast<int>(city->CellCountZ()) : 0; }
-    cIGZBuffer* CreatePotholeDecal() override {
-        SC4_UNWIRED("cSC4WinMapView: the pothole decal is not created");
-        return nullptr;
+    // SL::spGF vslot 0x28 (key, 1, out, colour type 9): the pothole decal {0x7ab50e44, 0x1abe787d, 0x4bfc0554}
+    cIGZBuffer* CreatePotholeDecal() override { return LoadIcon(cGZPersistResourceKey{0x7ab50e44, 0x1abe787d, 0x4bfc0554}, 9); }
+    static cIGZBuffer* LoadIcon(const cGZPersistResourceKey& key, std::int32_t colorType) {
+        ISLBufferHost* buffers = SLBufferHost();
+        cIGZBuffer* image = nullptr;
+        if (!buffers || !buffers->GetBufferResource(key, colorType, false, &image)) return nullptr;
+        return image;
+    }
+    // spCrimeSim vslot 0x2c GetCrimeIncidentArray: each incident's cell and its visual
+    void CrimeIncidentIcons(std::uint32_t colorType, std::vector<CrimeIcon>& out) override {
+        out.clear();
+        auto* crime = NativeCrimeSimulator();
+        std::vector<sc4::CrimeIncident> incidents;
+        if (!crime || !crime->GetCrimeIncidentArray(incidents)) return;
+        for (const sc4::CrimeIncident& incident : incidents) {
+            CrimeIcon icon;
+            icon.x = incident.x;
+            icon.z = incident.z;
+            icon.icon = LoadIcon(incident.visual, static_cast<std::int32_t>(colorType));
+            out.push_back(icon);
+        }
     }
     int MapRotation() override {
         cSC43DRender* renderer = CityRenderer();
@@ -414,6 +435,20 @@ public:
                     ok = Fill<float>(grid, out.f32, out);
                 }
                 break;
+            case kGridWeather: {   // the moisture map; tract widths = the terrain's size over the grid's size (whole metres)
+                auto* weather = CityAs<cSC4WeatherSimulator>(CityComponent::WeatherSimulator);
+                cSTETerrain* terrain = CityTerrainOf(HostCity());
+                std::vector<std::vector<std::uint8_t>>* grid = nullptr;
+                if (weather) weather->GetMoistureValueMapPtr(grid);
+                if (!grid || grid->empty() || (*grid)[0].empty() || !terrain) break;
+                out.u8 = grid;
+                out.cellSizeX = static_cast<float>(static_cast<int>(static_cast<float>(terrain->CellCountX()) * cSTETerrain::CellWidth() /
+                                                                    static_cast<float>(grid->size())));
+                out.cellSizeZ = static_cast<float>(static_cast<int>(static_cast<float>(terrain->CellCountZ()) * cSTETerrain::CellWidth() /
+                                                                    static_cast<float>((*grid)[0].size())));
+                ok = true;
+                break;
+            }
             case kGridResidentialAge:
                 if (auto* res = CityAs<cSC4ResidentialSimulator>(CityComponent::ResidentialSimulator)) ok = Fill<std::uint8_t>(res->GetAgeGrid(), out.u8, out);
                 break;

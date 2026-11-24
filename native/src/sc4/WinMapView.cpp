@@ -490,9 +490,19 @@ void cSC4WinMapView::Update() {
                     break;
                 case 2: u8(kGridLandValue); break;
                 case 3: u8(kGridPolice); break;
-                case 4: u8(kGridCrime);    // PARTIAL: the incident icons
-                    SC4_UNWIRED("cSC4WinMapView::Update: crime incident icons not drawn on the crime map");
+                case 4: {   // the crime grid, then each incident's icon at its cell, turned with the map
+                    u8(kGridCrime);
+                    const int cityX = g_host->CitySizeXInCells();
+                    std::vector<IWinMapViewHost::CrimeIcon> icons;
+                    g_host->CrimeIncidentIcons(static_cast<std::uint32_t>(buffer->GetColorType().type), icons);
+                    const float scale = cityX > 0 ? static_cast<float>(width) / static_cast<float>(cityX) : 0.0f;
+                    for (const auto& icon : icons) {
+                        SC4MapViewRotatedAlphaBlt(buffer, icon.icon, static_cast<int>(icon.x * scale), static_cast<int>(icon.z * scale),
+                                                  -g_host->MapRotation());
+                        if (icon.icon) icon.icon->Release();
+                    }
                     break;
+                }
                 case 5: u8(kGridFireProtection); break;
                 case 6: u8(kGridFlammability); break;
                 case 7: u8(kGridPower); break;
@@ -520,8 +530,12 @@ void cSC4WinMapView::Update() {
                     // The growth developer views: developer type by view, then the grid the layer style asks for.
                     static constexpr std::uint32_t kDeveloperTypes[12] = {0x1010, 0x1020, 0x1030, 0x3110, 0x3120, 0x3130,
                                                                           0x3320, 0x3330, 0x4100, 0x4200, 0x4300, 0x4400};
-                    if (dataView_ == 0x1d || dataView_ == 0x4c)
-                        SC4_UNWIRED("cSC4WinMapView::Update: weather (0x1d) / traffic route (0x4c) map views draw nothing");
+                    if (dataView_ == 0x1d) {   // the weather simulator's moisture map
+                        u8(kGridWeather);
+                        break;
+                    }
+                    if (dataView_ == 0x4c)
+                        SC4_UNWIRED("cSC4WinMapView::Update: the traffic route map view (0x4c) draws nothing");
                     const cISC4GrowthDeveloper* developer =
                         dataView_ >= 0x40 && dataView_ <= 0x4b ? g_host->GrowthDeveloper(kDeveloperTypes[dataView_ - 0x40]) : nullptr;
                     if (!developer) {

@@ -261,6 +261,10 @@ public:
     // The simulator grid a data view draws (Update's switch): the borrowed grid of `source` (WinMapGridSource), with its
     // tract widths. `argument` is the pollution kind (0 air, 1 water, 2 garbage, 3 radiation).
     virtual bool SimulatorGrid(int source, int argument, struct WinMapGrid& out) { (void)source; (void)argument; (void)out; return false; }
+    // The crime map's incidents (spCrimeSim vslot 0x2c GetCrimeIncidentArray): each one's cell and its icon (spGF vslot 0x28 with
+    // the incident's visual key, in `colorType`; one reference each, or null when the image is missing).
+    struct CrimeIcon { float x = 0.0f, z = 0.0f; cIGZBuffer* icon = nullptr; };
+    virtual void CrimeIncidentIcons(std::uint32_t colorType, std::vector<CrimeIcon>& out) { (void)colorType; out.clear(); }
     // BlockMapByLot's walk: spLotManager vslot 0x3c (every lot), lot 0x38 GetBoundingRect and 0x7c GetZoneType.
     virtual void CityLots(std::vector<struct WinMapLot>& out) { (void)out; }
     // spBuildingDevelopmentSim vslot 0x84: the growth developer of a developer type (borrowed), or null.
@@ -318,6 +322,7 @@ enum WinMapGridSource : int {
     kGridResidentialAge,           // spResidentialSim 0xa4, uint8
     kGridEducation,                // spResidentialSim 0x54 GetAverageEQGrid, float (a new grid: `owner` holds it)
     kGridHealth,                   // spResidentialSim 0x58 GetAverageHQGrid, float (a new grid: `owner` holds it)
+    kGridWeather,                  // spWeatherSim 0x48 GetMoistureValueMapPtr, uint8; tract widths from the terrain's size
 };
 struct WinMapGrid {
     const std::vector<std::vector<std::uint8_t>>* u8 = nullptr;
