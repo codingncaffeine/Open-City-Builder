@@ -4,9 +4,8 @@
 // GetTexture (0x10019d976) resolving the network textures {0x7ab50e44, 0x1abe787d, id + zoom}. The port's occupant is not
 // a model instance, so cSC4NetworkOccupantModel stands in for that subobject: a model instance that draws its occupant.
 //
-// Not ported: the highlight pass (SetSelfLitShade + the highlight state, and the one-way arrow's highlighted draw), the
-// lighting refresh (UpdateLighting, flag 0x8000: the saved vertex colours are used as they are) and the add-on parts'
-// "under water" test against the terrain.
+// Not ported: the lighting refresh (UpdateLighting, flag 0x8000: the saved vertex colours are used as they are) and the
+// add-on parts' "under water" test against the terrain.
 #pragma once
 #include <cstdint>
 
@@ -51,7 +50,7 @@ public:
 
 private:
     // DrawOneWayArrow (i386 0x0013270a): the arrow decal over a one-way piece.
-    void DrawOneWayArrow(SC4DrawContext* context, const cSC4PackedRenderState& state, std::uint8_t directions, int zoom);
+    void DrawOneWayArrow(SC4DrawContext* context, bool highlight, const cSC4PackedRenderState& state, std::uint8_t directions, int zoom);
 
     cSC4NetworkOccupant& occupant_;   // not referenced: the occupant's placeable object owns this model
 };

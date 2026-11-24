@@ -16,16 +16,29 @@ const std::uint16_t kTriangleIndices[6] = {0, 1, 2, 0, 2, 3};
 const std::uint16_t kFlippedTriangleIndices[6] = {0, 1, 3, 3, 1, 2};
 
 struct States {
-    cSC4PackedRenderState blend, noBlend;
+    cSC4PackedRenderState blend, noBlend, highlight;
     States() {
-        // cSC4NetworkOccupant::StaticInit's two states
+        // cSC4NetworkOccupant::StaticInit's three states
         blend.PackRenderState(true, true, true, true, true, 1, true, 3, 4, 5, 4, 0.1f, 1, -1);
         noBlend.PackRenderState(true, true, true, false, false, 1, true, 3, -1, -1, -1, -1.0f, 1, -1);
+        highlight.PackRenderState(true, true, true, true, true, 1, true, 2, 1, 1, 4, 0.1f, 1, -1);   // i386 0x00134a4d
     }
 };
+// _clrHighlight (static-initialised at i386 0x00a7edf8): the self-lit shade of a highlighted piece.
+const cS3DVector3 kHighlightShade{1.0f, 0.94f, 0.55f};
+
 const States& PackedStates() {
     static const States states;
     return states;
+}
+// The highlight pass's second draw of a primitive: the highlight state, then the piece's state back.
+template <class F>
+void DrawHighlighted(SC4DrawContext* context, const cSC4PackedRenderState& state, int wrap, F&& draw) {
+    context->SetRenderState(PackedStates().highlight);
+    context->SetTexWrapModes(wrap, wrap, 0);
+    context->SetTexFiltering(1, 1, 0);
+    draw();
+    context->SetRenderState(state);
 }
 
 // The combined edge configurations whose pieces draw blended (Draw's switch at 0x10019e115).
@@ -69,8 +82,7 @@ std::uint32_t cSC4NetworkOccupantModel::GetTexture(std::uint32_t id, std::uint32
 }
 
 int cSC4NetworkOccupantModel::Draw(SC4DrawContext* context, bool highlight) {
-    if (highlight) SC4_UNWIRED("cSC4NetworkOccupantModel::Draw: the highlight pass (SetSelfLitShade + highlight state, one-way arrow) is not ported");
-    if (!context || highlight) return 1;
+    if (!context) return 1;
     const int zoom = context->Zoom();
     // Pieces with a support pylon and an opaque first corner, and every piece with flag 0x80000, choose their state
     // from the edge configuration; the rest draw blended.
@@ -80,7 +92,14 @@ int cSC4NetworkOccupantModel::Draw(SC4DrawContext* context, bool highlight) {
     if (byEdges && !EdgeConfigBlends(occupant_.GetEdgeStore().CombinedConfig())) state = &PackedStates().noBlend;
     context->SetRenderState(*state);
     context->ResetModelViewTransform();
-    context->ResetShade();
+    // The highlight pass (i386 0x00133f02) draws only a highlighted piece, self-lit in the highlight colour, and draws
+    // every primitive a second time with the highlight state.
+    if (highlight) {
+        if (occupant_.GetHighlight() == 0) return 1;
+        context->SetSelfLitShade(kHighlightShade);
+    } else {
+        context->ResetShade();
+    }
     if (occupant_.HasAnyNetworkFlag(kNetworkFlagQuadDrawA | kNetworkFlagQuadDrawB)) {
         std::uint32_t textures[2] = {0, 0};
         // ([0] the under texture, [1] the piece texture at the variation, falling back to the plain piece when the
@@ -96,11 +115,16 @@ int cSC4NetworkOccupantModel::Draw(SC4DrawContext* context, bool highlight) {
             for (std::uint32_t texture : textures) {
                 if (!texture) continue;
                 context->SetTexture(static_cast<int>(texture), 0);
-                if (occupant_.HasNetworkFlag(kNetworkFlagQuadDrawA)) context->DrawPrimsIndexed(0, 3, indices);
-                if (occupant_.HasNetworkFlag(kNetworkFlagQuadDrawB)) context->DrawPrimsIndexed(0, 3, indices + 3);
+                const auto quads = [&] {
+                    if (occupant_.HasNetworkFlag(kNetworkFlagQuadDrawA)) context->DrawPrimsIndexed(0, 3, indices);
+                    if (occupant_.HasNetworkFlag(kNetworkFlagQuadDrawB)) context->DrawPrimsIndexed(0, 3, indices + 3);
+                };
+                quads();
+                if (highlight) DrawHighlighted(context, *state, 2, quads);
             }
             // The one-way arrow over the piece (vslot 0x114 GetOneWayDirections, vslot 0x170 DrawOneWayArrow).
-            if (const std::uint8_t directions = occupant_.GetOneWayDirections()) DrawOneWayArrow(context, *state, directions, zoom);
+            if (const std::uint8_t directions = occupant_.GetOneWayDirections())
+                DrawOneWayArrow(context, highlight, *state, directions, zoom);
         }
     }
     const std::vector<SC4AddOnPart>& parts = occupant_.AddOnParts();
@@ -112,8 +136,10 @@ int cSC4NetworkOccupantModel::Draw(SC4DrawContext* context, bool highlight) {
             if (!texture) continue;
             context->SetTexture(static_cast<int>(texture), 0);
             context->DrawPrims(0, 10, 3, part.corner);
+            if (highlight) DrawHighlighted(context, *state, 3, [&] { context->DrawPrims(0, 10, 3, part.corner); });
         }
     }
+    if (highlight) context->ResetShade();
     return 1;
 }
 
@@ -129,7 +155,8 @@ constexpr std::uint8_t kArrowOrientation[16][2] = {
 // configurations) gets an arrow: texture 0xbe35eb0 on a straight, 0xbe35ec0 on a curve (whose edges 1 and 2 read their
 // direction pair swapped). The direction bits vote (1 = +1, 2 = -1) for the arrow's orientation. The arrow borrows the
 // quad's corners with other texture coordinates and puts the piece's own coordinates back afterwards.
-void cSC4NetworkOccupantModel::DrawOneWayArrow(SC4DrawContext* context, const cSC4PackedRenderState& state, std::uint8_t directions, int zoom) {
+void cSC4NetworkOccupantModel::DrawOneWayArrow(SC4DrawContext* context, bool highlight, const cSC4PackedRenderState& state,
+                                               std::uint8_t directions, int zoom) {
     const std::uint32_t edges = occupant_.GetEdgeTypesFlag(10);   // vslot 0x98
     if ((edges & 0xfcfcfcfcu) != 0) return;
     const std::uint32_t edgeSet = ((((edges & 0x03030303u) + 0x03030303u) & 0x04040404u) * 0x01020408u) >> 26;
@@ -158,8 +185,12 @@ void cSC4NetworkOccupantModel::DrawOneWayArrow(SC4DrawContext* context, const cS
     context->SetTexture(static_cast<int>(texture), 0);
     occupant_.SetTextureCoordinates(orientation);
     const std::uint16_t* indices = occupant_.HasNetworkFlag(0x1000000) ? kFlippedTriangleIndices : kTriangleIndices;
-    if (occupant_.HasNetworkFlag(kNetworkFlagQuadDrawA)) context->DrawPrimsIndexed(0, 3, indices);
-    if (occupant_.HasNetworkFlag(kNetworkFlagQuadDrawB)) context->DrawPrimsIndexed(0, 3, indices + 3);
+    const auto quads = [&] {
+        if (occupant_.HasNetworkFlag(kNetworkFlagQuadDrawA)) context->DrawPrimsIndexed(0, 3, indices);
+        if (occupant_.HasNetworkFlag(kNetworkFlagQuadDrawB)) context->DrawPrimsIndexed(0, 3, indices + 3);
+    };
+    quads();
+    if (highlight) DrawHighlighted(context, state, 2, quads);
     context->SetRenderState(state);
     occupant_.SetTextureCoordinates(occupant_.GetRotationAndFlip());
 }
