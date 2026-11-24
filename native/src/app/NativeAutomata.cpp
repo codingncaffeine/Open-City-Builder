@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 #include <random>
 #include <vector>
 
@@ -20,6 +21,9 @@
 #include "sc4/Render3D.h"
 #include "app/NativeCityView.h"
 #include "app/NativeEffects.h"
+#include "s3d/ModelProcessor.h"
+#include "sc4/LightingManager.h"
+#include "sc4/ViewUtilities.h"
 #include "sc4/AutomataStates.h"
 #include "sc4/VisualEffect.h"
 #include "sc4/ServiceLocator.h"
@@ -34,7 +38,8 @@ sc4::cSC4AutomataController* NativeFindAttraction(sc4::cISC4Occupant* occupant, 
 sc4::IAutomatonGroupTemplate* NativeFindAutomatonGroup(std::uint32_t id);                                                                  // app/NativeAutomataManagerHost.cpp
 s3d::cS3DModelInstanceAnimatedSprite* NativeCreateSpriteInstance(const cGZPersistResourceKey& key);   // app/NativeSprites.cpp
 sc4::IAutomatonEffects* NativeNewModelRegEffects();                                                   // app/NativeModelRegEffects.cpp
-sc4::cSC4VisualEffect* NativeRegEffectVisual(sc4::IRegEffect* effect);                                // app/NativeModelRegEffects.cpp
+sc4::cSC4VisualEffect* NativeRegEffectVisual(sc4::IRegEffect* effect);
+sc4::cSC4Automaton* NativePlayerDriveAutomaton();                                                   // app/NativePlayerDrive.cpp                                // app/NativeModelRegEffects.cpp
 namespace {
 using namespace sc4;
 
@@ -90,10 +95,25 @@ public:
     void SetZoomAndRotation(int zoom, int rotation) override { if (animated_) animated_->SetZoomAndRotation(zoom, rotation); }
     void SetPlayMode(s3d::PlayMode mode) override { if (animated_) animated_->SetPlayMode(mode); }
     float GetOpacity() const override { return instance_->GetDrawAttributes().shade[3]; }
+    void AddDrawFlagsAndShade(std::uint32_t flags, const float* shade) override {
+        s3d::SC4DrawAttributes attributes = instance_->GetDrawAttributes();
+        attributes.flags |= flags;
+        for (int i = 0; i < 4; ++i) attributes.shade[i] = shade[i];
+        instance_->SetDrawAttributes(attributes);
+    }
+    void InitModelProcessor() override {
+        processor_ = std::make_unique<s3d::cS3DModelProcessor>();
+        processor_->SetModel(instance_);
+    }
+    void LightModel() override {
+        if (processor_ && processor_->Model())
+            processor_->LightModel(dynamic_cast<sc4::cISC4LightingManager*>(SL::spLightingManager), false);
+    }
 
 private:
     s3d::cIS3DModelInstance* instance_;
     s3d::cIS3DModelInstanceAnimated* animated_;
+    std::unique_ptr<s3d::cS3DModelProcessor> processor_;   // the automaton's +0xd0 processor (the ghost's)
     sc4::RegPointMap regPoints_;
     int refs_ = 1;
 };
@@ -281,6 +301,19 @@ public:
     void MoveSoundLoop(std::uint32_t handle, std::uint32_t x, std::uint32_t y, std::uint32_t z) override { PostSoundSystemEvent(0xca45190f, handle, x, y, z); }
     std::uint32_t ViewZoom() override { return SL::spViewUtilities ? static_cast<std::uint32_t>(SL::spViewUtilities->Zoom()) : 0; }
     bool IsDrivingMode() override { return NativeCurrentInputControlIsPlayerDrive(); }   // SL::spVehicleManager IsDrivingMode: the U-Drive-It tool is the view's
+    bool PlayerDriveCell(std::int32_t& cellX, std::int32_t& cellZ) override {
+        sc4::cSC4Automaton* driven = NativePlayerDriveAutomaton();
+        auto* state = driven ? static_cast<sc4::tAutomataStatePlayerDrive*>(driven->FindState(sc4::kStatePlayerDrive)) : nullptr;
+        if (!state) return false;
+        cellX = state->cellX298;
+        cellZ = state->cellZ29c;
+        return true;
+    }
+    bool ViewDirection(cS3DVector3& out) override {
+        if (!SL::spViewUtilities) return false;
+        out = SL::spViewUtilities->ViewDirection();
+        return true;
+    }
     // SL::AEMS() EndSound then StartSound (x86_64 slots 0x30 / 0x28): restart the event; nothing without an audio event system.
     void PostAudioEvent(std::uint32_t event) override {
         cIGZUnknown* service = SL::AEMS();

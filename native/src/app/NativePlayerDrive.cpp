@@ -429,6 +429,12 @@ void NativeDriveKeyCodes(int command, std::uint32_t keys[8], std::uint32_t& coun
 
 void InstallPlayerDrive() { SetPlayerDriveHost(&g_host); }
 
+// cSC4AutomataManager::spPlayerDriveView +0x30: the driven automaton, or null.
+cSC4Automaton* NativePlayerDriveAutomaton() {
+    cSC4ViewInputControlPlayerDrive* tool = Tool();
+    return tool ? tool->DrivenAutomaton() : nullptr;
+}
+
 // The driven automaton's position (cSC4AutomataManager::spPlayerDriveView +0x30, i386 vslot 0x1c): false while nothing is driven.
 bool NativePlayerDriveAutomatonPosition(float out[3]) {
     cSC4ViewInputControlPlayerDrive* tool = Tool();

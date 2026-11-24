@@ -308,7 +308,7 @@ public:
     void SetVehicleManagerSpeed(float count) override {
         if (auto* m = Concrete<cSC4AutomataManager>(CityComponent::VehicleManager)) m->SetMaxCount(static_cast<int>(count));
     }
-    void SetGhostModels(bool) override {}
+    void SetGhostModels(bool enabled) override { sc4::cSC4Automaton::sGhostModelsEnabled = enabled; }   // cSC4Automaton::SetGhostModelsEnabled
     bool CurrentInputControlIsPlayerDrive() override { return NativeCurrentInputControlIsPlayerDrive(); }
     IAutomataCameraControl* CameraControl() override { return NativeAutomataCameraControl(); }
     bool CameraFollowFast() override { return false; }

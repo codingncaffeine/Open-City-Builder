@@ -197,6 +197,13 @@ public:
     virtual void SetPlayMode(s3d::PlayMode mode) = 0;
     virtual void SetOwner(cIGZUnknown* owner) { (void)owner; }      // cIS3DModelInstance slot 0x10 (held reference)
     virtual float GetOpacity() const { return 1.0f; }               // slot 0x78: the draw attributes' opacity (+0x10)
+    // The ghost model's look (cSC4Automaton::InitGhostModel): the draw attributes (instance slots 0x3c / 0x40) with
+    // `flags` or'ed in and `shade` (r, g, b, opacity) set.
+    virtual void AddDrawFlagsAndShade(std::uint32_t flags, const float* shade) { (void)flags; (void)shade; }
+    // The automaton's cS3DModelProcessor (i386 +0xd0) on this instance: SetModel, then per update LightModel with
+    // SL::spLightingManager (no rotation flip).
+    virtual void InitModelProcessor() {}
+    virtual void LightModel() {}
 };
 
 // The cSC4ModelRegEffects object embedded at +0x290 (unrecovered neighbour).
@@ -329,6 +336,11 @@ public:
     virtual void MoveSoundLoop(std::uint32_t handle, std::uint32_t x, std::uint32_t y, std::uint32_t z) { (void)handle; (void)x; (void)y; (void)z; }
     virtual std::uint32_t ViewZoom() { return 0; }
     virtual bool IsDrivingMode() { return false; }
+    // cSC4AutomataManager::spPlayerDriveView +0x30, the driven automaton: its player-drive state's (FindState(0x10))
+    // occupant-manager cell. False when nothing is driven or the driven automaton has no such state.
+    virtual bool PlayerDriveCell(std::int32_t& cellX, std::int32_t& cellZ) { (void)cellX; (void)cellZ; return false; }
+    // SL::spViewUtilities' view direction (i386 +0x54, unit). False without a view.
+    virtual bool ViewDirection(cS3DVector3& out) { (void)out; return false; }
     virtual void PostAudioEvent(std::uint32_t event) = 0;  // SL::AEMS slots 0x30/0x28
     // cSC4Automaton::AddToCollisionSystem: the named collide effect (SL::spEffectsManager vslot 0x18) placed at `source`,
     // given the velocity (float params 0xf) and the automaton's model instance (void params 7), started; it becomes the
@@ -510,6 +522,8 @@ public:
     virtual cSC4Automaton* GetCollidingAutomaton(float distance) { (void)distance; return nullptr; }   // 0x410
     virtual void RecalculateLeaders() {}                              // 0x418 @ 0x10010bad4
     virtual float GetSpeedModifier() const;                           // 0x420 @ 0x10010bb54
+    static bool sGhostModelsEnabled;                                  // sbGhostModelsEnabled (i386 0xab77c0, on by default)
+    IAutomatonModel* GhostModel() const { return ghost_; }
     bool InitGhostModel();                                            // 0x428 @ 0x100108b64
     bool ShutdownGhostModel();                                        // 0x430 @ 0x100108ee0
     bool UpdateGhostModel();                                          // 0x438 @ 0x100108f8c
@@ -597,6 +611,7 @@ protected:
     std::vector<cGZPersistResourceKey> modelKeys_;               // +0x110
     IAutomatonModel* auxiliaryModel_ = nullptr;                  // +0x128
     std::vector<IAutomatonModel*> models_;                       // +0x1b0
+    IAutomatonModel* ghost_ = nullptr;                           // i386 +0xcc (counted), its model processor i386 +0xd0
     cGZPersistResourceKey primaryKey_;                           // +0x1c8
     std::uint32_t primaryInstanceId_ = 0;                        // +0x1d4
     float boundingBox_[6] = {1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f};   // +0x25c

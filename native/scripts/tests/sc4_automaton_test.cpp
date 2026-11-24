@@ -58,6 +58,12 @@ struct FakeModel final : IAutomatonModel {
     void SetPlayMode(s3d::PlayMode mode) override { playMode = static_cast<int>(mode); }
     float GetOpacity() const override { return opacity; }
     int playMode = -1;
+    std::uint32_t drawFlags = 0;
+    float shade[4] = {1, 1, 1, 1};
+    int processorInits = 0, lightings = 0;
+    void AddDrawFlagsAndShade(std::uint32_t flags, const float* values) override { drawFlags |= flags; std::memcpy(shade, values, sizeof(shade)); }
+    void InitModelProcessor() override { ++processorInits; }
+    void LightModel() override { ++lightings; }
 };
 
 struct FakeEffects final : IAutomatonEffects {
@@ -221,6 +227,14 @@ struct FakeHost final : IAutomatonHost {
     void MoveSoundLoop(std::uint32_t handle, std::uint32_t x, std::uint32_t y, std::uint32_t z) override { loopEvents.push_back({'m', 0, handle, x, y, z}); }
     std::uint32_t ViewZoom() override { return zoom; }
     bool IsDrivingMode() override { return drivingMode; }
+    bool driveCell = false;
+    std::int32_t driveCellX = 0, driveCellZ = 0;
+    bool PlayerDriveCell(std::int32_t& x, std::int32_t& z) override { x = driveCellX; z = driveCellZ; return driveCell; }
+    void OccupantManagerCell(float x, float z, std::int32_t& cellX, std::int32_t& cellZ) override {
+        cellX = static_cast<std::int32_t>(x / 64.0f);
+        cellZ = static_cast<std::int32_t>(z / 64.0f);
+    }
+    bool ViewDirection(cS3DVector3& out) override { out = cS3DVector3{0.0f, -1.0f, 0.0f}; return true; }
     void PostAudioEvent(std::uint32_t) override {}
     std::uint32_t RandomBelow(std::uint32_t range) override { return range ? 0 : 0; }
     std::int32_t RandomInt(std::int32_t lo, std::int32_t) override { return lo; }
@@ -340,6 +354,43 @@ int main() {
         automaton->ClearStateStack();                // the state's end stops the effect
         CHECK(host.collide.detached == 1);
         CHECK(automaton->Release() == 0);
+    }
+
+    // ---- ghost models (i386 0x000c1ce8 / 0x000c1fd8 / 0x000bbf18): while driving, an automaton in the driven vehicle's cell
+    // gets a green half-transparent copy lifted toward the camera; it goes when driving ends -----------------------------
+    {
+        FakeHost host;
+        cSC4Automaton* automaton = MakeAutomaton(host);
+        FakeModel* model = new FakeModel();
+        FakeModel* ghost = new FakeModel();
+        host.nextModel = model;
+        host.queuedModel = ghost;
+        CHECK(automaton->AddModelResourceKey(cGZPersistResourceKey{0x1111, 0x2222, 0x3333}));
+        CHECK(automaton->AddModelInstance(cGZPersistResourceKey{0x1111, 0x2222, 0x3333}) == model);
+        const float where[3] = {100.0f, 0.0f, 200.0f};   // occupant cell (1, 3)
+        automaton->SetPosition(where);
+        model->transform.translation[1] = 10.0f;
+        CHECK(!automaton->UpdateGhostModel() && automaton->GhostModel() == nullptr);   // not driving
+        host.drivingMode = true;
+        host.driveCell = true;
+        host.driveCellX = 2;
+        host.driveCellZ = 3;
+        automaton->UpdateGhostModel();
+        CHECK(automaton->GhostModel() == nullptr);          // another cell
+        host.driveCellX = 1;
+        const int added = host.rendererAdded;
+        automaton->UpdateGhostModel();
+        CHECK(automaton->GhostModel() == ghost && host.rendererAdded == added + 1 && ghost->processorInits == 1);
+        CHECK(ghost->drawFlags == 0x20 && ghost->shade[0] == 0.6f && ghost->shade[1] == 1.0f && ghost->shade[3] == 0.5f);
+        automaton->UpdateGhostModel();                      // follows the model, 1.5 x its height (3) toward the camera
+        CHECK_NEAR(ghost->transform.translation[1], 10.0f + 4.5f);
+        CHECK(ghost->lightings == 1);
+        host.drivingMode = false;
+        const int removed = host.rendererRemoved;
+        automaton->UpdateGhostModel();
+        CHECK(automaton->GhostModel() == nullptr && host.rendererRemoved == removed + 1 && ghost->releases == 1);
+        CHECK(automaton->Release() == 0);
+        delete ghost;
     }
 
     // ---- position / heading / destination ---------------------------------------------------------------------------

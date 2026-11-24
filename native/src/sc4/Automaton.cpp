@@ -2193,13 +2193,82 @@ bool cSC4Automaton::AddToCollisionSystem(tAutomataStateCollide* state) {
 const char* cSC4Automaton::GetDebugFlagsText() const { return ""; }
 const char* cSC4Automaton::GetDebugExtraText() const { return ""; }
 
-// ---- ghost model (the faint copy shown while an automaton is being moved) --------------------------------------------
-// PARTIAL: the ghost model is created through the renderer's model layer (cS3DModelProcessor at +0x1d8).
+// ---- ghost model: while U-Drive-It drives, the automata sharing the driven vehicle's occupant-manager cell get a green,
+// half-transparent copy of their first model, lifted toward the camera, so the player sees them through what hides them.
+bool cSC4Automaton::sGhostModelsEnabled = true;
+
+// i386 0x000c1fd8: the copy from the first model key (the animated instance), shaded (0.6, 1, 0.6) at half opacity with
+// draw flag 0x20, at the first model's transform, in the renderer, with the model processor on it.
 bool cSC4Automaton::InitGhostModel() {
-    SC4_UNWIRED("cSC4Automaton::InitGhostModel: the ghost model (cS3DModelProcessor at +0x1d8) is not created");
-    return false;
+    if (GetType() == 0x496e5783 && GetType() == 0x897f7ec2) return false;   // as the original compares (never both)
+    if (modelKeys_.empty() || !Host()) return false;
+    if (ghost_) {
+        IAutomatonModel* old = ghost_;
+        ghost_ = nullptr;
+        old->Release();
+    }
+    ghost_ = Host()->CreateAnimatedModel(modelKeys_[0]);
+    if (!ghost_) return false;
+    const float shade[4] = {0.6f, 1.0f, 0.6f, 0.5f};
+    ghost_->AddDrawFlagsAndShade(0x20, shade);
+    if (!models_.empty()) {
+        cS3DTransform transform;
+        models_[0]->GetTransform(transform);
+        ghost_->SetTransform(transform);
+    }
+    Host()->AddModelToRenderer(ghost_);
+    ghost_->InitModelProcessor();
+    return true;
 }
-bool cSC4Automaton::ShutdownGhostModel() { return false; }
-bool cSC4Automaton::UpdateGhostModel() { return false; }
+
+// i386 0x000bbf18: out of the renderer (when it is there) and released.
+bool cSC4Automaton::ShutdownGhostModel() {
+    if (!ghost_) return false;
+    if (Host()) Host()->RemoveModelFromRenderer(ghost_);   // the renderer's IsModelInserted test is RemoveModel's own
+    IAutomatonModel* old = ghost_;
+    ghost_ = nullptr;
+    old->Release();
+    return true;
+}
+
+// i386 0x000c1ce8: with ghost models on and the vehicle manager driving, a ghost is made for an automaton in the driven
+// vehicle's cell and then follows the first model, moved toward the camera by 1.5 x the model's height, lit each update.
+// Otherwise any ghost goes.
+bool cSC4Automaton::UpdateGhostModel() {
+    if (GetType() == 0x496e5783 && GetType() == 0x897f7ec2) return false;   // as the original compares (never both)
+    IAutomatonHost* host = Host();
+    if (!sGhostModelsEnabled || !host || !host->IsDrivingMode()) {
+        if (sGhostModelsEnabled && !ghost_) return false;
+        ShutdownGhostModel();
+        return true;
+    }
+    if (!ghost_ && !models_.empty()) {
+        std::int32_t driveX = 0, driveZ = 0, cellX = 0, cellZ = 0;
+        if (host->PlayerDriveCell(driveX, driveZ)) {
+            host->OccupantManagerCell(position_.x, position_.z, cellX, cellZ);
+            if (driveX == cellX && driveZ == cellZ) {
+                InitGhostModel();
+                return true;
+            }
+        }
+    }
+    if (!ghost_ || models_.empty()) return false;
+    cS3DTransform transform;
+    models_[0]->GetTransform(transform);
+    float minXyz[3] = {}, maxXyz[3] = {};
+    models_[0]->GetBounds(minXyz, maxXyz);
+    const float lift = (maxXyz[1] - minXyz[1]) * 1.5f;   // 0x00a707b0
+    cS3DVector3 view{0.0f, 0.0f, 0.0f};
+    host->ViewDirection(view);
+    transform.translation[2] -= lift * view.z;
+    transform.translation[1] -= lift * view.y;
+    transform.translation[0] -= lift * view.x;
+    transform.flags |= 1;
+    ++transform.changeCounter;
+    ghost_->SetTransform(transform);
+    host->MoveModelInRenderer(ghost_);
+    ghost_->LightModel();
+    return true;
+}
 
 }  // namespace sc4
