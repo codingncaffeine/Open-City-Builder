@@ -272,6 +272,11 @@ public:
     // SetDataView's 3D side. spView3D vslot 0x4c SetCurrentViewFilterInfo (the view takes its own reference) and vslot
     // 0x5c SetCurrentViewLevel (1 normal, 2 subway, 3 pipes).
     virtual void SetViewFilter(cISC4OccupantFilter* filter) { (void)filter; }
+    // spZoneManager vslots 0x44 GetDefaultZoneDisplayAlpha / 0x48 SetZoneDisplayAlpha, and spBuildingDevelopmentSim 0x90
+    // GetLotDeveloper -> vslot 0xbc SetForceEmptyLotBaseTextures (a data view can hide the lots' textures)
+    virtual std::uint8_t DefaultZoneDisplayAlpha() { return 0; }
+    virtual void SetZoneDisplayAlpha(std::uint8_t alpha) { (void)alpha; }
+    virtual void SetForceEmptyLotBaseTextures(bool force) { (void)force; }
     virtual void SetViewLevel(std::uint32_t level) { (void)level; }
     // spTerrain vslot 0x158 SetPlumbingInfoDisplayState / 0x150 SetWaterSurfaceDisplayState.
     virtual void SetTerrainDisplay(bool plumbingInfo, bool waterSurface) { (void)plumbingInfo; (void)waterSurface; }
@@ -289,7 +294,7 @@ struct WinMapViewExemplar {
     std::vector<std::uint32_t> ramp;             // 0x4a0b47e4 (stops)
     bool hasRamp = false;
     bool hasDataView = false; std::uint32_t dataView = 0;        // 0x4a0b47e5
-    bool hasZoneDisplay = false; bool zoneDisplay = false;       // 0x4a0b47e6
+    bool hasZoneDisplay = false; std::uint8_t zoneDisplay = 0;   // 0x4a0b47e6 the zone overlay alpha (AsUint8)
     bool hasClampToCity = false; bool clampToCity = false;       // 0x4a0b47e7
     bool hasLotTypeMask = false; std::uint32_t lotTypeMask = 0;  // 0x4a0b47e8
     bool hasHighlightView = false; std::uint32_t highlightView = 0;   // 0x4a0b47e9

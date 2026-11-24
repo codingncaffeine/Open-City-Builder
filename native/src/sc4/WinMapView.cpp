@@ -1261,7 +1261,7 @@ void cSC4WinMapView::UpdateOccupancyMap(const cISC4GrowthDeveloper* developer) {
 //   The 3D side: the view's cSC4ComplexViewOccupantFilter (0x4a0b47e0/e1/e2, the network list 0x4a0b47f1 and the
 //   pipe/subway inclusion) goes to spView3D vslot 0x4c, the underground mode (0x4a0b47e3) to vslot 0x5c and the terrain's
 //   plumbing / water display, and the custom view (class 0x4a0b47eb) starts.
-//   PARTIAL: the zone manager's display (0x4a0b47e6) and the building development view (0x4a0b47f0) are not applied.
+//   The zone overlay's alpha (0x4a0b47e6) and the lot developer's empty-lot textures (0x4a0b47f0) follow the view.
 // ---------------------------------------------------------------------------------------------------------------
 bool cSC4WinMapView::SetDataView(std::uint32_t view) {
     if (!viewActive_) return false;
@@ -1284,6 +1284,8 @@ bool cSC4WinMapView::SetDataView(std::uint32_t view) {
         g_host->SetTerrainDisplay(false, true);
         g_host->SetViewFilter(normal);
         normal->Release();
+        g_host->SetZoneDisplayAlpha(g_host->DefaultZoneDisplayAlpha());
+        g_host->SetForceEmptyLotBaseTextures(false);
         if (markedCells_) markedCells_->ClearMarkedCells();
         dataView_ = 0;
         clampGridToCity_ = false;
@@ -1316,6 +1318,7 @@ bool cSC4WinMapView::SetDataView(std::uint32_t view) {
     if (exemplar.hasInvertGroups) includeUnlisted = exemplar.invertGroups;
     filter->SetIncludeUnlistedTypes(includeUnlisted);
     filter->SetIncludePlainLots(!(exemplar.hasHidePlain && exemplar.hidePlain));
+    g_host->SetForceEmptyLotBaseTextures(exemplar.hasDevelopmentView && exemplar.developmentView != 0);   // 0x4a0b47f0
     std::uint32_t level = 1;   // 0x4a0b47e3: 1 = the pipes (level 3), 2 = the subway (level 2)
     if (exemplar.hasUnderground) level = exemplar.underground == 1 ? 3 : exemplar.underground == 2 ? 2 : 1;
     g_host->SetViewLevel(level);
@@ -1360,6 +1363,8 @@ bool cSC4WinMapView::SetDataView(std::uint32_t view) {
     }
     g_host->SetViewFilter(filter);   // spView3D vslot 0x4c
     filter->Release();
+    // 0x4a0b47e6: the zone overlay's alpha while the view is shown (else the zone manager's default)
+    g_host->SetZoneDisplayAlpha(exemplar.hasZoneDisplay ? static_cast<std::uint8_t>(exemplar.zoneDisplay) : g_host->DefaultZoneDisplayAlpha());
     if (markedCells_) markedCells_->ClearMarkedCells();
     dataView_ = exemplar.hasDataView ? exemplar.dataView : 0;
     if (markedCells_) markedCells_->SetShouldUseNetworkAltitude(dataView_ == 9 || dataView_ == kWinMapViewTraffic);
@@ -1386,7 +1391,6 @@ bool cSC4WinMapView::SetDataView(std::uint32_t view) {
         customView_ = CreateCustomView(exemplar.customView);
         if (customView_) customView_->InitCustomView();
     }
-    SC4_UNWIRED("cSC4WinMapView::SetDataView: zone manager display (0x4a0b47e6) and building development view (0x4a0b47f0) not applied");
     UpdateHighlights();
     Update();
     if (IWinMapViewColorSink* map = g_host->ViewColorSink(parentWin())) {

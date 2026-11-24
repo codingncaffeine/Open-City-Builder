@@ -50,6 +50,7 @@
 #include "sc4/NetworkManager.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/cSTETerrain.h"
+#include "sc4/LotDeveloper.h"
 #include "sc4/cSC4ZoneManager.h"
 #include "sc4/SLBuffer.h"
 #include "sc4/WeatherSimulator.h"
@@ -396,7 +397,7 @@ public:
         if ((out.hasUnderground = P::GetPropertyValue(h, 0x4a0b47e3, u))) out.underground = u;
         out.hasRamp = P::GetPropertyValue(h, 0x4a0b47e4, out.ramp);
         if ((out.hasDataView = P::GetPropertyValue(h, 0x4a0b47e5, u))) out.dataView = u;
-        if ((out.hasZoneDisplay = P::GetPropertyValue(h, 0x4a0b47e6, b))) out.zoneDisplay = b;
+        out.hasZoneDisplay = P::GetPropertyValue(h, 0x4a0b47e6, out.zoneDisplay);
         if ((out.hasClampToCity = P::GetPropertyValue(h, 0x4a0b47e7, b))) out.clampToCity = b;
         if ((out.hasLotTypeMask = P::GetPropertyValue(h, 0x4a0b47e8, u))) out.lotTypeMask = u;
         if ((out.hasHighlightView = P::GetPropertyValue(h, 0x4a0b47e9, u))) out.highlightView = u;
@@ -496,6 +497,22 @@ public:
         return ok;
     }
     const cISC4GrowthDeveloper* GrowthDeveloper(std::uint32_t type) override { return GrowthDeveloperInterfaceOfType(type); }
+    std::uint8_t DefaultZoneDisplayAlpha() override {
+        auto* zones = CityAs<cSC4ZoneManager>(CityComponent::ZoneManager);
+        return zones ? zones->GetDefaultZoneDisplayAlpha() : 0;
+    }
+    void SetZoneDisplayAlpha(std::uint8_t alpha) override {
+        if (auto* zones = CityAs<cSC4ZoneManager>(CityComponent::ZoneManager)) zones->SetZoneDisplayAlpha(alpha);
+    }
+    void SetForceEmptyLotBaseTextures(bool force) override {
+        cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(CityComponent::LotDeveloper) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(0xe4fda3d4, &raw) || !raw) return;
+        auto* serializable = static_cast<cIGZSerializable*>(raw);
+        if (serializable->GetGZCLSID() == kGZCLSID_cSC4LotDeveloper) static_cast<cSC4LotDeveloper*>(serializable)->SetForceEmptyLotBaseTextures(force);
+        serializable->Release();
+    }
     void SetViewFilter(sc4::cISC4OccupantFilter* filter) override {
         if (cSC4View3DWin* view = CityView3DWin()) {
             cSC4ViewFilterInformation info;
