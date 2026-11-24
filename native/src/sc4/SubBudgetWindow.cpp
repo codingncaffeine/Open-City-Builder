@@ -1,4 +1,5 @@
 #include "sc4/SubBudgetWindow.h"
+#include "gz/WinFlatRect.h"
 #include "platform/Unwired.h"
 
 #include <algorithm>
@@ -414,14 +415,15 @@ void cSC4SubBudgetWindow::AddSlider(cIGZWin* parent, std::uint32_t id, int x, in
     slider->Release();
 }
 
-// add_image_button2 (i386 0x002620f8). PARTIAL: the framed variant's highlight frame (GZCOM 0xc2afa76e) and the button's
-// text colours and sound.
+// add_image_button2 (i386 0x002620f8): a WCM style-2 button showing `image` (0x1a x 0x10 without one); a framed one takes
+// the framed look and font 0x4a809919. The button's click sound is 0x4a5c31d7 and its text colours (63, 73, 103) normal and
+// pressed, (102, 102, 102) disabled. It sits at 0,0 inside a flat rect (class 0xc2afa76e, id + 0x100, fill (255, 0, 255),
+// outline flags 0x40) placed at x, y.
 void cSC4SubBudgetWindow::AddImageButton(cIGZWin* parent, std::uint32_t id, int x, int y, std::uint32_t image, bool framed) {
     if (!parent || !g_host) return;
     cIGZBuffer* buffer = g_host->UiImage(image);
     gz::cIGZWinBtn* button = g_host->CreateButton(2, id, cRZString(), buffer);
     if (!button) return;
-    SC4_UNWIRED("cSC4SubBudgetWindow::AddImageButton: framed highlight frame (GZCOM 0xc2afa76e), button text colors and sound not ported");
     cIGZWin* win = button->AsIGZWin();
     if (!buffer) win->SetSize(0x1a, 0x10);
     if (framed) {
@@ -429,10 +431,31 @@ void cSC4SubBudgetWindow::AddImageButton(cIGZWin* parent, std::uint32_t id, int 
         win->SetFlag(0x20000, true);
         win->SetFlag(0x40000, true);
         win->SetFlag(0x800, false);
+        button->SetFont(g_host->Font(0x4a809919));
     }
+    button->SetBtnFlag(4, framed);
+    button->SetSoundID(0, 0x4a5c31d7);
+    button->SetFontColor(0, g_host->MakeColor(0x3f, 0x49, 0x67));
+    button->SetFontColor(2, g_host->MakeColor(0x3f, 0x49, 0x67));
+    button->SetFontColor(1, g_host->MakeColor(0x66, 0x66, 0x66));
     win->SetFlag(4, true);
     win->GZWinMoveTo(x, y);
-    parent->ChildAdd(win);
+    auto* frame = new gz::cGZWinFlatRect(g_host->WindowManager());   // GZCOM 0xc2afa76e
+    frame->AddRef();
+    cIGZWin* frameWin = frame->AsIGZWin();
+    frameWin->SetArea(win->GetArea());
+    frameWin->GZWinMoveTo(x, y);
+    win->GZWinMoveTo(0, 0);
+    frameWin->SetFlag(0x10000, false);
+    frameWin->SetFlag(0x20000, false);
+    frameWin->SetFlag(0x40000, false);
+    frameWin->SetFlag(0x800, false);
+    frameWin->SetID(id + 0x100);
+    frame->SetFillColor(0xff, 0, 0xff);
+    frame->SetOutlineFlags(0x40);
+    parent->ChildAdd(frameWin);
+    frameWin->ChildAdd(win);
+    frame->Release();
     button->Release();
 }
 
