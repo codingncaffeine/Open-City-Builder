@@ -239,16 +239,16 @@ cIGZIStream& operator>>(cIGZIStream& s, cSC4ParticlesDescriptionBase::cTimedEffe
 cIGZIStream& operator>>(cIGZIStream& s, cSC4DynamicParticleDescription& v) {
     v.type = ReadU32(s);
     v.name = ReadString(s);
-    s.GetUint32(v.count);
-    s >> v.curve;
+    s.GetUint32(v.modelId);
+    s >> v.modelIds;
     for (float& f : v.values) s.GetFloat32(f);
     return s;
 }
 cIGZOStream& operator<<(cIGZOStream& s, const cSC4DynamicParticleDescription& v) {
     s.SetUint32(static_cast<std::uint32_t>(v.type));
     WriteEffectString(s, v.name);
-    s.SetUint32(v.count);
-    s << v.curve;
+    s.SetUint32(v.modelId);
+    s << v.modelIds;
     for (float f : v.values) s.SetFloat32(f);
     return s;
 }

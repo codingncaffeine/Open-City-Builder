@@ -230,16 +230,16 @@ void DynamicParticleTable() {
     wisp.type = 0x1234;
     wisp.name = "Wisp";
     wisp.values[0] = 3.5f;
-    wisp.count = 2;
-    wisp.curve = {0.0f, 1.0f};
+    wisp.modelId = 2;
+    wisp.modelIds = {0u, 1u};
     collection.AddDynamicParticleDescription("Wisp", wisp);
     CHECK(collection.DynamicParticles().size() == 1);
 
     cSC4DynamicParticleDescription out;
     CHECK(collection.GetDynamicParticleDescription("WISP", &out));
     CHECK(out.type == 0x1234 && out.name == "Wisp");
-    CHECK(out.values[0] == 3.5f && out.count == 2);
-    CHECK(Equals(out.curve, {0.0f, 1.0f}));
+    CHECK(out.values[0] == 3.5f && out.modelId == 2);
+    CHECK((out.modelIds == std::vector<std::uint32_t>{0u, 1u}));
     CHECK(!collection.GetDynamicParticleDescription("none", &out));
     CHECK(collection.GetDynamicParticleDescription("wisp", nullptr));
 
@@ -247,7 +247,7 @@ void DynamicParticleTable() {
     second.values[0] = 1.0f;
     collection.AddDynamicParticleDescription("wisp", second);
     CHECK(collection.DynamicParticles().size() == 1);
-    CHECK(collection.GetDynamicParticleDescription("wisp", &out) && out.values[0] == 1.0f && out.curve.empty());
+    CHECK(collection.GetDynamicParticleDescription("wisp", &out) && out.values[0] == 1.0f && out.modelIds.empty());
 }
 
 void DecalTable() {

@@ -2,7 +2,7 @@
 // manager, saved network occupant references) and the car's view of its automata manager (ITrafficAutomataManager over
 // cSC4TrafficAutomataManager). In the original the car calls its manager directly.
 #include <algorithm>
-#include "platform/Unwired.h"
+#include <cstring>
 #include <map>
 #include <memory>
 
@@ -16,6 +16,8 @@
 #include "sc4/LightingManager.h"
 #include "sc4/AutomataManager.h"
 #include "sc4/DBSegment.h"
+#include "sc4/DynamicParticleEffect.h"
+#include "sc4/DynamicParticleSystem.h"
 #include "sc4/Pedestrian.h"
 #include "sc4/PedestrianManager.h"
 #include "sc4/TrafficAutomataManager.h"
@@ -57,6 +59,45 @@ bool NativeProjectToViewport(const float* xyz, float out[3]);                   
 
 namespace {
 using namespace sc4;
+
+// The driven vehicle's body in the dynamic particle system (i386 0x000cf428..0x000cf493): a kinematic 2 x 2 x 2 box
+// (inverse mass 1e-7) at the vehicle, which the vehicle moves itself through the body's float record.
+class DrivenParticle final : public ITrafficParticle {
+public:
+    explicit DrivenParticle(cSC4DynamicParticle* particle) : particle_(particle) {}
+    float* Fields() override { return particle_ ? particle_->Fields() : nullptr; }
+    cSC4DynamicParticle* Particle() const { return particle_; }
+private:
+    cSC4DynamicParticle* particle_;
+};
+class DrivenParticleSystem final : public ITrafficParticleSystem {
+public:
+    ITrafficParticle* AddParticle(const cS3DVector3& position) override {
+        cSC4DynamicParticleSystem* system = cSC4DynamicParticleEffect::DynamicSystem();
+        if (!system) return nullptr;
+        cSC4RigidBodySimulator2D::ObjectDesc desc;
+        desc.x = position.x;
+        desc.y = position.z;
+        desc.height = position.y;
+        desc.halfX = 1.0f;
+        desc.halfY = 1.0f;
+        desc.halfHeight = 1.0f;
+        const std::uint32_t inverseMassBits = 0x33d6bf95u;   // 1e-7: kinematic
+        std::memcpy(&desc.inverseMass, &inverseMassBits, sizeof desc.inverseMass);
+        return new DrivenParticle(system->AddParticle(desc, nullptr));
+    }
+    void DeleteParticle(ITrafficParticle* particle) override {   // HandleExitState (i386 0x000cf331)
+        auto* driven = static_cast<DrivenParticle*>(particle);
+        if (!driven) return;
+        cSC4DynamicParticleSystem* system = cSC4DynamicParticleEffect::DynamicSystem();
+        if (system && driven->Particle()) system->DeleteParticle(driven->Particle());
+        delete driven;
+    }
+    void Shutdown() override {   // ShutdownDynamicParticleSystem (i386 0x000cf33d); the automaton drops its pointer
+        cSC4DynamicParticleEffect::ShutdownDynamicParticleSystem();
+        delete this;
+    }
+};
 
 // The car's view of its automata manager (the slots cSC4TrafficAutomaton calls).
 class ManagerFace final : public ITrafficAutomataManager {
@@ -155,9 +196,9 @@ public:
         events->Release();   // SL::AEMS() keeps the service
         return events;
     }
-    ITrafficParticleSystem* CreateParticleSystem() override {   // PARTIAL: exhaust / dust particles
-        SC4_UNWIRED("cSC4TrafficAutomaton: the dynamic particle system (exhaust / dust) is not created");
-        return nullptr;
+    // cSC4TrafficAutomaton::HandleEnterState (i386 0x000cf41c): the player-driven vehicle joins the dynamic particle system.
+    ITrafficParticleSystem* CreateParticleSystem() override {
+        return sc4::cSC4DynamicParticleEffect::InitDynamicParticleSystem() ? new DrivenParticleSystem() : nullptr;
     }
     // A saved car's network occupant reference, as the map's view of the piece (one reference).
     ITrafficAutomatonOccupant* ReadNetworkOccupant(cIGZIStream& stream) override {

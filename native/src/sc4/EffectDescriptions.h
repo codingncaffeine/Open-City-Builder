@@ -102,10 +102,12 @@ struct cSC4ParticlesDescriptionBase {
 
 struct cSC4DynamicParticleDescription {
     std::uint64_t type = 0;                  // +0x10 (32 bits in the stream; the preceding 16 bytes belong to the base class)
-    std::string name;                        // +0x18
+    std::string name;                        // +0x18 (i386 +0x0c): "<name>_slave" / "<name>_collide" are its effects
+    // i386 +0x10..+0x24: [0] mass (0 or less: an inverse mass of 1e6), [2] forward, [3] side and [4] spin friction
+    // (cSC4DynamicParticleEffect::Start); [1] and [5] are not read.
     float values[6] = {0, 0, 0, 0, 0, 0};    // +0x30..+0x44
-    std::uint32_t count = 0;                 // +0x48
-    std::vector<float> curve;                // +0x50
+    std::uint32_t modelId = 0;               // +0x48 (i386 +0x28): the model, unless 0 / 0xffffffff
+    std::vector<std::uint32_t> modelIds;     // +0x50 (i386 +0x2c): or one of these, picked at random
 };
 
 // A string of the packed effects library: a u32 byte count, then the bytes (the PC library is written this way; the

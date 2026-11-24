@@ -260,6 +260,11 @@ bool cSC4EffectsManager::Shutdown() {
     geometryEffects_.clear();
     newGeometrySlots_.clear();
     freeGeometrySlots_.clear();
+    for (cRZAutoRefCount<cSC4DynamicParticleEffect>& effect : dynamicEffects_)   // i386 0x00405a24
+        if (effect) effect->Shutdown();
+    dynamicEffects_.clear();
+    newDynamicSlots_.clear();
+    freeDynamicSlots_.clear();
     // Quirk: the description tables are only partly cleared (the light table, the camera parameters, the effect
     // bindings and the message triggers survive, as they do in the original).
     collection_.ClearForEffectManagerShutdown();
@@ -532,6 +537,15 @@ void cSC4EffectsManager::DeactivateUnusedVisualEffects() {
                 stillRunning.push_back(index);
         }
         newGeometrySlots_.swap(stillRunning);
+        stillRunning.clear();
+        for (int index : newDynamicSlots_) {   // i386 0x004073b0: the dynamic particle pool, as the others
+            cSC4DynamicParticleEffect* effect = dynamicEffects_[static_cast<std::size_t>(index)].get();
+            if (effect->RefCount() == 1 && !effect->IsStarted())
+                freeDynamicSlots_.push_back(index);
+            else
+                stillRunning.push_back(index);
+        }
+        newDynamicSlots_.swap(stillRunning);
         stillRunning.clear();
         for (int index : newDecalSlots_) {   // i386 0x0040700c: a decal only the pool holds and not started is free again
             cSC4DecalEffect* decal = decalEffects_[static_cast<std::size_t>(index)].get();
@@ -1183,11 +1197,33 @@ void cSC4EffectsManager::CreateComponentFromDescription(const cSC4EffectDescript
         made->AddRef();
         component->component = made;
         component->flags |= 2;
-    } else if (kind == 16) {
-        SC4_UNWIRED("cSC4EffectsManager::CreateComponentFromDescription: dynamic particles (kind 16, factory 0x1005e2c12) are not ported");
+    } else if (kind == 16) {   // i386 0x004063d5: a dynamic particle from the pool with the record's description
+        const auto& table = collection_.DynamicParticles();
+        if (record.intValue < 0 || static_cast<std::size_t>(record.intValue) >= table.size()) return;   // port guard
+        cSC4DynamicParticleEffect* effect = NewDynamicParticleEffect();
+        effect->SetDescription(table[static_cast<std::size_t>(record.intValue)]);
+        effect->AddRef();
+        if (component->component) component->component->Release();
+        component->component = effect;
     }
     if (record.type & 1) component->flags |= 4;
     else component->flags &= ~std::uint64_t{4};
+}
+
+// @ i386 0x00405cb4: a recycled dynamic particle effect from the free list, or a new one (Init, the global parameters).
+cSC4DynamicParticleEffect* cSC4EffectsManager::NewDynamicParticleEffect() {
+    if (!freeDynamicSlots_.empty()) {
+        const int index = freeDynamicSlots_.back();
+        freeDynamicSlots_.pop_back();
+        newDynamicSlots_.push_back(index);
+        return dynamicEffects_[static_cast<std::size_t>(index)].get();
+    }
+    auto* effect = new cSC4DynamicParticleEffect();
+    effect->Init();
+    effect->SetGlobalParams(&globalParams_);
+    newDynamicSlots_.push_back(static_cast<int>(dynamicEffects_.size()));
+    dynamicEffects_.emplace_back(effect);
+    return effect;
 }
 
 // @ i386 0x00405dc6: a recycled geometry-sourced system from the free list, or a new one Init'ed with the global parameters.

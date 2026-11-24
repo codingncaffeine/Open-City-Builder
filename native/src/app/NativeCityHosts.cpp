@@ -15,6 +15,7 @@ void InstallAdvisorConcreteStub();
 void InstallAdvisorPopupTrackerStub();
 void InstallAdvisorSystemStub();
 void InstallAircraftHosts();   // app/NativeAircraft.cpp: the aircraft, helicopter and aircraft manager hosts
+void InstallDynamicParticleHost();   // app/NativeDynamicParticles.cpp: the dynamic particle system's services
 void InstallAmbienceHosts();    // app/NativeAudioAmbience.cpp: the ambience system's real hosts
 void InstallSoundBankHost();    // app/NativeAudioDirector.cpp
 void InstallAuraStub();
@@ -221,6 +222,7 @@ void InstallStubHosts() {
     InstallEffectToolStub();
     InstallDisasterTools();               // the disaster menu's tools; the effect tools' cursor effects replace the stub
     InstallPlayerDrive();                 // U-Drive-It: the player-drive tool's services
+    InstallDynamicParticleHost();         // the knocked-about props and the driven vehicle's physics
     InstallPlaceLotStub();
     InstallQueryStub();
     InstallQueryHost();                   // the real query host replaces the stub above

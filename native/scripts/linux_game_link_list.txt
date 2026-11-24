@@ -390,6 +390,9 @@ src/sc4/AirportDeveloper.cpp
 src/sc4/ConstructionOccupant.cpp
 src/sc4/DemandSimulator.cpp
 src/sc4/EffectsManager.cpp
+src/sc4/DynamicParticleEffect.cpp
+src/sc4/DynamicParticleSystem.cpp
+src/sc4/RigidBodySimulator2D.cpp
 src/sc4/DecalEffect.cpp
 src/sc4/LandfillDeveloper.cpp
 src/sc4/LandfillOccupant.cpp
@@ -470,6 +473,7 @@ src/sc4/EffectsResource.cpp
 src/sc4/ModelBasedParticlesEffect.cpp
 src/sc4/GeometrySourcedParticlesEffect.cpp
 src/app/NativeEffects.cpp
+src/app/NativeDynamicParticles.cpp
 src/app/NativeEffectComponents.cpp
 src/app/NativeSequenceEffects.cpp
 src/app/NativeCityPanel.cpp

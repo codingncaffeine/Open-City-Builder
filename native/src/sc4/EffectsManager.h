@@ -32,7 +32,7 @@
 //   +0xd00 new-slot list   +0xd18 active-slot list   +0xd30 free-slot list
 //   +0xd48 decal pool      +0xd60 new decals   +0xd78 free decals
 //   +0xd90 particle pool   +0xda8 new particles +0xdc0 free particles
-//   +0xdd8 dynamic-particle pool +0xdf0 new +0xe08 free
+//   +0xdd8 dynamic-particle pool +0xdf0 new +0xe08 free (i386 +0xc04 / +0xc10 / +0xc1c)
 //   +0xe20 model-based-particle pool +0xe38 new +0xe50 free
 //   +0xe68 geometry-sourced-particle pool +0xe80 new +0xe98 free
 //   +0xeb0 effects file parser (nSCRes::cFileParser, iid 0x1cf94583, AddRef'd)   +0xeb8 effects parser
@@ -127,6 +127,7 @@
 #include "sc4/EffectMaps.h"
 #include "sc4/EffectsCollection.h"
 #include "sc4/DecalEffect.h"
+#include "sc4/DynamicParticleEffect.h"
 #include "sc4/GeometrySourcedParticlesEffect.h"
 #include "sc4/ModelBasedParticlesEffect.h"
 #include "sc4/PackedRenderState.h"
@@ -345,11 +346,11 @@ public:
     void DrawScreenFlashes(SC4DrawContext* context, float elapsed);         // @ 0x1005dfb64 (PARTIAL)
 
     // ---- particles ---------------------------------------------------------------------------------------------
-    // The dynamic-particle factory (0x1005e2c12) is SKIPPED: its class is not recovered.
     cSC4ParticlesEffect* NewParticlesEffect();                              // @ 0x1005e2a74
     cSC4ModelBasedParticlesEffect* NewModelBasedParticlesEffect();          // @ i386 0x00405ed8
     cSC4GeometrySourcedParticlesEffect* NewGeometrySourcedParticlesEffect(); // @ i386 0x00405dc6
     cSC4DecalEffect* NewDecalEffect();                                      // @ i386 0x00405bb0
+    cSC4DynamicParticleEffect* NewDynamicParticleEffect();                  // @ i386 0x00405cb4
     // LoadAllEffects (i386 0x00409e36): BeginCollection, every packed effects library into the collection,
     // EndCollection. The plug-in "main.fx" text path is not ported.
     void LoadAllEffects();
@@ -492,6 +493,9 @@ private:
     std::vector<cRZAutoRefCount<cSC4GeometrySourcedParticlesEffect>> geometryEffects_;   // i386 +0xc4c
     std::vector<int> newGeometrySlots_;                 // i386 +0xc58
     std::vector<int> freeGeometrySlots_;                // i386 +0xc64
+    std::vector<cRZAutoRefCount<cSC4DynamicParticleEffect>> dynamicEffects_;   // i386 +0xc04
+    std::vector<int> newDynamicSlots_;                  // i386 +0xc10
+    std::vector<int> freeDynamicSlots_;                 // i386 +0xc1c
     std::vector<cRZAutoRefCount<cSC4DecalEffect>> decalEffects_;   // i386 +0xbbc
     std::vector<int> newDecalSlots_;                    // i386 +0xbc8
     std::vector<int> freeDecalSlots_;                   // i386 +0xbd4
