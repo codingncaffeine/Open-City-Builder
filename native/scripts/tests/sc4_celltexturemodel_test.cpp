@@ -2,7 +2,7 @@
 // terrain corners is split along the terrain's own diagonal for that cell (cSTETerrainView3D::DrawTexturedTerrainQuad's
 // index tables {0,2,3, 0,3,1} and, flipped, {0,2,1, 1,2,3}), so a cell that is not flat shows no ground through its
 // centre; a locked lot's flat quad keeps the strip, its corners lit by the lighting manager (straight up) with the spec's
-// alpha; the combine colour is the spec colour times the global light's red, and combine mode 3 under render property 29
+// alpha; the combine colour is the spec colour times the global light's red, and combine mode 3 under kNoAddSigned (29)
 // draws as mode 1 at half alpha.
 #include <cmath>
 #include <cstdio>

@@ -12,9 +12,9 @@
 namespace sc4 {
 namespace {
 
-// The draw context's render-property bool 29 (i386 Draw reads properties +0xc [0x1d]): lot textures in combine mode 3 draw
-// in mode 1 at half alpha while it is set.
-constexpr std::uint32_t kCellTextureHalfAlphaProperty = 29;
+// The render-property bool kNoAddSigned (29; i386 Draw reads properties +0xc [0x1d]): lot textures in combine mode 3 (add
+// signed) draw in mode 1 at half alpha while it is set.
+constexpr std::uint32_t kRenderBoolNoAddSigned = 29;
 ICellTextureModelHost* g_host = nullptr;
 
 // SetupPackedRenderState (0x1000b583a): the three states, packed once.
@@ -205,15 +205,15 @@ int cSC4CellTextureModel::Draw(SC4DrawContext* context, bool highlight) {
         context->SetTexWrapModes(2, 2, 0);
     } else {
         // The lot texture combiner: the spec colour times the global light's red and the alpha through the texture factor,
-        // combined with the texture in the spec's combine mode (mLotTextureCombiner, byte 0 = the mode). Mode 3 with render
-        // property 29 set falls back to mode 1 at half the alpha.
+        // combined with the texture in the spec's combine mode (mLotTextureCombiner, byte 0 = the mode). Mode 3 (add signed)
+        // under kNoAddSigned falls back to mode 1 at half the alpha.
         context->SetRenderState(States().combine);
         context->SetTexWrapModes(2, 2, 0);
         context->SetTexFiltering(1, 1, 0);
         cS3DVector3 light{1.0f, 1.0f, 1.0f};   // port guard: the original always has the draw context's lighting manager
         if (IS4LightingManager* lighting = context->LightingManager()) lighting->GetGlobalLight(light);
         std::uint8_t combineMode = spec_.combineMode, alpha = spec_.alpha;
-        if (combineMode == 3 && context->RenderBool(kCellTextureHalfAlphaProperty)) {
+        if (combineMode == 3 && context->RenderBool(kRenderBoolNoAddSigned)) {
             combineMode = 1;
             alpha = static_cast<std::uint8_t>(alpha >> 1);
         }

@@ -39,6 +39,7 @@
 #include "sc4/AnimationTickManager.h"
 #include "sc4/CameraControl.h"
 #include "sc4/EffectsManager.h"
+#include "sc4/RenderProperties.h"
 #include "rz/cRZAutoRefCount.h"
 #include "rz/cRZCmdLine.h"
 #include "rz/cRZMessage2Standard.h"
@@ -311,6 +312,11 @@ public:
         return view ? view->ViewportUnitsToWorldUnits(1.0f) : 1.0f;
     }
     float RenderHeightScale() override { return 300.0f; }
+    sc4::cSC4RenderProperties* RenderProperties() override { return dynamic_cast<sc4::cSC4RenderProperties*>(SL::spRenderProperties); }
+    bool SimulatorPresent() override { return SL::spSimulator != nullptr; }
+    void ForceFullRedraw() override { if (g_render) g_render->ForceFullRedraw(); }
+    // SetEnableRenderToScreen / SetTextureFactorySettings keep the defaults: the native window always presents, and the
+    // native texture cache has no cS3DTextureBindingFactory free pool, LOD offset or internal bit depth to set.
     // The renderer's screen shakes (vslots 0x158 / 0x160): the shake's handle goes on the effect, which stops it with its effect.
     std::uint32_t AddShake(const cSC4ShakeDescription& shake, const cS3DVector2* position) override {
         return g_render ? g_render->StartScreenShake(shake, position) : 0;

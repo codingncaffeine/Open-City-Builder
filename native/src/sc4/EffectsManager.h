@@ -140,6 +140,8 @@ class cIGZCommandParameterSet;
 class SC4DrawContext;   // sc4/DrawContext.h (global, like the renderer's)
 
 namespace sc4 {
+
+class cSC4RenderProperties;
 class cISC4OccupantManager;
 
 class cSC4EffectsManager;
@@ -241,6 +243,18 @@ public:
     virtual float TerrainAltitude(float x, float z) { (void)x; (void)z; return 0.0f; }
     virtual float SimulatorSpeed() = 0;                                             // SL::spSimulator vslot 0x100
     virtual void WeatherWind(float& x, float& z) = 0;                               // weather sim vslot 0xb0 (u64 payload)
+
+    // ---- DoRenderPropertiesChanged ----------------------------------------------------------------------------------
+    virtual cSC4RenderProperties* RenderProperties() { return nullptr; }            // SL::spRenderProperties (borrowed)
+    virtual bool SimulatorPresent() { return false; }                               // SL::spSimulator != null
+    // SL::spGS2 (cIGZGraphicSystem2) vslot 0x44 SetEnableRenderToScreen(kRenderUI).
+    virtual void SetEnableRenderToScreen(bool enable) { (void)enable; }
+    // cIS3DTextureBindingFactory vslots 0x38 SetFreePoolMax (kTexBindMaxFree in bytes), 0x24 SetLodOffset (kLODOffset),
+    // 0x28 SetInternalTextureBitDepth (kTextureBits).
+    virtual void SetTextureFactorySettings(std::uint32_t freePoolMax, std::uint32_t lodOffset, std::uint32_t bitDepth) {
+        (void)freePoolMax; (void)lodOffset; (void)bitDepth;
+    }
+    virtual void ForceFullRedraw() {}                                               // the renderer (+0x10d8) vslot 0x50
 };
 
 // ---- process-wide instances (the original's SL::spEffectsManager at 0x100b21368 and the host) ---------------------
@@ -412,6 +426,9 @@ public:
     float WorldUnitsPerViewportUnit() const { return worldUnitsPerViewportUnit_; }
     float LodRangeValue(int index) const { return lodRange_[index]; }
     int LodLevel() const { return lodLevel_; }
+    int LodOffset() const { return lodOffset_; }
+    cSC4VisualEffect* AtmosphericEffect() const { return atmosphericEffect_; }
+    cSC4VisualEffect* WaterEffect() const { return waterEffect_; }
     int PreviousLodLevel() const { return previousLodLevel_; }
     int Zoom() const { return zoom_; }
     const cSC4GlobalEffectParams& GlobalParams() const { return globalParams_; }

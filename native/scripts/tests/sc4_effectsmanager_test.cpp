@@ -15,6 +15,7 @@
 #include "rz/cRZMessage2Standard.h"
 #include "gz/CommandParameterSet.h"
 #include "sc4/EffectsManager.h"
+#include "sc4/RenderProperties.h"
 #include "sc4/DrawContext.h"
 #include "FakeRender3D.h"
 #include "fake_gdriver.h"
@@ -215,6 +216,19 @@ public:
     bool rayValid = true;
     int viewZoom = 3;
     float unitsPerViewport = 2.0f;
+    cSC4RenderProperties* renderProperties = nullptr;
+    bool simulator = false, renderToScreen = true;
+    int redraws = 0;
+    std::uint32_t freePool = 0, textureLod = 0, textureBits = 0;
+    cSC4RenderProperties* RenderProperties() override { return renderProperties; }
+    bool SimulatorPresent() override { return simulator; }
+    void SetEnableRenderToScreen(bool enable) override { renderToScreen = enable; }
+    void SetTextureFactorySettings(std::uint32_t pool, std::uint32_t lod, std::uint32_t bits) override {
+        freePool = pool;
+        textureLod = lod;
+        textureBits = bits;
+    }
+    void ForceFullRedraw() override { ++redraws; }
     float renderHeightScale = 5.0f;
     std::uint32_t shakeHandle = 42;
     std::int32_t snowlineHandle = 77;
@@ -1384,7 +1398,59 @@ void TestScreenFlashDraw() {
     SetEffectsManagerHost(nullptr);
 }
 
+// DoRenderPropertiesChanged (i386 0x004099bc) on the render-properties message: the particle settings, kRenderUI, the
+// texture factory settings, the atmospheric and water effects following their switches (with a simulator), a full redraw.
+void TestRenderPropertiesChanged() {
+    FakeHost host;
+    host.unitsPerViewport = 2.0f;
+    SetEffectsManagerHost(&host);
+    cSC4EffectsManager manager;
+    manager.SetHost(&host);
+    CHECK(manager.Init());
+    manager.BeginCollection();
+    cSC4EffectDescription description;
+    description.version = 3;
+    manager.Collection().AddEffectDescription("atmospheric_effects", description);
+    manager.Collection().AddEffectDescription("water_effects", description);
+    manager.EndCollection();
+    cSC4RenderProperties properties;
+    properties.SetFloatValue(3, 2.0f);       // kParticleDensity
+    properties.SetFloatValue(5, 0.5f);       // kParticleScale
+    properties.SetFloatValue(11, 100.0f);    // kParticleSizeThreshold
+    properties.SetFloatValue(2, 3.5f);       // kTexBindMaxFree (MB)
+    properties.SetIntValue(2, 16);           // kTextureBits
+    properties.SetIntValue(3, 2);            // kLODOffset
+    properties.SetIntValue(6, 1);            // kParticleLODOffset
+    properties.SetBoolValue(4, true);        // kRenderCloudsAndFog
+    properties.SetBoolValue(3, false);       // kRenderWaterEffects
+    properties.SetBoolValue(23, false);      // kRenderUI
+    host.renderProperties = &properties;
+    host.simulator = true;
+    cRZMessage2Standard changed;
+    changed.SetType(0xc9f775bb);
+    CHECK(manager.DoMessage(&changed));
+    CHECK(manager.GlobalParams().rateScale == 2.0f && manager.GlobalParams().sizeScale == 0.5f);
+    CHECK(manager.WorldUnitsPerViewportUnit() == 200.0f && manager.LodOffset() == 1 && manager.MaxEffectVersion() == 5);
+    CHECK(!host.renderToScreen && host.freePool == 3500000u && host.textureLod == 2 && host.textureBits == 16);
+    CHECK(manager.AtmosphericEffect() && manager.AtmosphericEffect()->IsStarted() && !manager.WaterEffect());
+    CHECK(host.redraws == 1);
+    // the switches flipped: the atmospheric effect stops and goes, the water effect starts
+    properties.SetBoolValue(4, false);
+    properties.SetBoolValue(3, true);
+    CHECK(manager.DoMessage(&changed));
+    CHECK(!manager.AtmosphericEffect() && manager.WaterEffect() && manager.WaterEffect()->IsStarted());
+    // a new priority level is taken; without a simulator the two effects are left alone
+    host.simulator = false;
+    properties.SetIntValue(7, 3);            // kEffectPriorityLevel
+    properties.SetBoolValue(3, false);
+    CHECK(manager.DoMessage(&changed));
+    CHECK(manager.MaxEffectVersion() == 3 && manager.WaterEffect() != nullptr && host.redraws == 3);
+    manager.Shutdown();
+    SetEffectsManagerHost(nullptr);
+}
+
 int main() {
+    TestRenderPropertiesChanged();
     TestCom();
     TestRegistry();
     TestPoolAndRecycle();

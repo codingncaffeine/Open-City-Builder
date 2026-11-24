@@ -2,6 +2,7 @@
 // quirks). Every function below carries its original address; functions whose body could not be completed are marked
 // PARTIAL / SKIPPED in the same comment and in notes/ledger_pending/cSC4EffectsManager.txt.
 #include "sc4/EffectsManager.h"
+#include "sc4/RenderProperties.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/SCPropertyHelp.h"
 
@@ -22,6 +23,14 @@
 #include "sc4/GameDataRegistry.h"
 
 namespace sc4 {
+
+namespace {
+// The render properties DoRenderPropertiesChanged reads (sc4/RenderPropertyDefaults.inc).
+constexpr std::uint32_t kRenderFloatTexBindMaxFree = 2, kRenderFloatParticleDensity = 3, kRenderFloatParticleScale = 5,
+                        kRenderFloatParticleSizeThreshold = 11;
+constexpr std::uint32_t kRenderIntTextureBits = 2, kRenderIntLodOffset = 3, kRenderIntParticleLodOffset = 6, kRenderIntEffectPriorityLevel = 7;
+constexpr std::uint32_t kRenderBoolWaterEffects = 3, kRenderBoolCloudsAndFog = 4, kRenderBoolRenderUI = 23, kRenderBoolUseVertexBuffers = 25;
+}  // namespace
 
 namespace {
 
@@ -1289,6 +1298,7 @@ void cSC4EffectsManager::LoadAllEffects() {
     }
     SC4_UNWIRED("cSC4EffectsManager::LoadAllEffects: the plug-in text effect files (main.fx / Effects/config.fx) are not parsed");
     EndCollection();
+    DoRenderPropertiesChanged();   // the original's branch for a plug-in folder without main.fx
 }
 
 // @ 0x1005e31cc: allocate the terrain snowline effect on first use, reset the current altitude (which forces the first
@@ -1450,6 +1460,7 @@ bool cSC4EffectsManager::DoMessage(cIGZMessage2* message) {
         case 0x697d01ed: DoEffectsTick(); break;
         case 0xab96b05f: effectsActive_ = true; UpdateActiveVisualEffects(); break;
         case 0x26d31ec2: suppressOccupantEffects_ = true; break;
+        case 0xc9f775bb: DoRenderPropertiesChanged(); break;   // render properties changed
         case 0x26d31ec1:   // PostCityInit (i386 0x0040a90a): the 1000 ms effects tick starts, holding the manager while it runs,
             tickTimer_.StartPeriodic(1000, this);   // then every occupant goes through DoOccupantInserted (vslot 0xb0, no type)
             if (cISC4OccupantManager* occupants = host_ ? host_->OccupantManager() : nullptr)
@@ -1479,10 +1490,54 @@ bool cSC4EffectsManager::DoSnowCheat(cRZCmdLine& commandLine) {
     return true;
 }
 
-// @ 0x1005de30a (PARTIAL): needs the render-properties object graph (+0x30 / +0x48 sub-objects), the lighting manager
-// and the atmospheric / water effect lookup; not ported.
+// @ 0x1005de30a (i386 0x004099bc): the effect settings from the render properties: particle density and scale, the size
+// threshold in world units, the particle LOD offset and the effect priority level; kRenderUI to the graphic system; the
+// particle systems' vertex buffers (kUseVertexBuffers); the texture factory's free pool, LOD offset and bit depth. A new
+// priority level re-runs the active effects with the update forced. With a simulator, the atmospheric and water effects
+// follow kRenderCloudsAndFog / kRenderWaterEffects (made and started when turned on, stopped when off), then the
+// renderer redraws fully.
 void cSC4EffectsManager::DoRenderPropertiesChanged() {
-    SC4_UNWIRED("cSC4EffectsManager::DoRenderPropertiesChanged: the effects detail priority, atmospheric and water effects are not refreshed");
+    cSC4RenderProperties* properties = host_ ? host_->RenderProperties() : nullptr;
+    if (!properties) return;   // port guard: the original always has SL::spRenderProperties
+    int priorityLevel = static_cast<int>(maxEffectVersion_);
+    globalParams_.rateScale = properties->FloatValue(kRenderFloatParticleDensity);
+    globalParams_.sizeScale = properties->FloatValue(kRenderFloatParticleScale);
+    worldUnitsPerViewportUnit_ = host_->WorldUnitsPerViewportUnit() * properties->FloatValue(kRenderFloatParticleSizeThreshold);
+    globalParams_.maxAlpha = worldUnitsPerViewportUnit_;   // the original reads +0xf24 as the particle max alpha
+    lodOffset_ = properties->IntValue(kRenderIntParticleLodOffset);
+    maxEffectVersion_ = static_cast<std::uint32_t>(properties->IntValue(kRenderIntEffectPriorityLevel));
+    host_->SetEnableRenderToScreen(properties->BoolValue(kRenderBoolRenderUI));
+    IParticlesVertexBuffer* buffers = host_->VertexBufferExtension();
+    IParticlesVertexBuffer* use = properties->BoolValue(kRenderBoolUseVertexBuffers) ? buffers : nullptr;
+    for (cRZAutoRefCount<cSC4ParticlesEffect>& effect : particlesEffects_)
+        if (effect) effect->SetVertexBufferExtension(use);
+    // kTexBindMaxFree is in megabytes: x 1e6, clamped to [0, 2^32 - 1], as an unsigned int
+    double freePool = static_cast<double>(properties->FloatValue(kRenderFloatTexBindMaxFree)) * 1000000.0;
+    freePool = std::max(0.0, std::min(freePool, 4294967295.0));
+    host_->SetTextureFactorySettings(static_cast<std::uint32_t>(freePool), static_cast<std::uint32_t>(properties->IntValue(kRenderIntLodOffset)),
+                                     static_cast<std::uint32_t>(properties->IntValue(kRenderIntTextureBits)));
+    const bool cloudsAndFog = properties->BoolValue(kRenderBoolCloudsAndFog);
+    const bool waterEffects = properties->BoolValue(kRenderBoolWaterEffects);
+    if (priorityLevel != static_cast<int>(maxEffectVersion_)) {
+        priorityLevel = static_cast<int>(maxEffectVersion_);   // the original keeps the new level: the checks below never see it change
+        forceUpdate_ = true;
+        UpdateActiveVisualEffects();
+        forceUpdate_ = false;
+    }
+    if (host_->SimulatorPresent()) {
+        auto follow = [&](cSC4VisualEffect*& slot, bool on, const char* name) {
+            if (slot && (!on || priorityLevel != static_cast<int>(maxEffectVersion_))) {
+                slot->Stop(1);
+                slot->Release();
+                slot = nullptr;
+            }
+            if (on && !slot && CreateVisualEffect(name, &slot)) slot->Start(0);
+        };
+        follow(atmosphericEffect_, cloudsAndFog, "atmospheric_effects");
+        follow(waterEffect_, waterEffects, "water_effects");
+    }
+    host_->ForceFullRedraw();
+    if (buffers) buffers->Release();
 }
 
 namespace {
