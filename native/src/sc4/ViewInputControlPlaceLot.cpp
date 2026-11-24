@@ -1269,10 +1269,8 @@ void cSC4ViewInputControlPlaceLot::GetBuildingPreviewModel() {
     IPlaceLotTerrain* terrain = Terrain();
     const float cell = terrain ? terrain->CellSize() : 16.0f;
 
-    // PARTIAL: the preview building model itself (the local grid helper's occupant, the model instances and
-    // the cS3DTextureBinding grid) is not built. The port creates the preview building prop one step further
-    // down and derives the same coverage categories / effect id / placement count from the building type.
-    SC4_UNWIRED("cSC4ViewInputControlPlaceLot::GetBuildingPreviewModel: preview model instances and the lot grid texture (cS3DTextureBinding) not built, a prop stands in");
+    // The preview building is the prop manager's generic prop made from the building's exemplar (i386 0x002d662c:
+    // spPropManager vslot 0x40), the host's CreateBuildingProp; the lot's props and the footprint texture follow.
     if (previewProp_ == nullptr) {
         if (cSC4LotConfigurationObject* object = configuration->GetPrimaryBuildingConfigurationObject()) {
             buildingRotation_ = object->orientation;

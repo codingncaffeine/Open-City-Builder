@@ -37,6 +37,8 @@
 #include "s3d/ModelInstance.h"
 #include "sc4/FireProtectionSimulator.h"
 #include "sc4/Lot.h"
+#include "sc4/PropOccupant.h"
+#include "sc4/PropManager.h"
 #include "sc4/LotDeveloper.h"
 #include "sc4/NetworkOccupant.h"
 #include "sc4/OccupantManager.h"
@@ -542,25 +544,14 @@ struct Demolition final : IPlaceLotDemolition {
 
 // The preview building (the original's prop manager CreateProp(building profile)): a building occupant that never enters the
 // occupant manager, so no simulator sees it; the model maker makes its models and they are drawn with the tool's attributes.
-class PreviewBuilding final : public IPlaceLotProp {
+// A lot prop on the preview (i386 GetBuildingPreviewModel 0x002d662c): made by the city's prop manager (vslot 0x3c),
+// flag 0x10 set, and kept only when its exemplar carries 0x4a89fcf3 (show in preview); then 0x29244db and 0x29f013e6
+// are set on it. Shown and hidden through the model maker as the preview building is.
+cSC4PropManager* CityPropManager() { return Plain<cSC4PropManager>(CityComponent::PropManager); }
+class PreviewLotProp final : public IPlaceLotProp {
 public:
-    explicit PreviewBuilding(std::uint32_t type) : occupant_(new cSC4BuildingOccupant()) {
-        occupant_->AddRef();
-        occupant_->SetBuildingType(type);
-        cGZPersistResourceKey key{};
-        cISCResExemplar* exemplar = nullptr;
-        if (SL::RM() && NativeBuildingKeyFromType(type, key) &&
-            SL::RM()->GetResource(key, kGZIID_cISCResExemplar, reinterpret_cast<void**>(&exemplar), 0, nullptr) && exemplar) {
-            occupant_->SetDefaultExemplar(exemplar);
-            std::vector<float> size;
-            if (cSCPropertyHelp::GetPropertyValue(exemplar->AsISCPropertyHolder(), 0x27812810, size) && size.size() >= 3) {
-                const float origin[3] = {0.0f, 0.0f, 0.0f};
-                occupant_->SetBoundingBox(origin, size.data());
-            }
-            exemplar->Release();
-        }
-    }
-    ~PreviewBuilding() {
+    explicit PreviewLotProp(cSC4PropOccupant* occupant) : occupant_(occupant) {}   // takes the reference
+    ~PreviewLotProp() {
         Hide();
         occupant_->Release();
     }
@@ -574,24 +565,32 @@ public:
     int Orientation() override { return occupant_->GetOrientation(); }
     void SetOrientation(int orientation) override { occupant_->SetOrientation(orientation); }
     bool IsPlaced() override { return shown_; }
-    bool ShowInPreview() override { return true; }
+    bool ShowInPreview() override {
+        bool show = false;
+        cSCPropertyHelp::GetPropertyValue(occupant_->AsPropertyHolder(), 0x4a89fcf3, show);
+        if (show) {
+            cSCPropertyHelp::SetPropertyValue(occupant_->AsPropertyHolder(), 0x029244db, true);
+            cSCPropertyHelp::SetPropertyValue(occupant_->AsPropertyHolder(), 0x29f013e6, true);
+        }
+        return show;
+    }
     void Show(const cS3DVector3& position, const s3d::SC4DrawAttributes& attributes) override {
-        // Rebuilt at every change: the model maker places a building's models from the occupant when it makes them.
         Hide();
         const float xyz[3] = {position.x, position.y, position.z};
         occupant_->SetPosition(xyz);
         if (!ShowPreviewOccupant(occupant_, true)) return;
         shown_ = true;
-        cISC43DPlaceableObject* placeable = occupant_->GetPlaceableObject();
-        if (PlaceLotDebug()) std::fprintf(stderr, "place lot: preview building %08x at %.0f,%.0f: %d models\n", occupant_->GetBuildingType(),
-                                          position.x, position.z, placeable ? placeable->GetModelCount() : -1);
-        if (placeable) {
+        if (PlaceLotDebug()) {
+            cISC43DPlaceableObject* placeable = occupant_->GetPlaceableObject();
+            std::fprintf(stderr, "place lot: preview prop at %.0f,%.0f: %d models\n", position.x, position.z, placeable ? placeable->GetModelCount() : -1);
+        }
+        if (cISC43DPlaceableObject* placeable = occupant_->GetPlaceableObject()) {
             std::uint32_t count = static_cast<std::uint32_t>(placeable->GetModelCount());
             std::vector<cIS3DModelInstance*> models(count);
             placeable->GetModels(models.data(), count);
             for (std::uint32_t i = 0; i < count; ++i)
                 reinterpret_cast<s3d::cIS3DModelInstance*>(models[i])->SetDrawAttributes(attributes);
-            if (placeable->IsVisible()) {   // the renderer reads the translucency bits when a model goes in
+            if (placeable->IsVisible()) {
                 placeable->SetVisibility(false);
                 placeable->SetVisibility(true);
             }
@@ -604,17 +603,35 @@ public:
     }
 
 private:
-    cSC4BuildingOccupant* occupant_;
+    cSC4PropOccupant* occupant_;
     std::uint32_t refs_ = 1;
     bool shown_ = false;
 };
 struct PropManager final : IPlaceLotPropManager {
-    bool PropTypeExists(std::uint32_t) override {   // PARTIAL: the lot's preview props
-        SC4_UNWIRED("cSC4ViewInputControlPlaceLot preview: the lot's props are not shown on the preview");
-        return false;
+    bool PropTypeExists(std::uint32_t propId) override {   // spPropManager vslot 0x20
+        cSC4PropManager* props = CityPropManager();
+        return props && props->IsPropTypeValid(propId);
     }
-    IPlaceLotProp* CreateProp(std::uint32_t) override { return nullptr; }
-    IPlaceLotProp* CreateBuildingProp(std::uint32_t type) override { return new PreviewBuilding(type); }
+    IPlaceLotProp* CreateProp(std::uint32_t propId) override {   // vslot 0x3c, then SetFlag(0x10)
+        cSC4PropManager* props = CityPropManager();
+        cSC4PropOccupant* occupant = nullptr;
+        if (!props || !props->CreateProp(propId, occupant) || !occupant) return nullptr;
+        occupant->SetFlag(0x10);
+        return new PreviewLotProp(occupant);
+    }
+    // The preview building (i386 0x002d662c): the prop manager's generic prop (vslot 0x40 CreateGenericProp) made from the
+    // building type's exemplar key, flag 0x10, properties 0x29244db and 0x29f013e6 set.
+    IPlaceLotProp* CreateBuildingProp(std::uint32_t type) override {
+        cSC4PropManager* props = CityPropManager();
+        cGZPersistResourceKey key{};
+        cSC4PropOccupant* occupant = nullptr;
+        if (!props || !NativeBuildingKeyFromType(type, key) || !props->CreateGenericProp(key, occupant) || !occupant) return nullptr;
+        occupant->SetFlag(0x10);
+        cSCPropertyHelp::SetPropertyValue(occupant->AsPropertyHolder(), 0x029244db, true);
+        cSCPropertyHelp::SetPropertyValue(occupant->AsPropertyHolder(), 0x29f013e6, true);
+        if (PlaceLotDebug()) std::fprintf(stderr, "place lot: preview building %08x as generic prop %p\n", type, static_cast<void*>(occupant));
+        return new PreviewLotProp(occupant);
+    }
 } g_propManager;
 
 class Host final : public IPlaceLotHost {
@@ -753,6 +770,15 @@ void NativePlaceLotAt(const std::string& id, int x, int z, int facing, int x1, i
                 }
         std::printf("placelot %08x: %d places\n", lot, listed);
         if (g_view->GetCurrentViewInputControl() == tool) g_view->RemoveCurrentViewInputControl(false);
+        tool->Release();
+        return;
+    }
+    if (facing == -3) {   // preview only: the tool's own preview at the cell (facing 0), the tool stays current for a picture
+        const float px = static_cast<float>(x) * 16.0f + 8.0f, pz = static_cast<float>(z) * 16.0f + 8.0f;
+        position = cS3DVector3(px, terrain ? terrain->GetAltitude(px, pz) : 0.0f, pz);
+        tool->GetBuildingPreviewModel();
+        tool->SetVisualUserFeedback(true, false, position);
+        std::printf("placelot %08x preview at %d,%d: %zu lot props\n", lot, x, z, tool->PreviewProps().size());
         tool->Release();
         return;
     }
