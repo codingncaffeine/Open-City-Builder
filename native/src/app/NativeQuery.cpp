@@ -1157,6 +1157,11 @@ void NativeQueryReport(std::uint32_t skipUi, int limit) {
     std::printf("querylist: %d buildings\n", total);
 }
 
+// cSC4ViewInputControlQuery::DoQueryDialog for the advisors' window_query (i386 LUAExtension_window_query 0x00445ab4).
+bool NativeOpenQueryDialog(sc4::cISC4Occupant* occupant) {
+    return occupant && sc4::cSC4ViewInputControlQuery::DoQueryDialog(occupant);
+}
+
 void InstallQueryHost() {
     static Host host;
     sc4::SetQueryHost(&host);

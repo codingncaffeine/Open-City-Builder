@@ -798,7 +798,7 @@ public:
     void DescribeDemand(int x, int z, cRZString& text);
     void DescribePopulation(int x, int z, cRZString& text);
     void DescribePick(int x, int y, cRZString& line1, cRZString& line2, cRZString& line3, bool detailed);   // @ 0x1002ccd38
-    bool DoQueryDialog(cISC4Occupant* occupant);                                              // i386 0x00218ed0
+    static bool DoQueryDialog(cISC4Occupant* occupant);                                       // i386 0x00218ed0 (static: the advisors open it too)
     bool DoZoneBasedQueryDialog(std::uint32_t zoneType, std::uint32_t cellX, std::uint32_t cellZ);   // i386 0x00219306
     bool DoNeighborConnectionQueryDialog(cISC4Occupant* occupant);                            // i386 0x00219668
     void GetOccupantPaths();

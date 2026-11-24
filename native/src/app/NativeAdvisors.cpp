@@ -62,6 +62,7 @@
 #include "sc4/cSC4City.h"
 
 namespace native {
+bool NativeOpenQueryDialog(sc4::cISC4Occupant* occupant);   // NativeQuery.cpp: cSC4ViewInputControlQuery::DoQueryDialog
 float NativeDispatchAltitude(float x, float z);   // NativeDispatch.cpp: the terrain height at a world point
 void UpdateAdvisorStatistics(std::uint32_t advisorClassId);   // NativeAdvisorStatistics.cpp
 namespace {
@@ -542,9 +543,18 @@ int L_tool_button(lua_State* L) {
 int L_window_budget(lua_State* L) { WindowOpen(L, 0xea5bdfbc); return 0; }
 int L_window_map(lua_State* L) { WindowOpen(L, 0x6a5bdfcd); return 0; }
 int L_window_graph(lua_State* L) { WindowOpen(L, 0x6a720993); return 0; }
-int L_window_query(lua_State*) {   // PARTIAL: the query dialog (cSC4ViewInputControlQuery::DoQueryDialog) is not wired from here
-    if (cSC4AdvisorSystem* system = System()) system->GetContextAdvice();
-    SC4_UNWIRED("nsAdviceAPI window_query: the original opens the query dialog for the advice's subject");
+// window_query(subject) (i386 0x00445ab4): the query dialog of the advice subject's building.
+int L_window_query(lua_State* L) {
+    cISCLua* lua = HostOf(L);
+    cSC4AdvisorSystem* system = System();
+    if (system) system->GetContextAdvice();
+    cISC4AdviceSubject* subject = SubjectArg(lua, system);
+    cIGZUnknown* object = subject ? subject->GetObjectA() : nullptr;
+    sc4::cISC4Occupant* occupant = nullptr;
+    if (object && object->QueryInterface(kGZIID_cISC4Occupant, reinterpret_cast<void**>(&occupant)) && occupant) {
+        NativeOpenQueryDialog(occupant);
+        occupant->Release();
+    }
     return 0;
 }
 
