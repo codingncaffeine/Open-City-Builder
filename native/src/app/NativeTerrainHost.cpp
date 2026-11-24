@@ -1,6 +1,7 @@
 // The terrain model's host on the native application (hand-written from the generated stub; scripts/gen_stub_hosts.py skips it).
 // The city and its components come from the application; the resource-backed readers use the resource manager.
 #include <string>
+#include "app/NativeZoneDeveloperHost.h"
 #include "app/NativeAudio.h"
 #include "sc4/MapUtilities.h"
 #include "sc4/DBSegment.h"
@@ -151,7 +152,7 @@ struct NativeSurfaceWaterHost final : ISurfaceWaterHost {
     }
     IWaterNetworkOccupant* AsNetworkOccupant(cIGZUnknown* object) override { return SurfaceWaterAsNetworkOccupant(object); }
     IWaterCellOccupant* AsCellOccupant(cIGZUnknown* object) override { return SurfaceWaterAsCellOccupant(object); }
-    const void* LotAtCell(int, int) override { SC4_UNWIRED("ISurfaceWaterHost::LotAtCell (lot manager)"); return nullptr; }
+    const void* LotAtCell(int x, int z) override { return NativeLotAtCell(x, z, false); }   // the lot manager's lot over the cell
     void OccupantsInCell(int x, int z, std::uint32_t group, std::vector<IWaterCellOccupant*>& out) override {
         SurfaceWaterOccupantsInCell(Component(CityComponent::OccupantManager), x, z, group, out);
     }
