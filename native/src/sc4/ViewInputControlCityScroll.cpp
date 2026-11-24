@@ -57,10 +57,22 @@ bool cSC4ViewInputControlCityScroll::OnMouseMove(int x, int y, std::uint32_t mod
     if (absX <= fullSpeed_ && absX <= deadZone_) velocityX_ = 0;
     if (absY <= fullSpeed_ && absY <= deadZone_) velocityY_ = 0;
     const bool scrolling = deadZone_ < absX || deadZone_ < absY;
+    // i386 0x0020687a: the cursor points the way the view scrolls (eight cursors), the centre one inside the dead zone
+    constexpr std::uint32_t kCentre = 0xc2a676ac;
+    std::uint32_t cursor = kCentre;
+    const int dz = static_cast<int>(deadZone_);
     if (scrolling) {
-        moved_ = true;
-        SC4_UNWIRED("cSC4ViewInputControlCityScroll::OnMouseMove: the eight direction cursors are not switched (cursor art)");
+        if (halfY < dz) {
+            if (-dz < halfY) cursor = halfX < dz ? (-dz < halfX ? kCentre : 0x62a67694u) : 0xc2a676a4u;   // left / right
+            else cursor = halfX < dz ? (-dz < halfX ? 0x62a67606u : 0x02a67691u) : 0x82a676a8u;           // up, up-left, up-right
+        } else {
+            cursor = halfX < dz ? (-dz < halfX ? 0x62a6769bu : 0xa2a67698u) : 0x22a676a0u;                // down, down-left, down-right
+        }
+    } else if (CursorId() != kCentre) {
+        SetCursor(kCentre);
     }
+    if (!moved_ && cursor != kCentre) moved_ = true;
+    if (cursor != CursorId()) SetCursor(cursor);
     float speed = std::sqrt(static_cast<float>(halfY * halfY) + static_cast<float>(halfX) * static_cast<float>(halfX)) /
                   static_cast<float>(fullSpeed_ - deadZone_);
     if (speed > 1.0f) speed = 1.0f;
