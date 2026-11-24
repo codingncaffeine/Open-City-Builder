@@ -471,6 +471,14 @@ public:
     }
     RegionCityRef* FindCity(int x, int z) override { CityAdapter* adapter = CityAt(x, z); return adapter ? adapter->Ref() : nullptr; }
     RegionCityRef* FindOrCreateCity(const RegionViewCity& city, bool) override { return FindCity(city.x, city.z); }
+    void DeleteCity(const RegionViewCity& city) override {
+        cISC4Region* region = ActiveRegion();
+        cRZAutoRefCount<cISC4RegionalCity>* holder = region ? region->GetCity(city.x, city.z) : nullptr;
+        cISC4RegionalCity* object = holder ? holder->get() : nullptr;
+        if (!object) return;
+        region->DeleteCity(holder);   // the holder dangles from here (the region freed it)
+        g_adapters.erase(object);     // the screen's adapter of the deleted city lets go of it
+    }
     bool LaunchRegionCityByName(const cRZString&, RegionCityRef*) override { return false; }
     void ClearRegionViewSlot() override {}
     std::uint32_t LaunchCityFromRegion(RegionCityRef* ref) override {

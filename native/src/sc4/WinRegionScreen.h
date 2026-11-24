@@ -330,6 +330,8 @@ public:
     virtual bool LoadCityThumbnails(int x, int z, IWinBuffer** image, IWinBuffer** mask) { (void)x; (void)z; (void)image; (void)mask; return false; }
     virtual RegionCityRef* FindCity(int x, int z) = 0;                      // city list vslot 0x58 (borrowed)
     virtual RegionCityRef* FindOrCreateCity(const RegionViewCity& city, bool create) = 0;
+    // GetOrCreateRegionalCity(city, true) then the active region's DeleteCity (region vslot 0x38): the city and its save file go
+    virtual void DeleteCity(const RegionViewCity& city) { (void)city; }
     virtual bool LaunchRegionCityByName(const cRZString& name, RegionCityRef* city) = 0;   // cISC4App vslot 0x68
     virtual void ClearRegionViewSlot() = 0;                                 // cISC4App vslot 0x138 -> +0x200
     virtual std::uint32_t LaunchCityFromRegion(RegionCityRef* city) = 0;    // cISC4App vslot 0x30

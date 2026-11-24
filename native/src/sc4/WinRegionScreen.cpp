@@ -1250,6 +1250,18 @@ bool cSC4WinRegionScreen::GZOnCommand(std::uint32_t command, std::uint64_t param
         host->ReloadRegion();                           // cISC4App vslot 0x30 (0): back to a fresh region view
         return true;
     }
+    case 0x4a560003: {   // delete city: after the confirmation the city goes and its tile shows the default pictures
+        if (!SC4DisplayDeleteCityDialog(this)) return true;
+        RegionViewCity* selected = view_ ? view_->GetSelectedCity() : nullptr;
+        if (!selected || !host) return true;
+        host->DeleteCity(*selected);
+        SetCitySnapshotsToDefault(*selected);
+        RecalculateImagesFromCitySnapshots(*selected);
+        view_->UpdateCity(selected);
+        RestoreSignposts();
+        UpdatePopulation();
+        return true;
+    }
     case 0x26c10a3e: {   // exit: remember the region and the view, ask the app to quit (it asks the player), unpress the button
         SetUserPreferencesToCurrentRegion();
         SetUserPreferencesToCurrentPosition();

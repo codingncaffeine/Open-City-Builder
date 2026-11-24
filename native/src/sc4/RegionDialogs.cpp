@@ -148,6 +148,14 @@ void cSC4NewRegionDialog::GZOnOK() {
     EndDialog(static_cast<std::uint32_t>(index));
 }
 
+bool SC4DisplayDeleteCityDialog(cIGZWin* parent) {
+    auto* dialog = new cSC4DeleteCityDialog();
+    dialog->AddRef();
+    const std::uint32_t result = dialog->Display(parent);
+    dialog->Release();
+    return result != 0;
+}
+
 int SC4DisplayNewRegionDialog(cIGZWin* parent, INewRegionNation* nation) {
     auto* dialog = new cSC4NewRegionDialog(nation);
     dialog->AddRef();

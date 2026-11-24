@@ -35,6 +35,12 @@ public:
     void GZOnAttach() override { TranslateTokensInCaption(0x1000); }                  // @ 0x006fd924
 };
 
+// The delete-city confirmation (script 0x8a5ab1d0).
+class cSC4DeleteCityDialog final : public cSC4DialogWinProcBase {
+public:
+    cSC4DeleteCityDialog() : cSC4DialogWinProcBase(0x8a5ab1d0, 0x8a5ab1d0, 0) {}      // @ 0x006fd6f6
+};
+
 // What the new-region dialog does with the nation: the regions' names (cISC4Nation vslot 0x2c region -> vslot 0xc) and the
 // new region itself (nation vslot 0x34 AddNewRegion(name) -> its index; the region's Init (0x20), SetBaseTerrainType (0x4c)
 // and Shutdown (0x24)).
@@ -75,6 +81,8 @@ std::uint32_t SC4RunScriptedButtonDialog(cIGZWin* parent, std::uint32_t instance
 int SC4DisplayLoadRegionDialog(cIGZWin* parent, const RegionDialogNation& nation);
 // True when the player confirmed.
 bool SC4DisplayDeleteRegionDialog(cIGZWin* parent);
+// True when the player confirmed (SC4DisplayDeleteCityDialog @ 0x002eb9fa).
+bool SC4DisplayDeleteCityDialog(cIGZWin* parent);
 // The new region's index, or -1 (cancelled).
 int SC4DisplayNewRegionDialog(cIGZWin* parent, INewRegionNation* nation);
 
