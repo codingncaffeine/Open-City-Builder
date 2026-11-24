@@ -504,6 +504,7 @@ ParticleOccupantsHost g_particleOccupants;
 // ---- model lookups and effect creation for the model-based particle systems ----
 class ModelsHost final : public sc4::IModelParticlesHost {
 public:
+    sc4::cISC4LightingManager* LightingManager() override { return dynamic_cast<sc4::cISC4LightingManager*>(SL::spLightingManager); }
     bool CreateModel(std::uint32_t modelId, s3d::cIS3DResModel** model, s3d::cIS3DModelInstance** instance) override {
         *model = nullptr;
         *instance = nullptr;

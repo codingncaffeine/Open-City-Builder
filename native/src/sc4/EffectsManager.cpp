@@ -600,6 +600,7 @@ void cSC4EffectsManager::DoZoomChanged(int zoom) {
     const int level = (zoom + 1) - lodOffset_;
     lodLevel_ = level > 0 ? level : 1;
     lodScale_ = SampleLodCurve(lodKeys_, static_cast<float>(zoom));
+    globalParams_.cameraDistance = lodScale_;
     worldUnitsPerViewportUnit_ = host_ ? host_->WorldUnitsPerViewportUnit() * host_->RenderHeightScale() : 0.0f;
     globalParams_.maxAlpha = worldUnitsPerViewportUnit_;   // the original reads +0xf24 as the particle max alpha
     UpdateActiveVisualEffects();
@@ -726,8 +727,9 @@ void cSC4EffectsManager::EndCollection() {
     collection_.EndCollection();
     const cSC4CameraParams& camera = collection_.CameraParams();
     lodKeys_ = camera.keys;
-    for (int i = 0; i < 4; ++i) lodRange_[i] = camera.values[i];
+    for (int i = 0; i < 4; ++i) lodRange_[i] = globalParams_.cameraValues[i] = camera.values[i];
     lodScale_ = SampleLodCurve(lodKeys_, host_ ? static_cast<float>(host_->ViewZoom()) : 0.0f);
+    globalParams_.cameraDistance = lodScale_;
 
     for (const auto& binding : collection_.EffectBindings()) {
         const auto range = collection_.EffectNames().equal_range(binding.first);

@@ -106,7 +106,12 @@ struct cSC4GlobalEffectParams {
     float rateScale = 1.0f;        // +0x00 multiplier of the emission rate
     float sizeScale = 1.0f;        // +0x04 multiplier of the particle size
     cS3DVector3 velocity;          // +0x08 global wind
-    std::uint8_t reserved14[0x30] = {};
+    std::uint8_t reserved14[0x1c] = {};   // +0x14 (the manager's LOD-key vector sits here in the original)
+    // +0x30 the effects manager's four camera-parameter values (i386 +0x20..+0x2c: the fake perspective's push start and
+    // range, the camera-collision box half size, the collision push) and +0x40 the camera distance sampled at the zoom
+    // (i386 +0x30); the manager keeps them in step with its own copies.
+    float cameraValues[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    float cameraDistance = 0.0f;
     float maxAlpha = 1.0f;         // +0x44 clamp of the size * sizeCurve product
 };
 

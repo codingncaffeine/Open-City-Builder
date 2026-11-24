@@ -73,6 +73,14 @@ public:
         if (utilities_) utilities_->GetViewportTerrainCenter(out);
         else out[0] = out[1] = out[2] = 0.0f;
     }
+    bool GetCameraFrame(cS3DVector3& eye, cS3DVector3& direction, cS3DVector3& right, cS3DVector3& up) const override {
+        if (!utilities_) return false;
+        eye = utilities_->EyePosition();
+        direction = utilities_->ViewDirection();
+        right = utilities_->RightVector();
+        up = utilities_->UpVector();
+        return true;
+    }
 
 private:
     SC4ViewUtilities* utilities_;

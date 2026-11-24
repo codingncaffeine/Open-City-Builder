@@ -19,11 +19,14 @@
 #pragma once
 #include <cstdint>
 
+#include "s3d/ModelProcessor.h"
 #include "sc4/ParticlesEffect.h"
 
 namespace s3d { class cIS3DModelInstance; class cIS3DResModel; }
 
 namespace sc4 {
+
+class cISC4LightingManager;
 
 class cSC4VisualEffect;
 
@@ -36,6 +39,7 @@ public:
     virtual bool CreateModel(std::uint32_t modelId, s3d::cIS3DResModel** model, s3d::cIS3DModelInstance** instance) = 0;
     virtual bool HasVisualEffect(const char* name) = 0;
     virtual cSC4VisualEffect* CreateVisualEffect(const char* name) = 0;   // one reference, null when unknown
+    virtual cISC4LightingManager* LightingManager() { return nullptr; }   // SL::spLightingManager (borrowed)
 };
 IModelParticlesHost* ModelParticlesHost();
 void SetModelParticlesHost(IModelParticlesHost* host);
@@ -46,6 +50,19 @@ struct cSC4MBParticle : cSC4EffectsParticle {
     float frame = 0;                     // +0x48 animation frame accumulator
     float roll = 0;                      // +0x4c
     float heading = 0;                   // +0x50 turns
+};
+
+// cSC4EffectsModelProcessor (0x00795c60, cS3DModelProcessor + the description at +0x40): the model processor of a
+// model particle system whose description deforms the mesh (11-bit flag 8).
+class cSC4EffectsModelProcessor : public s3d::cS3DModelProcessor {
+public:
+    void SetDescription(const cSC4ParticlesDescription* description) { description_ = description; }
+    // @ 0x0040ffde: every converted vertex from its model vertex: the position wiggled, the texture coordinates scrolled
+    // (value178 x time x range17c, wrapped every 8 units) and, with an alpha curve (curve190), the alpha from the curve
+    // at how far the vertex normal faces vector184.
+    void DeformModel(float time);
+private:
+    const cSC4ParticlesDescription* description_ = nullptr;   // +0x40 (counted in the original)
 };
 
 class cSC4ModelBasedParticlesEffect final : public cSC4ParticlesEffect {
@@ -77,8 +94,16 @@ private:
     void DrawParticle(cSC4MBParticle* particle, SC4DrawContext* context);   // one turn of RenderActiveParticles' loop
     void ReleaseModel();
     bool Flag11(int bit) const;
+    // @ 0x00410d72: the fake perspective of a particle at `position` (depth = its distance along the view from the view's
+    // ground point, plus the camera distance; `depthOffset` carries all but the dot product): the size scales by camera
+    // distance / depth and the particle is pushed out from the view's centre line; a particle the camera has overtaken
+    // bounces off it ("camera_collision") while inside the collision box, else it is dropped (false; its slave stops).
+    bool ApplyFakePerspective(float depthOffset, const cS3DVector3& direction, const cS3DVector3& eye, const cS3DVector3& right,
+                              const cS3DVector3& up, cSC4MBParticle* particle, cS3DVector3& position, float& size);
 
     s3d::cIS3DModelInstance* model_ = nullptr;         // +0x214
+    cSC4EffectsModelProcessor processor_;              // +0x21c
+    bool processorReady_ = false;                      // +0x260
     s3d::cIS3DResModel* modelResource_ = nullptr;      // the frames of +0x218 (cIS3DModelInstanceAnimated)
     bool hasSlave_ = false;                            // +0x261
     bool hasDeath_ = false;                            // +0x262

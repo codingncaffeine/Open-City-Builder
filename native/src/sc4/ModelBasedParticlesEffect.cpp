@@ -1,4 +1,7 @@
 #include "sc4/ModelBasedParticlesEffect.h"
+#include "sc4/DrawContext.h"
+#include "render/SimGL.h"
+#include "sc4/LightingManager.h"
 
 #include <algorithm>
 #include <cmath>
@@ -88,6 +91,15 @@ void WigglePoint(float t, const std::vector<float>& wiggles, cS3DVector3& p) {
     }
 }
 
+// floor() as the original computes it: the 12582912 rounding of x - 0.5, raised when x is that integer plus one.
+int MagicFloor(float x) {
+    const float shifted = (x - 0.5f) + 12582912.0f;
+    std::int32_t bits;
+    std::memcpy(&bits, &shifted, sizeof(bits));
+    const std::int32_t down = bits - 0x4b400000, up = bits - 0x4b3fffff;
+    return x == static_cast<float>(up) ? up : down;
+}
+
 cSC4MBParticle* MB(cSCParticle* particle) { return static_cast<cSC4MBParticle*>(cSC4ParticlesEffect::EffectsParticle(particle)); }
 }  // namespace
 
@@ -156,6 +168,8 @@ void cSC4ModelBasedParticlesEffect::SetDescription(cSC4ParticlesDescription* des
     ReleaseModel();
     modelExtent_ = 1.0f;
     SetChainSystem(nullptr);
+    processor_.SetModel(nullptr);
+    processorReady_ = false;
     voidParamSet_ = false;
     voidParam_ = nullptr;
     const std::uint32_t modelId = description->textureId;
@@ -166,14 +180,18 @@ void cSC4ModelBasedParticlesEffect::SetDescription(cSC4ParticlesDescription* des
         } else {
             SetModelId(modelId);
         }
-        // Self-lit models (32-bit flag 0) get draw attribute 4; descriptions with the 11-bit flags 8 or 2 also run the
-        // model processor (lighting / deforming the mesh), which is not ported.
-        if (((word >> 2) & 1u) != 0 || ((word >> 8) & 1u) != 0)
-            SC4_UNWIRED("cSC4ModelBasedParticlesEffect::SetDescription: the effects model processor (lighting / deforming the mesh) is not ported");
+        // Self-lit models (32-bit flag 0) get draw attribute 4; descriptions with the 11-bit flags 8 (deform) or 2 (light)
+        // run the model processor on the model's converted copy, its meshes sorted for a view straight down -z.
         if (model_ && (description->flags & 1) != 0) {
             s3d::SC4DrawAttributes attributes;
             attributes.flags = 4;
             model_->SetDrawAttributes(attributes);
+        }
+        if (model_ && (((word >> 2) & 1u) != 0 || ((word >> 8) & 1u) != 0)) {
+            if (((word >> 8) & 1u) != 0) processor_.SetDescription(description);
+            processor_.SetDestFormat(s3d::kModelProcessorDestFormat);
+            processorReady_ = processor_.SetModel(model_);
+            if (processorReady_) processor_.SortMeshes(cS3DVector3{0.0f, 0.0f, -1.0f});
         }
     }
     if (g_host) {
@@ -430,6 +448,103 @@ void cSC4ModelBasedParticlesEffect::RenderActiveParticles(IParticlesDrawContext*
     }
 }
 
+void cSC4EffectsModelProcessor::DeformModel(float time) {
+    if (Normals().empty()) CreateVertexNormals();
+    const cSC4ParticlesDescription* d = description_;
+    if (!d) return;   // port guard
+    float u = time * d->value178;
+    const float v0 = u * d->range17c[1];
+    u = u * d->range17c[0];
+    const float uShift = u - static_cast<float>(MagicFloor(u * 0.125f) << 3);   // 0x00a708d4
+    const float vShift = v0 - static_cast<float>(MagicFloor(v0 * 0.125f) << 3);
+    const auto& arrays = VertexArrays();
+    for (std::size_t mesh = 0; mesh < arrays.size(); ++mesh) {
+        const s3d::cS3DVertexArray* source = arrays[mesh].get();
+        if (!source || static_cast<std::int32_t>(source->format) != nRZSimGL::PackStandardVertexFormat(s3d::kModelProcessorAcceptedFormat))
+            continue;
+        s3d::cS3DVertexArray* converted = ConvertedVertexArray(mesh);
+        if (!converted) continue;   // port guard
+        const std::uint8_t* in = source->data.data();
+        std::uint8_t* out = converted->data.data();
+        for (int i = 0; i < source->count; ++i, in += 0x14, out += 0x18) {
+            float xyz[3], uv[2];
+            std::memcpy(xyz, in, sizeof(xyz));
+            std::memcpy(uv, in + 0xc, sizeof(uv));
+            cS3DVector3 p{xyz[0], xyz[1], xyz[2]};
+            if (!d->waveRows.empty()) WigglePoint(time, d->waveRows, p);
+            const float position[3] = {p.x, p.y, p.z};
+            std::memcpy(out, position, sizeof(position));
+            const float shifted[2] = {uv[0] + uShift, uv[1] + vShift};
+            std::memcpy(out + 0x10, shifted, sizeof(shifted));
+            if (!d->curve190.empty()) {
+                const cS3DVector3& n = Normals()[mesh][static_cast<std::size_t>(i)];
+                const float facing = (n.x * d->vector184[0] + n.y * d->vector184[1] + n.z * d->vector184[2] + 1.0f) * 0.5f;
+                const float sum = Curve(d->curve190, facing) + 49152.0f;   // 0x00a708d8: round(alpha x 256)
+                std::int32_t bits;
+                std::memcpy(&bits, &sum, sizeof(bits));
+                const std::int32_t value = bits - 0x47400000;
+                out[0xf] = static_cast<std::uint8_t>(static_cast<std::uint8_t>(value) - static_cast<std::uint8_t>(value >> 8));
+            }
+        }
+    }
+}
+
+bool cSC4ModelBasedParticlesEffect::ApplyFakePerspective(float depthOffset, const cS3DVector3& direction, const cS3DVector3& eye,
+                                                         const cS3DVector3& right, const cS3DVector3& up, cSC4MBParticle* particle,
+                                                         cS3DVector3& position, float& size) {
+    auto dot = [](const cS3DVector3& a, const cS3DVector3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; };
+    const float depth = dot(position, direction) + depthOffset;
+    size = globalParams_->cameraDistance / depth * size;
+    const cS3DVector3 fromEye{position.x - eye.x, position.y - eye.y, position.z - eye.z};
+    const float across = dot(fromEye, right), upward = dot(fromEye, up);
+    float push = (size - globalParams_->cameraValues[0]) / globalParams_->cameraValues[1];
+    if (push > 0.0f) {   // the bigger it looks, the further it moves out from the view's centre line (at most by size - 1)
+        push = std::min(1.0f, push);   // 0x00a706d8
+        const float out = size - 1.0f;
+        position.x += out * right.x * push * across;
+        position.y += out * right.y * push * across;
+        position.z += out * right.z * push * across;
+        position.x += push * out * up.x * upward;
+        position.y += out * up.y * push * upward;
+        position.z += out * up.z * push * upward;
+    }
+    if (!(std::fabs(size) > depth)) return true;
+    // the camera has caught up with the particle: inside the collision box and moving toward the camera it bounces off
+    const float closing = dot(particle->velocity, direction);
+    const float box = globalParams_->cameraValues[2];
+    if (depth > 0.0f && closing < 0.0f && std::fabs(across) < box && std::fabs(upward) < box) {
+        const float twice = closing + closing;
+        particle->velocity.x -= twice * direction.x;
+        particle->velocity.y -= twice * direction.y;
+        particle->velocity.z -= twice * direction.z;
+        const float kick = globalParams_->cameraValues[3];
+        particle->velocity.x += across * kick * right.x;
+        particle->velocity.y += kick * right.y * across;
+        particle->velocity.z += kick * right.z * across;
+        particle->velocity.x += kick * up.x * upward;
+        particle->velocity.y += kick * up.y * upward;
+        particle->velocity.z += kick * up.z * upward;
+        if (cSC4VisualEffect* hit = g_host ? g_host->CreateVisualEffect("camera_collision") : nullptr) {
+            cS3DTransform at;
+            at.translation[0] = position.x;
+            at.translation[1] = position.y;
+            at.translation[2] = position.z;
+            at.flags |= 1;
+            ++at.changeCounter;
+            hit->SetSourceTransform(at);
+            hit->Start(static_cast<int>(StartTransition()));
+            hit->Release();
+        }
+        return true;
+    }
+    if (particle->slave && particle->slave->IsStarted()) {
+        particle->slave->Stop(static_cast<int>(StopTransition()));
+        particle->slave->Release();
+        particle->slave = nullptr;
+    }
+    return false;
+}
+
 void cSC4ModelBasedParticlesEffect::DrawParticle(cSC4MBParticle* particle, SC4DrawContext* draw) {
     cS3DVector3 position = particle->position;
     if (description_->spinAroundY != 0.0f) {   // turn the particle about the effect's vertical axis by its height
@@ -441,9 +556,16 @@ void cSC4ModelBasedParticlesEffect::DrawParticle(cSC4MBParticle* particle, SC4Dr
         position.z = s * dx + c * dz + position.z;
     }
     const float fraction = particle->age / particle->lifetime;
-    const float size = static_cast<float>(static_cast<double>(particle->size) * kSizeUnit * Curve(description_->sizeCurve, fraction));
-    // (11-bit flag 1, ApplyFakePerspective, is not ported: those particles draw here unchanged.)
-    if (Flag11(1)) SC4_UNWIRED("cSC4ModelBasedParticlesEffect::DrawParticle: ApplyFakePerspective (pull away from the camera, camera_collision effect) is not ported");
+    float size = static_cast<float>(static_cast<double>(particle->size) * kSizeUnit * Curve(description_->sizeCurve, fraction));
+    if (Flag11(1)) {   // the fake perspective (RenderActiveParticles computes the depth offset once per draw)
+        cS3DVector3 eye, direction, right, up;
+        IS4ViewUtilities* view = draw ? draw->ViewUtilities() : nullptr;
+        if (view && globalParams_ && view->GetCameraFrame(eye, direction, right, up) && direction.y != 0.0f) {
+            const float offset = eye.y / direction.y - (direction.x * eye.x + direction.y * eye.y + direction.z * eye.z) +
+                                 globalParams_->cameraDistance;
+            if (!ApplyFakePerspective(offset, direction, eye, right, up, particle, position, size)) return;
+        }
+    }
     cS3DTransform transform;
     ProcessModelParticle(particle, fraction, size, position, transform);
     const cS3DVector3 colour = Curve(description_->colorCurve, fraction);
@@ -483,6 +605,11 @@ void cSC4ModelBasedParticlesEffect::DrawParticle(cSC4MBParticle* particle, SC4Dr
                 frame = f < static_cast<float>(frames) ? RoundDown(f) : frames - 1;
             }
             modelResource_->SelectFrame(model_, std::clamp(frame, 0, frames - 1));
+        } else if (processorReady_) {   // a still model: the processor lights (11-bit flag 2) and deforms (flag 8) it
+            if (Flag11(2)) {
+                if (cISC4LightingManager* lighting = g_host ? g_host->LightingManager() : nullptr) processor_.LightModel(lighting, false);
+            }
+            if (Flag11(8)) processor_.DeformModel(static_cast<float>(timeAccumulator_));
         }
         attributes.shade[0] = red;
         attributes.shade[1] = green;

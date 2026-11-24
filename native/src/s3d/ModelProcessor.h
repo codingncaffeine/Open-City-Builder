@@ -152,6 +152,8 @@ public:
     const std::vector<cRZAutoRefCount<cS3DVertexArray>>& VertexArrays() const { return vertexArrays_; }
     const std::vector<std::vector<std::uint8_t>>& ByteArrays() const { return byteArrays_; }
     const std::vector<std::vector<cS3DVector3>>& Normals() const { return normals_; }
+    // The converted copy the mesh record of `index` holds (what LightModel colours and the effects processor deforms).
+    cS3DVertexArray* ConvertedVertexArray(std::size_t index) const;
     const std::vector<int>& SortedMeshIndices() const { return sortedMeshIndices_; }
 
 private:

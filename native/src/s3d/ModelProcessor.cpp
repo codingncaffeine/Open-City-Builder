@@ -224,6 +224,10 @@ void cS3DModelProcessor::LightModel(sc4::cISC4LightingManager* lighting, bool fl
     }
 }
 
+cS3DVertexArray* cS3DModelProcessor::ConvertedVertexArray(std::size_t index) const {
+    return mesh_ && index < vertexArrays_.size() ? MeshRecordAt(*mesh_, unsigned(index)).vertexArray : nullptr;
+}
+
 void cS3DModelProcessor::CreateVertexNormals() {   // @ 0x1001661bc
     normals_.clear();                            // 0x10016620e frees the inner vectors
     normals_.resize(vertexArrays_.size());       // 0x10016624d

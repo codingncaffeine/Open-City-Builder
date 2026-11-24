@@ -129,6 +129,11 @@ public:
     virtual float WorldUnitsPerViewportUnit() const { return 0.0f; }
     // +0x3e4: the view's centre on the terrain (cSC43DRender::UpdateVisibleTerrainMetrics).
     virtual void GetViewportTerrainCenter(float* out) const { out[0] = out[1] = out[2] = 0.0f; }
+    // +0x3c eye, +0x54 view direction, +0x60 right, +0x6c up (i386 offsets): false when there is no view.
+    virtual bool GetCameraFrame(cS3DVector3& eye, cS3DVector3& direction, cS3DVector3& right, cS3DVector3& up) const {
+        (void)eye; (void)direction; (void)right; (void)up;
+        return false;
+    }
 };
 
 // cSC4LightingManager (unrecovered; draw context +0x68, cSC43DRender +0x178, 0x240 bytes).
