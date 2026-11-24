@@ -249,6 +249,17 @@ bool cSC4EffectsManager::Shutdown() {
     decalEffects_.clear();
     newDecalSlots_.clear();
     freeDecalSlots_.clear();
+    // i386 0x00405980..0x00405a1f: the model-based and geometry-sourced pools are shut down and emptied as well.
+    for (cRZAutoRefCount<cSC4ModelBasedParticlesEffect>& effect : modelEffects_)
+        if (effect) effect->Shutdown();
+    modelEffects_.clear();
+    newModelEffectSlots_.clear();
+    freeModelEffectSlots_.clear();
+    for (cRZAutoRefCount<cSC4GeometrySourcedParticlesEffect>& effect : geometryEffects_)
+        if (effect) effect->Shutdown();
+    geometryEffects_.clear();
+    newGeometrySlots_.clear();
+    freeGeometrySlots_.clear();
     // Quirk: the description tables are only partly cleared (the light table, the camera parameters, the effect
     // bindings and the message triggers survive, as they do in the original).
     collection_.ClearForEffectManagerShutdown();
