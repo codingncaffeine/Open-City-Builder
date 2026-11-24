@@ -26,7 +26,7 @@ struct StubQuery final : IQueryHost {
     IQueryPathView* CreatePathView() override { SC4_UNWIRED("StubQuery::CreatePathView"); return {}; }
     cISC4WinCalloutBox* CreateCalloutBox() override { SC4_UNWIRED("StubQuery::CreateCalloutBox"); return {}; }
     cIGZWin* CreateWindowFromScript(std::uint32_t instance, cIGZWin* parent, std::uint32_t id) override { SC4_UNWIRED("StubQuery::CreateWindowFromScript"); return {}; }
-    void AttachLegendWinProc(cIGZWin* window) override { SC4_UNWIRED("StubQuery::AttachLegendWinProc"); }
+    void AttachLegendWinProc(cIGZWin* window, gz::cIGZWinProc*) override { SC4_UNWIRED("StubQuery::AttachLegendWinProc"); }
     void DetachWinProc(cIGZWin* window) override { SC4_UNWIRED("StubQuery::DetachWinProc"); }
     bool IsKeyDown(std::uint32_t virtualKey) override { SC4_UNWIRED("StubQuery::IsKeyDown"); return {}; }
     bool IsDebugMode() override { SC4_UNWIRED("StubQuery::IsDebugMode"); return {}; }

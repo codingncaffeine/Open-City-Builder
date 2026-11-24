@@ -806,8 +806,21 @@ struct Host final : IViewInputHost, IQueryHost {
         legendInstances.push_back(instance);
         return legendParent;
     }
-    void AttachLegendWinProc(cIGZWin*) override { ++attached; }
-    void DetachWinProc(cIGZWin*) override { ++detached; }
+    // as cGZWinGen::SetWinProc: the window holds a reference on its proc until the proc is replaced
+    void AttachLegendWinProc(cIGZWin* window, gz::cIGZWinProc* proc) override {
+        ++attached;
+        lastLegendProc = proc;
+        if (proc) proc->AddRef();
+        if (gz::cIGZWinProc* old = legendProcs[window]) old->Release();
+        legendProcs[window] = proc;
+    }
+    gz::cIGZWinProc* lastLegendProc = nullptr;
+    std::map<cIGZWin*, gz::cIGZWinProc*> legendProcs;
+    void DetachWinProc(cIGZWin* window) override {
+        ++detached;
+        if (gz::cIGZWinProc* old = legendProcs[window]) old->Release();
+        legendProcs[window] = nullptr;
+    }
     bool IsKeyDown(std::uint32_t key) override {
         for (std::uint32_t k : keys) if (k == key) return true;
         return false;
@@ -1234,15 +1247,31 @@ int main() {
         CHECK(net->Init());
         CHECK(host.legendInstances.size() == 1);   // instance 0xabb0120f
         CHECK(host.attached == 2 && minimised->IsVisible() && !expanded->IsVisible());
+        // i386 0x00208eae: minimising hides the panel (+0x48, our "minimised") and shows the button (+0x4c) at its top right
+        minimised->GZWinMoveTo(300, 10);
         net->SetLegendMinimized(true);
-        CHECK(!minimised->IsVisible() && !expanded->IsVisible());
+        CHECK(!minimised->IsVisible() && expanded->IsVisible());
+        CHECK(expanded->GetL() == minimised->GetR() - expanded->GetW() && expanded->GetT() == 10);
         net->SetLegendMinimized(false);
-        CHECK(minimised->IsVisible() && expanded->IsVisible());
+        CHECK(minimised->IsVisible() && !expanded->IsVisible());
+        // the legend proc is the tool's: its minimise (0xebb91356) and restore (0x4bb92c1f) buttons drive the same switch
+        CHECK(host.lastLegendProc != nullptr);
+        if (host.lastLegendProc) {
+            cGZMessage press{};
+            press.type = kGZMsgCommand;
+            press.param1 = gz::kWinCommandSender;
+            press.param2 = 0xebb91356;
+            host.lastLegendProc->DoWinProcMessage(expanded, press);
+            CHECK(!minimised->IsVisible() && expanded->IsVisible());
+            press.param2 = 0x4bb92c1f;
+            host.lastLegendProc->DoWinProcMessage(expanded, press);
+            CHECK(minimised->IsVisible() && !expanded->IsVisible());
+        }
         CHECK(net->ShouldStack() == false);
         net->Shutdown();
         net->Release();
         host.legendParent = nullptr;
-        // legendParent is a child of the view window now and dies with it (owns both legend children)
+        // the emptied script window was deleted by the tool (the original's view ChildDelete)
     }
 
     // --- M: fire / police / jail / park / occupant-cost rows ------------------------------------------------

@@ -52,11 +52,13 @@
 #include "sc4/ResidentialSimulator.h"
 #include "sc4/TrafficSimulator.h"
 #include "sc4/cSTETerrain.h"
+#include "sc4/WinLocationSaver.h"
 #include "sc4/CoverageRadiusEffectHelper.h"
 #include "rz/cRZKeyboard.h"
 #include "sc4/ViewUtilities.h"
 #include "sc4/ZoneDeveloper.h"
 #include "gz/WinUtils.h"
+#include "gz/WinGen.h"
 #include "s3d/ModelInstance.h"
 #include "sc4/Lot.h"
 #include "sc4/Render3D.h"
@@ -964,11 +966,19 @@ public:
     }
     // PARTIAL: the window location saver runs natively (SL::spWinLocationSaver) but is not asked here; the dialog opens
     // centered over the game window each time.
+    // SL::spWinLocationSaver vslot 0x24 RestoreWindowLocation(dialog, true): where the player last left a dialog of this id.
+    // UNVERIFIED: with no saved place the original leaves the dialog where its script put it; the port centres it (the
+    // native script service does not place top-level dialogs for the window size).
     void RestoreDialogPlace(cIGZWin* dialog) override {
-        SC4_UNWIRED("cSC4ViewInputControlQuery: the query dialog's place is not restored from the window location saver");
+        auto* saver = static_cast<cSLWinLocationSaver*>(SL::spWinLocationSaver);
+        if (saver && saver->RestoreWindowLocation(dialog, true)) return;
         WinMgr* manager = ActiveWinMgr();
         cIGZWin* main = manager ? manager->GetMainWindow() : nullptr;
         if (main) dialog->GZWinMoveTo((main->GetW() - dialog->GetW()) / 2, (main->GetH() - dialog->GetH()) / 2);
+    }
+    // vslot 0x14 SaveWindowLocation(dialog) after the modal loop
+    void SaveDialogPlace(cIGZWin* dialog) override {
+        if (auto* saver = static_cast<cSLWinLocationSaver*>(SL::spWinLocationSaver)) saver->SaveWindowLocation(dialog);
     }
     void CloseDialog(cIGZWin* dialog) override {
         WinMgr* manager = ActiveWinMgr();
@@ -1003,8 +1013,14 @@ public:
         if (Trace()) std::fprintf(stderr, "query: script window %08x -> %p\n", instance, static_cast<void*>(window));
         return window;
     }
-    void AttachLegendWinProc(cIGZWin*) override { SC4_UNWIRED("cSC4ViewInputControlQuery: the legend window proc is not attached"); }
-    void DetachWinProc(cIGZWin*) override {}
+    void AttachLegendWinProc(cIGZWin* window, gz::cIGZWinProc* proc) override { SetProc(window, proc); }
+    void DetachWinProc(cIGZWin* window) override { SetProc(window, nullptr); }
+    static void SetProc(cIGZWin* window, gz::cIGZWinProc* proc) {
+        void* raw = nullptr;
+        if (!window || !window->QueryInterface(gz::kGZIID_cIGZWinGen, &raw) || !raw) return;
+        static_cast<gz::cIGZWinGen*>(raw)->SetWinProc(proc);
+        static_cast<gz::cIGZWinGen*>(raw)->Release();
+    }
     // RZ::WM() vslot 0x98 GetKeyboard -> vslot 0xc IsKeyDown: the window manager's tracked key state (i386 0x0020b5a6)
     bool IsKeyDown(std::uint32_t key) override {
         WinMgr* manager = ActiveWinMgr();

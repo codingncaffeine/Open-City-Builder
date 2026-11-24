@@ -223,20 +223,24 @@ cIGZWin* cSC4ViewInputControlQuery::ViewWindow() {
     return view ? view->ViewWindow() : nullptr;
 }
 
-// The network-mode legend: one script window with the minimised and the expanded legend children.
+// The network-mode legend (i386 Init 0x00218642): one script window with the two legend children, which move to the view; one
+// cSC4LegendDialogWinProc drives both; the emptied script window is deleted.
 void cSC4ViewInputControlQuery::CreateLegendWindows() {
     IQueryHost* host = QueryHost();
     cIGZWin* viewWin = ViewWindow();
     if (!host || !viewWin) return;
     cIGZWin* created = host->CreateWindowFromScript(kLegendInstance, viewWin, kLegendWindowId);
     if (!created) return;
+    legendView_.tool = this;
+    auto* proc = new cSC4LegendDialogWinProc(&legendView_);
+    proc->AddRef();
     cIGZWin* minimised = ChildAs<cIGZWin>(created, kLegendMinimizedChild, kGZIID_cIGZWin);
     cIGZWin* expanded = ChildAs<cIGZWin>(created, kLegendExpandedChild, kGZIID_cIGZWin);
     if (minimised) {
         created->ChildRemove(minimised);
         viewWin->ChildAdd(minimised);
         minimised->GZWinMoveTo(viewWin->GetW() - 2 - minimised->GetW(), 2);
-        host->AttachLegendWinProc(minimised);
+        host->AttachLegendWinProc(minimised, proc);
         minimised->PullToFront();
         minimised->ShowWindow();
         legendMinimized_ = minimised;
@@ -247,13 +251,22 @@ void cSC4ViewInputControlQuery::CreateLegendWindows() {
         const int x = legendMinimized_ ? legendMinimized_->GetR() - expanded->GetW() : 2;
         const int y = legendMinimized_ ? legendMinimized_->GetT() : 2;
         expanded->GZWinMoveTo(x, y);
-        host->AttachLegendWinProc(expanded);
+        host->AttachLegendWinProc(expanded, proc);
         expanded->PullToFront();
         expanded->HideWindow();
         legendExpanded_ = expanded;
     }
-    viewWin->ChildAdd(created);
+    viewWin->ChildDelete(created);   // view vslot 0x40: the emptied script window goes (the port used to add it back)
+    proc->Release();
     created->Release();
+}
+
+cIGZWin* cSC4ViewInputControlQuery::LegendView::LegendPanel() { return tool ? tool->legendMinimized_ : nullptr; }
+cIGZWin* cSC4ViewInputControlQuery::LegendView::LegendMinimizedPanel() { return tool ? tool->legendExpanded_ : nullptr; }
+void cSC4ViewInputControlQuery::LegendView::UpdatePaths() { if (tool) tool->UpdatePaths(); }
+void cSC4ViewInputControlQuery::LegendView::SetLegendMinimized(bool minimized) { if (tool) tool->SetLegendMinimized(minimized); }
+void cSC4ViewInputControlQuery::LegendView::SetButtonToggleState(cIGZWin* dialog, std::uint32_t buttonId, bool on) {
+    if (dialog) nsGZWinUtils::SetButtonToggleState(dialog, buttonId, on);
 }
 
 // @ 0x1002c2642
@@ -339,16 +352,18 @@ void cSC4ViewInputControlQuery::UpdatePaths() {
 }
 
 // @ 0x1002c1dfe
-void cSC4ViewInputControlQuery::SetLegendMinimized(bool minimized) {
+void cSC4ViewInputControlQuery::SetLegendMinimized(bool minimized) {   // i386 0x00208eae
+    // +0x48 (legendMinimized_) is the panel with the route toggles, +0x4c (legendExpanded_) the small button: minimising
+    // hides the panel and shows the button at the panel's top right; restoring shows the panel and hides the button. (The
+    // port hid both windows on minimise.)
     if (!legendMinimized_ || !legendExpanded_) return;
     if (minimized) {
         legendMinimized_->HideWindow();
-        legendExpanded_->HideWindow();
-        legendMinimized_->GZWinMoveTo(legendExpanded_->GetR() - legendMinimized_->GetW(), legendExpanded_->GetT());
-    } else {
         legendExpanded_->ShowWindow();
         legendExpanded_->GZWinMoveTo(legendMinimized_->GetR() - legendExpanded_->GetW(), legendMinimized_->GetT());
+    } else {
         legendMinimized_->ShowWindow();
+        legendExpanded_->HideWindow();
     }
 }
 

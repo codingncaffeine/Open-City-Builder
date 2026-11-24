@@ -34,6 +34,7 @@
 #include "gz/WinProc.h"
 #include "gz/cIGZMessage2.h"
 #include "rz/cRZCallbackTimer.h"
+#include "sc4/WinProcs.h"
 #include "rz/cRZString.h"
 #include "sc4/ISC4WinCalloutBox.h"
 #include "sc4/Occupant.h"
@@ -489,7 +490,8 @@ public:
     // SC4CreateWindowFromScript(instance, parent, id, iid, out) (@ 0x100039bf7)
     virtual cIGZWin* CreateWindowFromScript(std::uint32_t instance, cIGZWin* parent, std::uint32_t id) = 0;
     // new cSC4QueryDialogWinProc(this) + cIGZWinGen::SetWinProc (vslot 0x38) on the legend windows.
-    virtual void AttachLegendWinProc(cIGZWin* window) = 0;
+    // QueryInterface(0x5386d516) cIGZWinGen, then vslot 0x1c SetWinProc(proc) (the tool's cSC4LegendDialogWinProc).
+    virtual void AttachLegendWinProc(cIGZWin* window, gz::cIGZWinProc* proc) = 0;
     virtual void DetachWinProc(cIGZWin* window) = 0;          // SetWinProc(nullptr)
     virtual bool IsKeyDown(std::uint32_t virtualKey) = 0;     // cIGZKeyboard vslot 0x18
     virtual bool IsDebugMode() = 0;                           // SL::spSC4 vslot 0xa8
@@ -854,6 +856,15 @@ protected:
     cISC4WinCalloutBox* callout_ = nullptr;   // +0x68
     cIGZWin* legendMinimized_ = nullptr;      // +0x70
     cIGZWin* legendExpanded_ = nullptr;       // +0x78
+    // the legend windows' cSC4LegendDialogWinProc (the original's Init makes one for both), and the view of the tool it drives
+    struct LegendView final : ILegendView {
+        cSC4ViewInputControlQuery* tool = nullptr;
+        cIGZWin* LegendPanel() override;             // +0x48 (our legendMinimized_: the panel with the route toggles)
+        cIGZWin* LegendMinimizedPanel() override;    // +0x4c (our legendExpanded_)
+        void UpdatePaths() override;
+        void SetLegendMinimized(bool minimized) override;
+        void SetButtonToggleState(cIGZWin* dialog, std::uint32_t buttonId, bool on) override;
+    } legendView_;
     cRZCallbackTimer tipTimer_;               // +0x80
     bool tipEnabled_ = true;                  // +0xb8
     float pickX_ = 0.0f;                      // +0xbc
