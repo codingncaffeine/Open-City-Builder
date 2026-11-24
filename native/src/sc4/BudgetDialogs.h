@@ -67,6 +67,7 @@ private:
 
 class cSC4BudgetUIIncomeWinProc final : public gz::cIGZWinProc {
 public:
+    cSC4BudgetUIIncomeWinProc();   // @ 0x001aa526: makes its window from script 0xe91a0fa3 and becomes its proc
     cSC4BudgetUIIncomeWinProc(gz::cIGZWinGen* dialog) : dialog_(dialog) {}
     bool QueryInterface(std::uint32_t iid, void** out) override;
     std::uint32_t AddRef() override { return ++refCount_; }
@@ -84,11 +85,15 @@ public:
 
 private:
     std::uint32_t refCount_ = 0;
-    gz::cIGZWinGen* dialog_;                        // +0x28
+    gz::cIGZWinGen* dialog_ = nullptr;                      // +0x28
     cSC4BudgetSimulator* budget_ = nullptr;         // +0x30
     std::int64_t ordinanceMonthly_ = 0, ordinanceYearly_ = 0;   // +0x38, +0x40
     std::int64_t monthly_[3] = {};                  // +0x48, +0x58, +0x68 (residential, commercial, industrial)
     std::int64_t yearly_[3] = {};                   // +0x50, +0x60, +0x70
 };
+
+// cSC4BudgetSimulator::ShowBudgetWindow (i386 0x0018d1ec): the expense or the income budget window; each lives on through
+// the window proc its dialog holds.
+void SC4ShowBudgetWindow(bool expense);
 
 }  // namespace sc4

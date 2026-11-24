@@ -28,7 +28,11 @@
 #include "sc4/Simulator.h"
 #include "sc4/cSC4City.h"
 
+namespace sc4 { void SC4ShowBudgetWindow(bool expense); }   // sc4/BudgetDialogs.cpp
+
 namespace native {
+bool NativeDisasterManagerStart(std::uint32_t id, bool start, int x, int z);   // app/NativeDisasters.cpp
+constexpr std::uint32_t kEarthquakeManager = 0x42963812;   // sc4::kDisasterManagerIdEarthquake
 void InstallBudgetStub();   // hosts/StubBudget.cpp
 namespace {
 using namespace sc4;
@@ -174,12 +178,13 @@ struct BudgetServices final : sc4::IBudgetSimServices {
     double RandomDouble() override { static cRZRandom random(0x5eedu); return random.RandomDoubleUniform(); }
     void CityCellSize(float& x, float& z) override {
         sc4::cSC4City* city = HostCity();
-        x = city ? static_cast<float>(city->CellCountX()) : 0.0f;
-        z = city ? static_cast<float>(city->CellCountZ()) : 0.0f;
+        x = city ? city->SizeX() : 0.0f;   // city vslots 0x164 / 0x168 (i386): the city's size in metres
+        z = city ? city->SizeZ() : 0.0f;
     }
-    bool SpawnDisasterAt(int, int) override { return false; }
-    bool HasDisasterLayer() override { return false; }
-    void ShowBudgetDialog(bool) override { SC4_UNWIRED("IBudgetSimServices::ShowBudgetDialog (cSC4BudgetUIExpenseWinProc / IncomeWinProc)"); }
+    // the money cheat's earthquake: disaster layer GetDisasterManager(0x42963812) -> AttemptDisasterStart(x, z)
+    bool SpawnDisasterAt(int x, int z) override { return NativeDisasterManagerStart(kEarthquakeManager, true, x, z); }
+    bool HasDisasterLayer() override { return NativeDisasterManagerStart(kEarthquakeManager, false, 0, 0); }
+    void ShowBudgetDialog(bool expense) override { sc4::SC4ShowBudgetWindow(expense); }
 };
 
 struct BudgetEnvironment final : sc4::IBudgetSimEnvironment {

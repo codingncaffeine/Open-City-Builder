@@ -12,7 +12,7 @@ namespace sc4 {
 namespace {
 IBudgetDialogHost* g_host = nullptr;
 constexpr std::uint32_t kSenderSlider = 0x887113a3, kSenderButton = 0x287259f6, kMessageSpinner = 0x682876c9;
-constexpr std::uint32_t kExpenseScript = 0x691a0fb4, kExpenseWindowId = 0x10000000;
+constexpr std::uint32_t kExpenseScript = 0x691a0fb4, kExpenseWindowId = 0x10000000, kIncomeScript = 0xe91a0fa3;
 constexpr std::uint32_t kDepartmentTable[7][4] = {
     {152604492, 769, 533, 534}, {152604482, 770, 535, 536}, {2727754115u, 771, 537, 544}, {687168159, 772, 545, 546},
     {2299575434u, 773, 547, 548}, {3374436074u, 774, 549, 550}, {3374436075u, 775, 551, 552}};
@@ -33,6 +33,13 @@ void SetAmount(cIGZWin* window, std::uint32_t id, std::int64_t amount) {
 }  // namespace
 
 void SetBudgetDialogHost(IBudgetDialogHost* host) { g_host = host; }
+
+void SC4ShowBudgetWindow(bool expense) {
+    gz::cIGZWinProc* window = expense ? static_cast<gz::cIGZWinProc*>(new cSC4BudgetUIExpenseWinProc())
+                                      : static_cast<gz::cIGZWinProc*>(new cSC4BudgetUIIncomeWinProc());
+    window->AddRef();
+    window->Release();
+}
 
 // ---- expense dialog --------------------------------------------------------------------------------------
 
@@ -253,6 +260,11 @@ void cSC4BudgetUIIncomeWinProc::SetInfoPerTaxType(int taxType) {
     SetFormattedAmountInTextControl(monthlyText, static_cast<std::int64_t>((weighted * rate) / 100.0f));
     SetFormattedAmountInTextControl(yearlyText, static_cast<std::int64_t>(((weighted * rate) / 100.0f) * 12.0f));
     RecalculateTotals();
+}
+
+cSC4BudgetUIIncomeWinProc::cSC4BudgetUIIncomeWinProc() {
+    const cGZPersistResourceKey key{0, kUIScriptGroup, kIncomeScript};
+    if (SC4CreateWindowFromScript(key, nullptr, kExpenseWindowId, gz::kGZIID_cIGZWinGen, reinterpret_cast<void**>(&dialog_))) dialog_->SetWinProc(this);
 }
 
 void cSC4BudgetUIIncomeWinProc::InitDialog() {

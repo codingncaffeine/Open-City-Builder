@@ -600,6 +600,13 @@ sc4::cISC4Occupant* NativeLotMessageBuilding(cIGZUnknown* unknown) {
     if (!building || !building->QueryInterface(sc4::kGZIID_cISC4Occupant, &view)) return nullptr;
     return static_cast<sc4::cISC4Occupant*>(view);
 }
+// disaster layer vslot 0x1c GetDisasterManager(id); with `start`, that manager's AttemptDisasterStart(x, z) (vslot 0x1c)
+bool NativeDisasterManagerStart(std::uint32_t id, bool start, int x, int z) {
+    sc4::cISC4DisasterLayer* layer = Layer();
+    sc4::cISC4DisasterManager* manager = layer ? layer->GetDisasterManager(id) : nullptr;
+    if (!manager) return false;
+    return !start || manager->AttemptDisasterStart(x, z);
+}
 // disaster layer -> the fire manager's interface: IgniteCell(x, z, roll on a random lot, false, 0), then SetCause
 void NativeStartRandomFire(int x, int z, bool onRandomLot, int cause) {
     sc4::cISC4DisasterLayer* layer = Layer();
