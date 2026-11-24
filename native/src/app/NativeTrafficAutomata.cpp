@@ -6,6 +6,7 @@
 #include <map>
 #include <memory>
 
+#include "app/NativeAudio.h"
 #include "app/NativeLighting.h"
 #include "app/NativeAutomataViews.h"
 #include "app/NativeDemolition.h"   // CityNeighborsSimulator
@@ -19,6 +20,7 @@
 #include "sc4/PedestrianManager.h"
 #include "sc4/TrafficAutomataManager.h"
 #include "sc4/TrafficAutomaton.h"
+#include "sc4/SCPropertyHelp.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4audio/AEMSEvents.h"
 #include "sc4/TrafficNetworkMap.h"
@@ -132,6 +134,18 @@ public:
     }
     void StopAudioEvent(std::uint32_t event) override {
         if (cISC4AEMSEvents* events = AemsEvents()) events->EndSound(static_cast<cISC4AEMSEvents::AEMSEventType>(event));
+    }
+    void SetAudioWobble(float percentage) override {
+        if (cISC4AEMSEvents* events = AemsEvents()) events->SetParamWobble(sc4::SC4Percentage(percentage));
+    }
+    void PlaySoundAt(std::uint32_t soundId, const cS3DVector3& position) override {   // cSC4AudioSoundManager StartSound + SetSoundPosition
+        if (!SoundSystemAvailable()) return;
+        const std::uint32_t instance = NewSoundInstanceId();
+        PostSoundSystemEvent(0xea451903, soundId, instance);
+        auto coordinate = [](float v) {   // truncated through a 64-bit integer, as SetSoundPosition sends them
+            return (v > -9.2e18f && v < 9.2e18f) ? static_cast<std::uint32_t>(static_cast<std::int32_t>(static_cast<std::int64_t>(v))) : 0u;
+        };
+        PostSoundSystemEvent(0xca45190f, instance, coordinate(position.x), coordinate(position.y), coordinate(position.z));
     }
     static cISC4AEMSEvents* AemsEvents() {   // SL::AEMS(); nothing without an audio event system
         cIGZUnknown* service = SL::AEMS();

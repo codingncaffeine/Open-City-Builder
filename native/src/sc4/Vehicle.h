@@ -296,7 +296,7 @@ public:
                           const tAutomataPlayerDriveParams* params);         // @ 0x1000dffb6
     const tPath* ChoosePathFromKeyArray(cISC4PathInfo* pathInfo, const std::vector<std::uint32_t>& keys,
                                         cS3DVector3& position, std::uint32_t& key, int& index);   // @ 0x1000e0138
-    bool ChooseNewPlayerDriveDestination(cS3DVector3& position);             // @ 0x1000e0228
+    virtual bool ChooseNewPlayerDriveDestination(cS3DVector3& position);     // @ 0x1000e0228 (i386 vslot 0x330)
     void UpdateAfterDamage(tAutomataStatePlayerDrive* state, const tAutomataPlayerDriveParams* params);   // @ 0x1000e03f4
     // Pure geometry (the same three helpers the collision paths use).
     int LineIntersectsSphere(const cS3DVector3& a, const cS3DVector3& b, const cS3DVector3& centre, float radius,

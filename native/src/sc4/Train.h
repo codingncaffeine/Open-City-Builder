@@ -17,17 +17,20 @@
 //                 +0x2f4 cISC4NetworkOccupant* the network occupant there, counted
 //                 +0x2f8 u32         the path key there
 //                 +0x2fc float       seconds it has stood still
-//                 +0x300 float       the player-drive derail amount (NOT recovered: see the player-drive list below)
-//                 +0x304 bool        (written by Init only)
+//                 +0x300 float       the player-drive derail timer (milliseconds over the top speed)
+//                 +0x304 bool        derailing (set with the timer; Init clears it)
 //
 // Records: the train car is u16 2 + the vehicle record. The train is u16 2 + the train car record, u32 n + n car refs (read
 // with iid 0x4a416254, null refs dropped), u32 desired cars, the appear place, a ref to its occupant (iid 0xa821ef94) and its
 // path key. The mass-transit train is u16 1 + the train record.
 //
-// NOT recovered (the player drives a train only in the U-Drive-It missions): cSC4Train::DoPlayerDriveTick (0x00396432),
-// ChooseNewPlayerDriveDestination (0x003971d6), PlayerDriveCheckForDerail (0x00394abe), TranslatePlayerDriveCommands
-// (0x00394ce4) and the derail wobble at the end of DoAnimationTick. A train car entering the collide state also tells the
-// state's accident object which occupants crashed (slot 0x34 with 0x10 / 0x11); the port's accident has no such call.
+// The player drives a train only in the U-Drive-It missions: DoPlayerDriveTick (0x00396432) eases the speed towards the
+// throttle, runs the engine along the track (ChooseNewPlayerDriveDestination at the end of a piece, the switched junction
+// path first), lets drive command 9 throw the next junction ahead, and past its top speed starts the derail timer
+// (+0x300): the speed bounces, the wobble sound rises and the cars rock (end of DoAnimationTick); PlayerDriveCheckForDerail
+// wrecks the train when the timer runs out or the fifth car turns away from the engine. A train car entering the collide
+// state also tells the state's accident object which occupants crashed (slot 0x34 with 0x10 / 0x11); the port's accident
+// has no such call.
 #pragma once
 #include <cstdint>
 #include <vector>
@@ -58,6 +61,7 @@ constexpr std::uint32_t kMassTransitStationSfx = 0x0c16dc50;    // the state's s
 constexpr float kTrainCollideMilliseconds = 20000.0f;           // 0x469c4000
 constexpr float kTrainCarWreckMilliseconds = 10000.0f;          // 0x00a70824
 constexpr float kTrainStandStillSeconds = 10.0f;                // 0x00a707d4
+constexpr std::uint32_t kTrainJunctionSwitchSound = 0x8be8d9ac;  // DoPlayerDriveTick: a junction thrown by drive command 9
 
 class cSC4Train;
 
@@ -110,11 +114,12 @@ public:
     std::uint32_t GetGZCLSID() const override { return kTrainGZCLSID; }      // @ 0x0074bdf0
     cSC4Automaton* FindDrivingAutomaton() override { return this; }          // @ 0x00393398
     bool HandleCollision(cSC4Automaton* other, const cS3DVector3& point) override;   // @ 0x00393a4a
-    bool DoAnimationTick(std::uint32_t unknown, float milliseconds) override;   // @ 0x00394646 (PARTIAL: no derail wobble)
+    bool DoAnimationTick(std::uint32_t unknown, float milliseconds) override;   // @ 0x00394646
     bool ShouldCollide(cSC4Automaton* other) const override;                 // @ 0x003933dc
     bool HandleEnterState(tAutomataState* state) override;                   // @ 0x0039499e
     bool HandleExitState(const tAutomataState* state) override;              // @ 0x0039355a
-    bool DoPlayerDriveTick(float) override { return false; }                 // 0x00396432 NOT recovered (see the header note)
+    bool DoPlayerDriveTick(float milliseconds) override;                     // @ 0x00396432
+    bool TranslatePlayerDriveCommands(tAutomataStatePlayerDrive* state, float milliseconds) override;   // @ 0x00394ce4
     float GetSpeedModifier() const override;                                 // @ 0x00393444
     bool DoPathTick(float milliseconds) override;                            // @ 0x00395654
     bool StartTrip(ITrafficAutomatonOccupant* occupant, std::uint32_t key, bool param3) override;   // @ 0x00395f54
@@ -132,6 +137,9 @@ public:
     virtual void TickFollowingCars(float milliseconds);                      // 0x334 @ 0x00394da6
     virtual bool AddCarAtEnd();                                              // 0x338 @ 0x00397524
 
+    bool ChooseNewPlayerDriveDestination(cS3DVector3& orientation) override;   // 0x330 @ 0x003971d6
+    void PlayerDriveCheckForDerail();                                        // @ 0x00394abe
+
     cSC4TrainCar* GetTailCar();                                              // @ 0x003938a6
     void MarkTrainInCell(const tLookaheadNode& node, bool mark);             // @ 0x00393618
 
@@ -141,6 +149,9 @@ public:
     ITrafficAutomatonOccupant* TailOccupant() const { return tailOccupant_; }
     std::uint32_t TailPathKey() const { return tailPathKey_; }
     float StandStillSeconds() const { return standStill_; }
+    float DerailMilliseconds() const { return derail_; }
+    bool Derailing() const { return flag304_; }
+    void SetDerail(float milliseconds, bool derailing) { derail_ = milliseconds; flag304_ = derailing; }
 
 protected:
     std::uint32_t desiredCars_ = 0;                                          // +0x2d4

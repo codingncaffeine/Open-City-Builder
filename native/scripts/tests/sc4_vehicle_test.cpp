@@ -174,7 +174,9 @@ struct FakeModel final : IAutomatonModel {
         maxXyz[0] = 2.0f; maxXyz[1] = 1.5f; maxXyz[2] = 1.0f;
     }
     void GetTransform(cS3DTransform& out) override { out = cS3DTransform{}; }
-    void SetTransform(const cS3DTransform&) override {}
+    void SetTransform(const cS3DTransform& t) override { lastSet = t; ++transformSets; }
+    cS3DTransform lastSet;
+    int transformSets = 0;
     void SetOpacity(float opacity, bool translucent) override {
         ++opacityCalls;
         lastOpacity = opacity;
@@ -651,6 +653,7 @@ void TestTrailerVehicle() {
 struct TestEngine final : cSC4Train {
     using cSC4Train::cSC4Train;
     void SetRadiusForTest(float radius) { radius_ = radius; }
+    void AddCarForTest(cSC4TrainCar* car) { car->AddRef(); cars_.push_back(car); }
 };
 struct TestMassTransit final : cSC4MassTransitTrain {
     using cSC4MassTransitTrain::cSC4MassTransitTrain;
@@ -658,7 +661,139 @@ struct TestMassTransit final : cSC4MassTransitTrain {
 struct TestRailCar final : cSC4TrainCar {
     using cSC4TrainCar::cSC4TrainCar;
     void SetRadiusForTest(float radius) { radius_ = radius; }
+    void AddModelForTest(IAutomatonModel* model) { models_.push_back(model); }
 };
+// The driven train (i386 0x00394ce4 TranslatePlayerDriveCommands, 0x00396432 DoPlayerDriveTick, 0x00394abe
+// PlayerDriveCheckForDerail): the throttle, the derail timer past the top speed, the braking clamp and the wreck.
+void TestTrainPlayerDrive() {
+    World world;
+    tAutomataPlayerDriveParams& params = world.vehicleHost.params;
+    params.SetF(0x08, 1.0f);      // top speed
+    params.SetF(0x10, 0.001f);    // throttle / acceleration
+    params.SetF(0x14, 0.002f);    // brake / deceleration
+    params.SetF(0x4c, 1000.0f);   // derail limit (ms)
+    params.SetF(0x50, 10.0f);     // wobble degrees
+    params.SetF(0x5c, 100.0f);    // damage limit
+    auto* engine = new TestEngine(&world.host, &world.automatonHost);
+    engine->AddRef();
+    engine->AddOccupantGroup(kTrainGroupFreightEngine);
+    CHECK(engine->Init());
+
+    tAutomataStatePlayerDrive commands;
+    for (float& h : commands.history) h = -1.0f;
+    commands.history[0] = 0.0f;   // throttle held: +0x10 per second
+    CHECK(engine->TranslatePlayerDriveCommands(&commands, 500.0f));
+    CHECK_NEAR(commands.value38, 0.0005f);
+    commands.history[0] = -1.0f;
+    commands.history[1] = 0.0f;   // brake held: -+0x14 per second
+    CHECK(engine->TranslatePlayerDriveCommands(&commands, 500.0f));
+    CHECK_NEAR(commands.value38, -0.0005f);
+    commands.history[1] = -1.0f;  // neither: cleared
+    CHECK(engine->TranslatePlayerDriveCommands(&commands, 500.0f));
+    CHECK_NEAR(commands.value38, 0.0f);
+    world.vehicleHost.hasGroup = false;
+    CHECK(!engine->TranslatePlayerDriveCommands(&commands, 500.0f));
+    world.vehicleHost.hasGroup = true;
+
+    CHECK(engine->PushState(kStatePlayerDrive, nullptr, -1.0f, false, 0, 0, nullptr));
+    auto* state = static_cast<tAutomataStatePlayerDrive*>(engine->GetState());
+    CHECK(state && state->stateType == kStatePlayerDrive);
+    if (state) {
+        for (float& h : state->history) h = -1.0f;
+        // at the top speed the derail timer runs and the target bounces around 0.9 x top (the fake rolls the low end:
+        // -(16 / 1000) x a tenth of the top speed)
+        engine->SpeedTween() = AutomatonTween{1.0f, 1.0f, 0.0f, 0.0f};
+        state->value38 = 0.0f;
+        state->value3c = 1.0f;
+        CHECK(engine->DoPlayerDriveTick(16.0f));
+        CHECK(engine->GetMarkedForRemove());   // no track to drive on: the end of the path removes it
+        CHECK_NEAR(engine->DerailMilliseconds(), 16.0f);
+        CHECK(engine->Derailing());
+        CHECK_NEAR(state->value3c, 0.9f - 0.0016f);
+        // the brake held on a running timer resets it
+        state->history[1] = 0.0f;
+        engine->SetMarkedForRemove(false);
+        CHECK(engine->DoPlayerDriveTick(16.0f));
+        CHECK_NEAR(engine->DerailMilliseconds(), 0.0f);
+        CHECK(!engine->Derailing());
+        state->history[1] = -1.0f;
+        // below the top speed: easing up by +0x10 per millisecond towards the target
+        params.SetF(0x08, 2.0f);
+        engine->SpeedTween() = AutomatonTween{1.0f, 1.0f, 0.0f, 0.0f};
+        state->value3c = 1.5f;
+        engine->SetMarkedForRemove(false);
+        CHECK(engine->DoPlayerDriveTick(16.0f));
+        CHECK(!engine->Derailing());
+        CHECK_NEAR(engine->SpeedTween().desired, 1.016f);
+        // easing down keeps the original clamp with its bounds swapped: a step that stays above the target drops to 0
+        engine->SpeedTween() = AutomatonTween{1.0f, 1.0f, 0.0f, 0.0f};
+        state->value3c = 0.5f;
+        engine->SetMarkedForRemove(false);
+        CHECK(engine->DoPlayerDriveTick(16.0f));
+        CHECK_NEAR(engine->SpeedTween().desired, 0.0f);
+        // ... and a step past the target stops at the target
+        engine->SpeedTween() = AutomatonTween{1.0f, 1.0f, 0.0f, 0.0f};
+        state->value3c = 0.99f;
+        engine->SetMarkedForRemove(false);
+        CHECK(engine->DoPlayerDriveTick(16.0f));
+        CHECK_NEAR(engine->SpeedTween().desired, 0.99f);
+        // a train damaged past +0x5c does nothing
+        state->damage70 = 101;
+        engine->SetDerail(5.0f, false);
+        engine->SpeedTween() = AutomatonTween{2.0f, 2.0f, 0.0f, 0.0f};
+        engine->SetMarkedForRemove(false);
+        CHECK(engine->DoPlayerDriveTick(16.0f));
+        CHECK_NEAR(engine->DerailMilliseconds(), 5.0f);
+        state->damage70 = 0;
+    }
+
+    // the derail check: nothing without a car; the timer past +0x4c wrecks the train
+    engine->SetDerail(2000.0f, true);
+    engine->PlayerDriveCheckForDerail();
+    CHECK(!engine->CheckAutomataFlag(kAutomataFlagDisabled));
+    auto* car = new TestRailCar(&world.host, &world.automatonHost);
+    car->AddRef();
+    CHECK(car->Init());
+    const float ahead[3] = {1.0f, 0.0f, 0.0f};
+    engine->SetOrientation(ahead);
+    car->SetOrientation(ahead);
+    engine->AddCarForTest(car);
+    engine->SetDerail(500.0f, true);   // under the limit, the car straight behind: no wreck
+    engine->PlayerDriveCheckForDerail();
+    CHECK(!engine->CheckAutomataFlag(kAutomataFlagDisabled) && engine->GetBehavior() != kStateCollide);
+    // the wobble turns the engine and its car while the timer runs (the fake rolls the low end of +-0.5 x 10 degrees)
+    auto* carModel = Own(new FakeModel());
+    car->AddModelForTest(carModel);
+    engine->DoAnimationTick(0, 0.0f);
+    CHECK(carModel->transformSets >= 1);
+    // about z by -(500 / 1000) x 10 degrees: the x axis tilts by sin(5 degrees)
+    CHECK(std::fabs(std::fabs(carModel->lastSet.rotation[0][1]) - 0.0871557f) < 1e-4f);
+    engine->SetDerail(2000.0f, true);
+    engine->PlayerDriveCheckForDerail();
+    CHECK(engine->CheckAutomataFlag(kAutomataFlagDisabled) && engine->GetBehavior() == kStateCollide);
+    // a car turned away from the engine wrecks it one time in ten (the fake's roll of 0.5 does not)
+    auto* other = new TestEngine(&world.host, &world.automatonHost);
+    other->AddRef();
+    other->AddOccupantGroup(kTrainGroupFreightEngine);
+    CHECK(other->Init());
+    other->SetOrientation(ahead);
+    const float back[3] = {-1.0f, 0.0f, 0.0f};
+    auto* turnedCar = new TestRailCar(&world.host, &world.automatonHost);
+    turnedCar->AddRef();
+    CHECK(turnedCar->Init());
+    turnedCar->SetOrientation(back);
+    other->AddCarForTest(turnedCar);
+    other->SetDerail(100.0f, true);
+    other->PlayerDriveCheckForDerail();
+    CHECK(!other->CheckAutomataFlag(kAutomataFlagDisabled));
+    other->Shutdown();
+    other->Release();
+    turnedCar->Release();
+    engine->Shutdown();
+    engine->Release();
+    car->Release();
+}
+
 void TestTrain() {
     World world;
     VehicleTuning& tuning = world.vehicleHost.tuning;
@@ -2387,6 +2522,7 @@ int main() {
     TestPedestrian();
     TestTrailerVehicle();
     TestTrain();
+    TestTrainPlayerDrive();
     TestMayorLimo();
     for (auto& cleanup : FakeCleanups()) cleanup();
 

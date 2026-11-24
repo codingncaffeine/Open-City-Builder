@@ -204,6 +204,10 @@ public:
     // SL::AEMS StartSound / EndSound (i386 slots 0x14 / 0x18), e.g. event 0xe (the tunnel) in SetPath
     virtual void StartAudioEvent(std::uint32_t event) = 0;
     virtual void StopAudioEvent(std::uint32_t event) = 0;
+    // SL::AEMS slot 0x24 SetParamWobble (the driven train's derail sound, 0..1 and beyond)
+    virtual void SetAudioWobble(float percentage) { (void)percentage; }
+    // SFX::SoundManager(): when there is one, StartSound(sound, a new instance id) and SetSoundPosition(id, x, y, z)
+    virtual void PlaySoundAt(std::uint32_t soundId, const cS3DVector3& position) { (void)soundId; (void)position; }
     // cSC4DynamicParticleEffect::InitDynamicParticleSystem (0x1006fe9e8)
     virtual ITrafficParticleSystem* CreateParticleSystem() = 0;
     // SC4ReadGZSerializable(stream, 0xa821ef94, &out, false): the GZCOM-created network occupant (null in a memory stream)

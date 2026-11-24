@@ -1,5 +1,4 @@
 #include "sc4/Train.h"
-#include "platform/Unwired.h"
 
 #include <algorithm>
 #include <cmath>
@@ -34,6 +33,20 @@ bool IsUnset(const cS3DVector3& v) {
     std::memcpy(&y, &yBits, sizeof(y));
     std::memcpy(&z, &zBits, sizeof(z));
     return std::fabs(v.x - kAutomatonUnsetCoordinate) < 0.0001f && std::fabs(v.y - y) < 0.0001f && std::fabs(v.z - z) < 0.0001f;
+}
+
+// DoPlayerDriveTick's step count (0x00396b5e): the float `x + 0.5 + 1.5 * 2^23` read as an integer rounds to nearest even;
+// one less is taken when it equals x, which makes it ceil(x) for small positive x. The result is used unsigned, so a
+// negative speed gives a huge count (the caller caps it at six).
+std::uint32_t PlayerDriveStepCount(float x) {
+    const float magic = x + 0.5f + 12582912.0f;
+    std::int32_t bits = 0;
+    std::memcpy(&bits, &magic, sizeof(bits));
+    const std::int32_t rounded = static_cast<std::int32_t>(static_cast<std::uint32_t>(bits) - 0x4b400000u);
+    const std::int32_t less = static_cast<std::int32_t>(static_cast<std::uint32_t>(bits) - 0x4b400001u);
+    const float lessAsFloat = static_cast<float>(less);
+    const bool equal = !(std::isnan(x) || std::isnan(lessAsFloat)) && x == lessAsFloat;
+    return static_cast<std::uint32_t>(equal ? less : rounded);
 }
 
 }  // namespace
@@ -286,14 +299,310 @@ bool cSC4Train::DoAnimationTick(std::uint32_t unknown, float milliseconds) {
     }
     if (cars_.size() < desiredCars_) AddCarAtEnd();
     if (GetBehavior() != kStateCollide) TickFollowingCars(milliseconds);
-    else SC4_UNWIRED("cSC4Train::DoAnimationTick (0x00394646): derail wobble of a wrecked train (+0x300) not ported");
     if (!CheckAutomataFlag(kTrafficFlagStopped)) {
         standStill_ = 0.0f;
     } else if (0.01f < GetSpeedModifier()) {
         standStill_ = milliseconds * 0.001f + standStill_;
         if (kTrainStandStillSeconds <= standStill_ && Host() && Host()->RandomBelow(2) == 0) Remove(false);
     }
+    // The derail wobble: while the player drives and the derail timer runs (below the params' +0x4c limit), the engine
+    // and every car turn about their own z axis by a random angle within +-(timer / limit) x the params' +0x50 degrees.
+    const tAutomataPlayerDriveParams* params = nullptr;
+    if (FindState(kStatePlayerDrive) && derail_ != 0.0f && vehicleHost_ && vehicleHost_->FindPlayerDriveParams(this, &params) &&
+        params && derail_ < params->F(0x4c)) {
+        const float fraction = derail_ / params->F(0x4c);
+        const float amplitude = 0.017453292f * params->F(0x50);
+        const double high = static_cast<double>(fraction * amplitude);
+        const double low = static_cast<double>(amplitude * -fraction);
+        const cS3DVector3 axis = Vec(0.0f, 0.0f, 1.0f);
+        IAutomatonHost* random = Host();
+        cS3DTransform transform;
+        float angle = random ? static_cast<float>(random->RandomDouble(low, high)) : 0.0f;
+        GetTransform(transform);
+        nS3D::Rotate(transform, axis, angle);
+        SetTransform(transform);
+        for (cSC4TrainCar* car : cars_) {
+            if (!car) continue;
+            angle = random ? static_cast<float>(random->RandomDouble(low, high)) : 0.0f;
+            transform = cS3DTransform{};
+            car->GetTransform(transform);
+            nS3D::Rotate(transform, axis, angle);
+            car->SetTransform(transform);
+        }
+    }
     UpdateGhostModel();
+    return result;
+}
+
+// 0x00394ce4: the base translation, then the throttle: command 0 held accelerates the target by the params' +0x10 per
+// second, command 1 held brakes by +0x14 per second, neither clears it. False without player-drive parameters.
+bool cSC4Train::TranslatePlayerDriveCommands(tAutomataStatePlayerDrive* state, float milliseconds) {
+    cSC4Automaton::TranslatePlayerDriveCommands(state, milliseconds);
+    const float seconds = milliseconds / 1000.0f;
+    const tAutomataPlayerDriveParams* params = nullptr;
+    if (!vehicleHost_ || !vehicleHost_->FindPlayerDriveParams(this, &params) || !params) return false;
+    if (state->history[0] < 0.0f) {
+        if (state->history[1] < 0.0f) state->value38 = 0.0f;
+        else state->value38 = state->value38 - seconds * params->F(0x14);
+    } else {
+        state->value38 = seconds * params->F(0x10) + state->value38;
+    }
+    return true;
+}
+
+// 0x00394abe: only while derailing. The fifth car (or the last, with fewer) turned more than ~87 degrees away from the
+// engine wrecks the train one time in ten; so does the derail timer passing the params' +0x4c limit (the wobble sound
+// is reset first). A wreck is the collision with itself at the origin, the disabled flag and callback event 11.
+void cSC4Train::PlayerDriveCheckForDerail() {
+    if (!flag304_) return;
+    cSC4TrainCar* car = nullptr;
+    int count = 0;
+    for (auto it = cars_.begin(); it != cars_.end(); ++it) {
+        car = *it;
+        if (++count == 5) break;
+    }
+    if (!car) return;
+    const cS3DVector3 origin = Vec(0.0f, 0.0f, 0.0f);
+    if (orientation_.x * car->orientation_.x + orientation_.y * car->orientation_.y + orientation_.z * car->orientation_.z < 0.05f) {
+        const double roll = Host() ? Host()->RandomUnit() : 1.0;
+        if (roll < 0.10000000149011612) {
+            HandleCollision(this, origin);
+            SetAutomataFlag(kAutomataFlagDisabled, true);
+            SendCallbackMessage(kVehicleDamageMessage, 1);
+        }
+    }
+    const tAutomataPlayerDriveParams* params = nullptr;
+    if (derail_ != 0.0f && vehicleHost_ && vehicleHost_->FindPlayerDriveParams(this, &params) && params &&
+        params->F(0x4c) < derail_) {
+        if (trafficHost_) trafficHost_->SetAudioWobble(0.0f);
+        HandleCollision(this, origin);
+        SetAutomataFlag(kAutomataFlagDisabled, true);
+        SendCallbackMessage(kVehicleDamageMessage, 1);
+    }
+}
+
+// 0x003971d6: the track piece after the current one (across the path's exit edge, same path type). The junction's
+// switched path for the entry edge wins when it starts within 2 units of where the current path ends; otherwise a path
+// starting within half a unit of that end leaving towards `orientation`, else the best path from the entry edge. The
+// trip starts on it and the train is marked in that cell and in the one after it.
+bool cSC4Train::ChooseNewPlayerDriveDestination(cS3DVector3& orientation) {
+    cSC4TrafficNetworkMap* map = trafficHost_ ? trafficHost_->TrafficNetworkMap() : nullptr;
+    if (!map) return false;
+    std::uint8_t edge = static_cast<std::uint8_t>(pathKey_ & 0xff);
+    const std::uint8_t entry = static_cast<std::uint8_t>((edge + 2) & 3);
+    const std::uint32_t pathType = (pathKey_ & 0xf000000u) >> 24;
+    TrafficTileInfo* tile = map->GetTileInfoAtNeighborEdge(networkOccupant_, edge, false, pathType);
+    if (!tile || !tile->occupant) return false;   // the original reads the tile's occupant unchecked
+    auto* occupant = static_cast<ITrafficAutomatonOccupant*>(tile->occupant);
+    cISC4PathInfo* pathInfo = occupant->GetPathInfoObject();
+    if (!pathInfo) return false;   // port guard
+    std::uint32_t key = map->GetTrainJunctionPath(occupant, entry);
+    const tPath* path = nullptr;
+    const tPath* junction = (key != 0 && path_) ? pathInfo->GetPath(key, nullptr) : nullptr;
+    if (junction && !junction->points.empty() && !path_->empty() &&
+        Length3(Sub(junction->points.front(), path_->back())) <= 2.0f) {
+        path = pathInfo->GetPath(key, nullptr);
+    } else {
+        if (!path_ || path_->empty()) return false;   // port guard: the original reads the current path's end
+        GetEdgeFromVector(occupant, orientation, edge, true);
+        std::vector<std::uint32_t> keys = pathInfo->GetPathsNearStartPoint(pathType, path_->back(), entry, edge, 0.5f);
+        if (!keys.empty()) {
+            key = keys[0];
+            path = pathInfo->GetPath(key, nullptr);
+        } else {
+            path = pathInfo->GetBestPath(pathType, entry, kPathEdgeWildcard, path_->back(), &key, nullptr);
+        }
+    }
+    if (!path) return false;
+    StartTrip(occupant, key, true);
+    std::uint32_t cellX = 0, cellZ = 0;
+    occupant->GetOccupiedCell(cellX, cellZ);
+    map->MarkTrainInCell(this, static_cast<int>(cellX), static_cast<int>(cellZ));
+    TrafficTileInfo* next = map->GetTileInfoAtNeighborEdge(occupant, static_cast<std::uint8_t>(key & 0xff), false, 0);
+    if (next && next->occupant) {
+        next->occupant->GetOccupiedCell(cellX, cellZ);
+        map->MarkTrainInCell(this, static_cast<int>(cellX), static_cast<int>(cellZ));
+    }
+    return true;
+}
+
+// 0x00396432: the player-driven engine.
+//   * Speed (with player-drive parameters; a train damaged past +0x5c does nothing and answers true): the throttle target
+//     (state value3c) integrates value38 within 0..+0x8. At the top speed, or once derailing, the derail timer runs
+//     (unless the brake is held on a running timer, which resets it): the target bounces randomly by up to the timer's
+//     fraction of +0x4c times a tenth of the first train's top speed around 0.9 x the top speed. The wobble sound follows
+//     the timer over half the limit. With the timer at zero the speed eases towards the target by +0x10 per millisecond
+//     up or +0x14 down; going down keeps the original's clamp, whose bounds are the wrong way round: unless the step
+//     passes the target, the speed drops to zero.
+//   * A tap of drive command 9 throws the next junction ahead (within the lookahead count): the first piece where more
+//     than one path leaves the entry edge toggles if it has a switched path and plays the switch sound there.
+//   * Movement: ceil(speed x milliseconds) steps (1..6) of an equal share along the path, the back point one radius
+//     behind; a finished path chooses the next piece or removes the train. The driving state keeps the back point and
+//     heading, and the first collision is resolved and ends the steps.
+//   * The effect and the particle follow the engine; the derail check runs; the actual speed is the distance moved over
+//     the frame.
+bool cSC4Train::DoPlayerDriveTick(float milliseconds) {
+    const cS3DVector3 start = position_;
+    const bool result = cSC4Automaton::DoPlayerDriveTick(milliseconds);
+    if (result) {
+        auto* state = static_cast<tAutomataStatePlayerDrive*>(GetState());
+        if (!state) return result;   // port guard: the original reads the current state unchecked
+        const tAutomataPlayerDriveParams* params = nullptr;
+        if (!vehicleHost_ || !vehicleHost_->FindPlayerDriveParams(this, &params)) params = nullptr;
+        if (params) {
+            if (params->F(0x5c) < static_cast<float>(static_cast<std::uint32_t>(state->damage70))) return true;
+            const float top = params->F(0x8);
+            const float target = milliseconds * state->value38 + state->value3c;
+            state->value3c = 0.0f > target ? 0.0f : std::min(top, target);
+            const float current = GetCurrentSpeed();
+            if (top <= current || flag304_) {
+                if (derail_ > 0.0f && state->history[1] > 0.0f) {
+                    derail_ = 0.0f;
+                    flag304_ = false;
+                    const float eased = milliseconds * state->value38 + top;
+                    state->value3c = 0.0f > eased ? 0.0f : std::min(top, eased);
+                } else {
+                    derail_ = derail_ + milliseconds;
+                    flag304_ = true;
+                    static const float sfMaxDialBounce = 0.1f * top;   // a function static: the first driven train's
+                    const float fraction = derail_ / params->F(0x4c);
+                    const double bounce = Host() ? Host()->RandomDouble(static_cast<double>(sfMaxDialBounce * -fraction),
+                                                                        static_cast<double>(fraction * sfMaxDialBounce))
+                                                 : 0.0;
+                    state->value3c = static_cast<float>(bounce) + (top + top * -0.1f);
+                }
+            } else {
+                derail_ = 0.0f;
+                flag304_ = false;
+            }
+            const float limit = 0.5f * params->F(0x4c);
+            if (trafficHost_) trafficHost_->SetAudioWobble(limit > 0.0f ? derail_ / limit : 0.0f);
+            if (derail_ == 0.0f) {
+                const float now = GetCurrentSpeed();
+                const float wanted = state->value3c;
+                float speed = now;
+                if (wanted > now) {
+                    const float up = milliseconds * params->F(0x10) + now;
+                    speed = 0.0f > up ? 0.0f : (up > wanted ? wanted : up);
+                } else if (now > wanted) {
+                    const float down = now - milliseconds * params->F(0x14);
+                    speed = down < wanted ? wanted : (0.0f < down ? 0.0f : down);
+                }
+                if (speed != speedTween_.desired) {
+                    speedTween_.current = now;
+                    speedTween_.desired = speed;
+                    speedTween_.duration = 0.0f;
+                    speedTween_.elapsed = 0.0f;
+                }
+            }
+        }
+        // Drive command 9 throws the next junction ahead.
+        cISC4PathInfo* pathInfo = pathInfo_;
+        ITrafficAutomatonOccupant* occupant = networkOccupant_;
+        std::uint32_t key = pathKey_;
+        cSC4TrafficNetworkMap* map = trafficHost_ ? trafficHost_->TrafficNetworkMap() : nullptr;
+        if (state->tapped[9] != 0 && map) {
+            for (std::uint32_t step = 0; step < GetDesiredLookaheadCount(); ++step) {
+                if (!pathInfo || !occupant) break;
+                const tPath* path = pathInfo->GetPath(key, nullptr);
+                if (!path || path->points.empty()) break;
+                const cS3DVector3 end = path->points.back();
+                const std::uint8_t edge = static_cast<std::uint8_t>(key & 0xff);
+                TrafficTileInfo* tile = map->GetTileInfoAtNeighborEdge(occupant, edge, false, 0);
+                if (!tile) continue;
+                occupant = static_cast<ITrafficAutomatonOccupant*>(tile->occupant);
+                if (!occupant) break;
+                pathInfo = occupant->GetPathInfoObject();
+                if (!pathInfo) break;   // port guard
+                const std::uint8_t entry = static_cast<std::uint8_t>((edge + 2) & 3);
+                bool thrown = false;
+                bool decided = false;
+                for (; tile; tile = tile->next) {   // the original walks the stacked tiles with the same path information
+                    std::vector<std::uint32_t> keys =
+                        pathInfo->GetPathsNearStartPoint((key & 0xf000000u) >> 24, end, entry, kPathEdgeWildcard, 4.0f);
+                    if (keys.size() > 1) {
+                        if (map->GetTrainJunctionPath(occupant, entry) != 0 && map->ToggleTrainJunction(occupant)) {
+                            if (cISC4Occupant* piece = occupant->AsOccupant()) {
+                                float xyz[3] = {0.0f, 0.0f, 0.0f};
+                                piece->GetPosition(xyz);
+                                trafficHost_->PlaySoundAt(kTrainJunctionSwitchSound, Vec(xyz[0], xyz[1], xyz[2]));
+                            }
+                            thrown = true;
+                        }
+                        key = keys[0];
+                        decided = true;
+                        break;
+                    }
+                    if (keys.size() == 1) {
+                        key = keys[0];
+                        decided = true;
+                        break;
+                    }
+                }
+                if (!decided || thrown) break;
+            }
+        }
+        // The movement steps.
+        cS3DVector3 heading = orientation_;
+        std::uint32_t steps = PlayerDriveStepCount(GetCurrentSpeed() * milliseconds);
+        float stepCount = 0.0f;
+        if (steps == 0) {
+            steps = 1;
+            stepCount = 1.0f;
+        } else if (steps > 6) {
+            steps = 6;
+            stepCount = 6.0f;
+        } else {
+            stepCount = static_cast<float>(steps);
+        }
+        const float share = GetCurrentSpeed();
+        const float stepDistance = share * (milliseconds / stepCount);
+        SetAutomataFlag(kAutomataFlagIgnorePaths, false);
+        for (std::uint32_t step = 0; step < steps; ++step) {
+            cS3DVector3 nose = Vec(0.0f, 0.0f, 0.0f);
+            if (!InterpolateAlongPath(stepDistance, pathPos_, nose, reinterpret_cast<std::int32_t*>(&pathIndex_), path_,
+                                      &pathRemaining_) &&
+                !ChooseNewPlayerDriveDestination(heading)) {
+                Remove(false);
+                return true;
+            }
+            FindBackPosition(nose, backPoint_, radius_, pathHistory_);
+            cS3DVector3 along = Sub(pathPos_, backPoint_);
+            if (Length3(along) < kOrientationEpsilon) {
+                along = prevOrient_;
+                if (IsUnset(along) || Length3(along) < kOrientationEpsilon) return true;
+            }
+            destination_ = Vec(nose.x - along.x * 0.5f, nose.y - along.y * 0.5f, nose.z - along.z * 0.5f);
+            nS3D::Normalize(along);
+            MoveTo(&destination_.x, &along.x);
+            prevOrient_ = along;
+            pathPos_ = nose;
+            SetAutomataFlag(kTrafficFlagStopped, false);
+            state->drivePos54 = backPoint_;
+            state->driveDir60 = along;
+            state->steer48 = along;
+            cS3DVector3 point = Vec(0.0f, 0.0f, 0.0f);
+            float amount = 1.0f;
+            if (DoCollisionCheck(point, amount)) {
+                if (params) ResolveCollision(point, amount, state, params);
+                break;
+            }
+        }
+        if (driveEffect_) {
+            float matrix[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, position_.x, position_.y, position_.z, 1};
+            driveEffect_->SetTransform(matrix);
+        }
+        if (float* particle = particle_ ? particle_->Fields() : nullptr) {
+            particle[0] = position_.x;
+            particle[1] = position_.z;
+            particle[6] = -static_cast<float>(std::atan2(static_cast<double>(orientation_.x), static_cast<double>(orientation_.z)));
+            particle[4] = position_.y + particle[10];
+            particle[2] = 1000.0f * orientation_.x * share;
+            particle[3] = orientation_.z * 1000.0f * share;
+        }
+        PlayerDriveCheckForDerail();
+    }
+    SetActualSpeed(Length3(Sub(position_, start)) / milliseconds);
     return result;
 }
 
