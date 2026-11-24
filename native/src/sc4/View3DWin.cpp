@@ -1,5 +1,6 @@
 // cSC4View3DWin — see View3DWin.h for the layout, the vtable groups, the seams and the quirks.
 #include "platform/CrashLog.h"
+#include "sc4/ViewInputControlCitySituations.h"
 #include "sc4/View3DWin.h"
 #include "platform/Unwired.h"
 #include "platform/PerfLog.h"
@@ -3649,8 +3650,13 @@ void cSC4View3DWin::DoPostCityInit() {
         if (simulatorToPause_) simulatorToPause_->AddRef();
     }
     if (host_) host_->PostCityInit();
+    // i386 0x0052c100: the city situations tool joins the persistent tools (vslot 0x70 AddPersistentViewInputControl).
+    auto* situations = new cSC4ViewInputControlCitySituations();
+    situations->AddRef();
+    AddPersistentViewInputControl(situations);
     UpdateProgressMessage();
     DeleteProgressScreen();
+    situations->Release();
 }
 // 0x100787092 (i386 0x0052272c): record (0xa9c8647c, 0xe9c8647e, 1), versions below 5: the camera control, the 3D render, the
 // model maker and the simulator as references, then the global effect trigger counts (count, then id / count pairs).

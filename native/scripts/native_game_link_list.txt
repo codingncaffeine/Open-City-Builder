@@ -228,6 +228,7 @@ src/app/NativeBoot.cpp
 src/app/NativeAppServices.cpp
 src/app/NativeUi.cpp
 src/sc4/View3DWin.cpp
+src/sc4/ViewInputControlCitySituations.cpp
 src/sc4/ViewInputControlCityScroll.cpp
 src/sc4/WinRegionScreen.cpp
 src/sc4/WinSplashScreen.cpp

@@ -26,6 +26,8 @@
 #include "gz/WinFont.h"
 #include "rz/cRZMessage2Standard.h"
 #include "rz/cRZString.h"
+#include "sc4/DispatchVehicleView.h"
+#include "sc4/ViewInputControlCitySituations.h"
 #include "sc4/Advisor.h"
 #include "sc4/AdvisorSystem.h"
 #include "sc4/AutoHelpers.h"
@@ -505,7 +507,45 @@ cSC4CitySituationManager* Manager() { return HostCitySituations(); }
 
 }  // namespace
 
-void InstallCitySituationManager() { SetCitySituationManagerHost(&g_host); }
+// cSC4ViewInputControlCitySituations' services: the surface view (level 1), the city's situation and dispatch managers, the
+// dispatch manager's vehicle view, and the situation manager's InitiateSituationForOccupant(occupant, none).
+sc4::cSC4DispatchVehicleView* NativeDispatchVehicleView();   // app/NativeDispatchVehicleView.cpp
+namespace {
+class CitySituationsToolHostImpl final : public sc4::ICitySituationsToolHost {
+public:
+    bool InSurfaceView() override { return CityView3DWin() != nullptr && CityViewLevel() == 1; }   // spView3D vslot 0x58
+    bool HasManagers() override { return HostCitySituations() != nullptr; }   // the dispatch view is asked for each time
+    bool HasDispatchView() override { return NativeDispatchVehicleView() != nullptr; }
+    std::uint32_t FindIndicatorHandle(int x, int y) override {
+        sc4::cSC4DispatchVehicleView* v = NativeDispatchVehicleView();
+        return v ? v->FindIndicatorHandle(x, y) : 0u;
+    }
+    void SetActiveIndicator(std::uint32_t handle, std::uint32_t state) override {
+        if (sc4::cSC4DispatchVehicleView* v = NativeDispatchVehicleView()) v->SetActiveIndicator(handle, state);
+    }
+    void LockIndicator(std::uint32_t handle, bool lock) override {
+        if (sc4::cSC4DispatchVehicleView* v = NativeDispatchVehicleView()) v->LockIndicator(handle, lock);
+    }
+    sc4::cISC4Occupant* ActiveIndicatorOccupant() override {
+        sc4::cSC4DispatchVehicleView* v = NativeDispatchVehicleView();
+        return v ? v->GetActiveOccupant() : nullptr;
+    }
+    void InitiateSituation(sc4::cISC4Occupant* occupant) override {
+        if (sc4::cSC4CitySituationManager* manager = HostCitySituations())
+            manager->InitiateSituationForOccupant(SituationViewOfOccupant(occupant), nullptr);
+    }
+    void Listen(cIGZMessageTarget2* target, std::uint32_t type, bool on) override {
+        if (!SL::spMS2) return;
+        if (on) SL::spMS2->AddNotification(target, type);
+        else SL::spMS2->RemoveNotification(target, type);
+    }
+} g_toolHost;
+}  // namespace
+
+void InstallCitySituationManager() {
+    SetCitySituationManagerHost(&g_host);
+    sc4::SetCitySituationsToolHost(&g_toolHost);
+}
 
 // The kit's `situations` verb: the manager's state as the query windows read it (read-only).
 void NativeSituationsReport() {
