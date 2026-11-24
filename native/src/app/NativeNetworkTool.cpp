@@ -742,6 +742,48 @@ sc4::cSC4ViewInputControl* CreateNetworkTool(int type) {
 namespace native {
 sc4::cSC4NetworkTool* NativeManagerNetworkTool(std::uint32_t type);   // NativeNetworkManager.cpp
 
+// Kit verb `netpreview TYPE X1 Z1 X2 Z2` / `netpreview clear`: the drag before the release (PlaceAllSegments without
+// placing): the cell previews and the highlight of what the network would demolish stay up for a screenshot until
+// `netpreview clear`. Prints the valid steps, the cost and the highlighted occupants.
+void NativeNetworkPreview(const std::string& args) {
+    static sc4::cSC4NetworkTool* held = nullptr;
+    auto drop = [] {
+        if (!held) return;
+        held->ClearOccupantHighlights();
+        held->ClearCellPreviews();
+        held->Shutdown();
+        held->Release();
+        held = nullptr;
+    };
+    if (args.rfind("clear", 0) == 0) {
+        drop();
+        std::printf("netpreview: cleared\n");
+        return;
+    }
+    std::uint32_t type = 0;
+    int x1 = 0, z1 = 0, x2 = 0, z2 = 0;
+    if (std::sscanf(args.c_str(), "%u %d %d %d %d", &type, &x1, &z1, &x2, &z2) != 5 || type >= 13 || type == 4 ||
+        type == sc4::kNetworkPowerLine || type == sc4::kNetworkSubway) {
+        std::printf("netpreview: usage netpreview TYPE X1 Z1 X2 Z2 (a road-like type) | clear\n");
+        return;
+    }
+    drop();
+    held = new sc4::cSC4NetworkTool(type);
+    held->AddRef();
+    held->Init();
+    held->Reset();
+    held->SetAnchorPoints({sc4::SC4PointU{static_cast<std::uint32_t>(x1), static_cast<std::uint32_t>(z1)},
+                           sc4::SC4PointU{static_cast<std::uint32_t>(x2), static_cast<std::uint32_t>(z2)}});
+    held->PlaceAllSegments(false, true, false, type);
+    std::printf("netpreview: type %u %d,%d..%d,%d failure %d highlighted %zu\n", type, x1, z1, x2, z2, held->GetFailureState() ? 1 : 0,
+                held->HighlightedOccupants().size());
+    for (sc4::cISC4Occupant* occupant : held->HighlightedOccupants()) {
+        float p[3] = {0, 0, 0};
+        occupant->GetPosition(p);
+        std::printf("netpreview:   %08x at %.0f,%.0f highlight %u\n", occupant->GetType(), p[0], p[2], occupant->GetHighlight());
+    }
+}
+
 // Kit verb `netline TYPE X1 Z1 X2 Z2`: a tool of TYPE made as the drag's view input control makes its own (InputHost
 // CreateNetworkTool + Init; the network manager's shared tool re-solves the demolished pieces of a placement, so it may not
 // be the one placing) lays a line as the drag's release does (cSC4NetworkToolUI::DoPlacement): a dry run with neighbour

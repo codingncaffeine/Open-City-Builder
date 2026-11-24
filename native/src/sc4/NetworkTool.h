@@ -894,6 +894,7 @@ public:
     virtual void UpdateTerrainHeights(std::vector<std::uint32_t>& vertices);
     virtual int UpdateOccupantHighlights(int validSteps);
     static void UpdateHighlights(const std::vector<cISC4Occupant*>& before, const std::vector<cISC4Occupant*>& after);   // cSC4NetworkRoutines @ 0x0022f00a
+    const std::vector<cISC4Occupant*>& HighlightedOccupants() const { return highlighted_; }
     void UpdatePositionChangedPreviewsForPreviousSegments();   // @ 0x00127c4c
     bool SolveMultiTypeSeparation(const SC4PointU& cell, std::uint32_t type, std::uint32_t& piece, std::uint8_t& rotation,
                                   bool& flip);   // @ 0x00145d7c

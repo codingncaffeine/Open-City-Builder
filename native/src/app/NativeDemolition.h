@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace sc4 { class cISC4Occupant; class cSC4Lot; class cSC4NetworkManager; class cSC4NeighborsSimulator; class IDemolitionHost; class IDemolishFilter; class IDemolishable; struct DemolitionRegion; }
@@ -23,6 +24,7 @@ sc4::cISC4Occupant* DemolitionOccupant(sc4::IDemolishable* occupant);
 sc4::cSC4NetworkManager* CityNetworkManager();   // the city's network manager, or null
 sc4::cSC4NeighborsSimulator* CityNeighborsSimulator();   // the city's neighbours simulator, or null
 void NativeLayNetworkLine(std::uint32_t type, int x1, int z1, int x2, int z2);   // kit verb `netline` (NativeNetworkTool.cpp)
+void NativeNetworkPreview(const std::string& args);   // kit verb `netpreview` (NativeNetworkTool.cpp)
 void NativeBridgeReport(int x0, int z0, int x1, int z1);   // kit verb `bridges` (NativeNetworkTool.cpp)
 void NativeOneWayReport(int x0, int z0, int x1, int z1);   // kit verb `oneway` (NativeNetworkTool.cpp)
 void NativeBridgeChooser(std::uint32_t type, int x1, int z1, int x2, int z2, int row);   // kit verb `bridgechoose` (NativeNetworkTool.cpp)

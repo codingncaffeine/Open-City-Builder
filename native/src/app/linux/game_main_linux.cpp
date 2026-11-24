@@ -1445,6 +1445,9 @@ int RunScenario(const std::string& path) {
             int x1 = 0, z1 = 0, x2 = 0, z2 = 0;
             words >> type >> x1 >> z1 >> x2 >> z2;
             native::NativeLayNetworkLine(type, x1, z1, x2, z2);
+        } else if (command == "netpreview") {   // netpreview TYPE X1 Z1 X2 Z2 | clear: the drag's preview and demolition highlight, held
+            std::string rest; std::getline(words >> std::ws, rest);
+            native::NativeNetworkPreview(rest);
         } else if (command == "puzzles") {   // puzzles [ID]: the intersection rules (puzzle pieces), their rings and cells (read-only)
             std::string id;
             words >> id;
