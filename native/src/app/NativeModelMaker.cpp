@@ -2,6 +2,8 @@
 #include "sc4/View3DWin.h"
 #include "sc4/UndergroundOccupant.h"
 #include "app/NativeModelMaker.h"
+#include "app/NativeLighting.h"
+#include "sc4/LightingManager.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -638,6 +640,12 @@ public:
         for (int i = 0; i < 4; ++i) out[i] = TerrainShade(xs[i], zs[i]);
     }
     const sc4::CellTextureBinding* TextureBinding(std::uint32_t instance) override { return LotTextureBinding(instance); }
+    bool LightColor(const cS3DVector3& position, const cS3DVector3& normal, std::uint8_t rgb[3]) override {
+        sc4::cSC4LightingManager* lighting = LightingManager();
+        if (!lighting) return false;
+        lighting->GetColor(position, normal, rgb[0], rgb[1], rgb[2]);
+        return true;
+    }
     bool CellTriangulationFlipped(int x, int z) override {
         sc4::cSTETerrain* terrain = native::Terrain();
         return terrain && x >= 0 && z >= 0 && terrain->IsTriangulationFlipped(static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(z));

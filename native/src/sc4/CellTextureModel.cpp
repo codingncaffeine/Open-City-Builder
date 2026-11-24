@@ -11,6 +11,10 @@
 
 namespace sc4 {
 namespace {
+
+// The draw context's render-property bool 29 (i386 Draw reads properties +0xc [0x1d]): lot textures in combine mode 3 draw
+// in mode 1 at half alpha while it is set.
+constexpr std::uint32_t kCellTextureHalfAlphaProperty = 29;
 ICellTextureModelHost* g_host = nullptr;
 
 // SetupPackedRenderState (0x1000b583a): the three states, packed once.
@@ -106,14 +110,33 @@ void cSC4CellTextureModel::UpdateTextureRotation() {
     }
 }
 
-void cSC4CellTextureModel::SetupVertices(bool updateVertices, bool, void*, void*) {
-    if (!updateVertices) return;
+// 0x00083458: the vertices (a locked lot's quad flat at the lot's altitude, else on the terrain's corners) and bounds; then,
+// asked to and on a locked lot, each corner lit by the lighting manager (straight up) with the spec's alpha. The unlocked
+// cell is drawn through the terrain's own lit quad, so it takes no colours here (the port draws it itself: the terrain's
+// shades).
+void cSC4CellTextureModel::SetupVertices(bool updateVertices, bool updateLighting, void*, void*) {
+    if (updateVertices) SetupVertexPositions();
+    if (updateLighting && onLockedLot_) {
+        const cS3DVector3 up{0.0f, 1.0f, 0.0f};
+        for (Vertex& vertex : vertices_) {
+            std::uint8_t rgb[3] = {0xff, 0xff, 0xff};
+            if (g_host) g_host->LightColor(cS3DVector3{vertex.x, vertex.y, vertex.z}, up, rgb);
+            vertex.rgba[0] = rgb[0];
+            vertex.rgba[1] = rgb[1];
+            vertex.rgba[2] = rgb[2];
+            vertex.rgba[3] = spec_.alpha;
+        }
+    }
+}
+
+const std::uint8_t* cSC4CellTextureModel::VertexColor(int corner) const { return vertices_[corner & 3].rgba; }
+
+void cSC4CellTextureModel::SetupVertexPositions() {
     const int cellX = spec_.cellX, cellZ = spec_.cellZ;
     float altitude = 0;
     float corners[4] = {0, 0, 0, 0};
     onLockedLot_ = g_host && g_host->LockedLotAltitude(cellX, cellZ, altitude);
     if (onLockedLot_) {
-        SC4_UNWIRED("cSC4CellTextureModel::SetupVertices: the lighting manager's coloring of the locked-lot quad is not ported (terrain shade used)");
         std::fill(corners, corners + 4, altitude);
     } else if (g_host) {
         g_host->CellCornerAltitudes(cellX, cellZ, corners);
@@ -127,8 +150,8 @@ void cSC4CellTextureModel::SetupVertices(bool updateVertices, bool, void*, void*
         vertices_[i].x = xs[i];
         vertices_[i].y = corners[i];
         vertices_[i].z = zs[i];
-        // the terrain's light (the lighting manager colours the locked-lot quad in the original), the spec's alpha
-        vertices_[i].rgba[0] = vertices_[i].rgba[1] = vertices_[i].rgba[2] = shades[i];
+        if (onLockedLot_) continue;   // lit in SetupVertices' second half
+        vertices_[i].rgba[0] = vertices_[i].rgba[1] = vertices_[i].rgba[2] = shades[i];   // the terrain's light
         vertices_[i].rgba[3] = spec_.alpha;
     }
     UpdateTextureRotation();
@@ -181,15 +204,23 @@ int cSC4CellTextureModel::Draw(SC4DrawContext* context, bool highlight) {
         context->SetRenderState(States().translucent);
         context->SetTexWrapModes(2, 2, 0);
     } else {
-        // The lot texture combiner: the spec colour (times the light, white here) and alpha through the texture factor,
-        // combined with the texture in the spec's combine mode (mLotTextureCombiner, byte 0 = the mode).
-        SC4_UNWIRED("cSC4CellTextureModel::Draw: the combine color is not multiplied by the draw context's lighting (+0x68 vslot 0x50)");
+        // The lot texture combiner: the spec colour times the global light's red and the alpha through the texture factor,
+        // combined with the texture in the spec's combine mode (mLotTextureCombiner, byte 0 = the mode). Mode 3 with render
+        // property 29 set falls back to mode 1 at half the alpha.
         context->SetRenderState(States().combine);
         context->SetTexWrapModes(2, 2, 0);
         context->SetTexFiltering(1, 1, 0);
-        const cS3DVector4 colour{spec_.red / 255.0f, spec_.green / 255.0f, spec_.blue / 255.0f, spec_.alpha / 255.0f};
+        cS3DVector3 light{1.0f, 1.0f, 1.0f};   // port guard: the original always has the draw context's lighting manager
+        if (IS4LightingManager* lighting = context->LightingManager()) lighting->GetGlobalLight(light);
+        std::uint8_t combineMode = spec_.combineMode, alpha = spec_.alpha;
+        if (combineMode == 3 && context->RenderBool(kCellTextureHalfAlphaProperty)) {
+            combineMode = 1;
+            alpha = static_cast<std::uint8_t>(alpha >> 1);
+        }
+        constexpr float kByte = 0.003921568859368563f;   // 0x00a70794
+        const cS3DVector4 colour{spec_.red * kByte * light.x, spec_.green * kByte * light.x, light.x * spec_.blue * kByte, alpha * kByte};
         context->SetTexColor(colour);
-        const gd::cGDCombiner combiner{0x21020000u | spec_.combineMode, 0x00030001u, 0};
+        const gd::cGDCombiner combiner{0x21020000u | combineMode, 0x00030001u, 0};
         context->SetTexCombiner(combiner, 0);
     }
     if (onLockedLot_) {

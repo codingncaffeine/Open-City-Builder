@@ -254,6 +254,11 @@ public:
     void SetRenderProperties(sc4::cSC4RenderProperties* properties) { renderProperties_ = properties; }   // +0x50
     void SetViewUtilities(IS4ViewUtilities* utilities) { viewUtilities_ = utilities; }   // +0x28
     void SetLightingManager(IS4LightingManager* lighting) { lightingManager_ = lighting; }   // +0x68
+    IS4LightingManager* LightingManager() const { return lightingManager_; }                  // +0x68
+    // The render properties' (+0x50) bool `index`; false without properties or past the table.
+    bool RenderBool(std::uint32_t index) const {
+        return renderProperties_ && renderProperties_->NumBoolProperties() > index && renderProperties_->BoolValue(index);
+    }
     void SetCameraControl(sc4::cSC4CameraControl* control) { cameraControl_ = control; } // +0x60
     void SetRenderer(cISC43DRender* renderer) { renderer_ = renderer; }                 // +0x48
     cISC43DRender* Renderer() const { return renderer_; }

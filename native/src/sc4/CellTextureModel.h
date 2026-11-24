@@ -10,7 +10,7 @@
 // +0xdc the four uv pairs again for the terrain cell draw.
 //
 // Seams: the lot manager / lot developer / terrain / texture binding factory (ICellTextureModelHost). The lighting
-// manager colouring of the locked-lot quad (SetupVertices' second half) is left out: that quad takes the terrain shade.
+// manager colours the locked-lot quad's corners (SetupVertices' second half).
 //
 // Port notes:
 //  * The unlocked path draws through the draw context's terrain cell helper (+0x78 vslot 0x78) in the original, which
@@ -48,6 +48,12 @@ public:
     // The terrain's triangulation of the cell (vertex flags & 0x3000): the terrain cell draw splits the quad along the
     // same diagonal as the ground (cSTETerrainView3D::DrawTexturedTerrainQuad). False: the (x, z)-(x + 1, z + 1) diagonal.
     virtual bool CellTriangulationFlipped(int cellX, int cellZ) { (void)cellX; (void)cellZ; return false; }
+    // SL::spLightingManager vslot 0xc0 GetColor(position, normal, r, g, b): the lit colour of a locked lot's corner.
+    // False without a lighting manager.
+    virtual bool LightColor(const cS3DVector3& position, const cS3DVector3& normal, std::uint8_t rgb[3]) {
+        (void)position; (void)normal; (void)rgb;
+        return false;
+    }
     // SL::spTextureBindingFactory vslot 0x20 with {0x7ab50e44, 0x0986135e, instance}; null when missing. Not owned.
     virtual const CellTextureBinding* TextureBinding(std::uint32_t instance) = 0;
 };
@@ -75,9 +81,12 @@ public:
     // ILotCellTextureModel
     void UpdateTextures(int zoom, const LotBaseTextureSpecification& spec) override;   // @ 0x1000b5968
     void SetupVertices(bool updateVertices, bool updateLighting, void* terrain, void* lighting) override;   // @ 0x1000b5b60
+    void SetupVertexPositions();   // SetupVertices' first half (updateVertices)
     sc4::cIS3DModelInstance* ModelInstance() override {
         return reinterpret_cast<sc4::cIS3DModelInstance*>(static_cast<s3d::cIS3DModelInstance*>(this));
     }
+
+    const std::uint8_t* VertexColor(int corner) const;   // the test's view of a corner's rgba
 
 private:
     struct Vertex {   // V3F_C4UB_T2F
