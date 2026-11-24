@@ -20,6 +20,8 @@
 #include "rz/PortMemoryStreams.h"
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/NetworkManager.h"
+#include "sc4/NetworkOccupant.h"
+#include <map>
 #include "sc4/NetworkTool.h"   // the eNetworkType enumerators
 
 static int g_fail = 0;
@@ -335,6 +337,13 @@ public:
     std::uint8_t pipeMarker = 0;
     std::uint8_t pipeConnectionMarker = 0;
 
+    std::map<std::pair<int, int>, cSC4NetworkOccupant*> pieceAt;   // FirstNetworkOccupantAt (one reference handed out)
+    cSC4NetworkOccupant* FirstNetworkOccupantAt(int x, int z, std::uint32_t) override {
+        auto it = pieceAt.find({x, z});
+        if (it == pieceAt.end()) return nullptr;
+        it->second->AddRef();
+        return it->second;
+    }
     cIGZMessageServer2* MessageServer() override { return presentMessages ? &messages : nullptr; }
     bool LanguageFlag() override { return languageFlag; }
     cRZIniFile* OpenNetworkIni() override {
@@ -894,7 +903,42 @@ int main() {
         CHECK(node == nullptr);
         ilist<cISC4Occupant*> autoconnect;
         manager->AutoconnectLotNodes(nullptr, autoconnect);
-        manager->Retrofit();   // PARTIAL: no state to check yet
+        manager->Retrofit();   // nothing queued: nothing to do
+
+        // Retrofit of an old 2x2 intersection (piece 0x02012000 at origin (10, 10), rotation 0): every piece gets the new
+        // base 0x0c008000 + x * 0x100 + z * 0x10 from the intersection's corner, no path override, the "new piece" flag
+        // 0x8000000 without 0x2000000 / 0x4000000, and loses the retrofit property.
+        {
+            std::vector<cSC4NetworkOccupant*> old;
+            for (int dz = 0; dz < 2; ++dz) {
+                for (int dx = 0; dx < 2; ++dx) {
+                    auto* piece = new cSC4NetworkOccupant();
+                    piece->AddRef();
+                    const float x0 = float(10 + dx) * 16.0f, z0 = float(10 + dz) * 16.0f;
+                    const float corners[4][3] = {{x0, 0, z0}, {x0 + 16, 0, z0}, {x0 + 16, 0, z0 + 16}, {x0, 0, z0 + 16}};
+                    piece->Init(corners);
+                    piece->SetNetworkFlag(0x100000 | 0x2000000);
+                    piece->SetComplexPieceOrigin(10, 10);
+                    piece->SetRetrofitFlag(true);
+                    host.pieceAt[{10 + dx, 10 + dz}] = piece;
+                    old.push_back(piece);
+                }
+            }
+            old[0]->SetPathIDOverride(0x02012000);
+            for (cSC4NetworkOccupant* piece : old) manager->AddToRetrofitList(piece);
+            manager->Retrofit();
+            const std::uint32_t expected[4] = {0x0c008000, 0x0c008100, 0x0c008010, 0x0c008110};
+            for (int i = 0; i < 4; ++i) {
+                CHECK(old[i]->PieceId() == expected[i]);
+                CHECK(old[i]->GetPathIDOverride() == 0);
+                CHECK(old[i]->HasNetworkFlag(0x8000000));
+                CHECK(!old[i]->HasNetworkFlag(0x2000000));
+                CHECK(!old[i]->CheckForRetrofit());
+            }
+            CHECK(NetworkManagerTestAccess::Retrofits(*manager) == 0);
+            host.pieceAt.clear();
+            for (cSC4NetworkOccupant* piece : old) piece->Release();
+        }
 
         // The tracked occupant is released by Shutdown.
         manager->Shutdown();
