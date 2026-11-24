@@ -2,6 +2,7 @@
 // picking, and the SetOrGet rows that do not need an unrecovered simulator.
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -656,6 +657,56 @@ struct MsgServer final : cIGZMessageServer2 {
     bool CreateMessage(std::uint32_t, std::uint32_t, void**) override { return false; }
 };
 
+// ---- the debug read-outs ------------------------------------------------------------------------------------
+struct DebugFake final : IQueryDebugReadouts {
+    std::uint8_t intrinsic = 0, total = 0, flammability = 0, tripLength = 0;
+    int landValueType = 0;
+    float altitude = 0.0f, tripScale = 0.0f;
+    bool powered = false, radioactive = false, network = false, lot = false, designate = false;
+    int air = 0, water = 0, garbage = 0;
+    float capacity[6] = {};
+    std::uint16_t density[9][2] = {};
+    std::uint32_t jobs[3] = {};
+    bool consumedOk = false, producedOk = false, recyclingOk = false, watered = false;
+    std::uint32_t consumed = 0, produced = 0, used = 0, waterProduction = 0;
+    std::map<std::uint32_t, std::uint32_t> plantCapacity;   // pollution capacity property -> value (absent: refused)
+    float recycling = 0.0f;
+    struct DevCell { std::uint16_t maxCapacity = 0, capacity = 0; std::int16_t desirability = 0; };
+    std::map<std::uint32_t, DevCell> developers;
+    std::vector<Occupancy> occupancy;
+    bool hasOccupancy = false;
+    std::uint8_t IntrinsicLandValue(int, int) override { return intrinsic; }
+    std::uint8_t LandValue(int, int) override { return total; }
+    int LandValueType(int, int) override { return landValueType; }
+    float Altitude(float, float) override { return altitude; }
+    bool CellPowered(int, int) override { return powered; }
+    void PollutionValues(int, int, int& a, int& w, int& g, bool& r) override { a = air; w = water; g = garbage; r = radioactive; }
+    std::uint8_t Flammability(int, int) override { return flammability; }
+    bool NetworkOccupantAt(int, int) override { return network; }
+    float NetworkCapacity(int type, int, int) override { return capacity[type]; }
+    std::uint16_t EdgeDensity(int, int, int travel, bool reverse) override { return density[travel][reverse ? 1 : 0]; }
+    std::uint8_t TripLength(int, int) override { return tripLength; }
+    float TripScale() override { return tripScale; }
+    bool LotAt(int, int, bool& d, std::uint32_t j[3]) override { d = designate; for (int i = 0; i < 3; ++i) j[i] = jobs[i]; return lot; }
+    bool OccupantPowerConsumed(cISC4Occupant*, std::uint32_t& out) override { out = consumed; return consumedOk; }
+    bool OccupantPowerProduced(cISC4Occupant*, std::uint32_t& c, std::uint32_t& u) override { c = produced; u = used; return producedOk; }
+    bool PollutionCurrentCapacity(std::uint32_t property, cISC4Occupant*, std::uint32_t& out) override {
+        auto it = plantCapacity.find(property);
+        out = it == plantCapacity.end() ? 0 : it->second;
+        return it != plantCapacity.end();
+    }
+    bool RecyclingCurrentCapacity(cISC4Occupant*, float& out) override { out = recycling; return recyclingOk; }
+    bool IsBuildingWatered(cISC4Occupant*) override { return watered; }
+    std::uint32_t WaterProduction(cISC4Occupant*) override { return waterProduction; }
+    bool DeveloperCell(std::uint32_t type, int, int, std::uint16_t& m, std::uint16_t& c, std::int16_t& d) override {
+        auto it = developers.find(type);
+        DevCell cell = it == developers.end() ? DevCell{} : it->second;
+        m = cell.maxCapacity; c = cell.capacity; d = cell.desirability;
+        return it != developers.end();
+    }
+    bool LotOccupancy(int, int, std::vector<Occupancy>& out) override { out = occupancy; return hasOccupancy; }
+};
+
 // ---- host -------------------------------------------------------------------------------------------------
 struct Host final : IViewInputHost, IQueryHost {
     View view;
@@ -757,6 +808,8 @@ struct Host final : IViewInputHost, IQueryHost {
         return false;
     }
     bool IsDebugMode() override { return debug; }
+    DebugFake debugFake;
+    IQueryDebugReadouts* DebugReadouts() override { return &debugFake; }
     void FormatMoneyFloat(double value, cRZString& out) override {
         char buffer[64];
         std::snprintf(buffer, sizeof buffer, "%s%.2f", money.c_str(), value);
@@ -1998,6 +2051,104 @@ int main() {
         host.strings.clear();
         tool->GetTerrainSummaryInfo(terrainTitle, terrainText);
         CHECK(host.strings.size() == 1);   // an unknown zone: only the terrain title
+        tool->Release();
+    }
+
+    // --- the debug read-outs (DescribeCell / Building / Demand / Population, i386 0x00210cc8 / 0x002119c0 / 0x00212134 /
+    // 0x002126ea): the original's lines, word for word ---------------------------------------------------------------
+    {
+        auto* tool = new cSC4ViewInputControlQuery(cSC4ViewInputControlQuery::kQueryBuilding, 250);
+        DebugFake& d = host.debugFake;
+        d = DebugFake{};
+        auto str = [](const cRZString& text) { return std::string(text.ToChar()); };
+        const float position[3] = {24.0f, 0.0f, 40.0f};
+        cRZString text;
+        // a bare cell: zone, land value, altitude, flammability, power, pollution
+        d.intrinsic = 12; d.total = 80; d.landValueType = 2; d.altitude = 271.9f; d.flammability = 7; d.powered = true;
+        d.air = 3; d.water = 4; d.garbage = 5; d.radioactive = true;
+        tool->DescribeCell(2, position, text);
+        CHECK(str(text) == "Zoned: R##\nLand Value 12:80 (Medium)\nAlt: 271 Flam: 7\nPowered\nPollution: Air:3 Water:4 Garbage:5 Rad?:1");
+        // an unknown zone and land value type; unpowered
+        text = cRZString();
+        d.landValueType = 0; d.powered = false; d.radioactive = false;
+        tool->DescribeCell(0x20, position, text);
+        CHECK(str(text) == "Zoned: Unknown\nLand Value 12:80 ()\nAlt: 271 Flam: 7\nUnpowered\nPollution: Air:3 Water:4 Garbage:5 Rad?:0");
+        // a landfill shows its used share (0..1) with a percent sign
+        host.landfill.usage = 1; host.landfill.capacity = 4;
+        text = cRZString();
+        tool->DescribeCell(0xe, position, text);
+        CHECK(str(text).find("Rad?:0Used landfill capacity: 0%\n") != std::string::npos);
+        // a road cell: road capacity with cars + trucks, the travel volumes, a closing space; a lot: trip length and jobs
+        d.network = true;
+        d.capacity[1] = 400.0f;
+        d.density[1][0] = 100; d.density[1][1] = 50;   // cars
+        d.density[4][0] = 50;                          // trucks
+        d.lot = true; d.tripLength = 51; d.tripScale = 10.0f; d.jobs[0] = 1; d.jobs[1] = 2; d.jobs[2] = 3;
+        text = cRZString();
+        tool->DescribeCell(1, position, text);
+        CHECK(str(text).find("Rad?:0 Rd: cap(400) vol(200) cong(0.5) Ca: 150 Tr: 50 Trip length(2.00) Jobs 1:2:3") != std::string::npos);
+        // no trip length yet; a lot with a travel designate shows no jobs
+        d.tripLength = 0; d.designate = true; d.network = false;
+        text = cRZString();
+        tool->DescribeCell(1, position, text);
+        CHECK(str(text).substr(str(text).size() - 17) == "Trip length(n/a) ");
+        // control: the same cell without a lot ends at the pollution line
+        d.lot = false;
+        text = cRZString();
+        tool->DescribeCell(1, position, text);
+        CHECK(str(text).substr(str(text).size() - 6) == "Rad?:0");
+
+        // the building
+        TestOccupant occupant;
+        occupant.profileCapacity = 24;
+        occupant.profile.wealth = 3;
+        d.consumedOk = true; d.consumed = 30;
+        d.producedOk = true; d.produced = 200; d.used = 50;
+        d.plantCapacity[0x48ebd0b1] = 90;   // a waste-to-energy plant, no used-capacity property on this occupant
+        d.recyclingOk = true; d.recycling = 0.256f;
+        text = cRZString();
+        tool->DescribeBuilding(&occupant, text);
+        CHECK(str(text) == "Capacity: 24\nWealth $$$\nPower consumed: 30\nPower produced: 200\nPower capacity used: 25%\n"
+                           "Waste to energy capacity: 90\nRecycling center % reduction: 26%\n");
+        // control: nothing answers -> only the profile lines
+        d = DebugFake{};
+        text = cRZString();
+        tool->DescribeBuilding(&occupant, text);
+        CHECK(str(text) == "Capacity: 24\nWealth $$$\n");
+
+        // demand by the zone's family
+        d.developers[0x1010] = {10, 4, -3};
+        d.developers[0x1020] = {20, 5, 6};
+        d.developers[0x1030] = {30, 6, 7};
+        host.zone = 2;
+        text = cRZString();
+        tool->DescribeDemand(1, 2, text);
+        CHECK(str(text) == "R demand mc$:10, c$:4, d$:-3\nR demand mc$$:20, c$$:5, d$$:6\nR demand mc$$$:30, c$$$:6, d$$$:7\n");
+        host.zone = 5;
+        d.developers[0x3110] = {0, 0, 11};
+        d.developers[0x3330] = {0, 0, 15};
+        text = cRZString();
+        tool->DescribeDemand(1, 2, text);
+        CHECK(str(text) == "Cs demand: d$:11; d$$:0; d$$$:0\nCo demand d$$:0; d$$$:15\n");
+        host.zone = 0;   // control: no zone, no line
+        text = cRZString();
+        tool->DescribeDemand(1, 2, text);
+        CHECK(text.Strlen() == 0);
+
+        // population: occupancy per type with its desirability (0 without room, clamped to 100 %)
+        d.hasOccupancy = true;
+        d.occupancy = {{0x1010, 0.5f, 3}, {0x1020, 0.25f, 0}, {0x9999, 1.0f, 2}};
+        d.developers[0x1010].desirability = 150;
+        d.developers[0x9999] = {0, 0, 40};
+        text = cRZString();
+        tool->DescribePopulation(1, 2, text);
+        CHECK(str(text) == "R$ 50% (100%), R$$ 25% (0%),  100% (40%), \n");
+        d.hasOccupancy = false;   // control: no lot, nothing
+        text = cRZString();
+        tool->DescribePopulation(1, 2, text);
+        CHECK(text.Strlen() == 0);
+        d = DebugFake{};
+        host.zone = 0xff;
         tool->Release();
     }
 

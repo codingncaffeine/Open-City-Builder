@@ -69,6 +69,27 @@ sc4::cSC4GrowthDeveloper* GrowthDeveloperOfType(std::uint32_t type) {
 // The same developer through its interface (for code that cannot include the class header next to its own).
 const sc4::cISC4GrowthDeveloper* GrowthDeveloperInterfaceOfType(std::uint32_t type) { return GrowthDeveloperOfType(type); }
 
+bool GrowthDeveloperCell(std::uint32_t type, int x, int z, std::uint16_t& maxCapacity, std::uint16_t& capacity, std::int16_t& desirability) {
+    maxCapacity = capacity = 0;
+    desirability = 0;
+    sc4::cSC4GrowthDeveloper* developer = GrowthDeveloperOfType(type);
+    if (!developer) return false;
+    auto cell = [&](auto* grid) -> int {
+        if (!grid || x < 0 || z < 0 || !grid->TractIsInBounds(x >> grid->GetTractShift(), z >> grid->GetTractShift())) return 0;
+        return grid->GetCellValue(x, z);
+    };
+    maxCapacity = static_cast<std::uint16_t>(cell(developer->GetMaxCapacityMap()));
+    capacity = static_cast<std::uint16_t>(cell(developer->GetCapacityMap()));
+    desirability = static_cast<std::int16_t>(cell(developer->GetDesirabilityMap()));
+    return true;
+}
+
+bool GrowthDeveloperSubType(std::uint32_t type, std::uint32_t& subType) {
+    sc4::cSC4GrowthDeveloper* developer = GrowthDeveloperOfType(type);
+    subType = developer ? static_cast<std::uint32_t>(developer->GetSubType()) : 0;
+    return developer != nullptr;
+}
+
 namespace {
 // The developer as the query's rating rows read it: the subjective thresholds (vslot 0x78) and the curves.
 class QueryDeveloper final : public sc4::IQueryGrowthDeveloper {

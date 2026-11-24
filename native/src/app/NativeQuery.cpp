@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "app/NativeCatalogUi.h"
+#include "app/NativeCheats.h"
 #include "app/NativeCity.h"
 #include "app/NativeCitySystems.h"
 #include "app/NativeCityView.h"
@@ -51,6 +52,7 @@
 #include "sc4/ResidentialSimulator.h"
 #include "sc4/TrafficSimulator.h"
 #include "sc4/cSTETerrain.h"
+#include "rz/cRZKeyboard.h"
 #include "sc4/ViewUtilities.h"
 #include "sc4/ZoneDeveloper.h"
 #include "gz/WinUtils.h"
@@ -79,6 +81,7 @@ sc4::IFireOccupant* NativeFireStation(sc4::cISC4Occupant* occupant);
 sc4::IPoliceOccupant* NativePoliceStation(sc4::cISC4Occupant* occupant);
 sc4::IResidentialOccupant* NativeResidentialOccupant(cIGZUnknown* building);
 sc4::IPollutionOccupant* NativePollutionOccupantFor(sc4::cISC4Occupant* occupant);
+const sc4::cSC4SimGrid<std::uint8_t>* NativeFlammabilityGrid();   // app/NativeAdvisorFlammability.cpp
 
 void NativeSwitchStoplightStates(cIGZUnknown* object);               // NativeTrafficNetworkMap.cpp
 void NativeFollowAutomaton(cIGZUnknown* automaton);                   // NativeAutomataManagerHost.cpp
@@ -822,6 +825,113 @@ private:
     }
 } g_routes;
 
+// The debug query's read-outs (IQueryDebugReadouts): each one the simulator call the original makes, on the city's own objects.
+struct QueryDebug final : IQueryDebugReadouts {
+    static cSC4LandValueSimulator* LandValue() { return CityAs<cSC4LandValueSimulator>(CityComponent::LandValueSimulator); }
+    static cSC4PollutionSimulator* Pollution() { return QueryPollution::Sim(); }
+    std::uint8_t IntrinsicLandValue(int x, int z) override {
+        cSC4LandValueSimulator* landValue = LandValue();
+        return landValue ? CellOf(landValue->GetIntrinsicLandValueMap(), x, z) : 0;
+    }
+    std::uint8_t LandValue(int x, int z) override { cSC4LandValueSimulator* l = LandValue(); return l ? l->GetLandValue(x, z) : 0; }
+    int LandValueType(int x, int z) override { cSC4LandValueSimulator* l = LandValue(); return l ? l->GetLandValueType(x, z) : 0; }
+    float Altitude(float x, float z) override { return g_routes.Altitude(x, z); }
+    bool CellPowered(int x, int z) override { cSC4PowerSimulator* power = NativePowerSimulator(); return power && power->IsPowered(x, z); }
+    void PollutionValues(int x, int z, int& air, int& water, int& garbage, bool& radioactive) override {
+        air = water = garbage = 0;
+        radioactive = false;
+        cSC4PollutionSimulator* pollution = Pollution();
+        if (!pollution) return;
+        const auto ux = static_cast<unsigned>(x), uz = static_cast<unsigned>(z);
+        pollution->GetAirValue(ux, uz, air);
+        pollution->GetWaterValue(ux, uz, water);
+        pollution->GetGarbageValue(ux, uz, garbage);
+        radioactive = pollution->IsRadioactive(ux, uz);
+    }
+    std::uint8_t Flammability(int x, int z) override { return CellOf(NativeFlammabilityGrid(), x, z); }
+    bool NetworkOccupantAt(int x, int z) override {
+        cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(CityComponent::OccupantManager) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(kGZIID_cISC4OccupantManager, &raw) || !raw) return false;
+        auto* occupants = static_cast<cISC4OccupantManager*>(raw);
+        sc4::cISC4Occupant* found = nullptr;
+        const bool any = occupants->GetFirstOccupantByStandardCityCell(found, x, z, 0xc772bf98u);
+        if (found) found->Release();
+        occupants->Release();
+        return any;
+    }
+    float NetworkCapacity(int type, int x, int z) override { cSC4TrafficSimulator* t = QueryTraffic::Sim(); return t ? t->GetCapacity(type, x, z) : 0.0f; }
+    std::uint16_t EdgeDensity(int x, int z, int travelType, bool reverse) override { return g_routes.EdgeDensity(x, z, travelType, reverse); }
+    std::uint8_t TripLength(int x, int z) override {
+        cSC4TrafficSimulator* traffic = QueryTraffic::Sim();
+        return traffic ? CellOf(traffic->GetTripLengthMap(), x, z) : 0;
+    }
+    float TripScale() override { cSC4TrafficSimulator* t = QueryTraffic::Sim(); return t ? t->GetTripScale() : 0.0f; }
+    bool LotAt(int x, int z, bool& hasTravelDesignate, std::uint32_t jobs[3]) override {
+        cSC4Lot* lot = NativeLotAtCell(x, z, false);
+        hasTravelDesignate = false;
+        jobs[0] = jobs[1] = jobs[2] = 0;
+        if (!lot) return false;
+        hasTravelDesignate = lot->GetTravelDesignate() != nullptr;
+        for (std::uint32_t i = 0; i < 3; ++i) jobs[i] = cSC4TrafficSimulator::GetMaxTripCapacity(&lot->Properties(), i);
+        return true;
+    }
+    bool OccupantPowerConsumed(sc4::cISC4Occupant* occupant, std::uint32_t& out) override {   // power 0x80 (i386 0x0018074a)
+        sc4::cISCPropertyHolder* holder = occupant ? occupant->AsPropertyHolder() : nullptr;
+        sc4::cISCProperty* property = holder ? holder->GetProperty(kPowerConsumed) : nullptr;
+        cIGZVariant* value = property ? property->GetPropertyValue() : nullptr;
+        if (value) out = value->AsUint32();
+        return property != nullptr;
+    }
+    bool OccupantPowerProduced(sc4::cISC4Occupant* occupant, std::uint32_t& capacity, std::uint32_t& used) override {
+        capacity = used = 0;
+        cSC4PowerSimulator* power = NativePowerSimulator();
+        return power && occupant && power->GetOccupantPowerProduced(occupant, capacity, used);
+    }
+    bool PollutionCurrentCapacity(std::uint32_t property, sc4::cISC4Occupant* occupant, std::uint32_t& out) override {
+        out = 0;
+        cSC4PollutionSimulator* pollution = Pollution();
+        IPollutionOccupant* building = pollution ? QueryPollution::Building(occupant) : nullptr;
+        return building && pollution->GetCurrentCapacity(property, building, out);
+    }
+    bool RecyclingCurrentCapacity(sc4::cISC4Occupant* occupant, float& out) override {
+        out = 0.0f;
+        cSC4PollutionSimulator* pollution = Pollution();
+        IPollutionOccupant* building = pollution ? QueryPollution::Building(occupant) : nullptr;
+        return building && pollution->GetRecyclingCenterCurrentCapacity(building, out);
+    }
+    bool IsBuildingWatered(sc4::cISC4Occupant* occupant) override {
+        cSC4PlumbingSimulator* plumbing = NativePlumbingSimulator();
+        return plumbing && plumbing->IsBuildingWatered(occupant);
+    }
+    std::uint32_t WaterProduction(sc4::cISC4Occupant* occupant) override {
+        cSC4PlumbingSimulator* plumbing = NativePlumbingSimulator();
+        return plumbing ? plumbing->GetWaterProduction(occupant) : 0;
+    }
+    bool DeveloperCell(std::uint32_t type, int x, int z, std::uint16_t& maxCapacity, std::uint16_t& capacity,
+                       std::int16_t& desirability) override {
+        // the original dereferences the simulator's answer unguarded; a type without a developer reads zeros
+        return GrowthDeveloperCell(type, x, z, maxCapacity, capacity, desirability);
+    }
+    bool LotOccupancy(int x, int z, std::vector<Occupancy>& out) override {
+        out.clear();
+        cSC4Lot* lot = NativeLotAtCell(x, z, false);
+        if (!lot) return false;
+        std::map<std::uint32_t, float> shares;
+        lot->GetOccupancyByType(shares);
+        for (const auto& [type, share] : shares) {
+            Occupancy entry;
+            entry.type = type;
+            entry.share = share;
+            std::uint32_t subType = 0;
+            if (GrowthDeveloperSubType(type, subType)) entry.available = lot->GetAvailableCapacity(subType, false);
+            out.push_back(entry);
+        }
+        return true;
+    }
+} g_debug;
+
 class Host final : public IQueryHost {
 public:
     IQueryNetworkOccupant* NetworkOccupant(sc4::cISC4Occupant* occupant) override {
@@ -884,8 +994,14 @@ public:
     }
     void AttachLegendWinProc(cIGZWin*) override { SC4_UNWIRED("cSC4ViewInputControlQuery: the legend window proc is not attached"); }
     void DetachWinProc(cIGZWin*) override {}
-    bool IsKeyDown(std::uint32_t) override { return false; }
-    bool IsDebugMode() override { return false; }
+    // RZ::WM() vslot 0x98 GetKeyboard -> vslot 0xc IsKeyDown: the window manager's tracked key state (i386 0x0020b5a6)
+    bool IsKeyDown(std::uint32_t key) override {
+        WinMgr* manager = ActiveWinMgr();
+        auto* keyboard = manager ? dynamic_cast<cRZKeyboard*>(manager->GetKeyboard()) : nullptr;
+        return keyboard && keyboard->IsKeyDown(key);
+    }
+    bool IsDebugMode() override { return native::GameDebugMode(); }   // SL::spSC4: the app's debug functionality flag
+    IQueryDebugReadouts* DebugReadouts() override { return &g_debug; }
     void FormatMoneyFloat(double value, cRZString& out) override { SC4MakeMoneyString(static_cast<std::int64_t>(value), out); }
     void LoadString(std::uint32_t group, std::uint32_t instance, cIGZString& out) override { LoadLocalizedString(group, instance, out); }
     bool LoadExemplarString(cIGZString& out, sc4::cISCPropertyHolder* holder, std::uint32_t property) override {

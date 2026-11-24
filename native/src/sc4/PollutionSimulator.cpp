@@ -573,10 +573,11 @@ void cSC4PollutionSimulator::GetRecyclingCenterMaxCapacity(IPollutionOccupant* o
     if (cSCPropertyHelp::GetPropertyValue(occupant->PropertyHolder(), kPollutionOccRecyclingMax, p)) percentage = p.value;
 }
 
-void cSC4PollutionSimulator::GetRecyclingCenterCurrentCapacity(IPollutionOccupant* occupant, float& percentage) const {
+bool cSC4PollutionSimulator::GetRecyclingCenterCurrentCapacity(IPollutionOccupant* occupant, float& percentage) const {
     std::uint32_t value = 0;
-    if (GetCurrentCapacity(kPollutionOccRecyclingMax, occupant, value)) percentage = static_cast<float>(value) * 0.01f;
-    else percentage = 0.0f;
+    const bool found = GetCurrentCapacity(kPollutionOccRecyclingMax, occupant, value);
+    percentage = found ? static_cast<float>(value) * 0.01f : 0.0f;
+    return found;
 }
 
 void cSC4PollutionSimulator::GetMaxCapacity(std::uint32_t property, IPollutionOccupant* occupant,

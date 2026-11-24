@@ -30,6 +30,10 @@ int NativeTractDecline(void* developer, int tractX, int tractZ, std::uint8_t fla
 // The developer as a COM object (its cISC4GrowthDeveloper view): what the building development simulator's record references.
 cIGZUnknown* GrowthDeveloperObject(void* developer);
 sc4::cSC4GrowthDeveloper* GrowthDeveloperOfType(std::uint32_t type); // the developer of one developer type (or null)
+// The debug query's read-outs of one developer type: its max capacity (0x40), capacity (0x38) and desirability (0x34) maps at a
+// cell, and its subtype (0x18); false when the type has no developer.
+bool GrowthDeveloperCell(std::uint32_t type, int x, int z, std::uint16_t& maxCapacity, std::uint16_t& capacity, std::int16_t& desirability);
+bool GrowthDeveloperSubType(std::uint32_t type, std::uint32_t& subType);
 // cSC4TractDeveloper::Grow for one developer's tract (NativeTractDevelopment.cpp); > 0 when something was built
 bool NativeLotConfigurationsByFilter(std::vector<sc4::cSC4LotConfiguration*>& out, sc4::cISC4LotConfigurationFilter* filter);   // manager vslot 0x48
 int NativeTractGrow(void* developer, int tractX, int tractZ, std::uint8_t style);

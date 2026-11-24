@@ -334,7 +334,7 @@ public:
 
     // per-occupant capacity helpers (all read the occupant's exemplar)
     void GetRecyclingCenterMaxCapacity(IPollutionOccupant* occupant, float& percentage) const;
-    void GetRecyclingCenterCurrentCapacity(IPollutionOccupant* occupant, float& percentage) const;
+    bool GetRecyclingCenterCurrentCapacity(IPollutionOccupant* occupant, float& percentage) const;   // i386 0x0006a1c8
     void GetMaxCapacity(std::uint32_t property, IPollutionOccupant* occupant, std::uint32_t& out) const;
     bool GetCurrentCapacity(std::uint32_t property, IPollutionOccupant* occupant, std::uint32_t& out) const;
     void GetIncineratorCurrentCapacity(IPollutionOccupant* occupant, std::uint32_t& out) const;

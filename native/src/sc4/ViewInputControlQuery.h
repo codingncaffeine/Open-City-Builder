@@ -346,6 +346,45 @@ public:
     virtual std::int64_t GetMaintenanceCost(IQueryLot* lot) = 0;                                          // vslot 0x70
 };
 
+// The debug query's read-outs (shift+control+alt with the debug flag on: DescribeCell / DescribeBuilding / DescribeDemand /
+// DescribePopulation, i386 0x00210cc8 / 0x002119c0 / 0x00212134 / 0x002126ea). Each entry is one call of the original, named
+// after the simulator and slot it makes; a host without a city answers zeros.
+class IQueryDebugReadouts {
+public:
+    virtual ~IQueryDebugReadouts() = default;
+    // SL::spLandValueSim 0x1c GetIntrinsicLandValueMap -> cell value, 0x18 GetLandValue, 0x14 GetLandValueType (1..3)
+    virtual std::uint8_t IntrinsicLandValue(int x, int z) = 0;
+    virtual std::uint8_t LandValue(int x, int z) = 0;
+    virtual int LandValueType(int x, int z) = 0;
+    virtual float Altitude(float x, float z) = 0;                       // SL::spTerrain 0x30 GetAltitude
+    virtual bool CellPowered(int x, int z) = 0;                         // SL::spPowerSim 0x4c GetSupplyValue
+    // SL::spPollutionSim 0x1c / 0x20 / 0x24 GetAir / Water / GarbageValue, 0x40 IsRadioactive
+    virtual void PollutionValues(int x, int z, int& air, int& water, int& garbage, bool& radioactive) = 0;
+    virtual std::uint8_t Flammability(int x, int z) = 0;                // SL::spFlammabilitySim 0x14 grid -> cell value
+    virtual bool NetworkOccupantAt(int x, int z) = 0;                   // occupant manager 0x80 (type 0xc772bf98)
+    virtual float NetworkCapacity(int networkType, int x, int z) = 0;   // SL::spTrafficSim 0x5c GetCapacity
+    virtual std::uint16_t EdgeDensity(int x, int z, int travelType, bool reverse) = 0;   // 0x30 GetTrafficEdgeDensity (+0x20)
+    virtual std::uint8_t TripLength(int x, int z) = 0;                  // 0x34 GetTripLengthMap -> cell value
+    virtual float TripScale() = 0;                                      // 0x38 GetTripScale
+    // the lot at the cell (lot manager 0x14): exists / has a travel designate (lot 0xec) / its max trip capacity per wealth
+    // (traffic 0x50 GetMaxTripCapacity of the lot's property holder, 0..2); false without a lot.
+    virtual bool LotAt(int x, int z, bool& hasTravelDesignate, std::uint32_t jobs[3]) = 0;
+    virtual bool OccupantPowerConsumed(cISC4Occupant* occupant, std::uint32_t& out) = 0;                         // power 0x80
+    virtual bool OccupantPowerProduced(cISC4Occupant* occupant, std::uint32_t& capacity, std::uint32_t& used) = 0;   // power 0x84
+    virtual bool PollutionCurrentCapacity(std::uint32_t property, cISC4Occupant* occupant, std::uint32_t& out) = 0;   // 0xd4
+    virtual bool RecyclingCurrentCapacity(cISC4Occupant* occupant, float& out) = 0;                                 // 0xdc
+    virtual bool IsBuildingWatered(cISC4Occupant* occupant) = 0;           // SL::spPlumbingSim 0x24
+    virtual std::uint32_t WaterProduction(cISC4Occupant* occupant) = 0;    // SL::spPlumbingSim 0x28
+    // SL::spBuildingDevelopmentSim 0x84 GetDeveloper(type): its max capacity (0x40), capacity (0x38) and desirability (0x34)
+    // maps at the cell; false when the type has no developer.
+    virtual bool DeveloperCell(std::uint32_t type, int x, int z, std::uint16_t& maxCapacity, std::uint16_t& capacity,
+                               std::int16_t& desirability) = 0;
+    // the lot at the cell (lot manager 0x14): its occupancy by developer type (0xf8) and, per type, the available capacity
+    // (0xd0) of the type's developer subtype (0x18); false without a lot.
+    struct Occupancy { std::uint32_t type = 0; float share = 0.0f; std::uint16_t available = 0; };
+    virtual bool LotOccupancy(int x, int z, std::vector<Occupancy>& out) = 0;
+};
+
 // Everything else: one adapter implements this for the game, a fake for the test.
 // The route query's data (ShowAllRoutesThatIntersectCityRect / MakeRoutePath): the trip sources, the city geometry, the legend.
 struct QueryRouteSource {
@@ -450,6 +489,7 @@ public:
     virtual void DetachWinProc(cIGZWin* window) = 0;          // SetWinProc(nullptr)
     virtual bool IsKeyDown(std::uint32_t virtualKey) = 0;     // cIGZKeyboard vslot 0x18
     virtual bool IsDebugMode() = 0;                           // SL::spSC4 vslot 0xa8
+    virtual IQueryDebugReadouts* DebugReadouts() { return nullptr; }
     virtual void FormatMoneyFloat(double value, cRZString& out) = 0;   // RZ::LM()->0x128()->0x98
     // SC4LoadString(group, instance, out) @ 0x100120e10; the tool's strings all live in group 0xea5524eb.
     virtual void LoadString(std::uint32_t group, std::uint32_t instance, cIGZString& out) = 0;
@@ -746,6 +786,11 @@ public:
     // @ 0x1002cfb90 a lot's headline sentences keyed by importance
     static void GetLotHeadlines(IQueryLot* lot, std::multimap<int, cRZString>& headlines);
     static std::uint32_t GetBuildingWealth(IQueryLot* lot);   // @ 0x1002cfae0
+    // the debug read-outs the debug tip shows (i386 0x002119c0 / 0x00210cc8 / 0x00212134 / 0x002126ea)
+    void DescribeBuilding(cISC4Occupant* occupant, cRZString& text);
+    void DescribeCell(std::uint32_t zoneType, const float* position, cRZString& text);
+    void DescribeDemand(int x, int z, cRZString& text);
+    void DescribePopulation(int x, int z, cRZString& text);
     void DescribePick(int x, int y, cRZString& line1, cRZString& line2, cRZString& line3, bool detailed);   // @ 0x1002ccd38
     bool DoQueryDialog(cISC4Occupant* occupant);                                              // i386 0x00218ed0
     bool DoZoneBasedQueryDialog(std::uint32_t zoneType, std::uint32_t cellX, std::uint32_t cellZ);   // i386 0x00219306

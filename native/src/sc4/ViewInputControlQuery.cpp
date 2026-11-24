@@ -7,6 +7,7 @@
 #include "sc4/CompressedRouteReader.h"
 #include <initializer_list>
 #include <utility>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -2893,9 +2894,216 @@ void cSC4ViewInputControlQuery::GetBuildingOccupantHeadlines(cISC4Occupant* occu
     }
 }
 
+// ---- the debug read-outs ---------------------------------------------------------------------------------------------
+
+namespace {
+void AppendFormatted(cRZString& text, const char* format, ...) __attribute__((format(printf, 2, 3)));
+void AppendFormatted(cRZString& text, const char* format, ...) {
+    char buffer[512];
+    va_list args;
+    va_start(args, format);
+    std::vsnprintf(buffer, sizeof buffer, format, args);
+    va_end(args);
+    text.AppendString(cRZString(buffer));
+}
+// a property's value as the read-outs take it (property 0x14 -> value 0x18 -> AsUint32 0x124 / AsFloat32 0x144); false without it
+bool PropertyUint32(cISCPropertyHolder* holder, std::uint32_t id, std::uint32_t& out) {
+    cISCProperty* property = holder ? holder->GetProperty(id) : nullptr;
+    cIGZVariant* value = property ? property->GetPropertyValue() : nullptr;
+    if (!value) return false;
+    out = value->AsUint32();
+    return true;
+}
+bool PropertyFloat(cISCPropertyHolder* holder, std::uint32_t id, float& out) {
+    cISCProperty* property = holder ? holder->GetProperty(id) : nullptr;
+    cIGZVariant* value = property ? property->GetPropertyValue() : nullptr;
+    if (!value) return false;
+    out = value->AsFloat32();
+    return true;
+}
+}  // namespace
+
+// i386 0x002119c0: the building's capacity and wealth, its power, the pollution plants' capacities, the recycling reduction,
+// its water use or production and its age degradation, one line each.
+void cSC4ViewInputControlQuery::DescribeBuilding(cISC4Occupant* occupant, cRZString& text) {
+    IQueryHost* host = QueryHost();
+    IQueryDebugReadouts* debug = host ? host->DebugReadouts() : nullptr;
+    if (!occupant || !debug) return;
+    void* raw = nullptr;
+    if (occupant->QueryInterface(kIID_cISC4BuildingOccupant, &raw) && raw) {
+        auto* building = static_cast<cISC4BuildingOccupant*>(raw);
+        const BuildingProfile& profile = building->GetBuildingProfile();
+        if (profile.capacity != 0) AppendFormatted(text, "Capacity: %d\n", static_cast<int>(profile.capacity));
+        if (profile.wealth == 2) text.AppendString(cRZString("Wealth $$\n"));
+        else if (profile.wealth == 3) text.AppendString(cRZString("Wealth $$$\n"));
+        else if (profile.wealth == 1) text.AppendString(cRZString("Wealth $\n"));
+        building->Release();
+    }
+    std::uint32_t consumed = 0;
+    if (debug->OccupantPowerConsumed(occupant, consumed)) AppendFormatted(text, "Power consumed: %d\n", static_cast<int>(consumed));
+    std::uint32_t produced = 0, used = 0;
+    if (debug->OccupantPowerProduced(occupant, produced, used)) {
+        AppendFormatted(text, "Power produced: %d\n", static_cast<int>(produced));
+        if (produced != 0) AppendFormatted(text, "Power capacity used: %d%%\n", static_cast<int>(used * 100u / produced));
+    }
+    cISCPropertyHolder* holder = occupant->AsPropertyHolder();
+    // the incinerator, waste-to-energy and water treatment plants: the current capacity, then the used share of it
+    auto plant = [&](std::uint32_t capacityProperty, std::uint32_t usedProperty, const char* capacityLine, const char* usedLine) {
+        std::uint32_t capacity = 0;
+        if (!debug->PollutionCurrentCapacity(capacityProperty, occupant, capacity)) return false;
+        AppendFormatted(text, capacityLine, static_cast<int>(capacity));
+        std::uint32_t usedValue = 0;
+        if (capacity != 0 && PropertyUint32(holder, usedProperty, usedValue))
+            AppendFormatted(text, usedLine, static_cast<int>(usedValue * 100u / capacity));
+        return true;
+    };
+    plant(0xa8ebcf0c, 0xa8fcdba8, "Incinerator Capacity: %d\n", "Incinerator capacity used: %d%%\n");
+    if (plant(0x48ebd0b1, 0x28fcdbb0, "Waste to energy capacity: %d\n", "Waste to energy capacity used: %d%%\n")) {
+        std::uint32_t maximum = 0;
+        // the original's format is "Max power generated: %d%\n"; its C library prints the stray "%\n" as the newline alone
+        if (holder && cSCPropertyHelp::GetPropertyValue(holder, 0x08fd1613, maximum))
+            AppendFormatted(text, "Max power generated: %d\n", static_cast<int>(maximum));
+    }
+    plant(0xc8ebd131, 0x08fcdb69, "Water treatment capacity: %d\n", "Water treatment capacity used: %d%%\n");
+    float reduction = 0.0f;
+    if (debug->RecyclingCurrentCapacity(occupant, reduction))   // rounded to the nearest percent (the compiled 1.5 * 2^23 trick)
+        AppendFormatted(text, "Recycling center %% reduction: %d%%\n", static_cast<int>(std::nearbyint(reduction * 100.0f)));
+    std::uint32_t water = 0;
+    if (PropertyUint32(holder, 0xc8ed2d84, water) && water != 0) {
+        AppendFormatted(text, "Water consumed: %d", static_cast<int>(water));
+        text.AppendString(cRZString(debug->IsBuildingWatered(occupant) ? " (watered)\n" : " (unwatered)\n"));
+    }
+    std::uint32_t waterCapacity = 0;
+    if (PropertyUint32(holder, 0x88ed3303, waterCapacity) && waterCapacity != 0)
+        AppendFormatted(text, "Water Produced: %d//%d\n", static_cast<int>(debug->WaterProduction(occupant)), static_cast<int>(waterCapacity));
+    float degradation = 0.0f;
+    if (PropertyFloat(holder, 0xc910b4cf, degradation) && degradation > 0.0f)
+        AppendFormatted(text, "Age Degradation: %02.2f%%\n", static_cast<double>(degradation) * 100.0);
+}
+
+// i386 0x00210cc8: the cell's zone, land value, altitude, flammability, power and pollution; a landfill's usage; on a network
+// cell the capacity / volume / congestion per network and the volume per travel type; on a lot its trip length and jobs.
+void cSC4ViewInputControlQuery::DescribeCell(std::uint32_t zoneType, const float* position, cRZString& text) {
+    IQueryHost* host = QueryHost();
+    IQueryDebugReadouts* debug = host ? host->DebugReadouts() : nullptr;
+    if (!debug || !host->City()) return;
+    int x = 0, z = 0;
+    host->City()->PositionToCell(position[0], position[2], x, z);
+    static const char* const kZones[16] = {"None", "R#", "R##", "R###", "C#", "C##", "C###", "Ir", "Il", "Ih",
+                                           "Military", "Airport", "Seaport", "Spaceport", "Landfill", "Plopped Bldg"};
+    const int landValueType = debug->LandValueType(x, z);
+    const char* landValueName = landValueType == 1 ? "Low" : landValueType == 2 ? "Medium" : landValueType == 3 ? "High" : "";
+    int air = 0, water = 0, garbage = 0;
+    bool radioactive = false;
+    debug->PollutionValues(x, z, air, water, garbage, radioactive);
+    cRZString cell;
+    cell.Sprintf("Zoned: %s\nLand Value %d:%d (%s)\nAlt: %d Flam: %d\n%s\nPollution: Air:%d Water:%d Garbage:%d Rad?:%d",
+                 zoneType < 16 ? kZones[zoneType] : "Unknown", debug->IntrinsicLandValue(x, z), debug->LandValue(x, z), landValueName,
+                 static_cast<int>(debug->Altitude(position[0], position[2])), debug->Flammability(x, z),
+                 debug->CellPowered(x, z) ? "Powered" : "Unpowered", air, water, garbage, radioactive ? 1 : 0);
+    if (zoneType == 0xe) {
+        std::uint32_t usage = 0, capacity = 0;
+        if (IQueryLandfillDeveloper* landfill = host->LandfillDeveloper()) landfill->GetLandfillUsage(usage, capacity);
+        // as compiled: the share itself (0..1), printed with a percent sign
+        AppendFormatted(cell, "Used landfill capacity: %.0f%%\n", static_cast<double>(static_cast<float>(usage) / static_cast<float>(capacity)));
+    }
+    if (debug->NetworkOccupantAt(x, z)) {
+        static const char* const kNetString[6] = {"Wk", "Rd", "Rl", "Su", "El", "Mo"};
+        static const char* const kTravelString[9] = {"Wk", "Ca", "Bu", "Pt", "Tr", "Ft", "Su", "El", "Mo"};
+        float capacity[6] = {0.0f};
+        for (int type = 1; type < 6; ++type) capacity[type] = debug->NetworkCapacity(type, x, z);
+        float volume[9] = {};
+        for (int travel = 0; travel < 9; ++travel)
+            volume[travel] = static_cast<float>(debug->EdgeDensity(x & 0xff, z & 0xff, travel, false) +
+                                                debug->EdgeDensity(x & 0xff, z & 0xff, travel, true));
+        // roads carry cars and trucks, rail passengers and freight. DIVERGENCE: the original never fills the monorail entry
+        // (it reads a stale stack word); the port shows 0 there.
+        const float networkVolume[6] = {0.0f, volume[1] + volume[4], volume[3] + volume[5], volume[6], volume[7], 0.0f};
+        for (int n = 0; n < 6; ++n)
+            if (capacity[n] != 0.0f)
+                AppendFormatted(cell, " %s: cap(%.0f) vol(%.0f) cong(%.1f)", kNetString[n], static_cast<double>(capacity[n]),
+                                static_cast<double>(networkVolume[n]), static_cast<double>(networkVolume[n] / capacity[n]));
+        for (int t = 0; t < 9; ++t)
+            if (volume[t] != 0.0f) AppendFormatted(cell, " %s: %.0f", kTravelString[t], static_cast<double>(volume[t]));
+        cell.AppendString(cRZString(" "));
+    }
+    bool travelDesignate = false;
+    std::uint32_t jobs[3] = {};
+    if (debug->LotAt(x, z, travelDesignate, jobs)) {
+        const std::uint8_t tripLength = debug->TripLength(x, z);
+        if (tripLength == 0) cell.AppendString(cRZString("Trip length(n/a) "));
+        else AppendFormatted(cell, "Trip length(%.2f) ", static_cast<double>(static_cast<float>(tripLength) / 255.0f * debug->TripScale()));
+        if (!travelDesignate)
+            AppendFormatted(cell, "Jobs %d:%d:%d", static_cast<int>(jobs[0]), static_cast<int>(jobs[1]), static_cast<int>(jobs[2]));
+    }
+    text.AppendString(cell);
+}
+
+// i386 0x00212134: the growth developers' maps at the cell for the zone's family: max capacity, capacity and desirability per
+// wealth (residential, industrial) or desirability only (commercial service and office).
+void cSC4ViewInputControlQuery::DescribeDemand(int x, int z, cRZString& text) {
+    IQueryHost* host = QueryHost();
+    IQueryDebugReadouts* debug = host ? host->DebugReadouts() : nullptr;
+    if (!debug) return;
+    struct Cell { int maxCapacity = 0, capacity = 0, desirability = 0; };
+    auto read = [&](std::uint32_t type) {
+        std::uint16_t maxCapacity = 0, capacity = 0;
+        std::int16_t desirability = 0;
+        debug->DeveloperCell(type, x, z, maxCapacity, capacity, desirability);
+        return Cell{maxCapacity, capacity, desirability};
+    };
+    cRZString demand;
+    const std::uint32_t zone = host->ZoneTypeAt(x, z);
+    if (zone < 10) {
+        const std::uint32_t bit = 1u << zone;
+        if (bit & 0xe) {
+            const Cell a = read(0x1010), b = read(0x1020), c = read(0x1030);
+            demand.Sprintf("R demand mc$:%d, c$:%d, d$:%d\nR demand mc$$:%d, c$$:%d, d$$:%d\nR demand mc$$$:%d, c$$$:%d, d$$$:%d\n",
+                           a.maxCapacity, a.capacity, a.desirability, b.maxCapacity, b.capacity, b.desirability, c.maxCapacity,
+                           c.capacity, c.desirability);
+        } else if (bit & 0x70) {
+            demand.Sprintf("Cs demand: d$:%d; d$$:%d; d$$$:%d\nCo demand d$$:%d; d$$$:%d\n", read(0x3110).desirability,
+                           read(0x3120).desirability, read(0x3130).desirability, read(0x3320).desirability, read(0x3330).desirability);
+        } else if (bit & 0x380) {
+            const Cell a = read(0x4100), b = read(0x4200), c = read(0x4300), d = read(0x4400);
+            demand.Sprintf("I Demand mc$:%d, c$:%d, d$:%d\nI Demand mc$$d:%d, c$$d:%d, d$$d:%d\nI Demand mc$$m:%d, c$$m:%d, d$$m:%d; "
+                           "mc$$$:%d, c$$$:%d, d$$$:%d\n",
+                           a.maxCapacity, a.capacity, a.desirability, b.maxCapacity, b.capacity, b.desirability, c.maxCapacity,
+                           c.capacity, c.desirability, d.maxCapacity, d.capacity, d.desirability);
+        }
+    }
+    text.AppendString(demand);
+}
+
+// i386 0x002126ea: the lot's occupancy per developer type with the type's desirability at the cell (0 when the lot has no room
+// for that type, clamped to 0..100 %).
+void cSC4ViewInputControlQuery::DescribePopulation(int x, int z, cRZString& text) {
+    IQueryHost* host = QueryHost();
+    IQueryDebugReadouts* debug = host ? host->DebugReadouts() : nullptr;
+    std::vector<IQueryDebugReadouts::Occupancy> occupancy;
+    if (!debug || !debug->LotOccupancy(x, z, occupancy)) return;
+    static const std::pair<std::uint32_t, const char*> kNames[] = {
+        {0x1010, "R$"},   {0x1020, "R$$"},  {0x1030, "R$$$"}, {0x3110, "Cs$"}, {0x3120, "Cs$$"}, {0x3130, "Cs$$$"},
+        {0x3320, "Co$$"}, {0x3330, "Co$$$"}, {0x4100, "Ir"},  {0x4200, "Id"},  {0x4300, "Im"},   {0x4400, "Ih"}};
+    for (const auto& entry : occupancy) {
+        const char* name = "";
+        for (const auto& known : kNames)
+            if (known.first == entry.type) name = known.second;
+        std::uint16_t maxCapacity = 0, capacity = 0;
+        std::int16_t desirability = 0;
+        debug->DeveloperCell(entry.type, x, z, maxCapacity, capacity, desirability);
+        float share = 0.0f;
+        if (entry.available != 0) {
+            const float value = static_cast<float>(desirability) / 100.0f;
+            if (!(value < 0.0f)) share = value <= 1.0f ? value : 1.0f;
+        }
+        AppendFormatted(text, "%s %.0f%% (%.0f%%), ", name, static_cast<double>(100.0f * entry.share), static_cast<double>(share * 100.0f));
+    }
+    text.AppendString(cRZString("\n"));
+}
+
 // i386 0x0021d276 (PC 0x004D5E30, spec city-tools-input.md 8.11.4). The debug query (shift+control+alt with the debug flag) shows
-// the exemplar name over the developer's descriptions instead; the description writers (DescribeBuilding / DescribePopulation /
-// DescribeDemand / DescribeCell) are debug read-outs not ported, so the debug tip carries the name only.
+// the exemplar name over the developer's read-outs of the building, its lot's cell, demand and population instead.
 void cSC4ViewInputControlQuery::GetBuildingOccupantTipInfo(cRZString& title, cRZString& text, std::uint32_t& icon,
                                                            std::uint32_t& meter, float& meterValue) {
     IQueryHost* host = QueryHost();
@@ -2905,7 +3113,16 @@ void cSC4ViewInputControlQuery::GetBuildingOccupantTipInfo(cRZString& title, cRZ
     if (IsDebugQueryEnabled()) {
         icon = 0;
         if (holder) cSCPropertyHelp::GetPropertyValue(holder, 0x20, title);
-        SC4_UNWIRED("cSC4ViewInputControlQuery::GetBuildingOccupantTipInfo: debug descriptions (DescribeBuilding / Population / Demand / Cell) not ported");
+        DescribeBuilding(occupant_, text);
+        if (lot && host->City()) {
+            float center[3] = {0.0f, 0.0f, 0.0f};
+            lot->GetCenter(center);
+            int cellX = 0, cellZ = 0;
+            host->City()->PositionToCell(center[0], center[2], cellX, cellZ);
+            DescribePopulation(cellX, cellZ, text);
+            DescribeDemand(cellX, cellZ, text);
+            DescribeCell(host->ZoneTypeAt(cellX, cellZ), center, text);
+        }
         return;
     }
     cRZString name;
