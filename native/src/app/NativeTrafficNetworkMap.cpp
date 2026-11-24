@@ -341,6 +341,16 @@ void BindTrafficNetworkMap(sc4::cSC4TrafficNetworkMap* map) {
 
 // cSC4TrafficNetworkMap::ToggleTrainJunction (i386 map vslot 0xa8) for a picked network piece: false when the piece is no
 // train junction.
+// cSC4TrafficNetworkMap::SwitchStoplightStates (i386 map vslot 0x94) for a picked stoplight prop.
+void NativeSwitchStoplightStates(cIGZUnknown* object) {
+    auto* prop = object ? dynamic_cast<sc4::cSC4PropOccupant*>(object) : nullptr;
+    if (!g_boundMap || !prop) return;
+    auto* view = new StoplightPropView(prop);
+    view->AddRef();
+    g_boundMap->SwitchStoplightStates(view);
+    view->Release();
+}
+
 bool NativeToggleTrainJunction(sc4::cISC4Occupant* occupant) {
     if (!g_boundMap || !occupant) return false;
     sc4::ITrafficNetworkMapOccupant* view = g_host.AsMapOccupant(occupant);

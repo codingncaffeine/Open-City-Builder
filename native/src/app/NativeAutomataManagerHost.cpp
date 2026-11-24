@@ -554,4 +554,9 @@ std::uint32_t NativeVehicleGroupForCatalogItem(std::uint32_t item) {
     }
     return 0;
 }
+
+// The query tool's shift-click on an automaton: spCity vslot 0xac GetVehicleManager -> vslot 0x88 SetCameraFollow.
+void NativeFollowAutomaton(cIGZUnknown* automaton) {
+    if (sc4::cSC4AutomataManager* vehicles = NativeAutomataManagerAt(0)) vehicles->SetCameraFollow(AutomatonView(automaton));
+}
 }  // namespace native

@@ -80,6 +80,8 @@ sc4::IPoliceOccupant* NativePoliceStation(sc4::cISC4Occupant* occupant);
 sc4::IResidentialOccupant* NativeResidentialOccupant(cIGZUnknown* building);
 sc4::IPollutionOccupant* NativePollutionOccupantFor(sc4::cISC4Occupant* occupant);
 
+void NativeSwitchStoplightStates(cIGZUnknown* object);               // NativeTrafficNetworkMap.cpp
+void NativeFollowAutomaton(cIGZUnknown* automaton);                   // NativeAutomataManagerHost.cpp
 namespace {
 using namespace sc4;
 
@@ -221,8 +223,12 @@ struct QueryCity final : IQueryCity {
     }
     int CellCountX() override { cSC4City* c = HostCity(); return c ? static_cast<int>(c->CellCountX()) : 0; }
     int CellCountZ() override { cSC4City* c = HostCity(); return c ? static_cast<int>(c->CellCountZ()) : 0; }
-    void FollowAutomaton(cIGZUnknown*) override { SC4_UNWIRED("cSC4ViewInputControlQuery: following a queried automaton with the camera is not wired"); }
-    void SelectStoplightProp(cIGZUnknown*) override { SC4_UNWIRED("cSC4ViewInputControlQuery: selecting a stoplight prop is not wired"); }
+    // spCity vslot 0xac GetVehicleManager -> vslot 0x88 SetCameraFollow(automaton).
+    void FollowAutomaton(cIGZUnknown* automaton) override {
+        NativeFollowAutomaton(automaton);
+    }
+    // spCity vslot 0xa0 GetTrafficNetwork -> vslot 0x94 SwitchStoplightStates(prop).
+    void SelectStoplightProp(cIGZUnknown* prop) override { NativeSwitchStoplightStates(prop); }
 } g_city;
 
 // cSC4Lot as the query reads it. The lot manager hands lots out borrowed (the tool AddRefs some and reads others bare), so
