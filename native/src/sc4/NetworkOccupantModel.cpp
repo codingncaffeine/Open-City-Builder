@@ -131,7 +131,10 @@ int cSC4NetworkOccupantModel::Draw(SC4DrawContext* context, bool highlight) {
     if (!parts.empty()) {
         context->SetTexWrapModes(3, 3, 0);
         context->SetTexFiltering(1, 1, 0);
+        // While the water is shown, a part whose first corner is under the water level is not drawn (i386 0x00134150).
+        const bool water = g_host && g_host->WaterShown();
         for (const SC4AddOnPart& part : parts) {
+            if (water && !(g_host->WaterLevel(part.corner[0].x, part.corner[0].z) <= part.corner[0].y)) continue;
             const std::uint32_t texture = GetTexture(part.id, 0, zoom);
             if (!texture) continue;
             context->SetTexture(static_cast<int>(texture), 0);

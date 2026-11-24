@@ -4,8 +4,7 @@
 // GetTexture (0x10019d976) resolving the network textures {0x7ab50e44, 0x1abe787d, id + zoom}. The port's occupant is not
 // a model instance, so cSC4NetworkOccupantModel stands in for that subobject: a model instance that draws its occupant.
 //
-// Not ported: the lighting refresh (UpdateLighting, flag 0x8000: the saved vertex colours are used as they are) and the
-// add-on parts' "under water" test against the terrain.
+// Not ported: the lighting refresh (UpdateLighting, flag 0x8000: the saved vertex colours are used as they are).
 #pragma once
 #include <cstdint>
 
@@ -22,6 +21,9 @@ class INetworkModelHost {
 public:
     virtual ~INetworkModelHost() = default;
     virtual std::uint32_t NetworkTexture(std::uint32_t instance) = 0;
+    // SL::spTerrain vslot 0x14c GetWaterSurfaceDisplayState / vslot 0x7c GetWaterLevel(x, z): the add-on parts' water test
+    virtual bool WaterShown() { return false; }
+    virtual float WaterLevel(float x, float z) { (void)x; (void)z; return 0.0f; }
 };
 INetworkModelHost* NetworkModelHost();
 void SetNetworkModelHost(INetworkModelHost* host);

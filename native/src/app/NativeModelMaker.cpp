@@ -599,6 +599,14 @@ namespace {
 class NetworkModelHost final : public sc4::INetworkModelHost {
 public:
     std::uint32_t NetworkTexture(std::uint32_t instance) override { return TextureRecord(kModelTextureGroup, instance)->id; }
+    bool WaterShown() override {
+        sc4::cSTETerrain* terrain = native::Terrain();
+        return terrain && terrain->GetWaterSurfaceDisplayState();
+    }
+    float WaterLevel(float x, float z) override {
+        sc4::cSTETerrain* terrain = native::Terrain();
+        return terrain ? terrain->GetWaterLevel(x, z) : 0.0f;
+    }
 };
 
 // The terrain's lit grey at a vertex: the same fixed sun NativeTerrainHost::ApplyTerrainLightingRow lights the terrain with.
