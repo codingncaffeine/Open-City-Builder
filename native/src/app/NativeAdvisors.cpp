@@ -59,6 +59,8 @@
 #include "app/NativeUi.h"
 #include "gz/Win.h"
 #include "sc4/View3DWin.h"
+#include "sc4/BuildingOccupant.h"
+#include "sc4/BuildingDevelopmentSimulator.h"
 #include "sc4/cSC4City.h"
 
 namespace native {
@@ -820,10 +822,16 @@ public:
         record.text = text;
         civic->UpdateConditionalBuildingStatus(guid, &record);
     }
-    bool GetBuildingWords(std::uint32_t, std::uint32_t& word0, std::uint32_t& word1) override {   // PARTIAL
-        SC4_UNWIRED("cSC4RewardAdvice::GetTrigger: the reward building's subject words are not looked up (subject data stays 0)");
+    // spBuildingDevelopmentSim vslot 0xa0 GetBuildingProfilePtr(guid): the i386 profile's words +0x2c and +0x34 (4-byte aligned
+    // int64s there) = the low halves of the construction and the monthly maintenance cost; 0 for a building without a profile.
+    bool GetBuildingWords(std::uint32_t guid, std::uint32_t& word0, std::uint32_t& word1) override {
         word0 = word1 = 0;
-        return false;
+        auto* development = Comp<cSC4BuildingDevelopmentSimulator>(CityComponent::BuildingDevelopmentSimulator);
+        const BuildingProfile* profile = development ? development->GetBuildingProfilePtr(guid) : nullptr;
+        if (!profile) return false;
+        word0 = static_cast<std::uint32_t>(profile->cost);
+        word1 = static_cast<std::uint32_t>(profile->maintenance);
+        return true;
     }
     cISC4AdviceSubject* CreateSubject() override { return NewSubject(); }
 };
