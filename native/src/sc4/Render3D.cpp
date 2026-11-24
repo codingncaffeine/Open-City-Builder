@@ -4,6 +4,7 @@
 // stats strings, the per-frame draw pass (0x100763ac6..0x1007663a8) and — since RENDER3D-2 — the model change queue
 // and the quad-grid rebuild (0x10076113a..0x1007657c6). DoMessage (0x100762b36) is ported but for the backing-store
 // switch and the lighting-manager swap; UpdateVisibleTerrainMetrics (0x1007630ca) and picking are ported too.
+#include "sc4/TexUtil.h"
 #include "sc4/Render3D.h"
 #include "platform/Unwired.h"
 
@@ -1011,21 +1012,27 @@ cIGZBuffer* cSC43DRender::GetBackgroundPicture(bool* visible) const {
 }
 
 bool cSC43DRender::SetBackgroundPicture(cIGZBuffer* buffer, bool visible) {
-    // 0x10076981e (PARTIAL: the texture upload through nsTexUtil::SetupTexture is not ported; the port swaps the
-    // buffer and forgets the texture id, so the draw path will re-upload it when it is ported).
+    // 0x10076981e (i386 0x005037a0): the picture uploaded as an opaque texture (nsTexUtil::SetupTexture) and kept with its
+    // size; without a driver or when the upload fails the answer is false. Quirk kept: that failure keeps the new
+    // picture's reference (the original AddRefs it before the upload and never stores or releases it).
     backgroundPictureVisible_ = visible;
     if (backgroundPicture_ == buffer) return true;
-    if (backgroundPicture_) backgroundPicture_->Release();
-    backgroundPicture_ = nullptr;
+    if (backgroundPicture_) {
+        backgroundPicture_->Release();
+        backgroundPicture_ = nullptr;
+    }
     if (buffer) buffer->AddRef();
-    if (backgroundTexture_ != 0 && mpGDriver) {
-        mpGDriver->DeleteTextures(1, &backgroundTexture_);
+    if (backgroundTexture_ != 0) {
+        if (mpGDriver) nsTexUtil::ReleaseTexture(mpGDriver, backgroundTexture_);
         backgroundTexture_ = 0;
     }
-    if (!buffer) return false;
-    if (!mpGDriver) return false;
-    backgroundPicture_ = buffer;
-    SC4_UNWIRED("cSC43DRender::SetBackgroundPicture: texture upload (nsTexUtil::SetupTexture) not ported, the picture is not drawn");
+    if (buffer) {
+        if (!mpGDriver || !nsTexUtil::SetupTexture(buffer, mpGDriver, backgroundTexture_, false, nullptr, nullptr, nullptr))
+            return false;
+        backgroundPicture_ = buffer;
+        backgroundTextureWidth_ = static_cast<int>(buffer->Width());
+        backgroundTextureHeight_ = static_cast<int>(buffer->Height());
+    }
     return true;
 }
 

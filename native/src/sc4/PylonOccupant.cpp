@@ -447,17 +447,14 @@ bool cSC4PylonOccupant::RebuildCurrentTexture() {
     return currentTexture_ != 0;
 }
 
-// 0x10022f858 (PARTIAL: the font / buffer block that rasterises the digits calls RZ::WCM()'s font object and
-// nsTexUtil::SetupTexture, both behind IPylonOccupantHost; the geometry it builds is the original's.)
+// 0x10022f858: the font / buffer block that rasterises the digits calls RZ::WCM()'s font object and
+// nsTexUtil::SetupTexture, both behind IPylonOccupantHost; the geometry it builds is the original's.
 void cSC4PylonOccupant::BuildCallNumberTexture(float topY) {
     IPylonOccupantHost* host = g_host;
     if (!host) return;
 
     IPylonFont* font = host->CallNumberFont();
-    if (!font) {
-        SC4_UNWIRED("cSC4PylonOccupant::BuildCallNumberTexture: call number font / texture upload not wired (no digits on the dispatch pylon)");
-        return;
-    }
+    if (!font) return;   // the original's path without the window manager's font (the native host provides it)
     font->AddRef();
     const int previousSize = font->GetFontSize();
     font->SetFontSize(kPylonCallNumberFontSize);
@@ -520,8 +517,7 @@ bool cSC4PylonOccupant::BuildMySimTexture() {
 
     cIGZBuffer* source = nullptr;
     if (bitmapId_ == 0) {
-        if (!host->LoadBitmapFromFile(bitmapName_, &source))
-            SC4_UNWIRED("cSC4PylonOccupant::BuildMySimTexture: MySim picture from file (image decoder) not wired");
+        host->LoadBitmapFromFile(bitmapName_, &source);   // a missing or unreadable file leaves the base picture alone
     } else {
         cSLBuffer bitmap(kPylonBitmapType, kPylonBitmapGroup, static_cast<std::uint32_t>(bitmapId_),
                          kPylonBitmapColorType, false);
