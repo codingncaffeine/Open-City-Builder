@@ -1221,8 +1221,8 @@ bool cSC4WinRegionScreen::GZOnCommand(std::uint32_t command, std::uint64_t param
     case 0x4a560000: {   // open the selected city
         if (getenv("SC4_DEBUG")) fprintf(stderr, "open city: selected=%p\n", view_ ? (void*)view_->GetSelectedCity() : nullptr);
         RegionViewCity* selected = view_ ? view_->GetSelectedCity() : nullptr;
-        // PARTIAL: the original also sets the difficulty level on the application (cISC4App vslot 0x58) first.
-        SC4_UNWIRED("cSC4WinRegionScreen::GZOnCommand: difficulty level not set on the application (cISC4App vslot 0x58) before opening a city");
+        // (i386 0x001a5xxx: the original asks the nation for the active region here, spSC4 0x88 GetNation -> 0x2c GetRegion,
+        // and drops the answer; nothing is set.)
         RegionCityRef* cityRef = selected ? GetOrCreateRegionalCity(*selected, true) : nullptr;
         if (getenv("SC4_DEBUG")) fprintf(stderr, "open city: ref=%p\n", (void*)cityRef);
         if (cityRef && !LaunchRegionalCity(cityRef)) RestoreSignposts();
