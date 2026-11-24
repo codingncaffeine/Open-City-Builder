@@ -34,6 +34,7 @@
 #include "sc4/PylonOccupant.h"
 #include "sc4/SCPropertyHelp.h"
 #include "sc4/ServiceLocator.h"
+#include "sc4audio/AEMSEvents.h"
 #include "sc4/SpecialVehicles.h"
 #include "sc4/TrafficAutomataManager.h"
 #include "sc4/TrafficNetworkMap.h"
@@ -443,11 +444,9 @@ public:
         PostSoundSystemEvent(0xca45190f, SirenId(vehicle), static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(y), static_cast<std::uint32_t>(z));
     }
     // cSC4EmergencyVehicle::ShowEmergencyLights (Mac i386 0x00235862): lights on = an "automata_pullover" attractor riding on the
-    // vehicle (the cars around it pull over) and the flashing light model its exemplar names; lights off drops both.
-    // PARTIAL: the player-drive audio event (AEMS event 0xb) is not posted.
+    // vehicle (the cars around it pull over) and the flashing light model its exemplar names; lights off drops both. A driven
+    // vehicle then starts or ends the siren sound (AEMS event 0xb).
     void SetEmergencyLights(cSC4EmergencyVehicle& vehicle, bool on) override {
-        if (vehicle.GetBehavior() == kStatePlayerDrive)
-            SC4_UNWIRED("cSC4EmergencyVehicle::ShowEmergencyLights: the player-drive AEMS event 0xb (siren start / stop) is not posted");
         if (cIGZUnknown* old = vehicle.LightController()) {
             NativeRemoveController(old);
             vehicle.SetLightController(nullptr);
@@ -468,6 +467,16 @@ public:
             vehicle.RemoveModelInstance(model);
             vehicle.SetLightModel(nullptr);
             model->Release();
+        }
+        if (vehicle.GetBehavior() == kStatePlayerDrive) {   // vslot 0xec
+            void* raw = nullptr;
+            cIGZUnknown* service = SL::AEMS();
+            if (service && service->QueryInterface(kGZIID_cISC4AEMSEvents, &raw) && raw) {
+                auto* events = static_cast<cISC4AEMSEvents*>(raw);
+                if (on) events->StartSound(static_cast<cISC4AEMSEvents::AEMSEventType>(0xb));   // AEMS 0x14
+                else events->EndSound(static_cast<cISC4AEMSEvents::AEMSEventType>(0xb));        // AEMS 0x18
+                events->Release();
+            }
         }
     }
     void SirenStarted(const cSC4EmergencyVehicle& vehicle, std::uint32_t soundId) override { PostSoundSystemEvent(0xea451903, soundId, SirenId(vehicle)); }
