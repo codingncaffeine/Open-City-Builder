@@ -1,16 +1,14 @@
 // The city view's corner minimap on the native application (cSC4WinMiniMap's IMiniMapHost): the city's terrain, water and zones,
 // the surface networks, the camera's rotation / view rectangle and the click that recentres the camera, the exemplar colour ramps,
 // the animation tick and the anti-aliased line the view rectangle is drawn with (DrawLineAntialiased, Mac i386 0x002b4148 /
-// DrawLineAntialiasedNoClip 0x002b2f02, ported here: the minimap is its only caller).
-//
-// PARTIAL: the city situation manager's target marker: the manager runs natively (NativeCitySituations.cpp), but no
-// IMiniMapSituation view of it is made here.
+// DrawLineAntialiasedNoClip 0x002b2f02, ported here: the minimap is its only caller), and the city situation's target marker.
 #include <algorithm>
 #include "platform/Unwired.h"
 #include <cstdint>
 #include <vector>
 
 #include "sc4/Render3D.h"
+#include "sc4/CitySituationManager.h"
 #include "app/NativeAnimationTicks.h"
 #include "app/NativeCity.h"
 #include "app/NativeCityView.h"
@@ -298,9 +296,23 @@ public:
     int CityCellCountZ() override { cSC4City* c = HostCity(); return c ? c->CellCountZ() : 0; }
     float CitySizeX() override { cSC4City* c = HostCity(); return c ? c->SizeX() : 0.0f; }
     float CitySizeZ() override { cSC4City* c = HostCity(); return c ? c->SizeZ() : 0.0f; }
+    // SL::spCitySituationManager: the active situation (vslot 0x30) and its current target's position (0x48 -> occupant 0x40)
     IMiniMapSituation* CitySituationManager() override {
-        SC4_UNWIRED("cSC4WinMiniMap: the city situation manager's target marker is not drawn (no IMiniMapSituation view of the manager)");
-        return nullptr;
+        struct Situations final : IMiniMapSituation {
+            bool HasActiveSituation() override {
+                sc4::cSC4CitySituationManager* manager = HostCitySituations();
+                return manager && manager->GetActiveSituation() != nullptr;
+            }
+            bool CurrentTargetPosition(float xyz[3]) override {
+                sc4::cSC4CitySituationManager* manager = HostCitySituations();
+                sc4::ISituationOccupant* target = manager ? manager->GetCurrentTarget() : nullptr;
+                if (!target) return false;
+                target->Position(xyz);
+                return true;
+            }
+        };
+        static Situations situations;
+        return HostCitySituations() ? &situations : nullptr;
     }
     IMiniMapTerrain* Terrain() override { return native::Terrain() ? &g_terrain : nullptr; }
     IMiniMapZoneGrid* ZoneGrid() override { return HostCity() ? &g_zones : nullptr; }
