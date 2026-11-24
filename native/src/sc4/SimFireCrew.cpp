@@ -1,5 +1,4 @@
 #include "sc4/SimFireCrew.h"
-#include "platform/Unwired.h"
 
 #include <cfloat>
 #include <cmath>
@@ -339,8 +338,8 @@ void cSC4SimFireCrew::SetupFireCrew() {
         wander_ = target_;
         SendFireCrewMessage(kMessageFireCrewHoseOn, truck_, kCompetenceSoundIDs[level_], 0, 0, 0);
     } else {
-        // PARTIAL: the original moves the figure to the engine's other side when this one is off the engine's network lot.
-        SC4_UNWIRED("cSC4SimFireCrew::SetupFireCrew: off-lot check that moves the crew figure to the engine's other side not ported");
+        // The director stands beside the engine, on its left; when that spot is off the cells of the network piece the
+        // engine is on, on its right (i386 0x0038fd5c).
         cS3DTransform place;
         truck_->GetTransform(place);
         cS3DVector3 side{0.0f, 0.0f, -1.0f};
@@ -350,6 +349,19 @@ void cSC4SimFireCrew::SetupFireCrew() {
         side = RotatedY(side, kHalfPi);
         const float distance = g_host->DirectorDistance();
         cS3DVector3 spot{distance * side.x + truckPosition.x, distance * side.y + truckPosition.y, distance * side.z + truckPosition.z};
+        if (ITrafficAutomatonOccupant* network = truck_->GetNetworkOccupant()) {
+            if (cISC4Occupant* piece = network->AsOccupant()) {
+                SC4CellRect cells;
+                piece->GetBoundingCityCells(cells);
+                int cellX = 0, cellZ = 0;
+                g_host->PositionToCell(spot.x, spot.z, cellX, cellZ);
+                if (cellX < cells.x0 || cells.x1 < cellX || cellZ < cells.z0 || cells.z1 < cellZ) {
+                    side = cS3DVector3{-side.x, -side.y, -side.z};
+                    spot = cS3DVector3{distance * side.x + truckPosition.x, distance * side.y + truckPosition.y,
+                                       distance * side.z + truckPosition.z};
+                }
+            }
+        }
         ClampToCityBounds(spot);
         spot.y = Host()->RoadAltitude(spot.x, spot.z);
         float view[3] = {};

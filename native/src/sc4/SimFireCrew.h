@@ -56,6 +56,7 @@ public:
     virtual void MoveModelInRenderer(IAutomatonModel* model) = 0;                     // renderer vslot 0x78
     // The translations of a model's named registration point, one per animation frame; false when the model has none.
     virtual bool RegPointTranslations(IAutomatonModel* model, const char* name, std::vector<cS3DVector3>& out) = 0;
+    virtual void PositionToCell(float x, float z, int& cellX, int& cellZ) = 0;                // city vslot 0x17c
 };
 ISimFireCrewHost* SimFireCrewHost();
 void SetSimFireCrewHost(ISimFireCrewHost* host);

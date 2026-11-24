@@ -1,7 +1,12 @@
 #include <cstdio>
+#include <string>
 #include "rz/cRZString.h"
 #include "sc4/PropManager.h"
 #include "sc4/SCPropertyHelp.h"
+#include "gz/CommandParameterSet.h"
+#include "rz/cRZMessage2Standard.h"
+#include "rz/cRZVariant.h"
+#include "sc4/TextDecalOccupant.h"
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
 using namespace sc4;
@@ -105,8 +110,13 @@ public:
     void PositionToCityCell(float x, float z, int& cx, int& cz) override { cx = static_cast<int>(x / 16); cz = static_cast<int>(z / 16); }
     void CityCellToPosition(int cx, int cz, float& x, float& z) override { x = cx * 16.0f; z = cz * 16.0f; }
     cSC4Lot* LotAtCell(int, int) override { return nullptr; }
-    void CreateTextDecal(const std::vector<std::uint32_t>&) override {}
+    float TerrainAltitude(float, float) override { return 7.0f; }
+    cISC4TextDecalOccupant* NewTextDecal() override {
+        decals.push_back(new cSC4TextDecalOccupant());
+        return decals.back();
+    }
     int posted = 0;
+    std::vector<cSC4TextDecalOccupant*> decals;
 };
 }
 int main() {
@@ -177,10 +187,11 @@ int main() {
         const int before = pmh.posted;
         mgr->LoadAllStandardPropExemplarData();
         CHECK(pmh.posted == before + 1);
-        struct Filter final : IPropViewFilter {
+        struct Filter final : cIGZUnknown {
             int refs = 0;
-            std::uint32_t AddRef() override { return ++refs; }
-            std::uint32_t Release() override { return --refs; }
+            bool QueryInterface(std::uint32_t, void**) override { return false; }
+            std::uint32_t AddRef() override { return static_cast<std::uint32_t>(++refs); }
+            std::uint32_t Release() override { return static_cast<std::uint32_t>(--refs); }
         } first, second;
         PropViewFilterInformation none, a, b;
         a.filter = &first; b.filter = &second;
@@ -193,8 +204,58 @@ int main() {
         mgr->DoPostViewFilterChange(&b, &none);                                   // a null filter drops the held one
         CHECK(second.refs == 0);
     }
+    {   // the TextDecal command (i386 0x0012e090): text, x, z, then the height and, from eight on, red, green, blue, alpha
+        auto send = [&](std::uint32_t type, void* first, void* second) {
+            cRZMessage2Standard message;
+            message.SetType(type);
+            message.SetVoid1(first);
+            message.SetVoid2(second);
+            return mgr->DoMessage(&message);
+        };
+        auto command = [&](const std::vector<float>& numbers) {
+            cGZCommandParameterSet parameters;
+            cRZVariant text;
+            text.SetValString(cRZString("Main St"));
+            parameters.AppendParameter(text);
+            for (float n : numbers) {
+                cRZVariant value;
+                value.SetValFloat32(n);
+                parameters.AppendParameter(value);
+            }
+            return send(kMessagePropTextDecal, &parameters, nullptr);
+        };
+        CHECK(command({10.0f}) && pmh.decals.empty());   // two parameters: nothing
+        CHECK(command({10.0f, 20.0f, 2.0f, 0.5f, 0.25f, 0.125f, 0.75f}) && pmh.decals.size() == 1);
+        if (pmh.decals.size() == 1) {
+            const cSC4TextDecalOccupant* decal = pmh.decals[0];
+            CHECK(std::string(decal->Text().ToChar()) == "Main St");
+            CHECK(decal->PositionX() == 10.0f && decal->PositionZ() == 20.0f && decal->TextHeight() == 2.0f);
+            CHECK(decal->Color()[0] == 0.5f && decal->Color()[1] == 0.25f && decal->Color()[2] == 0.125f && decal->Alpha() == 0.75f);
+            float position[3] = {0, 0, 0};
+            pmh.decals[0]->GetPosition(position);
+            CHECK(position[1] == 7.0f);   // on the terrain
+        }
+        CHECK(command({30.0f, 40.0f}) && pmh.decals.size() == 2);   // three parameters: height, colour and alpha 1
+        if (pmh.decals.size() == 2) {
+            const cSC4TextDecalOccupant* decal = pmh.decals[1];
+            CHECK(decal->TextHeight() == 1.0f && decal->Color()[0] == 1.0f && decal->Color()[2] == 1.0f && decal->Alpha() == 1.0f);
+        }
+        // the view's filter message hands both pointers to DoPostViewFilterChange
+        struct Filter final : cIGZUnknown {
+            int refs = 0;
+            bool QueryInterface(std::uint32_t, void**) override { return false; }
+            std::uint32_t AddRef() override { return static_cast<std::uint32_t>(++refs); }
+            std::uint32_t Release() override { return static_cast<std::uint32_t>(--refs); }
+        } filter;
+        PropViewFilterInformation none, held;
+        held.filter = &filter;
+        CHECK(send(kMessagePropViewFilterChanged, &none, &held) && filter.refs == 1);
+        CHECK(send(kMessagePropViewFilterChanged, &held, &none) && filter.refs == 0);
+        CHECK(send(kMessagePropCameraMoved, nullptr, nullptr));
+    }
     mgr->Release();
     host.manager.ReleaseOccupantList(host.manager.items);   // the fake manager holds one reference per inserted prop
+    for (cSC4TextDecalOccupant* decal : pmh.decals) decal->Release();   // the reference DoMessage keeps (as the original)
     cSC4PropManager::StaticShutdown();
     std::puts(failures ? "sc4_propmanager: FAILED" : "sc4_propmanager ok");
     return failures != 0;

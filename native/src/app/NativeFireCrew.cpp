@@ -1,7 +1,6 @@
 // The fire crews in a native city: the services of cSC4SimFireCrew (ISimFireCrewHost) and what the fire engines' host
 // (app/NativeDispatch.cpp) needs to put a crew down and take it back.
 #include <cfloat>
-#include "platform/Unwired.h"
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -11,6 +10,7 @@
 #include "app/NativeCity.h"
 #include "app/NativeCityView.h"
 #include "app/NativeEffects.h"
+#include "sc4/ModelRegEffects.h"
 #include "rz/cRZRandom.h"
 #include "sc4/AutomataManager.h"
 #include "sc4/PedestrianManager.h"
@@ -24,6 +24,7 @@
 namespace sc4 { extern IPedestrianHost* g_loadPedestrianHost; }   // tools/city_probe_hostglobals.cpp (the native pedestrian host)
 
 namespace native {
+const sc4::RegPointMap* NativeAutomatonModelRegPoints(sc4::IAutomatonModel* model);   // app/NativeAutomata.cpp
 namespace {
 using namespace sc4;
 
@@ -102,10 +103,20 @@ public:
     }
     float HoseRadius() override { return AutomataTuning().f21a18; }
     void MoveModelInRenderer(IAutomatonModel*) override {}   // the automata host places a model when its transform is set
-    // PARTIAL: the hose registration point of the crew model (the stream leaves from the model's origin).
-    bool RegPointTranslations(IAutomatonModel*, const char*, std::vector<cS3DVector3>&) override {
-        SC4_UNWIRED("cSC4SimFireCrew hose: the crew model's hose registration point is not read (the stream leaves the model origin)");
-        return false;
+    // cSC4SimFireCrew::InitRegTranslationArray (i386 0x0038f520): the model's registration point table (model vslot 0x90),
+    // the named point's translation in each animation frame.
+    bool RegPointTranslations(IAutomatonModel* model, const char* name, std::vector<cS3DVector3>& out) override {
+        const sc4::RegPointMap* points = NativeAutomatonModelRegPoints(model);
+        if (!points || !name) return false;
+        const auto it = points->find(name);
+        if (it == points->end()) return false;
+        out.clear();
+        for (const sc4::RegPointTransform& frame : it->second)
+            out.push_back(cS3DVector3{frame.translation[0], frame.translation[1], frame.translation[2]});
+        return true;
+    }
+    void PositionToCell(float x, float z, int& cellX, int& cellZ) override {
+        if (sc4::cSC4City* city = HostCity()) city->PositionToCell(x, z, cellX, cellZ);
     }
 private:
     cRZRandom random_{0x5f1cu};

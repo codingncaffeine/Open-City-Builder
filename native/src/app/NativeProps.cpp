@@ -31,6 +31,13 @@
 #include "app/NativeAnimationTicks.h"
 #include "app/NativeDecalOverlay.h"
 #include "sc4/ServiceLocator.h"
+#include "app/NativeCitySystems.h"
+#include "app/NativeKeyboard.h"
+#include "gz/CommandServer.h"
+#include "gz/cIGZMessage2.h"
+#include "sc4/TextDecalOccupant.h"
+#include "sc4/View3DWin.h"
+#include "sc4/cSTETerrain.h"
 #include "sc4/Simulator.h"
 #include "sc4/cSC424HourClock.h"
 #include "sc4/cSC4City.h"
@@ -59,6 +66,23 @@ template <class T> T* Plain(CityComponent c) {
     void* raw = nullptr;
     return object && object->QueryInterface(kGZIID_PlainObject, &raw) ? static_cast<T*>(raw) : nullptr;
 }
+
+// The manager's cIGZMessageTarget2 view (+4 in the original): spMS2 delivers its four messages here.
+class PropManagerTarget final : public cIGZMessageTarget2 {
+public:
+    bool QueryInterface(std::uint32_t iid, void** out) override {
+        if (iid != kGZIID_cIGZMessageTarget2 && iid != 1) return false;
+        *out = static_cast<cIGZMessageTarget2*>(this);
+        AddRef();
+        return true;
+    }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override { return refs_ > 1 ? --refs_ : 1; }   // static: lives as long as the process
+    bool DoMessage(cIGZMessage2* message) override { return manager ? manager->DoMessage(message) : true; }
+    cSC4PropManager* manager = nullptr;
+private:
+    std::uint32_t refs_ = 1;
+} g_propManagerTarget;
 
 class PropManagerHost final : public IPropManagerHost {
 public:
@@ -122,9 +146,37 @@ public:
         else { x = static_cast<float>(cx) * 16.0f; z = static_cast<float>(cz) * 16.0f; }
     }
     cSC4Lot* LotAtCell(int x, int z) override { return NativeLotAtCell(x, z, false); }   // lot manager vslot 0x28
-    void CreateTextDecal(const std::vector<std::uint32_t>&) override {   // PARTIAL: message 0xbeaf1a2
-        SC4_UNWIRED("cSC4PropManager: the text decal message (0xbeaf1a2) is not posted");
+    void SubscribeMessages(cSC4PropManager* manager, bool on) override {
+        g_propManagerTarget.manager = on ? manager : nullptr;
+        if (!SL::spMS2) return;
+        for (std::uint32_t type : kPropManagerMessages) {
+            if (on) SL::spMS2->AddNotification(&g_propManagerTarget, type);
+            else SL::spMS2->RemoveNotification(&g_propManagerTarget, type);
+        }
     }
+    void RegisterTextDecalCommand(bool on) override {
+        cIGZCommandServer* server = GameCommandServer();
+        if (!server) return;
+        if (on) server->RegisterCommand(kMessagePropTextDecal, "TextDecal", nullptr);
+        else server->UnregisterCommand(kMessagePropTextDecal);
+    }
+    cIGZUnknown* CurrentViewFilter() override {
+        cSC4View3DWin* view = CityView3DWin();
+        if (!view) return nullptr;
+        cSC4ViewFilterInformation info;
+        view->GetCurrentViewFilterInfo(info);   // one reference for the caller
+        return info.filter;
+    }
+    float TerrainAltitude(float x, float z) override {
+        cIGZUnknown* object = Component(CityComponent::Terrain);
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(0xab953253, &raw) || !raw) return 0.0f;
+        auto* terrain = static_cast<cSTETerrain*>(static_cast<cIGZSerializable*>(raw));
+        const float altitude = terrain->GetAltitude(x, z);
+        static_cast<cIGZSerializable*>(raw)->Release();
+        return altitude;
+    }
+    cISC4TextDecalOccupant* NewTextDecal() override { return new cSC4TextDecalOccupant(); }
 private:
     std::map<cISCPropertyHolder*, cISCResExemplar*> held_;
 } g_managerHost;

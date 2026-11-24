@@ -4,7 +4,11 @@
 #include <algorithm>
 #include <cfloat>
 
+#include "gz/CommandParameterSet.h"
+#include "gz/cIGZMessage2.h"
+#include "gz/cIGZVariant.h"
 #include "sc4/SCPropertyHelp.h"
+#include "sc4/TextDecalOccupant.h"
 
 namespace sc4 {
 
@@ -107,7 +111,8 @@ void cSC4PropManager::LoadAllStandardPropExemplarData() {
 }
 
 void cSC4PropManager::DoPostViewFilterChange(PropViewFilterInformation*, PropViewFilterInformation* newFilter) {
-    IPropViewFilter* incoming = newFilter->filter;
+    if (!newFilter) return;   // port guard
+    cIGZUnknown* incoming = newFilter->filter;
     if (incoming == viewFilter_) return;
     if (incoming) incoming->AddRef();
     if (viewFilter_) viewFilter_->Release();
@@ -122,25 +127,82 @@ bool cSC4PropManager::StaticShutdown() {
     return true;
 }
 
+// i386 0x0012d846: the exemplar tables, the TextDecal command, the four messages and the view's current filter.
 bool cSC4PropManager::Init() {
     if (!initialized_) {
         initialized_ = true;
         StaticInit(this);
-        // (the original also registers the TextDecal command and subscribes to messages 0xa6b79602,
-        //  0x06cdb65b, 0x26d31ec1 and 0x0beaf1a2 on the message server here)
+        if (g_host) {
+            g_host->RegisterTextDecalCommand(true);
+            g_host->SubscribeMessages(this, true);
+            if (!viewFilter_) viewFilter_ = g_host->CurrentViewFilter();   // the view hands over a reference
+        }
     }
     return true;
 }
 
+// i386 0x0012d64a: drops the view filter (and the services it held), stops hearing the messages and the command.
 bool cSC4PropManager::Shutdown() {
     if (initialized_) {
         initialized_ = false;
+        if (viewFilter_) viewFilter_->Release();
+        viewFilter_ = nullptr;
         usageFilter_ = 0;
+        if (g_host) {
+            g_host->SubscribeMessages(this, false);
+            g_host->RegisterTextDecalCommand(false);
+        }
     }
     return true;
 }
 
-bool cSC4PropManager::DoMessage(std::uint32_t) { return true; }
+// i386 0x0012e090.
+//  * 0x0beaf1a2, the TextDecal command: with at least three parameters (text, x, z, then optionally the height and, from
+//    eight on, red, green, blue and alpha; each missing value is 1) a new text decal joins the city props on the terrain
+//    at (x, z). The manager keeps the reference it took on the decal.
+//  * 0x06cdb65b, the view's filter changed: DoPostViewFilterChange(old, new) from the message's two pointers.
+//  * 0xa6b79602 (the camera moved) reads both pointers and does nothing else; 0x26d31ec1 is heard and ignored.
+bool cSC4PropManager::DoMessage(cIGZMessage2* message) {
+    if (!message) return true;
+    auto* standard = static_cast<cIGZMessage2Standard*>(message);
+    const std::uint32_t type = message->GetType();
+    if (type == kMessagePropTextDecal) {
+        auto* parameters = static_cast<cIGZCommandParameterSet*>(standard->GetVoid1());
+        const std::uint32_t count = parameters ? parameters->GetParameterCount() : 0;
+        if (static_cast<std::int32_t>(count) <= 2) return true;
+        cRZString text;
+        (*parameters)[0].GetValString(text);
+        const float x = (*parameters)[1].GetValFloat32();
+        const float z = (*parameters)[2].GetValFloat32();
+        float height = 1.0f;
+        if (3 < static_cast<std::int32_t>(count)) height = (*parameters)[3].GetValFloat32();
+        float color[3] = {1.0f, 1.0f, 1.0f};
+        float alpha = 1.0f;
+        if (7 < static_cast<std::int32_t>(count)) {
+            color[0] = (*parameters)[4].GetValFloat32();
+            color[1] = (*parameters)[5].GetValFloat32();
+            color[2] = (*parameters)[6].GetValFloat32();
+            alpha = (*parameters)[7].GetValFloat32();
+        }
+        cISC4TextDecalOccupant* decal = g_host ? g_host->NewTextDecal() : nullptr;
+        if (!decal) return true;   // port guard: no text decals without the host
+        decal->AddRef();
+        AddCityProp(decal->AsOccupant());
+        const float position[3] = {x, g_host->TerrainAltitude(x, z), z};
+        decal->AsOccupant()->SetPosition(position);
+        decal->SetText(text);
+        decal->SetTextColor(color);
+        decal->SetAlpha(alpha);
+        decal->SetTextHeight(height);
+    } else if (type == kMessagePropCameraMoved) {
+        (void)standard->GetVoid1();
+        (void)standard->GetVoid2();
+    } else if (type == kMessagePropViewFilterChanged) {
+        DoPostViewFilterChange(static_cast<PropViewFilterInformation*>(standard->GetVoid1()),
+                               static_cast<PropViewFilterInformation*>(standard->GetVoid2()));
+    }
+    return true;
+}
 
 bool cSC4PropManager::Write(cIGZOStream& stream) const {
     stream.SetUint16(1);

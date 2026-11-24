@@ -18,7 +18,6 @@ struct StubPropManager final : IPropManagerHost {
     void PositionToCityCell(float x, float z, int& cx, int& cz) override { SC4_UNWIRED("StubPropManager::PositionToCityCell"); }
     void CityCellToPosition(int cx, int cz, float& x, float& z) override { SC4_UNWIRED("StubPropManager::CityCellToPosition"); }
     cSC4Lot* LotAtCell(int x, int z) override { SC4_UNWIRED("StubPropManager::LotAtCell"); return {}; }
-    void CreateTextDecal(const std::vector<std::uint32_t>& fields) override { SC4_UNWIRED("StubPropManager::CreateTextDecal"); }
 };
 }  // namespace
 

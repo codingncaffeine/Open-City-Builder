@@ -68,16 +68,18 @@ public:
     std::uint32_t refs = 1;
 };
 
-// cSC4ViewFilterInformation as DoPostViewFilterChange sees it: its first field is a counted filter object.
-class IPropViewFilter {
-public:
-    virtual ~IPropViewFilter() = default;
-    virtual std::uint32_t AddRef() = 0;       // vslot 0x08
-    virtual std::uint32_t Release() = 0;      // vslot 0x10
-};
+// cSC4ViewFilterInformation as DoPostViewFilterChange sees it (the same layout as the view's, sc4/View3DWin.h): its
+// first field is a counted filter object.
 struct PropViewFilterInformation {
-    IPropViewFilter* filter = nullptr;
+    cIGZUnknown* filter = nullptr;
 };
+class cISC4TextDecalOccupant;   // sc4/TextDecalOccupant.h
+class cSC4PropManager;
+
+// The messages the manager hears (Init / Shutdown, spMS2 vslots 0x14 / 0x18).
+constexpr std::uint32_t kMessagePropCameraMoved = 0xa6b79602;
+constexpr std::uint32_t kMessagePropCitySetUp = 0x26d31ec1;
+constexpr std::uint32_t kPropManagerMessages[4] = {0xa6b79602, 0x06cdb65b, 0x26d31ec1, 0x0beaf1a2};
 
 class IPropManagerHost {
 public:
@@ -99,7 +101,15 @@ public:
     virtual void PositionToCityCell(float x, float z, int& cx, int& cz) = 0;     // vslot 0x2f8
     virtual void CityCellToPosition(int cx, int cz, float& x, float& z) = 0;     // vslot 0x300
     virtual cSC4Lot* LotAtCell(int x, int z) = 0;                       // lot manager vslot 0x28
-    virtual void CreateTextDecal(const std::vector<std::uint32_t>& fields) = 0;  // message 0xbeaf1a2
+    // spMS2 AddNotification / RemoveNotification of kPropManagerMessages, delivered to DoMessage(cIGZMessage2*).
+    virtual void SubscribeMessages(cSC4PropManager* manager, bool on) { (void)manager; (void)on; }
+    // spCommandServer vslot 0x18 RegisterCommand(0x0beaf1a2, "TextDecal", no help) / vslot 0x24 UnregisterCommand.
+    virtual void RegisterTextDecalCommand(bool on) { (void)on; }
+    // spView3D vslot 0x48 GetCurrentViewFilterInfo: the view's filter object (one reference), or null.
+    virtual cIGZUnknown* CurrentViewFilter() { return nullptr; }
+    virtual float TerrainAltitude(float x, float z) { (void)x; (void)z; return 0.0f; }   // spTerrain vslot 0x30
+    // new cSC4TextDecalOccupant (the TextDecal command's label); null without text decals
+    virtual cISC4TextDecalOccupant* NewTextDecal() { return nullptr; }
 };
 IPropManagerHost* PropManagerHost();
 void SetPropManagerHost(IPropManagerHost* host);
@@ -114,7 +124,7 @@ public:
     bool QueryInterface(std::uint32_t iid, void** out);
     bool Init();
     bool Shutdown();
-    bool DoMessage(std::uint32_t messageType);
+    bool DoMessage(cIGZMessage2* message);                                   // @ 0x0012e090 (i386)
     std::uint32_t GetGZCLSID() const { return kGZCLSID_cSC4PropManager_Prop; }
     bool Write(cIGZOStream& stream) const;
     bool Read(cIGZIStream& stream);
@@ -167,7 +177,7 @@ public:
     void LoadAllStandardPropExemplarData();
     static void AddPropExemplarDataStatic(const cGZPersistResourceKey& key, void* manager);   // @ 0x100194548
     static void PostPropExemplarDataUpdatedMessage();                                         // @ 0x1001945cc
-    // @ 0x100194bb2: keeps the new filter object (+0x40), taking a reference on it and dropping the old one.
+    // @ 0x100194bb2: keeps the new filter object (+0x40), taking a reference on it and dropping the old one. Nothing reads it.
     void DoPostViewFilterChange(PropViewFilterInformation* oldFilter, PropViewFilterInformation* newFilter);
 
     static bool StaticInit(cSC4PropManager* manager);
@@ -183,7 +193,7 @@ private:
 
     std::uint32_t refCount_ = 0;
     bool initialized_ = false;
-    IPropViewFilter* viewFilter_ = nullptr;     // +0x40
+    cIGZUnknown* viewFilter_ = nullptr;         // +0x40 (i386 +0x24)
     std::uint32_t usageFilter_ = 0;             // +0x30 object's field +0x14: which usage a query accepts
 };
 

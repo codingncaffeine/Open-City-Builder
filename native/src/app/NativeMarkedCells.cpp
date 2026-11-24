@@ -1,17 +1,20 @@
 // SC4MarkedCellView (Mac i386 0x0051a2d4..0x0051b1d0): the renderer view object that tints a list of city cells over the
 // terrain in a colour per cell. The data-view map hands it the cells whose palette colour has alpha (sc4::IWinMapViewMarkedCells);
 // the map view registers it with the renderer as view object list 5, priority 1000.
-//   PARTIAL: the network-altitude mode (SetShouldUseNetworkAltitude: the cell's network occupant from the occupant manager with a
-//   cSC4NetworkOccupantFilter(0x1f4f), its altitude at each corner + 15.5 for flags 0x304) keeps the terrain altitude; the
-//   depth-inverted second pass (SetCellColorDepthInvert) has no caller natively.
+// In the network-altitude mode (SetShouldUseNetworkAltitude) a city cell takes the altitude of its network piece (the
+// occupant manager's first occupant through a cSC4NetworkOccupantFilter(0x1f4f)) at each corner, 15.5 higher for the raised
+// types (flags 0x304); a piece with flag 0x100000 and no active edges leaves its cell out. The depth-inverted second pass
+// (SetCellColorDepthInvert) has no caller natively.
 #include <cmath>
-#include "platform/Unwired.h"
 #include <cstdint>
 #include <vector>
 
 #include "app/NativeCity.h"
 #include "app/NativeCityView.h"
 #include "sc4/DrawContext.h"
+#include "sc4/NetworkOccupant.h"
+#include "sc4/OccupantFilters2.h"
+#include "sc4/OccupantManager.h"
 #include "sc4/PackedRenderState.h"
 #include "sc4/Render3D.h"
 #include "sc4/WinMapView.h"
@@ -32,6 +35,21 @@ cSTETerrain* CityTerrain() {
     static_cast<cIGZSerializable*>(raw)->Release();
     return terrain;
 }
+
+cISC4OccupantManager* CityOccupants() {   // borrowed: the city keeps it
+    cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(CityComponent::OccupantManager) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(kGZIID_cISC4OccupantManager, &raw) || !raw) return nullptr;
+    auto* manager = static_cast<cISC4OccupantManager*>(raw);
+    manager->Release();
+    return manager;
+}
+
+constexpr std::uint32_t kNetworkFilterMask = 0x1f4f;            // Init's cSC4NetworkOccupantFilter
+constexpr std::uint32_t kNetworkFlagNeedsActiveEdges = 0x100000;
+constexpr std::uint32_t kNetworkFlagRaised = 0x304;
+constexpr float kRaisedNetworkLift = 15.5f;                      // 0x00a706dc
 
 struct CellVertex {   // V3F_C4UB (vertex format 1, stride 16): the colour is the ABGR word, i.e. bytes R, G, B, A
     float x, y, z;
@@ -58,9 +76,19 @@ public:
         if (CityRenderer()) {
             state_.PackRenderState(true, false, !ignoreDepth_, false, true, 0, true, ignoreDepth_ ? -1 : 3, 4, 5, -1, -1.0f, 1, -1);
         }
+        if (!filter_) {
+            filter_ = new cSC4NetworkOccupantFilter();
+            filter_->SetMask(kNetworkFilterMask);
+            filter_->AddRef();
+        }
         initialized_ = true;
     }
-    void Shutdown() override { initialized_ = false; }
+    void Shutdown() override {
+        if (!initialized_) return;
+        if (filter_) filter_->Release();
+        filter_ = nullptr;
+        initialized_ = false;
+    }
     void SetShouldIgnoreDepthBuffer(bool on) override { ignoreDepth_ = on; }
     void SetShouldUseWaterAltitude(bool on) override { useWater_ = on; }
     void SetShouldUseNetworkAltitude(bool on) override { useNetwork_ = on; }
@@ -102,7 +130,6 @@ private:
     // 0x0051a50c: four corners per cell on the terrain (16 m cells take the vertex grid directly and follow the cell's
     // triangulation), culled when neither the first nor the third corner is in the frustum, drawn 0x400 vertices at a time.
     void DrawCells(SC4DrawContext& context, const std::uint32_t* single) {
-        if (useNetwork_) SC4_UNWIRED("SC4MarkedCellView network-altitude mode: the network occupant's corner altitudes are not used (terrain altitude stands in)");
         cSTETerrain* terrain = CityTerrain();
         if (!terrain) return;
         const std::uint32_t cellsX = terrain->CellCountX(), cellsZ = terrain->CellCountZ();
@@ -147,6 +174,7 @@ private:
                 }
             }
             if (!NativePointInViewFrustum(&corner[0].x) && !NativePointInViewFrustum(&corner[2].x)) continue;
+            if (cityCells && useNetwork_ && !NetworkAltitudes(cell, corner)) continue;
             const auto base = static_cast<std::uint16_t>(vertices.size());
             for (const CellVertex& v : corner) vertices.push_back(v);
             for (std::uint16_t n : (flipped ? kTriReverse : kTriForward)) indices.push_back(static_cast<std::uint16_t>(base + n));
@@ -155,16 +183,37 @@ private:
         flush();
     }
 
+    // The network-altitude mode for one city cell: false when the cell is left out.
+    bool NetworkAltitudes(const WinMapCell& cell, CellVertex corner[4]) {
+        cISC4OccupantManager* occupants = CityOccupants();
+        cISC4Occupant* occupant = nullptr;
+        if (!occupants || !occupants->GetFirstOccupantByStandardCityCell(occupant, cell.x, cell.z, filter_) || !occupant) return true;
+        bool keep = true;
+        // the port's pieces answer cISC4NetworkOccupant as the piece itself (see sc4/TrafficFilters.cpp)
+        if (auto* piece = dynamic_cast<cSC4NetworkOccupant*>(occupant)) {
+            const std::uint32_t flags = piece->GetNetworkFlag();
+            if ((flags & kNetworkFlagNeedsActiveEdges) != 0 && piece->GetActiveEdges() == 0) {
+                keep = false;
+            } else {
+                const float lift = (flags & kNetworkFlagRaised) != 0 ? kRaisedNetworkLift : 0.0f;
+                for (int k = 0; k < 4; ++k) corner[k].y = piece->GetAltitude(corner[k].x, corner[k].z) + lift;
+            }
+        }
+        occupant->Release();
+        return keep;
+    }
+
     std::uint32_t refs_ = 1;
     bool initialized_ = false;          // +0xc
     bool ignoreDepth_ = true;           // +0xd
     bool useWater_ = false;             // +0xe
-    bool useNetwork_ = false;           // +0xf (PARTIAL, see the top)
+    bool useNetwork_ = false;           // +0xf
     std::vector<WinMapCell> cells_;     // +0x10
     float cellX_ = 16.0f, cellZ_ = 16.0f, invCellX_ = 0.0625f, invCellZ_ = 0.0625f;   // +0x1c..+0x28
     std::uint32_t cellColor_ = 0x80c000c0u;   // +0x2c
     std::vector<std::uint32_t> colors_;  // +0x30
     cSC4PackedRenderState state_;        // +0x3c
+    cSC4NetworkOccupantFilter* filter_ = nullptr;   // +0x4c (counted)
 };
 
 }  // namespace
