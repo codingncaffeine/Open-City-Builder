@@ -1,7 +1,7 @@
 // cSC4PedestrianManager — see PedestrianManager.h for the layout, the messages, the seams and the quirks. Every function
-// here is a hand port of the exported decompile; the building property arrays are the only PARTIAL.
+// here is a hand port of the exported decompile.
 #include "sc4/PedestrianManager.h"
-#include "platform/Unwired.h"
+#include "sc4/SCPropertyHelp.h"
 
 #include <cmath>
 #include <cstring>
@@ -161,11 +161,22 @@ float cSC4PedestrianManager::GetCommotionMultiplier(ITrafficNetworkMapOccupant* 
     return host->AttractionCommotion(occupant) / 50.0f + 1.0f;
 }
 
-// 0x1000f121c PARTIAL: the building property arrays (0xe9aee3dc / 0xe9aee3dd) that name the response groups and flags are
-// unrecovered; only the base traffic handling runs.
+// i386 0x000b15a4: a new building sends out the walkers its exemplar names: one DispatchResponseAutomata per group of the
+// u32 array 0xe9aee3dc (count from the u8 array 0xe9aee3dd at the same index, 1 past its end or without it; not forced,
+// path type 2, flags 2) while the manager is under its maximum. Unlike the vehicle manager it does not run the base
+// handling, and it always answers true.
 bool cSC4PedestrianManager::HandleNewBuilding(IAutomataBuildingOccupant* building) {
-    SC4_UNWIRED("cSC4PedestrianManager::HandleNewBuilding: per-building pedestrians from property arrays 0xe9aee3dc / 0xe9aee3dd not spawned");
-    return cSC4TrafficAutomataManager::HandleNewBuilding(building);
+    IAutomataOccupant* occupant = building ? building->AsOccupant() : nullptr;   // port guard: the original calls it unchecked
+    cISCPropertyHolder* holder = occupant ? occupant->AsPropertyHolder() : nullptr;
+    std::vector<std::uint32_t> groups;
+    if (!holder || !cSCPropertyHelp::GetPropertyValue(holder, kPedestrianResponseGroupsProperty, groups)) return true;
+    std::vector<std::uint8_t> counts;
+    cSCPropertyHelp::GetPropertyValue(holder, kPedestrianResponseCountsProperty, counts);
+    ITrafficAutomataManagerHost* host = TrafficHostOrGlobal();
+    cISC4Occupant* cityOccupant = host ? host->AsCityOccupant(occupant) : nullptr;
+    for (std::size_t i = 0; i < groups.size() && static_cast<std::uint32_t>(GetAutomataCount()) < MaxCount(); ++i)
+        DispatchResponseAutomata(groups[i], cityOccupant, i < counts.size() ? counts[i] : 1, false, 2, 2);
+    return true;
 }
 
 // 0x1000f1368: a null automaton is a new cSC4Pedestrian (when the count limit allows it), then the base adds it.

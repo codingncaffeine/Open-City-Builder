@@ -3,7 +3,6 @@
 // Each host answers from the city's own components (terrain, zone manager, lot developer, growth developers, history warehouse) and
 // registers the simulator's agents with the city simulator, as the original's Init does through SL::spSimulator / SL::spMS2.
 #include <algorithm>
-#include "platform/Unwired.h"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -13,6 +12,7 @@
 #include <vector>
 
 #include "app/NativeCity.h"
+#include "sc4/AutomataControllerManager.h"
 #include "app/NativeEffects.h"
 #include "app/NativeGrowthDevelopers.h"
 #include "app/NativeSimHosts.h"
@@ -83,7 +83,20 @@ namespace native { sc4::IFlammabilityHost* NativeFlammabilityHost(); void Instal
 
 namespace native {
 namespace {
+
 using namespace sc4;
+
+// The automata controller manager (spCity vslot 0xbc) adds the named occupant group's controllers to a building, or takes
+// them away: the strikers in front of a school, hospital, fire or police station on strike and the escaped prisoners
+// around a jail (UpdateStrikingState / BeginJailbreak / EndJailbreak). Nothing without a manager.
+void SetOccupantControllerGroup(const char* group, cISC4Occupant* occupant, bool add) {
+    cSC4City* city = HostCity();
+    auto* controllers = city ? dynamic_cast<cSC4AutomataControllerManager*>(city->GetComponent(CityComponent::AutomataControllerManager)) : nullptr;
+    if (!controllers || !occupant) return;
+    const cRZString name(group);
+    if (add) controllers->AddControllersFromOccupantGroup(name, occupant, nullptr);
+    else controllers->RemoveControllersFromOccupantGroup(name, occupant);
+}
 
 template <class T> T* Component(CityComponent c, std::uint32_t clsid) {
     cSC4City* city = HostCity();
@@ -470,7 +483,9 @@ public:
     }
     void* DepartmentBudget() override { return nullptr; }
     void EnsureDepartment(std::uint32_t id, std::uint32_t name, float maxFunding) override { EnsureProtectionDepartment(id, name, maxFunding); }
-    void SetStrikerGroup(IFireOccupant*, bool) override {}
+    void SetStrikerGroup(IFireOccupant* station, bool add) override {   // i386 0x002373f8
+        if (auto* adapter = dynamic_cast<class FireOccupant*>(station)) SetOccupantControllerGroup("striking_fire", adapter->Occupant(), add);
+    }
     void RegisterFundedStation(IFireOccupant* station, std::uint32_t purpose, bool add) override {
         if (station) RegisterProtectionFunding(station->PropertyHolder(), purpose, add);
     }
@@ -554,8 +569,12 @@ public:
         return department ? department->GetFundingPercentage() : 1.0f;
     }
     void EnsureDepartment(std::uint32_t id, std::uint32_t name, float maxFunding) override { EnsureProtectionDepartment(id, name, maxFunding); }
-    void SetStrikerGroup(IPoliceOccupant*, bool) override {}
-    void SetJailbreakGroup(IPoliceOccupant*, bool) override {}
+    void SetStrikerGroup(IPoliceOccupant* station, bool add) override {   // i386 0x00076f04
+        if (auto* adapter = dynamic_cast<class PoliceOccupant*>(station)) SetOccupantControllerGroup("striking_police", adapter->Occupant(), add);
+    }
+    void SetJailbreakGroup(IPoliceOccupant* jail, bool add) override {   // i386 0x0007902c / 0x000789ce
+        if (auto* adapter = dynamic_cast<class PoliceOccupant*>(jail)) SetOccupantControllerGroup("jailbreak", adapter->Occupant(), add);
+    }
     void RegisterFundedStation(IPoliceOccupant* station, std::uint32_t purpose, bool add) override {
         if (station) RegisterProtectionFunding(station->PropertyHolder(), purpose, add);
     }
@@ -612,6 +631,7 @@ private:
 class ResidentialOccupant final : public IResidentialOccupant {
 public:
     explicit ResidentialOccupant(cISC4Occupant* occupant) : occupant_(occupant) {}
+    cISC4Occupant* Occupant() const { return occupant_; }
     cISCPropertyHolder* PropertyHolder() override { return occupant_->AsPropertyHolder(); }
     bool IsInGroup(std::uint32_t group) override { return occupant_->IsOccupantGroup(group); }
     std::uint32_t BuildingType() override {
@@ -640,8 +660,9 @@ class ResidentialHost final : public IResidentialHost {
 public:
     std::uint32_t CurrentDay() override { cSC4Simulator* s = Simulator(); return s ? s->GetSimDateNumber() : 0; }
     void PostStrikeMessage(std::uint32_t message, IResidentialOccupant*, bool, std::uint32_t) override { PostCityMessage(message); }
-    void SetStrikerGroup(bool, IResidentialOccupant*, bool) override {   // PARTIAL: no automata controllers for strikers yet
-        SC4_UNWIRED("cSC4ResidentialSimulator strike: the strikers' automata controller on the building is not created");
+    void SetStrikerGroup(bool education, IResidentialOccupant* building, bool add) override {   // i386 0x0017ae3e
+        if (auto* adapter = dynamic_cast<ResidentialOccupant*>(building))
+            SetOccupantControllerGroup(education ? "striking_education" : "striking_health", adapter->Occupant(), add);
     }
     bool CityHasOccupantManager() override { cSC4City* c = HostCity(); return c && c->GetComponent(CityComponent::OccupantManager); }
     std::uint8_t CellWorkforce(unsigned, unsigned) override { return 0; }   // only without grids (the class answers itself)

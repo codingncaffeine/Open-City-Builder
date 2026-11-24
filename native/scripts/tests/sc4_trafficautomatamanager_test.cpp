@@ -22,6 +22,7 @@
 #include "sc4/SCPropertyHelp.h"
 #include "sc4/TrafficAutomataManager.h"
 #include "sc4/VehicleManager.h"
+#include "sc4/PedestrianManager.h"
 
 using namespace sc4;
 
@@ -1472,6 +1473,50 @@ int main() {
         CHECK(manager->HandleNewBuilding(&building));
         CHECK(manager->DispatchResponseCount() == 0);
         tuning.f21a00 = 0.0f;
+        manager->Shutdown();
+        manager->Release();
+        host.cityOccupants.erase(&occupant);
+        holder->Release();
+        delete cityOccupant;
+    }
+
+    // ------------------------------------------------------------ cSC4PedestrianManager::HandleNewBuilding (i386 0x000b15a4)
+    {
+        auto* manager = new cSC4PedestrianManager(nullptr);   // the global host answers
+        manager->AddRef();
+        CHECK(manager->Init());
+        manager->SetMaxCount(100);
+        auto* cityOccupant = new FakeCityOccupant();
+        FakeOccupant occupant;
+        auto* holder = new cSCPropertyHolder();
+        holder->AddRef();
+        occupant.holder = holder;
+        host.cityOccupants[&occupant] = cityOccupant;
+        FakeBuilding building;
+        building.occupant = &occupant;
+        building.purpose = 1;
+        CHECK(manager->HandleNewBuilding(&building) && manager->DispatchResponseCount() == 0);   // no list: nothing
+        // walkers named by 0xe9aee3dc, counts from 0xe9aee3dd (1 past its end): not forced, path type 2, flags 2
+        AddUintArray(*holder, kPedestrianResponseGroupsProperty, {0x4011, 0x4012});
+        {
+            const std::uint8_t counts[1] = {4};
+            cRZVariant variant;
+            variant.RefUint8(counts, 1);
+            holder->AddProperty(kPedestrianResponseCountsProperty, &variant, false);
+        }
+        CHECK(manager->HandleNewBuilding(&building));
+        CHECK(manager->DispatchResponseCount() == 2);
+        if (manager->DispatchResponseCount() == 2) {
+            const tResponseAutomataInfo& first = manager->Responses()[0];
+            const tResponseAutomataInfo& second = manager->Responses()[1];
+            CHECK(first.group == 0x4011 && first.count == 4 && !first.forced && first.pathType == 2 && first.flags == (2u | 0x02000000u));
+            CHECK(first.occupant.get() == cityOccupant);
+            CHECK(second.group == 0x4012 && second.count == 1 && !second.forced);
+        }
+        manager->HandleRemoveOccupant(&occupant);
+        CHECK(manager->DispatchResponseCount() == 0);
+        manager->SetMaxCount(0);   // the automaton limit stops the list; the answer stays true
+        CHECK(manager->HandleNewBuilding(&building) && manager->DispatchResponseCount() == 0);
         manager->Shutdown();
         manager->Release();
         host.cityOccupants.erase(&occupant);

@@ -45,6 +45,8 @@ constexpr std::uint32_t kPedestrianMessageCrowdReactionResult = 0xa9e3b6e3;   //
 constexpr std::uint32_t kPedestrianExemplarGroup = 0x17;   // i386 constructor: +0xa50 = 0x17 (the 64-bit store also writes the next word)
 constexpr std::uint32_t kPedestrianDefaultGroup = 0x4001;
 constexpr std::uint32_t kPedestrianFallbackGroup = 0x896e75af;   // the cSC4Pedestrian class id
+constexpr std::uint32_t kPedestrianResponseGroupsProperty = 0xe9aee3dc;   // building exemplar: u32 automata groups (HandleNewBuilding)
+constexpr std::uint32_t kPedestrianResponseCountsProperty = 0xe9aee3dd;   // u8 count per group
 
 // ---- seams -------------------------------------------------------------------------------------------------------------
 class IPedestrianManagerHost : public ITrafficAutomataManagerHost {
