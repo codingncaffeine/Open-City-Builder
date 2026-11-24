@@ -142,6 +142,7 @@ declare -a TESTS=(
  "sc4_powersimulator:$T/sc4_powersimulator_test.cpp $S/sc4/PowerSimulator.cpp $S/gz/Bit1.cpp $S/sc4/SCProperty.cpp $S/sc4/SCPropertyHelp.cpp $S/sc4/cSC4ResponseCurve.cpp $S/rz/cRZRandom.cpp $S/rz/cRZVariant.cpp $S/rz/cRZString.cpp $S/rz/cRZUnknownList.cpp $S/rz/nRZHash.cpp $S/gz/cGZPersistResourceKeyList.cpp $S/rz/cRZMessage2Standard.cpp $S/rz/cRZStream.cpp $S/sc4/RandomIterator.cpp"
  "render_pixelcopy:$T/render_pixelcopy_test.cpp $S/render/PixelCopy.cpp"
  "s3d_math:$T/s3d_math_test.cpp $S/s3d/S3DMath.cpp $S/rz/cRZRandom.cpp"
+ "sc4_rigidbodysimulator2d:$T/sc4_rigidbodysimulator2d_test.cpp $S/sc4/RigidBodySimulator2D.cpp $S/s3d/S3DMath.cpp $S/rz/cRZRandom.cpp"
  "s3d_camera:$T/s3d_camera_test.cpp $S/s3d/Camera.cpp $S/s3d/S3DMath.cpp $S/rz/cRZRandom.cpp"
  "s3d_animatedinstance:$T/s3d_animatedinstance_test.cpp $S/s3d/AnimatedInstance.cpp"
  "lua_lua5thread:$T/lua_lua5thread_test.cpp $S/lua/Lua5Thread.cpp"
