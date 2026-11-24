@@ -100,13 +100,13 @@ void SelectPriority(AdviceBody& body, int priority) {
     }
 }
 
-// The picture a slot shows when the sim has no bitmap of its own: "<city name><bitmap file>".
+// The picture a slot shows when the sim has no bitmap of its own: "<MySim directory><bitmap file>".
 cRZString PortraitPath(const cISC4MySim* sim) {
     cRZString path;
     std::string combined;
     if (g_host) {
-        cRZString cityName;
-        if (g_host->CityName(cityName)) combined.assign(cityName.ToChar(), cityName.Strlen());
+        cRZString directory;
+        if (g_host->MySimDirectory(directory)) combined.assign(directory.ToChar(), directory.Strlen());
     }
     const cRZString& file = sim->GetBitmapFile();
     combined.append(file.Data(), file.Strlen());

@@ -216,7 +216,7 @@ public:
     virtual IModelManager* PedestrianManager() = 0;                      // SL::spPedestrianManager (borrowed)
     virtual void RestoreWindowLocation(cIGZWin* window) = 0;             // SL::spWinLocationSaver vslot 0x48
     virtual void SaveWindowLocation(cIGZWin* window) = 0;                // SL::spWinLocationSaver vslot 0x28
-    virtual bool CityName(cIGZString& out) = 0;                          // SL::spSC4 vslot 0x1d8
+    virtual bool MySimDirectory(cIGZString& out) = 0;                    // SL::spSC4 vslot 0x1d8 (i386 0xec) GetMySimDirectory
     virtual IPickSimWinProc* CreatePickSimWinProc(std::uint32_t index) = 0;
         // cSC4PickSimWinProc ctor @ 0x1003549dc: a fresh object with no reference yet (like cRZUnknown's ctor); AddSim
         // takes the reference and releases it after the modal Init loop.

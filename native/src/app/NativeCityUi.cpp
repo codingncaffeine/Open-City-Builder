@@ -18,6 +18,8 @@
 
 namespace native {
 sc4::cSC4MySimAgentSimulator* NativeMySimAgentSimulator();   // app/NativeMySim.cpp
+// the exemplars of the vehicle (0) or pedestrian (1) manager's model records; false without that manager
+bool NativeAutomataModelExemplars(int index, std::vector<sc4::cISCResExemplar*>* out);   // app/NativeAutomataManagerHost.cpp
 // The city view as its window (SL::spView3DWin; null without a city view).
 cIGZWin* NativeCityView3DWindow() {
     sc4::cSC4View3DWin* view = CityView3DWin();
@@ -73,15 +75,21 @@ public:
     cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
     sc4::cISC4GameDataRegistry* GameDataRegistry() override { return NativeGameDataRegistry(); }
     sc4::IMySimAgentSimulator* MySimAgentSimulator() override { return NativeMySimAgentSimulator() ? &agentView_ : nullptr; }
-    sc4::IModelManager* VehicleManager() override { return nullptr; }
-    sc4::IModelManager* PedestrianManager() override { return nullptr; }
+    // SL::spVehicleManager / spPedestrianManager vslot 0xe0: the automata model records' exemplars
+    sc4::IModelManager* VehicleManager() override { return NativeAutomataModelExemplars(0, nullptr) ? &vehicles_ : nullptr; }
+    sc4::IModelManager* PedestrianManager() override { return NativeAutomataModelExemplars(1, nullptr) ? &pedestrians_ : nullptr; }
     void RestoreWindowLocation(cIGZWin* window) override {   // SL::spWinLocationSaver
         if (auto* saver = static_cast<cSLWinLocationSaver*>(SL::spWinLocationSaver)) saver->RestoreWindowLocation(window, true);
     }
     void SaveWindowLocation(cIGZWin* window) override {
         if (auto* saver = static_cast<cSLWinLocationSaver*>(SL::spWinLocationSaver)) saver->SaveWindowLocation(window);
     }
-    bool CityName(cIGZString&) override { return false; }
+    bool MySimDirectory(cIGZString& out) override {
+        cSC4App* app = BootApplication();
+        if (!app) return false;
+        app->GetMySimDirectory(out);
+        return true;
+    }
     // the "add a sim" dialog for a MySim slot (cSC4PickSimWinProc); the panel Init's it, which runs it modally
     sc4::IPickSimWinProc* CreatePickSimWinProc(std::uint32_t index) override;
     cIGZWinMgr* WindowManager() override { return window_ ? window_->GetWindowManager() : nullptr; }
@@ -99,6 +107,17 @@ public:
 
     cIGZWin* window_ = nullptr;   // any window of the UI, for its window manager
     MySimAgentView agentView_;
+    struct Models final : sc4::IModelManager {
+        int index = 0;
+        explicit Models(int which) : index(which) {}
+        bool QueryInterface(std::uint32_t, void**) override { return false; }
+        std::uint32_t AddRef() override { return 1; }
+        std::uint32_t Release() override { return 1; }
+        void ModelExemplars(std::vector<sc4::cISCResExemplar*>& out) override {
+            NativeAutomataModelExemplars(index, &out);
+        }
+    };
+    Models vehicles_{0}, pedestrians_{1};
 };
 
 // cSC4View3DWin keeps the MySim procedure as IMySimWindow; the recovered class is a plain window procedure, so this

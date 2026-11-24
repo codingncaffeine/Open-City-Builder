@@ -564,7 +564,7 @@ struct HostImpl final : IMySimWinProcHost {
     int houseTools = 0, jobTools = 0;
     bool CreateChangeHouseTool(cISC4MySim*) override { ++houseTools; return true; }
     bool CreateChangeJobTool(cISC4MySim*) override { ++jobTools; return true; }
-    bool CityName(cIGZString& out) override { out.AssignFromCString(cityName.c_str()); return true; }
+    bool MySimDirectory(cIGZString& out) override { out.AssignFromCString(cityName.c_str()); return true; }
     IPickSimWinProc* CreatePickSimWinProc(std::uint32_t index) override {
         picks.push_back(new FakePickSim(index));   // no reference yet; the panel takes one (and the double is leaked)
         return picks.back();

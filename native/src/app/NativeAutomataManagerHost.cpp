@@ -511,6 +511,15 @@ sc4::cSC4AutomataManager* NativeAutomataManagerAt(int index) {
                                                    CityComponent::WatercraftManager};
     return index >= 0 && index < 4 ? Concrete<cSC4AutomataManager>(kManagers[index]) : nullptr;
 }
+bool NativeAutomataModelExemplars(int index, std::vector<sc4::cISCResExemplar*>* out) {
+    sc4::cSC4AutomataManager* manager = NativeAutomataManagerAt(index);
+    if (out) {
+        out->clear();
+        if (manager)
+            for (const sc4::tExemplarData& record : manager->GetExemplarData()) out->push_back(record.exemplar);
+    }
+    return manager != nullptr;
+}
 // cSC4TrafficAutomataManager::IsLayerVisible (i386 0x000ca21a) on the vehicle manager: the view level shows that layer.
 bool NativeAutomataLayerVisible(std::uint32_t layer) {
     cSC4TrafficAutomataManager* manager = Concrete<cSC4TrafficAutomataManager>(CityComponent::VehicleManager);
