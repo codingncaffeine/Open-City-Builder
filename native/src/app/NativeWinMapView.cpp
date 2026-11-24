@@ -50,6 +50,7 @@
 #include "sc4/NetworkManager.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/cSTETerrain.h"
+#include "sc4/cSC4ZoneManager.h"
 #include "sc4/SLBuffer.h"
 #include "sc4/WeatherSimulator.h"
 
@@ -246,11 +247,48 @@ public:
                     }
                 }
                 break;
-            case 6:
-                SC4_UNWIRED("cSC4WinMapView::UpdateHighlights view 6: garbage buildings and landfill-zone occupants are not collected");
+            case 6: {   // spPollutionSim 0xb8 GetGarbageBuildings, then each landfill-zone cell's occupant of type 0x6a11bd2b
+                if (auto* pollution = CityAs<cSC4PollutionSimulator>(CityComponent::PollutionSimulator)) {
+                    std::list<IPollutionOccupant*> buildings;
+                    pollution->GetGarbageBuildings(buildings);
+                    for (IPollutionOccupant* building : buildings) {
+                        void* raw = nullptr;
+                        cIGZUnknown* object = building ? building->Object() : nullptr;
+                        if (!object || !object->QueryInterface(sc4::kGZIID_cISC4Occupant, &raw) || !raw) continue;
+                        auto* occupant = static_cast<sc4::cISC4Occupant*>(raw);
+                        out.push_back({occupant, 0.0f});
+                        occupant->Release();   // the simulator's lists keep it
+                    }
+                }
+                cSC4City* city = HostCity();
+                auto* zones = CityAs<cSC4ZoneManager>(CityComponent::ZoneManager);
+                cIGZUnknown* object = city ? city->GetComponent(CityComponent::OccupantManager) : nullptr;
+                void* raw = nullptr;
+                if (!zones || !object || !object->QueryInterface(kGZIID_cISC4OccupantManager, &raw) || !raw) break;
+                auto* occupants = static_cast<cISC4OccupantManager*>(raw);
+                for (int x = 0; x < city->CellCountX(); ++x)
+                    for (int z = 0; z < city->CellCountZ(); ++z) {
+                        if (zones->GetZoneType(x, z) != 0xe) continue;   // landfill
+                        sc4::cISC4Occupant* found = nullptr;
+                        if (occupants->GetFirstOccupantByStandardCityCell(found, x, z, 0x6a11bd2bu) && found) {
+                            out.push_back({found, 0.0f});
+                            found->Release();
+                        }
+                    }
+                occupants->Release();
                 break;
-            case 9:
-                SC4_UNWIRED("cSC4WinMapView::UpdateHighlights view 9: the traffic simulator's transit switches are not collected");
+            }
+            case 9:   // spTrafficSim 0x70 GetTransitSwitches: the stations' buildings
+                if (auto* traffic = CityAs<cSC4TrafficSimulator>(CityComponent::TrafficSimulator)) {
+                    for (const auto& entry : traffic->TransitSwitches()) {
+                        auto* building = static_cast<cIGZUnknown*>(entry.second.occupant);
+                        void* raw = nullptr;
+                        if (!building || !building->QueryInterface(sc4::kGZIID_cISC4Occupant, &raw) || !raw) continue;
+                        auto* occupant = static_cast<sc4::cISC4Occupant*>(raw);
+                        out.push_back({occupant, 0.0f});
+                        occupant->Release();
+                    }
+                }
                 break;
             default: break;
         }
