@@ -22,6 +22,7 @@
 #include "sc4/DisasterManagers.h"
 #include "sc4/DummyAutoOccupant.h"
 #include "sc4/EffectComponents.h"
+#include "sc4/EffectMaps.h"
 #include "sc4/NetworkOccupant.h"
 #include "sc4/OccupantManager.h"
 #include "sc4/ScrubberEffect.h"
@@ -133,8 +134,10 @@ public:
         SL::spMS2->MessagePost(message, false);
         message->Release();
     }
-    void AddRectToEffectMap(std::uint32_t, const std::int32_t[4], float, std::uint32_t) override {
-        SC4_UNWIRED("IScrubberHost::AddRectToEffectMap (the effect maps are not made natively)");
+    // spEffectsManager QI 0x0a5eaa1a, vslot 0x24 AddRectToMap(map, rect, value, spread) (i386 AddBlobToMap 0x003e16f2)
+    void AddRectToEffectMap(std::uint32_t map, const std::int32_t rect[4], float value, std::uint32_t spread) override {
+        if (sc4::cSC4EffectMaps* maps = EffectMaps())
+            maps->AddRectToMap(map, sc4::SC4CellRect{rect[0], rect[1], rect[2], rect[3]}, value, spread);
     }
     void SimulatorPause(bool pause) override {
         if (cSC4Simulator* simulator = CitySimulatorObject()) pause ? simulator->Pause() : simulator->Resume();

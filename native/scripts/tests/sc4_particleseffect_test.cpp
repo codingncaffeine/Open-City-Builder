@@ -936,6 +936,32 @@ void TestTerrainForcesAndCollision() {
     CHECK(!effect.ApplyTerrainForces(particle, cS3DVector3{1.0f, 0.5f, 1.0f}, 0.1f));
     CHECK_EQ(hosts.effects.triggered.size(), static_cast<std::size_t>(1));
     if (!hosts.effects.triggered.empty()) CHECK(hosts.effects.triggered[0] == "splash_water");
+    // Flag 0x400: the point ahead (look-ahead 0 = the particle itself, world 1,3,1 inside the 6 x 8 m world) against effect
+    // map 0. A gap of 3 under the influence height 10 pushes along the normal by (10 - 3)^2 * strength 1 * step 0.1 = 4.9;
+    // a gap under the floor -5 kills the particle.
+    hosts.effects.hasMaps = true;
+    hosts.effects.hasEffect = false;
+    description.flags = 0x400;
+    description.terrainBounce[6] = 0.0f;
+    description.terrainBounce[0] = 10.0f;
+    description.terrainBounce[1] = 1.0f;
+    description.terrainBounce[2] = 0.0f;
+    description.terrainBounce[3] = 1.0f;
+    description.terrainBounce[4] = -5.0f;
+    effect.SetDescription(&description);
+    particle->alive = 1;
+    particle->position = cS3DVector3{1.0f, 3.0f, 1.0f};
+    particle->velocity = cS3DVector3{0.0f, 0.0f, 0.0f};
+    hosts.effects.maps.height = 0.0f;
+    hosts.effects.maps.releases = 0;
+    CHECK(effect.ApplyTerrainForces(particle, cS3DVector3{1.0f, 3.0f, 1.0f}, 0.1f));
+    CHECK_NEAR(particle->velocity.y, 4.9, 1e-4);
+    CHECK_EQ(hosts.effects.maps.releases, 1);
+    hosts.effects.maps.height = 9.0f;   // gap -6
+    CHECK(!effect.ApplyTerrainForces(particle, cS3DVector3{1.0f, 3.0f, 1.0f}, 0.1f));
+    hosts.effects.hasMaps = false;
+    description.flags = 0;
+    effect.SetDescription(&description);
     // Building collision: the occupant manager seam decides.
     hosts.occupants.blocked = true;
     particle->alive = 1;

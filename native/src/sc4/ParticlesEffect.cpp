@@ -1634,7 +1634,7 @@ void cSC4ParticlesEffect::ApplyTractorForce(cSC4EffectsParticle* particle, float
 // PARTIAL: the water kill switch and both terrain branches (follow the ground, bounce with drag) are recovered; the
 // vertical-plane bounce of flag 0x400 reads the effect maps, which the port does not hand out, and is left out.
 bool cSC4ParticlesEffect::ApplyTerrainForces(cSC4EffectsParticle* particle, const cS3DVector3& position,
-                                             float) {
+                                             float step) {
     const cSC4ParticlesDescription* desc = description_;
     if (position.y <= waterLevel_ && waterLevel_ != position.y) {
         const float chance = desc->terrainBounce[6];   // description +0x1c4
@@ -1652,7 +1652,7 @@ bool cSC4ParticlesEffect::ApplyTerrainForces(cSC4EffectsParticle* particle, cons
         }
     }
     // The original asks the effects manager for its effect maps first and does nothing without them; only the flag
-    // 0x400 branch reads them, so the port runs the two terrain branches without and skips that one.
+    // 0x400 branch reads them, so the port runs the two terrain branches without them as well.
     IParticlesEffectMaps* maps = ParticlesEffects() ? ParticlesEffects()->EffectMaps() : nullptr;
     bool alive = true;
     desc = description_;
@@ -1735,13 +1735,54 @@ bool cSC4ParticlesEffect::ApplyTerrainForces(cSC4EffectsParticle* particle, cons
                 }
             }
         }
-    } else {
-        // PARTIAL: the vertical bounce plane of description flag 0x400 needs the effect map's height field; the
-        // recovered part only keeps the particle alive (see the ledger).
-        SC4_UNWIRED("cSC4ParticlesEffect::ApplyTerrainForces: flag 0x400 vertical bounce plane on the effect map height field not ported");
-        if (maps) {
-            const float height = maps->Height(position.x, position.z);
-            (void)height;
+    } else if (maps) {
+        // Flag 0x400 (i386 0x004176ae, the bitset test 10): a point ahead of the particle along its velocity (by
+        // description +0x144, the speed taken as at least 10) is checked against effect map 0 (the terrain with the
+        // buildings and scrubber blobs raised on it). Under description +0x14c above the map the particle dies;
+        // under +0x13c it is pushed along the map's normal by the square of the gap (y scaled by +0x148), times
+        // +0x140 and the step - or, with flag 0x800000, the walking direction is turned instead, keeping its length.
+        const float* bounce = desc->terrainBounce;   // i386 +0x13c influence, +0x140 strength, +0x144 look-ahead, +0x148 y scale, +0x14c floor
+        cS3DVector3 ahead{bounce[2] * particle->velocity.x, bounce[2] * particle->velocity.y, bounce[2] * particle->velocity.z};
+        float speed = std::sqrt(particle->velocity.x * particle->velocity.x + particle->velocity.y * particle->velocity.y +
+                                particle->velocity.z * particle->velocity.z);
+        if (speed <= 10.0f) speed = 10.0f;
+        ahead.x = ahead.x / speed + particle->position.x;
+        ahead.y = ahead.y / speed + particle->position.y;
+        ahead.z = ahead.z / speed + particle->position.z;
+        const auto& r = sourceTransform_.rotation;   // TransformPoint
+        const float scale = sourceTransform_.scale;
+        const float wx = (r[0][2] * ahead.z + r[0][1] * ahead.y + r[0][0] * ahead.x) * scale + sourceTransform_.translation[0];
+        const float wy = (r[1][2] * ahead.z + r[1][1] * ahead.y + r[1][0] * ahead.x) * scale + sourceTransform_.translation[1];
+        const float wz = (r[2][2] * ahead.z + r[2][1] * ahead.y + r[2][0] * ahead.x) * scale + sourceTransform_.translation[2];
+        if (0.0f < wx && 0.0f < wz && wx < worldWidth_ && wz < worldDepth_) {
+            const float gap = wy - maps->Height(wx, wz);
+            if (gap < bounce[4]) {
+                alive = false;
+            } else if (gap < bounce[0]) {
+                cS3DVector3 normal{};
+                maps->Normal(wx, wz, normal);
+                const float push = (bounce[0] - gap) * (bounce[0] - gap);
+                const cS3DVector3 force{push * normal.x, push * normal.y * bounce[3], push * normal.z};
+                const float k = step * bounce[1];
+                if ((desc->flags & 0x800000) == 0) {
+                    particle->velocity.x += k * force.x;
+                    particle->velocity.y += k * force.y;
+                    particle->velocity.z += k * force.z;
+                } else {
+                    const float length = std::sqrt(walkDirection_.x * walkDirection_.x + walkDirection_.y * walkDirection_.y +
+                                                   walkDirection_.z * walkDirection_.z);
+                    walkDirection_.x += k * force.x;
+                    walkDirection_.y += k * force.y;
+                    walkDirection_.z += k * force.z;
+                    const float now = std::sqrt(walkDirection_.x * walkDirection_.x + walkDirection_.y * walkDirection_.y +
+                                                walkDirection_.z * walkDirection_.z);
+                    if (now > 0.0f) {
+                        walkDirection_.x *= length / now;
+                        walkDirection_.y *= length / now;
+                        walkDirection_.z *= length / now;
+                    }
+                }
+            }
         }
     }
     if (maps) maps->Release();

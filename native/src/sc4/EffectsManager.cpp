@@ -2,6 +2,8 @@
 // quirks). Every function below carries its original address; functions whose body could not be completed are marked
 // PARTIAL / SKIPPED in the same comment and in notes/ledger_pending/cSC4EffectsManager.txt.
 #include "sc4/EffectsManager.h"
+#include "sc4/OccupantManager.h"
+#include "sc4/SCPropertyHelp.h"
 
 #include <algorithm>
 #include <cctype>
@@ -1401,16 +1403,18 @@ bool cSC4EffectsManager::DoMessage(cIGZMessage2* message) {
         case 0x697d01ed: DoEffectsTick(); break;
         case 0xab96b05f: effectsActive_ = true; UpdateActiveVisualEffects(); break;
         case 0x26d31ec2: suppressOccupantEffects_ = true; break;
-        case 0x26d31ec1:   // PostCityInit (i386 0x0040a90a): the 1000 ms effects tick starts, holding the manager while it runs
-            tickTimer_.StartPeriodic(1000, this);
-            SC4_UNWIRED("cSC4EffectsManager::DoMessage: PostCityInit does not seed the building effect maps (occupant manager iteration -> DoOccupantInserted)");
+        case 0x26d31ec1:   // PostCityInit (i386 0x0040a90a): the 1000 ms effects tick starts, holding the manager while it runs,
+            tickTimer_.StartPeriodic(1000, this);   // then every occupant goes through DoOccupantInserted (vslot 0xb0, no type)
+            if (cISC4OccupantManager* occupants = host_ ? host_->OccupantManager() : nullptr)
+                occupants->IterateOccupants(
+                    [](cISC4Occupant* occupant, void* manager) {
+                        static_cast<cSC4EffectsManager*>(manager)->DoOccupantInserted(occupant);
+                        return true;
+                    },
+                    this, nullptr, nullptr, 0u);
             break;
-        case 0x99ef1142:
-            SC4_UNWIRED("cSC4EffectsManager::DoOccupantInserted: the static building's heights are not written into the effect maps");
-            break;
-        case 0x99ef1143:
-            SC4_UNWIRED("cSC4EffectsManager::DoOccupantRemoved: the removed building's effect-map cells are not cleared");
-            break;
+        case 0x99ef1142: DoOccupantInserted(static_cast<cISC4Occupant*>(static_cast<cIGZMessage2Standard*>(message)->GetVoid1())); break;
+        case 0x99ef1143: DoOccupantRemoved(static_cast<cISC4Occupant*>(static_cast<cIGZMessage2Standard*>(message)->GetVoid1())); break;
         default: break;
     }
     return true;
@@ -1434,12 +1438,62 @@ void cSC4EffectsManager::DoRenderPropertiesChanged() {
     SC4_UNWIRED("cSC4EffectsManager::DoRenderPropertiesChanged: the effects detail priority, atmospheric and water effects are not refreshed");
 }
 
-// @ 0x1005de68c (PARTIAL): needs the terrain effect maps and the occupant's box / flags (plus the free IsStaticBuilding
-// helper at 0x1005e3337); not ported.
-void cSC4EffectsManager::DoOccupantInserted(cISC4Occupant* occupant) { (void)occupant; }
+namespace {
+// IsStaticBuilding (i386 0x00404c26): an occupant whose exemplar has a size (0x27812820..0x27812824) and is not flagged
+// 0x29244db, and that is a building (iid 0x87dda3a9) or carries 0x8a5e5db8 set.
+bool IsStaticBuilding(cISC4Occupant* occupant) {
+    cISCPropertyHolder* holder = occupant ? occupant->AsPropertyHolder() : nullptr;
+    if (!holder || holder->HasProperty(0x029244db)) return false;
+    if (!holder->HasProperty(0x27812821) && !holder->HasProperty(0x27812820) && !holder->HasProperty(0x27812822) &&
+        !holder->HasProperty(0x27812823) && !holder->HasProperty(0x27812824))
+        return false;
+    void* building = nullptr;
+    if (occupant->QueryInterface(0x87dda3a9, &building) && building) {
+        static_cast<cIGZUnknown*>(building)->Release();
+        return true;
+    }
+    bool flagged = false;
+    return cSCPropertyHelp::GetPropertyValue(holder, 0x8a5e5db8, flagged) && flagged;
+}
+}  // namespace
 
-// @ 0x1005de762 (PARTIAL): same neighbours as DoOccupantInserted plus the occupant-manager box query; not ported.
-void cSC4EffectsManager::DoOccupantRemoved(cISC4Occupant* occupant) { (void)occupant; }
+// @ 0x1005de68c (i386 0x00404d22): a static building raises effect map 1 over its cells (one cell wider on the far
+// sides) by its height, spread 2; the tallest roof is kept.
+void cSC4EffectsManager::DoOccupantInserted(cISC4Occupant* occupant) {
+    if (!effectMaps_ || suppressOccupantEffects_ || !IsStaticBuilding(occupant)) return;
+    float boxMin[3] = {0, 0, 0}, boxMax[3] = {0, 0, 0};
+    occupant->GetBoundingBox(boxMin, boxMax);
+    const float height = boxMax[1] - boxMin[1];
+    SC4CellRect cells;
+    occupant->GetBoundingCityCells(cells);
+    cells.x1 += 1;
+    cells.z1 += 1;
+    effectMaps_->SetValueAboveTerrain(1, cells, height, 2);
+    if (tallestBuildingAltitude_ < boxMax[1]) tallestBuildingAltitude_ = boxMax[1];
+}
+
+// @ 0x1005de762 (i386 0x00404df0): a static building's cells, two wider on the near sides and three on the far, go back to
+// the terrain in effect map 1; then every building in a rectangle two cells wider still is inserted again (the
+// neighbours whose raised cells that reset took away).
+void cSC4EffectsManager::DoOccupantRemoved(cISC4Occupant* occupant) {
+    if (!effectMaps_ || suppressOccupantEffects_ || !IsStaticBuilding(occupant)) return;
+    SC4CellRect cells;
+    occupant->GetBoundingCityCells(cells);
+    cells.x0 -= 2;
+    cells.z0 -= 2;
+    cells.x1 += 3;
+    cells.z1 += 3;
+    effectMaps_->ResetValueToTerrain(1, cells);
+    cISC4OccupantManager* occupants = host_ ? host_->OccupantManager() : nullptr;
+    if (!occupants) return;
+    const int low[2] = {cells.x0 - 2, cells.z0 - 2}, high[2] = {cells.x1 + 2, cells.z1 + 2};
+    OccupantList buildings;
+    occupants->GetOccupantsByStandardCityCells(buildings, low, high, 0x278128a0u, 0xffffffffu);   // vslot 0xa0
+    for (cISC4Occupant* building : buildings) {
+        DoOccupantInserted(building);
+        building->Release();
+    }
+}
 
 // 0x1005dc8c9 (the cRZCallbackTimer callback): the original ignores its user pointer and posts kEffectsTickMessage
 // through the message server so the manager's DoMessage runs on the message thread.

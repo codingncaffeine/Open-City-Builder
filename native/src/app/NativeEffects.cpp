@@ -208,6 +208,17 @@ sc4::cSC4WeatherSimulator* CityWeather() {
 sc4::cISC4LightingManager* Lighting() { return dynamic_cast<sc4::cISC4LightingManager*>(SL::spLightingManager); }
 
 // ---- IEffectsManagerHost ----
+// SL::spOccupantManager for the effects manager (its building effect-map hooks).
+sc4::cISC4OccupantManager* EffectsOccupantManager() {
+    sc4::cSC4City* city = HostCity();
+    cIGZUnknown* object = city ? city->GetComponent(sc4::CityComponent::OccupantManager) : nullptr;
+    void* raw = nullptr;
+    if (!object || !object->QueryInterface(sc4::kGZIID_cISC4OccupantManager, &raw) || !raw) return nullptr;
+    auto* manager = static_cast<sc4::cISC4OccupantManager*>(raw);
+    manager->Release();   // borrowed: the city keeps it
+    return manager;
+}
+
 class ManagerHost final : public sc4::IEffectsManagerHost {
 public:
     void SendProgressMessage(int, const char*) override {}
@@ -233,6 +244,7 @@ public:
         return object;
     }
     // new cSC4EffectMaps (the manager Inits it); the maps read the city's terrain.
+    sc4::cISC4OccupantManager* OccupantManager() override { return EffectsOccupantManager(); }
     sc4::cSC4EffectMaps* CreateEffectMaps() override {
         sc4::SetTerrainMapSource(CityTerrain() ? &g_terrainMapSource : nullptr);
         auto* maps = new sc4::cSC4EffectMaps();
@@ -556,6 +568,25 @@ public:
     void Start(int) override {}
     void SetSourceTransform(const cS3DTransform&) override {}
 };
+// The effects manager's maps as the particles read them (GZCOM_Interface<cISC4EffectMaps>, i386 ApplyTerrainForces):
+// map 0's height and normal; one counted reference per query, given back by Release.
+class ParticleEffectMaps final : public IParticlesEffectMaps {
+public:
+    explicit ParticleEffectMaps(sc4::cSC4EffectMaps* maps) : maps_(maps) { maps_->AddRef(); }
+    void Release() override {
+        maps_->Release();
+        delete this;
+    }
+    float Height(float x, float z) override { return maps_->MapLerpedHeight(0, x, z); }   // vslot 0x18 (map 0)
+    void Normal(float x, float z, cS3DVector3& out) override {                            // vslot 0x20 (map 0)
+        float n[3] = {0.0f, 1.0f, 0.0f};
+        maps_->MapLerpedNormal(0, x, z, n);
+        out = cS3DVector3{n[0], n[1], n[2]};
+    }
+
+private:
+    sc4::cSC4EffectMaps* maps_;
+};
 class ParticlesEffectsHost final : public IParticlesEffects {
 public:
     IParticlesEffectLookup* FindEffect(const char* name) override {   // vslot 0x14 HasVisualEffect
@@ -568,7 +599,10 @@ public:
         if (std::getenv("SC4_FXDEBUG")) std::fprintf(stderr, "effects: a particle starts %s\n", name);
         return new ParticleTriggeredEffect(effect);
     }
-    IParticlesEffectMaps* EffectMaps() override { return nullptr; }
+    IParticlesEffectMaps* EffectMaps() override {
+        sc4::cSC4EffectMaps* maps = g_manager ? g_manager->GetEffectMaps() : nullptr;
+        return maps ? new ParticleEffectMaps(maps) : nullptr;
+    }
 };
 ParticlesEffectsHost g_particleEffects;
 
@@ -798,6 +832,11 @@ int StartNamedEffect(const char* name, float x, float y, float z) {
     return 1;
 }
 
+}  // namespace native
+
+namespace native {
+// The effects manager's effect maps (its QueryInterface 0x0a5eaa1a answers the maps at +0x1060), or null.
+sc4::cSC4EffectMaps* EffectMaps() { return g_manager ? g_manager->GetEffectMaps() : nullptr; }
 }  // namespace native
 
 namespace native {

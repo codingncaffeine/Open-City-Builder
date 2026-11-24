@@ -139,6 +139,7 @@ class cIGZCommandParameterSet;
 class SC4DrawContext;   // sc4/DrawContext.h (global, like the renderer's)
 
 namespace sc4 {
+class cISC4OccupantManager;
 
 class cSC4EffectsManager;
 class cISC4GameDataRegistry;   // sc4/GameDataRegistry.h (the game-data registry lives in this namespace)
@@ -180,6 +181,7 @@ public:
     virtual IParticlesVertexBuffer* VertexBufferExtension() = 0;                    // renderer device QI 0x9cd86f9 (AddRef'd)
     virtual cIGZUnknown* WeatherSim() = 0;                                          // SL::spWeatherSim (AddRef'd)
     virtual cSC4EffectMaps* CreateEffectMaps() = 0;                                 // new cSC4EffectMaps + Init
+    virtual cISC4OccupantManager* OccupantManager() { return nullptr; }             // SL::spOccupantManager (borrowed)
     virtual cIGZUnknown* CreateEffectsResource() = 0;                               // GZCOM 0x5cf9459a/0x1cf94583, vslot 0x18
     virtual void ShutdownEffectsResource(cIGZUnknown* resource) = 0;                 // resource vslot 0x20(1)
     virtual bool EffectsResourceChanged() = 0;                                      // resource vslot 0x70
@@ -370,8 +372,8 @@ public:
     void DoAnimationTick(std::uint32_t elapsedMs);                          // @ 0x1005ddd1c (PARTIAL)
     bool DoSnowCheat(cRZCmdLine& commandLine);                              // @ 0x1005de8d4
     void DoRenderPropertiesChanged();                                       // @ 0x1005de30a (PARTIAL)
-    void DoOccupantInserted(cISC4Occupant* occupant);                       // @ 0x1005de68c (PARTIAL)
-    void DoOccupantRemoved(cISC4Occupant* occupant);                        // @ 0x1005de762 (PARTIAL)
+    void DoOccupantInserted(cISC4Occupant* occupant);                       // @ 0x1005de68c (i386 0x00404d22)
+    void DoOccupantRemoved(cISC4Occupant* occupant);                        // @ 0x1005de762 (i386 0x00404df0)
     void CreateFlashMaterials();                                            // @ 0x1005dc2a2
     void CreateComponentFromDescription(const cSC4EffectDescription::cDescriptionRec& record,
                                         cSC4VisualEffect::cComponentRec* component,
