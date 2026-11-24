@@ -366,9 +366,8 @@ bool cSC4SignpostOccupant::DoMessage(cIGZMessage2* message) {
             cursorVisible_ = !cursorVisible_;   // this[0x109] ^= 1
             tickMs_ = 0;
         }
-        SC4_UNWIRED("cSC4SignpostOccupant::DoMessage: tail call to cSC4PropOccupant::DoMessage (animated model frame update) not made");
     }
-    return DoPropMessage(message);
+    return cSC4PropOccupant::DoMessage(message);   // every message ends in the prop's own (i386 0x0..: the animated model frames)
 }
 
 // 0x10071027e

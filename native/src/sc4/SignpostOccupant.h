@@ -227,11 +227,6 @@ public:
     ISignpostTextureBinding* Texture(int index) const { return textures_[index]; }
     const float* PickBox(int index) const { return pickBoxes_[index]; }   // min xyz, max xyz
 
-protected:
-    // The original tail-calls cSC4PropOccupant::DoMessage (0x10015ebb2) from the sign's DoMessage. The prop's body is
-    // ported (PropOccupant.cpp) but not chained here yet: this hook still answers "not handled".
-    virtual bool DoPropMessage(cIGZMessage2*) { return true; }
-
 private:
     void SetBoardColors(std::uint32_t color);   // the four background vertices (RebuildModel and SetDynamic)
     void WorldBoxesFromTransform(const float* localMin, const float* localMax, float* outMin, float* outMax) const;
