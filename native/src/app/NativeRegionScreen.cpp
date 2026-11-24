@@ -7,6 +7,11 @@
 #include "app/NativeAnimationTicks.h"
 
 #include <algorithm>
+#include <spawn.h>
+#include <string>
+#include <sys/wait.h>
+
+extern char** environ;
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -460,6 +465,18 @@ public:
         return true;
     }
     void RequestQuitFromRegion(bool ask) override { if (cSC4App* app = BootApplication()) app->RequestQuitFromRegion(ask); }
+    void RequestQuit(bool a, bool b) override { if (cSC4App* app = BootApplication()) app->RequestQuit(a, b); }
+    // The desktop's own opener (xdg-open: the portal / the user's default browser), started detached without a shell.
+    bool ViewExternalWebBrowser(const cRZString& url) override {
+        if (url.Strlen() == 0) return false;
+        std::string target = url.ToChar();
+        char* argv[] = {const_cast<char*>("xdg-open"), target.data(), nullptr};
+        pid_t pid = 0;
+        if (posix_spawnp(&pid, "xdg-open", nullptr, nullptr, argv, environ) != 0) return false;
+        int status = 0;
+        waitpid(pid, &status, 0);   // xdg-open hands the page over and returns at once
+        return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    }
     void DeleteRegion(int index) override { if (Nation() && index >= 0) Nation()->DeleteRegion(std::uint32_t(index)); }
     bool RegionCellBounds(int& left, int& top, int& right, int& bottom) override {
         cISC4Region* region = ActiveRegion();

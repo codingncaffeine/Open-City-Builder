@@ -1,5 +1,6 @@
 #include "sc4/WinRegionScreen.h"
 #include "platform/Unwired.h"
+#include "sc4/SLString.h"
 #include "sc4/RegionDialogs.h"
 
 #include <algorithm>
@@ -1375,13 +1376,22 @@ bool cSC4WinRegionScreen::GZOnCommand(std::uint32_t command, std::uint64_t param
                                        true);
         return true;
     }
+    case 0x4a779a1a:     // the two web links: the page named by the string table in the browser, then the game quits
+    case 0x4a779a09: {   // (preferences saved first), as i386 0x001a5274
+        const cRZString url = cSLString(0x6a231eaa, param == 0x4a779a1a ? 0x4a779d9du : 0x4a77a0b1u, true);
+        if (host && host->ViewExternalWebBrowser(url)) {
+            SetUserPreferencesToCurrentRegion();
+            SetUserPreferencesToCurrentPosition();
+            host->RequestQuit(false, false);   // cISC4App vslot 0x28 (0, 0)
+        }
+        return true;
+    }
     default:
         if (getenv("SC4_DEBUG")) fprintf(stderr, "region screen: button %#llx not wired\n", static_cast<unsigned long long>(param));
-        SC4_UNWIRED("cSC4WinRegionScreen::GZOnCommand: region screen button not wired (import / export city, snapshot album, web links)");
+        SC4_UNWIRED("cSC4WinRegionScreen::GZOnCommand: region screen button not wired (import / export city, snapshot album)");
         break;
     }
-    // PARTIAL: the new-region dialog, the import/export city dialogs, the snapshot album and the web links (0x10023b92a is
-    // 2739 bytes of that dispatch) are not recovered; load / delete region and the options dialogs are wired above.
+    // PARTIAL: the import city dialog and the snapshot taker / album are not recovered.
     return true;
 }
 

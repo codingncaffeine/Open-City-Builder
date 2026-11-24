@@ -318,6 +318,9 @@ public:
     virtual bool ReloadRegion() = 0;                                        // cISC4App vslot 0x60 (0)
     virtual void DeleteRegion(int index) { (void)index; }                   // cISC4Nation vslot 0x30 (i386)
     virtual void RequestQuitFromRegion(bool ask) { (void)ask; }             // cISC4App vslot 0x2c (i386)
+    virtual void RequestQuit(bool a, bool b) { (void)a; (void)b; }          // cISC4App vslot 0x28 (i386)
+    // SC4ViewExternalWebBrowser (i386 0x00024444): the page in the system's web browser; true when it was handed over.
+    virtual bool ViewExternalWebBrowser(const cRZString& url) { (void)url; return false; }
     virtual bool RegionCellBounds(int& left, int& top, int& right, int& bottom) = 0;   // city list vslot 0xc0
     virtual int CitySnapshotSet() = 0;                                      // city list vslot 0x90
     // region vslot 0xb8 (GetCityLocations): the city places of the active region (x, z, log2 of the edge length).
