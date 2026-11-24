@@ -11,7 +11,6 @@
 // walk order matters (which unsolved cell ApplyNetworkRules picks first) a different but equally valid order results.
 #include "sc4/NetworkTool.h"
 #include "sc4/Occupant.h"
-#include "platform/Unwired.h"
 #include "sc4/NetworkConstructionCrew.h"
 
 #include <cfloat>
@@ -2350,7 +2349,6 @@ float cSC4NetworkTool::GetNetworkVertexHeight(std::int32_t vertex) {
 
 // i386 vslot 0xf0 (0x0012...): the solved piece's texture on the cell, tinted (blue for a +0x52 cell, else orange),
 // raised by the type's elevation (kAltitudeForNetworkType: the elevated highway, light rail and monorail float 15.5).
-// NOT PORTED: the cells of two network types (SolveMultiTypeSeparation); they get no preview.
 void cSC4NetworkTool::AddCellPreview(cSC4NetworkCellInfo& cell, const tSolvedCell& solved) {
     static constexpr float kAltitudeForNetworkType[13] = {0, 0, 15.5f, 0, 0, 0, 0, 0, 15.5f, 15.5f, 0, 0, 0};
     if (cell.status == 0 || !preview_) return;
@@ -2374,8 +2372,60 @@ void cSC4NetworkTool::AddCellPreview(cSC4NetworkCellInfo& cell, const tSolvedCel
             return;
         }
     }
-    if (flags & (flags - 1))
-        SC4_UNWIRED("cSC4NetworkTool::AddCellPreview: preview of a two-network-type cell (SolveMultiTypeSeparation) not ported");
+    // A cell of two types (one of them elevated: flags 0x304 with others): each of its types gets its own piece, solved
+    // from that type's rules with the cell taken alone (SolveMultiTypeSeparation), drawn without the buildable look.
+    for (int type = 0; type < 13; ++type) {
+        if ((kFlagForNetworkType[type] & cell.networkFlags) == 0) continue;
+        std::uint32_t piece = 0;
+        std::uint8_t pieceRotation = 0;
+        bool pieceFlip = false;
+        if (!SolveMultiTypeSeparation(at, static_cast<std::uint32_t>(type), piece, pieceRotation, pieceFlip)) continue;
+        int turned = pieceRotation;
+        const std::uint32_t texture = host ? host->PieceTexture(piece, turned) : piece;
+        const cGZPersistResourceKey pieceKey{0x7ab50e44, 0x1abe787d, texture};
+        preview->AddTexturedSelection(at, color, cell.vertexHeights, pieceKey, turned, pieceFlip, kAltitudeForNetworkType[type], false);
+    }
+}
+
+// i386 0x00127c4c: the cells of the smoothing set take the solved height of their corners (a buildable cell's vertices are
+// numbered from 100000); a cell of an earlier segment (not solved in this drag) whose corners moved has its preview
+// raised or lowered to match.
+void cSC4NetworkTool::UpdatePositionChangedPreviewsForPreviousSegments() {
+    for (std::uint32_t key : unknown128_) {
+        cSC4NetworkCellInfo* cell = GetCellInfo(key);
+        if (!cell) continue;   // port guard: the original reads the record unchecked
+        const bool buildable = cell->buildable;
+        bool changed = false;
+        for (int i = 0; i < 4; ++i) {
+            const float height = GetNetworkVertexHeight((buildable ? 100000 : 0) + cell->vertexBaseHeights[i]);
+            if (height != cell->vertexHeights[i] || std::isnan(height) || std::isnan(cell->vertexHeights[i])) changed = true;
+            cell->vertexHeights[i] = height;
+        }
+        if (changed && cell->solvedCellIndex < 0 && preview_)
+            preview_->AdjustCellHeights(SC4PointU{cell->x, cell->z}, cell->vertexHeights, buildable);
+    }
+}
+
+// i386 0x00145d7c: the piece of `type` the type's rule sets (in order, up to the first empty slot) give the cell when its
+// neighbourhood is read for any type; false when none covers the cell itself.
+bool cSC4NetworkTool::SolveMultiTypeSeparation(const SC4PointU& cell, std::uint32_t type, std::uint32_t& piece,
+                                               std::uint8_t& rotation, bool& flip) {
+    for (cSC4TileEvaluator* evaluator : NetworkTileEvaluators(type)) {
+        if (!evaluator) return false;
+        cSC4NetworkTileNeighborhood neighborhood(cell.x, cell.z, this, type, true);
+        const std::vector<cSC4TileInfo>* solutions = nullptr;
+        if (!evaluator->Lookup(neighborhood, solutions) || !solutions) continue;
+        for (const cSC4TileInfo& tile : *solutions) {
+            std::uint32_t x = 0, z = 0;
+            tile.GetCell(cell.x, cell.z, x, z);
+            if (x != cell.x || z != cell.z) continue;
+            piece = tile.id;
+            rotation = static_cast<std::uint8_t>(tile.rotation & 0x7f);
+            flip = (tile.rotation >> 7) != 0;
+            return true;
+        }
+    }
+    return false;
 }
 
 // i386 0x001262b4 (vslot 0xe0): a new occupant of the class `clsid` (0 = cSC4NetworkOccupant) over the cell's four corners.
@@ -2816,8 +2866,7 @@ bool cSC4NetworkTool::PlaceNetwork(bool place, cSC4NetworkConstructionCrew* crew
     std::list<cSC4NetworkOccupant*> placed;
     if (validSteps_ > 0) {
         if (!place) {
-            // UpdatePositionChangedPreviewsForPreviousSegments: not ported (anchored multi-segment previews).
-            SC4_UNWIRED("cSC4NetworkTool::PlaceNetwork: UpdatePositionChangedPreviewsForPreviousSegments (anchored multi-segment previews) not ported");
+            UpdatePositionChangedPreviewsForPreviousSegments();
         } else {
             StartPlacing();                                                          // vslot 0x120
             DestroyHilightedOccupants();                                             // vslot 0xf8
