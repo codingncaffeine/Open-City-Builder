@@ -12,7 +12,6 @@
 #include "app/NativeBoot.h"
 #include "gz/GZCOM.h"
 #include "gz/GZFramework.h"
-#include "platform/Unwired.h"
 #include "sc4/AnimationTickManager.h"
 
 namespace native {
@@ -80,8 +79,9 @@ public:
     bool QueryInterface(std::uint32_t, void**) override { return false; }
     std::uint32_t AddRef() override { return 2; }
     std::uint32_t Release() override { return 1; }
-    bool MessageSend(cIGZMessage2*) override { SC4_UNWIRED("ATM as message server: MessageSend"); return false; }
-    bool MessagePost(cIGZMessage2*, bool) override { SC4_UNWIRED("ATM as message server: MessagePost"); return false; }
+    // Not owed: no caller sends through this view (in the ATM's vtable these slots are Init / Shutdown).
+    bool MessageSend(cIGZMessage2*) override { return false; }
+    bool MessagePost(cIGZMessage2*, bool) override { return false; }
     bool AddNotification(cIGZMessageTarget2* target, std::uint32_t priority) override {
         sc4::cSC4AnimationTickManager* atm = AnimationTickManager();
         return atm && atm->AddTickableObject(target, priority);

@@ -16,7 +16,6 @@
 #include "app/NativeCitySystems.h"
 #include "app/NativeKeyboard.h"
 #include "gz/CommandServer.h"
-#include "platform/Unwired.h"
 #include "sc4/App.h"
 #include "sc4/AuraSimulator.h"
 #include "sc4/BudgetSimulator.h"
@@ -129,18 +128,12 @@ struct FloraSimulatorHost final : sc4::IFloraSimulatorHost {
     cIGZMessageServer2* MessageServer() override { return SL::spMS2; }
     bool RegisterCommand(std::uint32_t id, const char* name, const char* parameterInfo) override {
         cIGZCommandServer* server = GameCommandServer();
-        if (!server) {
-            SC4_UNWIRED("IFloraSimulatorHost::RegisterCommand (no command server natively)");
-            return false;
-        }
+        if (!server) return false;   // port guard: the original calls the service unchecked
         return server->RegisterCommand(id, name, parameterInfo);
     }
     bool UnregisterCommand(std::uint32_t id) override {
         cIGZCommandServer* server = GameCommandServer();
-        if (!server) {
-            SC4_UNWIRED("IFloraSimulatorHost::UnregisterCommand (no command server natively)");
-            return false;
-        }
+        if (!server) return false;   // port guard: the original calls the service unchecked
         return server->UnregisterCommand(id);
     }
     bool AddSimulatorAgent(cIGZMessageTarget2* target, int level, const char* name, std::uint32_t flags) override {
