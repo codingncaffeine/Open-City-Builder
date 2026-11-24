@@ -290,6 +290,7 @@ public:
     cSC4ResponseCurve wearByFundingCurve;       // +0x38c (department funding -> wear rate, 0x0911e2e8)
     cSC4ResponseCurve wearByUsageCurve;         // +0x39c (use of capacity -> wear rate, 0x0911e2e9)
     cSC4ResponseCurve poleFundingCurve;         // +0x3ac (0xaa713782)
+    float GetFundingPercent() { return host_->DepartmentFundingFraction(); }   // i386 0x00180832: the department's funding
     static constexpr bool IsOnStrike() { return false; }
     static constexpr float GetChanceOfStrike() { return 0.0f; }
 

@@ -2,9 +2,8 @@
 // advisor publishes from the simulators (OpenSC4 advisors.md 7.3-7.8). The recovered advisors route their whole
 // simulator walk through this one seam; each block below is the variable table of one advisor.
 //
-// PARTIAL: g_road_funding_p / g_masstransit_funding_p / g_power_funding_p (their departments are not named here yet), the HQ occupant minimum-funding / grade locals and tract extremes, the school / health strike chances, the
-// traffic station utilizations and connection congestion, the port counts by size and stage, the neighbour-deal
-// "can buy / sell" proposals, the power-plant / water-building locals and the regional commodity imports / exports.
+// PARTIAL: the traffic statistics' transit station block (station counts and utilizations, freight depots, rapid-transit
+// transitions, potholes) is not kept by the traffic simulator.
 #include <cstring>
 #include "platform/Unwired.h"
 #include <cstdint>
@@ -15,7 +14,9 @@
 #include <string>
 #include <vector>
 
+#include "app/NativeRegion.h"
 #include "app/NativeCity.h"
+#include "sc4/RegionalCity.h"
 #include "sc4/Lot.h"
 #include "sc4/ZoneDeveloper.h"
 #include "sc4/AdviceSubject.h"
@@ -430,10 +431,28 @@ void Traffic() {
     }
 }
 
+// The least funded and the most worn plant (FindPowerPlants / FindWaterBuildings: funding from 100%, wear from 0), as locals
+// with the building as subject; the references the search hands out are dropped here.
+void PlantExtremes(const char* fundingName, const char* ageName, cISC4Occupant* leastFunded, float funding, cISC4Occupant* mostWorn,
+                   int wear) {
+    LocalAtObject(fundingName, X100(funding), leastFunded);
+    LocalAtObject(ageName, static_cast<double>(wear), mostWorn);
+    if (leastFunded) leastFunded->Release();
+    if (mostWorn) mostWorn->Release();
+}
+
 // ---- Utility (7.8)
 void Utility() {
-    SC4_UNWIRED("UpdateSimulatorStatistics Utility (advisors.md 7.8): g_power_funding_p, the neighbor-deal can buy / sell proposals, power-plant / water-building locals and regional commodity imports / exports are not published");
+    // cSC4AdvisorUtility::update_variables (i386 0x0032f11a): the regional city's commodity imports / exports (vslots 0xe0 /
+    // 0xd8; 1 power, 2 water), the power department's funding and the power strike (never: IsOnStrike / GetChanceOfStrike
+    // answer false / 0).
+    auto* region = dynamic_cast<cSC4RegionalCity*>(NativeCurrentRegionalCity());
+    G("g_power_imported", region ? region->GetImported(1) : 0.0);
+    G("g_power_exported", region ? region->GetExported(1) : 0.0);
     if (auto* power = Comp<cSC4PowerSimulator>(CityComponent::PowerSimulator)) {
+        G("g_power_funding_p", X100(power->GetFundingPercent()));
+        G("g_power_strike", cSC4PowerSimulator::IsOnStrike() ? 1.0 : 0.0);
+        G("g_power_strike_chance", X100(cSC4PowerSimulator::GetChanceOfStrike()));
         G("g_power_production_capacity", power->GetMonthlyProduction());
         G("g_power_consumed", power->GetMonthlyConsumption());
         G("g_overworked_power_plant_count", power->GetOverworkedPowerPlantCount());
@@ -446,14 +465,20 @@ void Utility() {
         for (const auto& t : kTypes) G(t.name, power->GetPowerPlantCount(t.type));
         G("g_aged_power_plant_count", power->GetAgedPowerPlantCount());
         G("g_power_pole_count", power->GetPowerPoleCount());
+        cISC4Occupant* leastFunded = nullptr;
+        cISC4Occupant* mostWorn = nullptr;
+        SC4Percentage funding(1.0f);
+        int wear = 0;
+        power->FindPowerPlants(&leastFunded, &funding, &mostWorn, &wear);   // vslot 0x78
+        PlantExtremes("l_power_plant_funding_pl", "l_power_plant_age_h", leastFunded, funding.value, mostWorn, wear);
     }
     G("g_water_funding_p", X100(DepartmentFunding(0xaa4014b4)));
     G("g_pollution_funding_p", X100(DepartmentFunding(0x6a42a8f5)));
     if (auto* water = Comp<cSC4PlumbingSimulator>(CityComponent::PlumbingSimulator)) {
         G("g_water_production_capacity", static_cast<std::int32_t>(water->GetWaterProductionCapacity()));
         G("g_water_consumed", static_cast<std::int32_t>(water->GetWaterConsumed()));
-        G("g_water_imported", static_cast<double>(water->GetWaterImported()));
-        G("g_water_exported", static_cast<double>(water->GetWaterExported()));
+        G("g_water_imported", region ? region->GetImported(2) : 0.0);
+        G("g_water_exported", region ? region->GetExported(2) : 0.0);
         G("g_water_source_count", water->GetNumWaterSources());
         G("g_water_pipe_count", water->GetNumPipes());
         G("g_water_distressed_pipe_count", water->GetNumDistressedPipes());
@@ -461,6 +486,12 @@ void Utility() {
         G("g_watered_building_count", water->GetNumWateredBuildings());
         G("g_unwatered_building_count", water->GetNumUnwateredBuildings());
         G("g_water_pollution_pump_shutdown_count", water->GetNumPollutedWaterSources());
+        cISC4Occupant* leastFunded = nullptr;
+        cISC4Occupant* mostWorn = nullptr;
+        SC4Percentage funding(1.0f);
+        int wear = 0;
+        water->FindWaterBuildings(&leastFunded, &funding, &mostWorn, &wear);   // vslot 0x6c
+        PlantExtremes("l_water_building_funding_pl", "l_water_building_age_h", leastFunded, funding.value, mostWorn, wear);
     }
     if (auto* pollution = Comp<cSC4PollutionSimulator>(CityComponent::PollutionSimulator)) {
         G("g_incinerator_capacity_daily", static_cast<std::uint32_t>(pollution->GetMonthlyIncineratorCapacity() * 30u));
@@ -476,6 +507,11 @@ void Utility() {
         G("g_garbage_to_landfill", static_cast<double>(pollution->GetGarbageLandfilledPrevMonth()));
         G("g_garbage_imported", static_cast<double>(pollution->GetGarbageImportedPrevMonth()));
         G("g_garbage_exported", static_cast<double>(pollution->GetGarbageExportedPrevMonth()));
+        G("g_garbage_recycled", static_cast<double>(pollution->GetGarbageRecycledPrevMonth()));   // vslot 0x98
+        G("g_incinerator_count", pollution->GetIncineratorCount());                              // 0xa8
+        G("g_waste_to_energy_building_count", pollution->GetWasteToEnergyBuildingCount());       // 0xac
+        G("g_water_treatment_plant_count", pollution->GetWaterTreatmentPlantCount());            // 0xb4
+        G("g_recycling_center_count", pollution->GetRecyclingCenterCount());                     // 0xb0
         int x = 0, z = 0, v = 0;
         pollution->GetWorstAirTract(x, z, v); LocalAtCell("l_air_pollution_h", nonNeg(v), x, z);
         pollution->GetWorstWaterTract(x, z, v); LocalAtCell("l_water_pollution_h", nonNeg(v), x, z);
@@ -496,6 +532,43 @@ void Utility() {
             neighbors->FindDeals(d.type, deals);
             G(d.name, static_cast<double>(deals.size()));
         }
+        // update_neighbor_deal_variables (i386 0x0032d9f2): which deals have a connection (the connections back to front until
+        // all three are seen: type 5 water, 4 power, 1 / 2 garbage by rail or road) and which the city could propose
+        // (ProposeDeals(list, false), the proposals back to front: buy / export, sell / import).
+        ConnectionList connections;
+        neighbors->GetAllConnections(connections);
+        unsigned present = 0;
+        for (auto it = connections.rbegin(); it != connections.rend() && present != 7; ++it) {
+            if (!*it) continue;
+            const std::uint32_t type = (*it)->GetType();
+            if (type == 4) present |= 2;
+            else if (type == 5) present |= 1;
+            else if (type - 1 < 2) present |= 4;
+        }
+        G("g_nd_connection_present_water", (present & 1) ? 1.0 : 0.0);
+        G("g_nd_connection_present_power", (present & 2) ? 1.0 : 0.0);
+        G("g_nd_connection_present_garbage", (present & 4) ? 1.0 : 0.0);
+        DealList proposals;
+        neighbors->ProposeDeals(proposals, false);
+        unsigned buy = 0, sell = 0;
+        for (auto it = proposals.rbegin(); it != proposals.rend() && buy != 7 && sell != 7; ++it) {
+            if (!*it) continue;
+            switch ((*it)->GetType()) {
+                case 0x4773ffe0: buy |= 2; break;
+                case 0x4773ffe1: sell |= 2; break;
+                case 0x4773ffe2: buy |= 1; break;
+                case 0x4773ffe3: sell |= 1; break;
+                case 0x4773ffe4: buy |= 4; break;
+                case 0x4773ffe5: sell |= 4; break;
+                default: break;
+            }
+        }
+        G("g_nd_can_buy_water", (buy & 1) ? 1.0 : 0.0);
+        G("g_nd_can_buy_power", (buy & 2) ? 1.0 : 0.0);
+        G("g_nd_can_export_garbage", (buy & 4) ? 1.0 : 0.0);
+        G("g_nd_can_sell_water", (sell & 1) ? 1.0 : 0.0);
+        G("g_nd_can_sell_power", (sell & 2) ? 1.0 : 0.0);
+        G("g_nd_can_import_garbage", (sell & 4) ? 1.0 : 0.0);
     }
 }
 
