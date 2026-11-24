@@ -234,6 +234,22 @@ public:
     // AddNewHighlight's position source: spLotManager vslot 0x70 (the occupant's lot) and lot vslot 0x78
     // (GetPosition); false means the occupant's own GetPosition (cISC4Occupant vslot 0x40) is used.
     virtual bool OccupantLotPosition(cISC4Occupant* occupant, float position[3]) = 0;
+    // The route view (Update case 0x4c) asks spTrafficSim: GetCapacity (vslot 0x5c) of a travel type at a cell,
+    // GetTrafficEdgeDensity (vslot 0x30: sixteen side-to-side counts, then the cell's total) of a network type,
+    // IsRoadDamaged (vslot 0x40) and, in the ferry mode, GetFerryRoutesInUse (vslot 0x7c); its grids are a tract of one
+    // cell, of RouteGridCellWidth metres.
+    struct FerryRoute {
+        std::vector<std::uint8_t> ab, ba;              // the compressed routes, A to B and back
+        std::uint16_t abAverage = 0, abRush = 0;       // FerryRouteInfo +0xc / +0x10
+        std::uint16_t baAverage = 0, baRush = 0;       // +0xe / +0x12
+    };
+    virtual float TrafficCapacity(int travelType, int x, int z) { (void)travelType; (void)x; (void)z; return 0.0f; }
+    virtual const std::uint16_t* TrafficEdgeDensity(int x, int z, int networkType, bool rushHour) {
+        (void)x; (void)z; (void)networkType; (void)rushHour; return nullptr;
+    }
+    virtual bool TrafficRoadDamaged(int x, int z) { (void)x; (void)z; return false; }
+    virtual void FerryRoutesInUse(std::vector<FerryRoute>& out) { out.clear(); }
+    virtual float RouteGridCellWidth() { return 16.0f; }
     // The traffic simulator's "is this cell a road" query (spTrafficSim vslot 0x80) and the city's cell counts
     // (spCity 0x2e8 / 0x2f0).
     virtual bool IsTransportationCell(int x, int z) = 0;
@@ -449,6 +465,7 @@ public:
     bool showTrafficLegend() const { return showTrafficLegend_; }
     const cRZString& effectName() const { return effectName_; }
     const std::uint32_t* paletteA() const { return paletteA_; }
+    std::uint32_t paletteSteps() const { return paletteSteps_; }
     cSC4SimGrid<std::int16_t>* occupancyGrid() const { return occupancyGrid_; }
     const std::uint32_t* paletteB() const { return paletteB_; }
 
@@ -460,6 +477,7 @@ private:
     cIGZWin* childWindow(std::uint32_t id) const;
     void removeWatchedNotifications();
     void fillPaletteFromGridEdges();
+    void DrawTrafficRoutes(cIGZBuffer* buffer);   // Update case 0x4c (i386 0x0027db2e + ..)
 
     bool started_ = false;                     // +0x1d8
     cIGZMessageServer2* messages_ = nullptr;   // +0x1e0

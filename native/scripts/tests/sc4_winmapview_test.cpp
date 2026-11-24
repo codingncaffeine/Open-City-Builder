@@ -1,5 +1,6 @@
 // Unit test for cSC4WinMapView (src/sc4/WinMapView.cpp): the window lifecycle, QueryInterface, the message
 // registrations, the parent-window panel switching, the view stack, the legend fill and the highlight merge.
+#include <array>
 #include <cassert>
 #include <cstdio>
 #include <cstring>
@@ -104,6 +105,7 @@ struct FakeMarkedCells final : IWinMapViewMarkedCells {
     void SetCellColors(const std::vector<std::uint32_t>& c) override { colors = c; }
     void SetCellSize(float x, float z) override { cellX = x; cellZ = z; }
 };
+
 
 struct FakeColorSink final : IWinMapViewColorSink {
     std::uint32_t baseColor = 0, baseFlags = 0;
@@ -211,6 +213,19 @@ struct FakeHost final : IWinMapViewHost {
     }
     int CitySizeXInCells() override { return cityX; }
     int CitySizeZInCells() override { return cityZ; }
+    // the route view's traffic queries: one cell with traffic, one damaged road
+    std::map<std::pair<int, int>, std::array<std::uint16_t, 17>> density;
+    std::pair<int, int> damaged{-1, -1};
+    int densityCalls = 0;
+    bool lastRush = false;
+    float TrafficCapacity(int, int x, int z) override { return density.count({x, z}) ? 1.0f : 0.0f; }
+    const std::uint16_t* TrafficEdgeDensity(int x, int z, int, bool rush) override {
+        ++densityCalls;
+        lastRush = rush;
+        auto it = density.find({x, z});
+        return it == density.end() ? nullptr : it->second.data();
+    }
+    bool TrafficRoadDamaged(int x, int z) override { return damaged == std::make_pair(x, z); }
     cIGZBuffer* CreatePotholeDecal() override { return decal; }
     int MapRotation() override { return rotation; }
     void SendCommand(std::uint32_t command, std::uint32_t a, std::uint32_t b) override {
@@ -937,6 +952,54 @@ void TestPotholeDecals() {
 
 }  // namespace
 
+// The route view (Update case 0x4c): a cell's volume = a floor of (steps + 0x17f) >> 8 plus the edge density's total, its
+// flow from the side-to-side counts; with the marked cells registered the traffic cells take the volume's palette colour
+// and a damaged road is marked without one.
+void TestTrafficRoutes() {
+    Fixture f;
+    f.view->Init();
+    auto* activate = new cRZMessage2Standard();
+    activate->SetType(kWinMapMsgViewActivate);
+    f.view->DoMessage(static_cast<cIGZMessage2*>(activate));
+    activate->Release();
+    f.host.sink.width = 16;
+    f.host.sink.height = 16;
+    f.host.cityX = 4;
+    f.host.cityZ = 4;
+    f.host.hasExemplar = true;
+    f.host.exemplar.hasDataView = true;
+    f.host.exemplar.dataView = 0x4c;
+    f.host.exemplar.hasNetworkTypes = true;
+    f.host.exemplar.networkTypes = {0};
+    f.host.exemplar.hasRamp = true;
+    std::vector<std::uint32_t> ramp(16);
+    for (std::uint32_t v = 0; v < 16; ++v) ramp[v] = 0xff000000u | (v * 16);
+    f.host.exemplar.ramp = ramp;
+    std::array<std::uint16_t, 17> cell{};
+    cell[2] = 30;     // side 0 -> side 2: leaves through x+ twice over in the flow sum
+    cell[16] = 50;    // the cell's total
+    f.host.density[{1, 2}] = cell;
+    f.host.damaged = {3, 3};
+    CHECK(f.view->SetDataView(0x4c));
+    CHECK(f.host.densityCalls >= 1 && !f.host.lastRush);
+    CHECK(f.host.sink.overlay != nullptr);
+    FakeMarkedCells* marked = f.host.marked;
+    CHECK(marked != nullptr && f.view->markedCellsRegistered());
+    if (marked) {
+        CHECK(marked->cells.size() == 2);
+        bool traffic = false, damaged = false;
+        for (std::size_t i = 0; i < marked->cells.size() && i < marked->colors.size(); ++i) {
+            if (marked->cells[i].x == 1 && marked->cells[i].z == 2)
+                traffic = marked->colors[i] == f.view->paletteA()[(52 * 255 / f.view->paletteSteps()) & 0xff];
+            if (marked->cells[i].x == 3 && marked->cells[i].z == 3) damaged = marked->colors[i] == 0;
+        }
+        CHECK(traffic);
+        CHECK(damaged);
+    }
+    CHECK(f.view->paletteA()[255] == 0xcfffffffu);   // the dash colour
+    f.view->SetDataView(0);
+}
+
 // SetDataView + Update (i386 0x0027fc98 / 0x0027db2e) + DisplayStandardUint8Grid / MakeMapColorBuffer: the view's grid is
 // drawn into a new buffer in blocks of the power-of-two size that covers the map, [x][z] -> pixel (x, z), in the
 // premultiplied palette with red and blue back in place, and handed to the map as its overlay.
@@ -1118,6 +1181,7 @@ int main() {
     TestInitWindow();
     TestPotholeDecals();
     TestDataViewImage();
+    TestTrafficRoutes();
     TestHighlightOverlay();
     TestHighlightEffect();
     TestUndergroundView();

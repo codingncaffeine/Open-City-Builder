@@ -3,6 +3,7 @@
 // button of the Data Views panel was vetoed before the view saw it).
 //   PARTIAL: CollectHighlights views 6 and 9 (see there) and the pothole decal answer "nothing"; the tutorial command
 //   filter always passes (tutorials run natively, app/NativeTutorial.cpp, but their filter is not asked here).
+#include <cstddef>
 #include <chrono>
 #include "platform/Unwired.h"
 #include "app/NativeTutorial.h"
@@ -341,6 +342,29 @@ public:
     bool IsTransportationCell(int x, int z) override {
         return x >= 0 && z >= 0 && x < CitySizeXInCells() && z < CitySizeZInCells() && NativeNetworkTypesAt(x, z) != 0;
     }
+    float TrafficCapacity(int travelType, int x, int z) override {
+        auto* traffic = CityAs<cSC4TrafficSimulator>(CityComponent::TrafficSimulator);
+        return traffic ? traffic->GetCapacity(travelType, x, z) : 0.0f;
+    }
+    static_assert(offsetof(sc4::TrafficEdgeDensity, density) == sizeof(std::uint16_t) * 16, "the view reads the total as the 17th count");
+    const std::uint16_t* TrafficEdgeDensity(int x, int z, int networkType, bool rushHour) override {
+        auto* traffic = CityAs<cSC4TrafficSimulator>(CityComponent::TrafficSimulator);
+        return traffic ? traffic->GetTrafficEdgeDensity(x, z, networkType, rushHour).last.data() : nullptr;   // last[16], then density
+    }
+    bool TrafficRoadDamaged(int x, int z) override {
+        auto* traffic = CityAs<cSC4TrafficSimulator>(CityComponent::TrafficSimulator);
+        return traffic && traffic->IsRoadDamaged(x, z);
+    }
+    void FerryRoutesInUse(std::vector<FerryRoute>& out) override {
+        out.clear();
+        auto* traffic = CityAs<cSC4TrafficSimulator>(CityComponent::TrafficSimulator);
+        if (!traffic) return;
+        std::list<cSC4TrafficSimulator::FerryRouteInfo> routes;
+        traffic->GetFerryRoutesInUse(routes);
+        for (const auto& info : routes)
+            out.push_back(FerryRoute{info.routeAB, info.routeBA, info.abLastA, info.abLastB, info.baLastA, info.baLastB});
+    }
+    float RouteGridCellWidth() override { return cSTETerrain::CellWidth(); }
     int CitySizeXInCells() override { cSC4City* city = HostCity(); return city ? static_cast<int>(city->CellCountX()) : 0; }
     int CitySizeZInCells() override { cSC4City* city = HostCity(); return city ? static_cast<int>(city->CellCountZ()) : 0; }
     // SL::spGF vslot 0x28 (key, 1, out, colour type 9): the pothole decal {0x7ab50e44, 0x1abe787d, 0x4bfc0554}

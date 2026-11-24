@@ -19,6 +19,7 @@
 #include "gz/WinUtils.h"
 #include "gz/cIGZMessage2.h"
 #include "sc4/ComplexViewOccupantFilter.h"
+#include "sc4/CompressedRouteReader.h"
 #include "sc4/GrowthDeveloper.h"
 #include "sc4/SimGridOps.h"
 #include "sc4/UndergroundCustomView.h"
@@ -448,7 +449,6 @@ bool cSC4WinMapView::MergeNewHighlights() {
 // ---------------------------------------------------------------------------------------------------------------
 // Update (0x10034a848; i386 0x0027db2e): draw the current data view's simulator grid into a new map buffer and hand
 // it to the panel's minimap (child 0x4203, cISC4WinMiniMap) as its overlay; data view 0 clears the overlay.
-//   PARTIAL: views 0x1d (weather) and 0x4c (traffic routes) draw nothing; crime incident icons are not drawn; the custom view is not asked to draw (vslot 0x14, unsure).
 // ---------------------------------------------------------------------------------------------------------------
 namespace {
 void DrawShadedRect(cIGZBuffer* buffer, const cRZRect& rect, std::uint32_t color);
@@ -524,6 +524,7 @@ void cSC4WinMapView::Update() {
                     break;
                 }
                 case 0x1e: u8(kGridResidentialAge); break;
+                case kWinMapViewTraffic: DrawTrafficRoutes(buffer); break;
                 case 0xb: break;   // draws nothing in the original too
                 default: {
                     // The growth developer views: developer type by view, then the grid the layer style asks for.
@@ -533,8 +534,6 @@ void cSC4WinMapView::Update() {
                         u8(kGridWeather);
                         break;
                     }
-                    if (dataView_ == 0x4c)
-                        SC4_UNWIRED("cSC4WinMapView::Update: the traffic route map view (0x4c) draws nothing");
                     const cISC4GrowthDeveloper* developer =
                         dataView_ >= 0x40 && dataView_ <= 0x4b ? g_host->GrowthDeveloper(kDeveloperTypes[dataView_ - 0x40]) : nullptr;
                     if (!developer) {
@@ -621,6 +620,133 @@ void cSC4WinMapView::Update() {
         if (customView_) customView_->RefreshCustomView();   // +0x9fc vslot 0x14, after the overlay (none: also)
     }
     lastUpdateMs_ = g_host->NowMilliseconds();   // cRZTime::GetMillisecondSystemTime, +0xae8
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The route view (Update case 0x4c, i386 0x0027db2e): per cell the traffic volume of the view's network types and its
+// direction (or, in the ferry mode 0x54, the ferry lines in use), drawn as the volume grid with a dash that walks one
+// cell in sixteen per update along the main direction of the flow; damaged roads are marked cells without a colour.
+// ---------------------------------------------------------------------------------------------------------------
+void cSC4WinMapView::DrawTrafficRoutes(cIGZBuffer* buffer) {
+    static std::uint32_t s = 0;   // Update()::s, the dash phase
+    const int cellsX = g_host->CitySizeXInCells(), cellsZ = g_host->CitySizeZInCells();
+    if (cellsX <= 0 || cellsZ <= 0) return;
+    std::vector<std::vector<std::uint16_t>> volume(cellsX, std::vector<std::uint16_t>(cellsZ, 0));
+    std::vector<std::vector<std::int16_t>> flowX(cellsX, std::vector<std::int16_t>(cellsZ, 0));
+    std::vector<std::vector<std::int16_t>> flowZ(cellsX, std::vector<std::int16_t>(cellsZ, 0));
+    const int steps = static_cast<int>(paletteSteps_);
+    const bool rushHour = trafficRoutes_;
+    s = s + 1 < 0x10 ? s + 1 : 0;
+    auto clamp16 = [](int v) { return static_cast<std::int16_t>(v < -0x8000 ? -0x8000 : (v > 0x7fff ? 0x7fff : v)); };
+    if (trafficView_ == 0x54) {   // the ferry lines: each route's cells get its volume, their sides the direction
+        std::vector<IWinMapViewHost::FerryRoute> routes;
+        g_host->FerryRoutesInUse(routes);
+        for (const IWinMapViewHost::FerryRoute& route : routes) {
+            for (int leg = 0; leg < 2; ++leg) {
+                const std::vector<std::uint8_t>& data = leg == 0 ? route.ab : route.ba;
+                const std::uint16_t v = leg == 0 ? (rushHour ? route.abRush : route.abAverage) : (rushHour ? route.baRush : route.baAverage);
+                cSC4CompressedRouteReader reader;
+                reader.SetData(&data);
+                CompressedRouteCell cell;
+                while (reader.GetNext(cell)) {
+                    if (cell.x < 0 || cell.x >= cellsX || cell.z < 0 || cell.z >= cellsZ) continue;
+                    volume[cell.x][cell.z] = static_cast<std::uint16_t>(volume[cell.x][cell.z] + v);
+                    std::int16_t& fx = flowX[cell.x][cell.z];
+                    std::int16_t& fz = flowZ[cell.x][cell.z];
+                    switch (cell.exitSide) {
+                        case 0: fx = clamp16(fx - v); break;
+                        case 1: fz = clamp16(fz - v); break;
+                        case 2: fx = clamp16(fx + v); break;
+                        case 3: fz = clamp16(fz + v); break;
+                        default: break;
+                    }
+                }
+            }
+        }
+    } else {
+        // The travel type of each selected network type, for the capacity test.
+        int travelTypes[8] = {};
+        const int count = std::min<int>(networkTypeCount_, 8);
+        for (int i = 0; i < count; ++i) {
+            switch (networkTypes_[i]) {
+                case 0: travelTypes[i] = 0; break;
+                case 3: case 5: travelTypes[i] = 2; break;
+                case 6: travelTypes[i] = 3; break;
+                case 7: travelTypes[i] = 4; break;
+                case 8: travelTypes[i] = 5; break;
+                default: travelTypes[i] = 1; break;
+            }
+        }
+        for (int x = 0; x < cellsX; ++x)
+            for (int z = 0; z < cellsZ; ++z) {
+                int total = 0, dx = 0, dz = 0;
+                for (int i = 0; i < count; ++i) {
+                    if (!(0.0f < g_host->TrafficCapacity(travelTypes[i], x, z))) continue;
+                    const int base = total != 0 ? total : ((steps + 0x17f) >> 8) & 0xffff;   // a floor the first type adds once
+                    const std::uint16_t* m = g_host->TrafficEdgeDensity(x & 0xff, z & 0xff, networkTypes_[i], rushHour);
+                    if (!m) continue;
+                    total = base + m[0x10];
+                    for (int k = 0; k < 4; ++k) {   // what leaves each side less what enters it, x sides 0 / 2, z sides 1 / 3
+                        dx = dx + (m[k] - m[4 * k]) - (m[8 + k] - m[4 * k + 2]);
+                        dz = dz + (m[4 + k] - m[4 * k + 1]) - (m[12 + k] - m[4 * k + 3]);
+                    }
+                }
+                const int ceiling = ((steps * 0xff) >> 8) & 0xffff;
+                volume[x][z] = static_cast<std::uint16_t>(total <= ceiling ? total : ceiling);
+                flowX[x][z] = clamp16(dx);
+                flowZ[x][z] = clamp16(dz);
+            }
+    }
+    DrawTransportationPotholeDecals(buffer);
+    if (markedCellsRegistered_ && markedCells_) {   // damaged roads without a colour, the rest in the volume's colour
+        std::vector<WinMapCell> cells;
+        std::vector<std::uint32_t> colors;
+        for (int x = 0; x < cellsX; ++x)
+            for (int z = 0; z < cellsZ; ++z) {
+                if (g_host->TrafficRoadDamaged(x, z)) {
+                    cells.push_back(WinMapCell{x, z});
+                    colors.push_back(0);
+                } else if (volume[x][z] != 0) {
+                    cells.push_back(WinMapCell{x, z});
+                    const int index = static_cast<int>(static_cast<double>(volume[x][z]) * 255.0 / static_cast<double>(paletteSteps_)) & 0xffff;
+                    colors.push_back(paletteA_[std::min(index, 255)]);
+                }
+            }
+        markedCells_->SetMarkedCells(cells);
+        markedCells_->SetCellColors(colors);
+        const float width = g_host->RouteGridCellWidth();
+        markedCells_->SetCellSize(width, width);
+    }
+    paletteB_[255] = 0xffffffffu;   // the dash colour (the original writes it into both palettes for good)
+    paletteA_[255] = 0xcfffffffu;
+    for (int x = 0; x < cellsX; ++x)
+        for (int z = 0; z < cellsZ; ++z) {
+            std::uint16_t v = volume[x][z];
+            if (v > 10) {
+                const float fx = static_cast<float>(flowX[x][z]) / static_cast<float>(v);
+                const float fz = static_cast<float>(flowZ[x][z]) / static_cast<float>(v);
+                const std::uint16_t top = static_cast<std::uint16_t>(paletteSteps_);
+                if (std::fabs(fx) <= std::fabs(fz)) {
+                    if (static_cast<double>(fz) > 0.9) {
+                        if (s == (static_cast<std::uint32_t>(z) & 0xf)) v = top;
+                    } else if (static_cast<double>(fz) < -0.9) {
+                        if (s == (~static_cast<std::uint32_t>(z) & 0xf)) v = top;
+                    }
+                } else {
+                    if (static_cast<double>(fx) > 0.9) {
+                        if (s == (static_cast<std::uint32_t>(x) & 0xf)) v = top;
+                    } else if (static_cast<double>(fx) < -0.9) {
+                        if (s == (~static_cast<std::uint32_t>(x) & 0xf)) v = top;
+                    }
+                }
+            }
+            volume[x][z] = v;
+        }
+    const bool registered = markedCellsRegistered_;   // the grid draw must not mark cells again
+    markedCellsRegistered_ = false;
+    const float width = g_host->RouteGridCellWidth();
+    DisplayStandardUint16GridScaled(volume, buffer, width, width);
+    markedCellsRegistered_ = registered;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
