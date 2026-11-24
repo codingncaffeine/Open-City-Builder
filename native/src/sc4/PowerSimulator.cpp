@@ -1096,12 +1096,14 @@ void cSC4PowerSimulator::FindPowerPlants(cISC4Occupant** leastFunded, SC4Percent
             worn = entry.occupant;
         }
     }
-    if (mostWorn && worn) {
+    if (mostWorn && worn) {   // both results carry a reference for the caller (i386 0x00182148 / 0x00182179)
         *mostWorn = worn;
+        worn->AddRef();
         *wearPercent = int(highestWear * 100.0f);
     }
     if (leastFunded && lowest) {
         *leastFunded = lowest;
+        lowest->AddRef();
         if (funding) funding->value = lowestFunding;
     }
 }

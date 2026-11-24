@@ -121,7 +121,14 @@ public:
     bool IsZoned(int, int) override { return false; }
     void SetSupplyValue(int x, int z, std::uint8_t value) override { supply[{x, z}] = value; }
     float OrdinancePowerFactor() override { return 1.0f; }
-    PowerPlantBudgetEntry GetPlantBudgetEntry(cISC4Occupant*) override { PowerPlantBudgetEntry e; e.tracked = true; e.funding = 1.0f; return e; }
+    bool explicitFunding = false;
+    PowerPlantBudgetEntry GetPlantBudgetEntry(cISC4Occupant*) override {
+        PowerPlantBudgetEntry e;
+        e.tracked = true;
+        e.funding = 1.0f;
+        e.hasExplicitFunding = explicitFunding;
+        return e;
+    }
     float DepartmentFundingFraction() override { return 1.0f; }
     void SetGenerationCost(std::int64_t cost) override { generationCost = cost; }
     void SetOccupantLotPowered(cISC4Occupant* building) override {
@@ -227,6 +234,21 @@ int main() {
     CHECK(copy->GetMonthlyProduction() == 100 && copy->consumers == 3 && copy->CurrentMonth() == power->CurrentMonth());
     CHECK(copy->Plants().size() == 1 && copy->IdleState() == power->IdleState());
     copy->Release();
+
+    {   // FindPowerPlants (i386 0x00181fc2) hands both results out with a reference each (the advisor releases them)
+        cISC4Occupant* leastFunded = nullptr;
+        cISC4Occupant* mostWorn = nullptr;
+        SC4Percentage funding(1.0f);
+        int wear = 0;
+        const int before = plant.refs;
+        host.explicitFunding = true;
+        power->FindPowerPlants(&leastFunded, &funding, &mostWorn, &wear);
+        CHECK(leastFunded == &plant && plant.refs == before + (mostWorn == &plant ? 2 : 1));
+        if (leastFunded) leastFunded->Release();
+        if (mostWorn) mostWorn->Release();
+        CHECK(plant.refs == before);
+        host.explicitFunding = false;
+    }
 
     // the plant goes: its cells are rewired from what is left and the next pass powers nothing
     host.occupants = {&near, &far, &late};
