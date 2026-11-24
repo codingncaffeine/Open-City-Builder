@@ -3,6 +3,7 @@
 #include "fake_occupant.h"
 #include "rz/PortMemoryStreams.h"
 #include "sc4/OccupantFilters2.h"
+#include "sc4/SCProperty.h"
 
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
@@ -14,6 +15,8 @@ struct World final : IOccupantFilterWorld {
     bool NetworkFlags(cISC4Occupant*, std::uint32_t& f) override { f = flags; return isNetwork; }
     bool NetworkIsPlaced(cISC4Occupant*) override { return placed; }
     int OccupantViewLevel(cISC4Occupant*) override { return level; }
+    int lotState = -1;
+    int LotStateAtPosition(float, float) override { return lotState; }
 };
 struct Inner final : cSC4OccupantFilter {
     bool answer = true;
@@ -84,6 +87,42 @@ int main() {
     CHECK(!cSC4PlacedNetworkOccupantFilter::IsOccPlaced(nullptr));
     placed->Release();
     inner->Release();
+    // cSC4RealisticOccupantFilter (i386 0x000795c8): zots, empty-lot textures and signposts hidden unless their flag is set
+    {
+        cSC4RealisticOccupantFilter realistic;
+        cSCPropertyHolder empty;   // the default filter reads the occupant's properties
+        FakeOccupant zot;
+        zot.holder = &empty;
+        zot.group = 0x5001;
+        CHECK(!realistic.IsOccupantIncluded(&zot));
+        realistic.showZots = true;
+        CHECK(realistic.IsOccupantIncluded(&zot));
+        FakeOccupant texture;
+        texture.type = 0x497f6d9d;
+        texture.holder = &empty;
+        texture.iface = 0x097f6d98;
+        world.lotState = 1;   // an empty lot
+        CHECK(!realistic.IsOccupantIncluded(&texture));
+        world.lotState = 3;   // control: a built lot keeps its texture
+        CHECK(realistic.IsOccupantIncluded(&texture));
+        world.lotState = 1;
+        realistic.showEmptyLotTextures = true;
+        CHECK(realistic.IsOccupantIncluded(&texture));
+        FakeOccupant sign;
+        sign.type = 0xa823821e;
+        sign.holder = &empty;
+        sign.iface = 0x4b44fbe2;
+        CHECK(!realistic.IsOccupantIncluded(&sign));
+        sign.iface = 0;   // control: another prop shows
+        CHECK(realistic.IsOccupantIncluded(&sign));
+        PortMemoryOStream out;
+        realistic.showSigns = true;
+        CHECK(realistic.Write(out));
+        cSC4RealisticOccupantFilter back;
+        PortMemoryIStream in(out.bytes().data(), out.bytes().size());
+        CHECK(back.Read(in) && back.showEmptyLotTextures && back.showZots && back.showSigns);
+        CHECK(back.GetGZCLSID() == 0x8a7a1c2c);
+    }
     std::printf(failures ? "FAILED\n" : "sc4_occupantfilters2 ok\n");
     return failures != 0;
 }

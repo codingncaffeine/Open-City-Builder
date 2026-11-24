@@ -12,6 +12,9 @@
 #include "sc4/NetworkOccupant.h"
 #include "sc4/OccupantFilters2.h"
 #include "sc4/SCPropertyHelp.h"
+#include "sc4/Lot.h"
+#include "app/NativeCity.h"
+#include "app/NativeZoneDeveloperHost.h"
 
 namespace native {
 namespace {
@@ -245,6 +248,14 @@ public:
             if (!p70) level = 1;
         }
         return level;
+    }
+    int LotStateAtPosition(float x, float z) override {
+        sc4::cSC4City* city = HostCity();
+        if (!city) return -1;
+        int cellX = 0, cellZ = 0;
+        city->PositionToCell(x, z, cellX, cellZ);
+        sc4::cSC4Lot* lot = NativeLotAtCell(cellX, cellZ, false);
+        return lot ? lot->GetState() : -1;
     }
 };
 }  // namespace

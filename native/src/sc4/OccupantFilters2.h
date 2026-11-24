@@ -23,6 +23,8 @@ public:
     virtual bool NetworkFlags(cISC4Occupant* occupant, std::uint32_t& flags) = 0;
     virtual bool NetworkIsPlaced(cISC4Occupant* occupant) = 0;           // network occupant vslot 0xa8
     virtual int OccupantViewLevel(cISC4Occupant* occupant) = 0;          // SC4GetOccupantViewLevel
+    // spCity 0x17c PositionToCell, spLotManager 0x14 the lot there, lot 0x84 GetState; -1 without a lot
+    virtual int LotStateAtPosition(float x, float z) { (void)x; (void)z; return -1; }
 };
 IOccupantFilterWorld* OccupantFilterWorld();
 void SetOccupantFilterWorld(IOccupantFilterWorld* world);
@@ -104,6 +106,22 @@ public:
 
 private:
     cISC4OccupantFilter* inner_;
+};
+
+// cSC4RealisticOccupantFilter (class 0x8a7a1c2c, i386 0x000795c8..0x0007a192): the default filter, and then, unless their
+// flag is set, no zots or signs (occupant group 0x5001; flag +0xd, the TastyZots cheat), no lot base texture on an empty lot
+// (state 1; flag +0xc, the Zoneria cheat) and no signpost or text decal prop (type 0xa823821e answering 0x4b44fbe2 or
+// 0x2b3b7d86; flag +0xe).
+constexpr std::uint32_t kGZCLSID_cSC4RealisticOccupantFilter = 0x8a7a1c2c;
+class cSC4RealisticOccupantFilter : public cSC4DefaultOccupantFilter {
+public:
+    bool IsOccupantIncluded(cISC4Occupant* occupant) override;
+    bool Write(cIGZOStream& stream) const override;
+    bool Read(cIGZIStream& stream) override;
+    std::uint32_t GetGZCLSID() const override { return kGZCLSID_cSC4RealisticOccupantFilter; }
+    bool showEmptyLotTextures = false;   // +0xc
+    bool showZots = false;               // +0xd
+    bool showSigns = false;              // +0xe
 };
 
 }  // namespace sc4

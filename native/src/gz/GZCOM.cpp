@@ -248,7 +248,8 @@ __attribute__((weak)) void* GZCOM_CreatecSC4OccupantTypesFilter() { SC4_UNWIRED(
 // weak fallback: GZCOMCreators*.cpp provide the real constructor-backed creator when linked
 __attribute__((weak)) void* GZCOM_CreatecSC4OccupantTypesFilterHashed() { SC4_UNWIRED("GZCOM_CreatecSC4OccupantTypesFilterHashed"); return nullptr; }
 // original allocates 0x18 bytes; the class is not recovered yet
-void* GZCOM_CreatecSC4RealisticOccupantFilter() { SC4_UNWIRED("GZCOM_CreatecSC4RealisticOccupantFilter"); return nullptr; }
+// weak fallback: GZCOMCreators4.cpp provides the real creator when linked
+__attribute__((weak)) void* GZCOM_CreatecSC4RealisticOccupantFilter() { SC4_UNWIRED("GZCOM_CreatecSC4RealisticOccupantFilter"); return nullptr; }
 // weak fallback: GZCOMCreators*.cpp provide the real constructor-backed creator when linked
 __attribute__((weak)) void* GZCOM_CreatecSC4NetworkOccupantFilter() { SC4_UNWIRED("GZCOM_CreatecSC4NetworkOccupantFilter"); return nullptr; }
 // weak fallback: GZCOMCreators*.cpp provide the real constructor-backed creator when linked

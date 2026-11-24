@@ -3,6 +3,7 @@
 #include "sc4/ViewInputControlCitySituations.h"
 #include "sc4/View3DWin.h"
 #include "sc4/CoverageRadiusEffectHelper.h"
+#include "sc4/OccupantFilters2.h"
 #include "platform/Unwired.h"
 #include "platform/PerfLog.h"
 
@@ -3481,15 +3482,38 @@ bool cSC4View3DWin::ProcessCheatCode(std::uint32_t id, const cRZCmdLine& line) {
     case kCheatEnableAnimationStepping:   // "WatchMeMove": the pause / step animation keys work from now on
         unknown1c8_ = static_cast<std::uint16_t>((unknown1c8_ & 0xff00u) | 1u);
         return true;
+    case kCheatToggleZones:   // "Zoneria" (i386 0x0052237x): a realistic filter with the empty-lot textures flipped
+    case kCheatToggleZots: {  // "TastyZots": ... with the zots flipped; the other flag is kept from the current filter
+        auto* filter = new cSC4RealisticOccupantFilter();
+        filter->AddRef();
+        cSC4ViewFilterInformation current;
+        GetCurrentViewFilterInfo(current);
+        auto* realistic = dynamic_cast<cSC4RealisticOccupantFilter*>(current.filter);
+        if (realistic && realistic->GetGZCLSID() == kGZCLSID_cSC4RealisticOccupantFilter) {
+            if (id == kCheatToggleZones) {
+                filter->showZots = realistic->showZots;
+                filter->showEmptyLotTextures = !realistic->showEmptyLotTextures;
+            } else {
+                filter->showEmptyLotTextures = realistic->showEmptyLotTextures;
+                filter->showZots = !realistic->showZots;
+            }
+        }
+        if (current.filter) current.filter->Release();
+        current.filter = static_cast<cISC4OccupantFilter*>(filter);
+        SetCurrentViewFilterInfo(current);   // vslot 0x4c (the view takes its own reference)
+        current.filter = nullptr;
+        filter->Release();
+        return false;
+    }
     case kCheatJackpot:   // "You don't deserve it": every reward building in the menus (the host keeps the menus' flag)
         if (host_) host_->ProcessCheatCode(id, line.argc() > 0 ? line[0].ToChar() : "");
         return true;
     default:
-        // GOL (cSC4ViewInputControlGameOfLife), TastyZots / Zoneria (cSC4RealisticOccupantFilter's flags), Recorder
+        // GOL (cSC4ViewInputControlGameOfLife), Recorder
         // (cSC4WinAnimationRecorder) and the debug-only LotPlop / BuildingPlop / toll are not ported yet.
-        if (id == kCheatGameOfLife || id == kCheatToggleZots || id == kCheatToggleZones || id == kCheatAnimationRecorder ||
+        if (id == kCheatGameOfLife || id == kCheatAnimationRecorder ||
             id == kCheatLotPlop || id == kCheatBuildingPlop || id == kCheatTollBooth)
-            SC4_UNWIRED("cSC4View3DWin::ProcessCheatCode: GOL / TastyZots / Zoneria / Recorder / LotPlop / BuildingPlop / toll cheats not ported");
+            SC4_UNWIRED("cSC4View3DWin::ProcessCheatCode: GOL / Recorder / LotPlop / BuildingPlop / toll cheats not ported");
         return false;
     }
 }

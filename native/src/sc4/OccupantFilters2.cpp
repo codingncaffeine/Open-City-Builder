@@ -1,4 +1,5 @@
 #include "sc4/OccupantFilters2.h"
+#include "gz/StreamOps.h"
 
 #include <algorithm>
 
@@ -135,6 +136,48 @@ bool cSC4PlacedNetworkOccupantFilter::IsOccupantIncluded(cISC4Occupant* occupant
 
 bool cSC4PlacedNetworkOccupantFilter::IsOccPlaced(cISC4Occupant* occupant) {
     return occupant != nullptr && g_world->NetworkIsPlaced(occupant);
+}
+
+// ---- cSC4RealisticOccupantFilter ---------------------------------------------------------------------------------------
+
+bool cSC4RealisticOccupantFilter::IsOccupantIncluded(cISC4Occupant* occupant) {   // i386 0x000795c8
+    if (!cSC4DefaultOccupantFilter::IsOccupantIncluded(occupant)) return false;
+    if (!showZots && occupant->IsOccupantGroup(0x5001)) return false;
+    auto answers = [occupant](std::uint32_t iid) {
+        void* raw = nullptr;
+        if (!occupant->QueryInterface(iid, &raw) || !raw) return false;
+        static_cast<cIGZUnknown*>(raw)->Release();
+        return true;
+    };
+    const std::uint32_t type = occupant->GetType();
+    if (type == 0x497f6d9d) {   // a lot base texture: hidden on an empty lot
+        if (showEmptyLotTextures) return true;
+        if (answers(0x097f6d98)) {
+            float position[3] = {0.0f, 0.0f, 0.0f};
+            occupant->GetPosition(position);
+            IOccupantFilterWorld* world = OccupantFilterWorld();
+            if (world && world->LotStateAtPosition(position[0], position[2]) == 1) return false;
+        }
+        return true;
+    }
+    if (type != 0xa823821e || showSigns) return true;   // a prop: signposts and text decals are hidden
+    return !answers(0x4b44fbe2) && !answers(0x2b3b7d86);
+}
+
+bool cSC4RealisticOccupantFilter::Write(cIGZOStream& s) const {   // i386 0x0007a192: version 4, the three flags, the default filter
+    s.SetUint16(4);
+    s << showEmptyLotTextures << showZots << showSigns;
+    return cSC4DefaultOccupantFilter::Write(s);
+}
+
+bool cSC4RealisticOccupantFilter::Read(cIGZIStream& s) {   // i386 0x00079eaa: version 3 has no sign flag (it follows the zots)
+    std::uint16_t version = 0;
+    s.GetUint16(version);
+    if (version < 3) return false;
+    s >> showEmptyLotTextures >> showZots;
+    if (version < 4) showSigns = showZots;
+    else s >> showSigns;
+    return cSC4DefaultOccupantFilter::Read(s);
 }
 
 }  // namespace sc4
