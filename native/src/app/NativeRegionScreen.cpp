@@ -1,6 +1,7 @@
 #include "app/NativeAudio.h"
 #include "app/NativeJobs.h"
 #include "app/NativeRegionScreen.h"
+#include "sc4/SLString.h"
 #include "app/NativeKeyboard.h"
 #include "gz/WinKeyAcceleratorRes.h"
 #include "app/NativeAnimationTicks.h"
@@ -401,6 +402,36 @@ public:
     void UpdateRegionViewState() override {}
     bool PreviousRegionIndex(int&) override { return false; }
     void SelectRegion(int index) override { if (Nation()) Nation()->SetActiveRegion(std::uint32_t(index)); }
+    // cSC4NewRegionDialog's nation: the regions' names; a new region (AddNewRegion, then the region's Init,
+    // SetBaseTerrainType and Shutdown, as GZOnOK does)
+    struct NewRegion final : sc4::INewRegionNation {
+        std::vector<std::string> RegionNames() override {
+            std::vector<std::string> names;
+            cISC4Nation* nation = Nation();
+            for (std::uint32_t i = 0; nation && i < nation->GetRegionCount(); ++i) {
+                cISC4Region* region = nation->GetRegion(i);
+                cIGZString* name = region ? region->GetName() : nullptr;
+                names.emplace_back(name ? name->ToChar() : "");
+            }
+            return names;
+        }
+        int AddNewRegion(const cIGZString& name, std::uint32_t baseTerrainType) override {
+            cISC4Nation* nation = Nation();
+            if (!nation) return -1;
+            const std::uint32_t index = nation->AddNewRegion(name);
+            cISC4Region* region = nation->GetRegion(index);
+            if (region) {
+                region->Init();
+                region->SetBaseTerrainType(static_cast<cISC4Region::eBaseTerrainType>(baseTerrainType));
+                region->Shutdown();
+            }
+            return static_cast<int>(index);
+        }
+        void NotifyNameInUse() override {
+            nSC4UI::GenericNotificationDialog(sc4::cSLString(0x6a231eaa, 0x4a78b7e8, true), sc4::cSLString(0x6a231eaa, 0x8a78b80e, true));
+        }
+    } newRegion_;
+    sc4::INewRegionNation* NewRegionNation() override { return Nation() ? &newRegion_ : nullptr; }
     const char* RegionNameAt(int index) override {
         cISC4Region* region = Nation() ? Nation()->GetRegion(std::uint32_t(index)) : nullptr;
         cIGZString* name = region ? region->GetName() : nullptr;

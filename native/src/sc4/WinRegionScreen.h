@@ -36,6 +36,7 @@
 // original's.
 // Compile without FMA contraction: the results follow the original single-precision operation order.
 #pragma once
+#include "sc4/RegionDialogs.h"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -313,6 +314,8 @@ public:
     virtual void UpdateRegionViewState() = 0;
     virtual bool PreviousRegionIndex(int& previousIndex) = 0;
     virtual void SelectRegion(int index) = 0;                               // region vslot 0x48
+    // the new-region dialog's nation (cISC4Nation AddNewRegion + the region's base terrain type); null = no nation
+    virtual INewRegionNation* NewRegionNation() { return nullptr; }
     virtual const char* RegionNameAt(int index) = 0;                        // region vslot 0x58 -> 0x18 -> 0x38
     virtual const char* RegionName() = 0;                                   // city list vslot 0x18 -> vslot 0x38
     virtual bool ReloadRegion() = 0;                                        // cISC4App vslot 0x60 (0)

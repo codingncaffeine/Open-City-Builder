@@ -378,6 +378,18 @@ int Count(const std::vector<std::string>& log, const std::string& value) {
 }  // namespace
 
 int main() {
+    // cSC4NewRegionDialog::NameConflicts (i386 0x002eb51a): a name the nation already has, compared without case
+    {
+        struct Nation final : INewRegionNation {
+            std::vector<std::string> RegionNames() override { return {"Timbuktu", "Berlin"}; }
+            int AddNewRegion(const cIGZString&, std::uint32_t) override { return -1; }
+            void NotifyNameInUse() override {}
+        } nation;
+        cSC4NewRegionDialog dialog(&nation);
+        dialog.AddRef();
+        CHECK(dialog.NameConflicts(cRZString("berlin")) && dialog.NameConflicts(cRZString("Timbuktu")));
+        CHECK(!dialog.NameConflicts(cRZString("Berlin 1")) && !dialog.NameConflicts(cRZString("London")));   // control
+    }
     FakeMgr2 mgr;
     FakeHost host;
 

@@ -1,6 +1,9 @@
 #include "sc4/RegionDialogs.h"
 
 #include "gz/WinListBox.h"
+#include "gz/WinBtn.h"
+#include "gz/WinTextEdit.h"
+#include "rz/PathUtils.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -72,6 +75,85 @@ bool SC4DisplayDeleteRegionDialog(cIGZWin* parent) {
     const std::uint32_t result = dialog->Display(parent);
     dialog->Release();
     return result != 0;
+}
+
+
+// ---- new region ----------------------------------------------------------------------------------------------------
+
+bool cSC4NewRegionDialog::NameConflicts(const cIGZString& name) {
+    if (!nation_) return false;
+    for (const std::string& existing : nation_->RegionNames())
+        if (cRZString(existing.c_str()).IsEqualToStringRef(name, false)) return true;
+    return false;
+}
+
+void cSC4NewRegionDialog::EnableControls() {
+    cIGZWin* ok = Window() ? Window()->GetChildWindowFromIDRecursive(0x8a5b9959) : nullptr;
+    cIGZWin* name = Window() ? Window()->GetChildWindowFromIDRecursive(0x2000) : nullptr;
+    if (!ok || !name) return;
+    ok->SetFlag(2, IsFileNameValid(cRZString(name->GetCaption()), nullptr));
+}
+
+bool cSC4NewRegionDialog::DoWinProcMessage(cIGZWin* window, cGZMessage& message) {
+    if (message.type == 0x9b1552d8u) {   // the name changed
+        EnableControls();
+        return true;
+    }
+    return cSC4DialogWinProcBase::DoWinProcMessage(window, message);
+}
+
+// The script's name, made unique ("<name> 1", "<name> 2", ...), selected for typing; the name field and the two terrain
+// buttons notify the dialog.
+void cSC4NewRegionDialog::GZOnAttach() {
+    cIGZWin* name = Window() ? Window()->GetChildWindowFromIDRecursive(0x2000) : nullptr;
+    if (!name) return;
+    void* raw = nullptr;
+    gz::cIGZWinTextEdit* edit = name->QueryInterface(gz::kGZIID_cIGZWinTextEdit, &raw) && raw ? static_cast<gz::cIGZWinTextEdit*>(raw) : nullptr;
+    const cRZString base(name->GetCaption());
+    cRZString unique(base);
+    for (int n = 1; NameConflicts(unique); ++n) unique.Sprintf("%s %d", base.ToChar(), n);
+    name->SetCaption(unique);
+    if (edit) edit->SetMaximumTextToAllow(0x80);
+    name->SetNotificationTarget(Window());
+    if (edit) {
+        edit->SetFlag(0x800);
+        edit->SetSelection(0, edit->GetTextLength());
+    }
+    for (std::uint32_t id : {0x1000u, 0x1001u})
+        if (cIGZWin* button = Window()->GetChildWindowFromIDRecursive(id)) button->SetNotificationTarget(Window());
+    EnableControls();
+    if (edit) edit->Release();
+}
+
+// The two terrain buttons act as a radio pair.
+bool cSC4NewRegionDialog::GZOnButtonActivate(std::uint32_t id) {
+    if (id != 0x1000 && id != 0x1001) return cSC4DialogWinProcBase::GZOnButtonActivate(id);
+    if (gz::cIGZWinBtn* flat = GetBtnControl(0x1000)) flat->SetChecked(id == 0x1000);
+    if (gz::cIGZWinBtn* mountains = GetBtnControl(0x1001)) mountains->SetChecked(id == 0x1001);
+    return true;
+}
+
+void cSC4NewRegionDialog::GZOnOK() {
+    cIGZWin* field = Window() ? Window()->GetChildWindowFromIDRecursive(0x2000) : nullptr;
+    if (!field) return;
+    const cRZString name(field->GetCaption());
+    if (!IsFileNameValid(name, nullptr)) return;
+    if (NameConflicts(name)) {
+        if (nation_) nation_->NotifyNameInUse();
+        return;
+    }
+    gz::cIGZWinBtn* mountains = GetBtnControl(0x1001);
+    const std::uint32_t terrain = mountains && mountains->IsChecked() ? 1u : 0u;
+    const int index = nation_ ? nation_->AddNewRegion(name, terrain) : -1;
+    EndDialog(static_cast<std::uint32_t>(index));
+}
+
+int SC4DisplayNewRegionDialog(cIGZWin* parent, INewRegionNation* nation) {
+    auto* dialog = new cSC4NewRegionDialog(nation);
+    dialog->AddRef();
+    const int result = static_cast<int>(dialog->Display(parent));
+    dialog->Release();
+    return result;
 }
 
 }  // namespace sc4

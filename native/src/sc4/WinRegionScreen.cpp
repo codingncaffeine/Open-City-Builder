@@ -1262,10 +1262,16 @@ bool cSC4WinRegionScreen::GZOnCommand(std::uint32_t command, std::uint64_t param
         }
         return true;
     }
-    case 0x2a5b0000:   // new region: cSC4NewRegionDialog is not ported yet
-        SC4_UNWIRED("cSC4WinRegionScreen::GZOnCommand: the new-region dialog (cSC4NewRegionDialog) not ported");
-        if (getenv("SC4_DEBUG")) fprintf(stderr, "region screen: the new-region dialog is not ported yet\n");
+    case 0x2a5b0000: {   // new region: the made region becomes the active one and the region screen is rebuilt for it
+        if (!host) return true;
+        const int index = SC4DisplayNewRegionDialog(this, host->NewRegionNation());
+        if (getenv("SC4_DEBUG")) fprintf(stderr, "region screen: new region dialog -> %d\n", index);
+        if (index < 0) return true;
+        host->SelectRegion(index);                      // cISC4Nation vslot 0x24 (SetActiveRegion)
+        SetUserPreferencesToCurrentRegion();
+        host->ReloadRegion();
         return true;
+    }
     case 0x0a5510a9:   // the options menu's game options button
         if (host) host->RunGameOptionsDialog();
         return true;
