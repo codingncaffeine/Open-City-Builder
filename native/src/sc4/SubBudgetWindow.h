@@ -8,7 +8,7 @@
 // It is a cIGZWinProc on the dialog window (DoWinMsg: init 0xa2bf8ad0, shutdown 0xa2bf8ad1, key 5, command 3).
 // The neighbor deal dialog (purpose 2) lists every deal the neighbors simulator proposes or runs, sales as income and
 // purchases as expenses, each with a combo box of amounts (none / cancel first); OK keeps the deals, Cancel restores them.
-//   PARTIAL (see the notes): the department path's row scrolling and the ordinance info popups (500+n) are not ported yet.
+//   PARTIAL (see the notes): the department and ordinance paths' row scrolling is not ported yet.
 #pragma once
 #include <cstdint>
 #include <string>
@@ -153,6 +153,10 @@ private:
     void InitOrdinanceBudget(cIGZWin* window);                          // initOrdinanceBudget 0x002678fe
     void UpdateOrdinanceBudget(cIGZWin* window);                        // updateOrdinanceBudget 0x002628da (the money texts)
     void AddCheckButton(cIGZWin* parent, std::uint32_t id, int x, int y, std::uint32_t image, bool checked);   // add_image_button1 0x00261e94
+    // the two-panel popup of SetEmptyWindow and the ordinance info (i386 0x00265ef4 / on_button_activated 500+n)
+    void MakePopupPanels(cIGZWin* window, bool ordinanceStyle);
+    void ClosePopup(cIGZWin* window);
+    void ShowOrdinanceInfo(cIGZWin* window, std::uint32_t row);
     void SetEmptyWindow(cIGZWin* window, const cIGZString& title, const cIGZString& text);       // 0x00265ef4
     void AddText(cIGZWin* parent, std::uint32_t id, int x, int y, const cIGZString& text, int align, std::uint32_t font,
                  std::uint8_t r, std::uint8_t g, std::uint8_t b);      // add_text 0x002616ca
@@ -188,6 +192,8 @@ private:
     bool initialized_ = false;                   // +0x08
     cIGZWin* dialog_ = nullptr;                  // +0x0c (the dialog window, one reference)
     cIGZWin* body_ = nullptr;                    // +0x10 (the inner window gen that holds the rows, one reference)
+    cIGZWin* popup_ = nullptr;                   // +0x14 the info popup's outer window (one reference)
+    cIGZWin* popupInner_ = nullptr;              // +0x18 its inner window (one reference)
     std::uint32_t purpose_ = 0;                  // +0x20 (the budget group)
     std::uint32_t individual_ = 0;               // +0x24 the department id (non-zero: the single-building dialog)
     std::uint32_t period_ = 0;                   // +0x28 (0 monthly, else yearly)

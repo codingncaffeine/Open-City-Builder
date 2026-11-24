@@ -79,6 +79,8 @@ cSC4SubBudgetWindow::cSC4SubBudgetWindow() : totalCaption_(Text(0x8a5796d1)) {}
 
 cSC4SubBudgetWindow::~cSC4SubBudgetWindow() {
     if (body_) body_->Release();
+    if (popup_) popup_->Release();
+    if (popupInner_) popupInner_->Release();
     if (dialog_) dialog_->Release();
 }
 
@@ -220,6 +222,8 @@ bool cSC4SubBudgetWindow::OnShutdown() {
     AddRef();   // the original holds itself across the releases below
     if (dialog_) { dialog_->Release(); dialog_ = nullptr; }
     if (body_) { body_->Release(); body_ = nullptr; }
+    if (popup_) { popup_->Release(); popup_ = nullptr; }
+    if (popupInner_) { popupInner_->Release(); popupInner_ = nullptr; }
     Release();
     return true;
 }
@@ -300,8 +304,18 @@ bool cSC4SubBudgetWindow::OnButtonActivated(cIGZWin* window, std::uint32_t id) {
         EndDialog(window, kResultClose);
         return true;
     }
-    if (id >= 500 && id < 700)
-        SC4_UNWIRED("cSC4SubBudgetWindow::OnButtonActivated: ordinance info popup (button 500+n) not ported");
+    if (id >= 500 && id < 700) {   // an ordinance's info button
+        ShowOrdinanceInfo(window, id - 500);
+        return false;
+    }
+    if (id == 0x68 || id == 900) {   // the info popup's close button / a click on it
+        ClosePopup(window);
+        return false;
+    }
+    if (id == 0xcc || id == 0x385) {   // the empty dialog's close button / a click on it
+        EndDialog(window, kResultClose);
+        return true;
+    }
     if (id >= 0x451 && id <= 0x454)
         SC4_UNWIRED("cSC4SubBudgetWindow::OnButtonActivated: row scrolling of the department path not ported");
     return false;
@@ -363,11 +377,125 @@ void cSC4SubBudgetWindow::SetupWindow(cIGZWin* window, std::uint32_t incomeRows,
     StackSegments(window, 0x140155f0, incomeRows, expenseRows);
 }
 
-// SetEmptyWindow (i386 0x00265ef4): a group without rows says so. PARTIAL: the empty dialog keeps the default size.
-void cSC4SubBudgetWindow::SetEmptyWindow(cIGZWin*, const cIGZString& title, const cIGZString& text) {
-    SC4_UNWIRED("cSC4SubBudgetWindow::SetEmptyWindow: resize of the empty dialog not ported (keeps the default size)");
-    AddText(body_, 0xabcde00, 0x14, 8, title, 0, kFontTitle, 'D', 'U', 'f');
-    AddText(body_, 0xabcde01, 0x14, 0x30, text, 0, kFontHeader, 'D', 'U', 'f');
+// The popup's two generic windows (i386 SetEmptyWindow 0x00265ef4 / on_button_activated 500+n): the outer one (id 0x423278d)
+// on the dialog, the inner one (id 0x423278f, background image 0x144161e4) inside it.
+void cSC4SubBudgetWindow::MakePopupPanels(cIGZWin* window, bool ordinanceStyle) {
+    if (!g_host || !window) return;
+    auto genFlags = [](gz::cIGZWinGen* gen, bool flag2000) {
+        gen->SetWinGenFlag(1, false);
+        gen->SetWinGenFlag(2, false);
+        gen->SetWinGenFlag(0x10000, false);
+        gen->SetWinGenFlag(0x20, false);
+        gen->SetWinGenFlag(0x40, false);
+        gen->SetWinGenFlag(0x1000, true);
+        gen->SetWinGenFlag(0x2000, flag2000);
+        gen->SetWinGenFlag(0x4000, true);
+    };
+    gz::cIGZWinGen* outer = g_host->CreateWinGen();
+    if (!outer) return;
+    if (popup_) popup_->Release();
+    popup_ = outer->AsIGZWin();
+    popup_->AddRef();
+    genFlags(outer, true);
+    if (ordinanceStyle) popup_->SetFlag(0x8000, false);
+    popup_->SetFlag(0x10000, false);
+    popup_->SetFlag(0x200000, false);
+    popup_->SetFlag(0x800, true);
+    popup_->PullToFront();
+    popup_->SetFlag(0x800, false);
+    popup_->SetID(0x423278d);
+    window->ChildAdd(popup_);
+    gz::cIGZWinGen* inner = g_host->CreateWinGen();
+    if (inner) {
+        if (popupInner_) popupInner_->Release();
+        popupInner_ = inner->AsIGZWin();
+        popupInner_->AddRef();
+        genFlags(inner, false);
+        if (ordinanceStyle) {
+            popupInner_->SetFlag(4, true);
+            popupInner_->SetFlag(0x8000, false);
+            popupInner_->SetFlag(0x100, true);
+            popupInner_->SetFlag(0x10000, true);
+            popupInner_->SetFlag(0x200000, true);
+            popupInner_->SetFlag(0x800, false);
+        } else {
+            popupInner_->SetFlag(0x100, true);
+            popupInner_->SetFlag(0x10000, true);
+            popupInner_->SetFlag(0x20000, true);
+            popupInner_->SetFlag(0x200000, true);
+            popupInner_->SetFlag(0x800, false);
+            popupInner_->SetFlag(4, true);
+        }
+        popupInner_->SetID(0x423278f);
+        popup_->ChildAdd(popupInner_);
+        inner->SetBackgroundBitmap(static_cast<gz::BGBltType>(2), g_host->UiImage(0x144161e4));
+        inner->Release();
+    }
+    outer->Release();
+}
+
+// the popup goes (buttons 0x68 / 900: the dialog's ChildRemove of +0x14)
+void cSC4SubBudgetWindow::ClosePopup(cIGZWin* window) {
+    if (!popup_) return;
+    if (window) window->ChildRemove(popup_);
+    popup_->Release();
+    popup_ = nullptr;
+    if (popupInner_) {
+        popupInner_->Release();
+        popupInner_ = nullptr;
+    }
+}
+
+// SetEmptyWindow (i386 0x00265ef4): a group without rows says so in a 300 x 100 dialog, centred, closed by 0xcc or a click on it.
+void cSC4SubBudgetWindow::SetEmptyWindow(cIGZWin* window, const cIGZString& title, const cIGZString& text) {
+    if (!window) return;
+    MakePopupPanels(window, false);
+    if (!popup_ || !popupInner_) return;
+    popup_->SetSize(300, 100);
+    popupInner_->SetSize(300, 100);
+    popup_->GZWinMoveTo(0, 0);
+    popupInner_->GZWinMoveTo(0, 0);
+    window->SetSize(300, 100);
+    if (cIGZWin* parent = window->GetParentWin())
+        window->GZWinMoveTo((parent->GetW() - window->GetW()) / 2, (parent->GetH() - window->GetH()) / 2);
+    AddText(popupInner_, 0xabce000, 10, 5, title, 0, 0xea85d307, 'D', 'U', 'f');
+    AddText(popupInner_, 0xabce001, 0xf, 0x19, text, 99, 0xea85d308, 'D', 'U', 'f');
+    AddImageButton(popup_, 0x385, 0, 0, 0x14416242, false);
+    AddImageButton(popup_, 0xcc, 0x10d, 0xb, 0x140155b4, false);
+    if (cIGZWin* back = popup_->GetChildWindowFromIDRecursive(0x385)) back->SetSize(300, 100);
+    if (cIGZWin* frame = popup_->GetChildWindowFromIDRecursive(0x485)) frame->SetSize(300, 100);
+    if (cIGZWin* back = popup_->GetChildWindowFromIDRecursive(0x385)) back->SetNotificationTarget(window);
+    if (cIGZWin* close = popup_->GetChildWindowFromIDRecursive(0xcc)) close->SetNotificationTarget(window);
+}
+
+// on_button_activated 500+n (i386 0x0027825c): the ordinance's name and description in a popup beside its row, (width - 0x3c)
+// x 0x7d at x 0x1e, as low as the row's info button (up to the dialog's height - 0x7d); 900 / 0x68 close it.
+void cSC4SubBudgetWindow::ShowOrdinanceInfo(cIGZWin* window, std::uint32_t row) {
+    ClosePopup(window);
+    if (!window || row >= ordinanceRows_.size()) return;
+    const std::uint32_t index = ordinanceRows_[row];
+    cIGZWin* info = window->GetChildWindowFromIDRecursive(row + 500 + 0x100);   // the info button's frame
+    if (!info) return;
+    const int rowTop = info->GetT();
+    MakePopupPanels(window, true);
+    if (!popup_ || !popupInner_) return;
+    const int width = width_ - 0x3c;
+    popup_->SetSize(width, 0x7d);
+    popupInner_->SetSize(width, 0x7d);
+    popup_->GZWinMoveTo(0x1e, std::min(rowTop, height_ - 0x7d));
+    popupInner_->GZWinMoveTo(0, 0);
+    cSC4OrdinanceSimulator* ordinances = g_host->OrdinanceSimulator();
+    cISC4Ordinance* ordinance = ordinances && index < ordinanceIds_.size() ? ordinances->GetOrdinanceByID(ordinanceIds_[index]) : nullptr;
+    if (ordinance) {
+        AddText(popupInner_, 0xabce000, 10, 5, ordinance->GetName(), 0, 0xea85d307, 'D', 'U', 'f');
+        AddText(popupInner_, 0xabce001, 0xf, 0x19, ordinance->GetDescription(), 99, 0xea85d308, 'D', 'U', 'f');
+    }
+    AddImageButton(popup_, 900, 0, 0, 0x14416242, false);
+    AddImageButton(popup_, 0x68, width_ - 0x5b, 0xb, 0x140155b4, false);
+    if (cIGZWin* back = popup_->GetChildWindowFromIDRecursive(900)) back->SetSize(width, 0x7d);
+    if (cIGZWin* frame = popup_->GetChildWindowFromIDRecursive(0x484)) frame->SetSize(width, 0x7d);
+    if (cIGZWin* back = popup_->GetChildWindowFromIDRecursive(900)) back->SetNotificationTarget(window);
+    if (cIGZWin* close = popup_->GetChildWindowFromIDRecursive(0x68)) close->SetNotificationTarget(window);
 }
 
 // add_text (i386 0x002616ca): a label of `text` in a font style and colour; align 0 = left edge at x, 6 = right edge at x
@@ -391,8 +519,15 @@ void cSC4SubBudgetWindow::AddText(cIGZWin* parent, std::uint32_t id, int x, int 
     // longer captions fit in; right-aligned labels end at x
     const cRZRect fitted = win->GetArea();
     win->SetArea(fitted.right, fitted.top, 1000, fitted.bottom);
-    if (align == 6) win->GZWinMoveTo(x - win->GetW(), y);
-    else win->GZWinMoveTo(x, y);
+    if (align == 6) {
+        win->GZWinMoveTo(x - win->GetW(), y);
+    } else if (align == 99) {   // the full-width variant: the parent's width less x on each side, down to its bottom; left aligned
+        win->SetArea(x, y, parent->GetW() - 2 * x, parent->GetH() - y);
+        win->GZWinMoveTo(x, y);
+        align = 0;
+    } else {
+        win->GZWinMoveTo(x, y);
+    }
     label->SetAlignment(static_cast<std::uint32_t>(align));
     win->SetFlag(0x800, false);
     win->SetFlag(0x8000, false);

@@ -55,6 +55,7 @@ struct Host final : sc4::ISubBudgetWindowHost {
         type.type = kBufferColorARGB8888;
         type.bitsPerPixel = 0x20;
         strip.Init(500, 20, type);
+        strip.AddRef();   // the host owns its images (windows AddRef and Release them)
     }
     sc4::cSC4BudgetSimulator* BudgetSimulator() override { return budget; }
     cIGZWinMgr* WindowManager() override { return mgr; }
@@ -298,7 +299,9 @@ int main() {
         view->ChildAdd(win);
         CHECK(win->Init());
         CHECK(win->GetChildWindowFromIDRecursive(0xabcde06) == nullptr);   // no rows
-        CHECK(win->GetChildWindowFromIDRecursive(0xabcde01) != nullptr);   // the "no buildings" text
+        CHECK(win->GetChildWindowFromIDRecursive(0xabce001) != nullptr);   // the "no buildings" text (i386 SetEmptyWindow ids)
+        CHECK(win->GetChildWindowFromIDRecursive(0x423278d) != nullptr);   // in the popup's outer panel
+        CHECK(win->GetW() == 300 && win->GetH() == 100);                   // the 300 x 100 dialog
         win->Release();
         single->Destroy();
         win->Shutdown();
