@@ -341,17 +341,34 @@ bool cSC4Watercraft::Shutdown() {
 }
 
 // ---- messages --------------------------------------------------------------------------------------------------------
-// @ 0x1004f6116. The 0x26d31ec1 "reload drive parameters" message is fully recovered. The 0xac400a31 tow-request
-// message only clears the flag here: its payload (the position of the boat looking for a tow and its occupant groups)
-// is read through cIGZMessage2Standard's GetIGZUnknown and the 0x78/get-position slots of that unknown, which the
-// port does not model yet (see PARTIAL in the ledger).
+// @ 0x1004f6116 (i386 0x00386f86). 0x26d31ec1 reloads the drive parameters. 0xac400a31 is the tow request: an effect that
+// started with that message names its position; a tow boat looking for work (towSearchActive_) takes the boat there when it is
+// a towable boat (group 0x4417) not already sinking, aground or towed (behaviors 0x46..0x49): it leaves its run-aground
+// behaviors (0x4a..0x4c) and starts being towed (behavior 0x4d).
 bool cSC4Watercraft::DoMessage(cIGZMessage2* message) {
     bool handled = false;
     if (message) {
         const std::uint32_t type = message->GetType();
         if (type == kWatercraftMessageTow) {
-            if (towSearchActive_) towSearchActive_ = false;
-            SC4_UNWIRED("cSC4Watercraft::DoMessage: tow-request payload (position and occupant groups of the boat asking for a tow) not read");
+            if (towSearchActive_) {
+                towSearchActive_ = false;
+                cIGZUnknown* effect = static_cast<cIGZMessage2Standard*>(message)->GetIGZUnknown();   // vslot 0x80
+                float position[3] = {0.0f, 0.0f, 0.0f};
+                if (effect && watercraftHost_ && watercraftHost_->EffectSourcePosition(effect, position)) {
+                    cSC4Watercraft* boat = watercraftHost_->LookForBoatsAtPosition(position, this);
+                    if (boat && boat != this && boat->AsOccupant()->IsOccupantGroup(0x4417)) {
+                        const std::uint32_t behavior = boat->GetBehavior();   // vslot 0xec
+                        if (behavior != 0x46 && behavior != 0x47 && behavior != 0x49 && behavior != 0x48) {
+                            towTarget_ = boat;
+                            boat->tower_ = this;
+                            const std::uint32_t current = boat->GetBehavior();
+                            if (current == 0x4a || current == 0x4b || current == 0x4c) boat->PopState();
+                            boat->PushState(0x4d, nullptr, -1.0f, false, 0, 0, nullptr);
+                            tower_ = nullptr;
+                        }
+                    }
+                }
+            }
         } else if (type == kWatercraftMessageReloadDriveParams) {
             LoadDriveParameters();
             handled = true;

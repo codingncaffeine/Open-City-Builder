@@ -503,6 +503,17 @@ public:
 
     // ---- cSC4WatercraftManager
     cSC4WatercraftManager* M() { return g_component ? &g_component->Manager() : nullptr; }
+    bool EffectSourcePosition(cIGZUnknown* effect, float xyz[3]) override {
+        auto* visual = effect ? dynamic_cast<cSC4VisualEffect*>(effect) : nullptr;
+        if (!visual) return false;
+        cS3DTransform transform;
+        visual->GetSourceTransform(transform);
+        if ((transform.flags & 1) == 0) return false;
+        xyz[0] = transform.translation[0];
+        xyz[1] = transform.translation[1];
+        xyz[2] = transform.translation[2];
+        return true;
+    }
     cSC4Watercraft* LookForBoatsAtPosition(const float* xyz, cSC4Watercraft* exclude) override {
         return M() ? M()->LookForBoatsAtPosition(cS3DVector3{xyz[0], xyz[1], xyz[2]}, exclude) : nullptr;
     }

@@ -203,6 +203,9 @@ class IWatercraftHost : public IAutomatonHost {
 public:
     // ---- cSC4WatercraftManager
     virtual cSC4Watercraft* LookForBoatsAtPosition(const float* xyz, cSC4Watercraft* exclude) = 0;   // @ 0x1004ef14e
+    // The tow request's payload: a visual effect that posted its start message (cSC4VisualEffect::Start puts itself in the
+    // message); its source transform (i386 vslot 0x3c GetSourceTransform), false unless the translation is set (flag 1).
+    virtual bool EffectSourcePosition(cIGZUnknown* effect, float xyz[3]) { (void)effect; (void)xyz; return false; }
     virtual cSC4Watercraft* CollisionDetection(float radius, cSC4Watercraft* self,
                                                float* outPosition) = 0;                              // @ 0x1004f4908
     virtual bool RequestPermissionToDock(cSC4Lot* lot, cSC4Watercraft* boat) = 0;   // @ 0x1004f4690
