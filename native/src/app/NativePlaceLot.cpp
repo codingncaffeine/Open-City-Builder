@@ -28,6 +28,7 @@
 #include "sc4/StringDetokenizer.h"
 #include "sc4/TrafficSimulator.h"
 #include "sc4/View3DWin.h"
+#include "sc4/WinMapView.h"
 #include "sc4/CoverageRadiusEffectHelper.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSC4ZoneManager.h"
@@ -329,10 +330,17 @@ public:
     std::uint32_t LastSelectedLot() override { return lastLot_; }
     void SetLastSelectedBuilding(std::uint32_t type) override { lastBuilding_ = type; }
     void SetLastSelectedLot(std::uint32_t id) override { lastLot_ = id; }
-    void AddGlobalEffect(std::uint32_t) override {       // the view manager's data views are not ported
-        SC4_UNWIRED("cSC4ViewInputControlPlaceLot: the view manager's global effect (the data view shown while placing) is not added");
+    // SL::ViewManager() vslots 0x10 PushView / 0x14 PopView (i386 Init / Shutdown): the water (10) or transit (0xf2) data view
+    // while a pump or a station is placed
+    void AddGlobalEffect(std::uint32_t view) override { WithViewManager([view](sc4::cISC4ViewManager* m) { m->PushView(view); }); }
+    void RemoveGlobalEffect(std::uint32_t view) override { WithViewManager([view](sc4::cISC4ViewManager* m) { m->PopView(view); }); }
+    template <typename Fn> static void WithViewManager(Fn&& fn) {
+        cSC4View3DWin* view = CityView3DWin();
+        cIGZUnknown* unknown = view ? view->GetViewManager() : nullptr;
+        if (!unknown) return;
+        fn(static_cast<sc4::cISC4ViewManager*>(unknown));
+        unknown->Release();
     }
-    void RemoveGlobalEffect(std::uint32_t) override {}
 
 private:
     std::uint32_t lastBuilding_ = 0, lastLot_ = 0;
