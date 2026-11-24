@@ -473,7 +473,6 @@ void cSC4WinMapView::Update() {
             type.bitsPerPixel = 0x20;
             buffer->Init(static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height), type);
             buffer->Fill(0, nullptr);
-            if (customView_) SC4_UNWIRED("cSC4WinMapView::Update: the custom view is not asked to draw (vslot 0x14)");
             WinMapGrid grid;
             auto u8 = [&](int source, int argument = 0) {
                 if (g_host->SimulatorGrid(source, argument, grid) && grid.u8 && !grid.u8->empty())
@@ -619,6 +618,7 @@ void cSC4WinMapView::Update() {
             if (dataView_ == kWinMapViewTraffic) map->Refresh();
             buffer->Release();
         }
+        if (customView_) customView_->RefreshCustomView();   // +0x9fc vslot 0x14, after the overlay (none: also)
     }
     lastUpdateMs_ = g_host->NowMilliseconds();   // cRZTime::GetMillisecondSystemTime, +0xae8
 }
