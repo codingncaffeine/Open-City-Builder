@@ -305,6 +305,19 @@ struct QueryLots final : IQueryLotManager {
         if (Trace()) std::fprintf(stderr, "query: lot at %d,%d -> %p\n", cellX, cellZ, static_cast<void*>(lot));
         return lot ? WrapLot(lot) : nullptr;
     }
+    void GetOccupantsInCellRect(const SC4CellRect& rect, std::vector<sc4::cISC4Occupant*>& out) override {
+        out.clear();
+        cSC4City* city = HostCity();
+        cIGZUnknown* object = city ? city->GetComponent(CityComponent::OccupantManager) : nullptr;
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(kGZIID_cISC4OccupantManager, &raw) || !raw) return;
+        auto* occupants = static_cast<cISC4OccupantManager*>(raw);
+        const int a[2] = {rect.x0, rect.z0}, b[2] = {rect.x1, rect.z1};
+        OccupantList found;
+        occupants->GetOccupantsByStandardCityCells(found, a, b, static_cast<cISC4OccupantFilter*>(nullptr), 0xffffffffu);
+        out.assign(found.begin(), found.end());
+        occupants->Release();
+    }
 } g_lots;
 
 // The landfill and port developers as the query rows ask them (vslots 0x50 GetLandfillUsage, 0x40 GetCurrentBudget; port 0x60 usage
@@ -590,6 +603,7 @@ struct NeighborCity final : IQueryNeighborCity {
     }
     void GetCityName(cIGZString& out) const override { city_->GetCityName(out); }
     void GetMayorName(cIGZString& out) const override { city_->GetMayorName(out); }
+    cSC4RegionalCity* City() const { return city_; }
 
 private:
     cSC4RegionalCity* city_;
@@ -607,6 +621,18 @@ struct QueryNeighbors final : IQueryNeighborsSim {
         cSC4NeighborsSimulator* neighbors = Sim();
         auto* city = neighbors ? dynamic_cast<cSC4RegionalCity*>(neighbors->FindCityOnOtherSideOfConnection(x, z)) : nullptr;
         return city ? new NeighborCity(city) : nullptr;
+    }
+    void FindDeals(std::uint32_t dealType, IQueryNeighborCity* city, std::vector<Deal>& out) override {
+        out.clear();
+        cSC4NeighborsSimulator* neighbors = Sim();
+        auto* regional = static_cast<NeighborCity*>(city);
+        if (!neighbors || !regional) return;
+        DealList deals;
+        neighbors->FindDeals(dealType, regional->City(), deals);
+        for (const cRZAutoRefCount<cISC4NeighborDeal>& deal : deals) {
+            if (!deal) continue;
+            out.push_back(Deal{deal->CheckFlagsAnd(2), deal->GetAmount(), deal->GetCost()});
+        }
     }
 } g_neighbors;
 

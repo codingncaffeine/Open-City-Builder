@@ -1927,12 +1927,10 @@ bool cSC4ViewInputControlQuery::SetOrGetResidentialBuildingCommute(cIGZWin* win,
 }
 
 // @ 0x1002daf96
-// PARTIAL: the original is a switch over the cell-based control ids (0x1011..0x1015 airport/seaport traffic, 0x1026 /
+// The original is a switch over the cell-based control ids (0x1011..0x1015 airport/seaport traffic, 0x1026 /
 // 0x1027 landfill, 0x1028 the landfill developer's monthly cost, 0x104b..0x104e the neighbour-connection rows and
 // 0x1066..0x107e the neighbour deals / airport / seaport rows). The airport, seaport, landfill and neighbour-connection rows
-// below are dispatched; 0x1012, 0x104e and 0x1066..0x107a are not (their row handlers need an unrecovered
-// developer/simulator, see notes/ledger_pending/cSC4ViewInputControlQuery.txt). The dispatcher always answers false, like
-// the original.
+// below are all dispatched. The dispatcher always answers false, like the original.
 bool cSC4ViewInputControlQuery::SetOrGetControlValue(cIGZWin* win, std::uint32_t id, bool set, tCellInfo* info) {
     if (!info) return false;
     const std::uint32_t rowId = static_cast<std::uint32_t>(info->idOffset);
@@ -1964,9 +1962,24 @@ bool cSC4ViewInputControlQuery::SetOrGetControlValue(cIGZWin* win, std::uint32_t
     case 0x104d:
         SetOrGetNeighborConnectionCongestion(win, rowId + 0x104d, set, info->x, info->z);
         return false;
+    case 0x1012: SetOrGetAirportNoisePollution(win, 0x1012, set, info->x, info->z); return false;
+    case 0x104e:
+        SetOrGetNeighborConnectionDealExists(win, rowId + 0x104e, set, info->x, info->z, info->connectionType);
+        return false;
+    case 0x1066:
+    case 0x1067:
+        SetOrGetNeighborConnectionDealCommodityAmount(win, rowId + id, set, info->x, info->z, info->connectionType, 1.0f);
+        return false;
+    case 0x1068:
+        SetOrGetNeighborConnectionDealValue(win, rowId + 0x1068, set, info->x, info->z, info->connectionType);
+        return false;
+    case 0x1069:
+        SetOrGetNeighborConnectionDealDirection(win, rowId + 0x1069, set, info->x, info->z, info->connectionType);
+        return false;
+    case 0x106a:
+        SetOrGetNeighborConnectionDealGarbageAmount(win, rowId + 0x106a, set, info->x, info->z, info->connectionType);
+        return false;
     default:
-        if (id == 0x1012 || id == 0x104e || (id >= 0x1066 && id <= 0x107a))
-            SC4_UNWIRED("cSC4ViewInputControlQuery::SetOrGetControlValue: cell query row (neighbor deals / airport / seaport) not ported");
         return false;
     }
 }
@@ -2474,6 +2487,147 @@ bool cSC4ViewInputControlQuery::SetOrGetOccupantCost(cIGZWin* win, std::uint32_t
 }
 
 // --- neighbour-connection rows -----------------------------------------------------------------------------
+
+namespace {
+constexpr std::uint32_t kStrQueryGroup = 0xea5524eb;
+// The deal types a connection type trades in (power 4 -> 0x4773ffe0/1, water 5 -> 0x4773ffe2/3, the road/rail/highway
+// connections 2/3/8/10/12 -> garbage 0x4773ffe4/5), and which commodity (1 power, 2 water, 3 garbage); false for none.
+bool DealTypesForConnection(int connectionType, std::uint32_t& first, std::uint32_t& second, int& commodity) {
+    if (static_cast<std::uint32_t>(connectionType) > 0xc) return false;
+    const std::uint32_t bit = 1u << connectionType;
+    if (bit & 0x150c) { first = 0x4773ffe4; second = 0x4773ffe5; commodity = 3; return true; }
+    if (bit & 0x10) { first = 0x4773ffe0; second = 0x4773ffe1; commodity = 1; return true; }
+    if (bit & 0x20) { first = 0x4773ffe2; second = 0x4773ffe3; commodity = 2; return true; }
+    return false;
+}
+// The deals of the first type with the city, else of the second (which list answered: 1, 2, or 0 for neither).
+int DealsWithCity(IQueryNeighborsSim* neighbors, IQueryNeighborCity* city, std::uint32_t first, std::uint32_t second,
+                  std::vector<IQueryNeighborsSim::Deal>& deals) {
+    neighbors->FindDeals(first, city, deals);
+    if (!deals.empty()) return 1;
+    neighbors->FindDeals(second, city, deals);
+    return deals.empty() ? 0 : 2;
+}
+// The first active deal of the connection's types with the city on its other side (deal vslot 0x98 CheckFlags(2)).
+bool ActiveDealOfConnection(int connectionType, int x, int z, IQueryNeighborsSim::Deal& found, int* list = nullptr,
+                            int* commodity = nullptr) {
+    IQueryHost* host = QueryHost();
+    IQueryNeighborsSim* neighbors = host ? host->NeighborsSim() : nullptr;
+    IQueryNeighborCity* city = cSC4ViewInputControlQuery::FindCityOnOtherSideOfConnection(connectionType, x, z);
+    if (!city) return false;
+    std::uint32_t first = 0, second = 0;
+    int kind = 0;
+    bool active = false;
+    if (neighbors && DealTypesForConnection(connectionType, first, second, kind)) {
+        std::vector<IQueryNeighborsSim::Deal> deals;
+        const int which = DealsWithCity(neighbors, city, first, second, deals);
+        if (list) *list = which;
+        if (commodity) *commodity = kind;
+        for (const IQueryNeighborsSim::Deal& deal : deals) {
+            if (deal.active) {
+                found = deal;
+                active = true;
+                break;
+            }
+        }
+    }
+    city->Release();
+    return active;
+}
+}  // namespace
+
+// i386 0x0020d6b0: the first value of property 0x27812851 summed (saturating) over every occupant in the cell rect of the lot
+// at the cell, at least 0.
+bool cSC4ViewInputControlQuery::SetOrGetAirportNoisePollution(cIGZWin* win, std::uint32_t id, bool set, int x, int z) {
+    if (!set) return true;
+    IQueryHost* host = QueryHost();
+    IQueryLotManager* lots = host ? host->LotManager() : nullptr;
+    IQueryLot* lot = lots ? lots->GetLotAtCell(x, z, 0) : nullptr;
+    if (!lot) return SetStaticControlNumeric(win, id, 0);
+    SC4CellRect rect;
+    lot->GetCellRect(rect);
+    std::vector<cISC4Occupant*> occupants;
+    lots->GetOccupantsInCellRect(rect, occupants);
+    std::int32_t total = 0;
+    for (cISC4Occupant* occupant : occupants) {
+        cISCPropertyHolder* holder = occupant ? occupant->AsPropertyHolder() : nullptr;
+        cISCProperty* property = holder ? holder->GetProperty(0x27812851) : nullptr;
+        cIGZVariant* value = property ? property->GetPropertyValue() : nullptr;
+        const std::int32_t* values = value ? value->RefSint32() : nullptr;
+        if (values) {
+            const std::int64_t sum = static_cast<std::int64_t>(total) + values[0];
+            total = sum > INT32_MAX ? INT32_MAX : sum < INT32_MIN ? INT32_MIN : static_cast<std::int32_t>(sum);
+        }
+        if (occupant) occupant->Release();
+    }
+    return SetStaticControlNumeric(win, id, static_cast<std::uint32_t>(total < 0 ? 0 : total));
+}
+
+// i386 0x0020de6e: "yes" (0xca5d4f33) when the city across the connection has an active deal of its types, else "no"
+// (0x6a5d4f37); with no city on the other side the row is left as it is.
+bool cSC4ViewInputControlQuery::SetOrGetNeighborConnectionDealExists(cIGZWin* win, std::uint32_t id, bool set, int x, int z,
+                                                                     int connectionType) {
+    if (!set) return true;
+    IQueryHost* host = QueryHost();
+    IQueryNeighborCity* city = FindCityOnOtherSideOfConnection(connectionType, x, z);
+    if (!city || !host) {
+        if (city) city->Release();
+        return false;
+    }
+    city->Release();
+    IQueryNeighborsSim::Deal deal;
+    const bool active = ActiveDealOfConnection(connectionType, x, z, deal);
+    cRZString text;
+    host->LoadString(kStrQueryGroup, active ? 0xca5d4f33u : 0x6a5d4f37u, text);
+    return SetStaticControlText(win, id, text);
+}
+
+// i386 0x0020dc26: the active deal's amount times the scale, at least 0; blank without one.
+bool cSC4ViewInputControlQuery::SetOrGetNeighborConnectionDealCommodityAmount(cIGZWin* win, std::uint32_t id, bool set, int x,
+                                                                              int z, int connectionType, float scale) {
+    if (!set) return true;
+    IQueryNeighborsSim::Deal deal;
+    if (!ActiveDealOfConnection(connectionType, x, z, deal)) return SetStaticControlText(win, id, cRZString(""));
+    float amount = static_cast<float>(deal.amount) * scale;
+    if (amount <= 0.0f) amount = 0.0f;
+    const std::uint32_t value = amount >= 4294967296.0f ? 0xffffffffu : static_cast<std::uint32_t>(amount);
+    return SetStaticControlNumeric(win, id, value);
+}
+
+// i386 0x0020daa6: the active deal's cost in simoleons, 0 without one.
+bool cSC4ViewInputControlQuery::SetOrGetNeighborConnectionDealValue(cIGZWin* win, std::uint32_t id, bool set, int x, int z,
+                                                                    int connectionType) {
+    if (!set) return true;
+    IQueryNeighborsSim::Deal deal;
+    return SetStaticControlSimoleons(win, id, ActiveDealOfConnection(connectionType, x, z, deal) ? deal.cost : 0);
+}
+
+// i386 0x0020d890: which way the deal runs, by which of the two deal types answered (garbage: 0x8a5d4f4b / 0xaa5d4f47,
+// power and water: 0x0a5d4f4f / 0x6a5d4f54), shown only when one of the deals is active; blank otherwise.
+bool cSC4ViewInputControlQuery::SetOrGetNeighborConnectionDealDirection(cIGZWin* win, std::uint32_t id, bool set, int x, int z,
+                                                                        int connectionType) {
+    if (!set) return true;
+    IQueryHost* host = QueryHost();
+    IQueryNeighborsSim::Deal deal;
+    int list = 0, commodity = 0;
+    if (!host || !ActiveDealOfConnection(connectionType, x, z, deal, &list, &commodity))
+        return SetStaticControlText(win, id, cRZString(""));
+    std::uint32_t instance = 0;
+    if (list == 1) instance = commodity == 3 ? 0x8a5d4f4bu : 0x0a5d4f4fu;
+    else if (list == 2) instance = commodity == 3 ? 0xaa5d4f47u : 0x6a5d4f54u;
+    cRZString text;
+    host->LoadString(kStrQueryGroup, instance, text);
+    return SetStaticControlText(win, id, text);
+}
+
+// i386 0x0020de16: the commodity amount scaled by the pollution simulator's garbage scaling factor (vslot 0xc0).
+bool cSC4ViewInputControlQuery::SetOrGetNeighborConnectionDealGarbageAmount(cIGZWin* win, std::uint32_t id, bool set, int x,
+                                                                            int z, int connectionType) {
+    IQueryHost* host = QueryHost();
+    IQueryPollutionSim* pollution = host ? host->PollutionSim() : nullptr;
+    const float scale = pollution ? pollution->GarbageScalingFactor() : 0.0f;
+    return SetOrGetNeighborConnectionDealCommodityAmount(win, id, set, x, z, connectionType, scale);
+}
 
 // @ 0x1002d906e
 IQueryNeighborCity* cSC4ViewInputControlQuery::FindCityOnOtherSideOfConnection(int connectionType, int x, int z) {

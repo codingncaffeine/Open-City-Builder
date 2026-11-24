@@ -175,6 +175,9 @@ public:
     virtual ~IQueryLotManager() = default;
     virtual IQueryLot* GetLotForOccupant(cISC4Occupant* occupant) = 0;   // vslot 0x70
     virtual IQueryLot* GetLotAtCell(int cellX, int cellZ, int unused) = 0;   // vslot 0x28
+    // SL::spOccupantManager vslot 0xa0 GetOccupantsByStandardCityCells(list, min, max, no filter, all types): one reference
+    // each, which the caller releases (vslot 0xc0 ReleaseOccupants).
+    virtual void GetOccupantsInCellRect(const SC4CellRect& rect, std::vector<cISC4Occupant*>& out) { (void)rect; out.clear(); }
 };
 
 // SL::spPowerSim / SL::spPlumbingSim booleans used by the "is powered" / "is watered" rows.
@@ -316,6 +319,10 @@ public:
     virtual bool IsValidConnectionCell(int x, int z) = 0;   // static IsValidConnectionCell(x, z, nullptr)
     virtual bool FindConnection(std::uint32_t type, int x, int z) = 0;                 // vslot 0x58
     virtual IQueryNeighborCity* FindCityOnOtherSide(int x, int z) = 0;                 // vslot 0x60
+    // vslot 0x78 FindDeals(dealType, city, list): the deals of a type with the city, in list order, as the deal rows read
+    // them (deal vslot 0x98 CheckFlags(2) = active, 0x28 GetAmount, 0x58 GetCost).
+    struct Deal { bool active = false; int amount = 0; std::int64_t cost = 0; };
+    virtual void FindDeals(std::uint32_t dealType, IQueryNeighborCity* city, std::vector<Deal>& out) { (void)dealType; (void)city; out.clear(); }
 };
 class IQueryTrafficSim {
 public:
@@ -696,6 +703,15 @@ public:
     static bool SetOrGetNeighborConnectionNeighborCityMayorName(cIGZWin* win, std::uint32_t id, bool set, int x,
                                                                 int z, int connectionType);              // @ 0x1002d9184
     static bool SetOrGetNeighborConnectionCongestion(cIGZWin* win, std::uint32_t id, bool set, int x, int z);   // @ 0x1002d922e
+    // The deal rows (i386 0x0020d890..0x0020de6e) and the airport noise row (i386 0x0020d6b0).
+    static bool SetOrGetAirportNoisePollution(cIGZWin* win, std::uint32_t id, bool set, int x, int z);
+    static bool SetOrGetNeighborConnectionDealExists(cIGZWin* win, std::uint32_t id, bool set, int x, int z, int connectionType);
+    static bool SetOrGetNeighborConnectionDealCommodityAmount(cIGZWin* win, std::uint32_t id, bool set, int x, int z,
+                                                              int connectionType, float scale);
+    static bool SetOrGetNeighborConnectionDealValue(cIGZWin* win, std::uint32_t id, bool set, int x, int z, int connectionType);
+    static bool SetOrGetNeighborConnectionDealDirection(cIGZWin* win, std::uint32_t id, bool set, int x, int z, int connectionType);
+    static bool SetOrGetNeighborConnectionDealGarbageAmount(cIGZWin* win, std::uint32_t id, bool set, int x, int z,
+                                                            int connectionType);
 
     static void GetOccupantName(cISC4Occupant* occupant, cRZString& out);                  // @ 0x1002d2616
     static float GetMayorRatingPercent(cISC4Occupant* occupant);                           // @ 0x1002da4f0

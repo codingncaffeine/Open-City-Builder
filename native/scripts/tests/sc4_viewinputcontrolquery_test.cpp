@@ -593,6 +593,15 @@ struct NeighborsSimFake final : IQueryNeighborsSim {
         if (city) city->AddRef();   // the caller releases (the original's returned pointer is owned)
         return city;
     }
+    std::vector<std::pair<std::uint32_t, Deal>> deals;   // (deal type, deal)
+    std::vector<std::uint32_t> dealTypesAsked;
+    void FindDeals(std::uint32_t dealType, IQueryNeighborCity* c, std::vector<Deal>& out) override {
+        out.clear();
+        dealTypesAsked.push_back(dealType);
+        if (c != city) return;
+        for (const auto& [type, deal] : deals)
+            if (type == dealType) out.push_back(deal);
+    }
 };
 
 struct TrafficSimFake final : IQueryTrafficSim {
@@ -2242,6 +2251,42 @@ int main() {
         CHECK(!cSC4ViewInputControlQuery::SetOrGetControlValue(dialog, 0x104d, true, &info));   // 0x114d: no control
         CHECK(!cSC4ViewInputControlQuery::SetOrGetControlValue(dialog, 0x1011, true, &info));   // no row for the airport ids yet
         CHECK(!cSC4ViewInputControlQuery::SetOrGetControlValue(dialog, 0x104b, true, nullptr));
+
+        // the deal rows: a road connection (type 2) trades garbage (0x4773ffe4, then 0x4773ffe5); power (4) 0x4773ffe0/1
+        info.idOffset = 0;
+        auto* amountRow = new gz::cGZWinText(&host.mgr);
+        amountRow->SetID(0x1066);
+        CHECK(dialog->ChildAdd(amountRow));
+        host.neighborsSim.deals.clear();
+        host.neighborsSim.dealTypesAsked.clear();
+        CHECK(cSC4ViewInputControlQuery::SetOrGetNeighborConnectionDealExists(dialog, 0x1007, true, 5, 6, 2));
+        CHECK(std::string(label->GetCaption().ToChar()) == host.no);
+        CHECK((host.neighborsSim.dealTypesAsked == std::vector<std::uint32_t>{0x4773ffe4, 0x4773ffe5}));
+        IQueryNeighborsSim::Deal inactive{false, 900, 9};
+        IQueryNeighborsSim::Deal active{true, 250, 1200};
+        host.neighborsSim.deals = {{0x4773ffe5, inactive}, {0x4773ffe5, active}};
+        CHECK(cSC4ViewInputControlQuery::SetOrGetNeighborConnectionDealExists(dialog, 0x1007, true, 5, 6, 2));
+        CHECK(std::string(label->GetCaption().ToChar()) == host.yes);
+        CHECK(!cSC4ViewInputControlQuery::SetOrGetControlValue(dialog, 0x1066, true, &info));
+        CHECK(std::string(amountRow->GetCaption().ToChar()) == "250");
+        host.strings.clear();
+        CHECK(cSC4ViewInputControlQuery::SetOrGetNeighborConnectionDealDirection(dialog, 0x1007, true, 5, 6, 2));
+        CHECK(!host.strings.empty() && host.strings.back() == 0xaa5d4f47u);   // the second garbage type answered
+        host.neighborsSim.deals = {{0x4773ffe0, active}};
+        host.strings.clear();
+        CHECK(cSC4ViewInputControlQuery::SetOrGetNeighborConnectionDealDirection(dialog, 0x1007, true, 5, 6, 4));
+        CHECK(!host.strings.empty() && host.strings.back() == 0x0a5d4f4fu);   // power, the first type
+        // the commodity amount is clamped at 0 and blank without an active deal
+        host.neighborsSim.deals = {{0x4773ffe4, IQueryNeighborsSim::Deal{true, -5, 0}}};
+        CHECK(cSC4ViewInputControlQuery::SetOrGetNeighborConnectionDealCommodityAmount(dialog, 0x1007, true, 5, 6, 2, 1.0f));
+        CHECK(std::string(label->GetCaption().ToChar()) == "0");
+        host.neighborsSim.deals.clear();
+        CHECK(cSC4ViewInputControlQuery::SetOrGetNeighborConnectionDealCommodityAmount(dialog, 0x1007, true, 5, 6, 2, 1.0f));
+        CHECK(std::string(label->GetCaption().ToChar()).empty());
+        // no city across the connection: the exists row is left alone and answers false
+        host.neighborsSim.city = nullptr;
+        CHECK(!cSC4ViewInputControlQuery::SetOrGetNeighborConnectionDealExists(dialog, 0x1007, true, 5, 6, 2));
+        host.neighborsSim.city = &city;
 
         dialog->Release();
     }
