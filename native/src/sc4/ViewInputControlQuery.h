@@ -19,9 +19,8 @@
 // Everything the class needs from an unrecovered neighbour goes through the seams below. Slot numbers are the
 // original vtable offsets; where the original reached a global (SL::spPowerSim, ...) the comment names it.
 //
-// PARTIAL (see notes/ledger_pending/cSC4ViewInputControlQuery.txt): the route query's tip text builders
-// GetBuildingOccupantTrafficInfo and GetNetworkOccupantTrafficInfo, WriteDetailedDebugInfo and the path helpers
-// (GetOccupantPaths, ShowAllRoutesThatIntersectCityRect) are empty stubs, and the row handlers for the simulators that are not recovered yet (the RCI building rows and the air and water pollution volumes) are declared but not
+// PARTIAL (see notes/ledger_pending/cSC4ViewInputControlQuery.txt): WriteDetailedDebugInfo and GetOccupantPaths are
+// empty stubs, and the row handlers for the simulators that are not recovered yet (the RCI building rows and the air and water pollution volumes) are declared but not
 // implemented. The fire, police/jail, park/occupant-cost and neighbour-connection rows — everything whose simulator
 // (cSC4FireProtectionSimulator, cSC4PoliceSimulator, cSC4BudgetSimulator, cSC4NeighborsSimulator) is recovered — are
 // ported, as are the school, hospital, library, landfill, incinerator, recycling, waste-to-energy, power plant, water building, landmark and transit station rows, the airport and seaport rows (usage, capacity, traffic meter, maintenance), the dialog enumeration callbacks (EnumFunc*) and the recovered control-id -> row handler table.
@@ -359,6 +358,8 @@ struct QueryRouteOccupant {
     bool bigBuilding = false;                        // building: occupant vslot 0x58(0x1003)
     bool subway = false;                             // network: IsOfType(7)
     std::uint32_t edges[13] = {};                    // network: vslot 0x98 GetEdgeTypesFlag per type it is of (0 otherwise)
+    std::uint32_t types = 0;                         // network: bit n = IsOfType(n), n < 13
+    const std::list<cSC4TripData>* trips = nullptr;  // building: its lot's trips (lot vslot 0x10 traffic source, vslot 0xc)
 };
 class IQueryRoutes {
 public:
@@ -373,6 +374,8 @@ public:
     // traffic simulator vslot 0x74 GetFerryRouteBetweenTiles (borrowed, or null)
     virtual const std::vector<std::uint8_t>* FerryRoute(int x1, int z1, int x2, int z2) = 0;
     virtual bool Describe(cISC4Occupant* occupant, QueryRouteOccupant& out) = 0;
+    // traffic simulator vslot 0x30 GetTrafficEdgeDensity(x, z, travel type, reverse): the record's density (+0x20).
+    virtual std::uint16_t EdgeDensity(int x, int z, int travelType, bool reverse) { (void)x; (void)z; (void)travelType; (void)reverse; return 0; }
 };
 
 class IQueryHost {
@@ -727,8 +730,8 @@ public:
     static bool EnumFuncNeighborDialogGetValue(cIGZWin* win, std::uint32_t id, void* cellInfo, void* occupant);   // @ 0x1002db748
 
     // --- the tip builders (the first three are empty stubs, PARTIAL: see the header comment and the ledger) ---
-    void GetBuildingOccupantTrafficInfo(cRZString& text, cRZString& title, std::uint32_t& icon);
-    void GetNetworkOccupantTrafficInfo(cRZString& text, cRZString& title);
+    void GetBuildingOccupantTrafficInfo(cRZString& title, cRZString& text, std::uint32_t& icon);   // i386 0x00215b18
+    void GetNetworkOccupantTrafficInfo(cRZString& title, cRZString& text);                         // i386 0x0021625c
     // i386 0x0021d276 (PC 0x004D5E30): the building's name, the icon and meter of its occupant group, then its lot's headlines
     void GetBuildingOccupantTipInfo(cRZString& title, cRZString& text, std::uint32_t& icon, std::uint32_t& meter,
                                     float& meterValue);
@@ -753,6 +756,10 @@ public:
     bool GetNetworkOccupantPaths();                                    // i386 0x0020f3e6
     bool DoesRouteCrossCell(const cSC4TripData& trip, const SC4CellRect& rect, bool reverse);   // i386 0x0020c982
     std::uint32_t GetRouteTravelTypes(const cSC4TripData& trip, bool reverse);                 // i386 0x0020cac2
+    // The trip volume per travel type as "type: count" lines (i386 0x00215438 a lot's own trips by their stored types;
+    // 0x0021560e every trip that starts in or crosses the rect, by its route's types).
+    void CalculateTripVolumeFromTrafficPaths(const std::list<cSC4TripData>* trips, cRZString& text);
+    void CalculateTripVolumeFromTrafficPaths(const SC4CellRect& rect, cRZString& text, bool reverse);
     void MakeRoutePath(const cSC4TripData& trip, const float* position, bool reverse, std::uint32_t mask);   // i386 0x0020cb24
     void WriteDetailedDebugInfo(int cellX, int cellZ);
 

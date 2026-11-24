@@ -2686,16 +2686,187 @@ bool cSC4ViewInputControlQuery::SetOrGetNeighborConnectionCongestion(cIGZWin* wi
     return SetStaticControlNumericPercent(win, id, static_cast<std::uint32_t>(static_cast<std::int64_t>(percent)));
 }
 
-// --- text builders that are still empty stubs (each marked PARTIAL; QUERY-6) ------------------------------------
-// They are declared so the message plumbing compiles and leave their strings empty.
-// PARTIAL stub (QUERY-6)
-void cSC4ViewInputControlQuery::GetBuildingOccupantTrafficInfo(cRZString&, cRZString&, std::uint32_t& icon) {
-    SC4_UNWIRED("cSC4ViewInputControlQuery::GetBuildingOccupantTrafficInfo: building traffic tip text not ported");
-    icon = 0;
+// --- the traffic tips (the route query's hover text) -------------------------------------------------------
+
+namespace {
+// _nTravelTypeStrings (i386 0x00ab96a0): the travel types' names, string group 0xea5524eb.
+constexpr std::uint32_t kTravelTypeStrings[9] = {0x2b8b39fe, 0x2b8b3a10, 0x8b8b3a1a, 0xab8b3a26, 0x8b8b3ab4,
+                                                 0xcb8c5c08, 0xab8b3a4a, 0x2bc7e0d2, 0xcc05a60f};
+constexpr std::uint32_t kStrNoTraffic = 0x2baab5c0;
+// The per-type volumes as lines "name: count" (joined by "\n"); the "no traffic" string when every one is 0.
+void AppendTravelVolumes(const std::int32_t (&volumes)[9], cRZString& text) {
+    IQueryHost* host = QueryHost();
+    if (!host) return;
+    for (int type = 0; type < 9; ++type) {
+        if (volumes[type] == 0) continue;
+        cRZString name;
+        host->LoadString(kStringGroup, kTravelTypeStrings[type], name);
+        char line[512];
+        std::snprintf(line, sizeof line, "%s: %d", name.ToChar(), volumes[type]);
+        std::string joined = text.ToChar();
+        if (!joined.empty()) joined += "\n";
+        joined += line;
+        text.AssignFromCString(joined.c_str());
+    }
+    if (StringLength(&text) == 0) host->LoadString(kStringGroup, kStrNoTraffic, text);
 }
-// PARTIAL stub (QUERY-6)
-void cSC4ViewInputControlQuery::GetNetworkOccupantTrafficInfo(cRZString&, cRZString&) {
-    SC4_UNWIRED("cSC4ViewInputControlQuery::GetNetworkOccupantTrafficInfo: network piece traffic tip text not ported");
+// Adds a live trip's count to each type it travels by (a trip by any of 0x1cc does not count as a car trip).
+void AddTripVolume(std::uint32_t types, std::uint32_t count, std::int32_t (&volumes)[9]) {
+    if (types & 0x1cc) types &= ~1u;
+    for (int type = 0; type < 9; ++type)
+        if (types & (1u << type)) volumes[type] += static_cast<std::int32_t>(count);
+}
+bool LiveTrip(const cSC4TripData& trip) { return (trip.flags & 8) != 0 && (trip.flags & 2) == 0; }
+// The occupant's groups (property 0xaa1dd396, a uint32 array: variant type 0x8006); false without them.
+bool OccupantGroups(cISC4Occupant* occupant, const std::uint32_t*& groups, std::uint32_t& count) {
+    cISCPropertyHolder* holder = occupant ? occupant->AsPropertyHolder() : nullptr;
+    cISCProperty* property = holder ? holder->GetProperty(0xaa1dd396) : nullptr;
+    cIGZVariant* value = property ? property->GetPropertyValue() : nullptr;
+    if (!value || value->GetType() != 0x8006) return false;
+    count = value->GetCount();
+    groups = value->RefUint32();
+    return groups != nullptr || count == 0;
+}
+bool HasGroup(const std::uint32_t* groups, std::uint32_t count, std::uint32_t group) {
+    for (std::uint32_t i = 0; i < count; ++i)
+        if (groups[i] == group) return true;
+    return false;
+}
+}  // namespace
+
+// i386 0x00215438
+void cSC4ViewInputControlQuery::CalculateTripVolumeFromTrafficPaths(const std::list<cSC4TripData>* trips, cRZString& text) {
+    if (!trips) return;
+    std::int32_t volumes[9] = {};
+    for (const cSC4TripData& trip : *trips)
+        if (LiveTrip(trip)) AddTripVolume(trip.extra, trip.count, volumes);
+    AppendTravelVolumes(volumes, text);
+}
+
+// i386 0x0021560e: the lots' trips, then the neighbor connections', as the route query walks them.
+void cSC4ViewInputControlQuery::CalculateTripVolumeFromTrafficPaths(const SC4CellRect& rect, cRZString& text, bool reverse) {
+    IQueryHost* host = QueryHost();
+    IQueryRoutes* routes = host ? host->Routes() : nullptr;
+    if (!routes) return;
+    std::int32_t volumes[9] = {};
+    std::vector<QueryRouteSource> lots, neighbors;
+    routes->Sources(lots, neighbors);
+    for (const std::vector<QueryRouteSource>* group : {&lots, &neighbors}) {
+        for (const QueryRouteSource& source : *group) {
+            if (!source.trips) continue;
+            const bool overlaps = source.rect[0] <= rect.x1 && rect.x0 <= source.rect[2] && source.rect[1] <= rect.z1 && rect.z0 <= source.rect[3];
+            for (const cSC4TripData& trip : *source.trips) {
+                if (!LiveTrip(trip)) continue;
+                if (!overlaps && !DoesRouteCrossCell(trip, rect, reverse)) continue;
+                AddTripVolume(GetRouteTravelTypes(trip, reverse), trip.count, volumes);
+            }
+        }
+    }
+    AppendTravelVolumes(volumes, text);
+}
+
+// i386 0x00215b18: a building's traffic tip. Its groups pick the title and icon: residential shows its lot's own trips; the
+// others (and the transit stations, by the legend's reverse toggle) every trip through the lot's rect.
+void cSC4ViewInputControlQuery::GetBuildingOccupantTrafficInfo(cRZString& title, cRZString& text, std::uint32_t& icon) {
+    IQueryHost* host = QueryHost();
+    IQueryRoutes* routes = host ? host->Routes() : nullptr;
+    QueryRouteOccupant building;
+    if (!routes || !routes->Describe(occupant_, building) || building.kind != 1) return;
+    const std::uint32_t* groups = nullptr;
+    std::uint32_t count = 0;
+    if (!OccupantGroups(occupant_, groups, count)) return;
+    routeMode_ = 1;
+    const SC4CellRect rect{building.rect[0], building.rect[1], building.rect[2], building.rect[3]};
+    auto has = [&](std::uint32_t group) { return HasGroup(groups, count, group); };
+    if (has(0x1000)) {
+        host->LoadString(kStringGroup, 0x0baab7ff, title);
+        icon = 0x14416208;
+        CalculateTripVolumeFromTrafficPaths(building.trips, text);
+        return;
+    }
+    if (has(0x1001)) {
+        host->LoadString(kStringGroup, 0x4baab823, title);
+        icon = 0x14416202;
+    } else if (has(0x1002)) {
+        host->LoadString(kStringGroup, 0x0baab82d, title);
+        icon = 0x14416206;
+    } else if (has(0x1004)) {
+        host->LoadString(kStringGroup, 0x4baab823, title);
+        icon = 0x1441620a;
+    } else if (has(0x1005)) {
+        if (has(0x1500)) icon = 0x14416207;
+        else if (has(0x1502)) icon = 0x14416203;
+        else if (has(0x1503) || has(0x1504) || has(0x1505) || has(0x1506) || has(0x1507)) icon = 0x14416201;
+        else if (has(0x150a) || has(0x150b)) icon = 0x1441620c;
+        else if (has(0x1006)) icon = 0x14416204;
+        else icon = 0x14416200;
+        host->LoadString(kStringGroup, 0x4baab823, title);
+    } else if (has(0x1003)) {
+        routeMode_ = 3;
+        icon = 0x14416209;
+        const bool reverse = routes->ButtonToggled(legendMinimized_, 0xebb0f666);
+        if (has(0x1301) || has(0x1302) || has(0x1303) || has(0x1307) || has(0x1304)) {
+            host->LoadString(kStringGroup, 0xabaab83b, title);
+        } else if (has(0x1300)) {
+            host->LoadString(kStringGroup, 0xcbaab854, title);
+        } else {
+            CalculateTripVolumeFromTrafficPaths(rect, text, reverse);
+            if (StringLength(&text) == 0) return;
+            host->LoadString(kStringGroup, 0x4baab823, title);
+            icon = 0x14416209;
+            return;
+        }
+        CalculateTripVolumeFromTrafficPaths(rect, text, reverse);
+        return;
+    } else if (has(0x150a) || has(0x150b)) {
+        CalculateTripVolumeFromTrafficPaths(rect, text, false);
+        if (StringLength(&text) == 0) return;
+        host->LoadString(kStringGroup, 0x4baab823, title);
+        icon = 0x1441620c;
+        return;
+    } else {
+        return;
+    }
+    CalculateTripVolumeFromTrafficPaths(rect, text, false);
+}
+
+// i386 0x0021625c: a network piece's traffic tip. The piece's first network type picks the title and the travel types listed
+// (road-like pieces: car, bus, passenger and freight; rail: its two; subway: its own), each with the traffic simulator's edge
+// density at the piece's cell in the legend's direction.
+void cSC4ViewInputControlQuery::GetNetworkOccupantTrafficInfo(cRZString& title, cRZString& text) {
+    IQueryHost* host = QueryHost();
+    IQueryRoutes* routes = host ? host->Routes() : nullptr;
+    QueryRouteOccupant piece;
+    if (!routes || !routes->Describe(occupant_, piece) || piece.kind != 2) return;
+    const bool reverse = routes->ButtonToggled(legendMinimized_, 0xebb0f666);
+    struct Row { int travelType; std::uint32_t name; };
+    static constexpr Row kRoad[] = {{0, 0x2b8b39fe}, {1, 0x2b8b3a10}, {2, 0x8b8b3a1a}, {4, 0x8b8b3ab4}, {7, 0x2bc7e0d2}, {8, 0xcc05a60f}};
+    static constexpr Row kRail[] = {{3, 0x4b8b4693}, {5, 0xcb8c5c08}};
+    static constexpr Row kSubway[] = {{6, 0xab8b3a4a}};
+    // (network type, title, rows) in the order the original asks IsOfType
+    struct Kind { int type; std::uint32_t title; const Row* rows; int count; };
+    static constexpr Kind kKinds[] = {{0, 0x6a5589d4, kRoad, 6},       {1, 0x4a5589f3, kRail, 2},  {2, 0xaa5589fb, kRoad, 6},
+                                      {3, 0x8a558a04, kRoad, 6},       {7, 0x8a558a10, kSubway, 1}, {6, 0x8b8c5cd0, kRoad, 6},
+                                      {8, 0x8b8c5cbd, kRoad, 6},       {9, 0x0be09ca2, kRoad, 6},  {10, 0x4bd9fdd8, kRoad, 6},
+                                      {11, 0xcbe09c9b, kRoad, 6},      {12, 0x2be09c9e, kRoad, 6}};
+    for (const Kind& kind : kKinds) {
+        if ((piece.types & (1u << kind.type)) == 0) continue;
+        host->LoadString(kStringGroup, kind.title, title);
+        for (int i = 0; i < kind.count; ++i) {
+            const std::uint16_t volume = routes->EdgeDensity(piece.rect[0], piece.rect[1], kind.rows[i].travelType, reverse);
+            if (volume == 0) continue;
+            cRZString name;
+            host->LoadString(kStringGroup, kind.rows[i].name, name);
+            char line[512];
+            std::snprintf(line, sizeof line, "%s: %d", name.ToChar(), static_cast<int>(volume));
+            std::string joined = text.ToChar();
+            if (!joined.empty()) joined += "\n";
+            joined += line;
+            text.AssignFromCString(joined.c_str());
+        }
+        break;
+    }
+    if (StringLength(&text) == 0) host->LoadString(kStringGroup, kStrNoTraffic, text);
 }
 // PC 0x004C3B10 (x87, float constants 0.8 and 0.19999999; inlined on the Mac at each use): no capacity reads 0, up to 80 % used
 // reads full, beyond that the meter falls linearly to empty at 100 % (and stays empty above it).

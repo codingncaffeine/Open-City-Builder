@@ -786,6 +786,7 @@ public:
             if (!lot) return false;
             out.kind = 1;
             lot->GetBoundingRect(out.rect);
+            out.trips = &lot->GetTripDataList();
             out.bigBuilding = occupant->IsOccupantGroup(0x1003);
             return true;
         }
@@ -797,9 +798,16 @@ public:
         out.rect[0] = out.rect[2] = static_cast<std::int32_t>(x);
         out.rect[1] = out.rect[3] = static_cast<std::int32_t>(z);
         out.subway = network->IsOfType(7);
-        for (std::uint32_t type = 0; type < 13; ++type)
-            if (network->IsOfType(type)) out.edges[type] = network->GetEdgeTypesFlag(static_cast<std::uint8_t>(type));
+        for (std::uint32_t type = 0; type < 13; ++type) {
+            if (!network->IsOfType(type)) continue;
+            out.types |= 1u << type;
+            out.edges[type] = network->GetEdgeTypesFlag(static_cast<std::uint8_t>(type));
+        }
         return true;
+    }
+    std::uint16_t EdgeDensity(int x, int z, int travelType, bool reverse) override {
+        cSC4TrafficSimulator* traffic = Serializable<cSC4TrafficSimulator>(CityComponent::TrafficSimulator, kGZCLSID_cSC4TrafficSimulator);
+        return traffic ? traffic->GetTrafficEdgeDensity(x, z, travelType, reverse).density : 0;
     }
 
 private:
