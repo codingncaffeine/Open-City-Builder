@@ -790,7 +790,7 @@ void RunGameOptionsDialog(std::function<std::uint8_t*()> preferences) {
     proc->ShowDialog(cSC4GamePreferencesWinProc::kGameOptions);
     // DoModalWin dereferences the dialog: run it only when this ShowDialog built one (the script loaded, no other copy is up)
     if (!alreadyShowing && cSC4GamePreferencesWinProc::Displayed()) proc->DoModalWin();
-    else SC4_UNWIRED("RunGameOptionsDialog: the game options dialog was not built");
+    else if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "RunGameOptionsDialog: no dialog (its script failed or one is already up)\n");
     proc->Release();
 }
 
@@ -809,7 +809,7 @@ void RunAudioOptionsDialog(std::function<std::uint8_t*()> preferences) {
     auto* proc = new cSC4AudioPreferencesWinProc();
     proc->AddRef();
     if (proc->ShowDialog()) proc->DoModalWin();
-    else SC4_UNWIRED("RunAudioOptionsDialog: the audio options dialog was not built");
+    else if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "RunAudioOptionsDialog: no dialog (its script failed or one is already up)\n");
     proc->Release();
 }
 
@@ -852,7 +852,7 @@ void RunGraphicOptionsDialog(std::function<std::uint8_t*()> preferences) {
     auto* proc = new cSC4VideoPreferencesWinProc();
     proc->AddRef();
     if (proc->ShowDialog()) proc->DoModalWin();
-    else SC4_UNWIRED("RunGraphicOptionsDialog: the graphic options dialog was not built");
+    else if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "RunGraphicOptionsDialog: no dialog (its script failed or one is already up)\n");
     proc->Release();
     std::uint32_t chosen = 0;
     if (blob) std::memcpy(&chosen, blob + 0xf20, 4);
