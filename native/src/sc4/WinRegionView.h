@@ -38,8 +38,8 @@
 // * The constructor never initialises +0x158; the screen sets it in LoadGUI. The port zeroes it so a hand-built view is
 //   deterministic (the constructor's store list, 0x10075afc6).
 //
-// RenderTile is PARTIAL: the backdrop, the per-city compositing and the city-name labels are drawn; the selected-city
-// grid and the icons of the original's 5.4 KB are not.
+// RenderTile draws the backdrop, every city's picture, then the labels and (map modes other than 0) the icons, then the
+// selected city's tint, as the original's three passes.
 #pragma once
 #include <cstdint>
 #include <list>
@@ -171,7 +171,7 @@ struct cSC4RegionViewCity {
     std::vector<std::uint32_t> spans;               // +0x58 RenderTile's transparent-run work list
     std::vector<std::uint32_t> hitSpans;            // +0x70 packed hit-test spans
     std::vector<std::uint32_t> gridSpans;           // +0x88 packed grid spans
-    std::vector<std::uint32_t> labelSpans;          // +0xa0 packed label/alpha spans
+    std::vector<std::uint32_t> selectSpans;         // +0xa0 (i386 +0x5c) the mask's green with weights: the selected city
     std::int32_t centerX = 0;                       // +0xb8 label anchor
     std::int32_t centerY = 0;                       // +0xbc
     std::list<cRZAutoRefCount<IRegionViewEffect>> effects;   // +0xc0 the city's signpost effects
@@ -258,7 +258,7 @@ public:
     bool GZPaint() override;                                       // @ 0x10075bb5e
     bool is_point_transparent(int x, int y) const override;        // @ 0x10075e6ac
 
-    void RenderTile(cIGZBuffer* buffer, int x, int y) override;    // @ 0x10075bb66 (+0x10075d57a thunk) PARTIAL
+    void RenderTile(cIGZBuffer* buffer, int x, int y) override;    // @ 0x10075bb66 (+0x10075d57a thunk)
 
     void ClearCities();                                            // @ 0x10075b5c6
     void InvalidateRegion(cSC4RegionViewCity& city);               // @ 0x10075b6b0
@@ -345,19 +345,18 @@ private:
     // its runs. Rebuilt when the picture, the mask, the grid switch, the grid colour or the map mode change.
     struct PreparedCity {
         const cIGZBuffer* image = nullptr;
-        const cIGZBuffer* mask = nullptr;
         bool grid = false;
         std::uint32_t gridColour = 0;
         int mapMode = 0;
+        std::size_t gridSpans = 0;
         int width = 0, height = 0;
         std::vector<std::uint32_t> pixels;   // 0xAARRGGBB, colours premultiplied as the original treats them
         struct Run { int y, x0, x1; bool opaque; };
         std::vector<Run> runs;
-        int centerX = 0, centerY = 0;   // the label anchor: the alpha-weighted centre (RecalculateImagesFromCitySnapshots)
     };
     std::map<const cSC4RegionViewCity*, PreparedCity> prepared_;
     const PreparedCity& Prepare(const cSC4RegionViewCity& city);
-    void DrawCityLabel(cIGZBuffer* buffer, const cSC4RegionViewCity& city, const PreparedCity& prepared, int left, int top);
+    void DrawCityLabel(cIGZBuffer* buffer, const cSC4RegionViewCity& city, int left, int top);
 };
 
 }  // namespace sc4

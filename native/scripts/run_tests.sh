@@ -347,6 +347,7 @@ declare -a TESTS=(
  "gz_buffersimglcache:$T/gz_buffersimglcache_test.cpp $S/gz/BufferSimGLCache.cpp $S/rz/TileSetup.cpp $S/render/SimGL.cpp $S/gz/Buffer.cpp $S/render/gd/GDriverBase.cpp"
  "gz_drawcontextrendertobuffer:$T/gz_drawcontextrendertobuffer_test.cpp $S/gz/DrawContextRenderToBuffer.cpp $S/rz/SpanList.cpp $S/gz/Buffer.cpp"
  "gz_drawfontrenderer:$T/gz_drawfontrenderer_test.cpp $S/gz/DrawFontRenderer.cpp $S/gz/Buffer.cpp -I$T"
+ "sc4_regioncityimages:$T/sc4_regioncityimages_test.cpp $S/sc4/RegionCityImages.cpp $S/gz/Buffer.cpp"
  "gz_gzfont:$T/gz_gzfont_test.cpp $S/gz/GZFont.cpp $S/gz/BufferFontRenderer.cpp $S/gz/Buffer.cpp $S/rz/cRZString.cpp $S/rz/TextEncoding.cpp $S/rz/UTF16Text.cpp $S/rz/CharLength.cpp $S/rz/StringConversion.cpp"
  "sc4_fontstylespec:$T/sc4_fontstylespec_test.cpp $S/sc4/FontStyleSpec.cpp $S/rz/cRZString.cpp $S/rz/RZStringUtils.cpp $S/rz/RZConvert.cpp"
  "gz_rgbcolorconverter:$T/gz_rgbcolorconverter_test.cpp $S/gz/RGBColorConverter.cpp $S/gz/Buffer.cpp"

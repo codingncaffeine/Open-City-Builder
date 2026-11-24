@@ -153,11 +153,8 @@ constexpr std::uint32_t kTuningCloudOpacity = 0xca383cb1;
 // ---------------------------------------------------------------------------------------------------------------
 // cSC4RegionViewCity (not recovered — the export lists only its constructor and destructor): the per-city record the
 // screen keeps in its vector at +0x1d0 (0xf0 bytes each). Only the fields the recovered code touches are named; the
-// three span vectors belong to SC4CreateSpanList (thresholds 0, 8 and 0x10) and their element type is a placeholder.
+// three span vectors are SC4CreateSpanList's (sc4/RegionCityImages.h) over the mask's blue, red and green.
 // ---------------------------------------------------------------------------------------------------------------
-struct RegionViewCitySpan {
-    std::int32_t left = 0, right = 0, y = 0;   // span layout not decoded; never read by the recovered code
-};
 constexpr std::size_t kRegionScreenCitySize = 0xf0;
 
 struct RegionViewCity {
@@ -175,9 +172,9 @@ struct RegionViewCity {
     IWinBuffer* maskSmall = nullptr;               // +0x38
     IWinBuffer* shadowMask = nullptr;              // +0x40
     std::uint8_t pad48_[0x28] = {};                // +0x48..+0x6f
-    std::vector<RegionViewCitySpan> spans0;        // +0x70
-    std::vector<RegionViewCitySpan> spans10;       // +0x88
-    std::vector<RegionViewCitySpan> spans8;        // +0xa0
+    std::vector<std::uint32_t> spans0;             // +0x70 (i386 +0x44) blue: hit testing
+    std::vector<std::uint32_t> spans10;            // +0x88 (i386 +0x50) red with weights: the grid
+    std::vector<std::uint32_t> spans8;             // +0xa0 (i386 +0x5c) green with weights: the selected city
     int centerX = 0;                               // +0xb8  label anchor in image coordinates
     int centerY = 0;                               // +0xbc
     std::uint8_t padC0_[0x30] = {};                // +0xc0..+0xef
@@ -325,9 +322,17 @@ public:
     virtual int CitySnapshotSet() = 0;                                      // city list vslot 0x90
     // region vslot 0xb8 (GetCityLocations): the city places of the active region (x, z, log2 of the edge length).
     virtual void CityLocations(std::vector<cISC4Region::cLocation>& out) { (void)out; }
-    // SC4ReadCityRegionViewThumbnails (0x1001d2cf3) for the city at (x, z): the picture the city's save file carries for the region
-    // map (records {0x8a2482b9, 0x4a2482bb, 0} and its mask at instance 2). Each comes back with one reference, or null.
-    virtual bool LoadCityThumbnails(int x, int z, IWinBuffer** image, IWinBuffer** mask) { (void)x; (void)z; (void)image; (void)mask; return false; }
+    // SC4ReadCityRegionViewThumbnails (0x1001d2cf3, i386 0x00157d..) for the city at (x, z): the pictures the city's save file
+    // carries for the region map, records {0x8a2482b9, 0x4a2482bb, n}: the picture (0), its mask (2), the second picture (4) and
+    // its mask (6). Each comes back with one reference, or null; false when the first one cannot be read.
+    virtual bool LoadCityThumbnails(int x, int z, IWinBuffer** image, IWinBuffer** mask, IWinBuffer** altImage, IWinBuffer** altMask) {
+        (void)x; (void)z; (void)image; (void)mask; (void)altImage; (void)altMask; return false;
+    }
+    // Whether any pixel of the picture is not 0 (PutCitiesInView's empty-picture test, cIGZBuffer vslot 0x54).
+    virtual bool BufferHasPixels(IWinBuffer* buffer) { return buffer != nullptr; }
+    // RecalculateImagesFromCitySnapshots (sc4/RegionCityImages.h) on the city's buffers: the pictures replaced by their
+    // resampled copies with the mask in their alpha, the masks let go, the span lists and the label anchor filled.
+    virtual void RecalculateCityImages(RegionViewCity& city) { (void)city; }
     virtual RegionCityRef* FindCity(int x, int z) = 0;                      // city list vslot 0x58 (borrowed)
     virtual RegionCityRef* FindOrCreateCity(const RegionViewCity& city, bool create) = 0;
     // GetOrCreateRegionalCity(city, true) then the active region's DeleteCity (region vslot 0x38): the city and its save file go

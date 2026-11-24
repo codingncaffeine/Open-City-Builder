@@ -707,8 +707,8 @@ void cSC4WinRegionScreen::LoadGUI() {   // @ 0x10023927a
 void cSC4WinRegionScreen::PutCitiesInView() {   // @ 0x100236398 (PARTIAL)
     // One record per city place of the active region, in the original's formulas: the cell corner (x - 1 + 2^size, z - 1 + 2^size),
     // the map position (-37.49 * (z + 2^size) + 90.51 * x, 45.25 * (z + 2^size) + 18.75 * (x + 2^size)) and the default snapshots of
-    // the city's size, replaced by the city file's own thumbnails (the host's LoadCityThumbnails). PARTIAL: their resampling
-    // (RecalculateImagesFromCitySnapshots) is not recovered.
+    // the city's size, replaced by the city file's own thumbnails (the host's LoadCityThumbnails) when they are usable; then
+    // every city's pictures are prepared (RecalculateImagesFromCitySnapshots).
     IRegionScreenHost* host = RegionScreenHost();
     if (host) {
         std::vector<cISC4Region::cLocation> locations;
@@ -732,18 +732,44 @@ void cSC4WinRegionScreen::PutCitiesInView() {   // @ 0x100236398 (PARTIAL)
             city.mapX = zs * -37.49f + static_cast<float>(location.x) * 90.51f;
             city.mapY = zs * 45.25f + static_cast<float>(edge + location.x) * 18.75f;
             SetCitySnapshotsToDefault(city);
-            // The city's own picture replaces the default one. (The original also resamples it by the fraction of its map position and
-            // turns the mask into the alpha channel and three span lists - RecalculateImagesFromCitySnapshots, still PARTIAL; the picture
-            // here already carries its alpha.)
+            // The city's own pictures (i386 0x001a5f84 + 0x9c..): the picture and its mask must be the same size, the second
+            // pair must match the first in size or both go; a picture without a single non-zero pixel falls back to the
+            // defaults.
             IWinBuffer* image = nullptr;
             IWinBuffer* mask = nullptr;
-            if (host->LoadCityThumbnails(location.x, location.z, &image, &mask) && image) {
-                SC4_UNWIRED("cSC4WinRegionScreen::PutCitiesInView: thumbnail resample by the map-position fraction, mask to alpha and span lists not done");
-                city.snapshot = image;
-                city.mask = mask;
+            IWinBuffer* altImage = nullptr;
+            IWinBuffer* altMask = nullptr;
+            auto sameSize = [](IWinBuffer* a, IWinBuffer* b) {
+                const cRZRect* ra = a->GetBounds();
+                const cRZRect* rb = b->GetBounds();
+                return ra->right - ra->left == rb->right - rb->left && ra->bottom - ra->top == rb->bottom - rb->top;
+            };
+            if (host->LoadCityThumbnails(location.x, location.z, &image, &mask, &altImage, &altMask)) {
+                const bool usable = !image || !mask || sameSize(mask, image);
+                if (image && altImage && altMask && !(sameSize(altMask, altImage) && sameSize(image, altImage))) {
+                    ReleaseBuffer(altMask);
+                    ReleaseBuffer(altImage);
+                    altImage = altMask = nullptr;
+                }
+                if (usable) {
+                    city.snapshot = image;
+                    city.mask = mask;
+                    if (!altImage || !altMask) {   // the second pair only as a pair
+                        ReleaseBuffer(altImage);
+                        ReleaseBuffer(altMask);
+                        altImage = altMask = nullptr;
+                    }
+                    city.snapshotSmall = altImage;   // the record owns these two references
+                    city.maskSmall = altMask;
+                    altImage = altMask = nullptr;
+                }
             }
             ReleaseBuffer(image);
             ReleaseBuffer(mask);
+            ReleaseBuffer(altImage);
+            ReleaseBuffer(altMask);
+            if (city.snapshot && !host->BufferHasPixels(city.snapshot.get())) SetCitySnapshotsToDefault(city);
+            RecalculateImagesFromCitySnapshots(city);
             cities_.push_back(std::move(city));
         }
     }
@@ -754,11 +780,11 @@ void cSC4WinRegionScreen::PutCitiesInView() {   // @ 0x100236398 (PARTIAL)
     ComputeBaseLimits();
 }
 
-void cSC4WinRegionScreen::RecalculateImagesFromCitySnapshots(RegionViewCity&) {   // @ 0x100236c36 (PARTIAL)
-    // PARTIAL: Resample (0x10023c642), SC4MoveMaskToAlpha (0x10023ce10) and SC4CreateSpanList (0x10023cf28) work on
-    // cIGZBuffer lock bits and are not recovered; the city snapshots (the double resample by (1 - fract(x)) /
-    // (1 - fract(y))), the alpha masks and the three span lists stay unimplemented.
-    SC4_UNWIRED("cSC4WinRegionScreen::RecalculateImagesFromCitySnapshots: Resample / SC4MoveMaskToAlpha / SC4CreateSpanList not ported");
+// RecalculateImagesFromCitySnapshots (i386 0x001a4cfe): the pictures resampled by the fraction of the map position, the
+// mask moved into the alpha and into the three span lists, the label anchor; the work on the pixels is
+// sc4/RegionCityImages.cpp, run by the host on the record's buffers.
+void cSC4WinRegionScreen::RecalculateImagesFromCitySnapshots(RegionViewCity& city) {   // @ 0x100236c36
+    if (IRegionScreenHost* host = RegionScreenHost()) host->RecalculateCityImages(city);
 }
 
 void cSC4WinRegionScreen::SetCitySnapshotsToDefault(RegionViewCity& city) {   // @ 0x100236b66

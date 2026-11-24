@@ -9,6 +9,8 @@
 #include <cstring>
 #include <vector>
 
+#include "gz/DrawContext.h"
+#include "gz/GZCOM.h"
 #include "gz/GZCOMDirector.h"
 #include "gz/Font.h"
 #include "gz/RZDraw.h"
@@ -297,18 +299,18 @@ void cSC4WinRegionView::UpdateCity(cSC4RegionViewCity* city) {   // @ 0x10075d5e
 // Rendering
 // ===================================================================================================================
 
-// The city's picture ready to blend (RenderTile's preparation pass, Mac i386 0x005002da, and the mask handling of
-// RecalculateImagesFromCitySnapshots 0x001a4cfe / SC4MoveMaskToAlpha 0x0019fe7a / SC4CreateSpanList 0x001a1fae). The mask is
-// three masks in one picture: blue = the city's body (the picture's alpha), red = its outline with an anti-aliasing
-// strength per pixel (the grid), green = the label area. Not done: the sub-pixel Resample of the original.
+// The city's picture ready to blend (RenderTile's preparation pass, Mac i386 0x005002da): the prepared picture (the
+// screen's RecalculateImagesFromCitySnapshots already resampled it and moved the mask into its alpha, sc4/RegionCityImages)
+// or, in map mode 1, the second picture when the city has one; with the grid on, the grid spans (the mask's red) tint the
+// outline toward the grid colour by half their weight.
 const cSC4WinRegionView::PreparedCity& cSC4WinRegionView::Prepare(const cSC4RegionViewCity& city) {
     PreparedCity& p = prepared_[&city];
-    cIGZBuffer* image = city.image;
-    cIGZBuffer* mask = city.mask;
-    if (!p.pixels.empty() && p.image == image && p.mask == mask && p.grid == grid_ && p.gridColour == labelColour1_ && p.mapMode == mapMode_)
+    cIGZBuffer* image = (mapMode_ == 1 && city.imageSmall) ? city.imageSmall : city.image;
+    if (!p.pixels.empty() && p.image == image && p.grid == grid_ && p.gridColour == labelColour1_ && p.mapMode == mapMode_ &&
+        p.gridSpans == city.gridSpans.size())
         return p;
     p = PreparedCity{};
-    p.image = image; p.mask = mask; p.grid = grid_; p.gridColour = labelColour1_; p.mapMode = mapMode_;
+    p.image = image; p.grid = grid_; p.gridColour = labelColour1_; p.mapMode = mapMode_; p.gridSpans = city.gridSpans.size();
     if (!image || !image->Lock(cIGZBuffer::kLockRead)) return p;
     const int w = static_cast<int>(image->Width()), h = static_cast<int>(image->Height());
     p.width = w; p.height = h;
@@ -318,47 +320,24 @@ const cSC4WinRegionView::PreparedCity& cSC4WinRegionView::Prepare(const cSC4Regi
     for (int row = 0; row < h; ++row)
         std::memcpy(&p.pixels[std::size_t(row) * w], src + std::size_t(row) * srcPitch, std::size_t(w) * 4);
     image->Unlock(cIGZBuffer::kLockRead);
-    p.centerX = w / 2;
-    p.centerY = h / 2;
-
-    const bool maskUsable = mask && static_cast<int>(mask->Width()) >= w && static_cast<int>(mask->Height()) >= h &&
-                            mask->Lock(cIGZBuffer::kLockRead);
-    if (maskUsable) {
-        const auto* m = static_cast<const std::uint8_t*>(mask->GetColorSurfaceBits());
-        const std::uint32_t mPitch = mask->GetColorSurfaceStride();
+    if (grid_ && !city.gridSpans.empty()) {
         const std::uint32_t c = labelColour1_;
-        for (int row = 0; row < h; ++row) {
-            const auto* mrow = reinterpret_cast<const std::uint32_t*>(m + std::size_t(row) * mPitch);
-            std::uint32_t* prow = &p.pixels[std::size_t(row) * w];
-            for (int col = 0; col < w; ++col) {
-                const std::uint32_t mv = mrow[col];
-                std::uint32_t px = (prow[col] & 0x00ffffffu) | ((mv & 0xffu) << 24);   // SC4MoveMaskToAlpha: blue -> alpha
-                const std::uint32_t strength = ((mv >> 16) & 0xffu) >> 1;            // the outline (red), halved
-                if (grid_ && strength) {   // the grid: the outline tinted toward the grid colour
-                    std::uint32_t out = px & 0xff000000u;
-                    for (int shift = 0; shift <= 16; shift += 8) {
-                        const int pc = int((px >> shift) & 0xff), gc = int((c >> shift) & 0xff);
-                        out |= std::uint32_t(pc + ((gc - pc) * int(strength) + 0x80 >> 8)) << shift;
-                    }
-                    px = out;
+        const std::vector<std::uint32_t>& spans = city.gridSpans;
+        for (std::size_t i = 0; i + 1 < spans.size();) {
+            const std::uint32_t start = spans[i], end = spans[i + 1];
+            i += 2;
+            const int row = static_cast<int>(start >> 16);
+            for (int col = static_cast<int>(start & 0xffff); col < static_cast<int>(end & 0xffff) && i < spans.size(); ++col) {
+                const std::uint32_t strength = (spans[i++] & 0xffu) >> 1;
+                if (strength == 0 || row >= h || col >= w) continue;
+                std::uint32_t& px = p.pixels[std::size_t(row) * w + col];
+                std::uint32_t out = px & 0xff000000u;
+                for (int shift = 0; shift <= 16; shift += 8) {
+                    const int pc = int((px >> shift) & 0xff), gc = int((c >> shift) & 0xff);
+                    out |= std::uint32_t(pc + ((gc - pc) * int(strength) + 0x80 >> 8)) << shift;
                 }
-                prow[col] = px;
+                px = out;
             }
-        }
-        mask->Unlock(cIGZBuffer::kLockRead);
-        // The label anchor (RecalculateImagesFromCitySnapshots, i386 0x001a4cfe): the centre of the picture weighted by
-        // its alpha, rounded half up; the picture's middle when it has no alpha at all.
-        std::int64_t sumX = 0, sumY = 0, total = 0;
-        for (int row = 0; row < h; ++row)
-            for (int col = 0; col < w; ++col) {
-                const std::int64_t a = p.pixels[std::size_t(row) * w + col] >> 24;
-                sumX += col * a;
-                sumY += row * a;
-                total += a;
-            }
-        if (total > 0) {
-            p.centerX = static_cast<int>((sumX + total / 2) / total);
-            p.centerY = static_cast<int>((sumY + total / 2) / total);
         }
     }
 
@@ -394,7 +373,7 @@ const cSC4WinRegionView::PreparedCity& cSC4WinRegionView::Prepare(const cSC4Regi
     return p;
 }
 
-void cSC4WinRegionView::RenderTile(cIGZBuffer* buffer, int x, int y) {   // @ 0x10075bb66 (Mac i386 0x005002da; selected-city grid / icons not drawn)
+void cSC4WinRegionView::RenderTile(cIGZBuffer* buffer, int x, int y) {   // @ 0x10075bb66 (Mac i386 0x005002da)
     if (!buffer) return;
     if (backdrop_) {
         const cRZRect* source = backdrop_->GetBufferArea();
@@ -446,9 +425,75 @@ void cSC4WinRegionView::RenderTile(cIGZBuffer* buffer, int x, int y) {   // @ 0x
             }
         }
         buffer->Unlock(cIGZBuffer::kLockWrite);
-        DrawCityLabel(buffer, *city, p, left, top);
     }
-    SC4_UNWIRED("cSC4WinRegionView::RenderTile: the selected-city grid and the icons are not drawn");
+    // Then, over every picture, each visible city's labels and, in a map mode other than 0, its icons (airports, seaports)
+    // through a draw context: white modulation, alpha blending, each centred on its point.
+    gz::cIGZDrawContext* context = nullptr;
+    for (cSC4RegionViewCity* city : cities_) {
+        if (!city || !city->image) continue;
+        cRZRect rect;
+        GetRegionScreenRect(*city, rect);
+        const int left = rect.left - x, top = rect.top - y;
+        if (rect.right - x <= tileArea.left || left >= tileArea.right || rect.bottom - y <= tileArea.top || top >= tileArea.bottom) continue;
+        IRegionViewHost* host = RegionViewHost();
+        if (!host || !host->FindRegionalCity(regionIndex_, city->x, city->z)) continue;
+        DrawCityLabel(buffer, *city, left, top);
+        if (mapMode_ == 0 || city->icons.empty()) continue;
+        if (!context) {
+            void* raw = nullptr;
+            if (cIGZCOM* com = GZCOM(); com && com->CreateInstance(gzcom::kCLSID_cGZDrawContext, gz::kGZIID_cIGZDrawContext, &raw) && raw)
+                context = static_cast<gz::cIGZDrawContext*>(raw);
+            if (!context) continue;
+            context->SetTarget(buffer);
+            context->SetColor(0xffffffffu);
+            context->SetBltModulate(true);
+            context->SetAlphaBlend(1);
+        }
+        for (const RegionViewCityIcon& icon : city->icons) {
+            if (!icon.image) continue;
+            const cRZRect source = *icon.image->GetBufferArea();
+            const int dx = (icon.x - scrollX_ - x) - (source.right - source.left) / 2;   // the original's icon.x - tile x, in
+            const int dy = (icon.y - scrollY_ - y) - (source.bottom - source.top) / 2;   // this port's city coordinates
+            const cRZRect destination{dx + source.left, dy + source.top, dx + source.right, dy + source.bottom};
+            context->Blt(icon.image, source, destination);
+        }
+    }
+    if (context) context->Release();
+    // Last, the selected city: the mask's green (the select spans) tints the tile toward the second colour by its weight.
+    if (selected_ && !selected_->selectSpans.empty() && selected_->image) {
+        cRZRect rect;
+        GetRegionScreenRect(*selected_, rect);
+        const int left = rect.left - x, top = rect.top - y;
+        const int clipLeft = std::max(left, tileArea.left), clipTop = std::max(top, tileArea.top);
+        const int clipRight = std::min(rect.right - x, tileArea.right), clipBottom = std::min(rect.bottom - y, tileArea.bottom);
+        if (clipRight > clipLeft && clipBottom > clipTop && buffer->Lock(cIGZBuffer::kLockWrite)) {
+            auto* bits = static_cast<std::uint8_t*>(buffer->GetColorSurfaceBits());
+            const std::uint32_t c = labelColour2_;
+            const std::vector<std::uint32_t>& spans = selected_->selectSpans;
+            for (std::size_t i = 0; i + 1 < spans.size();) {
+                const int ty = static_cast<int>(spans[i] >> 16) + top;
+                const int x0 = static_cast<int>(spans[i] & 0xffff) + left, x1 = static_cast<int>(spans[i + 1] & 0xffff) + left;
+                const std::size_t weights = i + 2;
+                i = weights + static_cast<std::size_t>(std::max(0, x1 - x0));
+                if (ty < clipTop || ty >= clipBottom) continue;
+                auto* row = reinterpret_cast<std::uint32_t*>(bits + static_cast<std::size_t>(ty) * destinationPitch);
+                for (int tx = std::max(x0, clipLeft); tx < std::min(x1, clipRight); ++tx) {
+                    const std::size_t at = weights + static_cast<std::size_t>(tx - x0);
+                    if (at >= spans.size()) break;
+                    const int weight = static_cast<int>(spans[at]);
+                    if (weight == 0) continue;
+                    std::uint32_t& px = row[tx];
+                    std::uint32_t out = px & 0xff000000u;
+                    for (int shift = 0; shift <= 16; shift += 8) {
+                        const int pc = int((px >> shift) & 0xff), sc = int((c >> shift) & 0xff);
+                        out |= std::uint32_t(std::uint8_t(pc + ((sc - pc) * weight + 0x80 >> 8))) << shift;
+                    }
+                    px = out;
+                }
+            }
+            buffer->Unlock(cIGZBuffer::kLockWrite);
+        }
+    }
 }
 
 // RenderTile's label (Mac i386 0x005002da, the block after the city's picture): the city name and, below it, the mayor
@@ -456,7 +501,7 @@ void cSC4WinRegionView::RenderTile(cIGZBuffer* buffer, int x, int y) {   // @ 0x
 // centred on the picture's anchor, each cut to 4/3 of the picture's width with the default ellipsis text 0x5377be31.
 // Tutorial cities are always labelled; other established cities only with the labels option on; the selected city only
 // with "always labels".
-void cSC4WinRegionView::DrawCityLabel(cIGZBuffer* buffer, const cSC4RegionViewCity& city, const PreparedCity& prepared, int left, int top) {
+void cSC4WinRegionView::DrawCityLabel(cIGZBuffer* buffer, const cSC4RegionViewCity& city, int left, int top) {
     static const bool trace = std::getenv("SC4_REGIONLABELDEBUG") != nullptr;
     IRegionViewHost* host = RegionViewHost();
     IRegionCityView* regional = host ? host->FindRegionalCity(regionIndex_, city.x, city.z) : nullptr;
@@ -499,8 +544,8 @@ void cSC4WinRegionView::DrawCityLabel(cIGZBuffer* buffer, const cSC4RegionViewCi
     mayorFont->FormatForEllipsis(mayorName, ellipsis, fit, false);
     const int nameWidth = nameFont->GetStringWidth(cityName.ToChar(), cityName.Strlen());
     const int mayorWidth = mayorFont->GetStringWidth(mayorName.ToChar(), mayorName.Strlen());
-    const int anchorX = left + prepared.centerX;
-    const int nameY = top + prepared.centerY - nameFont->GetLineHeight();
+    const int anchorX = left + city.centerX;   // the label anchor RecalculateImagesFromCitySnapshots weighed
+    const int nameY = top + city.centerY - nameFont->GetLineHeight();
     const int mayorY = nameY + mayorFont->GetLineHeight();
     const bool drew = nameFont->DrawTextLine(buffer, anchorX - nameWidth / 2, nameY, cityName.ToChar(), cityName.Strlen(), colour, 0x8000000u, nullptr, nullptr);
     if (trace) {

@@ -24,6 +24,7 @@
 #include "rz/cRZMessage2Standard.h"
 #include "sc4/App.h"
 #include "sc4/Nation.h"
+#include "sc4/RegionCityImages.h"
 #include "sc4/RegionalCity.h"
 #include "sc4/SC4UI.h"
 #include "sc4/ServiceLocator.h"
@@ -299,22 +300,31 @@ public:
     }
     ~ViewAdapter() override {
         for (sc4::cSC4RegionViewCity* city : mirrors_) delete city;
+        for (auto& copy : copies_) ReleaseSmall(*copy);
         view_->Release();
     }
     static cIGZWinMgr* mgr();
 
+    // The view's record of a city borrows the copy's buffers: the prepared picture (its alpha = the mask), the second picture,
+    // the three span lists and the label anchor (RecalculateImagesFromCitySnapshots' results).
     void AddCity(const RegionViewCity& city) override {
         auto* mirror = new sc4::cSC4RegionViewCity();
         mirror->left = city.left; mirror->top = city.top; mirror->x = city.x; mirror->z = city.z;
         mirror->mapX = city.mapX; mirror->mapY = city.mapY; mirror->size = city.size;
-        if (city.snapshot) mirror->image = static_cast<BitmapBuffer*>(city.snapshot.get())->Pixels();
-        if (city.mask) mirror->mask = static_cast<BitmapBuffer*>(city.mask.get())->Pixels();
-        BuildHitSpans(*mirror);
+        auto copy = std::make_unique<RegionViewCity>(city);
+        if (copy->snapshotSmall) copy->snapshotSmall->AddRef();   // the copy holds its own references to the raw pair
+        if (copy->maskSmall) copy->maskSmall->AddRef();
+        Mirror(*copy, *mirror);
         mirrors_.push_back(mirror);
-        copies_.push_back(std::make_unique<RegionViewCity>(city));
+        copies_.push_back(std::move(copy));
         view_->AddCity(mirror);
     }
-    void UpdateCity(RegionViewCity* city) override { if (auto* m = MirrorOf(city->x, city->z)) view_->UpdateCity(m); }
+    void UpdateCity(RegionViewCity* city) override {
+        if (auto* m = MirrorOf(city->x, city->z)) {
+            if (RegionViewCity* copy = CopyOf(m); copy == city) Mirror(*copy, *m);   // the screen re-prepared the copy (delete city)
+            view_->UpdateCity(m);
+        }
+    }
     void SetScrollPos(int x, int y) override { view_->SetScrollPos(x, y); }
     RegionViewCity* GetCityAtPoint(int x, int y) override { return CopyOf(view_->GetCityAtPoint(x, y)); }
     RegionViewCity* GetSelectedCity() override { return CopyOf(view_->GetSelectedCity()); }
@@ -333,26 +343,20 @@ public:
     cIGZWin* AsWindow() override { return static_cast<cIGZWin*>(static_cast<cGZWin*>(view_)); }
 
 private:
-    // The hit-test runs of SC4CreateSpanList (threshold 0, no alpha bytes): per row, a start marker x | y << 16 and an end marker
-    // (exclusive) for every run of pixels with any alpha; GetCityAtPoint tests membership by the parity of a lower_bound.
-    static void BuildHitSpans(sc4::cSC4RegionViewCity& city) {
-        city.hitSpans.clear();
-        cIGZBuffer* image = city.image;
-        if (!image) return;
-        const std::uint32_t width = image->Width(), height = image->Height();
-        for (std::uint32_t row = 0; row < height; ++row) {
-            std::uint32_t start = 0;
-            bool inside = false;
-            for (std::uint32_t col = 0; col <= width; ++col) {
-                const bool solid = col < width && (image->GetPixel(col, row) >> 24) != 0;
-                if (solid && !inside) { start = col; inside = true; }
-                else if (!solid && inside) {
-                    city.hitSpans.push_back(start | (row << 16));
-                    city.hitSpans.push_back(col | (row << 16));
-                    inside = false;
-                }
-            }
-        }
+    static void Mirror(const RegionViewCity& city, sc4::cSC4RegionViewCity& mirror) {
+        mirror.image = city.snapshot ? static_cast<BitmapBuffer*>(city.snapshot.get())->Pixels() : nullptr;
+        mirror.imageSmall = city.snapshotSmall ? static_cast<BitmapBuffer*>(city.snapshotSmall)->Pixels() : nullptr;
+        mirror.mask = nullptr;   // moved into the picture's alpha
+        mirror.hitSpans = city.spans0;
+        mirror.gridSpans = city.spans10;
+        mirror.selectSpans = city.spans8;
+        mirror.centerX = city.centerX;
+        mirror.centerY = city.centerY;
+    }
+    static void ReleaseSmall(RegionViewCity& city) {
+        if (city.snapshotSmall) city.snapshotSmall->Release();
+        if (city.maskSmall) city.maskSmall->Release();
+        city.snapshotSmall = city.maskSmall = nullptr;
     }
     sc4::cSC4RegionViewCity* MirrorOf(int x, int z) {
         for (sc4::cSC4RegionViewCity* m : mirrors_) if (m->x == x && m->z == z) return m;
@@ -501,7 +505,7 @@ public:
     }
     IWinBuffer* CreateBlankDisplayBuffer() override { return new BitmapBuffer(); }
     // The pictures a city file carries for the region map: PNG records {0x8a2482b9, 0x4a2482bb, 0} (the city's block) and 2 (its mask).
-    bool LoadCityThumbnails(int x, int z, IWinBuffer** image, IWinBuffer** mask) override {
+    bool LoadCityThumbnails(int x, int z, IWinBuffer** image, IWinBuffer** mask, IWinBuffer** altImage, IWinBuffer** altMask) override {
         cISC4Region* region = ActiveRegion();
         cRZAutoRefCount<cISC4RegionalCity>* holder = region ? region->GetCity(x, z) : nullptr;
         if (!holder || !holder->get() || !DecodeFunction()) {
@@ -524,8 +528,40 @@ public:
         };
         *image = load(0);
         *mask = load(2);
+        *altImage = load(4);
+        *altMask = load(6);
         if (std::getenv("SC4_DEBUG")) std::printf("region: city %d,%d thumbnail %s from %s\n", x, z, *image ? "loaded" : "MISSING", path.ToChar());
         return *image != nullptr;
+    }
+    bool BufferHasPixels(IWinBuffer* buffer) override {
+        cGZBuffer* pixels = buffer ? static_cast<BitmapBuffer*>(buffer)->Pixels() : nullptr;
+        if (!pixels || !pixels->Lock(cIGZBuffer::kLockRead)) return false;
+        bool any = false;
+        const cRZRect* area = pixels->GetBufferArea();
+        for (int y = 0; y < area->bottom - area->top && !any; ++y)
+            for (int x = 0; x < area->right - area->left && !any; ++x) any = pixels->GetPixel(std::uint32_t(x), std::uint32_t(y)) != 0;
+        pixels->Unlock(cIGZBuffer::kLockRead);
+        return any;
+    }
+    void RecalculateCityImages(RegionViewCity& city) override {
+        auto unwrap = [](IWinBuffer* b) -> cIGZBuffer* { return b ? static_cast<BitmapBuffer*>(b)->Pixels() : nullptr; };
+        sc4::RegionCityImages out;
+        sc4::SC4RecalculateRegionCityImages(unwrap(city.snapshot.get()), unwrap(city.mask.get()), unwrap(city.snapshotSmall),
+                                            unwrap(city.maskSmall), city.mapX, city.mapY, out);
+        auto wrap = [](cIGZBuffer* b) -> IWinBuffer* { return b ? new BitmapBuffer(static_cast<cGZBuffer*>(b)) : nullptr; };
+        IWinBuffer* image = wrap(out.image);   // adopts the reference
+        city.snapshot = image;
+        if (image) image->Release();
+        city.mask = nullptr;   // the original shuts the mask down once it is in the alpha and the span lists
+        if (city.snapshotSmall) city.snapshotSmall->Release();
+        if (city.maskSmall) city.maskSmall->Release();
+        city.snapshotSmall = wrap(out.altImage);
+        city.maskSmall = nullptr;
+        city.spans0 = std::move(out.hitSpans);
+        city.spans10 = std::move(out.gridSpans);
+        city.spans8 = std::move(out.selectSpans);
+        city.centerX = out.centerX;
+        city.centerY = out.centerY;
     }
 
     // The region screen's tuning exemplar {0x6534284a, 0x690f693f, 0xaa383bfe} (ReadTunableValues, Mac i386 0x0019fbde): scroll
