@@ -27,6 +27,16 @@
 #include <map>
 #include "sc4audio/AEMSEvents.h"
 #include "vic_fakes.h"
+#include "sc4/DrawContext.h"
+#include "sc4/TrainJunctionView.h"
+
+// The train junction view is linked but never draws in this test.
+void SC4DrawContext::ResetModelViewTransform() {}
+void SC4DrawContext::ResetTransparency() {}
+void SC4DrawContext::SetRenderState(const cSC4PackedRenderState&) {}
+void SC4DrawContext::SetTransparency(float) {}
+void SC4DrawContext::SetTexture(int, int) {}
+void SC4DrawContext::DrawPrims(int, int, int, const void*) {}
 
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++failures; } } while (0)
@@ -188,6 +198,10 @@ struct Host final : IViewInputHost, IPlayerDriveHost {
     float TerrainScale() override { return 16.0f; }
     void MinimizeUI(bool m) override { minimized = m ? 1 : 0; }
     void SetZoomLimits(int lo, int hi) override { zoomMin = lo; zoomMax = hi; }
+    int viewObjects = 0, viewLayer = -1;
+    std::uint32_t viewPriority = 0;
+    void AddViewObject(cISC4ViewObject3D*, int layer, std::uint32_t priority) override { ++viewObjects; viewLayer = layer; viewPriority = priority; }
+    void RemoveViewObject(cISC4ViewObject3D*) override { --viewObjects; }
     void SetZoom(int z) override { zoom = z; }
     bool CanZoomIn() override { return true; }
     bool CanZoomOut() override { return canZoomOut; }
@@ -274,6 +288,9 @@ int main() {
     CHECK(tool->GetID() == kPlayerDriveToolId);
     CHECK(tool->Init());
     CHECK(host.ticks == 1 && host.messages == 4 && host.commandTable == 1 && host.accelerator == 1);
+    // the train junction view goes on the renderer (layer 5, priority 1000)
+    CHECK(tool->JunctionView() && tool->JunctionView()->Initialized() && host.viewObjects == 1 && host.viewLayer == 5 &&
+          host.viewPriority == 1000);
     tool->EnterChoosingMode();
     CHECK(host.simPaused);
     CHECK(host.paused[0] == 1 && host.paused[1] == 1 && host.paused[2] == 1 && host.paused[3] == 1);
@@ -499,6 +516,7 @@ int main() {
 
     // ---- Shutdown undoes Init and leaves the drive view
     CHECK(tool->Shutdown());
+    CHECK(host.viewObjects == 0 && tool->JunctionView() == nullptr);
     CHECK(host.ticks == 0 && host.messages == 0 && host.commandTable == 0 && host.accelerator == 0);
     CHECK(host.exits == 1 && host.minimized == 0);
     // HideUI (from Shutdown): both windows leave the view, the view hides the mission status panel.

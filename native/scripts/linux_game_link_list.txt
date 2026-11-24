@@ -953,3 +953,5 @@ src/audio/FreshScore.cpp
 src/sc4/GroupLayer.cpp
 src/app/NativeAudioAmbience.cpp
 src/gz/FileSystem.cpp
+src/sc4/TrainJunctionView.cpp
+src/app/NativeTrainJunctionView.cpp

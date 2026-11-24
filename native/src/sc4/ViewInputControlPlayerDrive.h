@@ -31,6 +31,7 @@
 class cISC4AEMSEvents;
 class cIGZWin;
 class cIGZBuffer;
+class cISC4ViewObject3D;
 struct cGZPersistResourceKey;
 
 namespace sc4 {
@@ -38,6 +39,7 @@ namespace sc4 {
 class cSC4Automaton;
 class cSC4OccupantGroupTemplate;
 class tAutomataStatePlayerDrive;
+class SC4TrainJunctionView;
 struct tAutomataPlayerDriveParams;
 
 constexpr std::uint32_t kPlayerDriveToolId = 0x2b709676;          // the tool id the views compare (CurrentInputControlIsPlayerDrive)
@@ -102,6 +104,9 @@ public:
     // OnMouseMove's hover (i386 0x004b4310): spView3D vslot 0x90 PickTerrain(x, y, out, false), then city vslot 0x17c
     // PositionToCell; false when the point misses the terrain.
     virtual bool TerrainCellAt(int x, int y, int& cellX, int& cellZ) { (void)x; (void)y; (void)cellX; (void)cellZ; return false; }
+    // SL::spRenderer vslots 0x80 AddViewObject(object, layer, priority) / 0x84 RemoveViewObject: the junction view.
+    virtual void AddViewObject(cISC4ViewObject3D* object, int layer, std::uint32_t priority) { (void)object; (void)layer; (void)priority; }
+    virtual void RemoveViewObject(cISC4ViewObject3D* object) { (void)object; }
     virtual cSC4Automaton* PickAutomaton(int x, int y) = 0;                                  // spRenderer vslot 0x100 with +0x84, QI 0xa9b40f05 (counted)
     // ---- the dispatch vehicle view (+0x34)
     virtual bool HasDispatchView() = 0;
@@ -202,8 +207,10 @@ private:
     // SC4TrainJunctionView (+0x9c) state: the cell under the pointer (+0x1c / +0x20) and the junction last switched
     // (+0x24 / +0x28); -1 = none. The view's arrows are drawn from these.
     int junctionHoverX_ = -1, junctionHoverZ_ = -1;
+    SC4TrainJunctionView* junctionView_ = nullptr;   // +0x9c (counted)
     int junctionSelectedX_ = -1, junctionSelectedZ_ = -1;
 public:
+    SC4TrainJunctionView* JunctionView() const { return junctionView_; }
     int JunctionHoverX() const { return junctionHoverX_; }
     int JunctionHoverZ() const { return junctionHoverZ_; }
     int JunctionSelectedX() const { return junctionSelectedX_; }

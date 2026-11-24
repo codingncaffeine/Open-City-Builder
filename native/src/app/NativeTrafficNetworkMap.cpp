@@ -408,4 +408,23 @@ sc4::ITrafficAutomatonOccupant* NativeTrafficPiece(sc4::cISC4Occupant* occupant)
     return static_cast<sc4::ITrafficAutomatonOccupant*>(g_host.AsMapOccupant(occupant));
 }
 
+// The junction view's reads of the city's traffic network map (SC4TrainJunctionView::Update): false without a map.
+bool NativeTrafficVisibleCellRect(int rect[4]) {
+    if (!g_boundMap) return false;
+    const sc4::SC4RectInt32 visible = g_boundMap->GetVisibleCellRect();
+    rect[0] = visible.x0;
+    rect[1] = visible.z0;
+    rect[2] = visible.x1;
+    rect[3] = visible.z1;
+    return true;
+}
+void NativeTrafficCellOccupants(int cellX, int cellZ, std::vector<sc4::ITrafficNetworkMapOccupant*>& out) {
+    if (!g_boundMap) return;
+    for (sc4::TrafficTileInfo* tile = g_boundMap->GetTileInfoAtCell(cellX, cellZ); tile; tile = tile->next) out.push_back(tile->occupant);
+}
+std::size_t NativeTrainJunctionKeys(sc4::ITrafficNetworkMapOccupant* occupant, std::uint8_t pathType, std::vector<std::uint32_t>& keys,
+                                    std::uint16_t& current) {
+    return g_boundMap && occupant ? g_boundMap->GetTrainJunctionKeys(occupant, pathType, keys, current) : 0;
+}
+
 }  // namespace native

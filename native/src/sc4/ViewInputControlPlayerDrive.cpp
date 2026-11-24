@@ -1,4 +1,6 @@
 #include "sc4/ViewInputControlPlayerDrive.h"
+
+#include "sc4/TrainJunctionView.h"
 #include "platform/Unwired.h"
 
 #include <algorithm>
@@ -142,11 +144,10 @@ bool cSC4ViewInputControlPlayerDrive::InputBlocked() { return g_host && g_host->
 // 0x004b72f4: the base Init, the animation ticks (channel 0xff), the terrain scale, the four debug strings, the managers,
 // the junction view on the renderer, the dispatch view (its indicators hidden), the view-changed message and the command
 // table, the tool's key accelerator. The two pick filters live with the host's picks (PickAutomaton, ToggleTrainJunctionAt);
-// the junction view's cells live in the tool, its drawing is not ported; the debug strings had no reader.
+// the junction view's cells are mirrored in the tool for the tests; the debug strings had no reader.
 bool cSC4ViewInputControlPlayerDrive::Init() {
     if (initialized_) return true;
     junctionHoverX_ = junctionHoverZ_ = junctionSelectedX_ = junctionSelectedZ_ = -1;   // a fresh SC4TrainJunctionView
-    SC4_UNWIRED("SC4TrainJunctionView::DrawTrainJunction: the junction arrows over the hovered and switched cells are not drawn");
     cSC4ViewInputControl::Init();
     if (!g_host) return true;
     auto* target = static_cast<cIGZMessageTarget2*>(this);
@@ -159,6 +160,11 @@ bool cSC4ViewInputControlPlayerDrive::Init() {
         automaton_->Release();
         automaton_ = nullptr;
     }
+    if (junctionView_) junctionView_->Release();
+    junctionView_ = new SC4TrainJunctionView();
+    junctionView_->AddRef();
+    junctionView_->Init();
+    g_host->AddViewObject(junctionView_, 5, 1000);
     dispatchView_ = g_host->HasDispatchView();
     g_host->SetMessageTarget(target, kPlayerDriveViewChanged, true);
     for (std::uint32_t command : kPlayerDriveCommandTable) g_host->SetMessageTarget(target, command, true);
@@ -194,6 +200,12 @@ bool cSC4ViewInputControlPlayerDrive::Shutdown() {
         for (std::uint32_t command : kPlayerDriveCommandTable) g_host->SetMessageTarget(target, command, false);
         g_host->ClearCursorText(kPlayerDriveRolloverText);
         g_host->SetTickTarget(target, false);
+    }
+    if (junctionView_) {
+        if (g_host) g_host->RemoveViewObject(junctionView_);
+        junctionView_->Shutdown();
+        junctionView_->Release();
+        junctionView_ = nullptr;
     }
     dispatchView_ = false;
     if (g_host) g_host->ExitPlayerDriveView();
@@ -579,6 +591,7 @@ bool cSC4ViewInputControlPlayerDrive::OnMouseDownL(int x, int y, std::uint32_t m
     if (g_host && g_host->ToggleTrainJunctionAt(x, y, cellX, cellZ)) {
         junctionSelectedX_ = cellX;
         junctionSelectedZ_ = cellZ;
+        if (junctionView_) junctionView_->SetMouseDownCell(cellX, cellZ);
         return true;
     }
     if (!IsDriveAutoValid()) {
@@ -621,13 +634,14 @@ bool cSC4ViewInputControlPlayerDrive::OnMouseUpR(int x, int y, std::uint32_t mod
 }
 
 // 0x004b4310: choosing mode: the automaton under the mouse is the rollover; driving mode: the mouse position goes to the drive
-// state (+0x214 / +0x218, the tank's turret aim). PARTIAL: the junction view's hovered cell needs SC4TrainJunctionView.
+// state (+0x214 / +0x218, the tank's turret aim); the junction view gets the cell under the pointer.
 bool cSC4ViewInputControlPlayerDrive::OnMouseMove(int x, int y, std::uint32_t modifiers) {
     (void)modifiers;
     int cellX = -1, cellZ = -1;
     if (!g_host || !g_host->TerrainCellAt(x, y, cellX, cellZ)) cellX = cellZ = -1;
     junctionHoverX_ = cellX;   // the junction view's hovered cell
     junctionHoverZ_ = cellZ;
+    if (junctionView_) junctionView_->SetHighlightCell(cellX, cellZ);
     if (!IsDriveAutoValid()) {
         cSC4Automaton* picked = g_host ? g_host->PickAutomaton(x, y) : nullptr;
         if (!picked) {

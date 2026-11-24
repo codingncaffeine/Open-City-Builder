@@ -238,6 +238,12 @@ public:
         if (!controller || active < 0) return;
         controller->Activate(active != 0);
     }
+    void AddViewObject(cISC4ViewObject3D* object, int layer, std::uint32_t priority) override {
+        if (cSC43DRender* render = CityRenderer()) render->AddViewObject(object, layer, priority);
+    }
+    void RemoveViewObject(cISC4ViewObject3D* object) override {
+        if (cSC43DRender* render = CityRenderer()) render->RemoveViewObject(object);
+    }
     bool ToggleTrainJunctionAt(int x, int y, int& cellX, int& cellZ) override {
         cSC43DRender* render = CityRenderer();
         if (!render) return false;
@@ -427,7 +433,11 @@ void NativeDriveKeyCodes(int command, std::uint32_t keys[8], std::uint32_t& coun
     map->GetKeysForAccelerator(static_cast<std::uint32_t>(command), keys, count);
 }
 
-void InstallPlayerDrive() { SetPlayerDriveHost(&g_host); }
+void InstallTrainJunctionView();   // app/NativeTrainJunctionView.cpp
+void InstallPlayerDrive() {
+    SetPlayerDriveHost(&g_host);
+    InstallTrainJunctionView();
+}
 
 // cSC4AutomataManager::spPlayerDriveView +0x30: the driven automaton, or null.
 cSC4Automaton* NativePlayerDriveAutomaton() {
