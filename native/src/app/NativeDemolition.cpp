@@ -107,11 +107,11 @@ public:
     void BoundingBox(float out[6]) override { occupant_->GetBoundingBox(out, out + 3); }
     sc4::cISCPropertyHolder* Properties() override { return occupant_->AsPropertyHolder(); }
     bool TestFlag(std::uint32_t group) override { return occupant_->IsOccupantGroup(group); }
-    // PARTIAL: the network occupant's flag query (only the demolition effect's road / rail pick reads it).
-    bool NetworkHasFlag(int, bool* isNetwork) override {
-        SC4_UNWIRED("cSC4Demolition: the network occupant's flag query (demolition effect road / rail pick) answers false");
-        if (isNetwork) *isNetwork = dynamic_cast<cSC4NetworkOccupant*>(occupant_) != nullptr;
-        return false;
+    // QI 0xa821ef94 then vslot 0x58 IsOfType(network type): the demolition effect's road / rail pick (type 2 highway, 1 rail).
+    bool NetworkHasFlag(int type, bool* isNetwork) override {
+        auto* piece = dynamic_cast<cSC4NetworkOccupant*>(occupant_);
+        if (isNetwork) *isNetwork = piece != nullptr;
+        return piece && piece->IsOfType(static_cast<std::uint32_t>(type));
     }
 private:
     cISC4Occupant* occupant_;

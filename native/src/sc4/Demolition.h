@@ -67,7 +67,7 @@ public:
     virtual void BoundingBox(float out[6]) = 0;             // vslot 0x50: min x,y,z then max x,y,z (metres)
     virtual cISCPropertyHolder* Properties() = 0;           // vslot 0x30
     virtual bool TestFlag(std::uint32_t flag) = 0;          // vslot 0xb0 (props: 0x5004 = animated)
-    virtual bool NetworkHasFlag(int flag, bool* isNetwork) = 0;   // QI 0xa821ef94 then vslot 0xb0 (1 road-like, 2 ...)
+    virtual bool NetworkHasFlag(int type, bool* isNetwork) = 0;   // QI 0xa821ef94 then vslot 0xb0 IsOfType (1 rail, 2 highway)
 };
 
 // The filter object of the 3D view and the demolition filters (cISC4OccupantFilter).
