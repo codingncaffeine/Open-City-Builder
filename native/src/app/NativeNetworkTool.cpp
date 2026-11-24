@@ -513,6 +513,15 @@ public:
     // the placement before any demolition. Then spDemolition DemolishRegion(commit, region, privilege 1, 0x2001, false,
     // cSC4DemolishByNetworksOccupantFilter, cost). Candidates without a lot only widen the region's bounds.
     bool DemolishForNetwork(bool commit, const std::vector<sc4::SC4PointU>& cells, std::uint32_t layerMask, std::int64_t& cost) override {
+        return Demolish(commit, cells, layerMask, cost, nullptr);
+    }
+    bool DemolishForNetworkOccupants(const std::vector<sc4::SC4PointU>& cells, std::uint32_t layerMask, std::int64_t& cost,
+                                     std::vector<sc4::cISC4Occupant*>& demolished) override {
+        demolished.clear();
+        return Demolish(false, cells, layerMask, cost, &demolished);
+    }
+    bool Demolish(bool commit, const std::vector<sc4::SC4PointU>& cells, std::uint32_t layerMask, std::int64_t& cost,
+                  std::vector<sc4::cISC4Occupant*>* demolished) {
         if (cells.empty()) return true;   // no outputs written
         sc4::cSC4ZoneDeveloper* lots = LotManager();
         int minX = INT32_MAX, minZ = INT32_MAX, maxX = 0, maxZ = 0;   // the union, exclusive maxima
@@ -553,7 +562,7 @@ public:
         }
         if (zoneMask & 0xfc00u) return false;   // zones 10..15 may not be cleared; cost untouched
         cost = 0;
-        return native::DemolishRegion(commit, region, 1, 0x2001, false, &cost, nullptr, 0, 0, &g_byNetworks);
+        return native::DemolishRegion(commit, region, 1, 0x2001, false, &cost, nullptr, 0, 0, &g_byNetworks, demolished);
     }
     std::uint32_t PieceTexture(std::uint32_t piece, int&) override {
         int zoom = 0, rotation = 0;

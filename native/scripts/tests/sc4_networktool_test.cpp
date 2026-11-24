@@ -2,6 +2,7 @@
 // queries, network-type flag helpers, padded rect, the terrain highlight of the valid drag and the
 // straight/diagonal splitter). The engine globals the original touches are replaced by INetworkToolHost.
 #include <cmath>
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -15,6 +16,7 @@
 #include <fstream>
 #include <string>
 #include "sc4/NetworkTool.h"
+#include "sc4/Occupant.h"
 #include "sc4/ResourceAsFile.h"
 #include "sc4/NetworkOccupant.h"
 #include "sc4/TileRules.h"
@@ -474,6 +476,21 @@ struct Fixture {
 }  // namespace
 
 int main() {
+    // ---- cSC4NetworkRoutines::UpdateHighlights (i386 0x0022f00a): what only the old set holds loses its highlight,
+    // what only the new one holds gets highlight 5, what both hold keeps it -----------------------------------------
+    {
+        cSC4Occupant occupants[4];
+        std::vector<cISC4Occupant*> before{&occupants[0], &occupants[1], &occupants[2]};
+        std::vector<cISC4Occupant*> after{&occupants[1], &occupants[3]};
+        std::sort(before.begin(), before.end());
+        std::sort(after.begin(), after.end());
+        for (cISC4Occupant* o : before) o->SetHighlight(5, false);
+        cSC4NetworkTool::UpdateHighlights(before, after);
+        CHECK(occupants[0].GetHighlight() == 0 && occupants[2].GetHighlight() == 0);
+        CHECK(occupants[1].GetHighlight() == 5 && occupants[3].GetHighlight() == 5);
+        cSC4NetworkTool::UpdateHighlights(after, {});
+        CHECK(occupants[1].GetHighlight() == 0 && occupants[3].GetHighlight() == 0);
+    }
     // ---- construction: the network flags and the default bridge state, for every network type -----------------
     {
         FakeHost host;

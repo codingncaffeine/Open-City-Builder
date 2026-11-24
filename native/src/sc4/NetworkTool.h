@@ -67,6 +67,8 @@ struct cGZPersistResourceKey;
 
 namespace sc4 {
 
+class cISC4Occupant;   // sc4/Occupant.h
+
 class cISC4NetworkToolUI;
 class cSC4NetworkOccupant;
 class cSC4NetworkOccupantWithPreBuiltModel;
@@ -652,6 +654,13 @@ public:
     // ComputeDemolitionRegionForPlacementCells (i386 0x0061F7C0) + spDemolition DemolishRegion: the lots under the candidate
     // cells; `layerMask` is the tool's OR filter mask (a lot cell holding a network occupant of the layer stays out).
     virtual bool DemolishForNetwork(bool /*commit*/, const std::vector<SC4PointU>& /*cells*/, std::uint32_t /*layerMask*/, std::int64_t& cost) { cost = 0; return true; }
+    // The same query with the occupants it would demolish (the demolition's occupant set; one reference each), for the
+    // highlight of what a dragged network takes away (cSC4NetworkRoutines::UpdateHighlights).
+    virtual bool DemolishForNetworkOccupants(const std::vector<SC4PointU>& cells, std::uint32_t layerMask, std::int64_t& cost,
+                                             std::vector<cISC4Occupant*>& demolished) {
+        demolished.clear();
+        return DemolishForNetwork(false, cells, layerMask, cost);
+    }
     // DestroyOccupantsAndResolve's outside calls (network-tools.md §10): the synchronous 0xaa7a014d send (message server
     // slot 3; void1 and IGZUnknown = the occupant), occupant manager RemoveOccupant(o, false, 0) (slot 21), the network
     // manager's GetAllIntersectionPieces (slot 12; one reference each) and a tunnel portal's other end (QI 0x8a4bd52b,
@@ -884,6 +893,7 @@ public:
     virtual bool CanTilesBeSupportedOnTerrain(std::uint32_t networkType);
     virtual void UpdateTerrainHeights(std::vector<std::uint32_t>& vertices);
     virtual int UpdateOccupantHighlights(int validSteps);
+    static void UpdateHighlights(const std::vector<cISC4Occupant*>& before, const std::vector<cISC4Occupant*>& after);   // cSC4NetworkRoutines @ 0x0022f00a
     virtual void DestroyHilightedOccupants();
     virtual void CheckForReservedTiles(int& steps, std::uint32_t networkType, bool skipDrag);
     virtual bool CheckForGoodTerrain(int& steps);
@@ -1168,6 +1178,7 @@ private:
     cIGZUnknown* networkOrFilter_ = nullptr;                // +0x630 (counted; cISC4NetworkORFilter)
 
     std::vector<SC4PointU> demolitionCells_;              // i386 +0x238 (the demolition region, as cells)
+    std::vector<cISC4Occupant*> highlighted_;              // i386 +0x23c: what the network would demolish, highlighted (by address; counted)
     std::vector<cSC4NetworkOccupant*> previewOccupants_;  // i386 +0x25c (the preview occupants of this drag)
 
     // 0x100186d3e's shared flag (sbInited @ 0x100b2... in the binary).

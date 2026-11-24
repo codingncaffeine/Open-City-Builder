@@ -10,6 +10,7 @@
 // Port note: the original's sets are __gnu_cxx::hash_set; std::unordered_set walks them in another order. Where the
 // walk order matters (which unsolved cell ApplyNetworkRules picks first) a different but equally valid order results.
 #include "sc4/NetworkTool.h"
+#include "sc4/Occupant.h"
 #include "platform/Unwired.h"
 #include "sc4/NetworkConstructionCrew.h"
 
@@ -1564,10 +1565,10 @@ bool cSC4NetworkTool::CheckForGoodTerrain(int& steps) {
     return true;
 }
 
-// i386 vslot 0xf4 (0x0012...): the regular cells of the valid steps that hold no buildable network piece form the
-// demolition region (cSC4NetworkRoutines::ComputeDemolitionRegionForPlacementCells); its cost goes to +0x254. A region
-// the network may not clear (a zone of type 10..15) costs one step.
-// NOT PORTED: cSC4NetworkRoutines::UpdateHighlights (the highlight of what will go: highlight 5 on, 0 off).
+// i386 vslot 0xf4 (0x0012583c): the regular cells of the valid steps that hold no buildable network piece form the
+// demolition region (cSC4NetworkRoutines::ComputeDemolitionRegionForPlacementCells); its cost goes to +0x254 and the
+// occupants it would take are highlighted in place of the last set (cSC4NetworkRoutines::UpdateHighlights). A region the
+// network may not clear (a zone of type 10..15) costs one step.
 int cSC4NetworkTool::UpdateOccupantHighlights(int validSteps) {
     if (validSteps_ == 0) {
         ClearOccupantHighlights();
@@ -1583,12 +1584,41 @@ int cSC4NetworkTool::UpdateOccupantHighlights(int validSteps) {
         }
     }
     demolitionCells_ = cells;
-    SC4_UNWIRED("cSC4NetworkTool::UpdateOccupantHighlights: cSC4NetworkRoutines::UpdateHighlights (highlight what the network will demolish) not ported");
     std::int64_t cost = 0;
+    std::vector<cISC4Occupant*> found;
     INetworkToolHost* host = GetNetworkToolHost();
-    const bool ok = !host || host->DemolishForNetwork(false, demolitionCells_, placementFlagMask_, cost);
+    const bool ok = !host || host->DemolishForNetworkOccupants(demolitionCells_, placementFlagMask_, cost, found);
     baseCost_ = static_cast<std::int32_t>(cost);
+    // the new set (std::set<cRZAutoRefCount<cISC4Occupant>, less<cISC4Occupant*>>): by address, one reference each
+    std::sort(found.begin(), found.end());
+    std::vector<cISC4Occupant*> next;
+    for (cISC4Occupant* occupant : found) {
+        if (!next.empty() && next.back() == occupant) occupant->Release();
+        else next.push_back(occupant);
+    }
+    UpdateHighlights(highlighted_, next);
+    highlighted_.swap(next);
+    for (cISC4Occupant* occupant : next) occupant->Release();   // the old set
     return validSteps - (ok ? 0 : 1);
+}
+
+// cSC4NetworkRoutines::UpdateHighlights (i386 0x0022f00a): one walk of the two address-ordered sets; what only the old set
+// holds loses its highlight (0), what only the new one holds gets highlight 5.
+void cSC4NetworkTool::UpdateHighlights(const std::vector<cISC4Occupant*>& before, const std::vector<cISC4Occupant*>& after) {
+    auto old = before.begin();
+    auto now = after.begin();
+    while (old != before.end() && now != after.end()) {
+        if (*old < *now) {
+            (*old)->SetHighlight(0, false);
+            ++old;
+        } else {
+            if (*now < *old) (*now)->SetHighlight(5, false);
+            else ++old;
+            ++now;
+        }
+    }
+    for (; old != before.end(); ++old) (*old)->SetHighlight(0, false);
+    for (; now != after.end(); ++now) (*now)->SetHighlight(5, false);
 }
 
 // i386 vslot 0xf8: the demolition region goes (spDemolition vslot 0x18 with cSC4DemolishByNetworksOccupantFilter), then

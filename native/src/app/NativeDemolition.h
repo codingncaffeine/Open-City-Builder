@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 namespace sc4 { class cISC4Occupant; class cSC4Lot; class cSC4NetworkManager; class cSC4NeighborsSimulator; class IDemolitionHost; class IDemolishFilter; class IDemolishable; struct DemolitionRegion; }
 
@@ -14,7 +15,7 @@ sc4::IDemolitionHost* NativeDemolitionHost();   // installed in gzcom::GetSimHos
 // SL::spDemolition calls. `privilege` 0 = none, 1 = the player; `flags` as cSC4Demolition (low byte = effects).
 bool DemolishRegion(bool commit, const sc4::DemolitionRegion& region, int privilege, std::uint32_t flags, bool dezone,
                     std::int64_t* cost, sc4::cISC4Occupant* clicked = nullptr, int viewX = 0, int viewY = 0,
-                    sc4::IDemolishFilter* filter = nullptr);
+                    sc4::IDemolishFilter* filter = nullptr, std::vector<sc4::cISC4Occupant*>* demolished = nullptr);
 bool DemolishOccupant(bool commit, sc4::cISC4Occupant* occupant, std::uint32_t flags, std::int64_t* cost);
 bool NativeHasDemolition();   // SL::spDemolition is up
 // The city occupant behind an occupant a caller's filter is asked about.

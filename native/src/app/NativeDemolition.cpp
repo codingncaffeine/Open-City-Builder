@@ -498,11 +498,22 @@ cSC4NetworkManager* CityNetworkManager() { return Networks(); }
 cSC4NeighborsSimulator* CityNeighborsSimulator() { return Neighbors(); }
 
 bool DemolishRegion(bool commit, const DemolitionRegion& region, int privilege, std::uint32_t flags, bool dezone, std::int64_t* cost,
-                    cISC4Occupant* clicked, int viewX, int viewY, IDemolishFilter* filter) {
+                    cISC4Occupant* clicked, int viewX, int viewY, IDemolishFilter* filter, std::vector<cISC4Occupant*>* demolished) {
     cSC4Demolition* demolition = Service();
     if (!demolition) return false;
     Scope scope;
-    const bool ok = demolition->DemolishRegion(commit, region, privilege, flags, dezone, filter, cost, nullptr, g_arena.Of(clicked), viewX, viewY);
+    std::set<IDemolishable*> taken;
+    const bool ok = demolition->DemolishRegion(commit, region, privilege, flags, dezone, filter, cost, demolished ? &taken : nullptr,
+                                               g_arena.Of(clicked), viewX, viewY);
+    if (demolished) {   // the call's set as the game's occupants (one reference each), before the call's adapters go
+        demolished->clear();
+        for (IDemolishable* adapter : taken) {
+            cISC4Occupant* occupant = Raw(adapter);
+            if (!occupant) continue;
+            occupant->AddRef();
+            demolished->push_back(occupant);
+        }
+    }
     if (Debug()) {
         std::map<std::uint32_t, std::pair<int, int>> byType;   // type -> seen, gone from the occupant manager (flag 1 cleared)
         for (auto& [occupant, adapter] : g_arena.occupants) {

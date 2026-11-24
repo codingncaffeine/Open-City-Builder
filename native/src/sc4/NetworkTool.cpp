@@ -12,6 +12,7 @@
 //  * GetLastValidPoint indexes the step array with validSteps-1 without a bounds check (0x100190668).
 //  * GetMajorBridge* read the last element of the bridge vector through the vector's end pointer (0x100187f42).
 #include "sc4/NetworkTool.h"
+#include "sc4/Occupant.h"
 #include "platform/Unwired.h"
 #include "sc4/NetworkConstructionCrew.h"
 #include "sc4/NetworkOccupant.h"
@@ -848,7 +849,15 @@ void cSC4NetworkTool::ClearCellPreviews() {
 
 // i386 0x0012519a: every highlighted occupant (+0x23c) gets highlight 0 and the set and the cell map (+0x238) go.
 // Not modelled yet (unknown460_): nothing is ever highlighted.
-void cSC4NetworkTool::ClearOccupantHighlights() {}
+// i386 0x0012519a: every highlighted occupant loses its highlight, the set and the demolition region go.
+void cSC4NetworkTool::ClearOccupantHighlights() {
+    for (cISC4Occupant* occupant : highlighted_) {
+        occupant->SetHighlight(0, false);
+        occupant->Release();
+    }
+    highlighted_.clear();
+    demolitionCells_.clear();
+}
 
 // i386 0x00124dbe. The per-cell part: each newly solved cell (status) that is not +0x5a costs the most expensive of
 // its network types' per-cell costs (type info +0xdc), and every corner the solve moved costs |terrain - solved| times
