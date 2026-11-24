@@ -1542,24 +1542,16 @@ void cSTETerrain::DoAnimationTick(std::uint32_t elapsedMs) {
     if (9999999 < next && !emptyRect) ComputeWaterProximityValues(gridRect_);   // the 10 s sweep
 }
 
-void cSTETerrain::RedisplayTerrain(bool adjustAltitudes, bool redisplayWater, const TerrainPoint& a,
-                                   const TerrainPoint& b, std::uint32_t flags) {
-    // 0x10073de82: sort the corner pair, widen by one cell and clamp to the grid, then the rect variant.
-    const TerrainPoint* low = &a;
-    const TerrainPoint* high = &b;
-    if (b.x < a.x) std::swap(low, high);
-    std::int32_t left = static_cast<std::int32_t>(low->x);
-    std::int32_t top = static_cast<std::int32_t>(a.z);
-    std::int32_t bottom = static_cast<std::int32_t>(b.z);
-    if (b.z < a.z) {
-        top = static_cast<std::int32_t>(b.z);
-        bottom = static_cast<std::int32_t>(a.z);
-    }
-    std::uint32_t right = static_cast<std::uint32_t>(static_cast<std::int32_t>(high->x) + 1);
+void cSTETerrain::RedisplayTerrain(bool adjustAltitudes, bool redisplayWater, const TerrainPointI& a,
+                                   const TerrainPointI& b, std::uint32_t flags) {
+    // 0x10073de82 (i386 SC4Point<int>): the corners sorted per axis, the far edge one cell out and clamped to the grid,
+    // then the rect variant (vslot 0x114).
+    const std::int32_t left = std::min(a.x, b.x), top = std::min(a.z, b.z);
+    std::uint32_t right = static_cast<std::uint32_t>(std::max(a.x, b.x)) + 1;
+    std::uint32_t bottom = static_cast<std::uint32_t>(std::max(a.z, b.z)) + 1;
     if (cellsX_ < right) right = cellsX_;
-    std::uint32_t bottomCell = static_cast<std::uint32_t>(bottom + 1);
-    if (cellsZ_ < bottomCell) bottomCell = cellsZ_;
-    TerrainRect r{left, top, static_cast<std::int32_t>(right), static_cast<std::int32_t>(bottomCell)};
+    if (cellsZ_ < bottom) bottom = cellsZ_;
+    TerrainRect r{left, top, static_cast<std::int32_t>(right), static_cast<std::int32_t>(bottom)};
     RedisplayTerrain(adjustAltitudes, redisplayWater, r, flags);
 }
 

@@ -1473,7 +1473,7 @@ int main() {
         city.Vertices()[city.GetVertIndex(4, 3)].altitude = 30.0f;
         city.FindMinAndMaxHeights();
         host.messages.posts.clear();
-        city.RedisplayTerrain(true, true, TerrainPoint{3.0f, 2.0f}, TerrainPoint{1.0f, 4.0f}, 5);
+        city.RedisplayTerrain(true, true, TerrainPointI{3, 2}, TerrainPointI{1, 4}, 5);
         CHECK(host.messages.posts.size() == 3);
         CHECK(host.messages.posts[0].type == 0x278e6003);
         CHECK(host.messages.posts[0].data[0] == ((1u << 16) | 4u));      // left 1, right 3 + 1
@@ -1488,7 +1488,7 @@ int main() {
         // a view top above kMaxTerrainHeight is clamped to it
         cityView.maxAltitude = 500.0f;
         host.messages.posts.clear();
-        city.RedisplayTerrain(true, true, TerrainPoint{3.0f, 2.0f}, TerrainPoint{1.0f, 4.0f}, 0);
+        city.RedisplayTerrain(true, true, TerrainPointI{3, 2}, TerrainPointI{1, 4}, 0);
         CHECK(host.messages.posts.size() == 3);
         const std::uint32_t clamped = static_cast<std::uint32_t>(host.messages.posts[2].data[2]);
         CHECK((clamped & 0xffffu) == 200u);                       // kMaxTerrainHeight

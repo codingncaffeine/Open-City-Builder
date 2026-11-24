@@ -100,6 +100,9 @@ public:
         return t && t->IsWaterVertex(std::uint32_t(x), std::uint32_t(z)) && t->IsWaterVertex(std::uint32_t(x + 1), std::uint32_t(z)) &&
                t->IsWaterVertex(std::uint32_t(x), std::uint32_t(z + 1)) && t->IsWaterVertex(std::uint32_t(x + 1), std::uint32_t(z + 1));
     }
+    void RedisplayTerrain(int lowX, int lowZ, int highX, int highZ) override {
+        if (cSTETerrain* t = Terrain()) t->RedisplayTerrain(false, false, TerrainPointI{lowX, lowZ}, TerrainPointI{highX, highZ}, 0);
+    }
     int WaterPollutionAt(int x, int z) override { return NativeWaterPollutionAt(x, z); }
     float OrdinanceWaterFactor() override {
         auto* ordinances = Component<cSC4OrdinanceSimulator>(CityComponent::OrdinanceSimulator, kGZCLSID_cSC4OrdinanceSimulator);

@@ -477,7 +477,6 @@ void cSC4PlumbingSimulator::ServeNetwork() {
 // 5 tells the pipes and connections whether they carry water, 6 marks the buildings and producers on the working grid and publishes
 // it, 7 finds the changed cells, 8 books costs, ages the producers once a month and records the statistics, 9 waits for a refresh.
 //   The original slices states 6 and 7 by time (rdtsc); the port runs each whole.
-//   PARTIAL: state 7's changed rectangle goes to the terrain view's refresh (city vslot 0x150, vslot 0x110), not wired natively.
 bool cSC4PlumbingSimulator::DoIdle(std::uint32_t) {
     if (!enabled_ || !working_ || !published_) return true;
     if (captureLoaded_) {   // SC4_WATERDEBUG scores the first pass against the grid the city file brought
@@ -640,7 +639,24 @@ bool cSC4PlumbingSimulator::DoIdle(std::uint32_t) {
                              pipeCount_, in.size(), out.size());
             }
         }
-        SC4_UNWIRED("cSC4PlumbingSimulator::DoIdle: state 7 changed-cell rectangle not sent to the terrain view refresh (city vslot 0x150, vslot 0x110)");
+        // The cells whose watered value changed since the last pass (the grid at +0x30, now the previous one, against
+        // +0x34) span a rectangle the terrain shows again (i386 0x00073e80; the original walks it in time slices with the
+        // scanning iterator at +0x144 and redisplays what it covered at each slice's end, the port in one pass).
+        {
+            const auto& previous = working_->GetGridData();
+            const auto& now = published_->GetGridData();
+            int lowX = cellsX_, lowZ = cellsZ_, highX = 0, highZ = 0;
+            for (int z = scan_.rect.top; z <= scan_.rect.bottom; ++z)
+                for (int x = scan_.rect.left; x <= scan_.rect.right; ++x) {
+                    if (previous[std::size_t(x)][std::size_t(z)] == now[std::size_t(x)][std::size_t(z)]) continue;
+                    lowX = std::min(lowX, x);
+                    lowZ = std::min(lowZ, z);
+                    highX = std::max(highX, x);
+                    highZ = std::max(highZ, z);
+                }
+            scan_.state = 2;
+            if (lowX <= highX) host_->RedisplayTerrain(lowX, lowZ, highX, highZ);
+        }
         state_ = 8;
         return true;
     }

@@ -664,8 +664,8 @@ public:
 
     // ---- redisplay (the view's dirty rows / altitude range) ----------------------------------
     // 0x10073de82: the corner pair is sorted and widened by one cell, then the rect variant runs.
-    void RedisplayTerrain(bool adjustAltitudes, bool redisplayWater, const TerrainPoint& a,
-                          const TerrainPoint& b, std::uint32_t flags);
+    void RedisplayTerrain(bool adjustAltitudes, bool redisplayWater, const TerrainPointI& a,
+                          const TerrainPointI& b, std::uint32_t flags);
     void RedisplayTerrain(bool adjustAltitudes, bool redisplayWater, const TerrainRect& r,
                           std::uint32_t flags);                     // 0x10073defa
     void SetTerrainType(std::int32_t type);                         // 0x10073e4e6

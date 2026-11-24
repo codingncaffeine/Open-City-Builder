@@ -80,6 +80,9 @@ public:
     // occupant manager vslot 0xa0 (standard city cells, one type): the occupants of the cell (borrowed until the next query)
     virtual void OccupantsAtCell(int x, int z, std::uint32_t type, std::vector<cISC4Occupant*>& out) = 0;
     virtual bool IsWaterCell(int x, int z) = 0;                      // terrain (city vslot 0x150) vslot 0x88
+    // terrain (city vslot 0x150 GetTerrain) vslot 0x110 RedisplayTerrain(false, false, low, high, 0): the cells between the
+    // two corners shown again (the pipes view's watered colouring).
+    virtual void RedisplayTerrain(int lowX, int lowZ, int highX, int highZ) { (void)lowX; (void)lowZ; (void)highX; (void)highZ; }
     virtual int WaterPollutionAt(int x, int z) = 0;                  // pollution simulator vslot 0x20 (GetWaterValue)
     virtual float OrdinanceWaterFactor() { return 1.0f; }            // ordinance 0xa8f4eb0c GetCumulativeFactor
     virtual const cISCPropertyHolder* SimulatorExemplar() { return nullptr; }   // {0x6534284a, 0xe7e2c2db, 0xc911e35b}
