@@ -95,6 +95,7 @@
 // 0x6b0 is not reachable: the 42 GUI members keep their meaning but take the port's smaller vector/string sizes).
 // Compile without FMA contraction: the results follow the original single-precision operation order.
 #pragma once
+#include <memory>
 #include "sc4/CommonIIDs.h"
 #include "platform/Unwired.h"
 #include <cstddef>
@@ -128,6 +129,7 @@ class SC4ViewUtilities;   // global scope (src/sc4/ViewUtilities.h)
 class cRZCmdLine;
 class cISC4Occupant;
 namespace sc4 { class cISC4OccupantFilter; }   // sc4/OccupantManager.h
+namespace sc4 { class cSC4CoverageRadiusEffectHelper; }   // sc4/CoverageRadiusEffectHelper.h
 namespace gz { class cIGZWinGen; }
 namespace s3d { class cIS3DModelInstance; }
 
@@ -1089,7 +1091,8 @@ protected:
     IAdvisorPopupQueue* advisorPopups_ = nullptr;       // +0x4d0 cSC4AdvisorPopupTracker (APT-6: not a tool tip manager)
     int currentPanel_ = -1;                             // +0x350
     std::uint32_t mayorSubPanelState_ = 0;              // +0x530 (ShowMayorSubPanel's state word)
-    ICoverageHelper3D* coverageHelper_ = nullptr;        // +0x5f8 (the helper object, borrowed from the host)
+    ICoverageHelper3D* coverageHelper_ = nullptr;        // +0x5f8 the helper object (ownedCoverageHelper_)
+    std::unique_ptr<cSC4CoverageRadiusEffectHelper> ownedCoverageHelper_;   // the original embeds it at +0x5f8
     cIGZUnknown* filterInfo_ = nullptr;                 // +0x4d8 (the cSC4ViewFilterInformation's object)
     std::uint32_t viewLevel_ = 1;                       // +0x4e0 (constructor)
     float scrollAngle_ = 0.0f;                          // +0x4e4

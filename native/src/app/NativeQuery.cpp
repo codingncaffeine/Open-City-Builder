@@ -52,6 +52,7 @@
 #include "sc4/ResidentialSimulator.h"
 #include "sc4/TrafficSimulator.h"
 #include "sc4/cSTETerrain.h"
+#include "sc4/CoverageRadiusEffectHelper.h"
 #include "rz/cRZKeyboard.h"
 #include "sc4/ViewUtilities.h"
 #include "sc4/ZoneDeveloper.h"
@@ -136,7 +137,17 @@ struct QueryView final : IQueryView {
         if (cSC4View3DWin* v = View()) v->SetCursorText(id, static_cast<std::uint32_t>(order), title, text, icon);
     }
     void ClearTip(std::uint32_t id) override { if (cSC4View3DWin* v = View()) v->ClearCursorText(id); }
-    void RecalcCoverage() override { SC4_UNWIRED("cSC4ViewInputControlQuery: the coverage ring of the queried building is not drawn (RecalcCoverage)"); }
+    // view vslot 0x188: the coverage-radius effect helper the view owns
+    static cSC4CoverageRadiusEffectHelper* Rings() {
+        cSC4View3DWin* v = View();
+        return v ? dynamic_cast<cSC4CoverageRadiusEffectHelper*>(v->GetCoverageHelper()) : nullptr;
+    }
+    void RecalcCoverage() override { if (cSC4CoverageRadiusEffectHelper* rings = Rings()) rings->RecalcCoverage(); }
+    std::uint32_t CoverageCategories() override { cSC4CoverageRadiusEffectHelper* rings = Rings(); return rings ? rings->GetCategories() : 0; }
+    void SetCoverageCategories(std::uint32_t categories) override { if (cSC4CoverageRadiusEffectHelper* rings = Rings()) rings->SetCategories(categories); }
+    std::uint32_t CoverageCategoriesForOccupant(sc4::cISC4Occupant* occupant) override {
+        return Rings() ? cSC4CoverageRadiusEffectHelper::GetCategoriesForOccupant(occupant) : 0;
+    }
 } g_view;
 
 }  // namespace

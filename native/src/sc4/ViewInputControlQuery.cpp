@@ -368,10 +368,10 @@ void cSC4ViewInputControlQuery::MouseTipCallback(void* self) {
 }
 
 // @ 0x1002d4eb0
-void cSC4ViewInputControlQuery::CoverageRingCallback(void* self) {
-    auto* tool = static_cast<cSC4ViewInputControlQuery*>(self);
+// The dialog's ring timer passes no tool (the original's user data is 0): the message goes to every listener.
+void cSC4ViewInputControlQuery::CoverageRingCallback(void*) {
     IQueryHost* host = QueryHost();
-    if (!host || !tool) return;
+    if (!host) return;
     cIGZMessageServer2* messages = host->MessageServer();
     if (!messages) return;
     auto* message = new cRZMessage2Standard();   // heap: the queue holds it until delivery
@@ -3391,7 +3391,7 @@ void cSC4ViewInputControlQuery::GetTerrainSummaryInfo(cRZString& title, cRZStrin
 // edge opens the neighbor connection dialog, an occupant with a query UI (property 0x2a499f85) its script dialog, and a
 // landfill / airport / seaport zone the zone dialog; anything else plays the "nothing to query" sound.
 //   PARTIAL: the three debug description lines (the cell / piece / building texts the debug query shows) stay at their
-//   defaults; the coverage rings of the queried building are not drawn while its dialog is open.
+//   defaults.
 void cSC4ViewInputControlQuery::DescribePick(int x, int y, cRZString& line1, cRZString& line2, cRZString& line3, bool detailed) {
     (void)detailed;
     line1 = cRZString("Query");
@@ -3444,8 +3444,7 @@ void cSC4ViewInputControlQuery::DescribePick(int x, int y, cRZString& line1, cRZ
         std::uint32_t queryUi = 0;
         cISCPropertyHolder* holder = occupant->AsPropertyHolder();
         if (holder && cSCPropertyHelp::GetPropertyValue(holder, kPropQueryUi, queryUi)) {
-            DoQueryDialog(occupant);
-            SC4_UNWIRED("cSC4ViewInputControlQuery::DescribePick: coverage rings of the queried building not drawn while its dialog is open");
+            DoQueryDialog(occupant);   // the coverage rings are the dialog's (DoQueryDialog)
         } else {
             float position[3] = {0.0f, 0.0f, 0.0f};
             occupant->GetPosition(position);
@@ -3516,9 +3515,27 @@ bool cSC4ViewInputControlQuery::DoQueryDialog(cISC4Occupant* occupant) {
     if (!host || !holder || !cSCPropertyHelp::GetPropertyValue(holder, kPropQueryUi, instance)) return false;
     cIGZWin* dialog = host->CreateWindowFromScript(instance, nullptr, kQueryDialogId);
     if (!dialog) return false;
-    return RunQueryDialog(dialog, occupant, &cSC4ViewInputControlQuery::EnumFuncUpdateValue, occupant, nullptr,
-                          {{&cSC4ViewInputControlQuery::EnumFuncSetValue, occupant}}, &cSC4ViewInputControlQuery::EnumFuncGetValue,
-                          occupant);
+    // i386 0x00218ed0: while the dialog is open the view's rings show the building's categories (police, fire, health,
+    // education), redrawn every 330 ms; afterwards the categories the view had come back.
+    IQueryView* view = host->QueryView();
+    const std::uint32_t previous = view ? view->CoverageCategories() : 0;
+    const std::uint32_t categories = view ? view->CoverageCategoriesForOccupant(occupant) : 0;
+    cRZCallbackTimer ringTimer;
+    if (categories != 0) {
+        view->SetCoverageCategories(categories);
+        view->RecalcCoverage();
+        ringTimer.SetCallbackFunction(&cSC4ViewInputControlQuery::CoverageRingCallback, nullptr);
+        ringTimer.StartPeriodic(0x14a, nullptr);
+    }
+    const bool result = RunQueryDialog(dialog, occupant, &cSC4ViewInputControlQuery::EnumFuncUpdateValue, occupant, nullptr,
+                                       {{&cSC4ViewInputControlQuery::EnumFuncSetValue, occupant}},
+                                       &cSC4ViewInputControlQuery::EnumFuncGetValue, occupant);
+    if (categories != 0) {
+        view->SetCoverageCategories(previous);
+        view->RecalcCoverage();
+        ringTimer.Stop();
+    }
+    return result;
 }
 
 // i386 0x00219306: the dialog of a landfill (11), seaport (12) or airport (14) zone cell.

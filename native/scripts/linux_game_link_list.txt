@@ -242,6 +242,7 @@ src/app/NativeBoot.cpp
 src/app/NativeAppServices.cpp
 src/app/NativeUi.cpp
 src/sc4/View3DWin.cpp
+src/sc4/CoverageRadiusEffectHelper.cpp
 src/sc4/ViewInputControlCitySituations.cpp
 src/sc4/ViewInputControlLevelTerrain.cpp
 src/sc4/ViewInputControlCityScroll.cpp
@@ -911,6 +912,7 @@ src/app/NativePathView.cpp
 src/sc4/SubBudgetWindow.cpp
 src/app/NativeOrdinance.cpp
 src/app/NativeQuery.cpp
+src/app/NativeCoverageRings.cpp
 src/app/NativeKeyboard.cpp
 src/gz/WinKeyAcceleratorRes.cpp
 src/gz/WinKeyAccelerator.cpp

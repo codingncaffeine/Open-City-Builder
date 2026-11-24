@@ -1,5 +1,6 @@
 // cSC4ViewInputControlQuery: lifecycle / message plumbing, the query state machine, the dialog control helpers,
 // picking, and the SetOrGet rows that do not need an unrecovered simulator.
+#include <SDL.h>
 #include <cmath>
 #include <cstdio>
 #include <map>
@@ -229,6 +230,10 @@ struct View final : IQueryView {
     }
     void ClearTip(std::uint32_t) override { ++clears; }
     void RecalcCoverage() override { ++coverage; }
+    std::uint32_t ringCategories = 0, occupantCategories = 0;
+    std::uint32_t CoverageCategories() override { return ringCategories; }
+    void SetCoverageCategories(std::uint32_t categories) override { ringCategories = categories; }
+    std::uint32_t CoverageCategoriesForOccupant(cISC4Occupant*) override { return occupantCategories; }
 };
 
 // ---- the callout box --------------------------------------------------------------------------------------
@@ -810,6 +815,10 @@ struct Host final : IViewInputHost, IQueryHost {
     bool IsDebugMode() override { return debug; }
     DebugFake debugFake;
     IQueryDebugReadouts* DebugReadouts() override { return &debugFake; }
+    // the modal loop: what the view's rings showed while the dialog ran
+    int modalRuns = 0, modalCoverage = 0;
+    std::uint32_t modalRingCategories = 0;
+    int RunModalDialog(cIGZWin*) override { ++modalRuns; modalRingCategories = view.ringCategories; modalCoverage = view.coverage; return 1; }
     void FormatMoneyFloat(double value, cRZString& out) override {
         char buffer[64];
         std::snprintf(buffer, sizeof buffer, "%s%.2f", money.c_str(), value);
@@ -2051,6 +2060,42 @@ int main() {
         host.strings.clear();
         tool->GetTerrainSummaryInfo(terrainTitle, terrainText);
         CHECK(host.strings.size() == 1);   // an unknown zone: only the terrain title
+        tool->Release();
+    }
+
+    // --- DoQueryDialog's coverage rings (i386 0x00218ed0): the building's categories while its dialog is open ----------
+    {
+        auto* tool = new cSC4ViewInputControlQuery(cSC4ViewInputControlQuery::kQueryBuilding, 250);
+        TestOccupant station;
+        Holder queryUi;
+        queryUi.id = 0x2a499f85;
+        queryUi.values = {0x1234};
+        station.holder = &queryUi;
+        auto* dialog = new cGZWin(&host.mgr);
+        dialog->AddRef();   // the test's own reference (a new window starts at 0)
+        cIGZWin* oldParent = host.legendParent;
+        host.legendParent = dialog;
+        host.view.ringCategories = 4;        // the view showed health rings before
+        host.view.occupantCategories = 1;    // a police station
+        // the dialog's ring timer takes the SDL stub's "latest timer" slot the later sections fire by hand: keep it
+        const auto savedCallback = g_timerCallback;
+        void* const savedParam = g_timerParam;
+        const auto savedActive = g_activeTimerId;
+        const int coverageBefore = host.view.coverage;
+        dialog->AddRef();   // the script window's creation reference, which the dialog runner releases
+        tool->DoQueryDialog(&station);
+        CHECK(host.modalRuns == 1 && host.modalRingCategories == 1 && host.modalCoverage == coverageBefore + 1);
+        CHECK(host.view.ringCategories == 4 && host.view.coverage == coverageBefore + 2);   // restored and redrawn
+        // control: a building of no category leaves the rings alone
+        host.view.occupantCategories = 0;
+        dialog->AddRef();
+        tool->DoQueryDialog(&station);
+        CHECK(host.modalRuns == 2 && host.modalRingCategories == 4 && host.view.coverage == coverageBefore + 2);
+        host.legendParent = oldParent;
+        g_timerCallback = savedCallback;
+        g_timerParam = savedParam;
+        g_activeTimerId = savedActive;
+        dialog->Release();
         tool->Release();
     }
 

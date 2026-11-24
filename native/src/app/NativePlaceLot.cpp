@@ -28,6 +28,7 @@
 #include "sc4/StringDetokenizer.h"
 #include "sc4/TrafficSimulator.h"
 #include "sc4/View3DWin.h"
+#include "sc4/CoverageRadiusEffectHelper.h"
 #include "sc4/cSC4City.h"
 #include "sc4/cSC4ZoneManager.h"
 #include "sc4/cSTETerrain.h"
@@ -312,7 +313,18 @@ public:
     void ClearCursorText(std::uint32_t id) override { if (g_view) g_view->ClearCursorText(id); }
     void SetCostIndicator(std::uint32_t cost) override { if (g_view) g_view->SetCostIndicator(cost); }
     void ClearCostIndicator(bool force) override { if (g_view) g_view->ClearCostIndicator(force); }
-    IPlaceLotCoverageHelper* CoverageHelper() override { return nullptr; }   // cSC4CoverageRadiusEffectHelper is not recovered
+    // view vslot 0x188: the view's cSC4CoverageRadiusEffectHelper
+    IPlaceLotCoverageHelper* CoverageHelper() override {
+        struct Adapter final : IPlaceLotCoverageHelper {
+            cSC4CoverageRadiusEffectHelper* rings = nullptr;
+            void SetCategories(std::uint32_t categories) override { if (rings) rings->SetCategories(categories); }
+            void RecalcCoverage() override { if (rings) rings->RecalcCoverage(); }
+        };
+        static Adapter adapter;
+        cSC4View3DWin* view = CityView3DWin();
+        adapter.rings = view ? dynamic_cast<cSC4CoverageRadiusEffectHelper*>(view->GetCoverageHelper()) : nullptr;
+        return adapter.rings ? &adapter : nullptr;
+    }
     std::uint32_t LastSelectedBuilding() override { return lastBuilding_; }
     std::uint32_t LastSelectedLot() override { return lastLot_; }
     void SetLastSelectedBuilding(std::uint32_t type) override { lastBuilding_ = type; }

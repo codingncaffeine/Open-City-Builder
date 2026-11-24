@@ -59,8 +59,12 @@ public:
     // 0x140: SetTip(id, 0, title, text, 0)
     virtual void SetTip(std::uint32_t id, int unused, const cIGZString* title, const cIGZString* text, int flags) = 0;
     virtual void ClearTip(std::uint32_t id) = 0;                                          // 0x148
-    // 0x188: the coverage-radius effect helper, then cSC4CoverageRadiusEffectHelper::RecalcCoverage.
+    // 0x188 (i386 0xc4): the view's cSC4CoverageRadiusEffectHelper: RecalcCoverage, its categories (+0x14) and SetCategories,
+    // and GetCategoriesForOccupant. A view without one draws no rings.
     virtual void RecalcCoverage() = 0;
+    virtual std::uint32_t CoverageCategories() { return 0; }
+    virtual void SetCoverageCategories(std::uint32_t categories) { (void)categories; }
+    virtual std::uint32_t CoverageCategoriesForOccupant(cISC4Occupant* occupant) { (void)occupant; return 0; }
 };
 
 // cSC4OccupantFilter: the picking filter. The original builds one per query (a cSC4OccupantFilter subclass with the

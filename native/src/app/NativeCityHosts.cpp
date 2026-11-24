@@ -105,6 +105,7 @@ void InstallEffectToolStub();
 void InstallPlaceLotStub();
 void InstallQueryStub();
 void InstallQueryHost();   // app/NativeQuery.cpp
+void InstallCoverageRingHost();   // app/NativeCoverageRings.cpp
 void InstallSignToolStub();
 void InstallWeatherStub();
 void InstallNativeWeather();
@@ -223,6 +224,7 @@ void InstallStubHosts() {
     InstallPlaceLotStub();
     InstallQueryStub();
     InstallQueryHost();                   // the real query host replaces the stub above
+    InstallCoverageRingHost();            // the view's coverage rings (sc4/CoverageRadiusEffectHelper)
     InstallSignToolStub();
     InstallSignToolHost();                // NativeSignLabel.cpp: the sign tool and signposts' real hosts replace the stubs
     InstallObliterateCityHost();          // NativeObliterate.cpp: the obliterate scene's services

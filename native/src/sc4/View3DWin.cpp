@@ -2,6 +2,7 @@
 #include "platform/CrashLog.h"
 #include "sc4/ViewInputControlCitySituations.h"
 #include "sc4/View3DWin.h"
+#include "sc4/CoverageRadiusEffectHelper.h"
 #include "platform/Unwired.h"
 #include "platform/PerfLog.h"
 
@@ -86,6 +87,8 @@ void SetView3DWinHost(IView3DWinHost* host) { g_host = host; }
 
 cSC4View3DWin::cSC4View3DWin(cIGZWinMgr* mgr) : cGZWin(mgr) {
     host_ = g_host;
+    ownedCoverageHelper_ = std::make_unique<cSC4CoverageRadiusEffectHelper>();   // the embedded helper's constructor
+    coverageHelper_ = ownedCoverageHelper_.get();
     if (host_) {
         notifications_ = host_->NotificationHelper();
         if (notifications_) notifications_->AddMessageTypes(kView3DMessageTypes, kView3DMessageTypeCount);
