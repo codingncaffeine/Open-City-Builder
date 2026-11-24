@@ -2,8 +2,6 @@
 // advisor publishes from the simulators (OpenSC4 advisors.md 7.3-7.8). The recovered advisors route their whole
 // simulator walk through this one seam; each block below is the variable table of one advisor.
 //
-// PARTIAL: the traffic statistics' transit station block (station counts and utilizations, freight depots, rapid-transit
-// transitions, potholes) is not kept by the traffic simulator.
 #include <cstring>
 #include "platform/Unwired.h"
 #include <cstdint>
@@ -337,7 +335,6 @@ void Safety() {
 
 // ---- Traffic (7.7)
 void Traffic() {
-    SC4_UNWIRED("UpdateSimulatorStatistics Traffic: the transit station counts and utilizations (the traffic statistics' station block) are not published");
     auto* traffic = Comp<cSC4TrafficSimulator>(CityComponent::TrafficSimulator);
     if (traffic) {
         // cSC4AdvisorTraffic::update_variables (i386 0x00335d98): the statistics block's funding, strike and freight fields.
@@ -345,6 +342,20 @@ void Traffic() {
         G("g_masstransit_funding_p", X100(traffic->StatsMassTransitFunding()));
         G("g_transit_strike", traffic->StrikeActiveFlag() ? 1.0 : 0.0);
         G("ga_freight_trip_length", static_cast<double>(traffic->StatsFreightTripLength()));
+        // The statistics' station block (i386 stats +0x138: bus, train, subway, elevated, monorail, freight depots, rapid-transit
+        // transitions; count u16, average, cell, worst) is copied each cycle from a working block that the original resets
+        // (WorkOnSimCycle) and never fills, so every station value it publishes is 0, at cell (0, 0). The pothole count
+        // just before it (+0x134) is ApplyRoadFunding's.
+        static const char* const kStations[] = {"bus", "train", "subway", "elevated", "monorail"};
+        for (const char* kind : kStations) {
+            char name[64];
+            std::snprintf(name, sizeof name, "g_%s_station_count", kind); G(name, 0.0);
+            std::snprintf(name, sizeof name, "ga_%s_station_utilization_p", kind); G(name, 0.0);
+            std::snprintf(name, sizeof name, "l_%s_station_utilization_pl", kind); LocalAtCell(name, 0.0, 0, 0);
+        }
+        G("g_train_freight_depot_count", 0.0);
+        G("g_num_rapidtransit_transitions", 0.0);
+        G("g_pothole_count", static_cast<double>(static_cast<std::uint16_t>(traffic->StatRoadPotholes())));
         const auto& rows = traffic->PublishedStats();
         static const struct { const char* net; int row; } kNets[] = {
             {"road", 0}, {"rail", 1}, {"street", 3}, {"avenue", 6}, {"subway", 7}, {"elevated", 8}, {"monorail", 9}, {"bridge", 13}};
