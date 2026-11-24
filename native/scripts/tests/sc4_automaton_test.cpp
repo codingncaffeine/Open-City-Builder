@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <set>
+#include <string>
 #include <vector>
 
 #include "gz/CommandParameterSet.h"
@@ -113,8 +114,27 @@ struct FakeMessageTarget final : cIGZMessageTarget2 {
     }
 };
 
+struct FakeAttachment final : IAutomataStateAttachment {
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return static_cast<std::uint32_t>(++refs); }
+    std::uint32_t Release() override { return static_cast<std::uint32_t>(--refs); }
+    void Detach(bool final) override { detached += final ? 1 : 0; }
+    int refs = 1, detached = 0;
+};
 struct FakeHost final : IAutomatonHost {
     FakeModel* nextModel = nullptr;
+    FakeAttachment collide;
+    bool makeCollide = false;
+    std::string collideName;
+    cS3DVector3 collideVelocity{0.0f, 0.0f, 0.0f};
+    IAutomatonModel* collideModel = nullptr;
+    IAutomataStateAttachment* StartCollideEffect(const char* name, const cS3DTransform&, const cS3DVector3& velocity,
+                                                 IAutomatonModel* model) override {
+        collideName = name;
+        collideVelocity = velocity;
+        collideModel = model;
+        return makeCollide ? &collide : nullptr;
+    }
     FakeModel* queuedModel = nullptr;
     std::vector<std::uint32_t> createdInstances;
     FakeEffects effects;
@@ -294,6 +314,31 @@ int main() {
         automatonInterface->Release();
         void* unknown = nullptr;
         CHECK(!automaton->QueryInterface(0xdeadbeef, &unknown));
+        CHECK(automaton->Release() == 0);
+    }
+
+    // ---- AddToCollisionSystem (i386 0x000c0970): the collide state hands a modelled automaton to its collide effect ------
+    {
+        FakeHost host;
+        host.makeCollide = true;
+        cSC4Automaton* automaton = MakeAutomaton(host);
+        CHECK(automaton->PushState(kStateCollide, nullptr, 1.0f, false, 0, 0, nullptr));   // no model: no effect
+        CHECK(static_cast<tAutomataStateCollide*>(automaton->GetState())->attachment == nullptr && host.collideName.empty());
+        automaton->ClearStateStack();
+        FakeModel* model = new FakeModel();
+        host.nextModel = model;
+        CHECK(automaton->AddModelResourceKey(cGZPersistResourceKey{0x1111, 0x2222, 0x3333}));
+        CHECK(automaton->AddModelInstance(cGZPersistResourceKey{0x1111, 0x2222, 0x3333}) == model);
+        const float heading[3] = {0.0f, 0.0f, 1.0f};
+        automaton->SetOrientation(heading);
+        automaton->SetActualSpeed(0.002f);
+        CHECK(automaton->PushState(kStateCollide, nullptr, 1.0f, false, 0, 0, nullptr));
+        CHECK(static_cast<tAutomataStateCollide*>(automaton->GetState())->attachment == &host.collide);
+        CHECK(host.collideName == "vehicle_collide_fx" && host.collideModel == model);
+        CHECK_NEAR(host.collideVelocity.z, 3.0f);   // the heading at 1500 x the speed
+        CHECK(automaton->CheckAutomataFlag(kAutomataFlagNoCollision) && automaton->CheckAutomataFlag(kAutomataFlagIgnorePaths));
+        automaton->ClearStateStack();                // the state's end stops the effect
+        CHECK(host.collide.detached == 1);
         CHECK(automaton->Release() == 0);
     }
 

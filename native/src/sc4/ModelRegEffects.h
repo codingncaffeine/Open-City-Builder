@@ -93,6 +93,7 @@ public:
     }
     void StartAllEffectsByKeys(const std::vector<std::pair<std::string, bool>>& keyed) override;   // cSC4Automaton::StartAllEffects (0x000c06c6)
 
+    bool GetCurrentEffects(std::vector<AutomatonCurrentEffect>& out) override;          // @ 0x00160832
     const std::map<std::string, tRegEffect>& Effects() const { return effects_; }
 
 private:

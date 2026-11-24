@@ -200,6 +200,15 @@ public:
 };
 
 // The cSC4ModelRegEffects object embedded at +0x290 (unrecovered neighbour).
+class IRegEffect;                 // sc4/ModelRegEffects.h
+class IAutomataStateAttachment;   // sc4/AutomataStates.h
+// cSC4ModelRegEffects::CurrentEffectItem: a running registered effect and the transform of its point at the model's frame
+// (the effect holds a reference).
+struct AutomatonCurrentEffect {
+    IRegEffect* effect = nullptr;
+    cS3DTransform transform;
+};
+
 class IAutomatonEffects {
 public:
     virtual ~IAutomatonEffects() = default;
@@ -230,6 +239,8 @@ public:
     // cSC4Automaton::StartAllEffects' walk over the collection: every effect runs unless it is one that starts off; an effect
     // named in `keyed` (a player-drive key's effect) runs only while its key is held.
     virtual void StartAllEffectsByKeys(const std::vector<std::pair<std::string, bool>>& keyed) { (void)keyed; StartAll(); }
+    // cSC4ModelRegEffects::GetCurrentEffects (i386 0x00160832): the running effects; false without a model or effects.
+    virtual bool GetCurrentEffects(std::vector<AutomatonCurrentEffect>& out) { out.clear(); return false; }
 };
 
 // A player-drive key's effect as the automaton reads it from its group (tKeyEffect: the key, the effect, its registration point).
@@ -319,6 +330,18 @@ public:
     virtual std::uint32_t ViewZoom() { return 0; }
     virtual bool IsDrivingMode() { return false; }
     virtual void PostAudioEvent(std::uint32_t event) = 0;  // SL::AEMS slots 0x30/0x28
+    // cSC4Automaton::AddToCollisionSystem: the named collide effect (SL::spEffectsManager vslot 0x18) placed at `source`,
+    // given the velocity (float params 0xf) and the automaton's model instance (void params 7), started; it becomes the
+    // collide state's attachment (one reference). Null when there is no such effect.
+    virtual IAutomataStateAttachment* StartCollideEffect(const char* name, const cS3DTransform& source, const cS3DVector3& velocity,
+                                                         IAutomatonModel* model) {
+        (void)name; (void)source; (void)velocity; (void)model;
+        return nullptr;
+    }
+    // The collide effect's SetVoidParams(0x12, {effect, &transform}): a registered effect moves onto it.
+    virtual void AttachToCollideEffect(IAutomataStateAttachment* collide, IRegEffect* effect, const cS3DTransform& transform) {
+        (void)collide; (void)effect; (void)transform;
+    }
     virtual std::uint32_t RandomBelow(std::uint32_t range) = 0;               // cRZRandomSuper::RandomUint32Uniform(range)
     virtual std::int32_t RandomInt(std::int32_t lo, std::int32_t hi) = 0;     // RandomSint32RangeUniform
     virtual double RandomDouble(double lo, double hi) = 0;                    // RandomDoubleRangeUniform

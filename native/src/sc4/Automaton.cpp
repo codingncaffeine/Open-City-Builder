@@ -6,6 +6,7 @@
 #include <string>
 #include <dlfcn.h>
 #include <cmath>
+#include "sc4/ModelRegEffects.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -2140,12 +2141,51 @@ bool cSC4Automaton::HandleCollision(cSC4Automaton* other, const cS3DVector3& poi
     return true;
 }
 
+// i386 0x000c0970: an automaton with a model is handed over to its collide effect ("vehicle_collide_fx"; a train's
+// "train_engine_collide_fx", or "train_car_collide_fx" for a car of group 0x4236): the effect starts at the automaton,
+// facing along its heading, moving along it at 1500 x its speed, with the model (the effect's dynamic particle tosses
+// it about). The automaton stops colliding and following paths, and its running registered effects move onto the
+// collide effect. True when the effect was made.
 bool cSC4Automaton::AddToCollisionSystem(tAutomataStateCollide* state) {
-    (void)state;
-    // PARTIAL: creates the collision effect (cSC4EffectsManager slot 0x30 with the vehicle/train collide effect) and
-    // hands it the model instance and a velocity. Neither the effects manager nor the model layer is recovered.
-    SC4_UNWIRED("cSC4Automaton::AddToCollisionSystem: the vehicle/train collide effect (cSC4EffectsManager slot 0x30) is not created");
-    return false;
+    if (!state) return false;   // port guard
+    if (!models_.empty()) {
+        const char* name = "vehicle_collide_fx";                     // kVehicleCollideFx
+        if (IsOccupantGroup(0x4005)) name = IsOccupantGroup(0x4236) ? "train_car_collide_fx" : "train_engine_collide_fx";
+        cS3DTransform source;
+        source.translation[0] = position_.x;
+        source.translation[1] = position_.y;
+        source.translation[2] = position_.z;
+        source.flags |= 1;
+        ++source.changeCounter;
+        nS3D::Matrix3 facing;
+        nS3D::AlignDirToXWithYUp(orientation_, facing);
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 3; ++c) source.rotation[r][c] = facing.m[3 * r + c];
+        source.flags |= 4;
+        ++source.changeCounter;
+        cS3DVector3 velocity = orientation_;
+        const float speed = 1500.0f * actualSpeed_;                   // 0x00a7082c
+        const float length = std::sqrt(velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z);
+        if (length > 0.0f) velocity = cS3DVector3{velocity.x * (speed / length), velocity.y * (speed / length), velocity.z * (speed / length)};
+        IAutomatonHost* host = Host();
+        state->attachment = host ? host->StartCollideEffect(name, source, velocity, models_.front()) : nullptr;
+        if (state->attachment) {
+            SetAutomataFlag(kAutomataFlagNoCollision, true);
+            SetAutomataFlag(kAutomataFlagIgnorePaths, true);
+            SetAutomataFlag(kAutomataFlagPlayerDrive, true);
+            SetAutomataFlag(kAutomataFlagMarkedForRemove, false);
+            std::vector<AutomatonCurrentEffect> running;
+            if (effects_ && effects_->GetCurrentEffects(running)) {
+                effects_->Shutdown();
+                for (AutomatonCurrentEffect& item : running) {
+                    item.effect->Start(0);
+                    host->AttachToCollideEffect(state->attachment, item.effect, item.transform);
+                }
+            }
+            for (AutomatonCurrentEffect& item : running) item.effect->Release();
+        }
+    }
+    return state->attachment != nullptr;
 }
 
 // ---- debug text ------------------------------------------------------------------------------------------------------

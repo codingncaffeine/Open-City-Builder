@@ -239,4 +239,30 @@ void cSC4ModelRegEffects::Update(const cS3DVector3& position, const cS3DVector3&
     }
 }
 
+// 0x00160832: with a model and effects, every started effect with its point's transform at the model's current animation
+// frame (rotated about the frame's axis by its angle, at its translation; identity for a point without frames).
+bool cSC4ModelRegEffects::GetCurrentEffects(std::vector<AutomatonCurrentEffect>& out) {
+    out.clear();
+    if (!model_ || effects_.empty()) return false;
+    const int frame = model_->GetFrame();
+    for (auto& [point, entry] : effects_) {
+        (void)point;
+        if (!entry.effect || !entry.effect->IsStarted()) continue;
+        AutomatonCurrentEffect item;
+        item.effect = entry.effect;
+        entry.effect->AddRef();
+        if (entry.frames && static_cast<std::size_t>(frame) < entry.frames->size()) {   // port guard: the original indexes unchecked
+            const RegPointTransform& at = (*entry.frames)[static_cast<std::size_t>(frame)];
+            nS3D::Rotate(item.transform, cS3DVector3{at.axis[0], at.axis[1], at.axis[2]}, at.angle);
+            item.transform.translation[0] = at.translation[0];
+            item.transform.translation[1] = at.translation[1];
+            item.transform.translation[2] = at.translation[2];
+            item.transform.flags |= 1;
+            ++item.transform.changeCounter;
+        }
+        out.push_back(item);
+    }
+    return true;
+}
+
 }  // namespace sc4

@@ -19,6 +19,9 @@
 #include "sc4/TrafficNetworkMap.h"
 #include "sc4/Render3D.h"
 #include "app/NativeCityView.h"
+#include "app/NativeEffects.h"
+#include "sc4/AutomataStates.h"
+#include "sc4/VisualEffect.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/OccupantManager.h"
 #include "sc4audio/AEMSEvents.h"
@@ -31,6 +34,7 @@ sc4::cSC4AutomataController* NativeFindAttraction(sc4::cISC4Occupant* occupant, 
 sc4::IAutomatonGroupTemplate* NativeFindAutomatonGroup(std::uint32_t id);                                                                  // app/NativeAutomataManagerHost.cpp
 s3d::cS3DModelInstanceAnimatedSprite* NativeCreateSpriteInstance(const cGZPersistResourceKey& key);   // app/NativeSprites.cpp
 sc4::IAutomatonEffects* NativeNewModelRegEffects();                                                   // app/NativeModelRegEffects.cpp
+sc4::cSC4VisualEffect* NativeRegEffectVisual(sc4::IRegEffect* effect);                                // app/NativeModelRegEffects.cpp
 namespace {
 using namespace sc4;
 
@@ -108,6 +112,25 @@ cSC4TrafficNetworkMap* NetworkMap() {
     cIGZUnknown* object = CurrentCity() ? CurrentCity()->GetComponent(CityComponent::TrafficNetwork) : nullptr;
     return object ? dynamic_cast<cSC4TrafficNetworkMap*>(object) : nullptr;
 }
+
+// The collide state's attachment: the vehicle's collide effect. Detach is the effect's Stop (i386 vslot 0x10, 1 when the
+// state ends); the reference goes with the attachment.
+class CollideEffect final : public sc4::IAutomataStateAttachment {
+public:
+    explicit CollideEffect(sc4::cSC4VisualEffect* effect) : effect_(effect) {}   // takes the effect's reference
+    ~CollideEffect() { effect_->Release(); }
+    bool QueryInterface(std::uint32_t, void**) override { return false; }
+    std::uint32_t AddRef() override { return ++refs_; }
+    std::uint32_t Release() override {
+        if (refs_ <= 1) { delete this; return 0; }
+        return --refs_;
+    }
+    void Detach(bool final) override { effect_->Stop(final ? 1 : 0); }
+    sc4::cSC4VisualEffect* Effect() const { return effect_; }
+private:
+    sc4::cSC4VisualEffect* effect_;
+    std::uint32_t refs_ = 1;
+};
 
 class AutomataHost final : public IAutomatonHost {
 public:
@@ -229,6 +252,28 @@ public:
     float MaxSpeedUnits() override { return static_cast<float>(AutomataTuning().f21888); }
     float FadeDurationSeconds() override { return AutomataTuning().f219b4; }   // tuning 0x4998c916 (1.0 in the shipped data)
     void PostMessage(cIGZMessage2* message) override { if (SL::spMS2 && message) SL::spMS2->MessagePost(message, false); }
+    // cSC4Automaton::AddToCollisionSystem (i386 0x000c0970): the effect by name, placed, given the velocity and the model
+    // instance, started.
+    sc4::IAutomataStateAttachment* StartCollideEffect(const char* name, const cS3DTransform& source, const cS3DVector3& velocity,
+                                                      IAutomatonModel* model) override {
+        sc4::cSC4VisualEffect* effect = CreateNamedEffect(name);
+        if (!effect) return nullptr;
+        effect->SetSourceTransform(source);
+        const float v[3] = {velocity.x, velocity.y, velocity.z};
+        effect->SetFloatParams(0xf, v, 3);
+        auto* adapter = dynamic_cast<AutomatonModel*>(model);
+        void* instance = adapter ? static_cast<void*>(adapter->Instance()) : nullptr;
+        effect->SetVoidParams(7, &instance, 1);
+        effect->Start(0);
+        return new CollideEffect(effect);
+    }
+    void AttachToCollideEffect(sc4::IAutomataStateAttachment* collide, sc4::IRegEffect* effect, const cS3DTransform& transform) override {
+        auto* target = dynamic_cast<CollideEffect*>(collide);
+        sc4::cSC4VisualEffect* visual = NativeRegEffectVisual(effect);
+        if (!target || !visual) return;
+        void* params[2] = {visual, const_cast<cS3DTransform*>(&transform)};
+        target->Effect()->SetVoidParams(0x12, params, 2);
+    }
     std::uint32_t GenerateSoundInstanceId() override { return NewSoundInstanceId(); }
     void StopSoundLoop(std::uint32_t handle) override { PostSoundSystemEvent(0x6a451908, handle); }
     bool SoundSystemAvailable() override { return native::SoundSystemAvailable(); }
