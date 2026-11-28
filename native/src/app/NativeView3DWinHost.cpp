@@ -9,6 +9,7 @@
 #include <functional>
 #include <string>
 #include <vector>
+#include "sc4/cSTETerrainView3D.h"
 #include "sc4/ViewInputControlLevelTerrain.h"
 #include "sc4/View3DWin.h"
 #include "sc4/MyStreetSim.h"
@@ -100,6 +101,7 @@
 namespace native { void GoToNextDisaster(); bool NativeDisasterOngoing(); }   // NativeDisasters.cpp, NativeRiot.cpp
 #include "app/NativeDisasterTools.h"
 namespace native {
+extern sc4::cSTETerrainView3D* g_terrainView;   // NativeTerrainView.cpp
 sc4::INewsTickerWindow* CreateNewsTickerWindow();     // app/NativeWinHtml.cpp
 void ShutdownNewsTickerWindow(cIGZUnknown* proc);
 sc4::IAdvisorPopupQueue* CreateAdvisorPopupQueue();
@@ -121,6 +123,11 @@ public:
         sc4::cSC4View3DWin* view = CityView3DWin();
         return view && view->PickTerrain(x, y, out, false);
     }
+    // The terrain's view (terrain vslot 0x108, cISTETerrainView): 0x14 MarkSelected(rect, colour 2, on), 0x24
+    // ClearCurrentSelections, 0x28 SetAutomaticCellCursorUpdateStatus (answering the previous state).
+    void MarkSelected(const sc4::TerrainRect& rect) override { if (g_terrainView) g_terrainView->MarkSelected(rect, 2, true); }
+    void ClearSelection() override { if (g_terrainView) g_terrainView->ClearCurrentSelections(); }
+    bool ShowSelection(bool show) override { return g_terrainView ? g_terrainView->SetAutomaticCellCursorUpdateStatus(show) : false; }
 } g_levelTerrainHost;
 struct LevelTerrainHostInstaller { LevelTerrainHostInstaller() { sc4::SetLevelTerrainHost(&g_levelTerrainHost); } } g_levelTerrainHostInstaller;
 }  // namespace
