@@ -1,3 +1,6 @@
+#include <cstdio>
+#include <cstdlib>
+#include <string>
 #include "sc4/AutomataController.h"
 
 #include <cmath>
@@ -204,6 +207,12 @@ void cSC4AutomataController::CheckEffectTriggers() {
             result = !host->IsEffectActive(effect);
             if (!result) break;
         }
+    }
+    if (std::getenv("SC4_TRIGGERDEBUG") && (haveOn || !template_->effectsOff.empty())) {
+        std::string ids;
+        for (std::uint32_t e : template_->effectsOn) { char b[16]; std::snprintf(b, sizeof b, " on%08x", e); ids += b; }
+        for (std::uint32_t e : template_->effectsOff) { char b[16]; std::snprintf(b, sizeof b, " off%08x", e); ids += b; }
+        std::fprintf(stderr, "controller %p triggers%s -> %d\n", static_cast<void*>(this), ids.c_str(), int(result));
     }
     if (apply) Activate(result);
     host->EndEffectQuery();

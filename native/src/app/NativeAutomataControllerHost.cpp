@@ -90,11 +90,9 @@ struct NativeAutomataControllerHost final : IAutomataControllerHost {
         if (auto* manager = CityComponentAs<cSC4AutomataControllerManager>(CityComponent::AutomataControllerManager))
             manager->MoveController(static_cast<cSC4AutomataController*>(controller));
     }
-    bool BeginEffectQuery() override {
-        SC4_UNWIRED("cSC4AutomataController effect trigger: the 3D view's active-effect query is not wired (no effect is ever active)");
-        return false;
-    }
-    bool IsEffectActive(std::uint32_t) override { return false; }
+    // SL::spView3DWin QueryInterface(0xfa47b3f9): the city view answers the global effect triggers (vslot 0x170).
+    bool BeginEffectQuery() override { return NativeHasCityView(); }
+    bool IsEffectActive(std::uint32_t effectId) override { return NativeGlobalEffectTriggered(effectId); }
     void EndEffectQuery() override {}
     bool SoundAvailable() override { return SoundSystemAvailable(); }
     void PostSound(std::uint32_t message, std::uint32_t a, std::int64_t b, std::int64_t c, std::int64_t d) override {

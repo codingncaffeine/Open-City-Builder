@@ -588,4 +588,11 @@ bool FinishCityRenderStack(cISC4City* cityInterface) {
     return ok;
 }
 
+bool NativeGlobalEffectTriggered(std::uint32_t effectId) {
+    sc4::cSC4View3DWin* view = CityView3DWin();
+    return view && view->GetGlobalEffectTriggerState(effectId);
+}
+
+bool NativeHasCityView() { return CityView3DWin() != nullptr; }
+
 }  // namespace native

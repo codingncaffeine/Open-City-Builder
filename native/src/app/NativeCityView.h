@@ -94,4 +94,7 @@ bool PrepareCityRenderStack(cISC4City* city);
 void CityViewInit();
 bool FinishCityRenderStack(cISC4City* city);
 
+// cISC4View3DWin vslot 0x170 GetGlobalEffectTriggerState on the city view; false without one.
+bool NativeGlobalEffectTriggered(std::uint32_t effectId);
+bool NativeHasCityView();   // a city view is up (SL::spView3DWin)
 }  // namespace native
