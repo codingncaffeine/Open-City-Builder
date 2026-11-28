@@ -1294,6 +1294,7 @@ int RunScenario(const std::string& path) {
                 push(SDL_EVENT_MOUSE_MOTION, x + dx + float(n % 3 - 1), y + dy);
                 PumpEvents(); Frame(); Nap();
             }
+            if (const char* held = std::getenv("SC4_VIEWDRAG_SHOT")) WritePng(held);   // the drag's picture while still held
             push(SDL_EVENT_MOUSE_BUTTON_UP, x + dx, y + dy); PumpEvents(); Frame(); Nap();
             for (int i = 0; i < 5; ++i) { PumpEvents(); Frame(); Nap(); }
         } else if (command == "audit") {   // audit: renderer models made for another zoom (stale models drawing over new ones)
