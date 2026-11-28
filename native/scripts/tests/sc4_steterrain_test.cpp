@@ -2161,9 +2161,10 @@ int main() {
         // ---- ReadTerrainIniFile: the texture map table and the wind-erosion / hydrology tunables
         auto* ini = new FakeIni();      // ReadTerrainIniFile deletes the ini the host opened
         auto& table = ini->sections["TropicalTextureMapTable"];
-        table["HighCliff"] = "0x21";
-        table["LowCliff"] = "0x22";
-        table["Beach"] = "0x23";
+        auto& misc = ini->sections["TropicalMiscTextures"];   // the cliff and beach ids live here in the game's terrain ini
+        misc["HighCliff"] = "0x21";
+        misc["LowCliff"] = "0x22";
+        misc["Beach"] = "0x23";
         table["24"] = "10,17,18";                     // temperature 24: moisture 0..2 (comma separated, the first token is column 0)
         table["31"] = "0x40,0x41";
         ini->sections["MiscTerrainTunables"]["RaiseLowerAmount"] = "12.5";

@@ -922,6 +922,8 @@ double ParseTerrainFloat(const char* text) { return text ? std::strtod(text, nul
 
 // The ini entries all live in one of three sections (the first is kTerrainTypeNames[0] + "TextureMapTable").
 constexpr const char* kTerrainTextureMapSection = "TropicalTextureMapTable";
+// The terrain type's name + "MiscTextures" (i386 0x004e2dfc builds it from _kTerrainTypeNames): the cliff and beach ids.
+constexpr const char* kTerrainMiscTexturesSection = "TropicalMiscTextures";
 constexpr const char* kMiscTunablesSection = "MiscTerrainTunables";
 constexpr const char* kWindErosionSection = "WindErosion";
 constexpr const char* kHydrologySection = "Hydrology";
@@ -1036,7 +1038,7 @@ void cSTETerrain::DetermineTextureFamilyMembersForGridCells() {
 
 void cSTETerrain::ReadMiscTexturesForTerrainTypes(ITerrainIniFile& ini) {
     // 0x10073b602: the cliff and beach texture ids of terrain type 0, plus the fixed deep-water ids.
-    const cRZString section(kTerrainTextureMapSection);
+    const cRZString section(kTerrainMiscTexturesSection);
     cRZString value;
     if (ini.ReadEntry(section, cRZString("HighCliff"), value)) {
         HighCliffTextureId() = ParseTerrainUint(value.ToChar());
@@ -2147,6 +2149,12 @@ void cSTETerrain::DecideSurfaceCover(const TerrainRect& r) {
                         textureId = SurfaceCoverMapSlot()[0 <= terrainType && terrainType < 4 ? terrainType : 0][column];
                 } else {
                     textureId = beachTexture;
+                    if (std::getenv("SC4_BEACHDEBUG")) {
+                        static int beachCount = 0;
+                        if ((++beachCount & (beachCount - 1)) == 0)
+                            std::fprintf(stderr, "terrain: beach vertex %d at %d,%d id %#x altitude %.1f cover %u\n", beachCount, x, z, beachTexture,
+                                         vertices_[index].altitude, unsigned(surfaceCover_[static_cast<std::size_t>(z)][static_cast<std::size_t>(x)]));
+                    }
                     selectWater = true;                                       // the beach spreads over water too
                     if (r.left <= x && r.top <= z && x <= r.right && z <= r.bottom)
                         AddLandTypeAtVertex(index, textureKeyFor(textureId, index), 1.0f);
