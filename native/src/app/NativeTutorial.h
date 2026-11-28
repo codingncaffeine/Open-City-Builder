@@ -20,6 +20,7 @@ bool NativeTutorialRunning();
 // (OnTutorialEvent(1): the zone task's hints and try-again text) and places nothing.
 // Kits: the tutorial cheat as typed ("Tutorial next", "Tutorial step N") handed straight to the tutorial system's DoMessage.
 bool NativeTutorialCheat(const char* text);
+bool NativeTutorialFinish();   // the tutorial scripts' finish message (data1 0): true when the tutorial ended
 // Kits: the current tutorial task (number, kind, target GUID, instruction text) on stdout.
 void NativeTutorialTaskReport();
 // Kits: the current step as a player sees it: its number and kind, its region (x0 < 0: none) and the window it flashes

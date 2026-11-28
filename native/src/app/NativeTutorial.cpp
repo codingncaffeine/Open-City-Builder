@@ -19,6 +19,7 @@
 #include "app/NativeRegionScreen.h"
 #include "sc4/RegionalCity.h"
 #include "gz/WinHTML.h"
+#include "rz/cRZMessage2Standard.h"
 #include "sc4/App.h"
 #include "sc4/BuildingOccupant.h"
 #include "sc4/CameraControl.h"
@@ -388,6 +389,19 @@ bool NativeTutorialCheat(const char* text) {
     message.param2 = reinterpret_cast<std::uintptr_t>(static_cast<cIGZString*>(&typed));
     tutorial->DoMessage(message);
     return true;
+}
+
+bool NativeTutorialFinish() {
+    cSC4TutorialSystem* tutorial = System();
+    if (!tutorial || !tutorial->IsTutorial() || !SL::spMS2) return false;
+    // The tutorial scripts' finish message with data1 0: the system ends the tutorial and keeps the city (endTutorial(true)).
+    auto* message = new cRZMessage2Standard();
+    message->AddRef();
+    message->SetType(sc4::kTutorialMessageFinished);
+    message->SetData1(0);
+    SL::spMS2->MessageSend(message);
+    message->Release();
+    return !tutorial->IsTutorial();
 }
 
 bool NativeTutorialAllowsZone(int x0, int z0, int x1, int z1, bool flood) {

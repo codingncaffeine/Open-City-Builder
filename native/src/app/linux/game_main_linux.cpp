@@ -2185,6 +2185,8 @@ int RunScenario(const std::string& path) {
             for (int i = 0; i < count; ++i) { injected.push_back("tutorialdo"); injected.push_back("frames 40"); injected.push_back("tutorialtask"); }
         } else if (command == "tutorialtask") {   // tutorialtask: the current tutorial task's number, kind, target and text
             native::NativeTutorialTaskReport();
+        } else if (command == "tutorialend") {   // tutorialend: the tutorial ends as its scripts end it, the city stays open as a plain city
+            std::printf("tutorialend: %s\n", native::NativeTutorialFinish() ? "ended" : "no running tutorial");
         } else if (command == "tutorialcheat") {   // tutorialcheat TEXT: the tutorial system's cheat ("Tutorial next") without the cheat box
             std::string text; std::getline(words >> std::ws, text);
             std::printf("tutorialcheat %s -> %s\n", text.c_str(), native::NativeTutorialCheat(text.c_str()) ? "sent" : "no tutorial system");
