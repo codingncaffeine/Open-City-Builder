@@ -2652,18 +2652,23 @@ bool cGZWinGrid::SetScrollBarImageHorizontal(IWinBuffer* image, const cRZRect& a
     return true;
 }
 
+namespace {
+void (*g_gridSoundPlayer)(std::uint32_t) = nullptr;
+}  // namespace
+void SetGridSoundPlayer(void (*player)(std::uint32_t soundId)) { g_gridSoundPlayer = player; }
+
 bool cGZWinGrid::SetSoundID(int which, int soundId) {   // @ 0x10025c8c2
     if (which < 0 || which >= 3) return false;
     soundId_[which] = soundId;
     return true;
 }
 
-bool cGZWinGrid::PlaySoundA(int which) {   // @ 0x10025c8de (partial: RZ::SS() is not recovered)
+bool cGZWinGrid::PlaySoundA(int which) {   // @ 0x10025c8de
     if (which < 0 || which >= 3 || soundId_[which] == 0) return false;
-    // The original asks RZ::SS() for a sound object (vslot 0x70, sound 0x5b523ba4) and plays it (vslot 0x28).
-    // The sound system service is outside this class; the seam would be the same one the audio classes use.
-    SC4_UNWIRED("cGZWinGrid::PlaySoundA: the grid's click/select sound (RZ::SS() sound object) is not played");
-    return false;
+    // RZ::SS() makes a sound object for the id (vslot 0x70) and plays it (vslot 0x28): the application's sound player.
+    if (!g_gridSoundPlayer) return false;
+    g_gridSoundPlayer(static_cast<std::uint32_t>(soundId_[which]));
+    return true;
 }
 
 bool cGZWinGrid::Refresh() {   // @ 0x10025c9a8

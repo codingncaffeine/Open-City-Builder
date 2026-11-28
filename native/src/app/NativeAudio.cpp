@@ -78,6 +78,12 @@ void PlayGameSound(std::uint32_t soundId) {
 float EffectsGain() {
     return AudioRunning() ? sc4::cSC4AudioPreferencesWinProc::SoundGain(SL::spPreferences) : 0.0f;
 }
-void InstallButtonSounds() { gz::SetWinButtonHost(&g_buttons); }
+}  // namespace native
+namespace gz { void SetGridSoundPlayer(void (*player)(std::uint32_t soundId)); }   // gz/WinGrid.h
+namespace native {
+void InstallButtonSounds() {
+    gz::SetWinButtonHost(&g_buttons);
+    gz::SetGridSoundPlayer(&PlayGameSound);   // the grids' click / select sounds (cGZWinGrid::PlaySoundA)
+}
 
 }  // namespace native

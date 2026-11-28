@@ -325,6 +325,9 @@ constexpr std::uint32_t kGZMsgGridMouseDown = 0x9a1552d7;
 constexpr std::uint32_t kGridVerticalScrollBarId = 0x1a7c4511, kGridHorizontalScrollBarId = 0x1a7c4510;
 constexpr std::uint32_t kGridCmdScrollbar = 0x887113a3;
 
+// RZ::SS(): plays a sound by id for the grid's clicks (the application installs it).
+void SetGridSoundPlayer(void (*player)(std::uint32_t soundId));
+
 class cGZWinGrid : public cIGZWinGrid, public cGZWin {
 public:
     explicit cGZWinGrid(cIGZWinMgr* mgr, int flags = 0);          // 0x10025086a (the original only takes the flags)
