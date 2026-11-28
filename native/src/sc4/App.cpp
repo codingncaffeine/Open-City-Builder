@@ -13,18 +13,21 @@
 #include "rz/cRZMessage2Standard.h"
 #include "gz/cGZDBSegmentPackedFile.h"
 #include "rz/PathUtils.h"
+#include "sc4/AppPlatform.h"
 #include "sc4/AutoRecord.h"
 #include "rz/cRZSysServPtr.h"
 
 namespace {
 using LanguageManagerPtr = cRZSysServPtr<cIGZLanguageManager, kGZSID_cRZLanguageManager, kGZIID_cIGZLanguageManager>;
 
-// "<directory>/": the language folder of the current language (language 0) followed by a slash
+// "<directory>/": the language folder of the current language (language 0) followed by a slash. The PC data comes from a
+// file system that ignores case: the folder under `out` (the data directory) is matched without regard to case.
 void AppendLanguageFolder(cIGZString& out) {
     cRZString folder("English");
     LanguageManagerPtr languages;
     if (languages) languages->GetLanguageDirectoryName(folder, 0);
-    out.AppendString(folder);
+    const std::string name = SC4FolderNameOnDisk(out.ToChar(), folder.ToChar());
+    out.AppendChars(name.c_str(), static_cast<std::uint32_t>(name.size()));
     out.AppendChars("/", 1);
 }
 

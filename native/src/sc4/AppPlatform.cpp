@@ -1,5 +1,6 @@
 #include "sc4/AppPlatform.h"
 
+#include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <utility>
@@ -24,6 +25,20 @@ bool SC4GetInstalledLanguageAndCountryIDs(unsigned int& language, unsigned int& 
     language = 0;
     country = 0;
     return false;
+}
+
+std::string SC4FolderNameOnDisk(const std::string& base, const std::string& name) {
+    std::error_code error;
+    if (base.empty() || std::filesystem::is_directory(base + name, error)) return name;
+    const auto lower = [](std::string text) {
+        for (char& c : text) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return text;
+    };
+    const std::string want = lower(name);
+    for (const auto& entry : std::filesystem::directory_iterator(base, error)) {
+        if (entry.is_directory(error) && lower(entry.path().filename().string()) == want) return entry.path().filename().string();
+    }
+    return name;
 }
 
 int SC4SetCPUUsageCount(int) { return 0; }

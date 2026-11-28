@@ -31,6 +31,8 @@
 #include "gz/WinFlatRect.h"
 #include "gz/WinFolders.h"
 #include "gz/WinGen.h"
+#include "rz/LanguageManager.h"
+#include "rz/cRZSysServPtr.h"
 #include "gz/WinStyle.h"
 #include "gz/WinCtrlFactory.h"
 #include "gz/WinFont.h"
@@ -73,7 +75,7 @@ PngDecoder g_decodePng = nullptr;   // set by host_main.mm (ImageIO lives there)
 // The standard bitmap resources (type 0x856ddbac, PNG) of the game data, searched in the engine's package order; one counted reference.
 // The packages in lookup order: the language's SimCityLocale.dat first (its strings and art override the base ones), then
 // the expansion and the base packages, the later-loaded package first as the game's resource manager resolves them. Names match without regard to case (the PC data spells some ".DAT"); the language folder is
-// $SC4_LANGUAGE, else English.
+// the language manager's current one.
 std::string FindDataFile(const std::string& relative) {
     std::error_code error;
     if (std::filesystem::exists(GameDataDir() + relative, error)) return GameDataDir() + relative;
@@ -95,9 +97,18 @@ std::string FindDataFile(const std::string& relative) {
 bool LoadResourceBytes(std::uint32_t type, std::uint32_t group, std::uint32_t instance, std::vector<std::uint8_t>& bytes) {
     static std::vector<std::unique_ptr<dbpf::Package>> packages;
     static std::vector<std::string> names;
+    // The current language's folder, as cSC4App::GetDataDirectory(out, 0) appends it; this can run before the start-up
+    // picks the language, so a later change reopens the packages.
+    cRZString folder("English");
+    cRZSysServPtr<cIGZLanguageManager, kGZSID_cRZLanguageManager, kGZIID_cIGZLanguageManager> languages;
+    if (languages) languages->GetLanguageDirectoryName(folder, 0);
+    const std::string locale = std::string(folder.ToChar()) + "/SimCityLocale.dat";
+    if (!names.empty() && names.front() != locale) {
+        names.clear();
+        packages.clear();
+    }
     if (names.empty()) {
-        const char* language = std::getenv("SC4_LANGUAGE");
-        names.push_back(std::string(language && *language ? language : "English") + "/SimCityLocale.dat");
+        names.push_back(locale);
         // later packages override earlier ones in the game's resource manager: the expansion first, then the base set newest first
         for (const char* name : {"EP1.dat", "SimCity_5.dat", "SimCity_4.dat", "SimCity_3.dat", "SimCity_2.dat", "SimCity_1.dat", "Intro.dat"})
             names.push_back(name);

@@ -345,7 +345,7 @@ bool AnyEntryMatches(const std::string& directory, const char* pattern) {
     std::error_code error;
     if (!std::filesystem::is_directory(directory, error)) return false;
     for (const auto& entry : std::filesystem::directory_iterator(directory, error)) {
-        if (fnmatch(pattern, entry.path().filename().c_str(), 0) == 0) return true;
+        if (fnmatch(pattern, entry.path().filename().c_str(), FNM_CASEFOLD) == 0) return true;   // the PC data spells ".DAT"
     }
     return false;
 }
@@ -357,7 +357,8 @@ void cSC4App::FindAndRegisterAllAvailableLanguages() {
     cRZString directoryName;
     for (std::uint32_t language = 1; language <= 0x2c; ++language) {
         if (!languages->GetLanguageDirectoryName(directoryName, language)) continue;
-        std::string folder = std::string(dataDirectory_.ToChar()) + directoryName.ToChar() + "/";
+        const std::string base = dataDirectory_.ToChar();
+        std::string folder = base + SC4FolderNameOnDisk(base, directoryName.ToChar()) + "/";
         if (AnyEntryMatches(folder, "*.str*") || AnyEntryMatches(folder, "*.dat")) languages->AddAvailableLanguage(language);
     }
 }

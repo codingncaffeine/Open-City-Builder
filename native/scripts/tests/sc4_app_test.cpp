@@ -243,6 +243,8 @@ int main() {
         std::filesystem::create_directories(root + "/Data/German");
         std::ofstream(root + "/Data/German/data.dat") << "x";
         std::filesystem::create_directories(root + "/Data/French");        // no string tables: not available
+        std::filesystem::create_directories(root + "/Data/ukenglsh");      // UK English as the PC data spells it: case differs
+        std::ofstream(root + "/Data/ukenglsh/SimCityLocale.DAT") << "x";
         SetDocumentsFolderProvider([&](std::string& out) { out = root + "/Documents"; return true; });
         std::filesystem::create_directories(root + "/Documents");
 
@@ -274,6 +276,19 @@ int main() {
             std::string name = folder.ToChar();
             if (name == "English" || name == "German") CHECK(languages->CanSwitchToLanguage(id));
             if (name == "French") CHECK(!languages->CanSwitchToLanguage(id));
+        }
+        // the folder and the ".DAT" match without regard to case, as on the PC's file system
+        CHECK(languages->CanSwitchToLanguage(2));
+        CHECK(SC4FolderNameOnDisk(root + "/Data/", "UKEnglsh") == "ukenglsh");
+        CHECK(SC4FolderNameOnDisk(root + "/Data/", "German") == "German");
+        CHECK(SC4FolderNameOnDisk(root + "/Data/", "Swedish") == "Swedish");   // nothing on disk: the name as asked
+        {
+            const std::uint32_t current = languages->GetCurrentLanguage();
+            languages->SetCurrentLanguage(2);
+            cRZString data;
+            a->GetDataDirectory(data, 0);
+            CHECK(std::string(data.ToChar()) == root + "/Data/ukenglsh/");
+            languages->SetCurrentLanguage(current);
         }
         CHECK(languages->GetCurrentLanguage() == a->Preferences().Get<std::uint32_t>(sc4::prefs::kLanguageId));
         CHECK(graphics.driver == 0xc4554841u);                           // -d:opengl
