@@ -1455,7 +1455,22 @@ bool cSC4Automaton::HandleEnterState(tAutomataState* state) {
         }
         case kStatePlayerDrive: {
             auto* drive = static_cast<tAutomataStatePlayerDrive*>(state);
+            // i386 0x000c0dd4: the drive starts from the automaton's heading, half its radius behind its position (the
+            // off-road integration in the vehicles' DoPlayerDriveTick continues from drivePos54), with the rudder, the
+            // damage, the mouse and the on-road report cleared. The original also sets i386 +0x74 to 0 and +0x22c / +0x230
+            // to -1; the port has no reader of those three.
             drive->value38 = 0.0f;
+            drive->value3c = 0.0f;
+            drive->steer48 = orientation_;
+            drive->drivePos54 = cS3DVector3(position_.x - orientation_.x * radius_ * 0.5f, position_.y - orientation_.y * radius_ * 0.5f,
+                                            position_.z - orientation_.z * radius_ * 0.5f);
+            drive->driveDir60 = drive->steer48;
+            drive->steering6c = 0.0f;
+            drive->damage70 = 0;
+            drive->mouseX214 = 0;
+            drive->mouseY218 = 0;
+            drive->onRoad254 = 0;
+            drive->toggle229 = 0;
             // i386 HandleEnterState: every command released, no uses, unlimited, never reloading, ready.
             for (int i = 0; i < 13; ++i) {
                 drive->history[i] = -1.0f;
