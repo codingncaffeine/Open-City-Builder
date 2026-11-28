@@ -41,7 +41,6 @@
 #include "gz/WinLineInput.h"
 #include "gz/WinTextEdit.h"
 #include "gz/WinListBox.h"
-#include "gz/WinScrollbar.h"
 #include "gz/WinSlider.h"
 #include "gz/WinText.h"
 #include "rz/COMDirectors.h"
@@ -58,6 +57,7 @@
 
 #include "dbpf/DBPFReader.h"
 
+namespace native { void RegisterScriptControlMakers(cIGZWinMgr* mgr); }
 namespace native {
 namespace {
 
@@ -383,6 +383,7 @@ bool InitUiScripts(WinMgr* mgr) {
     // script built bare windows and the advice lists never got their page.
     RegisterWinHtmlMakers(g_mgr);
     InstallWinHtmlHosts();
+    RegisterScriptControlMakers(g_mgr);   // app/NativeUiMakers.cpp
     gz::RegisterDirectorMaker("cGZWinGrid", +[]() -> cIGZUnknown* {   // the director's default flags (Mac i386 CreateGZWinGrid 0x0073c2ee)
         return static_cast<cIGZUnknown*>(static_cast<cIGZWin*>(new gz::cGZWinGrid(g_mgr, 0x19bff)));
     });
