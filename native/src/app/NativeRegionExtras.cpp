@@ -13,6 +13,7 @@
 #include "sc4/WinRegionScroll.h"
 #include "sc4/WinRegionScreen.h"
 #include "gz/Buffer.h"
+#include "gz/WinBufferOfGZBuffer.h"
 #include "gz/WinBMP.h"
 #include "gz/WinCtrlMgr.h"
 #include "gz/WinCtrlFactory.h"
@@ -92,28 +93,6 @@ private:
     CloudsDevice device_;
 };
 
-// A loaded game picture (cIGZBuffer) as the window system's buffer, for the scroll origin marker.
-class PictureBuffer final : public IWinBuffer {
-public:
-    explicit PictureBuffer(cIGZBuffer* buffer) : buffer_(buffer) { buffer_->AddRef(); }
-    ~PictureBuffer() { buffer_->Release(); }
-    bool QueryInterface(std::uint32_t, void**) override { return false; }
-    std::uint32_t AddRef() override { return ++refs_; }
-    std::uint32_t Release() override { if (--refs_ == 0) { delete this; return 0; } return refs_; }
-    const cRZRect* GetBounds() const override { return buffer_->GetBufferArea(); }
-    std::uint32_t MakeNativeColor(std::uint8_t r, std::uint8_t g, std::uint8_t b) override { return buffer_->ConvertRGBValueToNative(r, g, b); }
-    void NativeToRGB(std::uint32_t n, std::uint8_t& r, std::uint8_t& g, std::uint8_t& b) override { buffer_->ConvertNativeValueToRGB(n, r, g, b); }
-    void* GetDrawContext() override { return nullptr; }
-    bool SetFadeAlpha(std::uint8_t) override { return false; }
-    void SetTransparency(std::uint32_t color) override { buffer_->SetTransparency(color); }
-    cIGZBuffer* AsGZBuffer() override { return buffer_; }
-    gz::IDrawTargetBuffer* AsDrawSource() override { return buffer_; }
-
-private:
-    int refs_ = 1;
-    cIGZBuffer* buffer_;
-};
-
 class ScrollHost final : public sc4::IRegionScrollHost {
 public:
     bool EdgeScrollEnabled() override {
@@ -125,7 +104,7 @@ public:
     IWinBuffer* LoadScrollOriginImage() override {
         cSLBuffer picture(0x856ddbac, 0x46a006b0, 0x094ac89a, 1, false);
         if (!picture.Load() || !picture.GetBuffer()) return nullptr;
-        return new PictureBuffer(picture.GetBuffer());
+        return new WinBufferOfGZBuffer(picture.GetBuffer());
     }
     // RZ::WCM() CreateWinBMP(0x48e945b4, image, fit): the marker window, one reference for the caller.
     cIGZWin* CreateImageWindow(IWinBuffer* image) override {
