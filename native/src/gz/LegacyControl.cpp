@@ -5,6 +5,7 @@
 // buffers they build; the class ids are the vocabulary's own GZWin* / IGZWin* entries). The interpreter
 // dispatch table is the original's TU-static sInterpretVocab (0x100b6eb10) and the class->view table its
 // sCLSIDtoIIDMap (0x100b6eb28).
+#include "gz/WinOptGrp.h"
 #include "gz/WinCombo.h"
 #include "gz/LegacyControl.h"
 
@@ -1909,6 +1910,148 @@ void cGZLegacyControl::InterpretPropertiesGZWinCombo(cIGZWin* window, tScriptPro
     combo->Release();
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// InterpretPropertiesGZWinOptGrp (i386 0x003bae7a). At init: the flags 0xf00..0xf02 / 0xf019 (1, 2, 4, 8), the gutters
+// 0xf004, the label and button fonts 0xf03 / 0xf04, the five font colours 0xf05..0xf09, the caption resource 0xf0a, the
+// back picture 0xf0b, the outline colours 0x40b "(r,g,b)" x 4 and the auto-fill type 0xf0c (0xf0e = by height, with the
+// limit 0xf10). After init: the options 0xf0d "id:caption:unused:{group,instance}:(l,t,r,b)", then 0xf11 / 0xf12
+// "id:(x,y)" moves and sizes, the selection 0x501, and with 0x304 the group sizes itself (autofit parameter 0xdacf8f9c).
+// The original also keeps the caption key as parameter 0x4a4af4ac for unscript, which the game never reads.
+// ---------------------------------------------------------------------------------------------------------
+void cGZLegacyControl::InterpretPropertiesGZWinOptGrp(cIGZWin* window, tScriptPropertyArray& parameters, bool init) {
+    if (!window) return;
+    gz::cIGZWinOptGrp* group = nullptr;
+    if (!window->QueryInterface(gz::kGZIID_cIGZWinOptGrp, reinterpret_cast<void**>(&group)) || !group) return;
+    auto native = [](std::uint8_t r, std::uint8_t g, std::uint8_t b) { return WinGraphics() ? WinGraphics()->MakeNativeColor(r, g, b) : 0u; };
+    auto textOf = [](const tScriptProperty& property, cRZString& out) {
+        return property.value && property.value->GetType() == (cIGZVariant::kTypeRZChar | cIGZVariant::kTypeArrayFlag) &&
+               property.value->GetValString(out);
+    };
+    auto split = [](std::string& rest) {   // cRZString::SplitToken on ':': the first token, removed from `rest`
+        const std::size_t at = rest.find(':');
+        std::string token = rest.substr(0, at);
+        rest = at == std::string::npos ? std::string() : rest.substr(at + 1);
+        return token;
+    };
+    if (init) {
+        static constexpr struct { std::uint32_t property; int flag; } kFlags[] = {{0xf00, 1}, {0xf01, 2}, {0xf02, 4}, {0xf019, 8}};
+        for (const auto& f : kFlags) {
+            std::uint32_t value = 0;
+            if (GetPropertyUint32(parameters, f.property, value)) group->SetOptGrpFlag(f.flag, value == 1);   // vslot 0x14
+        }
+        int gx = 0, gy = 0;
+        if (GetPropertyCoords(parameters, 0xf004, gx, gy)) group->SetGutters(static_cast<std::uint8_t>(gx), static_cast<std::uint8_t>(gy));
+        gz::IWinFontSource* fonts = gz::WinFontSource();
+        cRZString name;
+        std::uint32_t styleId = 0;
+        if (GetPropertyUint32(parameters, 0xf03, styleId)) {
+            group->SetLabelFont(fonts ? fonts->Font(styleId) : nullptr);   // vslot 0x20
+            SetGZWinFont(window, styleId, 0);
+        } else if (GetPropertyString(parameters, 0xf03, name)) {
+            SetGZWinFont(window, name, 0);
+        }
+        if (GetPropertyUint32(parameters, 0xf04, styleId)) {
+            group->SetBtnFont(fonts ? fonts->Font(styleId) : nullptr);     // vslot 0x24
+            SetGZWinFont(window, styleId, 1);
+        } else if (GetPropertyString(parameters, 0xf04, name)) {
+            SetGZWinFont(window, name, 1);
+        }
+        static constexpr std::uint32_t kColors[] = {0xf05, 0xf06, 0xf07, 0xf08, 0xf09};
+        for (std::uint32_t i = 0; i < 5; ++i) {
+            std::uint8_t r = 0, g = 0, b = 0;
+            if (GetPropertyColor(parameters, kColors[i], r, g, b))
+                group->SetFontColor(static_cast<gz::cIGZWinOptGrp::tOptGrpFontColorIdx>(i), native(r, g, b));   // vslot 0x28
+        }
+        cRZString text;
+        std::uint32_t keyGroup = 0, keyInstance = 0;
+        if (GetPropertyString(parameters, 0xf0a, text)) {
+            std::sscanf(text.ToChar(), "{%x,%x}", &keyGroup, &keyInstance);
+            cRZString caption;
+            if (LoadStringA(keyGroup, keyInstance, caption)) group->AsIGZWin()->SetCaption(caption);   // window vslot 0x128
+        }
+        if (GetPropertyString(parameters, 0xf0b, text) && std::sscanf(text.ToChar(), "{%x,%x}", &keyGroup, &keyInstance) == 2) {
+            cIGZBuffer* image = LoadBuffer(keyGroup, keyInstance);
+            if (image) group->SetBackBMP(image);   // vslot 0x50
+            SetGZWinImage(window, keyGroup, keyInstance, 0);
+            if (image) image->Release();
+        }
+        unsigned c[12] = {};
+        if (GetPropertyString(parameters, 0x40b, text) &&
+            std::sscanf(text.ToChar(), "(%u,%u,%u)(%u,%u,%u)(%u,%u,%u)(%u,%u,%u)", &c[0], &c[1], &c[2], &c[3], &c[4], &c[5], &c[6], &c[7],
+                        &c[8], &c[9], &c[10], &c[11]) == 12) {
+            auto colour = [&](int i) { return native(std::uint8_t(c[i]), std::uint8_t(c[i + 1]), std::uint8_t(c[i + 2])); };
+            group->SetOutlineColors(colour(0), colour(3), colour(6), colour(9));   // vslot 0x54
+        }
+        std::uint32_t fill = 0;
+        if (GetPropertyUint32(parameters, 0xf0c, fill)) {
+            if (fill == 0xf0e) {
+                std::uint32_t limit = 0;
+                if (GetPropertyUint32(parameters, 0xf10, limit)) group->SetAutoFillType(0, static_cast<int>(limit));   // vslot 0x70
+            } else {
+                group->SetAutoFillType(1, 0);
+            }
+        }
+    } else {
+        for (const tScriptProperty& property : parameters) {
+            cRZString value;
+            if (property.id != 0xf0d || !textOf(property, value)) continue;
+            std::string rest(value.ToChar(), value.Strlen());
+            int id = 0, unused = 0;
+            std::sscanf(split(rest).c_str(), "%d", &id);
+            const cRZString caption(split(rest).c_str());
+            std::sscanf(split(rest).c_str(), "%d", &unused);
+            unsigned pictureGroup = 0, pictureInstance = 0;
+            cIGZBuffer* image = nullptr;
+            if (std::sscanf(split(rest).c_str(), "{%x,%x}", &pictureGroup, &pictureInstance) == 2) image = LoadBuffer(pictureGroup, pictureInstance);
+            cRZRect area{0, 0, 1, 1};
+            int l = 0, t = 0, r = 0, b = 0;
+            if (std::sscanf(rest.c_str(), "(%d,%d,%d,%d)", &l, &t, &r, &b) == 4) area = cRZRect{l, t, r, b};
+            group->OptBtnAdd(static_cast<std::uint32_t>(id), caption, static_cast<std::uint32_t>(unused), image, &area);   // vslot 0x3c
+            gz::cIGZWinBtn* button = nullptr;
+            if (group->GetOptBtn(static_cast<std::uint32_t>(id), &button) && button) {   // vslot 0x4c
+                SetGZWinImage(button->AsIGZWin(), pictureGroup, pictureInstance, 0);
+                button->Release();
+            }
+            if (image) image->Release();
+        }
+        for (const tScriptProperty& property : parameters) {
+            if (property.id != 0xf11 && property.id != 0xf12) continue;
+            cRZString value;
+            if (!textOf(property, value)) continue;
+            std::string rest(value.ToChar(), value.Strlen());
+            int id = 0, x = 0, y = 0;
+            std::sscanf(split(rest).c_str(), "%d", &id);
+            if (std::sscanf(rest.c_str(), "(%d,%d)", &x, &y) != 2) continue;
+            if (property.id == 0xf11) group->OptBtnMoveTo(static_cast<std::uint32_t>(id), x, y);   // vslot 0x44
+            else group->OptBtnSize(static_cast<std::uint32_t>(id), x, y);                         // vslot 0x48
+        }
+        std::uint32_t selection = 0;
+        if (GetPropertyUint32(parameters, 0x501, selection)) group->SetValue(selection);   // vslot 0x38
+        bool autofit = false;
+        for (const tScriptProperty& property : parameters) {
+            if (property.id == 0x304) { autofit = true; break; }
+        }
+        auto* autofitParam = new cRZVariant();
+        autofitParam->SetValBool(autofit);
+        window->SetParam(0xdacf8f9cu, autofitParam);
+        if (autofit) group->AutoSize();   // vslot 0x60
+        if (std::getenv("SC4_DEBUG")) {
+            std::string buttons;
+            for (std::uint32_t id = 0; id < 16; ++id) {
+                gz::cIGZWinBtn* button = nullptr;
+                if (!group->GetOptBtn(id, &button) || !button) continue;
+                cIGZWin* w = button->AsIGZWin();
+                char line[64];
+                std::snprintf(line, sizeof line, " %u@%d,%d %dx%d", id, w->GetL(), w->GetT(), w->GetW(), w->GetH());
+                buttons += line;
+                button->Release();
+            }
+            std::fprintf(stderr, "option group %08x: value %u, options%s\n", window->GetID(), group->GetValue(), buttons.c_str());
+        }
+    }
+    group->Release();
+}
+
 #define GZLEGACYCTRL_PARTIAL_INTERPRETER(Name)                                                   \
     void cGZLegacyControl::InterpretProperties##Name(cIGZWin* window, tScriptPropertyArray& parameters, \
                                                     bool init) {                                 \
@@ -1918,7 +2061,6 @@ void cGZLegacyControl::InterpretPropertiesGZWinCombo(cIGZWin* window, tScriptPro
 
 
 GZLEGACYCTRL_PARTIAL_INTERPRETER(GZWinLineInput)
-GZLEGACYCTRL_PARTIAL_INTERPRETER(GZWinOptGrp)
 GZLEGACYCTRL_PARTIAL_INTERPRETER(GZWinTextTicker)
 GZLEGACYCTRL_PARTIAL_INTERPRETER(GZWinFileBrowser)
 GZLEGACYCTRL_PARTIAL_INTERPRETER(GZWinTreeView)
