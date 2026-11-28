@@ -1215,7 +1215,7 @@ void cSC4WinRegionScreen::ShowPanel(int panel) {   // @ 0x100237a58
     }
     for (int i = 0; i < 3; ++i) {
         void* button = nullptr;
-        if (GetChildAs(kRegionScreenPanelButtonIds[i], gz::kGZIID_cIGZWinBtn, &button) && button) {
+        if (GetChildAsRecursive(kRegionScreenPanelButtonIds[i], gz::kGZIID_cIGZWinBtn, &button) && button) {
             static_cast<gz::cIGZWinBtn*>(button)->SetChecked(i == panel);
             static_cast<gz::cIGZWinBtn*>(button)->Release();
         }
@@ -1229,11 +1229,12 @@ bool cSC4WinRegionScreen::GZOnCommand(std::uint32_t command, std::uint64_t param
         if (param != kRegionScreenGridCheckBoxId) return true;
         void* raw = nullptr;
         bool checked = false;
-        if (GetChildAs(kRegionScreenGridCheckBoxId, gz::kGZIID_cIGZWinBtn, &raw) && raw) {
+        if (GetChildAsRecursive(kRegionScreenGridCheckBoxId, gz::kGZIID_cIGZWinBtn, &raw) && raw) {
             auto* button = static_cast<gz::cIGZWinBtn*>(raw);
             checked = button->IsChecked();
             button->Release();
         }
+        if (getenv("SC4_DEBUG")) fprintf(stderr, "region screen: check box %08x -> %d\n", kRegionScreenGridCheckBoxId, int(checked));
         if (view_) view_->EnableGrid(checked);
         if (std::uint8_t* preferences = host ? host->Preferences() : nullptr) {
             preferences[kPrefsShowGrid] = checked ? 1 : 0;
@@ -1294,7 +1295,7 @@ bool cSC4WinRegionScreen::GZOnCommand(std::uint32_t command, std::uint64_t param
         SetUserPreferencesToCurrentPosition();
         if (host) host->RequestQuitFromRegion(true);   // cISC4App vslot 0x2c (1)
         void* raw = nullptr;
-        if (GetChildAs(0x26c10a3e, gz::kGZIID_cIGZWinBtn, &raw) && raw) {
+        if (GetChildAsRecursive(0x26c10a3e, gz::kGZIID_cIGZWinBtn, &raw) && raw) {
             auto* button = static_cast<gz::cIGZWinBtn*>(raw);
             button->SetChecked(false);
             button->Release();
@@ -1340,11 +1341,12 @@ bool cSC4WinRegionScreen::GZOnCommand(std::uint32_t command, std::uint64_t param
     case kRegionScreenSignpostCheckBoxId: {   // signpost-mode check box
         void* raw = nullptr;
         bool checked = false;
-        if (GetChildAs(kRegionScreenSignpostCheckBoxId, gz::kGZIID_cIGZWinBtn, &raw) && raw) {
+        if (GetChildAsRecursive(kRegionScreenSignpostCheckBoxId, gz::kGZIID_cIGZWinBtn, &raw) && raw) {
             auto* button = static_cast<gz::cIGZWinBtn*>(raw);
             checked = button->IsChecked();
             button->Release();
         }
+        if (getenv("SC4_DEBUG")) fprintf(stderr, "region screen: check box %08x -> %d\n", kRegionScreenSignpostCheckBoxId, int(checked));
         signpostMode_ = checked ? 1 : 0;
         RestoreSignposts();
         if (std::uint8_t* preferences = host ? host->Preferences() : nullptr) {
@@ -1364,7 +1366,7 @@ bool cSC4WinRegionScreen::GZOnCommand(std::uint32_t command, std::uint64_t param
                 }
             }
             void* raw = nullptr;
-            if (GetChildAs(id, gz::kGZIID_cIGZWinBtn, &raw) && raw) {
+            if (GetChildAsRecursive(id, gz::kGZIID_cIGZWinBtn, &raw) && raw) {
                 auto* button = static_cast<gz::cIGZWinBtn*>(raw);
                 button->SetChecked(id == param);
                 button->Release();
