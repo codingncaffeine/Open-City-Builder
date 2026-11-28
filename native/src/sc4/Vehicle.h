@@ -111,6 +111,8 @@ constexpr std::uint32_t kVehicleNetworkFlagTunnelInterface = 0x80000;
 // The network flag the player-drive code uses to recognise a road cell (HasAnyNetworkFlag 0x40341004 in the original;
 // 0x1f4f is the "drivable network" mask).
 constexpr std::uint32_t kVehicleNetworkFlagDriveable = 0x1f4f;
+// The pieces a driven car is held to (highways and the raised / special pieces in the flag word's upper bits). An ordinary
+// road (flags 0x1600a001 in a test city) has none of them, so the original drives freely there and reports "off road".
 constexpr std::uint32_t kVehicleNetworkFlagOnRoad = 0x40341004;
 
 constexpr float kVehicleStoppedSpeed = 0.0002777778f;   // 1/3600, the plummet's resting speed (0x3991a2b5)

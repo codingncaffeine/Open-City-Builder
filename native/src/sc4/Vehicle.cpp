@@ -1340,9 +1340,13 @@ ITrafficAutomatonOccupant* cSC4Vehicle::PlayerDriveGetNetwork(tAutomataStatePlay
         const float occupantAltitude = occupant->GetAltitude(position.x, position.z);
         cS3DVector3 snapped = position;
         const int index = pathInfo->SnapPointToPath(snapped, &path->points);
-        float candidate = occupantAltitude;
-        if (index != -1 && !occupant->HasAnyNetworkFlag(kVehicleNetworkFlagOnRoad) &&
-            std::fabs(occupantAltitude - position.y) < std::fabs(snapped.y - position.y)) {
+        // i386 0x000a11e3..0x000a127b: no snap -> the occupant's altitude; a road -> the snapped point's height; anything
+        // else -> whichever of the two is nearer the car.
+        float candidate = snapped.y;
+        if (index == -1) {
+            candidate = occupantAltitude;
+        } else if (!occupant->HasAnyNetworkFlag(kVehicleNetworkFlagOnRoad) &&
+                   std::fabs(occupantAltitude - position.y) < std::fabs(snapped.y - position.y)) {
             candidate = occupantAltitude;
         }
         if (candidate < bestDistance && candidate - 4.0f < position.y) {
