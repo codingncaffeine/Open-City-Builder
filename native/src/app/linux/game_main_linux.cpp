@@ -110,6 +110,7 @@
 #include "rz/cRZMessage2Standard.h"
 #include "app/NativeEffects.h"
 #include "sc4/WinRegionScreen.h"
+#include "sc4/WinRegionScroll.h"
 #include "sc4/WinSC4App.h"
 #include "sc4/WinSplashScreen.h"
 #include "app/NativeZoneTool.h"
@@ -957,7 +958,7 @@ void PostMouse(std::uint32_t type, float x, float y, std::uint32_t extra = 0) {
                      type, x, y, gx, gy, ww, wh, pw, ph, p.x, p.y, p.w, p.h, gW, gH);
     }
     if (type != kGZMsgMouseMove) platform::Breadcrumb("mouse %#x at game %d,%d", type, gx, gy);
-    gMgr->GZWinMsgPost_Mouse(type, gx, gy, extra | Flags());
+    gMgr->ProcessInputMouse(type, gx, gy, extra | Flags());   // the window system's input: the original's window procedure path
 }
 
 // The Windows virtual-key code the game's windows test (VK_ESCAPE 0x1b, VK_RETURN 0x0d, letters and digits as upper-case ASCII).
@@ -1224,6 +1225,11 @@ int RunScenario(const std::string& path) {
             }
             for (int i = 0; i < 5; ++i) { PumpEvents(); Frame(); Nap(); }
             std::printf("tapat %d,%d\n", gx, gy);
+        } else if (command == "sdlmotion") {   // sdlmotion X Y: a real SDL pointer motion with no button held (window points), then a frame
+            float x = 0, y = 0; words >> x >> y;
+            SDL_Event e{};
+            e.type = SDL_EVENT_MOUSE_MOTION; e.motion.windowID = SDL_GetWindowID(gWindow); e.motion.x = x; e.motion.y = y;
+            SDL_PushEvent(&e); PumpEvents(); Frame(); Nap();
         } else if (command == "sdlclick") {   // sdlclick X Y: a real SDL left click in window points, through the live event path
             float x = 0, y = 0; words >> x >> y;
             SDL_Event e{};
@@ -1937,6 +1943,18 @@ int RunScenario(const std::string& path) {
         } else if (command == "regionview") {   // regionview: back to the region without the save question (RequestGoToRegionView(false), after a savecity)
             cSC4App* app = native::BootApplication();
             std::printf("regionview: %s\n", app && app->RequestGoToRegionView(false) ? "done" : "refused");
+        } else if (command == "regionscroll") {   // regionscroll: the region screen's scroll window (pointer scrolling, its vector, capture, flags)
+            auto* screen = gAppWindow ? dynamic_cast<sc4::cSC4WinRegionScreen*>(gAppWindow->CurrentScreen()) : nullptr;
+            sc4::cSC4WinRegionScroll* scroll = screen ? screen->Scroll() : nullptr;
+            if (!scroll) {
+                std::printf("regionscroll: no region screen\n");
+            } else {
+                cIGZWin* capture = gMgr ? gMgr->GZGetCapture() : nullptr;
+                std::printf("regionscroll: %p scrolling %d vector %.2f,%.2f capture %s enabled %d ignorescursor %d\n", static_cast<void*>(scroll), int(scroll->MouseScrolling()),
+                            scroll->MouseVectorX(), scroll->MouseVectorY(),
+                            capture == nullptr ? "none" : (capture == static_cast<cIGZWin*>(scroll) ? "scroll" : "other"),
+                            int(scroll->IsEnabled()), int(scroll->GetFlag(0x200000)));
+            }
         } else if (command == "regioncity") {   // regioncity: the open city's regional record (what the region view and the neighbors read)
             auto* record = dynamic_cast<cSC4RegionalCity*>(native::NativeCurrentRegionalCity());
             std::vector<cISC4RegionalCity::PointOfInterest> airports, seaports;

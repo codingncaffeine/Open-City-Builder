@@ -1,5 +1,8 @@
 #include "sc4/WinRegionScroll.h"
 
+#include <cstdio>
+#include <cstdlib>
+
 #include <algorithm>
 #include <cmath>
 
@@ -43,7 +46,10 @@ bool cSC4WinRegionScroll::Shutdown() {
     return true;
 }
 
+namespace { bool ScrollDebug() { static const bool on = std::getenv("SC4_SCROLLDEBUG") != nullptr; return on; } }
+
 bool cSC4WinRegionScroll::GZOnMouseDownR(int x, int y, std::uint32_t) {
+    if (ScrollDebug()) std::fprintf(stderr, "region scroll: down %d,%d (%p)\n", x, y, static_cast<void*>(this));
     if (cIGZWin* marker = GetChildWindowFromID(kRegionScrollArrowWindowId)) ChildDelete(marker);
     SetFlag(0x200000, false);
     mgr_->GZSetCapture(this);
@@ -81,7 +87,8 @@ void cSC4WinRegionScroll::SetMouseScroll(int x, int y) {
     marker->Release();
 }
 
-bool cSC4WinRegionScroll::GZOnMouseUpR(int, int, std::uint32_t) {
+bool cSC4WinRegionScroll::GZOnMouseUpR(int x, int y, std::uint32_t) {
+    if (ScrollDebug()) std::fprintf(stderr, "region scroll: up %d,%d (%p)\n", x, y, static_cast<void*>(this));
     if (cIGZWin* marker = GetChildWindowFromID(kRegionScrollArrowWindowId)) ChildDelete(marker);
     mouseScrolling_ = false;
     mouseVector_[0] = mouseVector_[1] = 0.0f;
@@ -100,6 +107,7 @@ void cSC4WinRegionScroll::SetCursorByID(std::uint32_t id) {
 }
 
 bool cSC4WinRegionScroll::GZOnMouseMove(int x, int y, std::uint32_t) {
+    if (ScrollDebug()) std::fprintf(stderr, "region scroll: move %d,%d (scrolling %d, from %d,%d)\n", x, y, int(mouseScrolling_), mouseX_, mouseY_);
     const float dx = static_cast<float>(x - mouseX_);
     const float dy = static_cast<float>(y - mouseY_);
     const float dist2 = dy * dy + dx * dx;

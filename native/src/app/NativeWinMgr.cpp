@@ -35,12 +35,33 @@ void WinMgr::PostWinMessage(std::uint32_t type, std::uint64_t p1, std::uint64_t 
         // The wheel posts the Windows wParam shape (delta in the high word, key state in the low one); the window reads
         // the key state from param3's high half and the signed delta from its low half.
         if (type == kGZMsgMouseWheel) message.param3 = ((std::uint64_t(p1) & 0xffffu) << 16) | ((std::uint64_t(p1) >> 16) & 0xffffu);
-        ProcessMouseMessage(message);
+        postedMouse_.push_back(message);   // the window system's queue: seen at the next pump
         return;
     }
     message.param1 = p1; message.param2 = p2; message.param3 = p3;
     if (type == kGZMsgKeyDown || type == kGZMsgKeyUp || type == kGZMsgCharacter) { ProcessKeyboardMessage(message); return; }
     PostMessageToTarget(GetMainWindow(), message);
+}
+
+bool WinMgr::ProcessInputMouse(std::uint32_t type, int x, int y, std::uint32_t flags) {
+    DispatchPostedMouse();   // what was posted before this input comes first, as in the window system's queue
+    cGZMessage message;
+    message.type = type;
+    message.param1 = std::uint64_t(std::int64_t(std::int16_t(x & 0xffff)));
+    message.param2 = std::uint64_t(std::int64_t(std::int16_t(y & 0xffff)));
+    message.param3 = std::uint64_t(flags) << 16;
+    if (type == kGZMsgMouseWheel) message.param3 = ((std::uint64_t(flags) & 0xffffu) << 16) | ((std::uint64_t(flags) >> 16) & 0xffffu);
+    return ProcessMouseMessage(message);
+}
+
+void WinMgr::DispatchPostedMouse() {
+    // Messages posted while these are processed join the end and are seen in the same pump; the cap stops a handler that
+    // posts on every message from spinning the frame.
+    for (std::size_t i = 0, limit = 256; !postedMouse_.empty() && i < limit; ++i) {
+        cGZMessage message = postedMouse_.front();
+        postedMouse_.erase(postedMouse_.begin());
+        ProcessMouseMessage(message);
+    }
 }
 
 std::uint64_t WinMgr::RunModalLoop(cIGZWin* window, cIGZFrameWork*, std::uint32_t noResult, std::uint32_t abortCode) {

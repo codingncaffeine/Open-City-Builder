@@ -59,6 +59,7 @@ public:
     // test access
     float VelocityX() const { return velocity_[0]; }
     float VelocityY() const { return velocity_[1]; }
+    bool MouseScrolling() const { return mouseScrolling_; }   // test / kit accessor
     float MouseVectorX() const { return mouseVector_[0]; }
     float MouseVectorY() const { return mouseVector_[1]; }
     std::uint32_t CursorId() const { return cursorId_; }
