@@ -1511,6 +1511,16 @@ int RunScenario(const std::string& path) {
             int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
             words >> x0 >> z0 >> x1 >> z1;
             native::NativeTerrainHeightsReport(x0, z0, x1, z1);
+        } else if (command == "uiscript") {   // uiscript INSTANCE (hex): the UI script {0, 0x96a006b0, INSTANCE} built under the main window, then removed
+            std::string hex; words >> hex;
+            const std::uint32_t instance = std::uint32_t(std::strtoul(hex.c_str(), nullptr, 16));
+            cIGZWin* main = gMgr ? gMgr->GetMainWindow() : nullptr;
+            cIGZWin* made = main ? native::CreateWindowFromScript(cGZPersistResourceKey{0, 0x96a006b0, instance}, main, 0) : nullptr;
+            std::printf("uiscript %08x: %s\n", instance, made ? "built" : "not built");
+            if (made) {
+                main->ChildDelete(made);
+                made->Release();
+            }
         } else if (command == "terraintool") {   // terraintool N: the city view's global terrain tool N (7 = the level terrain tool)
             int tool = 0; words >> tool;
             sc4::cSC4View3DWin* view = gAppWindow ? gAppWindow->View3D() : nullptr;
