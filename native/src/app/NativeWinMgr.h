@@ -25,6 +25,7 @@ public:
 
     // The window system's own input (the original's window procedure path): processed now.
     bool ProcessInputMouse(std::uint32_t type, int x, int y, std::uint32_t flags);
+    bool ProcessInputKeyboard(std::uint32_t type, std::uint32_t key, std::uint32_t modifiers);
     // Posted messages, the mouse ones first: GZWinMsgPost_Mouse goes through the window system's queue in the original, so
     // a move a handler posts (GZReleaseCapture re-posts the pointer) is seen after that handler returns, not inside it.
     void Pump() { DispatchPostedMouse(); ProcessPostedMessages(); }
@@ -38,11 +39,11 @@ private:
     cIGZMessageServer* MessageServer() override { return &messages_; }
     int GraphicSystemShowCursor(bool) override { return 0; }
 
-    void DispatchPostedMouse();
+    void DispatchPostedMouse();   // the posted mouse and keyboard messages
 
     cGZMessageServer messages_;
     bool plotting_ = false;
-    std::vector<cGZMessage> postedMouse_;   // in posting order
+    std::vector<cGZMessage> postedMouse_;   // posted mouse and keyboard messages, in posting order (one queue, as the window system's)
     // One frame per running modal loop, innermost last: EndModal ends the loop of its window (null = the innermost), so a
     // dialog's own popup (a combo's list) ending does not end the dialog under it.
     struct ModalFrame { cIGZWin* window = nullptr; bool done = false; std::uint64_t result = 0; };

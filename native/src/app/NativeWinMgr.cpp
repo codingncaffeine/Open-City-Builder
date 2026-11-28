@@ -39,7 +39,7 @@ void WinMgr::PostWinMessage(std::uint32_t type, std::uint64_t p1, std::uint64_t 
         return;
     }
     message.param1 = p1; message.param2 = p2; message.param3 = p3;
-    if (type == kGZMsgKeyDown || type == kGZMsgKeyUp || type == kGZMsgCharacter) { ProcessKeyboardMessage(message); return; }
+    if (type == kGZMsgKeyDown || type == kGZMsgKeyUp || type == kGZMsgCharacter) { postedMouse_.push_back(message); return; }   // same queue
     PostMessageToTarget(GetMainWindow(), message);
 }
 
@@ -54,13 +54,24 @@ bool WinMgr::ProcessInputMouse(std::uint32_t type, int x, int y, std::uint32_t f
     return ProcessMouseMessage(message);
 }
 
+bool WinMgr::ProcessInputKeyboard(std::uint32_t type, std::uint32_t key, std::uint32_t modifiers) {
+    DispatchPostedMouse();
+    cGZMessage message;
+    message.type = type;
+    message.param1 = key;
+    message.param2 = modifiers;
+    message.param3 = 0;
+    return ProcessKeyboardMessage(message);
+}
+
 void WinMgr::DispatchPostedMouse() {
     // Messages posted while these are processed join the end and are seen in the same pump; the cap stops a handler that
     // posts on every message from spinning the frame.
     for (std::size_t i = 0, limit = 256; !postedMouse_.empty() && i < limit; ++i) {
         cGZMessage message = postedMouse_.front();
         postedMouse_.erase(postedMouse_.begin());
-        ProcessMouseMessage(message);
+        if (message.type == kGZMsgKeyDown || message.type == kGZMsgKeyUp || message.type == kGZMsgCharacter) ProcessKeyboardMessage(message);
+        else ProcessMouseMessage(message);
     }
 }
 
