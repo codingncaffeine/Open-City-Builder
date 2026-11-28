@@ -8,8 +8,7 @@
 // properties 0xe90f5de4 and 0xa90f5dec). Id 0x48e2a1f8, cursor 0xc2a676ac.
 //
 // Seams (ICityScrollHost): GetAsyncKeyState(VK_RBUTTON), the tuning exemplar and the view's SetScrolling / ScrollStop (view vslots
-// 0x108 / 0x110). Not ported: the eight direction cursors OnMouseMove switches between and the press-point overlay window
-// SetMouseScroll creates (and Shutdown / EndInput remove) - both are cursor art only.
+// 0x108 / 0x110), and the press-point window SetMouseScroll shows (ShowPressPoint / RemovePressPoint).
 // The angle for a purely vertical offset is DAT_100a1c500[dy < 0], taken as {pi / 2, 3 pi / 2} (screen y grows down).
 #pragma once
 #include "sc4/ViewInputControl.h"
@@ -24,6 +23,12 @@ public:
     virtual bool ReadTunables(std::uint32_t& deadZone, std::uint32_t& fullSpeed) = 0;   // false: keep the defaults
     virtual void SetScrolling(bool scrolling, float angle, float speed) = 0;   // the view's vslot 0x108
     virtual void ScrollStop() = 0;                                              // the view's vslot 0x110
+    // i386 0x00206630: cSLBuffer {0x856ddbac, 0x46a006b0, 0x094ac89a} with magenta transparent, a bitmap window 0x48e945b4
+    // (RZ::WCM() CreateWinBMP) centred on the press point, disabled and shown, added to the view and pulled to the front
+    // (destroyed when the view will not take it). False when the picture does not load.
+    virtual bool ShowPressPoint(int x, int y) { (void)x; (void)y; return false; }
+    // EndInput / Shutdown: the view's child 0x48e945b4 is deleted.
+    virtual void RemovePressPoint() {}
 };
 ICityScrollHost* CityScrollHost();
 void SetCityScrollHost(ICityScrollHost* host);
@@ -38,10 +43,10 @@ public:
     bool OnMouseUpR(int, int, std::uint32_t) override { EndInput(); return true; }   // @ 0x1002c15b6
     bool OnMouseMove(int x, int y, std::uint32_t modifiers) override;       // @ 0x1002c15c8
     bool IsSelfScrollingView() override { return true; }                    // @ 0x1002c1b6c
-    void SetMouseScroll(int x, int y) {                                     // @ 0x1002c1930 (overlay not ported)
+    void SetMouseScroll(int x, int y) {                                     // @ 0x1002c1930
         pressX_ = x;
         pressY_ = y;
-        SC4_UNWIRED("cSC4ViewInputControlCityScroll::SetMouseScroll: the press-point overlay window is not created");
+        if (!pressImageLoaded_ && g_scrollHostForInline()) pressImageLoaded_ = g_scrollHostForInline()->ShowPressPoint(x, y);   // +0x50
     }
 
 private:
@@ -49,6 +54,8 @@ private:
 
     int pressX_ = 0, pressY_ = 0;            // +0x3c / +0x40
     float velocityX_ = 0, velocityY_ = 0;    // +0x44 / +0x48
+    static ICityScrollHost* g_scrollHostForInline() { return CityScrollHost(); }
+    bool pressImageLoaded_ = false;          // +0x50 (the original keeps the loaded picture there; the window is made with it)
     bool moved_ = false;                     // +0x4c
     bool selfScrolling_ = false;             // +0x4d
     std::uint32_t deadZone_ = 12;            // +0x58

@@ -33,15 +33,20 @@ void cSC4ViewInputControlCityScroll::ReadTunableValues() {
 
 bool cSC4ViewInputControlCityScroll::Shutdown() {
     if (initialized_) {
+        if (g_host) g_host->RemovePressPoint();
         if (!selfScrolling_) ReleaseCapture();
         if (g_host) g_host->ScrollStop();
+        pressImageLoaded_ = false;
         cSC4ViewInputControl::Shutdown();
     }
     return true;
 }
 
 void cSC4ViewInputControlCityScroll::EndInput() {
-    if (g_host) g_host->ScrollStop();   // (the press-point overlay window is removed here in the original)
+    if (g_host) {
+        g_host->ScrollStop();
+        g_host->RemovePressPoint();
+    }
     cSC4ViewInputControl::EndInput();
 }
 

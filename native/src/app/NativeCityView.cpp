@@ -1,3 +1,7 @@
+#include "gz/Buffer.h"
+#include "gz/WinCtrlMgr.h"
+#include "gz/WinCtrlFactory.h"
+#include "sc4/SLBuffer.h"
 #include "app/NativeWaterRipple.h"
 #include "platform/Unwired.h"
 #include "app/NativeVolcanoLava.h"
@@ -195,6 +199,34 @@ public:
     bool ReadTunables(std::uint32_t&, std::uint32_t&) override { return false; }   // the constructor's 12 / 80 are the shipped values
     void SetScrolling(bool scrolling, float angle, float speed) override { adapter_.view->SetScrolling(scrolling, angle, speed); }
     void ScrollStop() override { adapter_.view->ScrollStop(); }
+    // i386 0x00206630 (cSC4ViewInputControlCityScroll::SetMouseScroll): the press-point picture as a bitmap window centred on
+    // the press point, a child of the city view.
+    bool ShowPressPoint(int x, int y) override {
+        cSLBuffer picture(0x856ddbac, 0x46a006b0, 0x094ac89a, 1, false);
+        if (!picture.Load() || !picture.GetBuffer()) return false;
+        cIGZBuffer* image = picture.GetBuffer();
+        image->SetTransparency(image->ConvertRGBValueToNative(0xff, 0, 0xff));
+        const cRZRect* b = image->GetBufferArea();
+        const int halfW = (b->left - b->right) / 2, halfH = (b->top - b->bottom) / 2;
+        gz::cIGZWinCtrlMgr* controls = gz::WinCtrlMgr();
+        cIGZWin* view = adapter_.view ? adapter_.view->AsIGZWin() : nullptr;
+        gz::cIGZWinBMP* bmp = controls && view ? controls->CreateWinBMP(kPressPointWindowId, image, true) : nullptr;
+        if (!bmp) return true;   // the picture loaded: the original keeps it and does not try again
+        cIGZWin* marker = bmp->AsIGZWin();
+        marker->SetArea(halfW + b->left + x, halfH + b->top + y, halfW + b->right + x, halfH + b->bottom + y);
+        marker->SetFlag(2, false);   // disabled
+        marker->SetFlag(4, true);
+        marker->ShowWindow();
+        if (view->ChildAdd(marker)) view->ChildToFront(marker);
+        else view->GetWindowManager()->DestroyWindow(marker);
+        bmp->Release();
+        return true;
+    }
+    void RemovePressPoint() override {
+        cIGZWin* view = adapter_.view ? adapter_.view->AsIGZWin() : nullptr;
+        if (cIGZWin* marker = view ? view->GetChildWindowFromID(kPressPointWindowId) : nullptr) view->ChildDelete(marker);
+    }
+    static constexpr std::uint32_t kPressPointWindowId = 0x48e945b4;
 
 private:
     ViewAdapter adapter_;
