@@ -2143,7 +2143,7 @@ void cSTETerrain::DecideSurfaceCover(const TerrainRect& r) {
                         if (temperature < 0) temperature = 0;
                         if (0x1f < temperature) temperature = 0x1f;
                     }
-                    moisture = landSimulator_ ? host->MoistureIndexAtX(static_cast<float>(x) * 16.0f) : 0;
+                    moisture = landSimulator_ ? host->MoistureIndexAt(static_cast<float>(x) * 16.0f, static_cast<float>(z) * 16.0f) : 0;
                     std::uint32_t column = static_cast<std::uint32_t>(temperature * 16 + (moisture & 15));
                     if (column < 512)
                         textureId = SurfaceCoverMapSlot()[0 <= terrainType && terrainType < 4 ? terrainType : 0][column];

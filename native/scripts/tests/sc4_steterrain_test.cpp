@@ -557,8 +557,9 @@ public:
     void ChangeTerrainType(std::int32_t terrainType) override { changedTerrainTypes.push_back(terrainType); }
     void SetUpTexturesForCurrentTerrainTypeAndZoom(std::int32_t zoom) override { textureZooms.push_back(zoom); }
     std::uint32_t TerrainTextureSubTextureCount(std::int32_t, std::uint32_t) override { return textureSubTextureCount; }
-    std::int32_t MoistureIndexAtX(float worldX) override {
+    std::int32_t MoistureIndexAt(float worldX, float worldZ) override {
         lastMoistureX = worldX;
+        lastMoistureZ = worldZ;
         return moistureIndex;
     }
 
@@ -723,6 +724,7 @@ public:
     std::uint32_t textureSubTextureCount = 1;
     std::int32_t moistureIndex = 3;
     float lastMoistureX = 0.0f;
+    float lastMoistureZ = -1.0f;
     int propertyHolderRequests = 0, textureResourceLists = 0;
     cGZPersistResourceKey lastPropertyKey{};
     bool worldBusy = false, preferencesFlag = false;
@@ -2261,6 +2263,7 @@ int main() {
         CHECK(hasKey(surface.Vertices()[static_cast<std::size_t>(beachIndex)], 0x23));
         CHECK(hasKey(surface.Vertices()[static_cast<std::size_t>(cliffIndex)], 0x22));
         CHECK(host.lastMoistureX > 0.0f && std::fmod(host.lastMoistureX, 16.0f) == 0.0f);   // x * 16 m
+        CHECK(host.lastMoistureZ >= 0.0f && std::fmod(host.lastMoistureZ, 16.0f) == 0.0f);   // and z * 16 m (i386 0x004e8a0c)
         CHECK(!host.changedTerrainTypes.empty() && host.changedTerrainTypes.back() == 0);
         // a water vertex gets the shallow sea-bed id (0x14), which has no info: nothing is added
         surface.WaterDepth()[static_cast<std::size_t>(surface.GetVertIndex(3, 3))] = 5.0f;

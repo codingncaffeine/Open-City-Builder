@@ -24,6 +24,8 @@
 #include "sc4/ISC4City.h"
 #include "sc4/ServiceLocator.h"
 #include "sc4/cSC4City.h"
+#include "sc4/cSTETerrainView3D.h"
+#include "sc4/WeatherSimulator.h"
 #include "app/NativeCity.h"
 #include "app/NativeFlora.h"
 #include "app/NativeDecalOverlay.h"
@@ -221,7 +223,11 @@ struct NativeTerrainHost final : ITerrainHost {
     std::uint32_t CityCellCountX() override { cSC4City* city = City4(); if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "terrain host: city %p cells %d\n", static_cast<void*>(g_city), city ? city->CellCountX() : -1); return city ? static_cast<std::uint32_t>(city->CellCountX()) : 0; }
     std::uint32_t CityCellCountZ() override { cSC4City* city = City4(); return city ? static_cast<std::uint32_t>(city->CellCountZ()) : 0; }
     std::int32_t CityTerrainType() override { return {}; }
-    cIGZUnknown* CityLandSimulator() override { return {}; }
+    // spCity vslot 0x230 = cSC4City::GetWeatherSimulator (i386 0x118): the terrain's "land simulator" is the weather simulator.
+    cIGZUnknown* CityLandSimulator() override {
+        sc4::cSC4City* city = native::HostCity();
+        return city ? city->GetComponent(sc4::CityComponent::WeatherSimulator) : nullptr;
+    }
     cIGZUnknown* CityFloraSimulator() override { return Component(CityComponent::FloraSimulator); }
     cIGZUnknown* CityEffectsManager() override { return Component(CityComponent::EffectsManager); }
     cIGZUnknown* Simulator() override { return Component(CityComponent::Simulator); }
@@ -254,8 +260,28 @@ struct NativeTerrainHost final : ITerrainHost {
         if (g_terrainTarget.terrain == terrain) g_terrainTarget.terrain = nullptr;
         return removed;
     }
-    void UpdateLandSimulator(cIGZUnknown* landSimulator) override {}
-    void ResetLandSimulator(cIGZUnknown* landSimulator) override {}
+    // +0x140 vslot 0x80 = cSC4WeatherSimulator::UpdateMoisture (i386 0x40), over the whole city as its other caller passes it.
+    void UpdateLandSimulator(cIGZUnknown* landSimulator) override {
+        if (sc4::cSC4WeatherSimulator* weather = Weather(landSimulator)) {
+            const sc4::cSC4City* city = native::HostCity();
+            sc4::WeatherRect rect;
+            rect.right = city ? static_cast<std::int32_t>(city->CellCountX()) : 0;
+            rect.bottom = city ? static_cast<std::int32_t>(city->CellCountZ()) : 0;
+            weather->UpdateMoisture(rect);
+        }
+    }
+    // +0x140 vslot 0x28 = cSC4WeatherSimulator::DoPostCityInit (i386 0x14).
+    void ResetLandSimulator(cIGZUnknown* landSimulator) override {
+        if (sc4::cSC4WeatherSimulator* weather = Weather(landSimulator)) weather->DoPostCityInit();
+    }
+    static sc4::cSC4WeatherSimulator* Weather(cIGZUnknown* object) {
+        void* raw = nullptr;
+        if (!object || !object->QueryInterface(0xe4fda3d4, &raw) || !raw) return nullptr;   // cIGZSerializable
+        auto* serializable = static_cast<cIGZSerializable*>(raw);
+        auto* weather = serializable->GetGZCLSID() == sc4::kGZCLSID_cSC4WeatherSimulator ? static_cast<sc4::cSC4WeatherSimulator*>(serializable) : nullptr;
+        serializable->Release();
+        return weather;
+    }
     bool WorldManagerBusy() override { return {}; }
     bool PreferencesFlag4ec() override { return {}; }
     std::uint32_t ViewZoomLevel() override { return {}; }
@@ -303,10 +329,21 @@ struct NativeTerrainHost final : ITerrainHost {
         if (std::getenv("SC4_DEBUG")) { cRZString v; const bool ok = ini->ReadEntry(cRZString("TropicalTextureMapTable"), cRZString("HighCliff"), v); std::fprintf(stderr, "terrain host: HighCliff %d '%s' path %s\n", int(ok), v.ToChar(), path.c_str()); }
         return ini;
     }
-    void ChangeTerrainType(std::int32_t terrainType) override {}
-    void SetUpTexturesForCurrentTerrainTypeAndZoom(std::int32_t zoom) override {}
-    std::uint32_t TerrainTextureSubTextureCount(std::int32_t zoom, std::uint32_t textureId) override { return {}; }
-    std::int32_t MoistureIndexAtX(float worldX) override { return {}; }
+    // The terrain view's statics (cSTETerrainView3D::ChangeTerrainType / SetUpTexturesForCurrentTerrainTypeAndZoom).
+    void ChangeTerrainType(std::int32_t terrainType) override { sc4::cSTETerrainView3D::ChangeTerrainType(terrainType); }
+    void SetUpTexturesForCurrentTerrainTypeAndZoom(std::int32_t zoom) override { sc4::cSTETerrainView3D::SetUpTexturesForCurrentTerrainTypeAndZoom(zoom); }
+    // sTerrainTextureBinding[zoom][texture] + 8: the loaded texture's sub-texture count; 0 when not loaded.
+    std::uint32_t TerrainTextureSubTextureCount(std::int32_t zoom, std::uint32_t textureId) override {
+        if (zoom < 0 || zoom >= 5) return 0;
+        const auto& bindings = sc4::cSTETerrainView3D::S().terrainTextureBinding[static_cast<std::size_t>(zoom)];
+        if (textureId >= bindings.size() || !bindings[textureId]) return 0;
+        return static_cast<std::uint32_t>(bindings[textureId]->ids.size());
+    }
+    // +0x140 vslot 0x98 = cSC4WeatherSimulator::GetMoistureType (i386 0x4c).
+    std::int32_t MoistureIndexAt(float worldX, float worldZ) override {
+        sc4::cSC4WeatherSimulator* weather = Weather(CityLandSimulator());
+        return weather ? static_cast<std::int32_t>(weather->GetMoistureType(worldX, worldZ)) : 0;
+    }
     std::uint32_t RandomUint32UniformBelow(std::uint32_t bound) override { static cRZRandom random(0x7e11u); return bound ? random.RandomUint32Uniform(bound) : 0; }
     // The brush shapes: FSH {0x7ab50e44, 0x891b0e1a, instance}, one byte per texel: an 8-bit frame (0x7b paletted, 0x64 grey)
     // is sampled as its raw bytes like the original's texture buffer; any other format is decoded and its red channel kept. Loaded once per instance and kept: the brush descriptions hold them for good.

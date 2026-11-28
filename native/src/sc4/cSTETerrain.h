@@ -483,9 +483,9 @@ public:
     // cSTETerrainView3D::sTerrainTextureBinding[zoom][texture] + 8: the number of sub-textures the loaded
     // texture has (the original divides the family index by it). 0 when the texture is not loaded.
     virtual std::uint32_t TerrainTextureSubTextureCount(std::int32_t zoom, std::uint32_t textureId) = 0;
-    // The land simulator's climate/moisture query: +0x140 vslot 0x98, called with (cellX * 16.0f). The
-    // returned 0..15-ish index is the surface-cover map's moisture column.
-    virtual std::int32_t MoistureIndexAtX(float worldX) = 0;
+    // The land (weather) simulator's GetMoistureType: +0x140 vslot 0x98 (i386 0x4c), called with the vertex's
+    // (x * 16, z * 16). The 0..15 result is the surface-cover map's moisture column.
+    virtual std::int32_t MoistureIndexAt(float worldX, float worldZ) = 0;
 
     // ---- the brush path (ApplyBrushComponents 0x100731d10 and the BrushFn* bodies) ----------------------
     // cRZRandom::RandomUint32UniformBelow @ 0x10003d366, on the same seeded sRand as the double ranges
