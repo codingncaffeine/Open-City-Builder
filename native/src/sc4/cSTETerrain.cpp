@@ -284,7 +284,7 @@ void cSTETerrain::GetFaceNormal(float x, float z, TerrainVector3& out) const {
 }
 
 void cSTETerrain::GetLerpedNormal(float x, float z, TerrainVector3& out) const {
-    if (!initialized_) return;
+    if (!LocationIsInBounds(x, z)) return;   // i386 0x004e2974: vslot 0x2c first; a point off the map leaves `out` alone
     const float gx = x * 0.0625f, gz = z * 0.0625f;
     const std::uint32_t cx = FloorCell(x), cz = FloorCell(z);
     const float fx = gx - static_cast<float>(cx), fz = gz - static_cast<float>(cz);
