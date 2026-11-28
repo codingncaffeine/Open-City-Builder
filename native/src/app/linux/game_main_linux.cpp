@@ -2213,7 +2213,9 @@ int RunScenario(const std::string& path) {
             cRZString folder;
             cRZSysServPtr<cIGZLanguageManager, kGZSID_cRZLanguageManager, kGZIID_cIGZLanguageManager> languages;
             if (languages) languages->GetLanguageDirectoryName(folder, 0);
-            std::printf("slstring %s %s: \"%s\" (language %u, folder %s)\n", g.c_str(), i.c_str(), text.ToChar(),
+            std::string shown;   // one line: line breaks as \n
+            for (const char* c = text.ToChar(); *c; ++c) shown += *c == '\n' ? std::string("\\n") : std::string(1, *c);
+            std::printf("slstring %s %s: \"%s\" (language %u, folder %s)\n", g.c_str(), i.c_str(), shown.c_str(),
                         languages ? languages->GetCurrentLanguage() : 0u, folder.ToChar());
         } else if (command == "tutorialend") {   // tutorialend: the tutorial ends as its scripts end it, the city stays open as a plain city
             std::printf("tutorialend: %s\n", native::NativeTutorialFinish() ? "ended" : "no running tutorial");
