@@ -393,14 +393,32 @@ void ManagerHost::DetachRenderable(cIGZUnknown*) {
     g_render = nullptr;
 }
 
+// The renderer's camera control (SL::spRenderer GetCameraControl) as the camera effects use it.
+class CameraEffectsCamera final : public sc4::ICameraControl {
+public:
+    sc4::cSC4CameraControl* control = nullptr;
+    int ZoomLevel() override { return control->Zoom(); }
+    void SetZoom(float zoom) override { control->SetZoom(zoom); }
+    void SetRotation(std::uint32_t rotation) override { control->SetRotation(static_cast<int>(rotation)); }
+    void SetViewTargetPosition(const cS3DVector3& position) override { control->SetViewTargetPosition(position); }
+};
+CameraEffectsCamera g_effectsCamera;
+
 // The effect components' services (sc4/EffectComponents.h): the sound components post their events (start, position, stop)
-// to the sound system, where the game's sound manager handles them. PARTIAL: the camera effects (no ICameraControl natively).
+// to the sound system, where the game's sound manager handles them; the camera effects move the city camera.
 class ComponentsHost final : public sc4::IEffectsHost {
 public:
-    sc4::ICameraControl* Camera() override { return nullptr; }
+    sc4::ICameraControl* Camera() override {
+        sc4::cSC43DRender* render = CityRenderer();
+        g_effectsCamera.control = render ? render->GetCameraControl() : nullptr;
+        return g_effectsCamera.control ? &g_effectsCamera : nullptr;
+    }
+    // The render property kDoAutoZoomAndRotationChanges (bool 0x25, i386 cSC4CameraEffect::Start 0x003dfc2c); off without
+    // the render properties.
     bool CameraEffectsEnabled() override {
-        SC4_UNWIRED("cSC4EffectsManager camera effects: no ICameraControl natively, camera effect components do nothing");
-        return false;
+        auto* properties = dynamic_cast<sc4::cSC4RenderProperties*>(SL::spRenderProperties);
+        constexpr std::uint32_t kDoAutoZoomAndRotationChanges = 0x25;
+        return properties && properties->NumBoolProperties() > kDoAutoZoomAndRotationChanges && properties->BoolValue(kDoAutoZoomAndRotationChanges);
     }
     void AddNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->AddNotification(target, message); }
     void RemoveNotification(cIGZMessageTarget2* target, std::uint32_t message) override { if (SL::spMS2) SL::spMS2->RemoveNotification(target, message); }

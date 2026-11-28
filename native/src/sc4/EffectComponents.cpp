@@ -1,3 +1,5 @@
+#include <cstdio>
+#include <cstdlib>
 #include "sc4/EffectComponents.h"
 
 #include "rz/cRZString.h"
@@ -215,6 +217,9 @@ void cSC4CameraEffect::Start(int) {
     ICameraControl* camera = host ? host->Camera() : nullptr;
     if (camera) {
         const std::uint32_t flags = description_->flags;
+        if (std::getenv("SC4_DEBUG"))
+            std::fprintf(stderr, "camera effect: flags %x zoom %d -> %d rotation %u enabled %d at %.0f,%.0f\n", flags, camera->ZoomLevel(),
+                         description_->zoom, description_->rotation, int(host->CameraEffectsEnabled()), position_.x, position_.z);
         if ((flags & 1) && host->CameraEffectsEnabled() &&
             static_cast<float>(camera->ZoomLevel()) < static_cast<float>(description_->zoom - 1))
             camera->SetZoom(static_cast<float>(description_->zoom));
