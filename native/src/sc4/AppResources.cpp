@@ -1,3 +1,4 @@
+#include "rz/cRZSysServPtr.h"
 #include "sc4/AppResources.h"
 
 #include <algorithm>
@@ -406,5 +407,29 @@ void cSC4App::SetupFontSet() {
     directory.AppendChars("Fonts", 5);
     directory.AppendChars("/", 1);
     fonts->AddAllFontsFromDirectory(directory);
-    SC4_UNWIRED("cSC4App::SetupFontSet: the per-language font name filter (RemoveFontByName over the five language tables) is not applied");
+    // For the Chinese, Japanese, Korean and Thai languages (0x0f, 0x11..0x14) the fonts made for the other scripts go again: every
+    // loaded font whose lower-case name contains one of the language's names is removed (once per matching name). The system
+    // fonts directory step of 0x13 / 0x14 is dead here (SC4GetSystemFontsDirectory answers false).
+    cRZSysServPtr<cIGZLanguageManager, kGZSID_cRZLanguageManager, kGZIID_cIGZLanguageManager> languages;
+    const std::uint32_t language = languages ? languages->GetCurrentLanguage() : 0;
+    std::vector<std::string> names;
+    switch (language) {
+        case 0x0f: names = {"mhei gb ", "mhei b5", "hy round gothic", "cordiaupc"}; break;
+        case 0x11: names = {"hg-gothic", "mhei b5", "hy round gothic", "cordiaupc"}; break;
+        case 0x12: names = {"hg-gothic", "mhei gb", "hy round gothic", "cordiaupc"}; break;
+        case 0x13: names = {"hg-gothic", "mhei gb", "mhei b5", "hy round gothic"}; break;   // + "cordiaupc" in the dead step
+        case 0x14: names = {"hg-gothic", "mhei gb", "mhei b5", "cordiaupc"}; break;   // + "hy round gothic" in the dead step
+        default: return;
+    }
+    names.insert(names.begin(), {"arial mt", "arta", "courier ld", "stoclet"});
+    std::vector<cIGZFontSys::FontInfo> loaded(0x40);
+    const std::uint32_t count = fonts->EnumerateFontInfo(loaded.data(), 0x40);   // vslot 0x44
+    for (std::uint32_t i = 0; i < count && i < loaded.size(); ++i) {
+        cRZString name(loaded[i].name);
+        name.MakeLower();
+        const std::string lower(name.ToChar(), name.Strlen());
+        for (const std::string& unwanted : names) {
+            if (lower.find(unwanted) != std::string::npos) fonts->RemoveFontByName(name);   // vslot 0x40
+        }
+    }
 }
