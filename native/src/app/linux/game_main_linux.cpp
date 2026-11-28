@@ -1521,6 +1521,12 @@ int RunScenario(const std::string& path) {
                 main->ChildDelete(made);
                 made->Release();
             }
+        } else if (command == "globaleffect") {   // globaleffect HEXID: the city view's global effect trigger asserted (as an advisor script's GlobalEffectOn)
+            std::string hex; words >> hex;
+            sc4::cSC4View3DWin* view = gAppWindow ? gAppWindow->View3D() : nullptr;
+            const std::uint32_t id = std::uint32_t(std::strtoul(hex.c_str(), nullptr, 16));
+            if (view) view->AssertGlobalEffectTrigger(id);
+            std::printf("globaleffect %08x: %s\n", id, view ? (view->GetGlobalEffectTriggerState(id) ? "on" : "off") : "no city view");
         } else if (command == "terraintool") {   // terraintool N: the city view's global terrain tool N (7 = the level terrain tool)
             int tool = 0; words >> tool;
             sc4::cSC4View3DWin* view = gAppWindow ? gAppWindow->View3D() : nullptr;
