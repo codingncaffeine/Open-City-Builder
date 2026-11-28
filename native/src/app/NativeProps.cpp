@@ -134,9 +134,9 @@ public:
         prop->AddRef();
         return prop->AsPropOccupant();
     }
-    void PostPropExemplarDataUpdated() override {   // PARTIAL: message 0x896fdc70
-        SC4_UNWIRED("cSC4PropManager: the prop exemplar data updated message (0x896fdc70) is not posted");
-    }
+    // Message 0x896fdc70 (i386 PostPropExemplarDataUpdatedMessage 0x0012d4fc): nothing in the binary listens for it (the constant
+    // appears only in the post), so it is not posted natively.
+    void PostPropExemplarDataUpdated() override {}
     void PositionToCityCell(float x, float z, int& cx, int& cz) override {
         if (cSC4City* city = HostCity()) city->PositionToCell(x, z, cx, cz);
         else { cx = static_cast<int>(x / 16.0f); cz = static_cast<int>(z / 16.0f); }
