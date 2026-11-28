@@ -66,6 +66,10 @@
 #include "app/NativeFlora.h"
 #include "app/NativePlaceLot.h"
 #include "gz/Buffer.h"
+#include "gz/WinUtils.h"
+#include "rz/cRZSysServPtr.h"
+#include "rz/LanguageManager.h"
+#include "sc4/SLBuffer.h"
 #include "gz/WinBtn.h"
 #include "sc4/SC4UI.h"
 #include "sc4/ViewInputControlQuery.h"
@@ -722,7 +726,35 @@ struct StubView3DWin final : IView3DWinHost {
     }
     void InvokeCatalogItemCommand(std::uint32_t, std::uint32_t, bool) override {}   // unused: the view's InvokeCatalogItemCommand is whole
     void ExecuteAcceleratorCommand(std::uint32_t command) override { native::ExecuteGameCommand(command); }
-    void Update24HourClockHover() override {}
+    // cSC4View3DWin::Update24HourClockHover (i386 0x00523ce0): while the clock button 0xaa75ca06 is hovered (button flag 0x2000) its
+    // tip 0xaa771fd7 shows, in front, with the hour as the language utility writes it (MakeTimeString(hour, -1, -1)) in 0xaa771fc7;
+    // otherwise the tip is hidden. (The PC panel has these windows; Update24HourClock's 0x29ee06d8 / 0x6a64e353 are the Mac panel's.)
+    void Update24HourClockHover() override {
+        sc4::cSC4View3DWin* view = CityView3DWin();
+        cIGZWin* win = view ? view->AsIGZWin() : nullptr;
+        cIGZWin* root = win && win->GetWindowManager() ? win->GetWindowManager()->GetMainWindow() : win;
+        if (!root) return;
+        cRZString time;
+        cRZSysServPtr<cIGZLanguageManager, kGZSID_cRZLanguageManager, kGZIID_cIGZLanguageManager> languages;
+        if (languages) if (cIGZLanguageUtility* utility = languages->GetLanguageUtility(0))
+            utility->MakeTimeString(std::max(0, native::NativeClockHour()), -1, -1, time);
+        cIGZWin* buttonWin = root->GetChildWindowFromIDRecursive(0xaa75ca06);
+        gz::cIGZWinBtn* button = nullptr;
+        if (!buttonWin || !buttonWin->QueryInterface(gz::kGZIID_cIGZWinBtn, reinterpret_cast<void**>(&button)) || !button) return;
+        cIGZWin* tip = root->GetChildWindowFromIDRecursive(0xaa771fd7);
+        if (tip) {
+            if (!button->GetBtnFlag(0x2000)) {
+                nsGZWinUtils::SetWindowVisible(root, 0xaa771fd7, false, false);
+            } else {
+                tip->SetFlag(0x800, true);
+                tip->PullToFront();
+                tip->SetFlag(0x800, false);
+                tip->SetFlag(1, true);
+                if (cIGZWin* text = root->GetChildWindowFromIDRecursive(0xaa771fc7)) text->SetCaption(time);
+            }
+        }
+        button->Release();
+    }
     void UpdateCursorTextPositions(int x, int y) override {}
     void SetDrawContextFrameMarker(void* drawContext, std::uint32_t frame) override {}
     void OnView3DCreate(cISC4View3DWin* view) override {}
@@ -730,6 +762,46 @@ struct StubView3DWin final : IView3DWinHost {
     void OnView3DInit() override { native::CityViewInit(); }   // SL::OnView3DInit with the view's objects
     void GetCityName(cIGZString& out) override { if (cSC4City* city = LoadedCity()) city->GetCityName(out); }
     int VisualTimeMode() override { return native::NativeVisualTimeMode(); }   // SL::sp24HourClock vslot 0x30
+    // cSC4View3DWin::Update24HourClock (i386 0x00524274): the HUD clock. The text window 0x29ee06d8 gets the language utility's
+    // time string; the clock picture 0x6a64e353 shows the hour's 37x37 frame of the sheet {0x856ddbac, 0x46a006b0, 0x13d14ca3}
+    // (column 2 x hour + 1, one less before half past), copied into the picture's image area of a second copy of the sheet.
+    void ClockChanged(std::uint32_t hour, std::uint32_t minute) override {
+        sc4::cSC4View3DWin* view = CityView3DWin();
+        cIGZWin* win = view ? view->AsIGZWin() : nullptr;
+        if (!win) return;
+        cIGZWin* root = win->GetWindowManager() ? win->GetWindowManager()->GetMainWindow() : win;
+        auto find = [&](std::uint32_t id) -> cIGZWin* {
+            cIGZWin* found = win->GetChildWindowFromIDRecursive(id);
+            return found ? found : (root ? root->GetChildWindowFromIDRecursive(id) : nullptr);
+        };
+        if (hour > 23) hour = static_cast<std::uint32_t>(std::max(0, native::NativeClockHour()));
+        if (cIGZWin* text = find(0x29ee06d8)) {
+            cRZString time;
+            cRZSysServPtr<cIGZLanguageManager, kGZSID_cRZLanguageManager, kGZIID_cIGZLanguageManager> languages;
+            if (languages) if (cIGZLanguageUtility* utility = languages->GetLanguageUtility(0))
+                utility->MakeTimeString(static_cast<int>(hour), static_cast<int>(minute), -1, time);
+            text->SetCaption(time);
+        }
+        cIGZWin* picture = find(0x6a64e353);
+        gz::cIGZWinBMP* bmp = nullptr;
+        if (picture && picture->QueryInterface(gz::kGZIID_cIGZWinBMP, reinterpret_cast<void**>(&bmp)) && bmp) {
+            cRZRect area;
+            bmp->GetImageArea(area);
+            cSLBuffer sheet(0, 0x46a006b0, 0x13d14ca3, 1, false), target(0, 0x46a006b0, 0x13d14ca3, 1, false);
+            if (sheet.Load() && target.Load() && sheet.GetBuffer() && target.GetBuffer()) {
+                const int column = static_cast<int>(hour) * 2 + 1 - (minute < 30 ? 1 : 0);
+                const cRZRect frame{column * 0x25, 0, column * 0x25 + 0x25, 0x25};
+                target.GetBuffer()->Blt(sheet.GetBuffer(), frame, area, nullptr);
+                bmp->SetBMP(target.GetBuffer());
+            }
+            bmp->Release();
+        }
+        Update24HourClockHover();   // the original ends with it
+    }
+    // cSC4View3DWin::UpdateAmbientLightLevel (i386 0x0051e134): the lighting manager's time of day from the 24-hour clock's visual
+    // time, then a full redraw when it changed. Natively app/NativeLighting.cpp TickLighting applies the same visual time every
+    // second of real time (and relights the terrain), so the clock message has nothing left to do here.
+    void AmbientLightChanged() override {}
     int CityPopulation() override { auto* r = CityComponentAs<cSC4ResidentialSimulator>(CityComponent::ResidentialSimulator, kGZCLSID_cSC4ResidentialSimulator); return r ? r->GetPopulation() : 0; }
     std::int64_t CityFunds() override { auto* b = CityComponentAs<cSC4BudgetSimulator>(CityComponent::BudgetSimulator, kGZCLSID_cSC4BudgetSimulator); return b ? b->GetTotalFunds() : 0; }
     void FormatNumber(std::int64_t value, cIGZString& out) override { out.AssignFromCString(GroupDigits(value).c_str()); }
