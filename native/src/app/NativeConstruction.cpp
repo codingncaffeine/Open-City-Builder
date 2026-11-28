@@ -32,6 +32,7 @@
 #include "sc4/PropOccupant.h"
 #include "sc4/PropOccupantVisualEffect.h"
 #include "sc4/ServiceLocator.h"
+#include "sc4/RenderProperties.h"
 #include "sc4/Simulator.h"
 #include "sc4/ViewUtilities.h"
 #include "sc4/cSC4City.h"
@@ -340,9 +341,13 @@ public:
         if (const SC4ViewUtilities* view = render ? render->GetViewUtilities() : nullptr) view->ProjectPointToViewCoordinates(point);
     }
     void TransformBoundingBox(const cS3DTransform& transform, cS3DBoundingBox& box) override { SC4ViewUtilities::TransformBoundingBox(transform, box); }
-    int RenderDetailLevel() override {   // PARTIAL: the render properties' detail level; high
-        SC4_UNWIRED("cSC4ConstructionOccupant: the render properties' detail level is not read (always high)");
-        return 3;
+    // The render property kEffectPriorityLevel (int 7, default 5; i386 CreateConstructionCrew 0x0011c33a): crews above 2.
+    int RenderDetailLevel() override {
+        constexpr std::uint32_t kEffectPriorityLevel = 7;
+        if (auto* properties = dynamic_cast<sc4::cSC4RenderProperties*>(SL::spRenderProperties);
+            properties && properties->NumIntProperties() > static_cast<std::int32_t>(kEffectPriorityLevel))
+            return properties->IntValue(kEffectPriorityLevel);
+        return sc4::DefaultRenderProperties().ints[kEffectPriorityLevel].value;
     }
     // SL::spLightingManager vslot 0xb8; the fixed sun the network pieces are lit with when there is no city lighting yet.
     void LightColourForDirection(const float n[3], std::uint8_t rgb[3]) override {
