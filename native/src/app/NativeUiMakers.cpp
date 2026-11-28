@@ -1,6 +1,8 @@
 // The script control classes made by name for the window COM director (gz::DirectorMake), apart from NativeUi.cpp because
 // their headers declare gz::cIGZBuffer.
 #include "gz/WinCombo.h"
+#include "gz/WinCtrlFactory.h"
+#include "gz/WinCtrlMgr.h"
 #include "gz/WinMsgBox.h"
 #include "gz/WinOptGrp.h"
 #include "gz/WinScrollbar.h"
@@ -26,6 +28,12 @@ void RegisterScriptControlMakers(cIGZWinMgr* mgr) {
     gz::RegisterDirectorMaker("cGZWinScrollbar", +[]() -> cIGZUnknown* { return MakeControl<gz::cGZWinScrollbar>(); });
     gz::RegisterDirectorMaker("cGZWinScrollbar2", +[]() -> cIGZUnknown* { return MakeControl<gz::cGZWinScrollbar2>(); });
     gz::RegisterDirectorMaker("cGZWinMsgBox", +[]() -> cIGZUnknown* { return MakeControl<gz::cGZWinMsgBox>(); });
+}
+
+// RZ::WCM()->CreateCtrl: the control manager's creators and stock classes (null without a control manager).
+bool CreateStockControl(std::uint32_t classId, std::uint32_t iid, void** out) {
+    gz::cIGZWinCtrlMgr* controls = gz::WinCtrlMgr();
+    return controls && controls->CreateCtrl(classId, iid, out) && out && *out;
 }
 
 }  // namespace native

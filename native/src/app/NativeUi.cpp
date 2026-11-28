@@ -57,7 +57,7 @@
 
 #include "dbpf/DBPFReader.h"
 
-namespace native { void RegisterScriptControlMakers(cIGZWinMgr* mgr); }
+namespace native { void RegisterScriptControlMakers(cIGZWinMgr* mgr); bool CreateStockControl(std::uint32_t classId, std::uint32_t iid, void** out); }
 namespace native {
 namespace {
 
@@ -284,7 +284,10 @@ void ForEachStockControlImage(const std::function<void(std::uint32_t stockId, cG
 
 class CtrlFactory final : public gz::IWinCtrlFactory {
 public:
+    // RZ::WCM()->CreateCtrl: the control manager's creators and its stock classes (the option group's radio buttons
+    // 0xa8963e4b, the list box 0x28963e36, ...), then the COM classes.
     bool CreateCtrl(std::uint32_t classId, std::uint32_t iid, void** out) override {
+        if (CreateStockControl(classId, iid, out)) return true;   // app/NativeUiMakers.cpp
         return GZCOM() && GZCOM()->CreateInstance(classId, iid, out) && *out;
     }
     // cGZWinCtrlMgr::CreateScrollbar (Mac i386 0x0016a9f2): the id, the direction, the stock scroll bar skin, the range
