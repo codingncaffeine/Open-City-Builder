@@ -5,6 +5,7 @@
 // buffers they build; the class ids are the vocabulary's own GZWin* / IGZWin* entries). The interpreter
 // dispatch table is the original's TU-static sInterpretVocab (0x100b6eb10) and the class->view table its
 // sCLSIDtoIIDMap (0x100b6eb28).
+#include "gz/WinCombo.h"
 #include "gz/LegacyControl.h"
 
 #include <cstdio>
@@ -1840,6 +1841,74 @@ void cGZLegacyControl::InterpretPropertiesGZWinFolders(cIGZWin* window, tScriptP
 // is the original one, but they currently do nothing; each is recovered-partial in
 // notes/ledger_pending/cGZLegacyControl.txt with the neighbour it waits for.
 // ---------------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------------
+// InterpretPropertiesGZWinCombo (i386 0x003b94bc). At init: the font (a style id through RZ::WCM() vslot 0x14,
+// else a named font), the drop-down arrow picture 0x800 "{group,instance}" with its area 0x801, the button gutter
+// 0x803 and the text gutters 0xf004. After init: the three text colours 0xf00f..0xf011, the highlight 0x408, the
+// drop-down outline 0x40b and arrow colour 0x802, editable 0x400 (== 1), every string 0x502 appended (index -2)
+// and the selection 0x501 (notifying).
+// ---------------------------------------------------------------------------------------------------------
+void cGZLegacyControl::InterpretPropertiesGZWinCombo(cIGZWin* window, tScriptPropertyArray& parameters, bool init) {
+    if (!window) return;
+    gz::cIGZWinCombo* combo = nullptr;
+    if (!window->QueryInterface(gz::kGZIID_cIGZWinCombo, reinterpret_cast<void**>(&combo)) || !combo) return;
+    if (init) {
+        std::uint32_t styleId = 0;
+        cRZString name;
+        if (GetPropertyUint32(parameters, 0xf000, styleId)) {
+            gz::IWinFontSource* fonts = gz::WinFontSource();
+            gz::IWinFont* font = fonts ? fonts->Font(styleId) : nullptr;
+            combo->SetFont(font ? font->AsFont() : nullptr);   // combo vslot 0x2c
+            SetGZWinFont(window, styleId, 0);
+        } else if (GetPropertyString(parameters, 0xf000, name)) {
+            SetGZWinFont(window, name, 0);
+        }
+        cRZString picture;
+        std::uint32_t group = 0, instance = 0;
+        if (GetPropertyString(parameters, 0x800, picture) && std::sscanf(picture.ToChar(), "{%x,%x}", &group, &instance) == 2) {
+            cIGZBuffer* image = LoadBuffer(group, instance);
+            if (image) {
+                cRZRect area;
+                combo->SetComboDownArrow(image, GetPropertyRect(parameters, 0x801, area) ? &area : nullptr);   // vslot 0x84
+            }
+            SetGZWinImage(window, group, instance, 0);
+            if (image) image->Release();
+        }
+        std::uint32_t gutter = 0;
+        if (GetPropertyUint32(parameters, 0x803, gutter)) combo->SetBtnGutter(static_cast<std::int8_t>(gutter));   // vslot 0x94
+        int x = 0, y = 0;
+        if (GetPropertyCoords(parameters, 0xf004, x, y)) combo->SetTextGutters(static_cast<std::int8_t>(x), static_cast<std::int8_t>(y));   // 0x9c
+    } else {
+        auto native = [](std::uint8_t r, std::uint8_t g, std::uint8_t b) { return WinGraphics() ? WinGraphics()->MakeNativeColor(r, g, b) : 0u; };
+        std::uint8_t r = 0, g = 0, b = 0;
+        if (GetPropertyColor(parameters, 0xf00f, r, g, b)) combo->SetFontColor(gz::cIGZWinCombo::kColorText, native(r, g, b));
+        if (GetPropertyColor(parameters, 0xf010, r, g, b)) combo->SetFontColor(gz::cIGZWinCombo::kColorDisabled, native(r, g, b));
+        if (GetPropertyColor(parameters, 0xf011, r, g, b)) combo->SetFontColor(gz::cIGZWinCombo::kColorSelected, native(r, g, b));
+        if (GetPropertyColor(parameters, 0x408, r, g, b)) combo->SetHighlightColor(native(r, g, b));        // vslot 0x40
+        if (GetPropertyColor(parameters, 0x40b, r, g, b)) combo->SetDropDownOutlineColor(native(r, g, b));  // vslot 0x58
+        if (GetPropertyColor(parameters, 0x802, r, g, b)) combo->SetComboDownColor(native(r, g, b));        // vslot 0x8c
+        std::uint32_t editable = 0;
+        if (GetPropertyUint32(parameters, 0x400, editable)) combo->SetEditable(editable == 1);                // vslot 0x54
+        for (const tScriptProperty& property : parameters) {
+            if (property.id != 0x502 || !property.value ||
+                property.value->GetType() != (cIGZVariant::kTypeRZChar | cIGZVariant::kTypeArrayFlag))
+                continue;
+            cRZString item;
+            property.value->GetValString(item);
+            combo->InsertString(item, -2);   // vslot 0x6c
+        }
+        std::uint32_t selection = 0;
+        if (GetPropertyUint32(parameters, 0x501, selection)) combo->SetSelection(static_cast<int>(selection), true);   // vslot 0x70
+        if (std::getenv("SC4_DEBUG")) {
+            int count = 0;
+            cRZString item;
+            while (combo->GetStringFromIndex(count, item)) ++count;
+            std::fprintf(stderr, "combo %08x: %d strings, selection %d, editable %d\n", window->GetID(), count, combo->GetSelection(), int(combo->GetEditable()));
+        }
+    }
+    combo->Release();
+}
+
 #define GZLEGACYCTRL_PARTIAL_INTERPRETER(Name)                                                   \
     void cGZLegacyControl::InterpretProperties##Name(cIGZWin* window, tScriptPropertyArray& parameters, \
                                                     bool init) {                                 \
@@ -1848,7 +1917,6 @@ void cGZLegacyControl::InterpretPropertiesGZWinFolders(cIGZWin* window, tScriptP
     }
 
 
-GZLEGACYCTRL_PARTIAL_INTERPRETER(GZWinCombo)
 GZLEGACYCTRL_PARTIAL_INTERPRETER(GZWinLineInput)
 GZLEGACYCTRL_PARTIAL_INTERPRETER(GZWinOptGrp)
 GZLEGACYCTRL_PARTIAL_INTERPRETER(GZWinTextTicker)
