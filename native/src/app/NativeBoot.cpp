@@ -110,6 +110,8 @@ bool RunBoot(bool verbose, bool keepAlive, gd::cIGZGDriver* driver, const std::f
     g_app = app;
     app->AddRef();
     app->SetFramework(framework);
+    // Dev switch (not in the original): the debug functionality the cheat-only tools register under (Casper, DrawPaths, ...).
+    if (std::getenv("SC4_DEBUGFUNCTIONALITY")) app->SetDebugFunctionalityEnabled(true);
     auto* languages = new cRZLanguageManager();
     framework->AddSystemService(languages);
     auto* resources = new cGZPersistResourceManager();

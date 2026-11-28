@@ -9,6 +9,8 @@
 #include "gz/cIGZVariant.h"
 #include "sc4/SCPropertyHelp.h"
 #include "sc4/TextDecalOccupant.h"
+#include <cstdlib>
+#include <cstdio>
 
 namespace sc4 {
 
@@ -194,6 +196,7 @@ bool cSC4PropManager::DoMessage(cIGZMessage2* message) {
         decal->SetTextColor(color);
         decal->SetAlpha(alpha);
         decal->SetTextHeight(height);
+        if (std::getenv("SC4_DEBUG")) std::fprintf(stderr, "prop manager: text decal \"%s\" at %.0f,%.1f,%.0f height %.1f\n", text.ToChar(), x, position[1], z, height);
     } else if (type == kMessagePropCameraMoved) {
         (void)standard->GetVoid1();
         (void)standard->GetVoid2();

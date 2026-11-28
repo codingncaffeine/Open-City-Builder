@@ -36,6 +36,8 @@
 #include "platform/GameDataPath.h"
 #include "platform/PointerState.h"
 #include "sc4/SLString.h"
+#include "sc4/DynamicParticleEffect.h"
+#include "sc4/DynamicParticleSystem.h"
 #include "rz/LanguageManager.h"
 #include "rz/cRZSysServPtr.h"
 #include "sc4/Simulator.h"
@@ -1454,6 +1456,20 @@ int RunScenario(const std::string& path) {
             int x1 = 0, z1 = 0, x2 = 0, z2 = 0;
             words >> type >> x1 >> z1 >> x2 >> z2;
             native::NativeLayNetworkLine(type, x1, z1, x2, z2);
+        } else if (command == "dynparticles") {   // dynparticles: the dynamic particle system's bodies (count, kinematic, active cells), read-only
+            sc4::cSC4DynamicParticleSystem* system = sc4::cSC4DynamicParticleEffect::DynamicSystem();
+            if (!system) {
+                std::printf("dynparticles: no system\n");
+            } else {
+                int bodies = 0, kinematic = 0;
+                for (sc4::cSC4DynamicParticle& particle : system->Particles()) {
+                    if (!particle.object) continue;
+                    ++bodies;
+                    if (particle.object->kinematic) ++kinematic;
+                }
+                std::printf("dynparticles: particles %zu bodies %d kinematic %d active cells %zu\n", system->Particles().size(), bodies, kinematic,
+                            system->ActiveCellCount());
+            }
         } else if (command == "netpreview") {   // netpreview TYPE X1 Z1 X2 Z2 | clear: the drag's preview and demolition highlight, held
             std::string rest; std::getline(words >> std::ws, rest);
             native::NativeNetworkPreview(rest);
@@ -1494,6 +1510,12 @@ int RunScenario(const std::string& path) {
             int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
             words >> x0 >> z0 >> x1 >> z1;
             native::NativeTerrainHeightsReport(x0, z0, x1, z1);
+        } else if (command == "terraintool") {   // terraintool N: the city view's global terrain tool N (7 = the level terrain tool)
+            int tool = 0; words >> tool;
+            sc4::cSC4View3DWin* view = gAppWindow ? gAppWindow->View3D() : nullptr;
+            if (view) view->RunGlobalTerrainTool(tool);
+            sc4::cSC4ViewInputControl* current = view ? view->GetCurrentViewInputControl() : nullptr;
+            std::printf("terraintool %d: %s, current tool %#x\n", tool, view ? "run" : "no city view", current ? current->GetID() : 0u);
         } else if (command == "terrainedit") {   // terrainedit X0 Z0 X1 Z1 RISE REASON: raise a vertex rectangle, redisplay with a reason
             int x0 = 0, z0 = 0, x1 = 0, z1 = 0;
             float rise = 0.0f;
@@ -2075,6 +2097,10 @@ int RunScenario(const std::string& path) {
                 win->WindowToScreenCoordinates(screenX, screenY);
                 gMgr->GZWinMsgPost_Mouse(kGZMsgMouseMove, screenX, screenY, 0x10);
                 Frame();
+            }
+            if (const char* held = std::getenv("SC4_VIEWDRAG_SHOT")) {   // the drag's picture while still held (a tool's live selection)
+                for (int i = 0; i < 3; ++i) { Frame(); Nap(); }
+                WritePng(held);
             }
             const bool released = view->GZOnMouseUpL(x, y, 0);
             std::printf("viewdrag: released at %d,%d (%s)\n", x, y, released ? "taken" : "not taken");
