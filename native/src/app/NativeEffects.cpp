@@ -38,6 +38,7 @@
 #include "s3d/ModelInstance.h"
 #include "sc4/AnimationTickManager.h"
 #include "sc4/CameraControl.h"
+#include "sc4/DummyAutoOccupant.h"
 #include "sc4/EffectsManager.h"
 #include "sc4/RenderProperties.h"
 #include "rz/cRZAutoRefCount.h"
@@ -61,6 +62,10 @@
 
 namespace native {
 sc4::cSC43DRender* CityRenderer();   // app/NativeCityView.cpp
+}  // namespace native
+namespace sc4 { class cSC4AutomataController; }
+namespace native {
+sc4::cSC4AutomataController* NativeFindAttraction(sc4::cISC4Occupant* occupant, cS3DVector3* direction, float* distance, float* strength);   // app/NativeAutomataControllerHost.cpp
 namespace {
 
 constexpr std::uint32_t kGZIID_cIS3DResModel = 0x9ad0e7e3;
@@ -499,12 +504,23 @@ public:
         if (hit) hits.fetch_add(1, std::memory_order_relaxed);
         return hit;
     }
-    // The attractor's ground point goes through city vslot 0xbc and that object's vslot 0x58 with a dummy automaton occupant
-    // (Mac i386 0x0041583e UpdateAttractor); that path query is not recovered, so the attractor keeps a zero length.
-    bool AttractorGroundPoint(const cS3DVector3&, std::int32_t, cS3DVector3&, float& length) override {
-        SC4_UNWIRED("cSC4ParticlesEffect::UpdateAttractor: the attractor ground point (city vslot 0xbc -> vslot 0x58 with a dummy automaton occupant) is not recovered");
-        length = 0.0f;
-        return false;
+    // UpdateAttractor (i386 0x0041583e): a cSC4DummyAutoOccupant at the particle box's centre in the description's occupant group
+    // asks the automata controller manager (spCity vslot 0xbc, vslot 0x58 GetCompositeAttractionEffect) for the summed pull of
+    // the attractors in reach; `direction` gets the sum and `length` its size.
+    bool AttractorGroundPoint(const cS3DVector3& centre, std::int32_t group, cS3DVector3& direction, float& length) override {
+        sc4::cSC4DummyAutoOccupant dummy;
+        const float at[3] = {centre.x, centre.y, centre.z};
+        dummy.SetPosition(at);
+        dummy.SetGroup(static_cast<std::uint32_t>(group));
+        direction = cS3DVector3{0.0f, 0.0f, 0.0f};
+        float distance = 0.0f, strength = 0.0f;
+        NativeFindAttraction(&dummy, &direction, &distance, &strength);
+        length = std::sqrt(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z);
+        if (g_debug) {
+            static int lines = 0;
+            if (lines++ < 20) std::fprintf(stderr, "effects: attractor group %08x at %.0f,%.0f pull %.2f\n", static_cast<std::uint32_t>(group), centre.x, centre.z, length);
+        }
+        return length != 0.0f;
     }
 private:
     static sc4::cISC4OccupantManager* Manager() {
