@@ -35,6 +35,9 @@
 #include "gz/CheatCodeManager.h"
 #include "platform/GameDataPath.h"
 #include "platform/PointerState.h"
+#include "sc4/SLString.h"
+#include "rz/LanguageManager.h"
+#include "rz/cRZSysServPtr.h"
 #include "sc4/Simulator.h"
 #include "sc4/RegionDialogs.h"
 #include "app/NativeTutorial.h"
@@ -2185,6 +2188,15 @@ int RunScenario(const std::string& path) {
             for (int i = 0; i < count; ++i) { injected.push_back("tutorialdo"); injected.push_back("frames 40"); injected.push_back("tutorialtask"); }
         } else if (command == "tutorialtask") {   // tutorialtask: the current tutorial task's number, kind, target and text
             native::NativeTutorialTaskReport();
+        } else if (command == "slstring") {   // slstring GROUP INSTANCE (hex): the localized string the game resolves, and the language folder
+            std::string g, i;
+            words >> g >> i;
+            const sc4::cSLString text(std::uint32_t(std::strtoul(g.c_str(), nullptr, 16)), std::uint32_t(std::strtoul(i.c_str(), nullptr, 16)), true);
+            cRZString folder;
+            cRZSysServPtr<cIGZLanguageManager, kGZSID_cRZLanguageManager, kGZIID_cIGZLanguageManager> languages;
+            if (languages) languages->GetLanguageDirectoryName(folder, 0);
+            std::printf("slstring %s %s: \"%s\" (language %u, folder %s)\n", g.c_str(), i.c_str(), text.ToChar(),
+                        languages ? languages->GetCurrentLanguage() : 0u, folder.ToChar());
         } else if (command == "tutorialend") {   // tutorialend: the tutorial ends as its scripts end it, the city stays open as a plain city
             std::printf("tutorialend: %s\n", native::NativeTutorialFinish() ? "ended" : "no running tutorial");
         } else if (command == "tutorialcheat") {   // tutorialcheat TEXT: the tutorial system's cheat ("Tutorial next") without the cheat box
