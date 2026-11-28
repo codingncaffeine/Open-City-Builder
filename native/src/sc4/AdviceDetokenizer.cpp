@@ -1,3 +1,6 @@
+#include "gz/WinCtrlFactory.h"
+#include "gz/WinCtrlMgr.h"
+#include "gz/WinFont.h"
 #include "sc4/AdviceDetokenizer.h"
 
 #include <cstdint>
@@ -185,10 +188,16 @@ bool AdviceDetokenizerFunction(const cIGZString& tokenIn, cIGZString& out, void*
         cISC4Advice* advice = system ? system->GetContextAdvice() : nullptr;
         cISC4Advisor* advisor = advice ? system->GetAdvisor(advice->GetAdvisorID()) : nullptr;
         if (advisor) {
-            // PARTIAL: the original first fits the name into 200 pixels of the window font 0x68963c4c (RZ::WCM() vslot
-            // 0x14, font vslot 0xc8 with style 0x5377be31); there is no control manager natively, so it is used whole.
-            SC4_UNWIRED("cSC4AdviceDetokenizer: the advisor name is not fitted into 200 pixels of window font 0x68963c4c");
-            out.Copy(advisor->GetPersonalName());
+            // The name fitted into 200 pixels of the system font 0x68963c4c (RZ::WCM() vslot 0x14 SystemFont, font vslot 0xc8
+            // FormatForEllipsis with the default text 0x5377be31 as the ellipsis); whole without a control manager.
+            cRZString name(advisor->GetPersonalName());
+            gz::cIGZWinCtrlMgr* controls = gz::WinCtrlMgr();
+            if (gz::IWinFont* font = controls ? controls->SystemFont(0x68963c4c) : nullptr) {
+                cRZString ellipsis;
+                if (const cIGZString* e = controls->DefaultText(0x5377be31)) ellipsis.Copy(*e);
+                font->FormatForEllipsis(name, ellipsis, cRZRect{0, 0, 200, font->GlyphHeight()}, false);
+            }
+            out.Copy(name);
             return true;
         }
     } else if (Is(token, kRewardBuildingPlopCost) || Is(token, kRewardBuildingBudgetCost)) {
